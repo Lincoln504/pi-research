@@ -9,9 +9,10 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './src/tool.js';
+import { logger } from './src/logger.js';
 
 export default function (pi: ExtensionAPI) {
-  console.log('[pi-research] Extension loading...');
+  logger.log('[pi-research] Extension loading...');
 
   // NOTE: SearXNG lifecycle is managed independently of sessions
   // Container lives for the duration of the pi process
@@ -21,5 +22,5 @@ export default function (pi: ExtensionAPI) {
   // Register research tool
   pi.registerTool(createResearchTool());
 
-  console.log('[pi-research] Extension loaded');
+  logger.log('[pi-research] Extension loaded');
 }

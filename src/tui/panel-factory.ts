@@ -7,8 +7,9 @@
 
 import type { Component } from '@mariozechner/pi-tui';
 import type { Theme } from '@mariozechner/pi-coding-agent';
-import { TUI_MODE } from '../config.js';
 import type { SearxngStatus } from '../searxng-lifecycle.js';
+
+const TUI_MODE: string = 'simple';
 import {
   createSimplePanel,
   getCapturedTui as getSimpleCapturedTui,

@@ -10,6 +10,7 @@ import { Type } from '@sinclair/typebox';
 import { createAgentSession, createReadTool, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { rgGrepTool } from './rg-grep.js';
 import { makeResourceLoader } from './make-resource-loader.js';
+import { logger } from './logger.js';
 
 export interface ContextToolOptions {
   cwd: string;
@@ -54,7 +55,7 @@ export function createInvestigateContextTool(options: ContextToolOptions): ToolD
     ): Promise<AgentToolResult<unknown>> {
       const { question } = params as { question: string };
 
-      console.log(`[context] Investigating project context: ${question.slice(0, 50)}...`);
+      logger.log(`[context] Investigating project context: ${question.slice(0, 50)}...`);
 
       const { session } = await createAgentSession({
         cwd: options.cwd,
@@ -73,7 +74,7 @@ export function createInvestigateContextTool(options: ContextToolOptions): ToolD
       const last = [...msgs].reverse().find((m) => m.role === 'assistant');
       const text = extractText(last);
 
-      console.log('[context] Investigation complete');
+      logger.log('[context] Investigation complete');
       return { content: [{ type: 'text', text }], details: {} };
     },
   };

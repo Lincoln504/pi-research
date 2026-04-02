@@ -3,23 +3,18 @@
  *
  * Allows the coordinator to spawn researcher agents via delegate_research tool.
  * Researchers run in parallel or sequential mode, with token tracking and flash indicators.
- *
- * Supports both TUI modes:
- * - 'simple': 3-line display (uses SimplePanelState)
- * - 'full': Boxed grid layout (uses FullPanelState)
  */
 
 import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.js';
-import { TUI_MODE } from './config.js';
-import type { SimplePanelState, FullPanelState } from './tui/panel-factory.js';
-import { setAgentFlash, addAgent, getCapturedTui } from './tui/panel-factory.js';
+import type { ResearchPanelState } from './tui/research-panel.js';
+import { addSlice, updateSliceLabel, completeSlice, flashSlice, getCapturedTui } from './tui/research-panel.js';
+import { logger } from './logger.js';
 
-export type PanelState = SimplePanelState | FullPanelState;
 export interface DelegateToolOptions {
   breadthCounter: { value: number }; // Mutable ref, incremented per call
-  panelState: PanelState;
+  panelState: ResearchPanelState;
   onTokens: (n: number) => void;
   researcherOptions: CreateResearcherSessionOptions;
   signal?: AbortSignal;
@@ -109,18 +104,18 @@ async function withRetry<T>(
 
       // Check if error is transient
       if (!isTransientError(error)) {
-        console.debug(`[delegate] Non-transient error for ${label}, not retrying:`, lastError.message);
+        logger.debug(`[delegate] Non-transient error for ${label}, not retrying:`, lastError.message);
         throw error;
       }
 
       if (attempt > maxRetries) {
-        console.error(`[delegate] ${label} failed after ${maxRetries} retries:`, lastError.message);
+        logger.error(`[delegate] ${label} failed after ${maxRetries} retries:`, lastError.message);
         throw error;
       }
 
       // Calculate exponential backoff: 1s, 2s, 4s
       const delayMs = initialDelayMs * Math.pow(2, attempt - 1);
-      console.debug(`[delegate] ${label} failed (attempt ${attempt}/${maxRetries}), retrying in ${delayMs}ms:`, lastError.message);
+      logger.debug(`[delegate] ${label} failed (attempt ${attempt}/${maxRetries}), retrying in ${delayMs}ms:`, lastError.message);
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
@@ -128,34 +123,6 @@ async function withRetry<T>(
 
   // Should never reach here
   throw lastError || new Error('Retry exhausted');
-}
-
-/**
- * Set flash indicator for an agent
- */
-function setFlash(label: string, color: 'green' | 'red', options: DelegateToolOptions): void {
-  setAgentFlash(
-    (options.panelState as any).agents,
-    label,
-    color,
-    options.flashTimeoutMs
-  );
-}
-
-/**
- * Add agent to panel state
- */
-function registerAgent(label: string, options: DelegateToolOptions): void {
-  if (TUI_MODE === 'full') {
-    // In full mode, we need sliceNumber and depthNumber
-    // For now, use simple numbering based on breadthCounter
-    const sliceNumber = options.breadthCounter.value;
-    addAgent(options.panelState as FullPanelState, label, sliceNumber, undefined);
-  } else {
-    // In simple mode, just add to the Map
-    (options.panelState as SimplePanelState).agents.set(label, { label, flash: null });
-  }
-  getCapturedTui()?.requestRender?.();
 }
 
 /**
@@ -184,50 +151,65 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
     ): Promise<AgentToolResult<unknown>> {
       const { slices, simultaneous } = params as { slices: string[]; simultaneous: boolean };
 
-      console.log(`[delegate] Spawning ${slices.length} researcher agents (${simultaneous ? 'parallel' : 'sequential'})`);
+      logger.log(`[delegate] Spawning ${slices.length} researcher agents (${simultaneous ? 'parallel' : 'sequential'})`);
 
-      // Assign labels and register in panelState
+      // Assign labels and register slices in panelState
+      // Labels use X.0 format: X = breadth counter, .0 = first (initial) research depth
       const assignments: Array<{ label: string; slice: string }> = slices.map((slice) => {
-        const label = String(++options.breadthCounter.value);
-        registerAgent(label, options);
+        const breadth = ++options.breadthCounter.value;
+        const label = `${breadth}.0`;
+        addSlice(options.panelState, label, label);
         return { label, slice };
       });
 
+      getCapturedTui()?.requestRender?.();
+
       // Run a single researcher session
-      const runOne = async ({ label, slice }: { label: string; slice: string }): Promise<[string, string]> => {
-        console.log(`[delegate] Starting researcher ${label}`);
+      const runOne = async ({ label: initialLabel, slice }: { label: string; slice: string }): Promise<[string, string]> => {
+        logger.log(`[delegate] Starting researcher ${initialLabel}`);
+
+        const sliceKey = initialLabel; // Map key — never changes (always "X.0")
+        const breadthNum = initialLabel.split('.')[0]; // e.g. "3" from "3.0"
+        let depth = 0; // tool-call depth counter
+
         const session = await createResearcherSession(options.researcherOptions);
 
-        // Token tracking
+        // Token tracking + tool-call flash + depth label updates
         session.subscribe((event) => {
           if (event.type === 'message_end' && event.message.role === 'assistant') {
             const tokens = (event.message as any).usage?.totalTokens;
             if (tokens) options.onTokens(tokens);
+          } else if (event.type === 'tool_execution_start') {
+            depth += 1;
+            updateSliceLabel(options.panelState, sliceKey, `${breadthNum}.${depth}`);
+          } else if (event.type === 'tool_execution_end') {
+            const color = (event as any).isError ? 'red' : 'green';
+            flashSlice(options.panelState, sliceKey, color, options.flashTimeoutMs);
           }
         });
 
         await withTimeout(
-          withRetry(() => session.prompt(slice), 3, 1000, label),
+          withRetry(() => session.prompt(slice), 3, 1000, sliceKey),
           options.timeoutMs,
-          label
+          sliceKey
         );
 
         // Extract final message text
         const msgs = session.messages;
         const last = [...msgs].reverse().find((m) => m.role === 'assistant');
         const text = extractText(last);
-        console.log(`[delegate] Completed researcher ${label}`);
-        return [label, text];
+        logger.log(`[delegate] Completed researcher ${sliceKey}`);
+        return [sliceKey, text];
       };
 
-      // Flash on completion
+      // Mark completion (checkmark only, no flash)
       const runWithFlash = async (assignment: { label: string; slice: string }): Promise<[string, string]> => {
         try {
           const result = await runOne(assignment);
-          setFlash(assignment.label, 'green', options);
+          completeSlice(options.panelState, result[0]); // use final label (may have updated)
           return result;
         } catch (err) {
-          setFlash(assignment.label, 'red', options);
+          completeSlice(options.panelState, assignment.label);
           return [assignment.label, `Error: ${err instanceof Error ? err.message : String(err)}`];
         }
       };

@@ -5,9 +5,7 @@
  * Creates coordinator session that naturally calls delegate_research and investigate_context tools.
  * Initializes SearXNG on first call (lazy initialization).
  *
- * Supports two TUI modes (configured via PI_RESEARCH_TUI_MODE):
- * - 'simple' (default): Compact 3-line display with SearXNG status + agent dots
- * - 'full': Boxed grid layout showing slice/depth hierarchy with visual research tree
+ * TUI: Two-box layout (SearXNG status + slice columns)
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,15 +20,13 @@ import type {
 import { Type } from '@sinclair/typebox';
 import { SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createCoordinatorSession } from './coordinator.js';
-import { TUI_MODE, validateConfig, logConfig, RESEARCHER_TIMEOUT_MS, FLASH_TIMEOUT_MS } from './config.js';
+import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.js';
 import {
-  createPanel,
+  createResearchPanel,
   getCapturedTui,
   clearAllFlashTimeouts,
-  type PanelState,
-  createInitialPanelState,
-} from './tui/panel-factory.js';
-import type { SimplePanelState, FullPanelState } from './tui/panel-factory.js';
+  type ResearchPanelState,
+} from './tui/research-panel.js';
 import { formatParentContext } from './session-context.js';
 import {
   initLifecycle,
@@ -40,9 +36,10 @@ import {
   type SearxngStatus,
 } from './searxng-lifecycle.js';
 import { getManager } from './searxng-lifecycle.js';
-import { createDelegateTool, type DelegateToolOptions, type PanelState as DelegatePanelState } from './delegate-tool.js';
+import { createDelegateTool, type DelegateToolOptions } from './delegate-tool.js';
 import { createInvestigateContextTool } from './context-tool.js';
 import type { CreateResearcherSessionOptions } from './researcher.js';
+import { logger, suppressConsole } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -68,7 +65,7 @@ export function createResearchTool(): ToolDefinition {
     promptSnippet: 'Conduct multi-agent research on a topic',
     promptGuidelines: [
       'Use research to investigate complex topics requiring multiple perspectives.',
-      'The coordinator breaks down the query into research slices.',
+      'The coordinator breaks down query into research slices.',
       'Researchers investigate using web search, scraping, security databases, and code search.',
       'Results are synthesized into a final comprehensive answer.',
     ],
@@ -76,6 +73,9 @@ export function createResearchTool(): ToolDefinition {
       query: Type.String({
         description: 'Research query or topic to investigate',
       }),
+      model: Type.Optional(Type.String({
+        description: 'Model ID to use for all research agents (defaults to the currently active model)',
+      })),
     }),
     async execute(
       _toolCallId: string,
@@ -84,10 +84,16 @@ export function createResearchTool(): ToolDefinition {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const query = (params as { query: string }).query;
+      const { query, model: modelId } = params as { query: string; model?: string };
+
+      // Suppress ALL console output immediately — catches SearXNG Manager init messages,
+      // pi-search-scrape logs, and any other module that uses console.* directly.
+      // Output goes to log file when --verbose, otherwise silenced entirely.
+      const restoreConsole = suppressConsole();
 
       // 1. Validate
       if (!query) {
+        restoreConsole();
         return {
           content: [{ type: 'text', text: 'Error: query is required' }],
           details: {},
@@ -95,6 +101,7 @@ export function createResearchTool(): ToolDefinition {
       }
 
       if (!ctx.model) {
+        restoreConsole();
         return {
           content: [{ type: 'text', text: 'Error: No model selected. Please select a model before using the research tool.' }],
           details: {},
@@ -104,10 +111,10 @@ export function createResearchTool(): ToolDefinition {
       // 2. Config
       try {
         validateConfig();
-        logConfig();
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error('[research] Invalid configuration:', errorMsg);
+        logger.error('[research] Invalid configuration:', errorMsg);
+        restoreConsole();
         return {
           content: [
             {
@@ -119,13 +126,26 @@ export function createResearchTool(): ToolDefinition {
         };
       }
 
-      console.log(`[research] Starting research orchestration (TUI mode: ${TUI_MODE}):`, { query: query.slice(0, 50) });
+      // 3. Resolve model — use specified model ID if valid, else fall back to active model
+      let selectedModel = ctx.model;
+      if (modelId) {
+        const found = ctx.modelRegistry.getAll().find((m: any) => m.id === modelId);
+        if (found) {
+          selectedModel = found;
+          logger.log(`[research] Using model: ${modelId}`);
+        } else {
+          logger.warn(`[research] Model '${modelId}' not found, falling back to active model`);
+        }
+      }
 
-      // 3. Init SearXNG
+      logger.log('[research] Starting research orchestration:', { query: query.slice(0, 50) });
+
+      // 4. Init SearXNG
       try {
         await initLifecycle(ctx);
       } catch (error) {
-        console.error('[research] Failed to initialize SearXNG:', error);
+        logger.error('[research] Failed to initialize SearXNG:', error);
+        restoreConsole();
         return {
           content: [
             {
@@ -147,13 +167,14 @@ export function createResearchTool(): ToolDefinition {
           if (manager) {
             const { setSearxngManager } = await import('../../pi-search-scrape/utils.ts');
             setSearxngManager(manager);
-            console.debug('[research] Registered SearXNG manager with pi-search-scrape');
+            logger.debug('[research] Registered SearXNG manager with pi-search-scrape');
           }
         } catch (regError) {
-          console.warn('[research] Could not register manager with pi-search-scrape:', regError instanceof Error ? regError.message : String(regError));
+          logger.warn('[research] Could not register manager with pi-search-scrape:', regError instanceof Error ? regError.message : String(regError));
         }
       } catch (error) {
-        console.error('[research] Failed to ensure SearXNG running:', error);
+        logger.error('[research] Failed to ensure SearXNG running:', error);
+        restoreConsole();
         return {
           content: [
             {
@@ -165,43 +186,44 @@ export function createResearchTool(): ToolDefinition {
         };
       }
 
-      // 4. Setup TUI
+      // 5. Setup TUI
       const searxngStatus = getStatus();
-      let panelState: PanelState;
+      const panelState: ResearchPanelState = {
+        searxngStatus,
+        totalTokens: 0,
+        slices: new Map(),
+        modelName: (selectedModel as any)?.id ?? 'unknown',
+      };
 
-      if (TUI_MODE === 'full') {
-        panelState = createInitialPanelState(searxngStatus) as FullPanelState;
-      } else {
-        panelState = createInitialPanelState(searxngStatus) as SimplePanelState;
-        // Update searxngStatus in simple mode
-        (panelState as SimplePanelState).searxngStatus = searxngStatus;
-      }
-
-      ctx.ui.setWidget('pi-research-panel', createPanel(panelState), { placement: 'aboveEditor' });
+      ctx.ui.setWidget('pi-research-panel', createResearchPanel(panelState), { placement: 'aboveEditor' });
       getCapturedTui()?.requestRender?.();
 
-      // Subscribe to SearXNG status changes (simple mode only)
+      // Subscribe to SearXNG status changes
       const unsubStatus = onStatusChange((status: SearxngStatus) => {
-        if (TUI_MODE === 'simple') {
-          (panelState as SimplePanelState).searxngStatus = status;
-        }
+        panelState.searxngStatus = status;
         getCapturedTui()?.requestRender?.();
       });
 
-      // Cleanup function
+      // Cleanup function — idempotent
+      // restoreConsole is delayed 15s to absorb pending SearXNG HTTP timeout callbacks
+      // that fire console.warn after the research is done (pi-search-scrape internal logging).
+      let cleaned = false;
       const cleanup = () => {
-        console.log('[research] Cleaning up...');
+        if (cleaned) return;
+        cleaned = true;
+        logger.log('[research] Cleaning up...');
         unsubStatus();
         clearAllFlashTimeouts();
         ctx.ui.setWidget('pi-research-panel', undefined);
+        setTimeout(restoreConsole, 15000).unref?.();
       };
 
       signal?.addEventListener('abort', cleanup, { once: true });
 
-      // 5. Mutable label state
+      // 6. Mutable label state
       const breadthCounter = { value: 0 };
 
-      // 6. Shared options for researcher creation
+      // 7. Shared options for researcher creation
       const sessionManager = SessionManager.inMemory();
       const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
       const coordinatorPrompt = readFileSync(join(__dirname, '..', 'prompts', 'coordinator.md'), 'utf-8');
@@ -209,7 +231,7 @@ export function createResearchTool(): ToolDefinition {
 
       const researcherOptions: CreateResearcherSessionOptions = {
         cwd: ctx.cwd,
-        ctxModel: ctx.model,
+        ctxModel: selectedModel,
         modelRegistry: ctx.modelRegistry,
         sessionManager,
         settingsManager,
@@ -218,7 +240,7 @@ export function createResearchTool(): ToolDefinition {
         extensionCtx: ctx,
       };
 
-      // 7. Create tools for coordinator
+      // 8. Create tools for coordinator
       const onTokens = (n: number) => {
         panelState.totalTokens += n;
         getCapturedTui()?.requestRender?.();
@@ -226,25 +248,25 @@ export function createResearchTool(): ToolDefinition {
 
       const delegateToolOptions: DelegateToolOptions = {
         breadthCounter,
-        panelState: panelState as DelegatePanelState,
+        panelState,
         onTokens,
         researcherOptions,
         signal,
         timeoutMs: RESEARCHER_TIMEOUT_MS,
-        flashTimeoutMs: FLASH_TIMEOUT_MS,
+        flashTimeoutMs: 1000,
       };
 
       const delegateTool = createDelegateTool(delegateToolOptions);
       const contextTool = createInvestigateContextTool({
         cwd: ctx.cwd,
-        ctxModel: ctx.model,
+        ctxModel: selectedModel,
         modelRegistry: ctx.modelRegistry,
       });
 
-      // 8. Create coordinator session
+      // 9. Create coordinator session
       const coordinatorSession = await createCoordinatorSession({
         cwd: ctx.cwd,
-        ctxModel: ctx.model,
+        ctxModel: selectedModel,
         modelRegistry: ctx.modelRegistry,
         sessionManager,
         settingsManager,
@@ -254,7 +276,7 @@ export function createResearchTool(): ToolDefinition {
         customTools: [delegateTool, contextTool],
       });
 
-      // 9. Token tracking for coordinator itself
+      // 10. Token tracking for coordinator itself
       coordinatorSession.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           const tokens = (event.message as any).usage?.totalTokens;
@@ -262,7 +284,7 @@ export function createResearchTool(): ToolDefinition {
         }
       });
 
-      // 10. Single prompt — coordinator converges on its own
+      // 11. Single prompt — coordinator converges on its own
       try {
         const context = formatParentContext(ctx);
         await coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`);

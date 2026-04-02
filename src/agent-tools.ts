@@ -11,6 +11,7 @@
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import type { SecuritySearchParams } from '../../pi-search-scrape/security-databases/types.ts';
+import { logger } from './logger.js';
 
 // Import from pi-search-scrape
 // Supports both relative paths (development) and npm package (production)
@@ -34,7 +35,7 @@ async function loadPiSearchScrapeModules() {
     scrapeBulk = scrapersModule.scrapeBulk;
     searchSecurityDatabases = securityModule.searchSecurityDatabases;
 
-    console.log('[agent-tools] Loaded pi-search-scrape from relative paths');
+    logger.log('[agent-tools] Loaded pi-search-scrape from relative paths');
   } catch (relativeError) {
     const relMsg = relativeError instanceof Error ? relativeError.message : String(relativeError);
     throw new Error(
@@ -160,8 +161,16 @@ export function createPiSearchTool(options: CreateAgentToolsOptions): ToolDefini
           content: [{ type: 'text', text: markdown }],
           details: { results, totalQueries: queries.length },
         };
+      } catch (error) {
+        // Return error as tool result — never let it propagate through the agent loop
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.warn('[pi_search] Error:', msg);
+        return {
+          content: [{ type: 'text', text: `Search failed: ${msg}. Proceeding with available information.` }],
+          details: { error: msg },
+        };
       } finally {
-        // Restore original URL
+        // Always restore original URL
         if (originalUrl !== undefined) {
           process.env['SEARXNG_URL'] = originalUrl;
         } else {
@@ -216,7 +225,17 @@ export function createPiScrapeTool(_options: CreateAgentToolsOptions): ToolDefin
       // Load pi-search-scrape modules (lazy loading, happens once)
       await loadPiSearchScrapeModules();
 
-      const scrapeResults = await scrapeBulk(urls, maxConcurrency, signal);
+      let scrapeResults: any[];
+      try {
+        scrapeResults = await scrapeBulk(urls, maxConcurrency, signal);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.warn('[pi_scrape] Error:', msg);
+        return {
+          content: [{ type: 'text', text: `Scrape failed: ${msg}. Proceeding with available information.` }],
+          details: { error: msg },
+        };
+      }
 
       const successful = scrapeResults.filter((r: any) => r.source !== 'failed');
       const failed = scrapeResults.filter((r: any) => r.source === 'failed');
@@ -351,7 +370,17 @@ export function createPiSecuritySearchTool(_options: CreateAgentToolsOptions): T
         githubRepo: record.githubRepo,
       };
 
-      const results = await searchSecurityDatabases(securityParams);
+      let results: any;
+      try {
+        results = await searchSecurityDatabases(securityParams);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.warn('[pi_security_search] Error:', msg);
+        return {
+          content: [{ type: 'text', text: `Security search failed: ${msg}. Proceeding with available information.` }],
+          details: { error: msg },
+        };
+      }
 
       let markdown = '# Security Vulnerability Search Results\n\n';
       markdown += `**Searched:** ${databases.join(', ')}\n`;

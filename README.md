@@ -10,6 +10,7 @@ A pi coding agent extension that orchestrates multi-agent research using a coord
 - **Code Search**: Includes ripgrep (rg) or grep fallback for codebase searches
 - **Visual Progress**: TUI panel shows SearXNG connection status, token usage, and active researchers with flash effects
 - **SearXNG Management**: Takes ownership of Docker SearXNG container lifecycle from pi-search-scrape
+- **Optional Tor Proxy**: Route searches through Tor to avoid IP blocking (see [TOR.md](./TOR.md))
 
 ## Quick Setup
 
@@ -230,6 +231,20 @@ export PI_RESEARCH_RESEARCHER_TIMEOUT_MS=60000
 
 # Flash duration (default: 500ms)
 export PI_RESEARCH_FLASH_TIMEOUT_MS=500
+
+# Enable Tor proxy for SearXNG searches (default: disabled)
+export PI_RESEARCH_ENABLE_TOR=true
+
+# Tor SOCKS5 port (default: 9050)
+export PI_RESEARCH_TOR_SOCKS_PORT=9050
+
+# Tor control port (default: 9051)
+export PI_RESEARCH_TOR_CONTROL_PORT=9051
+
+# Auto-start Tor if not running (default: false)
+export PI_RESEARCH_TOR_AUTO_START=true
+
+> **Note:** Tor support is optional and requires Tor to be installed. See [TOR.md](./TOR.md) for detailed setup instructions.
 
 # TUI mode (default: simple)
 export PI_RESEARCH_TUI_MODE=simple|full
