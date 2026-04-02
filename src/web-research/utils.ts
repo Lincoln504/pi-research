@@ -60,6 +60,33 @@ const activeContexts = new Map<string, TrackedContext>();
 // Active connection counter (for TUI display)
 let activeConnections = 0;
 let maxConnections = 0;
+// Callback system for connection count changes
+type ConnectionCountCallback = (count: number) => void;
+const connectionCallbacks: ConnectionCountCallback[] = [];
+
+/**
+ * Subscribe to connection count changes
+ * @returns Unsubscribe function
+ */
+export function onConnectionCountChange(callback: ConnectionCountCallback): () => void {
+  connectionCallbacks.push(callback);
+  // Immediately call with current count
+  callback(activeConnections);
+  // Return unsubscribe function
+  return () => {
+    const index = connectionCallbacks.indexOf(callback);
+    if (index !== -1) {
+      connectionCallbacks.splice(index, 1);
+    }
+  };
+}
+
+/** Notify all callbacks when connection count changes */
+function notifyConnectionCountChange(): void {
+  for (const callback of connectionCallbacks) {
+    callback(activeConnections);
+  }
+}
 
 /**
  * Increment active connection count
@@ -69,6 +96,7 @@ export function incrementConnectionCount(): void {
   if (activeConnections > maxConnections) {
     maxConnections = activeConnections;
   }
+  notifyConnectionCountChange();
 }
 
 /**
@@ -78,6 +106,7 @@ export function decrementConnectionCount(): void {
   if (activeConnections > 0) {
     activeConnections--;
   }
+  notifyConnectionCountChange();
 }
 
 /**
@@ -100,6 +129,7 @@ export function getMaxConnectionCount(): number {
 export function resetConnectionCounters(): void {
   activeConnections = 0;
   maxConnections = 0;
+  notifyConnectionCountChange();
 }
 
 /**

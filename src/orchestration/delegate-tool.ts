@@ -34,18 +34,45 @@ export interface DelegateToolOptions {
 }
 
 /**
- * Wraps a promise with a timeout
+ * Wraps a promise with a timeout and abort signal support
  */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  signal?: AbortSignal
+): Promise<T> {
+  const timeoutController = new AbortController();
+  const timeoutSignal = timeoutController.signal;
+
+  // Create combined abort signal if external signal provided
+  const combinedSignal = signal
+    ? AbortSignal.any([timeoutSignal, signal])
+    : timeoutSignal;
   return Promise.race([
     promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
+    new Promise<T>((_, reject) => {
+      // Timeout handler
+      const timeoutId = setTimeout(() => {
+        timeoutController.abort();
+        reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      // Abort handler
+      if (combinedSignal.aborted) {
+        clearTimeout(timeoutId);
+        reject(new Error(`Researcher ${label} cancelled`));
+      } else {
+        combinedSignal.addEventListener('abort', () => {
+          clearTimeout(timeoutId);
+          reject(new Error(`Researcher ${label} cancelled`));
+        });
+      }
+    }),
+  ]).finally(() => {
+    // Clean up on completion or error
+    timeoutController.abort();
+  });
 }
 
 /**
@@ -223,7 +250,8 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         await withTimeout(
           withRetry(() => session.prompt(slice), 3, 1000, sliceKey),
           options.timeoutMs,
-          sliceKey
+          sliceKey,
+          options.signal
         );
 
         // Extract final message text and check for failure AFTER prompt completes

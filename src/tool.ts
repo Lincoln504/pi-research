@@ -38,6 +38,7 @@ import {
   getConnectionCount,
 } from './searxng-lifecycle.js';
 import { getManager } from './searxng-lifecycle.js';
+import { onConnectionCountChange } from './web-research/utils.js';
 import { createDelegateTool, type DelegateToolOptions } from './orchestration/delegate-tool.js';
 import { createInvestigateContextTool } from './orchestration/context-tool.js';
 import type { CreateResearcherSessionOptions } from './orchestration/researcher.js';
@@ -194,6 +195,12 @@ export function createResearchTool(): ToolDefinition {
         panelState.activeConnections = getConnectionCount();
         getCapturedTui()?.requestRender?.();
       });
+
+      // Subscribe to connection count changes for real-time updates
+      const unsubConnectionCount = onConnectionCountChange((count: number) => {
+        panelState.activeConnections = count;
+        getCapturedTui()?.requestRender?.();
+      });
       // Start research session for robust failure tracking
       const sessionId = startResearchSession();
       logger.log(`[research] Started research session: ${sessionId}`);
@@ -207,6 +214,7 @@ export function createResearchTool(): ToolDefinition {
         logger.log('[research] Cleaning up...');
         endResearchSession();  // Clear session state
         unsubStatus();
+        unsubConnectionCount();
         clearAllFlashTimeouts();
         ctx.ui.setWidget('pi-research-panel', undefined);
         setTimeout(restoreConsole, 15000).unref?.();
@@ -275,28 +283,62 @@ export function createResearchTool(): ToolDefinition {
         }
       });
 
-      // 11. Single prompt — coordinator converges on its own
+      // 11. Create internal abort controller for research session
+      const researchAbortController = new AbortController();
+      const researchSignal = researchAbortController.signal;
+
+      // Combine external signal (ESC/Ctrl+C) with internal abort controller
+      const combinedSignal = AbortSignal.any([signal ?? AbortSignal.timeout(Infinity), researchSignal]);
+
+      // 12. When ESC/Ctrl+C is pressed, abort all sessions immediately
+      const abortHandler = () => {
+        researchAbortController.abort();
+      };
+      signal?.addEventListener('abort', abortHandler, { once: true });
+
+      // 13. Single prompt — coordinator converges on its own
       try {
         const context = formatParentContext(ctx);
-        await coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`);
-
+        // Race the coordinator prompt against abort signal
+        await Promise.race([
+          coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`),
+          new Promise((_, reject) => {
+            if (combinedSignal.aborted) {
+              reject(new Error('Research cancelled by user'));
+            } else {
+              combinedSignal.addEventListener('abort', () => {
+                reject(new Error('Research cancelled by user'));
+              });
+            }
+          })
+        ]);
         const msgs = coordinatorSession.messages;
         const last = [...msgs].reverse().find((m) => m.role === 'assistant');
         const text = extractText(last) || 'No answer synthesized.';
-
         cleanup();
         return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
       } catch (error) {
         cleanup();
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        
+        // Check if it was a user cancellation
+        if (errorMsg.includes('cancelled by user') || combinedSignal.aborted) {
+          return {
+            content: [{ type: 'text', text: 'Research cancelled by user (ESC/Ctrl+C)' }],
+            details: {},
+          };
+        }
         return {
           content: [
             {
               type: 'text',
-              text: `Research failed: ${error instanceof Error ? error.message : String(error)}`,
+              text: `Research failed: ${errorMsg}`,
             },
           ],
           details: {},
         };
+      } finally {
+        signal?.removeEventListener('abort', abortHandler);
       }
     },
   };
