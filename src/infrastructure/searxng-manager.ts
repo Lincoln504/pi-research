@@ -1,0 +1,1430 @@
+/**
+ * SearXNG Container Manager - Simplified Design
+ *
+ * Session-scoped SearXNG container management.
+ *
+ * DESIGN PRINCIPLES:
+ * 1. Session-scoped containers - one per pi session, named by session ID
+ * 2. Explicit lifecycle - start on session_start, stop on session_shutdown
+ * 3. Stateless manager - fresh instance per session, no singleton
+ * 4. Simple error recovery - if container is gone, recreate it
+ * 5. No AutoRemove - manage cleanup explicitly
+ * 6. No complex reuse logic - just check for container by name
+ * 7. Manage Docker images - pull latest, prune old images on start
+ */
+
+import Docker from 'dockerode';
+import * as fs from 'node:fs';
+import * as net from 'node:net';
+import * as path from 'node:path';
+import { NetworkManager } from './network-manager';
+import { StateManager } from './state-manager';
+
+// Docker type definitions
+interface DockerContainerInspectInfo {
+  State: {
+    Running: boolean;
+    Status: string;
+  };
+  NetworkSettings: {
+    Ports: Record<string, Array<{ HostPort: string }> | null> | null;
+    Networks?: Record<string, {
+      GlobalIPv6Address?: string;
+      [key: string]: unknown;
+    }>;
+  };
+}
+
+interface DockerContainerListInfo {
+  Id: string;
+  Names: string[];
+  Image: string;
+  State: string;
+  Status: string;
+  RepoTags?: string[];
+}
+
+interface DockerImageInfo {
+  Id: string;
+  RepoTags?: string[];
+  Created: number;
+}
+
+interface DockerContainerCreateOptions {
+  name: string;
+  Image: string;
+  ExposedPorts: Record<string, {}>;
+  HostConfig: {
+    PortBindings: Record<string, Array<{ HostPort: string }>>;
+    Binds: string[];
+    AutoRemove: boolean;
+  };
+  Env: string[];
+  Labels: Record<string, string>;
+  NetworkingConfig?: {
+    EndpointsConfig: Record<string, {}>;
+  };
+}
+
+// Extension context type
+interface ExtensionContext {
+  ui?: {
+    notify(_message: string, _type?: 'info' | 'warning' | 'error'): void;
+  };
+}
+
+// Default configuration
+const DEFAULT_CONFIG = {
+  port: 55732,
+  imageName: 'searxng/searxng',
+  imageTag: 'latest',
+  healthTimeout: 120000,
+  pruneOldImages: true,
+  enableIPv6Rotation: true,
+  maxUptimeMinutes: 90,
+} as const;
+
+/**
+ * Singleton mode - shared SearXNG container across all sessions
+ * Enabled by default, set ENABLE_SINGLETON=false to use session-scoped mode
+ */
+const ENABLE_SINGLETON = (process.env['ENABLE_SINGLETON'] ?? 'true') !== 'false';
+
+/**
+ * Configuration from environment variables
+ */
+interface EnvConfig {
+  port?: number;
+  imageName?: string;
+  imageTag?: string;
+  healthTimeout?: number;
+  enableIPv6Rotation?: boolean;
+  maxUptimeMinutes?: number;
+}
+
+/**
+ * Load configuration from environment variables
+ */
+function loadConfigFromEnv(): EnvConfig {
+  const config: EnvConfig = {};
+
+  const portEnv = process.env['SEARXNG_PORT'];
+  if (portEnv !== undefined) {
+    const parsed = parseInt(portEnv, 10);
+    if (!isNaN(parsed)) {
+      config.port = parsed;
+    }
+  }
+
+  const imageEnv = process.env['SEARXNG_IMAGE'];
+  if (imageEnv) {
+    const parts = imageEnv.split(':');
+    config.imageName = parts[0];
+    config.imageTag = parts[1] ?? 'latest';
+  }
+
+  const healthTimeoutEnv = process.env['SEARXNG_HEALTH_TIMEOUT'];
+  if (healthTimeoutEnv !== undefined) {
+    const parsed = parseInt(healthTimeoutEnv, 10);
+    if (!isNaN(parsed)) {
+      config.healthTimeout = parsed * 1000;
+    }
+  }
+
+  const ipv6RotationEnv = process.env['SEARXNG_IPV6_ROTATION'];
+  if (ipv6RotationEnv !== undefined) {
+    config.enableIPv6Rotation = ipv6RotationEnv === 'true';
+  }
+
+  const maxUptimeEnv = process.env['SEARXNG_MAX_UPTIME_MINUTES'];
+  if (maxUptimeEnv !== undefined) {
+    const parsed = parseInt(maxUptimeEnv, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      config.maxUptimeMinutes = parsed;
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Sleep for ms milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Clean up orphaned SearXNG containers from previous sessions
+ * This prevents port conflicts when sessions crash
+ */
+async function cleanupOrphanedContainers(docker: Docker, currentSessionId: string): Promise<void> {
+  try {
+    const containers: DockerContainerListInfo[] = await docker.listContainers({ all: true });
+
+    for (const container of containers) {
+      // Check if this is a SearXNG container
+      if (container.Names.some((n: string) => n.startsWith('/pi-searxng-'))) {
+        const firstContainerName = container.Names[0];
+        if (!firstContainerName) {
+          continue;
+        }
+        const containerName = firstContainerName.substring(1); // Remove leading '/'
+
+        // Skip our current session's container
+        if (containerName === `pi-searxng-${currentSessionId}`) {
+          continue;
+        }
+
+        // Remove old containers
+        try {
+          const c = docker.getContainer(container.Id);
+          await c.remove({ v: true, force: true });
+          console.log(`[SearXNG Manager] Removed orphaned container: ${containerName}`);
+        } catch (error) {
+          console.warn(`[SearXNG Manager] Failed to remove container ${containerName}:`, error);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[SearXNG Manager] Error cleaning up orphaned containers:', error);
+  }
+}
+
+/**
+ * Check if a TCP port is accepting connections
+ */
+function isPortListening(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const socket: net.Socket = new net.Socket();
+
+    socket.setTimeout(2000); // 2 second timeout
+
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+
+    socket.connect(port, host);
+  });
+}
+
+/**
+ * SearxngManagerConfig type
+ */
+export interface SearxngManagerConfig {
+  port?: number;
+  settingsPath?: string; // Custom settings file path (for Tor mode)
+  imageName?: string;
+  imageTag?: string;
+  healthTimeout?: number;
+  pruneOldImages?: boolean;
+  enableIPv6Rotation?: boolean;
+  maxUptimeMinutes?: number;
+}
+
+/**
+ * SearxngContainerInfo type
+ */
+export interface SearxngContainerInfo {
+  id: string;
+  name: string;
+  port: number;
+  url: string;
+  ipv6Address?: string | null;
+  ipv6Enabled?: boolean;
+}
+
+/**
+ * SearxngStatus type
+ */
+export interface SearxngStatus {
+  dockerAvailable: boolean;
+  healthy: boolean;
+  containerId?: string;
+  containerName?: string;
+  port?: number;
+  url?: string;
+  ipv6Address?: string | null;
+  ipv6Enabled?: boolean;
+  error?: string;
+}
+
+/**
+ * DockerSearxngManager Class
+ *
+ * Simplified SearXNG Docker container manager.
+ * Session-scoped lifecycle with deterministic container naming.
+ * Also manages Docker images (pulls latest, prunes old images).
+ */
+export class DockerSearxngManager {
+  private readonly docker: Docker | null = null;
+  private container: Docker.Container | null = null;
+  private containerInfo: SearxngContainerInfo | null = null;
+  private readonly config: Required<SearxngManagerConfig>;
+  private ctx: ExtensionContext | null = null;
+  private sessionId: string | null = null;
+  private networkManager: NetworkManager | null = null;
+  private starting: Promise<void> | null = null; // Mutex to prevent concurrent starts
+  private readonly stateManager: StateManager;
+  private readonly _extensionDir: string;
+  private readonly _settingsPath: string;
+  private containerStartupLock: Promise<void> | null = null;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private heartbeatRunning = false;
+  private containerStartTime: number | null = null;
+
+  constructor(
+    _extensionDir: string,
+    config: SearxngManagerConfig = {},
+  ) {
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...loadConfigFromEnv(),
+      ...config,
+    } as Required<SearxngManagerConfig>;
+    this._extensionDir = _extensionDir;
+    this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'default-settings.yml');
+    // Initialize Docker client
+    // Initialize Docker client
+    try {
+      this.docker = new Docker({
+        socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
+      });
+    } catch (error) {
+      console.warn('[SearXNG Manager] Failed to initialize Docker client:', error);
+      this.docker = null;
+    }
+
+    // Initialize StateManager for singleton mode
+    this.stateManager = new StateManager();
+    // Note: signal handling (SIGTERM/SIGINT) is managed by pi-research tool.ts, not here.
+    // Registering handlers here would create duplicate handlers and competing process.exit(0) calls.
+  }
+
+  /**
+   * Set extension context for UI notifications
+   */
+  setContext(ctx: ExtensionContext): void {
+    this.ctx = ctx;
+  }
+
+  /**
+   * Notify user via UI
+   */
+  private notify(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
+    if (this.ctx?.ui) {
+      // Convert 'success' to 'info' for UI compatibility
+      const uiType: 'info' | 'warning' | 'error' = type === 'success' ? 'info' : type;
+      this.ctx.ui.notify(message, uiType);
+    } else {
+      console.log(`[SearXNG Manager ${type.toUpperCase()}] ${message}`);
+    }
+  }
+
+  /**
+   * Get StateManager instance
+   */
+  getStateManager(): StateManager | null {
+    return this.stateManager;
+  }
+
+  /**
+   * Check if heartbeat is running
+   */
+  isHeartbeatRunning(): boolean {
+    return this.heartbeatRunning;
+  }
+
+  /**
+   * Cleanup stale sessions — removes sessions whose process is dead OR that haven't
+   * been seen in over 2 hours.  Uses StateManager's built-in cleanup which checks
+   * both the timeout threshold AND process liveness (so crashed processes are
+   * removed immediately without waiting for the timeout to expire).
+   */
+  async cleanupStaleSessions(): Promise<void> {
+
+    try {
+      const removed = await this.stateManager.cleanupStaleSessions(2 * 60 * 60 * 1000); // 2 hours
+      if (removed > 0) {
+        console.log(`[SearXNG Manager] Cleaned up ${removed} stale session(s)`);
+      }
+    } catch (error) {
+      console.error('[SearXNG Manager] Error cleaning up stale sessions:', error);
+    }
+  }
+
+  /**
+   * Verify container health
+   */
+  async verifyContainerHealthy(): Promise<boolean> {
+    if (!this.container || this.docker === null) {
+      return false;
+    }
+
+    try {
+      const info: DockerContainerInspectInfo = await this.container.inspect() as DockerContainerInspectInfo;
+      const portListening = await isPortListening(this.config.port);
+      return info.State.Running && portListening;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Start heartbeat monitoring
+   */
+  startHeartbeat(): void {
+    if (this.heartbeatRunning) {
+      console.warn('[SearXNG Manager] Heartbeat already running');
+      return;
+    }
+
+    this.heartbeatRunning = true;
+    const baseInterval = 30000; // 30 seconds
+    const jitter = Math.floor(Math.random() * 5000); // 0-5 seconds random
+    const interval = baseInterval + jitter;
+
+    console.log(`[SearXNG Manager] Heartbeat interval: ${interval}ms (${baseInterval}ms base + ${jitter}ms jitter)`);
+
+    this.heartbeatInterval = setInterval(() => {
+      void (async (): Promise<void> => {
+        try {
+          // Refresh this session's lastSeen so it isn't pruned by cleanupStaleSessions
+          if (this.sessionId !== null) {
+            this.stateManager.updateHeartbeat(this.sessionId).catch(() => {});
+          }
+          // Remove sessions whose pi processes have died since the last cycle
+          await this.cleanupStaleSessions();
+          await this.verifyContainerHealthy();
+
+          // Check for uptime-based restart (for IP rotation)
+          const maxUptimeMs = this.config.maxUptimeMinutes * 60 * 1000;
+          if (
+            this.containerStartTime &&
+            this.container &&
+            this.sessionId &&
+            Date.now() - this.containerStartTime > maxUptimeMs
+          ) {
+            console.log(
+              `[SearXNG Manager] Container reached ${this.config.maxUptimeMinutes}-minute uptime limit, ` +
+              'restarting for IP rotation',
+            );
+            this.notify(
+              `Restarting SearXNG container for IP rotation (${this.config.maxUptimeMinutes} min uptime reached)...`,
+              'info',
+            );
+
+            // Trigger graceful restart
+            this.starting = (async (): Promise<void> => {
+              try {
+                if (this.container) {
+                  try {
+                    await this.stopContainer(this.container);
+                  } catch { /* ignore — may already be stopped */ }
+                  try {
+                    await this.removeContainer(this.container);
+                  } catch { /* ignore — may already be gone */ }
+                  this.container = null;
+                  this.containerInfo = null;
+                  this.containerStartTime = null;
+                }
+                await this.startSingleton();
+                this.notify('SearXNG container restarted with fresh IPv6 address', 'success');
+                console.log('[SearXNG Manager] Container restarted successfully for IP rotation');
+              } catch (error) {
+                const errMsg = error instanceof Error ? error.message : String(error);
+                console.error('[SearXNG Manager] Error during uptime-triggered restart:', error);
+                this.notify(`Failed to restart SearXNG container: ${errMsg}`, 'error');
+              } finally {
+                this.starting = null;
+              }
+            })();
+
+            // Wait for restart to complete
+            try {
+              await this.starting;
+            } catch (error) {
+              console.error('[SearXNG Manager] Restart wait failed:', error);
+            }
+          }
+        } catch (error) {
+          console.error('[SearXNG Manager] Heartbeat check failed:', error);
+        }
+      })();
+    }, interval).unref(); // Don't keep event loop alive when nothing else is running
+
+    console.log('[SearXNG Manager] Heartbeat started');
+  }
+
+  /**
+   * Stop heartbeat monitoring
+   */
+  stopHeartbeat(): void {
+    this.heartbeatRunning = false;
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    console.log('[SearXNG Manager] Heartbeat stopped');
+  }
+
+  /**
+   * Acquire container for session (singleton mode)
+   */
+  async acquire(sessionId: string): Promise<void> {
+
+    if (this.containerStartupLock) {
+      await this.containerStartupLock;
+    }
+
+    const existingSession = await this.stateManager.getSession(sessionId);
+    if (existingSession) {
+      console.log(`[SearXNG Manager] Session ${sessionId} already has container reference`);
+      await this.stateManager.updateActivity(sessionId);
+      this.sessionId = sessionId;
+      // If this manager instance has no container reference (e.g. after a session
+      // reconnect where pi reuses the same session ID), attach to the running container
+      // so ensureReady() and getStatus() work correctly.
+      if (!this.container) {
+        try {
+          const existing = await this.findContainerByName('pi-searxng');
+          if (existing) {
+            const info: DockerContainerInspectInfo = await existing.inspect() as DockerContainerInspectInfo;
+            this.container = existing;
+
+            const portBindings = info.NetworkSettings.Ports?.['8080/tcp'];
+            let port = this.config.port;
+            if (portBindings && portBindings.length > 0) {
+              const hostPort = portBindings[0]?.HostPort;
+              if (hostPort) {
+                port = parseInt(hostPort, 10);
+              }
+            }
+
+            // Check for IPv6 network attachment from existing container
+            let ipv6Address: string | null = null;
+            let ipv6Enabled = false;
+            const networks = info.NetworkSettings.Networks ?? {};
+            for (const [netName, networkInfo] of Object.entries(networks)) {
+              if (netName.startsWith('pi-searxng-net-')) {
+                // Try to get IPv6 address from container's network settings
+                const globalIPv6 = (networkInfo as { GlobalIPv6Address?: string }).GlobalIPv6Address;
+                if (globalIPv6) {
+                  ipv6Address = globalIPv6;
+                }
+
+                ipv6Enabled = true;
+                // Initialize networkManager for this container
+                if (this.config.enableIPv6Rotation && this.docker !== null) {
+                  this.networkManager = new NetworkManager(this.docker, 'singleton');
+                }
+                break;
+              }
+            }
+
+            this.containerInfo = {
+              id: existing.id,
+              name: 'pi-searxng',
+              port,
+              url: `http://localhost:${port}`,
+              ipv6Address,
+              ipv6Enabled,
+            };
+            this.config.port = port;
+          }
+        } catch (err) {
+          console.warn('[SearXNG Manager] Could not attach to existing container on reconnect:', err);
+        }
+      }
+      return;
+    }
+
+    this.containerStartupLock = (async (): Promise<void> => {
+      try {
+        const containerName = 'pi-searxng';
+        console.log(`[SearXNG Manager] Acquiring container for session ${sessionId}`);
+
+        const existingContainer = await this.findContainerByName(containerName);
+
+        if (existingContainer) {
+          console.log(`[SearXNG Manager] Reusing existing singleton container: ${containerName}`);
+
+          const info: DockerContainerInspectInfo = await existingContainer.inspect() as DockerContainerInspectInfo;
+          this.container = existingContainer;
+
+          let port = this.config.port;
+          const portBindings = info.NetworkSettings.Ports?.['8080/tcp'];
+          if (portBindings && portBindings.length > 0) {
+            const hostPort = portBindings[0]?.HostPort;
+            if (hostPort) {
+              port = parseInt(hostPort, 10);
+            }
+          }
+
+          // Check for IPv6 network attachment from existing container
+          let ipv6Address: string | null = null;
+          let ipv6Enabled = false;
+          const networks = info.NetworkSettings.Networks ?? {};
+          for (const [netName, networkInfo] of Object.entries(networks)) {
+            if (netName.startsWith('pi-searxng-net-')) {
+              // Try to get IPv6 address from container's network settings
+              const globalIPv6 = (networkInfo as { GlobalIPv6Address?: string }).GlobalIPv6Address;
+              if (globalIPv6) {
+                ipv6Address = globalIPv6;
+              }
+
+              ipv6Enabled = true;
+              // Initialize networkManager for this container
+              if (this.config.enableIPv6Rotation && this.docker !== null) {
+                this.networkManager = new NetworkManager(this.docker, 'singleton');
+              }
+              break;
+            }
+          }
+
+          this.containerInfo = {
+            id: existingContainer.id,
+            name: containerName,
+            port,
+            url: `http://localhost:${port}`,
+            ipv6Address,
+            ipv6Enabled,
+          };
+
+          this.config.port = port;
+
+          if (!info.State.Running) {
+            await this.startContainer(existingContainer);
+            await this.waitForHealthy();
+          } else {
+            const healthy = await this.verifyContainerHealthy();
+            if (!healthy) {
+              await this.waitForHealthy();
+            }
+          }
+        } else {
+          await this.startSingleton();
+        }
+
+        await this.stateManager.addSession(sessionId, containerName);
+        this.sessionId = sessionId;
+        console.log(`[SearXNG Manager] Session ${sessionId} acquired container reference`);
+
+      } finally {
+        this.containerStartupLock = null;
+      }
+    })();
+
+    await this.containerStartupLock;
+  }
+
+  /**
+   * Release container for session (singleton mode)
+   */
+  async release(sessionId: string): Promise<void> {
+
+    console.log(`[SearXNG Manager] Releasing container for session ${sessionId}`);
+
+    await this.stateManager.removeSession(sessionId);
+
+    // Clean up sessions whose processes have died before counting remaining references.
+    // Without this, stale sessions from crashed/killed terminals accumulate in the state
+    // file and prevent the container from stopping even when no real sessions remain.
+    await this.cleanupStaleSessions();
+
+    const remainingSessions = await this.stateManager.getAllSessions();
+    if (Object.keys(remainingSessions).length === 0) {
+      console.log('[SearXNG Manager] No more sessions, stopping singleton container');
+      await this.stopSingleton();
+    } else {
+      console.log(`[SearXNG Manager] Container still in use by ${Object.keys(remainingSessions).length} session(s)`);
+    }
+  }
+
+  /**
+   * Start singleton container
+   */
+  private async startSingleton(): Promise<void> {
+    const containerName = 'pi-searxng';
+
+    console.log(`[SearXNG Manager] Starting singleton container: ${containerName}`);
+
+    await this.ensureImage();
+
+    // Initialize IPv6 network if enabled
+    let networkInfo: { ipv6Address?: string | null } | null = null;
+    if (this.config.enableIPv6Rotation && this.docker !== null) {
+      this.networkManager = new NetworkManager(this.docker, 'singleton');
+      networkInfo = await this.networkManager.createIPv6Network();
+
+      if (networkInfo.ipv6Address !== undefined && networkInfo.ipv6Address !== null) {
+        this.notify(`IPv6 rotation enabled: ${networkInfo.ipv6Address}`, 'info');
+      } else {
+        this.notify('IPv6 not available, using IPv4 only (search engines may be rate-limited)', 'warning');
+      }
+    }
+
+    try {
+      const containerResult = await this.createContainer(containerName, this.config.port);
+      this.container = containerResult.container;
+      const assignedPort = containerResult.assignedPort;
+
+      await this.startContainer(this.container);
+
+      // Ensure IPv6-only by disconnecting from bridge if attached
+      if (this.networkManager && this.docker) {
+        try {
+          const info: DockerContainerInspectInfo = await this.container.inspect() as DockerContainerInspectInfo;
+          const networks = Object.keys(info.NetworkSettings.Networks ?? {});
+
+          if (networks.includes('bridge')) {
+            const bridge = this.docker.getNetwork('bridge');
+            await bridge.disconnect({ Container: this.container.id, Force: true });
+            console.log('[SearXNG Manager] Disconnected container from default bridge (enforcing IPv6-only)');
+          } else {
+            console.log('[SearXNG Manager] Container is IPv6-only (bridge not attached)');
+          }
+        } catch (error) {
+          console.warn('[SearXNG Manager] Warning: Could not verify/disconnect from bridge network:', error);
+        }
+      }
+
+      this.containerInfo = {
+        id: this.container.id,
+        name: containerName,
+        port: assignedPort,
+        url: `http://localhost:${assignedPort}`,
+        ipv6Address: networkInfo?.ipv6Address ?? null,
+        ipv6Enabled: this.networkManager?.isIPv6Enabled() ?? false,
+      };
+
+      this.config.port = assignedPort;
+
+      await this.waitForHealthy();
+
+      // Record start time for uptime-based restart
+      this.containerStartTime = Date.now();
+
+      console.log(`[SearXNG Manager] Singleton container started on port ${assignedPort}`);
+    } catch (error) {
+      console.error('[SearXNG Manager] Failed to start singleton container:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stop singleton container
+   */
+  private async stopSingleton(): Promise<void> {
+    console.log('[SearXNG Manager] Stopping singleton container');
+
+    if (this.heartbeatInterval) {
+      this.stopHeartbeat();
+    }
+
+    if (this.container) {
+      try {
+        await this.stopContainer(this.container);
+        await this.removeContainer(this.container);
+        console.log('[SearXNG Manager] Singleton container stopped');
+      } catch (error) {
+        console.warn('[SearXNG Manager] Error stopping singleton container:', error);
+      } finally {
+        this.container = null;
+        this.containerInfo = null;
+      }
+    }
+
+    // Clean up IPv6 network if enabled
+    if (this.networkManager) {
+      try {
+        await this.networkManager.removeNetwork();
+        console.log('[SearXNG Manager] IPv6 network removed');
+      } catch (error) {
+        console.warn('[SearXNG Manager] Error removing IPv6 network:', error);
+      } finally {
+        this.networkManager = null;
+      }
+    }
+  }
+
+  /**
+   * Check if Docker is available
+   */
+  private async checkDocker(): Promise<boolean> {
+    if (!this.docker) {
+      return false;
+    }
+
+    try {
+      await this.docker.ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get full image name with tag
+   */
+  private getFullImageName(): string {
+    return `${this.config.imageName}:${this.config.imageTag}`;
+  }
+
+  /**
+   * Check if Docker image exists locally
+   */
+  private async imageExists(): Promise<boolean> {
+    if (!this.docker) {
+      return false;
+    }
+
+    try {
+      const fullImage = this.getFullImageName();
+      const image = this.docker.getImage(fullImage);
+      await image.inspect();
+      return true;
+    } catch {
+      // Image doesn't exist
+      return false;
+    }
+  }
+
+  /**
+   * Pull the latest Docker image
+   */
+  private async pullLatestImage(): Promise<void> {
+    if (this.docker === null) {
+      throw new Error('Docker not available.');
+    }
+
+    const fullImage = this.getFullImageName();
+
+    this.notify(`Updating SearXNG image: ${fullImage}...`, 'info');
+    this.notify('This may take 1-2 minutes on first run.', 'warning');
+
+    try {
+      const docker = this.docker;
+      await new Promise<void>((resolve, reject) => {
+        void docker.pull(fullImage, (err: Error | null, stream: NodeJS.ReadableStream) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          docker.modem.followProgress(stream, (err: Error | null) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve();
+            }
+          }, (event: Record<string, unknown>) => {
+            // Optional: log progress events
+            if (event['status'] === 'Pulling fs layer' || event['status'] === 'Downloading') {
+              // Could show progress here
+            }
+          });
+        });
+      });
+
+      this.notify('SearXNG image updated successfully.', 'success');
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to pull image: ${errMsg}`, { cause: error });
+    }
+  }
+
+  /**
+   * Prune old SearXNG images (dangling and non-latest tags)
+   */
+  private async pruneOldImages(): Promise<void> {
+    if (!this.docker) {
+      return;
+    }
+
+    if (!this.config.pruneOldImages) {
+      return;
+    }
+
+    try {
+      this.notify('Cleaning up old SearXNG images...', 'info');
+
+      // Get all images for the repository
+      const images: DockerImageInfo[] = await this.docker.listImages({ filters: { reference: [this.config.imageName] } });
+
+      const currentImage = this.getFullImageName();
+
+      for (const image of images) {
+        const repoTags = image.RepoTags;
+        if (repoTags && repoTags.length > 0) {
+          for (const tag of repoTags) {
+            // Skip the current image (latest)
+            if (tag === currentImage) {
+              continue;
+            }
+
+            // Remove old images
+            const img = this.docker.getImage(tag);
+            try {
+              await img.remove({ force: false });
+              this.notify(`Removed old image: ${tag}`, 'info');
+            } catch (error) {
+              // Image might be in use, that's okay
+              console.warn('[SearXNG Manager] Could not remove image:', tag, error);
+            }
+          }
+        }
+      }
+
+      // Also prune dangling images
+      await this.docker.pruneImages({ filters: { dangling: ['true'] } });
+
+      this.notify('Image cleanup complete.', 'success');
+    } catch (error) {
+      console.warn('[SearXNG Manager] Error pruning old images:', error);
+      // Don't fail the whole process if pruning fails
+    }
+  }
+
+  /**
+   * Ensure image is available and up-to-date
+   */
+  private async ensureImage(): Promise<void> {
+    const imageExists = await this.imageExists();
+
+    if (!imageExists) {
+      // Image doesn't exist, pull it
+      await this.pullLatestImage();
+    } else {
+      // Image exists, prune old ones and optionally pull latest
+      await this.pruneOldImages();
+
+      // Optionally: always pull latest to stay up-to-date
+      // Uncomment the next line to always update on start:
+      // await this.pullLatestImage();
+    }
+  }
+
+  /**
+   * Find container by name
+   */
+  private async findContainerByName(name: string): Promise<Docker.Container | null> {
+    if (!this.docker) {
+      return null;
+    }
+
+    try {
+      const containers: DockerContainerListInfo[] = await this.docker.listContainers({ all: true });
+
+      for (const c of containers) {
+        if (c.Names.some((n: string) => n === `/${name}`)) {
+          return this.docker.getContainer(c.Id);
+        }
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Create a new container with port auto-assignment
+   */
+  private async createContainer(
+    name: string,
+    preferredPort: number | null,
+  ): Promise<{ container: Docker.Container; assignedPort: number }> {
+    if (!this.docker) {
+      throw new Error('Docker not available.');
+    }
+
+    const fullImage = this.getFullImageName();
+
+    // Mount both settings.yml and limiter.toml for complete bot detection disable
+    const settingsPath = this._settingsPath;
+    const limiterConfigPath = path.join(this._extensionDir, 'config', 'limiter.toml');
+
+    // Verify configuration files exist
+    if (!fs.existsSync(settingsPath)) {
+      throw new Error(`Settings file not found: ${settingsPath}.`);
+    }
+    if (!fs.existsSync(limiterConfigPath)) {
+      throw new Error(`Limiter config not found: ${limiterConfigPath}. Please ensure limiter.toml exists.`);
+    }
+
+    // Try preferred port first, or use auto-assignment (empty string)
+    const hostPort = preferredPort ? preferredPort.toString() : '';
+
+    const containerConfig: DockerContainerCreateOptions = {
+      name,
+      Image: fullImage,
+      ExposedPorts: { '8080/tcp': {} },
+      HostConfig: {
+        PortBindings: {
+          '8080/tcp': [{ HostPort: hostPort }],
+        },
+        Binds: [
+          `${settingsPath}:/etc/searxng/settings.yml:ro`,
+          `${limiterConfigPath}:/etc/searxng/limiter.toml:ro`,
+        ],
+        AutoRemove: false,
+      },
+      Env: [
+        // No SEARXNG_LIMITER or SEARXNG_BIND_ADDRESS - use mounted config files only
+      ],
+      Labels: {
+        'managed-by': 'pi-research',
+        'mode': ENABLE_SINGLETON ? 'singleton' : 'session-scoped',
+      },
+    };
+
+    // Add network configuration if IPv6 is enabled
+    const networkName = this.networkManager?.getNetworkName();
+    if (networkName) {
+      containerConfig.NetworkingConfig = {
+        EndpointsConfig: {
+          [networkName]: {},
+        },
+      };
+    }
+
+    const container = await this.docker.createContainer(containerConfig);
+
+    // Query the actual assigned port (important for auto-assignment)
+    const info: DockerContainerInspectInfo = await container.inspect() as DockerContainerInspectInfo;
+    const portBindings = info.NetworkSettings.Ports?.['8080/tcp'];
+    const assignedPort = (portBindings && portBindings.length > 0 && portBindings[0]?.HostPort)
+      ? parseInt(portBindings[0].HostPort, 10)
+      : (preferredPort ?? 0);
+
+    console.log(`[SearXNG Manager] Container created with port ${assignedPort}`);
+
+    return { container, assignedPort };
+  }
+
+  /**
+   * Start a container
+   */
+  private async startContainer(container: Docker.Container): Promise<void> {
+    await container.start();
+  }
+
+  /**
+   * Stop a container
+   */
+  private async stopContainer(container: Docker.Container): Promise<void> {
+    try {
+      await container.stop({ t: 10 });
+    } catch (error: unknown) {
+      // Container might already be stopped (error 304)
+      const errorStr = String(error);
+      if (errorStr.includes('is not running') ||
+          errorStr.includes('container already stopped') ||
+          errorStr.includes('304')) {
+        // Already stopped, that's fine
+        return;
+      }
+      console.warn('[SearXNG Manager] Error stopping container:', error);
+    }
+  }
+
+  /**
+   * Remove a container
+   */
+  private async removeContainer(container: Docker.Container): Promise<void> {
+    await Promise.race([
+      container.remove({ v: true, force: true }),
+      new Promise<void>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('container.remove timed out after 15s'));
+        }, 15000);
+      }),
+    ]).catch((err: unknown) => {
+      if (!String(err).includes('No such container')) {
+        console.warn('[SearXNG Manager] Error removing container:', err);
+      }
+    });
+  }
+
+  /**
+   * Wait for container to be healthy
+   */
+  private async waitForHealthy(): Promise<void> {
+    if (!this.container) {
+      throw new Error('No container to wait for.');
+    }
+
+    const startTime = Date.now();
+    const timeout = this.config.healthTimeout;
+    const checkInterval = 3000; // Check every 3 seconds
+    const STARTUP_DELAY = 5000; // Wait 5 seconds for initial startup
+
+    this.notify('Starting SearXNG container and waiting for it to be ready...', 'info');
+    this.notify('If this is your first run, it may take 1-2 minutes to download the image.', 'warning');
+    this.notify('Subsequent runs will be much faster.', 'info');
+
+    // Wait for container to start (initial delay)
+    await sleep(STARTUP_DELAY);
+
+    let consecutiveHealthyChecks = 0;
+    const HEALTHY_CHECKS_NEEDED = 2; // Need 2 consecutive healthy checks
+    let lastElapsedTime = '';
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        // Check if container still exists and get its state in one call
+        let info: DockerContainerInspectInfo;
+        try {
+          info = await this.container.inspect() as DockerContainerInspectInfo;
+        } catch (error: unknown) {
+          const err = error as { statusCode?: number };
+          if (err.statusCode === 404) {
+            // Container was removed, recreate it
+            this.notify('Container was removed, recreating...', 'warning');
+            const goneError = new Error('CONTAINER_GONE');
+            goneError.cause = error;
+            throw goneError;
+          }
+          throw error;
+        }
+
+        // Check if container is still running
+        if (!info.State.Running) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+
+          // Container has exited, get logs to understand why
+          try {
+            const logs = await this.container.logs({ stdout: true, stderr: true, tail: 50 });
+            const logsStr = logs.toString();
+
+            this.notify(`Container exited with status: ${info.State.Status} (${elapsed}s elapsed)`, 'error');
+            console.error('[SearXNG Manager] Container logs:', logsStr);
+
+            // Check for common error patterns
+            if (logsStr.includes('bind') && (logsStr.includes('address already in use') || logsStr.includes('already allocated'))) {
+              throw new Error(`Failed to start container: Port ${this.config.port} is already in use. Check if another SearXNG container or service is using this port.`, { cause: logsStr });
+            }
+
+            // Generic error with logs
+            throw new Error(`Container exited unexpectedly. Last 50 lines of logs:\n${logsStr}`, { cause: logsStr });
+          } catch (error: unknown) {
+            if (error instanceof Error) {
+              throw error; // Re-throw our custom error
+            }
+            // If log retrieval failed, throw a generic error
+            throw new Error(`Container exited with status: ${info.State.Status}. Unable to retrieve logs.`, { cause: error });
+          }
+        }
+
+        // Enhanced health check: container running AND port is listening
+        // SearXNG bot detection blocks HTTP requests, so we use TCP check instead
+        const portListening = await isPortListening(this.config.port);
+        if (portListening) {
+          consecutiveHealthyChecks++;
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+          if (consecutiveHealthyChecks >= HEALTHY_CHECKS_NEEDED) {
+            this.notify(`SearXNG container is ready! (${elapsed}s elapsed)`, 'success');
+            return;
+          } else if (lastElapsedTime !== elapsed) {
+            this.notify(`SearXNG container starting up... (${elapsed}s elapsed)`, 'info');
+            lastElapsedTime = elapsed;
+          }
+        } else {
+          // Container is running but port not listening yet
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+          if (lastElapsedTime !== elapsed) {
+            this.notify(`SearXNG container running, waiting for port ${this.config.port} to be ready... (${elapsed}s elapsed)`, 'info');
+            lastElapsedTime = elapsed;
+          }
+        }
+
+        await sleep(checkInterval);
+      } catch (error: unknown) {
+        // If container is gone, rethrow to trigger recreation
+        if (error instanceof Error && error['message'] === 'CONTAINER_GONE') {
+          throw error;
+        }
+        // Log other errors but continue
+        console.error('[SearXNG Manager] Health check error:', error);
+        await sleep(checkInterval);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+    const containerId = this.container.id;
+    throw new Error(`Container did not become healthy within ${elapsed}s. Check Docker logs with: docker logs ${containerId}`);
+  }
+
+  /**
+   * Start SearXNG for a session
+   */
+  async start(sessionId: string): Promise<void> {
+    this.sessionId = sessionId;
+
+    const dockerAvailable = await this.checkDocker();
+
+    if (!dockerAvailable) {
+      this.notify('Docker is not available. SearXNG search functionality will not work.', 'error');
+      throw new Error('Docker not available');
+    }
+
+    if (ENABLE_SINGLETON) {
+      console.log('[SearXNG Manager] Singleton mode enabled');
+
+      await this.cleanupStaleSessions();
+      await this.acquire(sessionId);
+      this.startHeartbeat();
+
+      return;
+    }
+
+    if (this.docker) {
+      await cleanupOrphanedContainers(this.docker, sessionId);
+    }
+
+    await this.ensureImage();
+
+    const containerName = `pi-searxng-${sessionId}`;
+
+    let networkInfo: { ipv6Address?: string | null } | null = null;
+    if (this.config.enableIPv6Rotation && this.docker !== null) {
+      this.networkManager = new NetworkManager(this.docker, sessionId);
+      networkInfo = await this.networkManager.createIPv6Network();
+
+      if (networkInfo.ipv6Address !== null) {
+        this.notify(`IPv6 rotation enabled: ${networkInfo.ipv6Address}`, 'info');
+      } else {
+        this.notify('IPv6 not available, using IPv4 only (search engines may be rate-limited)', 'warning');
+      }
+    }
+
+    const existingContainer = await this.findContainerByName(containerName);
+
+    if (existingContainer) {
+      try {
+        const info: DockerContainerInspectInfo = await existingContainer.inspect() as DockerContainerInspectInfo;
+
+        if (info.State.Running) {
+          this.container = existingContainer;
+
+          let port = this.config.port;
+          const portBindings = info.NetworkSettings.Ports?.['8080/tcp'];
+          if (portBindings && portBindings.length > 0) {
+            const hostPort = portBindings[0]?.HostPort;
+            if (hostPort) {
+              port = parseInt(hostPort, 10);
+            }
+          }
+
+          let ipv6Address: string | null = null;
+          if (networkInfo?.ipv6Address) {
+            ipv6Address = networkInfo.ipv6Address;
+          }
+
+          this.containerInfo = {
+            id: existingContainer.id,
+            name: containerName,
+            port,
+            url: `http://localhost:${port}`,
+            ipv6Address,
+            ipv6Enabled: this.networkManager?.isIPv6Enabled() ?? false,
+          };
+
+          this.notify(`Reusing existing SearXNG container: ${containerName}`, 'info');
+
+          await this.waitForHealthy();
+          return;
+        } else {
+          await this.removeContainer(existingContainer);
+        }
+      } catch {
+        await this.removeContainer(existingContainer).catch(() => {});
+      }
+    }
+
+    let containerResult: { container: Docker.Container; assignedPort: number };
+    try {
+      containerResult = await this.createContainer(containerName, this.config.port);
+    } catch (portError: unknown) {
+      const portErrorStr = String(portError);
+      if (portErrorStr.includes('port') || portErrorStr.includes('already in use')) {
+        this.notify(`Preferred port ${this.config.port} unavailable, using auto-assigned port`, 'warning');
+        containerResult = await this.createContainer(containerName, null);
+      } else {
+        throw portError;
+      }
+    }
+    this.container = containerResult.container;
+    const assignedPort = containerResult.assignedPort;
+    await this.startContainer(this.container);
+    this.containerInfo = {
+      id: this.container.id,
+      name: containerName,
+      port: assignedPort,
+      url: `http://localhost:${assignedPort}`,
+      ipv6Address: networkInfo ? networkInfo.ipv6Address : undefined,
+      ipv6Enabled: this.networkManager ? this.networkManager.isIPv6Enabled() : false,
+    };
+
+    this.config.port = assignedPort;
+
+    await this.waitForHealthy();
+    this.notify(`SearXNG container started successfully on port ${assignedPort}.`, 'success');
+  }
+
+  /**
+   * Stop SearXNG container
+   */
+  async stop(): Promise<void> {
+    if (ENABLE_SINGLETON && this.sessionId) {
+      console.log(`[SearXNG Manager] Singleton mode: releasing container for session ${this.sessionId}`);
+      await this.release(this.sessionId);
+      this.sessionId = null;
+      this.starting = null;
+      return;
+    }
+
+    if (!this.container) {
+      return;
+    }
+
+    try {
+      await this.stopContainer(this.container);
+      await this.removeContainer(this.container);
+
+      if (this.networkManager) {
+        await this.networkManager.removeNetwork();
+        this.networkManager = null;
+      }
+
+      this.notify('SearXNG container stopped and removed.', 'info');
+    } catch (error) {
+      console.warn('[SearXNG Manager] Cleanup error:', error);
+    } finally {
+      this.container = null;
+      this.containerInfo = null;
+      this.sessionId = null;
+      this.starting = null;
+    }
+  }
+
+  /**
+   * Get current status
+   */
+  async getStatus(): Promise<SearxngStatus> {
+    const dockerAvailable = await this.checkDocker();
+
+    if (!dockerAvailable) {
+      return {
+        dockerAvailable: false,
+        healthy: false,
+      };
+    }
+
+    if (this.container && this.containerInfo) {
+      try {
+        const info: DockerContainerInspectInfo = await this.container.inspect() as DockerContainerInspectInfo;
+
+        // Enhanced health check: container running AND port is listening
+        // SearXNG bot detection blocks HTTP requests, so we use TCP check instead
+        const portListening = await isPortListening(this.config.port);
+        const healthy = info.State.Running && portListening;
+
+        return {
+          containerId: this.container.id,
+          containerName: this.containerInfo.name,
+          port: this.containerInfo.port,
+          url: this.containerInfo.url,
+          ipv6Address: this.containerInfo.ipv6Address,
+          ipv6Enabled: this.containerInfo.ipv6Enabled,
+          healthy,
+          dockerAvailable: true,
+        };
+      } catch (error) {
+        return {
+          dockerAvailable: true,
+          healthy: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+
+    return {
+      dockerAvailable: true,
+      healthy: false,
+    };
+  }
+
+  /**
+   * Get SearXNG URL
+   */
+  getSearxngUrl(): string {
+    if (this.containerInfo) {
+      return this.containerInfo.url;
+    }
+
+    throw new Error('SearXNG container not running.');
+  }
+
+  /**
+   * Ensure container is ready before use
+   */
+  async ensureReady(): Promise<void> {
+    if (!this.container || !this.containerInfo) {
+      throw new Error('SearXNG container not initialized. Call acquire() first.');
+    }
+
+    // If a start is already in progress, wait for it
+    if (this.starting) {
+      await this.starting;
+      return;
+    }
+
+    // Check if container is healthy
+    const status = await this.getStatus();
+    if (!status.healthy) {
+      // Directly stop/remove/restart the container rather than going through start() →
+      // acquire(). acquire() early-returns when the session already exists in state, so
+      // calling start() here would leave the unhealthy container in place.
+      this.starting = (async (): Promise<void> => {
+        try {
+          if (this.container) {
+            try {
+              await this.stopContainer(this.container);
+            } catch { /* ignore — may already be stopped */ }
+            try {
+              await this.removeContainer(this.container);
+            } catch { /* ignore — may already be gone */ }
+            this.container = null;
+            this.containerInfo = null;
+            this.containerStartTime = null;
+          }
+          await this.startSingleton();
+        } finally {
+          this.starting = null;
+        }
+      })();
+
+      try {
+        await this.starting;
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        throw new Error(`SearXNG container is not healthy and restart failed: ${errMsg}`, { cause: error });
+      }
+    }
+  }
+}

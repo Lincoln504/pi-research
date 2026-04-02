@@ -1,6 +1,6 @@
 #!/bin/bash
 # pi-research Configuration Setup
-# Interactive setup script for easy TOR toggle
+# Interactive setup script for easy proxy configuration
 
 CONFIG_FILE="$(dirname "$0")/.env"
 EXAMPLE_FILE="$(dirname "$0")/.env.example"
@@ -27,59 +27,52 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 echo ""
-echo "Current Configuration:"
+echo "Current Proxy Configuration:"
 echo "----------------------------------------"
 if [ -f "$CONFIG_FILE" ]; then
-    grep "PI_RESEARCH_ENABLE_TOR" "$CONFIG_FILE" || echo "PI_RESEARCH_ENABLE_TOR not set"
-    grep "PI_RESEARCH_TOR_SOCKS_PORT" "$CONFIG_FILE" || echo "PI_RESEARCH_TOR_SOCKS_PORT not set"
-    grep "PI_RESEARCH_TOR_AUTO_START" "$CONFIG_FILE" || echo "PI_RESEARCH_TOR_AUTO_START not set"
+    grep "PROXY_URL" "$CONFIG_FILE" || echo "PROXY_URL not set (using direct connection)"
 fi
 echo "----------------------------------------"
 echo ""
 
 echo "What would you like to configure?"
-echo "1) Toggle Tor (enable/disable)"
-echo "2) Set Tor port"
-echo "3) Enable/disable Tor auto-start"
-echo "4) Show full .env file"
-echo "5) Edit .env file directly"
+echo "1) Set proxy URL (Tor or HTTP proxy)"
+echo "2) Clear proxy URL (use direct connection)"
+echo "3) Show full .env file"
+echo "4) Edit .env file directly"
 echo ""
-read -p "Select option [1-5]: " choice
+read -p "Select option [1-4]: " choice
 
 case $choice in
     1)
-        read -p "Enable Tor? [y/n]: " enable
-        if [ "$enable" = "y" ] || [ "$enable" = "Y" ]; then
-            sed -i 's/^PI_RESEARCH_ENABLE_TOR=.*/PI_RESEARCH_ENABLE_TOR=true/' "$CONFIG_FILE"
-            echo -e "${GREEN}✓ Tor enabled${NC}"
+        echo ""
+        echo "Enter your proxy URL:"
+        echo "  - For Tor:            socks5://127.0.0.1:9050"
+        echo "  - For Tor Browser:     socks5://127.0.0.1:9150"
+        echo "  - For HTTP proxy:     http://proxy.example.com:8080"
+        echo "  - For authenticated:  http://user:pass@proxy.example.com:8080"
+        echo ""
+        read -p "Proxy URL: " proxy_url
+
+        if [ -n "$proxy_url" ]; then
+            sed -i "s|^PROXY_URL=.*|PROXY_URL=$proxy_url|" "$CONFIG_FILE"
+            echo -e "${GREEN}✓ Proxy URL set to: $proxy_url${NC}"
+            echo ""
+            echo "Make sure your proxy is running before starting pi!"
         else
-            sed -i 's/^PI_RESEARCH_ENABLE_TOR=.*/PI_RESEARCH_ENABLE_TOR=false/' "$CONFIG_FILE"
-            echo -e "${GREEN}✓ Tor disabled${NC}"
+            echo -e "${RED}✗ Proxy URL cannot be empty${NC}"
+            exit 1
         fi
         ;;
     2)
-        read -p "Enter Tor SOCKS port [default: 9050]: " port
-        if [ -z "$port" ]; then
-            port=9050
-        fi
-        sed -i "s/^PI_RESEARCH_TOR_SOCKS_PORT=.*/PI_RESEARCH_TOR_SOCKS_PORT=$port/" "$CONFIG_FILE"
-        echo -e "${GREEN}✓ Tor port set to $port${NC}"
+        sed -i 's/^PROXY_URL=.*/PROXY_URL=/' "$CONFIG_FILE"
+        echo -e "${GREEN}✓ Proxy URL cleared (using direct connection)${NC}"
         ;;
     3)
-        read -p "Enable Tor auto-start? [y/n]: " autostart
-        if [ "$autostart" = "y" ] || [ "$autostart" = "Y" ]; then
-            sed -i 's/^PI_RESEARCH_TOR_AUTO_START=.*/PI_RESEARCH_TOR_AUTO_START=true/' "$CONFIG_FILE"
-            echo -e "${GREEN}✓ Tor auto-start enabled${NC}"
-        else
-            sed -i 's/^PI_RESEARCH_TOR_AUTO_START=.*/PI_RESEARCH_TOR_AUTO_START=false/' "$CONFIG_FILE"
-            echo -e "${GREEN}✓ Tor auto-start disabled${NC}"
-        fi
-        ;;
-    4)
         echo ""
         cat "$CONFIG_FILE"
         ;;
-    5)
+    4)
         echo ""
         echo "Opening .env file for editing..."
         ${EDITOR:-nano} "$CONFIG_FILE"
@@ -94,6 +87,6 @@ echo ""
 echo -e "${GREEN}✓ Configuration updated!${NC}"
 echo ""
 echo "To apply changes:"
-echo "  1. Source the .env file: ${YELLOW}source .env${NC}"
+echo "  1. Source" .env file: ${YELLOW}source .env${NC}"
 echo "  2. Or add to your ~/.bashrc: ${YELLOW}echo 'source ~/Documents/pi-research/.env' >> ~/.bashrc${NC}"
 echo "  3. Then run: ${YELLOW}pi${NC}"

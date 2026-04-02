@@ -1,5 +1,5 @@
 /**
- * rg_grep Tool
+ * pi_code_search Tool (Ripgrep)
  *
  * Standalone grep tool using ripgrep (rg) or fallback to grep.
  */
@@ -99,9 +99,10 @@ function sanitizeInput(input: string): string[] {
   return result;
 }
 
-export const rgGrepTool: ToolDefinition = {
-  name: 'rg_grep',
-  label: 'Ripgrep Search',
+export function createGrepTool(): ToolDefinition {
+  return {
+    name: 'pi_code_search',
+    label: 'Code Search',
   description: 'Search files using ripgrep (rg) or grep fallback. Fast recursive text search.',
   promptSnippet: 'Search files for patterns using ripgrep/grep',
   promptGuidelines: [
@@ -214,13 +215,13 @@ export const rgGrepTool: ToolDefinition = {
       }
     }
   },
-};
+  };
+}
 
 /**
  * Standalone function to execute rg/grep search
- * Used by createRgGrepTool in agent-tools.ts
  */
-export async function rgGrep(pattern: string, path: string = '.', flags: string = ''): Promise<string> {
+export async function grep(pattern: string, path: string = '.', flags: string = ''): Promise<string> {
   if (!pattern) {
     throw new Error('Pattern is required');
   }

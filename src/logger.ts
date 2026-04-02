@@ -4,8 +4,8 @@
  * Silent by default. When --verbose or PI_RESEARCH_VERBOSE=1 is set,
  * writes timestamped lines to /tmp/pi-research-<timestamp>.log.
  *
- * suppressConsole() globally overrides console.* for the duration of research,
- * redirecting to the log file (verbose) or silencing entirely (default).
+ * suppressConsole() globally overrides console.* for duration of research,
+ * redirecting to log file (verbose) or silencing entirely (default).
  * Returns a restore function to call when research is done.
  */
 
@@ -24,7 +24,46 @@ if (isVerbose) {
   try {
     writeFileSync(logFile, `# pi-research verbose log — ${new Date().toISOString()}\n`);
     process.stderr.write(`[pi-research] verbose log: ${logFile}\n`);
+
+    // Ensure logs are saved even on crash/timeout
+    setupEmergencyHandlers(logFile);
   } catch { /* ignore write errors */ }
+}
+
+/**
+ * Setup emergency handlers to ensure log file is saved
+ * even if process crashes, is killed, or times out.
+ */
+function setupEmergencyHandlers(filePath: string): void {
+  if (!filePath) return;
+
+  // Handle graceful shutdown signals
+  const cleanupAndExit = (signal: string) => {
+    process.stderr.write(`\n[pi-research] Received ${signal}, ensuring logs saved to: ${filePath}\n`);
+    process.exit(1);
+  };
+
+  // Signal handlers for various termination scenarios
+  process.on('SIGINT', () => cleanupAndExit('SIGINT'));   // Ctrl+C
+  process.on('SIGTERM', () => cleanupAndExit('SIGTERM')); // kill command
+  process.on('SIGHUP', () => cleanupAndExit('SIGHUP'));   // Terminal closed
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (err: Error) => {
+    process.stderr.write(`\n[pi-research] UNCAUGHT EXCEPTION: ${err.message}\n`);
+    if (err.stack) {
+      process.stderr.write(`${err.stack}\n`);
+    }
+    process.stderr.write(`[pi-research] Logs saved to: ${filePath}\n`);
+    process.exit(1);
+  });
+
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', (reason: unknown) => {
+    process.stderr.write(`\n[pi-research] UNHANDLED PROMISE REJECTION: ${reason}\n`);
+    process.stderr.write(`[pi-research] Logs saved to: ${filePath}\n`);
+    process.exit(1);
+  });
 }
 
 function write(level: string, ...args: unknown[]): void {
@@ -37,7 +76,12 @@ function write(level: string, ...args: unknown[]): void {
         : String(a)))
     .join(' ');
   const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
-  try { appendFileSync(logFile, line); } catch { /* ignore */ }
+  try {
+    // Use appendFileSync for immediate synchronous write to disk
+    appendFileSync(logFile, line);
+  } catch {
+    // Ignore write errors - we're doing our best
+  }
 }
 
 export const logger = {
@@ -49,8 +93,8 @@ export const logger = {
 };
 
 /**
- * Globally redirect all console.* calls to the log file (verbose) or /dev/null (default).
- * This silences output from ALL modules — including pi-search-scrape, SearXNG manager, etc.
+ * Globally redirect all console.* calls to log file (verbose) or /dev/null (default).
+ * This silences output from ALL modules — including internal modules, SearXNG manager, etc.
  * Returns a restore function; call it when research ends to undo the override.
  */
 export function suppressConsole(): () => void {

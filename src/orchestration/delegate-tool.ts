@@ -3,14 +3,25 @@
  *
  * Allows the coordinator to spawn researcher agents via delegate_research tool.
  * Researchers run in parallel or sequential mode, with token tracking and flash indicators.
+ *
+ * Robust failure tracking:
+ * - Uses session state to track failures across ALL delegate_research calls
+ * - Counts unique failed researchers (same researcher failing N times = 1 failure)
+ * - Stops research when 2+ different researchers fail in entire session
  */
 
 import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.js';
-import type { ResearchPanelState } from './tui/research-panel.js';
-import { addSlice, updateSliceLabel, completeSlice, flashSlice, getCapturedTui } from './tui/research-panel.js';
-import { logger } from './logger.js';
+import type { ResearchPanelState } from '../tui/research-panel.js';
+import { addSlice, completeSlice, flashSlice, getCapturedTui } from '../tui/research-panel.js';
+import { logger } from '../logger.js';
+import { extractText } from '../utils/text-utils.js';
+import {
+  recordResearcherFailure,
+  shouldStopResearch,
+  getResearchStopMessage,
+} from '../utils/session-state.js';
 
 export interface DelegateToolOptions {
   breadthCounter: { value: number }; // Mutable ref, incremented per call
@@ -20,21 +31,6 @@ export interface DelegateToolOptions {
   signal?: AbortSignal;
   timeoutMs: number;
   flashTimeoutMs: number;
-}
-
-/**
- * Extract text content from a message
- */
-function extractText(message: any): string {
-  if (!message) return '';
-  if (typeof message.content === 'string') return message.content;
-  if (Array.isArray(message.content)) {
-    return message.content
-      .filter((b: any) => b.type === 'text')
-      .map((b: any) => b.text)
-      .join('\n');
-  }
-  return '';
 }
 
 /**
@@ -132,7 +128,15 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
   return {
     name: 'delegate_research',
     label: 'Delegate Research',
-    description: 'Spawn researcher agents to investigate multiple topics in parallel or sequentially',
+    description: 'Spawn researcher agents to investigate multiple topics in parallel or sequentially. Labels use "X:Y" format: X = slice number, Y = iteration number. Complexity: Level 1 (brief, 1-2 slices, single pass only), Level 2 (normal, 3-5 slices, 0-3 follow-ups), Level 3 (deep, 5+ slices, extensive follow-ups). Always honor user-specified complexity levels.',
+    promptSnippet: 'Research multiple topics via parallel or sequential researcher agents',
+    promptGuidelines: [
+      'Use delegate_research to spawn researcher agents for comprehensive investigation.',
+      'CRITICAL: If the user explicitly specified a complexity level ("level 1", "brief", "quick", "simple", "level 2", "level 3", "deep"), honor that request exactly.',
+      'Otherwise, assess complexity internally: Level 1 = brief factual lookup (1-2 slices, single pass), Level 2 = normal multi-faceted topic (3-5 slices, 0-3 follow-ups), Level 3 = deep cross-domain analysis (5+ slices, extensive follow-ups).',
+      'Include extra slices (at least 1-2 more than seems strictly necessary) to ensure thorough coverage.',
+      'Use simultaneous: true for parallel execution, simultaneous: false for sequential order.',
+    ],
     parameters: Type.Object({
       slices: Type.Array(
         Type.String({ description: 'Research task per researcher' }),
@@ -141,6 +145,12 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       simultaneous: Type.Boolean({
         description: 'Run all in parallel (true) or sequentially (false)',
       }),
+      iterateOn: Type.Optional(Type.String({
+        description: 'Slice identifier to iterate on (e.g., "1" to create "1:2", "2" to create "2:3"). Omit for new slices.',
+      })),
+      iterationNumber: Type.Optional(Type.Number({
+        description: 'Explicit iteration number to use (e.g., 2 for "1:2"). Defaults to auto-increment if omitted.',
+      })),
     }),
     async execute(
       _id: string,
@@ -149,15 +159,42 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       _onUpdate: unknown,
       _ctx: unknown
     ): Promise<AgentToolResult<unknown>> {
-      const { slices, simultaneous } = params as { slices: string[]; simultaneous: boolean };
+      const { slices, simultaneous, iterateOn, iterationNumber } = params as {
+        slices: string[];
+        simultaneous: boolean;
+        iterateOn?: string;
+        iterationNumber?: number;
+      };
+
+      // Check if research should stop due to too many cumulative failures
+      // This checks across ALL delegate_research calls in the session, not just this one
+      if (shouldStopResearch()) {
+        const errorText = getResearchStopMessage();
+        logger.error('[delegate]', errorText);
+        throw new Error(errorText);
+      }
 
       logger.log(`[delegate] Spawning ${slices.length} researcher agents (${simultaneous ? 'parallel' : 'sequential'})`);
 
       // Assign labels and register slices in panelState
-      // Labels use X.0 format: X = breadth counter, .0 = first (initial) research depth
-      const assignments: Array<{ label: string; slice: string }> = slices.map((slice) => {
-        const breadth = ++options.breadthCounter.value;
-        const label = `${breadth}.0`;
+      // Labels use "X:Y" format: X = slice number, Y = iteration number
+      // New slices start at iteration 1, follow-ups increment iteration
+      const assignments: Array<{ label: string; slice: string }> = slices.map((slice, index) => {
+        let sliceNum: string;
+        let iterNum: number;
+
+        if (iterateOn) {
+          // Follow-up: iterate on existing slice
+          // Use iterationNumber + index for multiple parallel follow-up tasks
+          sliceNum = iterateOn;
+          iterNum = (iterationNumber ?? 1) + index;
+        } else {
+          // New slice: increment breadth counter
+          sliceNum = `${++options.breadthCounter.value}`;
+          iterNum = 1; // First iteration for new slices
+        }
+
+        const label = `${sliceNum}:${iterNum}`;
         addSlice(options.panelState, label, label);
         return { label, slice };
       });
@@ -168,20 +205,15 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       const runOne = async ({ label: initialLabel, slice }: { label: string; slice: string }): Promise<[string, string]> => {
         logger.log(`[delegate] Starting researcher ${initialLabel}`);
 
-        const sliceKey = initialLabel; // Map key — never changes (always "X.0")
-        const breadthNum = initialLabel.split('.')[0]; // e.g. "3" from "3.0"
-        let depth = 0; // tool-call depth counter
-
+        const sliceKey = initialLabel; // Map key — never changes (e.g., "1:1", "1:2", etc.)
         const session = await createResearcherSession(options.researcherOptions);
 
-        // Token tracking + tool-call flash + depth label updates
+        // Token tracking and tool-call flash visualization
+        // Note: Failure detection is done AFTER prompt() completes, not here
         session.subscribe((event) => {
           if (event.type === 'message_end' && event.message.role === 'assistant') {
             const tokens = (event.message as any).usage?.totalTokens;
             if (tokens) options.onTokens(tokens);
-          } else if (event.type === 'tool_execution_start') {
-            depth += 1;
-            updateSliceLabel(options.panelState, sliceKey, `${breadthNum}.${depth}`);
           } else if (event.type === 'tool_execution_end') {
             const color = (event as any).isError ? 'red' : 'green';
             flashSlice(options.panelState, sliceKey, color, options.flashTimeoutMs);
@@ -194,10 +226,21 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           sliceKey
         );
 
-        // Extract final message text
+        // Extract final message text and check for failure AFTER prompt completes
         const msgs = session.messages;
         const last = [...msgs].reverse().find((m) => m.role === 'assistant');
         const text = extractText(last);
+
+        // Check if agent failed due to error or abort
+        // This is the single, authoritative failure check point
+        const isFailed = last?.stopReason === 'error' || last?.stopReason === 'aborted' || last?.errorMessage;
+        if (isFailed) {
+          // Record failure in session state (persists across delegate_research calls)
+          recordResearcherFailure(sliceKey);
+          logger.error(`[delegate] Researcher ${sliceKey} failed: ${last?.errorMessage || last?.stopReason}`);
+          throw new Error(`Researcher ${sliceKey} failed: ${last?.errorMessage || last?.stopReason || 'Unknown error'}`);
+        }
+
         logger.log(`[delegate] Completed researcher ${sliceKey}`);
         return [sliceKey, text];
       };
@@ -210,7 +253,8 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           return result;
         } catch (err) {
           completeSlice(options.panelState, assignment.label);
-          return [assignment.label, `Error: ${err instanceof Error ? err.message : String(err)}`];
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          return [assignment.label, `Error: ${errorMsg}`];
         }
       };
 
@@ -223,6 +267,15 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         for (const a of assignments) {
           pairs.push(await runWithFlash(a));
         }
+      }
+
+      // Check if too many cumulative failures - abort research
+      // This check runs AFTER all researchers complete (or one throws in sequential mode)
+      // Failures are tracked across ALL delegate_research calls in the session
+      if (shouldStopResearch()) {
+        const errorText = getResearchStopMessage();
+        logger.error('[delegate]', errorText);
+        throw new Error(errorText);
       }
 
       // Format results for coordinator

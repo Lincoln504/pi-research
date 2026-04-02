@@ -1,165 +1,205 @@
-# Tor Support for pi-research
+# Proxy Support for pi-research
 
 ## Overview
 
-pi-research includes optional Tor proxy support to avoid IP blocking by search engines like DuckDuckGo. When enabled, all SearXNG searches are routed through Tor's SOCKS5 proxy.
+pi-research includes optional proxy support to avoid IP blocking by search engines. When enabled, all SearXNG searches are routed through your configured proxy.
 
-**Important:** Tor is **disabled by default**. It must be explicitly enabled via environment variables.
+**Important:** Proxy support is **disabled by default**. It must be explicitly enabled via configuration.
 
 ## Configuration
 
-### Enable Tor
+### Enable Proxy
 
-Set the `PI_RESEARCH_ENABLE_TOR` environment variable to `true`:
+Set the `PROXY_URL` environment variable or add it to your `.env` file:
 
 ```bash
-export PI_RESEARCH_ENABLE_TOR=true
+export PROXY_URL=socks5://127.0.0.1:9050
 ```
 
-### Tor Configuration Options
+### Supported Proxy Types
 
-| Environment Variable | Default | Description |
-|-------------------|----------|-------------|
-| `PI_RESEARCH_ENABLE_TOR` | `false` | Enable Tor proxy for SearXNG searches |
-| `PI_RESEARCH_TOR_SOCKS_PORT` | `9050` | Tor SOCKS5 proxy port |
-| `PI_RESEARCH_TOR_CONTROL_PORT` | `9051` | Tor control port |
-| `PI_RESEARCH_TOR_AUTO_START` | `false` | Automatically start Tor if not running |
+#### SOCKS5 Proxy (Tor)
+```bash
+# Standard Tor
+PROXY_URL=socks5://127.0.0.1:9050
 
-## Installation
+# Tor Browser
+PROXY_URL=socks5://127.0.0.1:9150
+```
 
-### macOS
+#### HTTP/HTTPS Proxy
+```bash
+# Simple HTTP proxy
+PROXY_URL=http://proxy.example.com:8080
 
+# HTTPS proxy
+PROXY_URL=https://proxy.example.com:8443
+
+# Authenticated proxy
+PROXY_URL=http://username:password@proxy.example.com:8080
+```
+
+### Using Tor
+
+#### Step 1: Install Tor
+
+**macOS:**
 ```bash
 brew install tor
 ```
 
-### Linux/Ubuntu/Debian
-
+**Linux/Ubuntu/Debian:**
 ```bash
 sudo apt install tor
 ```
 
-### Verify Installation
+#### Step 2: Start Tor
+
+Start Tor as a service or run it manually:
 
 ```bash
-tor --version
+# Start Tor service
+sudo systemctl start tor
+
+# Or run manually (for testing)
+tor
 ```
 
-You should see output like: `Tor version 0.4.8.10`
-
-## Usage
-
-### Option 1: Tor Already Running
-
-If Tor is already running on your system (e.g., as a service), simply enable it:
+#### Step 3: Configure pi-research
 
 ```bash
-export PI_RESEARCH_ENABLE_TOR=true
+export PROXY_URL=socks5://127.0.0.1:9050
+pi
 ```
 
-### Option 2: Auto-Start Tor
+### Using Proxy Rotators
 
-Let pi-research automatically start Tor for you:
+If you have a proxy rotator service (e.g., a service that rotates IPs automatically), simply use its endpoint:
 
 ```bash
-export PI_RESEARCH_ENABLE_TOR=true
-export PI_RESEARCH_TOR_AUTO_START=true
+export PROXY_URL=http://your-proxy-rotator.com:8080
+pi
 ```
 
-### Option 3: Custom Tor Port
+## Interactive Setup
 
-If Tor is running on a custom port:
+Use the setup script for easy configuration:
 
 ```bash
-export PI_RESEARCH_ENABLE_TOR=true
-export PI_RESEARCH_TOR_SOCKS_PORT=9150  # Example: Tor Browser's default port
+./setup-config.sh
+```
+
+This script provides a menu to:
+1. Set proxy URL
+2. Clear proxy URL
+3. View full `.env` file
+4. Edit `.env` file directly
+
+## Configuration File
+
+For convenience, use a `.env` file:
+
+```bash
+# Copy the example
+cp .env.example .env
+
+# Edit the file
+vim .env
+
+# Source it
+source .env
+pi
+```
+
+Example `.env` file:
+```bash
+PROXY_URL=socks5://127.0.0.1:9050
 ```
 
 ## How It Works
 
-When Tor is enabled:
+When a proxy is configured:
 
-1. **Tor Check**: pi-research verifies Tor is installed and accessible
-2. **Configuration**: Generates a SearXNG settings file with Tor SOCKS5 proxy configuration
-3. **Proxy Routing**: SearXNG container routes all outbound HTTP requests through `socks5://127.0.0.1:9050`
-4. **IP Rotation**: Each Tor circuit provides a different exit IP, reducing rate-limiting
+1. **Proxy Configuration:** pi-research generates a SearXNG settings file with your proxy URL
+2. **Proxy Routing:** SearXNG container routes all outbound HTTP requests through the configured proxy
+3. **IP Rotation:** If using Tor or a proxy rotator, each request may use a different exit IP, reducing rate-limiting
 
 ## Troubleshooting
 
+### Proxy Not Working
+
+**Symptom:** Searches fail or timeout
+
+**Check:**
+1. Is your proxy running?
+   ```bash
+   # For Tor
+   sudo systemctl status tor
+
+   # Check if port is listening
+   netstat -an | grep 9050
+   ```
+
+2. Is the proxy URL correct?
+   ```bash
+   # Test with curl
+   curl --socks5 127.0.0.1:9050 https://check.torproject.org
+   ```
+
+3. Is Docker configured to reach the proxy?
+   - For Tor on localhost: Use `socks5://127.0.0.1:9050` (Docker can reach host)
+   - For remote proxies: Ensure firewall allows Docker connections
+
 ### Tor Not Installed
 
-**Error:**
-```
-Tor is enabled in configuration but not installed. 
-Install Tor with: brew install tor (macOS) or apt install tor (Linux/Ubuntu)
-```
+**Install Tor:**
+```bash
+# macOS
+brew install tor
 
-**Fix:** Install Tor using the appropriate command for your system (see Installation section above).
-
-### Tor Not Running
-
-**Error:**
-```
-Tor is enabled but not running on port 9050. 
-Start Tor manually or set PI_RESEARCH_TOR_AUTO_START=true.
+# Linux/Ubuntu
+sudo apt install tor
 ```
 
-**Fix:** Start Tor manually or set `PI_RESEARCH_TOR_AUTO_START=true`.
+### Connection Errors
 
-### Tor Connection Failed
-
-**Error:**
-```
-Tor failed to bootstrap within 30 seconds
-```
+**Error:** "Failed to configure proxy"
 
 **Fix:**
-- Check if your network allows Tor connections
-- Verify Tor is not blocked by your firewall
-- Try using a different Tor port
-- Check Tor logs: `journalctl -u tor` (Linux) or `tail -f /usr/local/var/log/tor/tor.log` (macOS)
-
-### Verify Tor is Working
-
-Check if Tor is accessible:
-
-```bash
-# Check if Tor port is listening
-netstat -an | grep 9050
-
-# Or use curl to test Tor proxy
-curl --socks5 127.0.0.1:9050 https://check.torproject.org
-```
+1. Verify proxy is running
+2. Check proxy URL format
+3. Test proxy connectivity manually
+4. Unset `PROXY_URL` to use direct connection
 
 ## Performance Considerations
 
-- **Slower Searches**: Tor adds latency - expect 2-5 second delays
-- **Reliability**: Some search engines may block Tor exit nodes
-- **Rate Limiting**: Tor exit nodes are often rate-limited by search engines
-- **Use Only When Needed**: Disable Tor for normal use; enable only when experiencing IP blocking
+- **Slower Searches:** Proxies add latency - expect 2-5 second delays
+- **Reliability:** Some search engines may block Tor exit nodes or certain proxy IPs
+- **Rate Limiting:** Proxy exit nodes may be rate-limited by search engines
+- **Use Only When Needed:** Disable proxy for normal use; enable only when experiencing IP blocking
 
 ## Security Notes
 
-- Tor provides anonymity for the **SearXNG instance**, not for your pi-research queries
+- Proxies provide anonymity for the **SearXNG instance**, not for your pi-research queries
 - The pi-research tool itself still makes direct connections to the SearXNG container
-- Only outbound requests from SearXNG to search engines go through Tor
-- Consider using a dedicated Tor service for production use
+- Only outbound requests from SearXNG to search engines go through the proxy
+- For Tor, consider running it as a dedicated service for production use
+- Be cautious with public proxy services - they may log your requests
 
-## Disabling Tor
+## Disabling Proxy
 
-To disable Tor and use direct connections:
+To disable the proxy and use direct connections:
 
 ```bash
-unset PI_RESEARCH_ENABLE_TOR
-# or
-export PI_RESEARCH_ENABLE_TOR=false
+unset PROXY_URL
+# or edit .env and set: PROXY_URL=
 ```
 
 Then restart pi or trigger a new session.
 
 ## Advanced Configuration
 
-### Tor with Systemd (Linux)
+### Using Tor with Systemd (Linux)
 
 Create a systemd service for Tor:
 
@@ -186,7 +226,7 @@ sudo systemctl enable pi-research-tor
 sudo systemctl start pi-research-tor
 ```
 
-### Tor with launchd (macOS)
+### Using Tor with launchd (macOS)
 
 Create a launchd plist:
 
@@ -217,4 +257,41 @@ Save as `~/Library/LaunchAgents/org.torproject.tor.plist` and run:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/org.torproject.tor.plist
+```
+
+## Configuration Reference
+
+| Environment Variable | Description | Default | Example |
+|-------------------|-------------|----------|---------|
+| `PROXY_URL` | Full proxy URL | undefined (disabled) | `socks5://127.0.0.1:9050` |
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | Researcher timeout | 60000 (60s) | 120000 |
+| `PI_RESEARCH_FLASH_TIMEOUT_MS` | Flash timeout | 1000 (1s) | 500 |
+
+## Quick Reference
+
+**Enable Tor:**
+```bash
+export PROXY_URL=socks5://127.0.0.1:9050
+pi
+```
+
+**Enable HTTP Proxy:**
+```bash
+export PROXY_URL=http://proxy.example.com:8080
+pi
+```
+
+**Disable Proxy:**
+```bash
+unset PROXY_URL
+pi
+```
+
+**Check Proxy Working:**
+```bash
+# For Tor
+curl --socks5 127.0.0.1:9050 https://check.torproject.org
+
+# For HTTP proxy
+curl -x http://127.0.0.1:8080 https://httpbin.org/ip
 ```

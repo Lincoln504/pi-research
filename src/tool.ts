@@ -19,7 +19,7 @@ import type {
 } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
-import { createCoordinatorSession } from './coordinator.js';
+import { createCoordinatorSession } from './orchestration/coordinator.js';
 import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.js';
 import {
   createResearchPanel,
@@ -27,7 +27,8 @@ import {
   clearAllFlashTimeouts,
   type ResearchPanelState,
 } from './tui/research-panel.js';
-import { formatParentContext } from './session-context.js';
+import { formatParentContext } from './orchestration/session-context.js';
+import { extractText } from './utils/text-utils.js';
 import {
   initLifecycle,
   ensureRunning,
@@ -36,26 +37,13 @@ import {
   type SearxngStatus,
 } from './searxng-lifecycle.js';
 import { getManager } from './searxng-lifecycle.js';
-import { createDelegateTool, type DelegateToolOptions } from './delegate-tool.js';
-import { createInvestigateContextTool } from './context-tool.js';
-import type { CreateResearcherSessionOptions } from './researcher.js';
+import { createDelegateTool, type DelegateToolOptions } from './orchestration/delegate-tool.js';
+import { createInvestigateContextTool } from './orchestration/context-tool.js';
+import type { CreateResearcherSessionOptions } from './orchestration/researcher.js';
 import { logger, suppressConsole } from './logger.js';
-
+import { startResearchSession, endResearchSession } from './utils/session-state.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-function extractText(message: any): string {
-  if (!message) return '';
-  if (typeof message.content === 'string') return message.content;
-  if (Array.isArray(message.content)) {
-    return message.content
-      .filter((b: any) => b.type === 'text')
-      .map((b: any) => b.text)
-      .join('\n');
-  }
-  return '';
-}
-
 export function createResearchTool(): ToolDefinition {
   return {
     name: 'research',
@@ -87,7 +75,7 @@ export function createResearchTool(): ToolDefinition {
       const { query, model: modelId } = params as { query: string; model?: string };
 
       // Suppress ALL console output immediately — catches SearXNG Manager init messages,
-      // pi-search-scrape logs, and any other module that uses console.* directly.
+      // internal module logs, and any other module that uses console.* directly.
       // Output goes to log file when --verbose, otherwise silenced entirely.
       const restoreConsole = suppressConsole();
 
@@ -161,16 +149,16 @@ export function createResearchTool(): ToolDefinition {
       try {
         searxngUrl = await ensureRunning();
 
-        // Register manager with pi-search-scrape
+        // Register manager with web-research module
         try {
           const manager = getManager();
           if (manager) {
-            const { setSearxngManager } = await import('../../pi-search-scrape/utils.ts');
+            const { setSearxngManager } = await import('./web-research/utils.js');
             setSearxngManager(manager);
-            logger.debug('[research] Registered SearXNG manager with pi-search-scrape');
+            logger.debug('[research] Registered SearXNG manager with web-research module');
           }
         } catch (regError) {
-          logger.warn('[research] Could not register manager with pi-search-scrape:', regError instanceof Error ? regError.message : String(regError));
+          logger.warn('[research] Could not register SearXNG manager:', regError instanceof Error ? regError.message : String(regError));
         }
       } catch (error) {
         logger.error('[research] Failed to ensure SearXNG running:', error);
@@ -203,21 +191,23 @@ export function createResearchTool(): ToolDefinition {
         panelState.searxngStatus = status;
         getCapturedTui()?.requestRender?.();
       });
-
+      // Start research session for robust failure tracking
+      const sessionId = startResearchSession();
+      logger.log(`[research] Started research session: ${sessionId}`);
       // Cleanup function — idempotent
       // restoreConsole is delayed 15s to absorb pending SearXNG HTTP timeout callbacks
-      // that fire console.warn after the research is done (pi-search-scrape internal logging).
+      // that fire console.warn after the research is done (internal module logging).
       let cleaned = false;
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
         logger.log('[research] Cleaning up...');
+        endResearchSession();  // Clear session state
         unsubStatus();
         clearAllFlashTimeouts();
         ctx.ui.setWidget('pi-research-panel', undefined);
         setTimeout(restoreConsole, 15000).unref?.();
       };
-
       signal?.addEventListener('abort', cleanup, { once: true });
 
       // 6. Mutable label state
@@ -271,8 +261,6 @@ export function createResearchTool(): ToolDefinition {
         sessionManager,
         settingsManager,
         systemPrompt: coordinatorPrompt,
-        searxngUrl,
-        extensionCtx: ctx,
         customTools: [delegateTool, contextTool],
       });
 

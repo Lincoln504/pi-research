@@ -7,9 +7,7 @@
 
 import type { AgentSession, ModelRegistry, SessionManager, SettingsManager, ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool } from '@mariozechner/pi-coding-agent';
-import { createAgentTools } from './agent-tools.js';
-import { rgGrepTool } from './rg-grep.js';
-import { makeResourceLoader } from './make-resource-loader.js';
+import { makeResourceLoader } from '../make-resource-loader.ts';
 
 export interface CreateCoordinatorSessionOptions {
   cwd: string;
@@ -18,14 +16,11 @@ export interface CreateCoordinatorSessionOptions {
   sessionManager: SessionManager;
   settingsManager: SettingsManager;
   systemPrompt: string;
-  searxngUrl: string;
-  extensionCtx: any; // ExtensionContext
   customTools?: ToolDefinition[];
 }
 
 export async function createCoordinatorSession(options: CreateCoordinatorSessionOptions): Promise<AgentSession> {
-  const { cwd, ctxModel, modelRegistry, sessionManager, settingsManager, systemPrompt, searxngUrl, extensionCtx, customTools = [] } =
-    options;
+  const { cwd, ctxModel, modelRegistry, sessionManager, settingsManager, systemPrompt, customTools = [] } = options;
 
   if (!ctxModel) {
     throw new Error('No model selected. Please select a model before using the research tool.');
@@ -34,11 +29,7 @@ export async function createCoordinatorSession(options: CreateCoordinatorSession
   const { session } = await createAgentSession({
     cwd,
     tools: [createReadTool(cwd)],
-    customTools: [
-      ...createAgentTools({ searxngUrl, ctx: extensionCtx }),
-      rgGrepTool,
-      ...customTools,
-    ],
+    customTools,
     sessionManager,
     settingsManager,
     model: ctxModel,

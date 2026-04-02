@@ -20,7 +20,7 @@ import type { SearxngStatus } from '../searxng-lifecycle.js';
 
 export interface SliceState {
   id: string;
-  label: string; // Displayed number: "1", "2", "1.1", "3.2", etc.
+  label: string; // Displayed label: "1:1", "1:2", "2:1", "3:1", etc. (X = slice number, Y = iteration number)
   completed: boolean;
   flash: 'green' | 'red' | null;
 }
@@ -35,15 +35,10 @@ export interface ResearchPanelState {
 const activeTimeouts = new Set<NodeJS.Timeout>();
 
 let capturedTui: { requestRender?(): void } | null = null;
-let renderTimer: NodeJS.Timeout | null = null;
 
-/** Debounced render — batches rapid state changes into ≤20 renders/sec */
+/** Request an immediate render for per-slice updates (no debounce) */
 function scheduleRender(): void {
-  if (renderTimer) return;
-  renderTimer = setTimeout(() => {
-    renderTimer = null;
-    capturedTui?.requestRender?.();
-  }, 50);
+  capturedTui?.requestRender?.();
 }
 
 export function getCapturedTui(): { requestRender?(): void } | null {
@@ -55,10 +50,6 @@ export function clearAllFlashTimeouts(): void {
     clearTimeout(timeout);
   }
   activeTimeouts.clear();
-  if (renderTimer) {
-    clearTimeout(renderTimer);
-    renderTimer = null;
-  }
 }
 
 /** Add a new slice column */
@@ -67,10 +58,10 @@ export function addSlice(state: ResearchPanelState, sliceId: string, label: stri
   scheduleRender();
 }
 
-/** Update slice label (e.g., "1" → "1.1" → "1.2") */
+/** Update slice label (e.g., "1:1" → "1:2" → "1:3") */
 export function updateSliceLabel(state: ResearchPanelState, sliceId: string, newLabel: string): void {
   const slice = state.slices.get(sliceId);
-  if (slice) {
+  if (slice && !slice.completed) {  // Guard: don't update completed slices
     slice.label = newLabel;
     scheduleRender();
   }
@@ -93,7 +84,7 @@ export function flashSlice(
   durationMs: number = 1000
 ): void {
   const slice = state.slices.get(sliceId);
-  if (!slice) return;
+  if (!slice || slice.completed) return;  // Guard: don't flash completed slices
   slice.flash = color;
   scheduleRender();
 

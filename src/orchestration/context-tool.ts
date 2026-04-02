@@ -8,9 +8,9 @@
 import type { ToolDefinition, AgentToolResult, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { createAgentSession, createReadTool, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
-import { rgGrepTool } from './rg-grep.js';
-import { makeResourceLoader } from './make-resource-loader.js';
-import { logger } from './logger.js';
+import { createGrepTool } from '../tools/grep.ts';
+import { makeResourceLoader } from '../make-resource-loader.ts';
+import { logger } from '../logger.ts';
 
 export interface ContextToolOptions {
   cwd: string;
@@ -60,7 +60,7 @@ export function createInvestigateContextTool(options: ContextToolOptions): ToolD
       const { session } = await createAgentSession({
         cwd: options.cwd,
         tools: [createReadTool(options.cwd)],
-        customTools: [rgGrepTool], // read + rg only, no search/scrape
+        customTools: [createGrepTool()], // read + rg only, no search/scrape
         sessionManager: SessionManager.inMemory(),
         settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
         model: options.ctxModel,

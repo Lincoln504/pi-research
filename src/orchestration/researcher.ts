@@ -7,9 +7,8 @@
 
 import type { AgentSession, ModelRegistry, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool } from '@mariozechner/pi-coding-agent';
-import { createAgentTools } from './agent-tools.js';
-import { rgGrepTool } from './rg-grep.js';
-import { makeResourceLoader } from './make-resource-loader.js';
+import { createAgentTools } from '../agent-tools.ts';
+import { makeResourceLoader } from '../make-resource-loader.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -32,7 +31,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   const { session } = await createAgentSession({
     cwd,
     tools: [createReadTool(cwd)],
-    customTools: [...createAgentTools({ searxngUrl, ctx: extensionCtx }), rgGrepTool],
+    customTools: createAgentTools({ searxngUrl, ctx: extensionCtx }),
     sessionManager,
     settingsManager,
     model: ctxModel,
