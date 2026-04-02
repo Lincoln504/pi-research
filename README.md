@@ -6,7 +6,7 @@ A pi coding agent extension that orchestrates multi-agent research using a coord
 
 - **Multi-Agent Orchestration**: Coordinator agent breaks down queries into research slices and delegates to specialized researchers
 - **Parallel/Sequential Execution**: Researchers can run simultaneously or sequentially based on coordinator's decision
-- **Web Research**: Uses pi-search-scrape tools for web search, URL scraping, and security database queries
+72|- **Web Research**: Built-in tools for web search, URL scraping, and security database queries (via SearXNG)
 - **Code Search**: Includes ripgrep (rg) or grep fallback for codebase searches
 - **Visual Progress**: TUI panel shows SearXNG connection status, token usage, and active researchers with flash effects
 - **SearXNG Management**: Manages Docker SearXNG container lifecycle for web searches
@@ -33,7 +33,6 @@ pi -e ./index.ts
 
 The extension will automatically be available in pi after installation.
 
-pi-research uses `pi-search-scrape` as an npm dependency for web research tools.
 
 ## Usage
 
@@ -80,7 +79,7 @@ Query → Coordinator Agent → Researcher Agents (pi_search, pi_scrape, pi_secu
 3. **src/tool.ts**: Main orchestration logic and research tool
 4. **src/coordinator.ts**: Creates and manages coordinator sessions
 5. **src/researcher.ts**: Creates and manages researcher sessions
-6. **src/agent-tools.ts**: Tool wrappers for pi-search-scrape functions
+3a|6. **src/agent-tools.ts**: Creates agent tools for research (web search, scraping, security databases, code search)
 7. **src/rg-grep.ts**: Standalone ripgrep/grep tool
 8. **src/searxng-lifecycle.ts**: SearXNG container lifecycle management
 9. **src/session-context.ts**: Formats parent session context
@@ -272,7 +271,10 @@ The TUI panel displays cumulative token usage across all sessions:
 
 - `@mariozechner/pi-coding-agent`: pi core SDK
 - `@sinclair/typebox`: Parameter schema validation
-- `pi-search-scrape`: npm package for web research tools
+a4|- `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion for scraping
+b1|- `dockerode`: Docker API client for SearXNG container management
+99|- `js-yaml`: YAML parsing for SearXNG settings
+95|- `playwright`: Headless browser for JS-heavy web scraping
 
 ## Development
 

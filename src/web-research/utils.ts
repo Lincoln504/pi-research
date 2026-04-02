@@ -57,6 +57,51 @@ export function getSearxngUrl(): string {
 // Active browser contexts tracking - keyed by ID for O(1) lookup
 const activeContexts = new Map<string, TrackedContext>();
 
+// Active connection counter (for TUI display)
+let activeConnections = 0;
+let maxConnections = 0;
+
+/**
+ * Increment active connection count
+ */
+export function incrementConnectionCount(): void {
+  activeConnections++;
+  if (activeConnections > maxConnections) {
+    maxConnections = activeConnections;
+  }
+}
+
+/**
+ * Decrement active connection count
+ */
+export function decrementConnectionCount(): void {
+  if (activeConnections > 0) {
+    activeConnections--;
+  }
+}
+
+/**
+ * Get current active connection count
+ */
+export function getActiveConnectionCount(): number {
+  return activeConnections;
+}
+
+/**
+ * Get max connection count seen this session
+ */
+export function getMaxConnectionCount(): number {
+  return maxConnections;
+}
+
+/**
+ * Reset connection counters
+ */
+export function resetConnectionCounters(): void {
+  activeConnections = 0;
+  maxConnections = 0;
+}
+
 /**
  * Clear all tracked contexts without closing them
  * Used when browser is closed externally (e.g., via stopChromium())

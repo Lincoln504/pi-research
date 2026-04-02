@@ -35,6 +35,7 @@ import {
   getStatus,
   onStatusChange,
   type SearxngStatus,
+  getConnectionCount,
 } from './searxng-lifecycle.js';
 import { getManager } from './searxng-lifecycle.js';
 import { createDelegateTool, type DelegateToolOptions } from './orchestration/delegate-tool.js';
@@ -179,6 +180,7 @@ export function createResearchTool(): ToolDefinition {
       const panelState: ResearchPanelState = {
         searxngStatus,
         totalTokens: 0,
+    activeConnections: 0,
         slices: new Map(),
         modelName: (selectedModel as any)?.id ?? 'unknown',
       };
@@ -189,6 +191,7 @@ export function createResearchTool(): ToolDefinition {
       // Subscribe to SearXNG status changes
       const unsubStatus = onStatusChange((status: SearxngStatus) => {
         panelState.searxngStatus = status;
+        panelState.activeConnections = getConnectionCount();
         getCapturedTui()?.requestRender?.();
       });
       // Start research session for robust failure tracking

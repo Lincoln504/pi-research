@@ -229,8 +229,14 @@ export async function ensureRunning(): Promise<string> {
 }
 
 export function getConnectionCount(): number {
-  // Singleton pattern: always 1 if active, 0 if not
-  return currentStatus.state === 'active' ? 1 : 0;
+  // Get actual active connection count from web-research module
+  try {
+    const { getActiveConnectionCount } = require('../web-research/utils.js');
+    return getActiveConnectionCount();
+  } catch {
+    // Fallback: return 1 if active, 0 if not (singleton pattern)
+    return currentStatus.state === 'active' ? 1 : 0;
+  }
 }
 
 export function getStatus(): SearxngStatus {

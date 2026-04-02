@@ -4,7 +4,7 @@
  * Search via SearXNG and return URLs, titles, and snippets.
  */
 
-import { getSearxngUrl } from './utils.ts';
+import { getSearxngUrl, incrementConnectionCount, decrementConnectionCount } from './utils.ts';
 import { createTimeoutSignal } from './retry-utils.ts';
 import type { SearXNGResult, QueryResultWithError } from './types.ts';
 
@@ -49,57 +49,64 @@ export interface SearxngOptions {
  * @throws {Error} When network error, timeout, or API error occurs
  */
 async function searchSearxng(query: string): Promise<SearXNGResult[]> {
-  const baseUrl = getSearxngUrl();
-
-  // Build URL with query parameters
-  const url = new URL(`${baseUrl}/search`);
-  url.searchParams.append('q', query);
-  url.searchParams.append('format', 'json');
-
-  // Make GET request
-
-  let response: Response;
-  const fetch = globalThis.fetch;
+  // Increment connection count
+  incrementConnectionCount();
 
   try {
-    response = await fetch(url.toString(), {
-      signal: createTimeoutSignal(30000), // 30 second timeout
-    });
-  } catch (error) {
-    // Handle network errors, DNS failures, connection refused, etc.
-    if (error instanceof Error) {
-      if (error.name === 'AbortError' || error.name === 'DOMException') {
-        const timeoutError = new Error(
-          `SearXNG request timed out: ${error.message}`,
+    const baseUrl = getSearxngUrl();
+
+    // Build URL with query parameters
+    const url = new URL(`${baseUrl}/search`);
+    url.searchParams.append('q', query);
+    url.searchParams.append('format', 'json');
+
+    // Make GET request
+    let response: Response;
+    const fetch = globalThis.fetch;
+
+    try {
+      response = await fetch(url.toString(), {
+        signal: createTimeoutSignal(30000), // 30 second timeout
+      });
+    } catch (error) {
+      // Handle network errors, DNS failures, connection refused, etc.
+      if (error instanceof Error) {
+        if (error.name === 'AbortError' || error.name === 'DOMException') {
+          const timeoutError = new Error(
+            `SearXNG request timed out: ${error.message}`,
+          ) as ErrorWithCause;
+          timeoutError.cause = error;
+          throw timeoutError;
+        }
+        const networkError = new Error(
+          `SearXNG network error: ${error.message}`,
         ) as ErrorWithCause;
-        timeoutError.cause = error;
-        throw timeoutError;
+        networkError.cause = error;
+        throw networkError;
       }
-      const networkError = new Error(
-        `SearXNG network error: ${error.message}`,
+      const unknownError = new Error(
+        `SearXNG network error: ${String(error)}`,
       ) as ErrorWithCause;
-      networkError.cause = error;
-      throw networkError;
+      unknownError.cause = error;
+      throw unknownError;
     }
-    const unknownError = new Error(
-      `SearXNG network error: ${String(error)}`,
-    ) as ErrorWithCause;
-    unknownError.cause = error;
-    throw unknownError;
+
+    if (!response.ok) {
+      const apiError = new Error(
+        `SearXNG request failed: ${response.status} ${response.statusText}`,
+      ) as ErrorWithCause;
+      apiError.cause = { status: response.status, statusText: response.statusText };
+      throw apiError;
+    }
+
+    const data = await response.json() as SearxngApiResponse;
+
+    // Return results or empty array using nullish coalescing
+    return data.results ?? [];
+  } finally {
+    // Decrement connection count
+    decrementConnectionCount();
   }
-
-  if (!response.ok) {
-    const apiError = new Error(
-      `SearXNG request failed: ${response.status} ${response.statusText}`,
-    ) as ErrorWithCause;
-    apiError.cause = { status: response.status, statusText: response.statusText };
-    throw apiError;
-  }
-
-  const data = await response.json() as SearxngApiResponse;
-
-  // Return results or empty array using nullish coalescing
-  return data.results ?? [];
 }
 
 // ============================================================================

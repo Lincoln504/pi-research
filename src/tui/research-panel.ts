@@ -28,6 +28,7 @@ export interface SliceState {
 export interface ResearchPanelState {
   searxngStatus: SearxngStatus;
   totalTokens: number;
+  activeConnections: number;
   slices: Map<string, SliceState>; // slice ID → state
   modelName: string;
 }
@@ -168,11 +169,11 @@ export function createResearchPanel(
         const pad1 = LEFT_INNER - line1raw.length;
         const leftRow2 = `│${theme.fg(statusColor, statusText)}${theme.fg('accent', portStr)}${' '.repeat(Math.max(0, pad1))}│`;
 
-        // Line 2: token count centred in LEFT_INNER
-        const tokStr = formatTokens(state.totalTokens);
-        const padL2 = Math.floor((LEFT_INNER - tokStr.length) / 2);
-        const padR2 = LEFT_INNER - tokStr.length - padL2;
-        const leftRow3 = `│${' '.repeat(padL2)}${theme.fg('text', tokStr)}${' '.repeat(Math.max(0, padR2))}│`;
+        // Line 2: active connection count centred in LEFT_INNER
+        const connStr = state.activeConnections.toString();
+        const padL2 = Math.floor((LEFT_INNER - connStr.length) / 2);
+        const padR2 = LEFT_INNER - connStr.length - padL2;
+        const leftRow3 = `│${' '.repeat(padL2)}${theme.fg("text", connStr)}${' '.repeat(Math.max(0, padR2))}│`;
 
         const leftBorder = `┌${'─'.repeat(LEFT_INNER)}┐`;
         const leftEmpty  = `│${' '.repeat(LEFT_INNER)}│`;
