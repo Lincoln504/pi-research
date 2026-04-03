@@ -291,7 +291,7 @@ export function createResearchTool(): ToolDefinition {
       const researchSignal = researchAbortController.signal;
 
       // Combine external signal (ESC/Ctrl+C) with internal abort controller
-      const combinedSignal = AbortSignal.any([signal ?? AbortSignal.timeout(Infinity), researchSignal]);
+      const combinedSignal = AbortSignal.any([signal ?? AbortSignal.timeout(86400000), researchSignal]);
 
       // 12. When ESC/Ctrl+C is pressed, abort all sessions immediately
       const abortHandler = () => {
