@@ -14,7 +14,7 @@ import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-ag
 import { Type } from '@sinclair/typebox';
 import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.js';
 import type { ResearchPanelState } from '../tui/research-panel.js';
-import { addSlice, completeSlice, flashSlice, getCapturedTui } from '../tui/research-panel.js';
+import { addSlice, completeSlice, flashSlice, activateSlice, getCapturedTui } from '../tui/research-panel.js';
 import { logger } from '../logger.js';
 import { extractText } from '../utils/text-utils.js';
 import {
@@ -30,6 +30,7 @@ export interface DelegateToolOptions {
   researcherOptions: CreateResearcherSessionOptions;
   signal?: AbortSignal;
   timeoutMs: number;
+  maxConcurrency: number; // Max concurrent slices (default: 4, nonConcurrent mode: 1)
   flashTimeoutMs: number;
 }
 
@@ -170,8 +171,12 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         { minItems: 1 }
       ),
       simultaneous: Type.Boolean({
-        description: 'Run all in parallel (true) or sequentially (false)',
+        description: 'Run all in parallel (true) or sequentially (false). In non-concurrent mode, this is forced to false.',
       }),
+      nonConcurrent: Type.Optional(Type.Boolean({
+        description: 'If true, run slices one at a time (max concurrency = 1). UI shows one active slice at a time, completing slices stay visible. Same structure and logic as concurrent mode, just limited to 1 active slice.',
+        default: false,
+      })),
       iterateOn: Type.Optional(Type.String({
         description: 'Slice identifier to iterate on (e.g., "1" to create "1:2", "2" to create "2:3"). Omit for new slices.',
       })),
@@ -186,9 +191,10 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       _onUpdate: unknown,
       _ctx: unknown
     ): Promise<AgentToolResult<unknown>> {
-      const { slices, simultaneous, iterateOn, iterationNumber } = params as {
+      const { slices, simultaneous, nonConcurrent = false, iterateOn, iterationNumber } = params as {
         slices: string[];
         simultaneous: boolean;
+        nonConcurrent?: boolean;
         iterateOn?: string;
         iterationNumber?: number;
       };
@@ -201,15 +207,15 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         throw new Error(errorText);
       }
 
-      logger.log(`[delegate] Spawning ${slices.length} researcher agents (${simultaneous ? 'parallel' : 'sequential'})`);
-
+      const effectiveMaxConcurrency = nonConcurrent ? 1 : options.maxConcurrency;
+      const mode = nonConcurrent ? 'non-concurrent (1)' : (simultaneous ? 'parallel' : 'sequential');
+      logger.log(`[delegate] Spawning ${slices.length} researcher agents (${mode}, max concurrency: ${effectiveMaxConcurrency})`);
       // Assign labels and register slices in panelState
       // Labels use "X:Y" format: X = slice number, Y = iteration number
       // New slices start at iteration 1, follow-ups increment iteration
       const assignments: Array<{ label: string; slice: string }> = slices.map((slice, index) => {
         let sliceNum: string;
         let iterNum: number;
-
         if (iterateOn) {
           // Follow-up: iterate on existing slice
           // Use iterationNumber + index for multiple parallel follow-up tasks
@@ -220,12 +226,34 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           sliceNum = `${++options.breadthCounter.value}`;
           iterNum = 1; // First iteration for new slices
         }
-
         const label = `${sliceNum}:${iterNum}`;
-        addSlice(options.panelState, label, label);
+        // Mark all slices as queued initially (hidden from UI)
+        addSlice(options.panelState, label, label, true);
         return { label, slice };
       });
 
+      // Queue of unprocessed assignments (index-based for order)
+      const queueIndex = { value: 0 };
+      const allAssignments = assignments;
+      const activeCount = { value: 0 };
+
+      // Activate slices up to max concurrency
+      const activateNextSlice = () => {
+        if (queueIndex.value < allAssignments.length && activeCount.value < effectiveMaxConcurrency) {
+          const assignment = allAssignments[queueIndex.value]!;
+          activateSlice(options.panelState, assignment.label);
+          queueIndex.value++;
+          activeCount.value++;
+          getCapturedTui()?.requestRender?.();
+          return true;
+        }
+        return false;
+      };
+
+      // Activate initial slices
+      while (activateNextSlice()) {
+        // Activate slices up to maxConcurrency
+      }
       getCapturedTui()?.requestRender?.();
 
       // Run a single researcher session
@@ -272,8 +300,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         logger.log(`[delegate] Completed researcher ${sliceKey}`);
         return [sliceKey, text];
       };
-
-      // Mark completion (checkmark only, no flash)
+      // Mark completion
       const runWithFlash = async (assignment: { label: string; slice: string }): Promise<[string, string]> => {
         try {
           const result = await runOne(assignment);
@@ -286,13 +313,68 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         }
       };
 
-      // Run parallel or sequential
+      // Run parallel or sequential (with queue management)
       let pairs: [string, string][];
-      if (simultaneous) {
-        pairs = await Promise.all(assignments.map(runWithFlash));
-      } else {
+      if (nonConcurrent) {
+        // Non-concurrent mode: run one at a time
+        // Each slice is activated, run, and completed before moving to next
         pairs = [];
-        for (const a of assignments) {
+        for (const a of allAssignments) {
+          // Activate slice (if not already)
+          activateSlice(options.panelState, a.label);
+          getCapturedTui()?.requestRender?.();
+          
+          // Run this slice
+          pairs.push(await runWithFlash(a));
+          // Slice completed, stays visible with checkmark
+          // Next slice will be activated and run in next iteration
+        }
+      } else if (simultaneous) {
+        // Parallel mode with queue: use pool pattern
+        // Maintain a queue of slices to run
+        const runQueue: Array<{ assignment: typeof allAssignments[0]; resolve: (result: [string, string]) => void; reject: (error: Error) => void }> = [];
+        
+        // Worker function that pulls from queue
+        const worker = async (): Promise<void> => {
+          while (true) {
+            const item = runQueue.shift();
+            if (!item) break; // Queue empty, stop worker
+            
+            try {
+              const result = await runWithFlash(item.assignment);
+              item.resolve(result);
+            } catch (err) {
+              item.reject(err instanceof Error ? err : new Error(String(err)));
+            }
+          }
+        };
+        
+        // Populate queue with all slices
+        const promises = allAssignments.map(a => {
+          return new Promise<[string, string]>((resolve, reject) => {
+            runQueue.push({ assignment: a, resolve, reject });
+          });
+        });
+        
+        // Start workers up to maxConcurrency
+        const workers = [];
+        const initialWorkers = Math.min(effectiveMaxConcurrency, allAssignments.length);
+        for (let i = 0; i < initialWorkers; i++) {
+          workers.push(worker());
+        }
+        
+        // Wait for all to complete
+        pairs = await Promise.all(promises);
+      } else {
+        // Sequential mode (original behavior, no queue)
+        // Mark all as active (not queued)
+        for (const a of allAssignments) {
+          activateSlice(options.panelState, a.label);
+        }
+        getCapturedTui()?.requestRender?.();
+        
+        pairs = [];
+        for (const a of allAssignments) {
           pairs.push(await runWithFlash(a));
         }
       }

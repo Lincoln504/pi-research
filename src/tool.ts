@@ -255,6 +255,7 @@ export function createResearchTool(): ToolDefinition {
         signal,
         timeoutMs: RESEARCHER_TIMEOUT_MS,
         flashTimeoutMs: 1000,
+        maxConcurrency: 4, // Default: 4 concurrent slices (prevents rate limiting)
       };
 
       const delegateTool = createDelegateTool(delegateToolOptions);

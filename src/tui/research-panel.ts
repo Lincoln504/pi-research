@@ -22,6 +22,7 @@ export interface SliceState {
   id: string;
   label: string; // Displayed label: "1:1", "1:2", "2:1", "3:1", etc. (X = slice number, Y = iteration number)
   completed: boolean;
+  queued: boolean; // True if waiting in backlog (not yet started)
   flash: 'green' | 'red' | null;
 }
 
@@ -54,15 +55,15 @@ export function clearAllFlashTimeouts(): void {
 }
 
 /** Add a new slice column */
-export function addSlice(state: ResearchPanelState, sliceId: string, label: string): void {
-  state.slices.set(sliceId, { id: sliceId, label, completed: false, flash: null });
+export function addSlice(state: ResearchPanelState, sliceId: string, label: string, queued: boolean = false): void {
+  state.slices.set(sliceId, { id: sliceId, label, completed: false, queued, flash: null });
   scheduleRender();
 }
 
 /** Update slice label (e.g., "1:1" → "1:2" → "1:3") */
 export function updateSliceLabel(state: ResearchPanelState, sliceId: string, newLabel: string): void {
   const slice = state.slices.get(sliceId);
-  if (slice && !slice.completed) {  // Guard: don't update completed slices
+  if (slice && !slice.completed && !slice.queued) {  // Guard: don't update completed or queued slices
     slice.label = newLabel;
     scheduleRender();
   }
@@ -73,6 +74,7 @@ export function completeSlice(state: ResearchPanelState, sliceId: string): void 
   const slice = state.slices.get(sliceId);
   if (slice) {
     slice.completed = true;
+    slice.queued = false;
     scheduleRender();
   }
 }
@@ -85,10 +87,9 @@ export function flashSlice(
   durationMs: number = 1000
 ): void {
   const slice = state.slices.get(sliceId);
-  if (!slice || slice.completed) return;  // Guard: don't flash completed slices
+  if (!slice || slice.completed || slice.queued) return;  // Guard: don't flash completed or queued slices
   slice.flash = color;
   scheduleRender();
-
   const timeout = setTimeout(() => {
     slice.flash = null;
     scheduleRender();
@@ -101,6 +102,20 @@ export function flashSlice(
 export function removeSlice(state: ResearchPanelState, sliceId: string): void {
   state.slices.delete(sliceId);
   scheduleRender();
+}
+
+/** Mark slice as active (start from queued state) */
+export function activateSlice(state: ResearchPanelState, sliceId: string): void {
+  const slice = state.slices.get(sliceId);
+  if (slice) {
+    slice.queued = false;
+    scheduleRender();
+  }
+}
+
+/** Count active (non-queued, non-completed) slices */
+export function countActiveSlices(state: ResearchPanelState): number {
+  return Array.from(state.slices.values()).filter(s => !s.completed && !s.queued).length;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -190,7 +205,12 @@ export function createResearchPanel(
           theme.fg('accent', '─'.repeat(titleFillDashes) + '┐');
 
         // ── Right box: 0-slice empty state ────────────────────────────────────
-        const sliceIds = Array.from(state.slices.keys());
+        // IMPORTANT: Only show non-queued slices (active or completed)
+        // Queued slices are hidden until they become active
+        const sliceIds = Array.from(state.slices.keys()).filter(id => {
+          const slice = state.slices.get(id);
+          return slice && !slice.queued;
+        });
         const numSlices = sliceIds.length;
 
         if (numSlices === 0) {
