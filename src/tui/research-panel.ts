@@ -265,10 +265,16 @@ export function createResearchPanel(
         const rawTopInner = Array.from({ length: totalCols }, (_, i) =>
           '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')
         ).join('');
+        
+        // Calculate how much of rawTopInner to skip (the part covered by the title)
+        // Title goes in first column, so we skip up to where title ends in first column
+        const titleInFirstCol = Math.min(titleText.length - titlePrefixDashes, colW(0));
+        const skipChars = titleInFirstCol;
+        
         const rTop =
           '┌' + '─'.repeat(titlePrefixDashes) +
           theme.fg('muted', titleText) +
-          theme.fg('accent', '─'.repeat(titleFillDashes)) + (totalCols > 0 ? theme.fg('accent', rawTopInner) : '') + '┐';
+          theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
 
         // Empty rows (above and below content)
         const rEmpty = '│' + Array.from({ length: totalCols }, (_, i) =>
