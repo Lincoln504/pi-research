@@ -2,16 +2,24 @@
  * Research TUI Panel
  *
  * Two-box layout for research status:
- * - Left box (13 cols): SearXNG status — line1: "act:55732", line2: "  12k  "
- * - Right box (fills remaining width): One column per slice, single centred label row
+ * - Left box (11 cols): SearXNG status — line1: "SearXNG:55732", line2: "12 conn"
+ * - Right box (fills remaining width): Up to 6 visible slice columns, consolidates with "+N" indicator
  *
- * Layout (example, 3 slices):
- * ┌───────────┐ ┌──────────┬──────────┬──────────┐
- * │act:55732  │ │          │          │          │
- * │    12k    │ │    1     │    2     │    3     │
- * │           │ │          │          │          │
- * │           │ │          │          │          │
- * └───────────┘ └──────────┴──────────┴──────────┘
+ * Layout (example, 5 slices):
+ * ┌───────────┐ ┌────┬────┬────┬────┬────┐
+ * │SearXNG:5  │ │    │    │    │    │    │
+ * │12 conn    │ │ 1  │ 2  │ 3  │ 4  │ 5  │
+ * │           │ │    │    │    │    │    │
+ * │           │ │    │    │    │    │    │
+ * └───────────┘ └────┴────┴────┴────┴────┘
+ *
+ * Consolidation (example, 8 slices, max 6 visible):
+ * ┌───────────┐ ┌────┬────┬────┬────┬────┐
+ * │SearXNG:5  │ │    │    │    │    │    │
+ * │12 conn    │ │ 1  │ 2  │ 3  │ 4  │+3  │
+ * │           │ │    │    │    │    │    │
+ * │           │ │    │    │    │    │    │
+ * └───────────┘ └────┴────┴────┴────┴────┘
  */
 
 import { type Component } from '@mariozechner/pi-tui';
@@ -129,10 +137,10 @@ function formatTokens(tokens: number): string {
 
 function getStatusText(state: string): string {
   switch (state) {
-    case 'starting_up': return 'act';
-    case 'active':      return 'act';
-    case 'inactive':    return 'ina';
-    case 'error':       return 'err';
+    case 'starting_up': return 'SearXNG';
+    case 'active':      return 'SearXNG';
+    case 'inactive':    return 'Offline';
+    case 'error':       return 'Error';
     default:            return '?';
   }
 }
@@ -149,7 +157,7 @@ function extractPort(url: string): string {
 /**
  * Create research panel component.
  * Left box is exactly LEFT_BOX_W columns wide (borders included).
- * Right box fills the rest.
+ * Right box fills rest.
  */
 export function createResearchPanel(
   state: ResearchPanelState
@@ -160,9 +168,9 @@ export function createResearchPanel(
     const component: Component = {
       render(width: number): string[] {
         // ── Left box geometry ──────────────────────────────────────────────────
-        // Inner content is 11 chars: "act:55732  " (status+port padded to 11)
-        const LEFT_INNER = 11;
-        const LEFT_BOX_W = LEFT_INNER + 2; // 13 (borders)
+        // Inner content is 9 chars: "SearXNG:557" (status+port trimmed to fit)
+        const LEFT_INNER = 9;
+        const LEFT_BOX_W = LEFT_INNER + 2; // 11 (borders, ~20% thinner)
         const GAP = 1;
 
         // ── Right box geometry ────────────────────────────────────────────────
@@ -179,16 +187,18 @@ export function createResearchPanel(
             ? 'success'
             : 'muted';
 
-        // Line 1: "act:55732  " (status+port, pad to LEFT_INNER)
-        const line1raw = statusText + portStr; // e.g. "act:55732"
+        // Line 1: "SearXNG:557" (status+port trimmed to LEFT_INNER)
+        const portShort = portStr.length > 3 ? portStr.slice(0, 3) : portStr; // ":557" from ":55732"
+        const line1raw = statusText + portShort; // e.g. "SearXNG:557"
         const pad1 = LEFT_INNER - line1raw.length;
-        const leftRow2 = `│${theme.fg(statusColor, statusText)}${theme.fg('accent', portStr)}${' '.repeat(Math.max(0, pad1))}│`;
+        const leftRow2 = `│${theme.fg(statusColor, statusText)}${theme.fg('accent', portShort)}${' '.repeat(Math.max(0, pad1))}│`;
 
-        // Line 2: active connection count centred in LEFT_INNER
-        const connStr = state.activeConnections.toString();
+        // Line 2: active connection count with "conn" label
+        const connStr = `${state.activeConnections} conn`;
+        const connColor = state.activeConnections > 0 ? 'text' : 'muted';
         const padL2 = Math.floor((LEFT_INNER - connStr.length) / 2);
         const padR2 = LEFT_INNER - connStr.length - padL2;
-        const leftRow3 = `│${' '.repeat(padL2)}${theme.fg("text", connStr)}${' '.repeat(Math.max(0, padR2))}│`;
+        const leftRow3 = `│${' '.repeat(padL2)}${theme.fg(connColor, connStr)}${' '.repeat(Math.max(0, padR2))}│`;
 
         const leftBorder = `┌${'─'.repeat(LEFT_INNER)}┐`;
         const leftEmpty  = `│${' '.repeat(LEFT_INNER)}│`;
@@ -207,13 +217,25 @@ export function createResearchPanel(
         // ── Right box: 0-slice empty state ────────────────────────────────────
         // IMPORTANT: Only show non-queued slices (active or completed)
         // Queued slices are hidden until they become active
+        const MAX_VISIBLE_SLICES = 6;
         const sliceIds = Array.from(state.slices.keys()).filter(id => {
           const slice = state.slices.get(id);
           return slice && !slice.queued;
         });
         const numSlices = sliceIds.length;
 
-        if (numSlices === 0) {
+        // Apply max visible slices limit with consolidation
+        let visibleSliceIds = sliceIds;
+        let showIndicator = false;
+        let hiddenCount = 0;
+        if (numSlices > MAX_VISIBLE_SLICES) {
+          visibleSliceIds = sliceIds.slice(0, MAX_VISIBLE_SLICES - 1);
+          hiddenCount = numSlices - (MAX_VISIBLE_SLICES - 1);
+          showIndicator = true;
+        }
+        const numVisible = showIndicator ? MAX_VISIBLE_SLICES : numSlices;
+
+        if (numVisible === 0) {
           const rEmpty  = `│${' '.repeat(rightInner)}│`;
           const rBottom = `└${'─'.repeat(rightInner)}┘`;
 
@@ -227,21 +249,19 @@ export function createResearchPanel(
         }
 
         // ── Right box: column layout ──────────────────────────────────────────
-        // rightInner = sum of column widths + (numSlices-1) dividers
-        const dividers = numSlices - 1;
+        // rightInner = sum of column widths + (numVisible-1) dividers
+        const dividers = numVisible - 1;
         const contentTotal = rightInner - dividers;
-        const colBase = Math.floor(contentTotal / numSlices);
-        const extra   = contentTotal % numSlices; // first `extra` columns get +1
+        const colBase = Math.floor(contentTotal / numVisible);
+        const extra   = contentTotal % numVisible; // first `extra` columns get +1
 
         const colW = (i: number) => colBase + (i < extra ? 1 : 0);
 
         // Top border: title fills the first section, then ┬ dividers for column breaks
-        // We embed the title in the top border by overlaying it on the dash region.
-        // Build the raw dash+divider string, then splice the title into the front.
-        const rawTopInner = Array.from({ length: numSlices }, (_, i) =>
-          '─'.repeat(colW(i)) + (i < numSlices - 1 ? '┬' : '')
+        // Build raw dash+divider string, then splice title into the front
+        const rawTopInner = Array.from({ length: numVisible }, (_, i) =>
+          '─'.repeat(colW(i)) + (i < numVisible - 1 ? '┬' : '')
         ).join('');
-        // Insert title after the first 2 dashes; fill the rest with whatever rawTopInner has
         const titleLen = titleText.length;
         const rTop =
           '┌' + '─'.repeat(titlePrefixDashes) +
@@ -249,12 +269,12 @@ export function createResearchPanel(
           theme.fg('accent', rawTopInner.slice(titlePrefixDashes + titleLen) + '┐');
 
         // Empty row
-        const rEmpty = '│' + Array.from({ length: numSlices }, (_, i) =>
-          ' '.repeat(colW(i)) + (i < numSlices - 1 ? '│' : '')
+        const rEmpty = '│' + Array.from({ length: numVisible }, (_, i) =>
+          ' '.repeat(colW(i)) + (i < numVisible - 1 ? '│' : '')
         ).join('') + '│';
 
         // Content row (row 3 = middle of 5)
-        const cols = sliceIds.map((id, i) => {
+        const cols = visibleSliceIds.map((id, i) => {
           const slice = state.slices.get(id)!;
           const content = slice.completed ? `✓${slice.label}` : slice.label;
           const w = colW(i);
@@ -265,13 +285,25 @@ export function createResearchPanel(
             slice.flash === 'green' ? theme.fg('success', cell) :
             slice.flash === 'red'   ? theme.fg('error',   cell) :
                                       theme.fg('text',    cell);
-          return colored + (i < numSlices - 1 ? '│' : '');
+          // Only add divider if not the last slice column
+          return colored + (i < visibleSliceIds.length - 1 ? '│' : '');
         });
+        // Add indicator column if showing hidden count
+        if (showIndicator) {
+          const indicatorContent = `+${hiddenCount}`;
+          const w = colW(numVisible - 1);
+          const pL = Math.max(0, Math.floor((w - indicatorContent.length) / 2));
+          const pR = Math.max(0, w - indicatorContent.length - pL);
+          const cell = ' '.repeat(pL) + indicatorContent + ' '.repeat(pR);
+          // No divider after indicator column (it's the last column)
+          cols.push(theme.fg('muted', cell));
+        }
+
         const rContent = '│' + cols.join('') + '│';
 
         // Bottom border with ┴ dividers
-        const rBottom = '└' + Array.from({ length: numSlices }, (_, i) =>
-          '─'.repeat(colW(i)) + (i < numSlices - 1 ? '┴' : '')
+        const rBottom = '└' + Array.from({ length: numVisible }, (_, i) =>
+          '─'.repeat(colW(i)) + (i < numVisible - 1 ? '┴' : '')
         ).join('') + '┘';
 
         return [
