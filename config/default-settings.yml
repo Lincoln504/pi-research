@@ -85,16 +85,11 @@ default_doi_resolver: 'oadoi.org'
 # Search engines configuration
 engines:
   # General web engines (run for all unqualified queries)
-  - name: duckduckgo
-    engine: duckduckgo
-    shortcut: ddg
-    timeout: 2.0
-
-  - name: brave
-    engine: brave
-    shortcut: brv
-    categories: [general]
-
+  # - name: duckduckgo
+  #   engine: duckduckgo
+  #   shortcut: ddg
+  #   timeout: 2.0
+  # DISABLED: Network timeout (see logs - connection to duckduckgo.com fails)
   - name: bing
     engine: bing
     shortcut: bi
