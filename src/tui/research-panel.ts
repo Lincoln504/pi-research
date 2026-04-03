@@ -265,11 +265,10 @@ export function createResearchPanel(
         const rawTopInner = Array.from({ length: totalCols }, (_, i) =>
           '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')
         ).join('');
-        const titleLen = titleText.length;
         const rTop =
           '┌' + '─'.repeat(titlePrefixDashes) +
           theme.fg('muted', titleText) +
-          theme.fg('accent', rawTopInner.slice(titlePrefixDashes + titleLen) + '┐');
+          theme.fg('accent', '─'.repeat(titleFillDashes)) + (totalCols > 0 ? theme.fg('accent', rawTopInner) : '') + '┐';
 
         // Empty rows (above and below content)
         const rEmpty = '│' + Array.from({ length: totalCols }, (_, i) =>
