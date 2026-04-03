@@ -30,7 +30,6 @@ export interface DelegateToolOptions {
   researcherOptions: CreateResearcherSessionOptions;
   signal?: AbortSignal;
   timeoutMs: number;
-  maxConcurrency: number; // Max concurrent slices (default: 4, nonConcurrent mode: 1)
   flashTimeoutMs: number;
 }
 
@@ -207,7 +206,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         throw new Error(errorText);
       }
 
-      const effectiveMaxConcurrency = nonConcurrent ? 1 : options.maxConcurrency;
+      const effectiveMaxConcurrency = nonConcurrent ? 1 : 3;
       const mode = nonConcurrent ? 'non-concurrent (1)' : (simultaneous ? 'parallel' : 'sequential');
       logger.log(`[delegate] Spawning ${slices.length} researcher agents (${mode}, max concurrency: ${effectiveMaxConcurrency})`);
       // Assign labels and register slices in panelState
