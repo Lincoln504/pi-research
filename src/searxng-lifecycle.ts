@@ -89,6 +89,9 @@ function extractSessionId(ctx: ExtensionContext): string {
 /**
  * Generate proxy-enabled SearXNG settings file dynamically
  * Uses configured PROXY_URL from config
+ *
+ * Automatically converts localhost (127.0.0.1) to Docker gateway IP (172.19.0.1)
+ * because containers cannot access the host's 127.0.0.1 directly.
  */
 async function generateProxySettings(proxyUrl: string): Promise<string> {
   const defaultSettingsPath = path.join(EXTENSION_DIR, 'config', 'default-settings.yml');
@@ -102,17 +105,26 @@ async function generateProxySettings(proxyUrl: string): Promise<string> {
     const yaml = await import('js-yaml');
     const settings = yaml.load(defaultSettings) as any;
 
+    // Convert localhost addresses for Docker container access
+    // When user specifies socks5://127.0.0.1:9050, the container cannot reach host's 127.0.0.1
+    // Instead, use the Docker gateway IP (172.19.0.1) which can reach the host
+    let containerProxyUrl = proxyUrl;
+    if (proxyUrl.includes('127.0.0.1') || proxyUrl.includes('localhost')) {
+      containerProxyUrl = proxyUrl.replace(/127\.0\.0\.1|localhost/g, '172.19.0.1');
+      logger.log(`[pi-research] Converting localhost proxy to Docker gateway: ${proxyUrl} → ${containerProxyUrl}`);
+    }
+
     // Add proxy configuration
     settings.outgoing = settings.outgoing || {};
     settings.outgoing.proxies = {
-      'all://': [proxyUrl]
+      'all://': [containerProxyUrl]
     };
     settings.outgoing.extra_proxy_timeout = 10;
 
     // Write generated settings
     await fs.promises.writeFile(proxySettingsPath, yaml.dump(settings), 'utf-8');
 
-    logger.log(`[pi-research] Generated proxy settings: ${proxyUrl}`);
+    logger.log(`[pi-research] Generated proxy settings for container: ${containerProxyUrl}`);
 
     return proxySettingsPath;
   } catch (error) {
