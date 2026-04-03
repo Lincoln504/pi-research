@@ -44,6 +44,7 @@ import { createInvestigateContextTool } from './orchestration/context-tool.js';
 import type { CreateResearcherSessionOptions } from './orchestration/researcher.js';
 import { logger, suppressConsole } from './logger.js';
 import { startResearchSession, endResearchSession } from './utils/session-state.js';
+import { generateSessionId, cleanupSharedLinks } from './utils/shared-links.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 export function createResearchTool(): ToolDefinition {
@@ -202,7 +203,8 @@ export function createResearchTool(): ToolDefinition {
         getCapturedTui()?.requestRender?.();
       });
       // Start research session for robust failure tracking
-      const sessionId = startResearchSession();
+      const sessionBaseId = startResearchSession();
+      const sessionId = generateSessionId(sessionBaseId);
       logger.log(`[research] Started research session: ${sessionId}`);
       // Cleanup function — idempotent
       // restoreConsole is delayed 15s to absorb pending SearXNG HTTP timeout callbacks
@@ -213,6 +215,7 @@ export function createResearchTool(): ToolDefinition {
         cleaned = true;
         logger.log('[research] Cleaning up...');
         endResearchSession();  // Clear session state
+        cleanupSharedLinks(sessionId);  // Clean up shared links pool file
         unsubStatus();
         unsubConnectionCount();
         clearAllFlashTimeouts();
@@ -248,6 +251,7 @@ export function createResearchTool(): ToolDefinition {
       };
 
       const delegateToolOptions: DelegateToolOptions = {
+        sessionId,  // Pass session ID for shared links
         breadthCounter,
         panelState,
         onTokens,
@@ -256,7 +260,6 @@ export function createResearchTool(): ToolDefinition {
         timeoutMs: RESEARCHER_TIMEOUT_MS,
         flashTimeoutMs: 1000,
       };
-
       const delegateTool = createDelegateTool(delegateToolOptions);
       const contextTool = createInvestigateContextTool({
         cwd: ctx.cwd,

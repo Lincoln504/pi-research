@@ -16,6 +16,13 @@ import { createResearcherSession, type CreateResearcherSessionOptions } from './
 import type { ResearchPanelState } from '../tui/research-panel.js';
 import { addSlice, completeSlice, flashSlice, activateSlice, getCapturedTui } from '../tui/research-panel.js';
 import { logger } from '../logger.js';
+import {
+  buildSharedLinksPool,
+  saveSharedLinks,
+  loadSharedLinks,
+  formatSharedLinksForPrompt,
+  type SharedLinksPool,
+} from '../utils/shared-links.js';
 import { extractText } from '../utils/text-utils.js';
 import {
   recordResearcherFailure,
@@ -24,6 +31,7 @@ import {
 } from '../utils/session-state.js';
 
 export interface DelegateToolOptions {
+  sessionId: string; // Unique session ID for shared links
   breadthCounter: { value: number }; // Mutable ref, incremented per call
   panelState: ResearchPanelState;
   onTokens: (n: number) => void;
@@ -33,6 +41,7 @@ export interface DelegateToolOptions {
   flashTimeoutMs: number;
 }
 
+/**
 /**
  * Wraps a promise with a timeout and abort signal support
  */
@@ -249,6 +258,9 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         return false;
       };
 
+      // Load existing shared links from previous researchers
+      const existingSharedLinks = loadSharedLinks(options.sessionId);
+      const existingLinksContext = formatSharedLinksForPrompt(existingSharedLinks);
       // Activate initial slices
       while (activateNextSlice()) {
         // Activate slices up to maxConcurrency
@@ -274,8 +286,12 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           }
         });
 
+        // Append shared links context to researcher prompt
+        const enhancedSlice = existingLinksContext
+          ? `${slice}\n\n${existingLinksContext}`
+          : slice;
         await withTimeout(
-          withRetry(() => session.prompt(slice), 3, 1000, sliceKey),
+          withRetry(() => session.prompt(enhancedSlice), 3, 1000, sliceKey),
           options.timeoutMs,
           sliceKey,
           options.signal
@@ -378,6 +394,12 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         }
       }
 
+      // Build and save shared links pool from researcher responses
+      const researcherResponses = new Map<string, string>(pairs);
+      const newSharedLinks = buildSharedLinksPool(researcherResponses);
+      const mergedPool: SharedLinksPool = { ...existingSharedLinks, ...newSharedLinks };
+      saveSharedLinks(options.sessionId, mergedPool);
+      logger.log(`[delegate] Shared links saved: ${Object.keys(mergedPool).length} slice(s)`);
       // Check if too many cumulative failures - abort research
       // This check runs AFTER all researchers complete (or one throws in sequential mode)
       // Failures are tracked across ALL delegate_research calls in the session
@@ -386,13 +408,12 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         logger.error('[delegate]', errorText);
         throw new Error(errorText);
       }
-
       // Format results for coordinator
       const result = pairs
         .map(([label, text]) => `## Researcher ${label}\n\n${text}`)
         .join('\n\n');
-
       return { content: [{ type: 'text', text: result }], details: {} };
+
     },
   };
 }
