@@ -47,19 +47,7 @@ You may escalate the complexity level mid-research if findings reveal greater de
    - **To iterate on an existing slice**: Use `iterateOn: "X"` parameter (e.g., `iterateOn: "1"` creates "1:2", "1:3", etc.).
    - **Decision boundary**: Whether to iterate on an existing slice vs. spawn a new slice is your judgment. Iterate if deepening the same angle; spawn new slice if exploring new territory.
    - **Escalate complexity level if needed** by using more slices in follow-up delegations.
-   - **Provide shared link pool**: When delegating to new or existing slices, pass the current shared link pool so they can coordinate:
-     ```
-     delegate_research({
-       slices: ["research task description with shared links context..."],
-       simultaneous: true,
-       sharedLinks: {
-         "1:1": { cited: [...], candidates: [...] },
-         "2:1": { cited: [...], candidates: [...] },
-         ...
-       }
-     })
-     ```
-     - **Note**: While you can mention shared links in context, the tool doesn't have this parameter yet. Researchers should check for global context or state. For now, use this as guidance in your instructions.
+   - **Shared link pool is automatic**: The system automatically maintains and provides the shared link pool to researchers. You don't need to pass it explicitly - it's handled internally across all delegate_research calls in the session. Researchers will see links from previous slices and can avoid re-scraping them.
 
 6. **Synthesize** all findings into a final comprehensive answer. Write prose, no JSON, no headers unless the content naturally calls for them.
 

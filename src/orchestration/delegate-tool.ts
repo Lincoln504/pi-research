@@ -397,7 +397,9 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       // Build and save shared links pool from researcher responses
       const researcherResponses = new Map<string, string>(pairs);
       const newSharedLinks = buildSharedLinksPool(researcherResponses);
-      const mergedPool: SharedLinksPool = { ...existingSharedLinks, ...newSharedLinks };
+      const mergedPool: SharedLinksPool = existingSharedLinks
+        ? { ...existingSharedLinks, ...newSharedLinks }
+        : newSharedLinks;
       saveSharedLinks(options.sessionId, mergedPool);
       logger.log(`[delegate] Shared links saved: ${Object.keys(mergedPool).length} slice(s)`);
       // Check if too many cumulative failures - abort research

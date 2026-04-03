@@ -202,17 +202,17 @@ export function formatSharedLinksForPrompt(pool: SharedLinksPool | null): string
     output += `### Slice ${sliceId}\n\n`;
 
     if (entry.cited.length > 0) {
-      output += '**CITED LINKS** (used in summary):\n';
+      output += '### CITED LINKS\n';
       for (const link of entry.cited) {
-        output += `- [${link.url}]${link.description ? ` - ${link.description}` : ''}\n`;
+        output += `* [${link.url}]${link.description ? ` - ${link.description}` : ''}\n`;
       }
       output += '\n';
     }
 
     if (entry.candidates.length > 0) {
-      output += '**SCRAPE CANDIDATES** (scraped but not used):\n';
+      output += '### SCRAPE CANDIDATES\n';
       for (const candidate of entry.candidates) {
-        output += `- [${candidate.url}] - Not used (${candidate.reason})\n`;
+        output += `* [${candidate.url}] - Not used (${candidate.reason})\n`;
       }
       output += '\n';
     }
