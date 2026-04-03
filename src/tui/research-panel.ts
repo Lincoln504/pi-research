@@ -294,7 +294,9 @@ export function createResearchPanel(
             slice.flash === 'red'   ? theme.fg('error',   cell) :
                                       theme.fg('text',    cell);
           // Only add divider if not last slice column
-          return colored + (i < visibleSliceIds.length - 1 ? '│' : '');
+          // Add divider for all except last column (use absolute index)
+          const absIndex = i + (showIndicator ? 1 : 0);
+          return colored + (absIndex < totalCols - 1 ? '│' : '');
         });
 
         // Add indicator column on LEFT (before slice columns)
