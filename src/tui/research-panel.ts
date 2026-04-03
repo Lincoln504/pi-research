@@ -274,7 +274,7 @@ export function createResearchPanel(
         const rTop =
           '┌' + '─'.repeat(titlePrefixDashes) +
           theme.fg('muted', titleText) +
-          theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
+          theme.fg('accent', rawTopInner.slice(skipChars).slice(0, rightBoxWidth - (titlePrefixDashes + titleText.length + 2)) + '┐');
 
         // Empty rows (above and below content)
         const rEmpty = '│' + Array.from({ length: totalCols }, (_, i) =>
