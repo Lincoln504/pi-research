@@ -76,9 +76,6 @@ outgoing:
   retries: 2
   using_tor_proxy: false
   extra_proxy_timeout: 10
-  proxies:
-    all://:
-      - socks5://172.19.0.1:9050
 
 doi_resolvers:
   oadoi.org: 'https://oadoi.org/'
