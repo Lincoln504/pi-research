@@ -59,13 +59,7 @@ export function createPiStackexchangeTool(options: {
     ): Promise<AgentToolResult<unknown>> {
       const paramsRecord = params as Record<string, unknown>;
       const command = paramsRecord['command'] as string;
-      const query = paramsRecord['query'] as string | undefined;
-      const id = paramsRecord['id'] as string | number | undefined;
 
-      ctx.ui.notify(
-        `Executing pi_stackexchange ${command}: ${query ?? id ?? 'listing sites'}`,
-        'info',
-      );
 
       return stackexchangeCommand({
         command,

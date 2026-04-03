@@ -66,12 +66,12 @@ async function searchSearxng(query: string): Promise<SearXNGResult[]> {
 
     try {
       response = await fetch(url.toString(), {
-        signal: createTimeoutSignal(30000), // 30 second timeout
+        signal: createTimeoutSignal(45000), // 45 second timeout (SearXNG max is 30s internally)
       });
     } catch (error) {
       // Handle network errors, DNS failures, connection refused, etc.
       if (error instanceof Error) {
-        if (error.name === 'AbortError' || error.name === 'DOMException') {
+        if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.name === 'DOMException') {
           const timeoutError = new Error(
             `SearXNG request timed out: ${error.message}`,
           ) as ErrorWithCause;
@@ -122,6 +122,13 @@ async function searchSearxng(query: string): Promise<SearXNGResult[]> {
 function classifyError(error: unknown): QueryResultWithError['error'] {
   const errorStr = String(error);
 
+  // Timeout errors — check BEFORE network errors because "SearXNG network error: ...timeout" messages
+  // contain "network" and would otherwise be misclassified as network_error.
+  if (errorStr.includes('timed out') || errorStr.includes('timeout') ||
+      errorStr.includes('AbortError') || errorStr.includes('TimeoutError')) {
+    return { type: 'timeout', message: 'Search request timed out' };
+  }
+
   // Network-related errors: connection refused, DNS failures, network unreachable, etc.
   if (errorStr.includes('fetch failed') ||
       errorStr.includes('ECONNREFUSED') ||
@@ -133,10 +140,6 @@ function classifyError(error: unknown): QueryResultWithError['error'] {
       errorStr.includes('network') ||
       errorStr.includes('Network error')) {
     return { type: 'network_error', message: 'Network error - unable to connect to SearXNG service' };
-  }
-
-  if (errorStr.includes('timeout') || errorStr.includes('AbortError')) {
-    return { type: 'timeout', message: 'Search request timed out' };
   }
 
   if (errorStr.includes('SearXNG request failed')) {

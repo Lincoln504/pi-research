@@ -43,17 +43,6 @@ export interface ResearchPanelState {
 
 const activeTimeouts = new Set<NodeJS.Timeout>();
 
-let capturedTui: { requestRender?(): void } | null = null;
-
-/** Request an immediate render for per-slice updates (no debounce) */
-function scheduleRender(): void {
-  capturedTui?.requestRender?.();
-}
-
-export function getCapturedTui(): { requestRender?(): void } | null {
-  return capturedTui;
-}
-
 export function clearAllFlashTimeouts(): void {
   for (const timeout of activeTimeouts) {
     clearTimeout(timeout);
@@ -64,16 +53,6 @@ export function clearAllFlashTimeouts(): void {
 /** Add a new slice column */
 export function addSlice(state: ResearchPanelState, sliceId: string, label: string, queued: boolean = false): void {
   state.slices.set(sliceId, { id: sliceId, label, completed: false, queued, flash: null });
-  scheduleRender();
-}
-
-/** Update slice label (e.g., "1:1" → "1:2" → "1:3") */
-export function updateSliceLabel(state: ResearchPanelState, sliceId: string, newLabel: string): void {
-  const slice = state.slices.get(sliceId);
-  if (slice && !slice.completed && !slice.queued) {  // Guard: don't update completed or queued slices
-    slice.label = newLabel;
-    scheduleRender();
-  }
 }
 
 /** Mark slice as complete — shows ✓ prefix, no flash */
@@ -82,7 +61,6 @@ export function completeSlice(state: ResearchPanelState, sliceId: string): void 
   if (slice) {
     slice.completed = true;
     slice.queued = false;
-    scheduleRender();
   }
 }
 
@@ -91,24 +69,19 @@ export function flashSlice(
   state: ResearchPanelState,
   sliceId: string,
   color: 'green' | 'red',
-  durationMs: number = 1000
+  durationMs: number = 1000,
+  onUpdate?: () => void
 ): void {
   const slice = state.slices.get(sliceId);
   if (!slice || slice.completed || slice.queued) return;  // Guard: don't flash completed or queued slices
   slice.flash = color;
-  scheduleRender();
+  onUpdate?.();
   const timeout = setTimeout(() => {
     slice.flash = null;
-    scheduleRender();
+    onUpdate?.();
     activeTimeouts.delete(timeout);
   }, durationMs);
   activeTimeouts.add(timeout);
-}
-
-/** Remove a slice column */
-export function removeSlice(state: ResearchPanelState, sliceId: string): void {
-  state.slices.delete(sliceId);
-  scheduleRender();
 }
 
 /** Mark slice as active (start from queued state) */
@@ -116,13 +89,7 @@ export function activateSlice(state: ResearchPanelState, sliceId: string): void 
   const slice = state.slices.get(sliceId);
   if (slice) {
     slice.queued = false;
-    scheduleRender();
   }
-}
-
-/** Count active (non-queued, non-completed) slices */
-export function countActiveSlices(state: ResearchPanelState): number {
-  return Array.from(state.slices.values()).filter(s => !s.completed && !s.queued).length;
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -161,9 +128,7 @@ function extractPort(url: string): string {
 export function createResearchPanel(
   state: ResearchPanelState
 ): (tui: unknown, theme: Theme) => Component & { dispose?(): void } {
-  return (tui: unknown, theme: Theme) => {
-    capturedTui = tui as { requestRender?(): void };
-
+  return (_tui: unknown, theme: Theme) => {
     const component: Component = {
       render(width: number): string[] {
         // ── Left box geometry ──────────────────────────────────────────────────
@@ -266,15 +231,16 @@ export function createResearchPanel(
           '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')
         ).join('');
         
-        // Calculate how much of rawTopInner to skip (the part covered by the title)
-        // Title goes in first column, so we skip up to where title ends in first column
-        const titleInFirstCol = Math.min(titleText.length - titlePrefixDashes, colW(0));
-        const skipChars = titleInFirstCol;
-        
+        // Skip the portion of rawTopInner consumed by: titlePrefixDashes (explicit dashes) + titleText.
+        // Both are placed before rawTopInner.slice(skipChars), so rawTopInner must advance by both.
+        // rawTopInner.slice(skipChars).length == rightInner - titlePrefixDashes - titleText.length
+        // which is exactly the remaining border width needed — no second .slice() required.
+        const skipChars = titlePrefixDashes + titleText.length;
+
         const rTop =
           '┌' + '─'.repeat(titlePrefixDashes) +
           theme.fg('muted', titleText) +
-          theme.fg('accent', rawTopInner.slice(skipChars).slice(0, rightBoxWidth - (titlePrefixDashes + titleText.length + 2)) + '┐');
+          theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
 
         // Empty rows (above and below content)
         const rEmpty = '│' + Array.from({ length: totalCols }, (_, i) =>
@@ -284,8 +250,9 @@ export function createResearchPanel(
         // Content row (row 2 = middle of 4)
         const cols = visibleSliceIds.map((id, i) => {
           const slice = state.slices.get(id)!;
-          const content = slice.completed ? `✓${slice.label}` : slice.label;
-          const w = colW(i);
+          const w = colW(showIndicator ? i + 1 : i);
+          const raw = slice.completed ? `✓${slice.label}` : slice.label;
+          const content = raw.length > w ? raw.slice(0, w) : raw;
           const pL = Math.max(0, Math.floor((w - content.length) / 2));
           const pR = Math.max(0, w - content.length - pL);
           const cell = ' '.repeat(pL) + content + ' '.repeat(pR);
@@ -327,7 +294,7 @@ export function createResearchPanel(
       },
 
       invalidate(): void {
-        // No-op — state mutations call requestRender directly
+        // No-op — re-renders are driven by onUpdate() callback
       },
     };
 

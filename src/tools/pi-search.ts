@@ -14,10 +14,9 @@ interface PiSearchParams {
   [key: string]: unknown;
 }
 
-export function createPiSearchTool(options: {
+export function createPiSearchTool(_options: {
   ctx: ExtensionContext;
 }): ToolDefinition {
-  const { ctx } = options;
 
   return {
     name: 'pi_search',
@@ -56,10 +55,6 @@ export function createPiSearchTool(options: {
       const maxResults = (paramsRecord['maxResults'] as number | undefined) ?? 20;
 
       const queriesText = queries.length === 1 ? 'query' : 'queries';
-      ctx.ui.notify(
-        `Searching ${queries.length} ${queriesText} via SearXNG...`,
-        'info',
-      );
 
       const queryResults = await search(queries);
 

@@ -20,11 +20,10 @@ interface PiSecuritySearchParams {
   [key: string]: unknown;
 }
 
-export function createPiSecuritySearchTool(options: {
+export function createPiSecuritySearchTool(_options: {
   searxngUrl: string;
   ctx: ExtensionContext;
 }): ToolDefinition {
-  const { ctx } = options;
 
   return {
     name: 'pi_security_search',
@@ -89,11 +88,6 @@ export function createPiSecuritySearchTool(options: {
 
       const maxResults = (paramsRecord['maxResults'] as number | undefined) ?? 20;
 
-      const termsText = terms.length === 1 ? 'term' : 'terms';
-      ctx.ui.notify(
-        `Searching security databases (${databases.join(', ')}) for ${terms.length} ${termsText}...`,
-        'info',
-      );
 
       const results = await searchSecurityDatabases({
         databases,

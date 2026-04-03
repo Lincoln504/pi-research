@@ -23,7 +23,6 @@ import { createCoordinatorSession } from './orchestration/coordinator.js';
 import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.js';
 import {
   createResearchPanel,
-  getCapturedTui,
   clearAllFlashTimeouts,
   type ResearchPanelState,
 } from './tui/research-panel.js';
@@ -187,20 +186,23 @@ export function createResearchTool(): ToolDefinition {
         modelName: (selectedModel as any)?.id ?? 'unknown',
       };
 
-      ctx.ui.setWidget('pi-research-panel', createResearchPanel(panelState), { placement: 'aboveEditor' });
-      getCapturedTui()?.requestRender?.();
+      // Widget update function - re-sets widget to trigger re-render
+      // Widgets don't support requestRender(), so we must re-set the widget
+      const updateWidget = () => {
+        ctx.ui.setWidget('pi-research-panel', createResearchPanel(panelState), { placement: 'aboveEditor' });
+      };
 
+      ctx.ui.setWidget('pi-research-panel', createResearchPanel(panelState), { placement: 'aboveEditor' });
       // Subscribe to SearXNG status changes
       const unsubStatus = onStatusChange((status: SearxngStatus) => {
         panelState.searxngStatus = status;
         panelState.activeConnections = getConnectionCount();
-        getCapturedTui()?.requestRender?.();
+        updateWidget();
       });
-
       // Subscribe to connection count changes for real-time updates
       const unsubConnectionCount = onConnectionCountChange((count: number) => {
         panelState.activeConnections = count;
-        getCapturedTui()?.requestRender?.();
+        updateWidget();
       });
       // Start research session for robust failure tracking
       const sessionBaseId = startResearchSession();
@@ -247,7 +249,7 @@ export function createResearchTool(): ToolDefinition {
       // 8. Create tools for coordinator
       const onTokens = (n: number) => {
         panelState.totalTokens += n;
-        getCapturedTui()?.requestRender?.();
+        updateWidget();
       };
 
       const delegateToolOptions: DelegateToolOptions = {
@@ -255,6 +257,7 @@ export function createResearchTool(): ToolDefinition {
         breadthCounter,
         panelState,
         onTokens,
+        onUpdate: updateWidget,  // Callback to trigger widget re-render
         researcherOptions,
         signal,
         timeoutMs: RESEARCHER_TIMEOUT_MS,
@@ -321,6 +324,8 @@ export function createResearchTool(): ToolDefinition {
         cleanup();
         return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
       } catch (error) {
+        // Abort the coordinator session to stop any in-progress API calls
+        coordinatorSession.abort().catch(() => {});
         cleanup();
         const errorMsg = error instanceof Error ? error.message : String(error);
         

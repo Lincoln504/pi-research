@@ -14,7 +14,7 @@ import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-ag
 import { Type } from '@sinclair/typebox';
 import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.js';
 import type { ResearchPanelState } from '../tui/research-panel.js';
-import { addSlice, completeSlice, flashSlice, activateSlice, getCapturedTui } from '../tui/research-panel.js';
+import { addSlice, completeSlice, flashSlice, activateSlice } from '../tui/research-panel.js';
 import { logger } from '../logger.js';
 import {
   buildSharedLinksPool,
@@ -35,13 +35,13 @@ export interface DelegateToolOptions {
   breadthCounter: { value: number }; // Mutable ref, incremented per call
   panelState: ResearchPanelState;
   onTokens: (n: number) => void;
+  onUpdate: () => void; // Callback to trigger widget re-render
   researcherOptions: CreateResearcherSessionOptions;
   signal?: AbortSignal;
   timeoutMs: number;
   flashTimeoutMs: number;
 }
 
-/**
 /**
  * Wraps a promise with a timeout and abort signal support
  */
@@ -252,7 +252,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           activateSlice(options.panelState, assignment.label);
           queueIndex.value++;
           activeCount.value++;
-          getCapturedTui()?.requestRender?.();
+          options.onUpdate();
           return true;
         }
         return false;
@@ -265,7 +265,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       while (activateNextSlice()) {
         // Activate slices up to maxConcurrency
       }
-      getCapturedTui()?.requestRender?.();
+      options.onUpdate();
 
       // Run a single researcher session
       const runOne = async ({ label: initialLabel, slice }: { label: string; slice: string }): Promise<[string, string]> => {
@@ -282,7 +282,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
             if (tokens) options.onTokens(tokens);
           } else if (event.type === 'tool_execution_end') {
             const color = (event as any).isError ? 'red' : 'green';
-            flashSlice(options.panelState, sliceKey, color, options.flashTimeoutMs);
+            flashSlice(options.panelState, sliceKey, color, options.flashTimeoutMs, options.onUpdate);
           }
         });
 
@@ -290,12 +290,17 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         const enhancedSlice = existingLinksContext
           ? `${slice}\n\n${existingLinksContext}`
           : slice;
-        await withTimeout(
-          withRetry(() => session.prompt(enhancedSlice), 3, 1000, sliceKey),
-          options.timeoutMs,
-          sliceKey,
-          options.signal
-        );
+        try {
+          await withTimeout(
+            withRetry(() => session.prompt(enhancedSlice), 3, 1000, sliceKey),
+            options.timeoutMs,
+            sliceKey,
+            options.signal
+          );
+        } catch (err) {
+          session.abort().catch(() => {}); // stop ongoing API calls from this researcher
+          throw err;
+        }
 
         // Extract final message text and check for failure AFTER prompt completes
         const msgs = session.messages;
@@ -319,12 +324,14 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       const runWithFlash = async (assignment: { label: string; slice: string }): Promise<[string, string]> => {
         try {
           const result = await runOne(assignment);
-          completeSlice(options.panelState, result[0]); // use final label (may have updated)
+          completeSlice(options.panelState, result[0]); // result[0] is sliceKey
+          options.onUpdate();  // Update widget to show checkmark
           return result;
         } catch (err) {
           completeSlice(options.panelState, assignment.label);
+          options.onUpdate();  // Update widget to show checkmark
           const errorMsg = err instanceof Error ? err.message : String(err);
-          return [assignment.label, `Error: ${errorMsg}`];
+          return [assignment.label, `ERROR: ${errorMsg}`];
         }
       };
 
@@ -337,7 +344,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         for (const a of allAssignments) {
           // Activate slice (if not already)
           activateSlice(options.panelState, a.label);
-          getCapturedTui()?.requestRender?.();
+          options.onUpdate();
           
           // Run this slice
           pairs.push(await runWithFlash(a));
@@ -354,7 +361,11 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           while (true) {
             const item = runQueue.shift();
             if (!item) break; // Queue empty, stop worker
-            
+
+            // Activate slice in TUI (no-op if already active for the initial batch)
+            activateSlice(options.panelState, item.assignment.label);
+            options.onUpdate();
+
             try {
               const result = await runWithFlash(item.assignment);
               item.resolve(result);
@@ -386,7 +397,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         for (const a of allAssignments) {
           activateSlice(options.panelState, a.label);
         }
-        getCapturedTui()?.requestRender?.();
+        options.onUpdate();
         
         pairs = [];
         for (const a of allAssignments) {

@@ -106,14 +106,14 @@ Your response should be a concise, well-structured summary:
 
 ## Error Handling
 
-**Important**: If you encounter any errors (timeouts, rate limits, network issues, API failures), immediately report them clearly at the start of your response with "ERROR:" prefix, then continue with any partial results you were able to gather.
+**Individual tool failures** (search timeout, scrape timeout, one tool returning no results): Continue research using other tools. Do NOT use "ERROR:" prefix. Simply note in your findings that the search returned no results or timed out, then use pi_scrape, pi_security_search, pi_stackexchange, or grep to fill gaps.
 
-Example format:
+**Only use "ERROR:" prefix** if you cannot complete any useful research at all — for example, if every single tool fails and you have no findings to report. This signals a systemic failure to the coordinator.
+
+Example of good handling when a search times out:
 ```
-ERROR: Search timeout for "Rust 2025 features" - unable to complete full research
-
-Despite the timeout, I was able to gather some information:
-[rest of partial results...]
+My search for "Rust 2025 features" returned no results. I scraped the official Rust blog and found:
+[findings from scraping...]
 ```
 
 ## Coordinator Interaction

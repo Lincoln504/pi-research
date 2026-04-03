@@ -15,11 +15,10 @@ interface PiScrapeParams {
   [key: string]: unknown;
 }
 
-export function createPiScrapeTool(options: {
+export function createPiScrapeTool(_options: {
   searxngUrl: string;
   ctx: ExtensionContext;
 }): ToolDefinition {
-  const { ctx } = options;
 
   return {
     name: 'pi_scrape',
@@ -63,11 +62,6 @@ export function createPiScrapeTool(options: {
 
       const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
-      const urlsText = urls.length === 1 ? 'URL' : 'URLs';
-      ctx.ui.notify(
-        `Scraping ${urls.length} ${urlsText}...`,
-        'info',
-      );
 
       let scrapeResults: Array<{ url: string; source: string; layer?: string; markdown: string; error?: string }>;
       if (urls.length === 1) {

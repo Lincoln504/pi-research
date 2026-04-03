@@ -1,0 +1,136 @@
+general:
+  instance_name: pi SearXNG
+  debug: false
+  privacypolicy_url: false
+  contact_url: false
+  enable_metrics: false
+  open_metrics: ''
+brand:
+  new_issue_url: https://github.com/searxng/searxng/issues/new
+  docs_url: https://docs.searxng.org/
+  public_instances: https://searx.space
+  wiki_url: https://github.com/searxng/searxng/wiki
+  issue_url: https://github.com/searxng/searxng/issues
+server:
+  port: 8080
+  bind_address: 0.0.0.0
+  secret_key: ''
+  base_url: false
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  http_protocol_version: '1.0'
+  method: POST
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+search:
+  safe_search: 0
+  autocomplete: ''
+  autocomplete_min: 4
+  favicon_resolver: ''
+  default_lang: en-US
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json
+    - csv
+    - rss
+  suspended_times:
+    SearxEngineAccessDenied: 180
+    SearxEngineCaptcha: 3600
+    SearxEngineTooManyRequests: 180
+    cf_SearxEngineCaptcha: 1296000
+    cf_SearxEngineAccessDenied: 86400
+    recaptcha_SearxEngineCaptcha: 604800
+ui:
+  static_path: ''
+  templates_path: ''
+  query_in_title: false
+  default_theme: simple
+  center_alignment: false
+  default_locale: ''
+  results_on_new_tab: false
+  theme_args:
+    simple_style: auto
+  search_on_category_select: true
+  hotkeys: default
+  url_formatting: pretty
+outgoing:
+  request_timeout: 10
+  max_request_timeout: 30
+  useragent_suffix: ''
+  pool_connections: 150
+  pool_maxsize: 20
+  enable_http2: false
+  retries: 2
+  using_tor_proxy: false
+  extra_proxy_timeout: 10
+  proxies:
+    all://:
+      - socks5://127.0.0.1:9050
+doi_resolvers:
+  oadoi.org: https://oadoi.org/
+  doi.org: https://doi.org/
+default_doi_resolver: oadoi.org
+engines:
+  - name: bing
+    engine: bing
+    shortcut: bi
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    weight: 1.5
+  - name: duckduckgo images
+    engine: duckduckgo_extra
+    categories:
+      - images
+    ddg_category: images
+    shortcut: ddi
+  - name: bing images
+    engine: bing_images
+    categories:
+      - images
+    shortcut: bii
+  - name: duckduckgo news
+    engine: duckduckgo_extra
+    categories:
+      - news
+    ddg_category: news
+    shortcut: ddn
+  - name: bing news
+    engine: bing_news
+    categories:
+      - news
+    shortcut: bin
+  - name: duckduckgo videos
+    engine: duckduckgo_extra
+    categories:
+      - videos
+    ddg_category: videos
+    shortcut: ddv
+  - name: bing videos
+    engine: bing_videos
+    categories:
+      - videos
+    shortcut: biv
+  - name: stackoverflow
+    engine: stackoverflow
+    categories:
+      - it
+    shortcut: so
+  - name: arxiv
+    engine: arxiv
+    categories:
+      - science
+    weight: 1.5
+    shortcut: arx
+  - name: semantic scholar
+    engine: semantic_scholar
+    categories:
+      - science
+    weight: 1.5
+    shortcut: sem
