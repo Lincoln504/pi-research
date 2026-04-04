@@ -27,6 +27,7 @@ import {
   clearTrackedContexts,
   checkModule,
 } from './utils.ts';
+import { logger } from '../logger.js';
 
 // ============================================================================
 // Type Definitions
@@ -113,10 +114,10 @@ function getBrowser(): Promise<Browser> {
 
   if (sharedBrowser !== null) {
     // Browser existed but lost connection — relaunch
-    console.log('[Scrapers] Chromium disconnected, relaunching...');
+    logger.log('[Scrapers] Chromium disconnected, relaunching...');
     sharedBrowser = null;
   } else {
-    console.log('[Scrapers] Launching Chromium...');
+    logger.log('[Scrapers] Launching Chromium...');
   }
 
   sharedBrowserLaunchPromise = (async (): Promise<Browser> => {
@@ -126,7 +127,7 @@ function getBrowser(): Promise<Browser> {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       });
-      console.log('[Scrapers] Chromium launched');
+      logger.log('[Scrapers] Chromium launched');
       return sharedBrowser;
     } finally {
       // Always clear the promise — success or failure — so the next call
@@ -146,7 +147,7 @@ export async function stopChromium(): Promise<void> {
     return; // Nothing to stop
   }
 
-  console.log('[Scrapers] Stopping Chromium...');
+  logger.log('[Scrapers] Stopping Chromium...');
 
   // Capture and null both references before any await so concurrent calls
   // cannot double-close.
@@ -167,7 +168,7 @@ export async function stopChromium(): Promise<void> {
     }
   }
 
-  console.log('[Scrapers] Chromium stopped');
+  logger.log('[Scrapers] Chromium stopped');
 }
 
 /**
@@ -301,7 +302,7 @@ function getDomainThreshold(url: string): number {
     // Check for exact match or subdomain match
     for (const [domain, threshold] of Object.entries(DOMAIN_THRESHOLDS)) {
       if (hostname === domain || hostname.endsWith(`.${domain}`)) {
-        console.log(`[Scrapers] Using domain threshold ${threshold} for ${hostname}`);
+        logger.log(`[Scrapers] Using domain threshold ${threshold} for ${hostname}`);
         return threshold;
       }
     }

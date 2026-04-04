@@ -10,6 +10,7 @@
  * 3. Graceful fallback - continue with IPv4 if IPv6 unavailable
  * 4. Orphan cleanup - remove leftover networks from crashed sessions
  */
+import { logger } from '../logger.js';
 
 import type Docker from 'dockerode';
 
@@ -100,20 +101,20 @@ export class NetworkManager {
         // Skip if network has containers (might be in use)
         const containers = networkInfo.Containers;
         if (containers !== undefined && Object.keys(containers).length > 0) {
-          console.log(`[NetworkManager] Skipping network ${name} - has containers`);
+          logger.log(`[NetworkManager] Skipping network ${name} - has containers`);
           continue;
         }
 
         try {
           const net = this.docker.getNetwork(networkInfo.Id);
           await net.remove({ force: true });
-          console.log(`[NetworkManager] Removed orphaned network: ${name}`);
+          logger.log(`[NetworkManager] Removed orphaned network: ${name}`);
         } catch (error) {
-          console.warn(`[NetworkManager] Failed to remove network ${name}:`, error);
+          logger.warn(`[NetworkManager] Failed to remove network ${name}:`, error);
         }
       }
     } catch (error) {
-      console.warn('[NetworkManager] Failed to cleanup orphaned networks:', error);
+      logger.warn('[NetworkManager] Failed to cleanup orphaned networks:', error);
     }
   }
 
@@ -135,7 +136,7 @@ export class NetworkManager {
       const subnet = ipamConfig?.[0]?.Subnet ?? '';
       const ipv6Address = subnet !== '' ? subnet.replace('::/64', '::2') : null; // Container address (::2), not gateway (::1)
 
-      console.log(`[NetworkManager] Reusing existing IPv6 network: ${this.networkName}`);
+      logger.log(`[NetworkManager] Reusing existing IPv6 network: ${this.networkName}`);
 
       this.ipv6Enabled = true;
       return {
@@ -146,7 +147,7 @@ export class NetworkManager {
     } catch (error) {
       const dockerError = error as DockerError;
       if (dockerError.statusCode !== 404) {
-        console.warn('[NetworkManager] Error checking existing network:', error);
+        logger.warn('[NetworkManager] Error checking existing network:', error);
         return {
           name: this.networkName,
           ipv6Address: null,
@@ -202,7 +203,7 @@ export class NetworkManager {
 
       this.ipv6Enabled = true; // CRITICAL: Must set this flag!
 
-      console.log(`[NetworkManager] Created IPv6 network: ${this.networkName}`);
+      logger.log(`[NetworkManager] Created IPv6 network: ${this.networkName}`);
 
       return {
         name: this.networkName,
@@ -210,7 +211,7 @@ export class NetworkManager {
         created: true,
       };
     } catch (error) {
-      console.error('[NetworkManager] Failed to create IPv6 network:', error);
+      logger.error('[NetworkManager] Failed to create IPv6 network:', error);
 
       // Fallback: try with docker CLI if API fails
       try {
@@ -232,7 +233,7 @@ export class NetworkManager {
           );
         });
 
-        console.log(`[NetworkManager] Created IPv6 network via CLI fallback: ${this.networkName}`);
+        logger.log(`[NetworkManager] Created IPv6 network via CLI fallback: ${this.networkName}`);
 
         this.ipv6Enabled = true; // Set flag when CLI fallback succeeds
 
@@ -242,7 +243,7 @@ export class NetworkManager {
           created: true,
         };
       } catch (cliError) {
-        console.error('[NetworkManager] Docker CLI fallback also failed:', cliError);
+        logger.error('[NetworkManager] Docker CLI fallback also failed:', cliError);
         return {
           name: this.networkName,
           ipv6Address: null,
@@ -274,9 +275,9 @@ export class NetworkManager {
     try {
       const network = this.docker.getNetwork(networkId);
       await network.remove({ force: true });
-      console.log(`[NetworkManager] Removed IPv6 network: ${this.networkName}`);
+      logger.log(`[NetworkManager] Removed IPv6 network: ${this.networkName}`);
     } catch (error) {
-      console.warn('[NetworkManager] Failed to remove network via API, trying CLI...', error);
+      logger.warn('[NetworkManager] Failed to remove network via API, trying CLI...', error);
 
       // Fallback to CLI
       try {
@@ -290,9 +291,9 @@ export class NetworkManager {
             }
           });
         });
-        console.log(`[NetworkManager] Removed network via CLI: ${this.networkName}`);
+        logger.log(`[NetworkManager] Removed network via CLI: ${this.networkName}`);
       } catch (cliError) {
-        console.error('[NetworkManager] Failed to remove network via CLI:', cliError);
+        logger.error('[NetworkManager] Failed to remove network via CLI:', cliError);
       }
     } finally {
       this.networkId = null;

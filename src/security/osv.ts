@@ -8,6 +8,7 @@
 
 import type { Vulnerability, OSVResult } from './types.ts';
 import { createTimeoutSignal } from '../web-research/retry-utils.ts';
+import { logger } from '../logger.js';
 
 const OSV_BASE_URL = 'https://api.osv.dev/v1';
 const DEFAULT_MAX_RESULTS = 20;
@@ -208,7 +209,7 @@ export async function searchOSV(
       }
 
       if (!response.ok) {
-        console.warn(`OSV query failed for "${term}": ${response.status}`);
+        logger.warn(`OSV query failed for "${term}": ${response.status}`);
         continue;
       }
 
@@ -222,7 +223,7 @@ export async function searchOSV(
       } else if (isOsvQueryResponse(data)) {
         items = data.vulns ?? [];
       } else {
-        console.warn(`OSV returned unexpected format for "${term}"`);
+        logger.warn(`OSV returned unexpected format for "${term}"`);
         continue;
       }
 
@@ -290,13 +291,13 @@ export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
     const data: unknown = await response.json();
 
     if (!isOsvVulnerability(data)) {
-      console.error(`OSV ${osvId} returned unexpected format`);
+      logger.error(`OSV ${osvId} returned unexpected format`);
       return null;
     }
 
     return mapOsvItemToVulnerability(data);
   } catch (err: unknown) {
-    console.error(`Error fetching OSV ${osvId}:`, err);
+    logger.error(`Error fetching OSV ${osvId}:`, err);
     return null;
   }
 }

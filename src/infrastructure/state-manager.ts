@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
+import { logger } from '../logger.js';
 
 /**
  * State metrics interface
@@ -131,7 +132,7 @@ export class StateManager {
 
     // Clean up any stale locks on initialization (fire and forget)
     this.cleanupStaleLocksOnStartup().catch((error: unknown) => {
-      console.warn('[StateManager] Failed to cleanup stale locks on startup:', error instanceof Error ? error.message : String(error));
+      logger.warn('[StateManager] Failed to cleanup stale locks on startup:', error instanceof Error ? error.message : String(error));
     },
     );
   }
@@ -149,16 +150,16 @@ export class StateManager {
 
       // Clean up locks older than stale threshold (30 seconds)
       if (lockAge > this.lockStaleThreshold) {
-        console.log(`[StateManager] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old)`);
+        logger.log(`[StateManager] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old)`);
         await fs.unlink(this.lockFilePath);
-        console.log('[StateManager] Stale lock removed');
+        logger.log('[StateManager] Stale lock removed');
       }
     } catch (error: unknown) {
       // ENOENT is expected (no lock file exists)
       if (error instanceof Error && 'code' in error) {
         const errnoError = error as NodeJS.ErrnoException;
         if (errnoError.code !== 'ENOENT') {
-          console.warn(`[StateManager] Could not check lock file: ${errnoError.message}`);
+          logger.warn(`[StateManager] Could not check lock file: ${errnoError.message}`);
         }
       }
     }
@@ -235,7 +236,7 @@ export class StateManager {
 
         // Check for corruption
         if (error instanceof SyntaxError || (error instanceof Error && error.message.includes('parse'))) {
-          console.error('[StateManager] State file corrupted, attempting recovery...');
+          logger.error('[StateManager] State file corrupted, attempting recovery...');
           // Recover directly — we already hold the lock, so we must NOT call
           // recoverFromCorruption() (which calls writeState() → withLock() → deadlock).
           await this.recoverFromCorruptionDirect();
@@ -588,7 +589,7 @@ export class StateManager {
         await fs.unlink(filePath);
       }
     } catch (error: unknown) {
-      console.error(`Failed to cleanup old backups: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`Failed to cleanup old backups: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -618,7 +619,7 @@ export class StateManager {
       if (newestBackup !== null) {
         const backupPath = path.join(this.backupDirPath, newestBackup.name);
         await fs.copyFile(backupPath, this.stateFilePath);
-        console.log(`[StateManager] Recovered state from backup: ${newestBackup.name}`);
+        logger.log(`[StateManager] Recovered state from backup: ${newestBackup.name}`);
       } else {
         // No backups — write default state directly (atomic rename, no lock needed)
         const defaultState = this.getDefaultState();
@@ -627,11 +628,11 @@ export class StateManager {
         const tempPath = path.join(path.dirname(this.stateFilePath), tempFile);
         await fs.writeFile(tempPath, JSON.stringify(defaultState, null, 2), 'utf-8');
         await fs.rename(tempPath, this.stateFilePath);
-        console.log('[StateManager] Recovered with default state (no backups available)');
+        logger.log('[StateManager] Recovered with default state (no backups available)');
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[StateManager] Failed to recover from corruption: ${message}`);
+      logger.error(`[StateManager] Failed to recover from corruption: ${message}`);
       throw error;
     }
   }
@@ -750,7 +751,7 @@ export class StateManager {
         try {
           await this.releaseLock();
         } catch (error: unknown) {
-          console.error('[StateManager] Failed to release lock:', error);
+          logger.error('[StateManager] Failed to release lock:', error);
         }
       }
     }
@@ -870,7 +871,7 @@ export class StateManager {
       try {
         await this.releaseLock();
       } catch (error: unknown) {
-        console.error('Failed to release lock during cleanup:', error);
+        logger.error('Failed to release lock during cleanup:', error);
       }
     }
   }

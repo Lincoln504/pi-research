@@ -7,6 +7,7 @@
 import { getSearxngUrl, incrementConnectionCount, decrementConnectionCount } from './utils.ts';
 import { createTimeoutSignal } from './retry-utils.ts';
 import type { SearXNGResult, QueryResultWithError } from './types.ts';
+import { logger } from '../logger.js';
 
 // ============================================================================
 // Type Definitions
@@ -181,7 +182,7 @@ export function search(queries: string[]): Promise<QueryResultWithError[]> {
         return result;
       })
       .catch((error: unknown): QueryResultWithError => {
-        console.warn(`[Web Research] Search failed for "${query}":`, error);
+        logger.warn(`[Web Research] Search failed for "${query}":`, error);
         const result: QueryResultWithError = { query, results: [] };
         result.error = classifyError(error);
         return result;

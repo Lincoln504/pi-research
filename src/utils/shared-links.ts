@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { logger } from '../logger.js';
 
 /**
  * A single entry in the shared links pool for one slice
@@ -164,7 +165,7 @@ export function loadSharedLinks(sessionId: string): SharedLinksPool | null {
     const content = fs.readFileSync(filePath, 'utf-8');
     return JSON.parse(content) as SharedLinksPool;
   } catch (error) {
-    console.error(`Failed to load shared links for session ${sessionId}:`, error);
+    logger.error(`Failed to load shared links for session ${sessionId}:`, error);
     return null;
   }
 }
@@ -180,7 +181,7 @@ export function cleanupSharedLinks(sessionId: string): void {
     try {
       fs.unlinkSync(filePath);
     } catch (error) {
-      console.error(`Failed to cleanup shared links for session ${sessionId}:`, error);
+      logger.error(`Failed to cleanup shared links for session ${sessionId}:`, error);
     }
   }
 }

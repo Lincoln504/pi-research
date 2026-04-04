@@ -7,6 +7,8 @@
  * Used by: NVD, GitHub Advisories, OSV, CISA KEV, Search
  */
 
+import { logger } from '../logger.js';
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
@@ -123,7 +125,7 @@ export async function retryWithBackoff<T>(
       const jitter = Math.random() * 0.5 * baseDelay; // ±50% jitter
       const delay = Math.min(baseDelay + jitter, opts.maxDelay);
 
-      console.warn(`[Retry] Request failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
+      logger.warn(`[Retry] Request failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
 
       // Unref the timeout so it doesn't prevent process exit
       await new Promise<void>(resolve => {

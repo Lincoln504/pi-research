@@ -19,6 +19,7 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 import { NetworkManager } from './network-manager';
 import { StateManager } from './state-manager';
+import { logger } from '../logger.js';
 
 // Docker type definitions
 interface DockerContainerInspectInfo {
@@ -180,14 +181,14 @@ async function cleanupOrphanedContainers(docker: Docker, currentSessionId: strin
         try {
           const c = docker.getContainer(container.Id);
           await c.remove({ v: true, force: true });
-          console.log(`[SearXNG Manager] Removed orphaned container: ${containerName}`);
+          logger.log(`[SearXNG Manager] Removed orphaned container: ${containerName}`);
         } catch (error) {
-          console.warn(`[SearXNG Manager] Failed to remove container ${containerName}:`, error);
+          logger.warn(`[SearXNG Manager] Failed to remove container ${containerName}:`, error);
         }
       }
     }
   } catch (error) {
-    console.warn('[SearXNG Manager] Error cleaning up orphaned containers:', error);
+    logger.warn('[SearXNG Manager] Error cleaning up orphaned containers:', error);
   }
 }
 
@@ -302,7 +303,7 @@ export class DockerSearxngManager {
         socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
       });
     } catch (error) {
-      console.warn('[SearXNG Manager] Failed to initialize Docker client:', error);
+      logger.warn('[SearXNG Manager] Failed to initialize Docker client:', error);
       this.docker = null;
     }
 
@@ -328,7 +329,7 @@ export class DockerSearxngManager {
       const uiType: 'info' | 'warning' | 'error' = type === 'success' ? 'info' : type;
       this.ctx.ui.notify(message, uiType);
     } else {
-      console.log(`[SearXNG Manager ${type.toUpperCase()}] ${message}`);
+      logger.log(`[SearXNG Manager ${type.toUpperCase()}] ${message}`);
     }
   }
 
@@ -357,10 +358,10 @@ export class DockerSearxngManager {
     try {
       const removed = await this.stateManager.cleanupStaleSessions(2 * 60 * 60 * 1000); // 2 hours
       if (removed > 0) {
-        console.log(`[SearXNG Manager] Cleaned up ${removed} stale session(s)`);
+        logger.log(`[SearXNG Manager] Cleaned up ${removed} stale session(s)`);
       }
     } catch (error) {
-      console.error('[SearXNG Manager] Error cleaning up stale sessions:', error);
+      logger.error('[SearXNG Manager] Error cleaning up stale sessions:', error);
     }
   }
 
@@ -386,7 +387,7 @@ export class DockerSearxngManager {
    */
   startHeartbeat(): void {
     if (this.heartbeatRunning) {
-      console.warn('[SearXNG Manager] Heartbeat already running');
+      logger.warn('[SearXNG Manager] Heartbeat already running');
       return;
     }
 
@@ -395,7 +396,7 @@ export class DockerSearxngManager {
     const jitter = Math.floor(Math.random() * 5000); // 0-5 seconds random
     const interval = baseInterval + jitter;
 
-    console.log(`[SearXNG Manager] Heartbeat interval: ${interval}ms (${baseInterval}ms base + ${jitter}ms jitter)`);
+    logger.log(`[SearXNG Manager] Heartbeat interval: ${interval}ms (${baseInterval}ms base + ${jitter}ms jitter)`);
 
     this.heartbeatInterval = setInterval(() => {
       void (async (): Promise<void> => {
@@ -416,7 +417,7 @@ export class DockerSearxngManager {
             this.sessionId &&
             Date.now() - this.containerStartTime > maxUptimeMs
           ) {
-            console.log(
+            logger.log(
               `[SearXNG Manager] Container reached ${this.config.maxUptimeMinutes}-minute uptime limit, ` +
               'restarting for IP rotation',
             );
@@ -441,10 +442,10 @@ export class DockerSearxngManager {
                 }
                 await this.startSingleton();
                 this.notify('SearXNG container restarted with fresh IPv6 address', 'success');
-                console.log('[SearXNG Manager] Container restarted successfully for IP rotation');
+                logger.log('[SearXNG Manager] Container restarted successfully for IP rotation');
               } catch (error) {
                 const errMsg = error instanceof Error ? error.message : String(error);
-                console.error('[SearXNG Manager] Error during uptime-triggered restart:', error);
+                logger.error('[SearXNG Manager] Error during uptime-triggered restart:', error);
                 this.notify(`Failed to restart SearXNG container: ${errMsg}`, 'error');
               } finally {
                 this.starting = null;
@@ -455,16 +456,16 @@ export class DockerSearxngManager {
             try {
               await this.starting;
             } catch (error) {
-              console.error('[SearXNG Manager] Restart wait failed:', error);
+              logger.error('[SearXNG Manager] Restart wait failed:', error);
             }
           }
         } catch (error) {
-          console.error('[SearXNG Manager] Heartbeat check failed:', error);
+          logger.error('[SearXNG Manager] Heartbeat check failed:', error);
         }
       })();
     }, interval).unref(); // Don't keep event loop alive when nothing else is running
 
-    console.log('[SearXNG Manager] Heartbeat started');
+    logger.log('[SearXNG Manager] Heartbeat started');
   }
 
   /**
@@ -478,7 +479,7 @@ export class DockerSearxngManager {
       this.heartbeatInterval = null;
     }
 
-    console.log('[SearXNG Manager] Heartbeat stopped');
+    logger.log('[SearXNG Manager] Heartbeat stopped');
   }
 
   /**
@@ -492,7 +493,7 @@ export class DockerSearxngManager {
 
     const existingSession = await this.stateManager.getSession(sessionId);
     if (existingSession) {
-      console.log(`[SearXNG Manager] Session ${sessionId} already has container reference`);
+      logger.log(`[SearXNG Manager] Session ${sessionId} already has container reference`);
       await this.stateManager.updateActivity(sessionId);
       this.sessionId = sessionId;
       // If this manager instance has no container reference (e.g. after a session
@@ -546,7 +547,7 @@ export class DockerSearxngManager {
             this.config.port = port;
           }
         } catch (err) {
-          console.warn('[SearXNG Manager] Could not attach to existing container on reconnect:', err);
+          logger.warn('[SearXNG Manager] Could not attach to existing container on reconnect:', err);
         }
       }
       return;
@@ -555,12 +556,12 @@ export class DockerSearxngManager {
     this.containerStartupLock = (async (): Promise<void> => {
       try {
         const containerName = 'pi-searxng';
-        console.log(`[SearXNG Manager] Acquiring container for session ${sessionId}`);
+        logger.log(`[SearXNG Manager] Acquiring container for session ${sessionId}`);
 
         const existingContainer = await this.findContainerByName(containerName);
 
         if (existingContainer) {
-          console.log(`[SearXNG Manager] Reusing existing singleton container: ${containerName}`);
+          logger.log(`[SearXNG Manager] Reusing existing singleton container: ${containerName}`);
 
           const info: DockerContainerInspectInfo = await existingContainer.inspect() as DockerContainerInspectInfo;
           this.container = existingContainer;
@@ -621,7 +622,7 @@ export class DockerSearxngManager {
 
         await this.stateManager.addSession(sessionId, containerName);
         this.sessionId = sessionId;
-        console.log(`[SearXNG Manager] Session ${sessionId} acquired container reference`);
+        logger.log(`[SearXNG Manager] Session ${sessionId} acquired container reference`);
 
       } finally {
         this.containerStartupLock = null;
@@ -636,7 +637,7 @@ export class DockerSearxngManager {
    */
   async release(sessionId: string): Promise<void> {
 
-    console.log(`[SearXNG Manager] Releasing container for session ${sessionId}`);
+    logger.log(`[SearXNG Manager] Releasing container for session ${sessionId}`);
 
     await this.stateManager.removeSession(sessionId);
 
@@ -647,10 +648,10 @@ export class DockerSearxngManager {
 
     const remainingSessions = await this.stateManager.getAllSessions();
     if (Object.keys(remainingSessions).length === 0) {
-      console.log('[SearXNG Manager] No more sessions, stopping singleton container');
+      logger.log('[SearXNG Manager] No more sessions, stopping singleton container');
       await this.stopSingleton();
     } else {
-      console.log(`[SearXNG Manager] Container still in use by ${Object.keys(remainingSessions).length} session(s)`);
+      logger.log(`[SearXNG Manager] Container still in use by ${Object.keys(remainingSessions).length} session(s)`);
     }
   }
 
@@ -660,7 +661,7 @@ export class DockerSearxngManager {
   private async startSingleton(): Promise<void> {
     const containerName = 'pi-searxng';
 
-    console.log(`[SearXNG Manager] Starting singleton container: ${containerName}`);
+    logger.log(`[SearXNG Manager] Starting singleton container: ${containerName}`);
 
     await this.ensureImage();
 
@@ -693,12 +694,12 @@ export class DockerSearxngManager {
           if (networks.includes('bridge')) {
             const bridge = this.docker.getNetwork('bridge');
             await bridge.disconnect({ Container: this.container.id, Force: true });
-            console.log('[SearXNG Manager] Disconnected container from default bridge (enforcing IPv6-only)');
+            logger.log('[SearXNG Manager] Disconnected container from default bridge (enforcing IPv6-only)');
           } else {
-            console.log('[SearXNG Manager] Container is IPv6-only (bridge not attached)');
+            logger.log('[SearXNG Manager] Container is IPv6-only (bridge not attached)');
           }
         } catch (error) {
-          console.warn('[SearXNG Manager] Warning: Could not verify/disconnect from bridge network:', error);
+          logger.warn('[SearXNG Manager] Warning: Could not verify/disconnect from bridge network:', error);
         }
       }
 
@@ -718,9 +719,9 @@ export class DockerSearxngManager {
       // Record start time for uptime-based restart
       this.containerStartTime = Date.now();
 
-      console.log(`[SearXNG Manager] Singleton container started on port ${assignedPort}`);
+      logger.log(`[SearXNG Manager] Singleton container started on port ${assignedPort}`);
     } catch (error) {
-      console.error('[SearXNG Manager] Failed to start singleton container:', error);
+      logger.error('[SearXNG Manager] Failed to start singleton container:', error);
       throw error;
     }
   }
@@ -729,7 +730,7 @@ export class DockerSearxngManager {
    * Stop singleton container
    */
   private async stopSingleton(): Promise<void> {
-    console.log('[SearXNG Manager] Stopping singleton container');
+    logger.log('[SearXNG Manager] Stopping singleton container');
 
     if (this.heartbeatInterval) {
       this.stopHeartbeat();
@@ -739,9 +740,9 @@ export class DockerSearxngManager {
       try {
         await this.stopContainer(this.container);
         await this.removeContainer(this.container);
-        console.log('[SearXNG Manager] Singleton container stopped');
+        logger.log('[SearXNG Manager] Singleton container stopped');
       } catch (error) {
-        console.warn('[SearXNG Manager] Error stopping singleton container:', error);
+        logger.warn('[SearXNG Manager] Error stopping singleton container:', error);
       } finally {
         this.container = null;
         this.containerInfo = null;
@@ -752,9 +753,9 @@ export class DockerSearxngManager {
     if (this.networkManager) {
       try {
         await this.networkManager.removeNetwork();
-        console.log('[SearXNG Manager] IPv6 network removed');
+        logger.log('[SearXNG Manager] IPv6 network removed');
       } catch (error) {
-        console.warn('[SearXNG Manager] Error removing IPv6 network:', error);
+        logger.warn('[SearXNG Manager] Error removing IPv6 network:', error);
       } finally {
         this.networkManager = null;
       }
@@ -883,7 +884,7 @@ export class DockerSearxngManager {
               this.notify(`Removed old image: ${tag}`, 'info');
             } catch (error) {
               // Image might be in use, that's okay
-              console.warn('[SearXNG Manager] Could not remove image:', tag, error);
+              logger.warn('[SearXNG Manager] Could not remove image:', tag, error);
             }
           }
         }
@@ -894,7 +895,7 @@ export class DockerSearxngManager {
 
       this.notify('Image cleanup complete.', 'success');
     } catch (error) {
-      console.warn('[SearXNG Manager] Error pruning old images:', error);
+      logger.warn('[SearXNG Manager] Error pruning old images:', error);
       // Don't fail the whole process if pruning fails
     }
   }
@@ -1011,7 +1012,7 @@ export class DockerSearxngManager {
       ? parseInt(portBindings[0].HostPort, 10)
       : (preferredPort ?? 0);
 
-    console.log(`[SearXNG Manager] Container created with port ${assignedPort}`);
+    logger.log(`[SearXNG Manager] Container created with port ${assignedPort}`);
 
     return { container, assignedPort };
   }
@@ -1038,7 +1039,7 @@ export class DockerSearxngManager {
         // Already stopped, that's fine
         return;
       }
-      console.warn('[SearXNG Manager] Error stopping container:', error);
+      logger.warn('[SearXNG Manager] Error stopping container:', error);
     }
   }
 
@@ -1055,7 +1056,7 @@ export class DockerSearxngManager {
       }),
     ]).catch((err: unknown) => {
       if (!String(err).includes('No such container')) {
-        console.warn('[SearXNG Manager] Error removing container:', err);
+        logger.warn('[SearXNG Manager] Error removing container:', err);
       }
     });
   }
@@ -1112,7 +1113,7 @@ export class DockerSearxngManager {
             const logsStr = logs.toString();
 
             this.notify(`Container exited with status: ${info.State.Status} (${elapsed}s elapsed)`, 'error');
-            console.error('[SearXNG Manager] Container logs:', logsStr);
+            logger.error('[SearXNG Manager] Container logs:', logsStr);
 
             // Check for common error patterns
             if (logsStr.includes('bind') && (logsStr.includes('address already in use') || logsStr.includes('already allocated'))) {
@@ -1159,7 +1160,7 @@ export class DockerSearxngManager {
           throw error;
         }
         // Log other errors but continue
-        console.error('[SearXNG Manager] Health check error:', error);
+        logger.error('[SearXNG Manager] Health check error:', error);
         await sleep(checkInterval);
       }
     }
@@ -1183,7 +1184,7 @@ export class DockerSearxngManager {
     }
 
     if (ENABLE_SINGLETON) {
-      console.log('[SearXNG Manager] Singleton mode enabled');
+      logger.log('[SearXNG Manager] Singleton mode enabled');
 
       await this.cleanupStaleSessions();
       await this.acquire(sessionId);
@@ -1291,7 +1292,7 @@ export class DockerSearxngManager {
    */
   async stop(): Promise<void> {
     if (ENABLE_SINGLETON && this.sessionId) {
-      console.log(`[SearXNG Manager] Singleton mode: releasing container for session ${this.sessionId}`);
+      logger.log(`[SearXNG Manager] Singleton mode: releasing container for session ${this.sessionId}`);
       await this.release(this.sessionId);
       this.sessionId = null;
       this.starting = null;
@@ -1313,7 +1314,7 @@ export class DockerSearxngManager {
 
       this.notify('SearXNG container stopped and removed.', 'info');
     } catch (error) {
-      console.warn('[SearXNG Manager] Cleanup error:', error);
+      logger.warn('[SearXNG Manager] Cleanup error:', error);
     } finally {
       this.container = null;
       this.containerInfo = null;
