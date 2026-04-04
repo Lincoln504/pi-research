@@ -1,14 +1,14 @@
 import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
+
 export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
-    // NOTE: No real integration tests yet. Future tests should use testcontainers
-    // to test actual integration with external services (SearXNG, NVD, OSV, etc.)
-    include: [],
+    // Integration tests using testcontainers
+    include: ['test/integration/**/*.test.ts'],
     setupFiles: [],
-    testTimeout: 120000,
-    maxConcurrency: 2,
+    testTimeout: 180000, // 3 minute timeout for integration tests
+    maxConcurrency: 1, // Only one integration test at a time due to containers
   },
 });
