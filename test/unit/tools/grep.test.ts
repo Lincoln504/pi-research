@@ -8,7 +8,7 @@
  * - Error handling and fallback behavior
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createGrepTool, grep } from '../../../src/tools/grep';
 import { spawn } from 'node:child_process';
 
@@ -380,7 +380,7 @@ describe('grep tool', () => {
       await promise;
 
       expect(spawnMock).toHaveBeenCalledWith('rg', expect.any(Array));
-      const args = spawnMock.mock.calls[0][1];
+      const args = spawnMock.mock.calls[0]?.[1];
       expect(args).toContain('test_pattern');
       expect(args).toContain('/search/path');
     });
