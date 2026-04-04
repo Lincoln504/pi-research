@@ -7,8 +7,8 @@ import type { SortOrder, SortActivity, SortReputation } from './types';
 export interface SearchParams {
   query?: string;
   title?: string;
-  tagged?: string;
-  nottagged?: string;
+  tagged?: string | string[];
+  nottagged?: string | string[];
   intitle?: string;
   accepted?: boolean;
   answers?: number;

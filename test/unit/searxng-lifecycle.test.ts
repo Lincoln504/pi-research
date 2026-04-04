@@ -5,18 +5,15 @@
  * Now fully testable without Docker dependencies.
  */
 
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { DockerSearxngManager } from '../../src/infrastructure/searxng-manager';
 import {
   SearxngLifecycleManager,
   createSearxngLifecycleManager,
   getLifecycleManager,
   setLifecycleManager,
   resetLifecycleManager,
-  type ISearxngLifecycleManager,
-  type SearxngLifecycleConfig,
   type SearxngLifecycleStatus,
   initLifecycle,
   ensureRunning,
@@ -113,7 +110,7 @@ describe('SearxngLifecycleManager', () => {
 
     it('should create manager with injected manager', () => {
       const injectedManager = new MockDockerSearxngManager();
-      const manager = new SearxngLifecycleManager({ manager: injectedManager });
+      const manager = new SearxngLifecycleManager({ manager: injectedManager as unknown as DockerSearxngManager });
 
       expect(manager.getManager()).toBe(injectedManager);
     });
@@ -129,9 +126,9 @@ describe('SearxngLifecycleManager', () => {
   describe('init', () => {
     it('should initialize with valid context', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
 
       await lifecycleManager.init(ctx);
 
@@ -144,9 +141,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should handle missing sessionId in context', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = {} as any;
+      const ctx = {} as unknown as ExtensionContext;
 
       await lifecycleManager.init(ctx);
 
@@ -157,9 +154,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should not initialize twice', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
 
       await lifecycleManager.init(ctx);
       await lifecycleManager.init(ctx);
@@ -171,9 +168,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should set context on underlying manager', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
 
       await lifecycleManager.init(ctx);
 
@@ -184,9 +181,9 @@ describe('SearxngLifecycleManager', () => {
   describe('ensureRunning', () => {
     it('should return URL when manager is initialized', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       const url = await lifecycleManager.ensureRunning();
@@ -216,9 +213,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should return 1 when active and no callback', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       const count = lifecycleManager.getConnectionCount();
@@ -247,9 +244,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should return active status after init', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       const status = lifecycleManager.getStatus();
@@ -277,35 +274,35 @@ describe('SearxngLifecycleManager', () => {
       lifecycleManager.onStatusChange(callback);
 
       expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback.mock.calls[0][0].state).toBe('inactive');
+      expect(callback.mock.calls[0]![0].state).toBe('inactive');
     });
 
     it('should call callback when status changes', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       const callback = vi.fn();
 
       lifecycleManager.onStatusChange(callback);
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       expect(callback).toHaveBeenCalled();
       // Should have been called with active status
-      const lastCall = callback.mock.calls[callback.mock.calls.length - 1][0];
+      const lastCall = callback.mock.calls[callback.mock.calls.length - 1]![0];
       expect(lastCall.state).toBe('active');
     });
 
     it('should support multiple callbacks', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       const callback1 = vi.fn();
       const callback2 = vi.fn();
 
       lifecycleManager.onStatusChange(callback1);
       lifecycleManager.onStatusChange(callback2);
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       expect(callback1).toHaveBeenCalled();
@@ -314,13 +311,13 @@ describe('SearxngLifecycleManager', () => {
 
     it('should unsubscribe when returned function is called', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       const callback = vi.fn();
 
       const unsubscribe = lifecycleManager.onStatusChange(callback);
       unsubscribe();
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       // Should only be called once (immediately)
@@ -331,9 +328,9 @@ describe('SearxngLifecycleManager', () => {
   describe('shutdown', () => {
     it('should shutdown and update status', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       expect(lifecycleManager.isInitialized()).toBe(true);
@@ -363,9 +360,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should return true after init', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       expect(lifecycleManager.isInitialized()).toBe(true);
@@ -373,9 +370,9 @@ describe('SearxngLifecycleManager', () => {
 
     it('should return false after shutdown', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
       await lifecycleManager.shutdown();
 
@@ -405,7 +402,7 @@ describe('createSearxngLifecycleManager', () => {
 
   it('should create manager with injected manager', () => {
     const injectedManager = new MockDockerSearxngManager();
-    const manager = createSearxngLifecycleManager({ manager: injectedManager });
+    const manager = createSearxngLifecycleManager({ manager: injectedManager as unknown as DockerSearxngManager });
 
     expect(manager.getManager()).toBe(injectedManager);
   });
@@ -441,7 +438,7 @@ describe('global lifecycle state', () => {
     });
 
     it('should replace existing manager', () => {
-      const manager1 = getLifecycleManager();
+      getLifecycleManager();
       const manager2 = new SearxngLifecycleManager();
 
       expect(getLifecycleManager()).not.toBe(manager2);
@@ -484,10 +481,10 @@ describe('backward compatibility exports', () => {
   describe('initLifecycle', () => {
     it('should initialize global manager', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       setLifecycleManager(lifecycleManager);
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await initLifecycle(ctx);
 
       expect(isInitialized()).toBe(true);
@@ -497,10 +494,10 @@ describe('backward compatibility exports', () => {
   describe('ensureRunning', () => {
     it('should return URL from global manager', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       setLifecycleManager(lifecycleManager);
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       const url = await ensureRunning();
@@ -557,10 +554,10 @@ describe('backward compatibility exports', () => {
   describe('shutdownLifecycle', () => {
     it('should shutdown global manager', async () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       setLifecycleManager(lifecycleManager);
 
-      const ctx: ExtensionContext = { sessionId: 'test-session' };
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
       await lifecycleManager.init(ctx);
 
       expect(isInitialized()).toBe(true);
@@ -582,7 +579,7 @@ describe('backward compatibility exports', () => {
   describe('getManager', () => {
     it('should return underlying Docker manager from global lifecycle', () => {
       const mockManager = new MockDockerSearxngManager();
-      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
       setLifecycleManager(lifecycleManager);
 
       const dockerManager = getManager();
@@ -600,7 +597,7 @@ describe('integration scenarios', () => {
   it('should support full lifecycle', async () => {
     const mockManager = new MockDockerSearxngManager();
     const lifecycleManager = new SearxngLifecycleManager({
-      manager: mockManager,
+      manager: mockManager as unknown as DockerSearxngManager,
       logger: mockLogger,
     });
 
@@ -609,7 +606,7 @@ describe('integration scenarios', () => {
     expect(lifecycleManager.getStatus().state).toBe('inactive');
 
     // Initialize
-    const ctx: ExtensionContext = { sessionId: 'test-session' };
+    const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
     await lifecycleManager.init(ctx);
 
     expect(lifecycleManager.isInitialized()).toBe(true);
@@ -633,15 +630,15 @@ describe('integration scenarios', () => {
 
   it('should handle status changes correctly', async () => {
     const mockManager = new MockDockerSearxngManager();
-    const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager });
+    const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
 
     const statuses: SearxngLifecycleStatus[] = [];
     lifecycleManager.onStatusChange((status) => statuses.push(status));
 
     expect(statuses.length).toBe(1);
-    expect(statuses[0].state).toBe('inactive');
+    expect(statuses[0]!.state).toBe('inactive');
 
-    const ctx: ExtensionContext = { sessionId: 'test-session' };
+    const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
     await lifecycleManager.init(ctx);
 
     expect(statuses.length).toBeGreaterThanOrEqual(2);
@@ -661,10 +658,10 @@ describe('edge cases', () => {
     const mockManager1 = new MockDockerSearxngManager();
     const mockManager2 = new MockDockerSearxngManager();
 
-    const lifecycleManager1 = new SearxngLifecycleManager({ manager: mockManager1 });
-    const lifecycleManager2 = new SearxngLifecycleManager({ manager: mockManager2 });
+    const lifecycleManager1 = new SearxngLifecycleManager({ manager: mockManager1 as unknown as DockerSearxngManager });
+    const lifecycleManager2 = new SearxngLifecycleManager({ manager: mockManager2 as unknown as DockerSearxngManager });
 
-    const ctx: ExtensionContext = { sessionId: 'test-session' };
+    const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
     await lifecycleManager1.init(ctx);
     await lifecycleManager2.init(ctx);
 
@@ -689,11 +686,10 @@ describe('edge cases', () => {
   });
   it('should handle cleanup of old manager on init', async () => {
     const mockManager1 = new MockDockerSearxngManager();
-    const mockManager2 = new MockDockerSearxngManager();
 
-    const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager1 });
+    const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager1 as unknown as DockerSearxngManager });
 
-    const ctx: ExtensionContext = { sessionId: 'test-session' };
+    const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
     await lifecycleManager.init(ctx);
 
     expect(mockManager1.isHeartbeatRunning()).toBe(true);

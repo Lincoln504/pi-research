@@ -5,7 +5,7 @@
  * No external dependencies required.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('orchestration/session-context', () => {
   // Import the functions we're testing
@@ -26,7 +26,7 @@ describe('orchestration/session-context', () => {
 
     if (Array.isArray(content)) {
       return content
-        .filter((block) => block.type === 'text')
+        .filter((block) => (block as { type?: string }).type === 'text')
         .map((block) => (block as { type: 'text'; text: string }).text)
         .join('\n');
     }
@@ -34,7 +34,7 @@ describe('orchestration/session-context', () => {
     return '';
   };
 
-  const isMessageEntry = (entry: any): entry is { type: 'message' } => {
+  const isMessageEntry = (entry: any): entry is { type: 'message'; message: { role: string; content: string | unknown[] } } => {
     return entry != null && entry.type === 'message';
   };
 
@@ -243,12 +243,12 @@ describe('orchestration/session-context', () => {
 
     describe('negative cases', () => {
       it('should return empty string for null content', () => {
-        const message = { role: 'assistant', content: null };
+        const message = { role: 'assistant', content: null } as unknown as { role: string; content: string | unknown[] };
         expect(extractTextContent(message)).toBe('');
       });
 
       it('should return empty string for undefined content', () => {
-        const message = { role: 'assistant', content: undefined };
+        const message = { role: 'assistant', content: undefined } as unknown as { role: string; content: string | unknown[] };
         expect(extractTextContent(message)).toBe('');
       });
 

@@ -5,7 +5,7 @@
  * Covers batch queries, ecosystem support, and error handling.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('OSV Integration', () => {
   describe('Batch query operations', () => {
@@ -127,7 +127,7 @@ describe('OSV Integration', () => {
       };
 
       expect(vuln.affected).toHaveLength(1);
-      expect(vuln.affected[0].ranges).toHaveLength(1);
+      expect(vuln.affected[0]!.ranges).toHaveLength(1);
     });
 
     it('should parse multiple affected packages', async () => {

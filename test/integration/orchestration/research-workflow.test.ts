@@ -5,7 +5,7 @@
  * Focuses on delegation, token tracking, and failure handling.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('Research Workflow Integration', () => {
   describe('Coordinator delegation', () => {
@@ -88,7 +88,7 @@ describe('Research Workflow Integration', () => {
         }
       }
 
-      expect(usedTokens).toBeLessThanOrEqual(maxTokens + tokenAllocations[tokenAllocations.length - 1]);
+      expect(usedTokens).toBeLessThanOrEqual(maxTokens + tokenAllocations[tokenAllocations.length - 1]!);
     });
   });
 
@@ -158,7 +158,7 @@ describe('Research Workflow Integration', () => {
     });
 
     it('should preserve state across operations', async () => {
-      const state = {
+      const state: { metadata: { startTime: number; totalTokens: number }; results: any[] } = {
         metadata: {
           startTime: Date.now(),
           totalTokens: 0,
@@ -253,9 +253,9 @@ describe('Research Workflow Integration', () => {
 
       const sorted = findings.sort((a, b) => b.confidence - a.confidence);
 
-      expect(sorted[0].id).toBe('f3');
-      expect(sorted[1].id).toBe('f1');
-      expect(sorted[2].id).toBe('f2');
+      expect(sorted[0]!.id).toBe('f3');
+      expect(sorted[1]!.id).toBe('f1');
+      expect(sorted[2]!.id).toBe('f2');
     });
   });
 

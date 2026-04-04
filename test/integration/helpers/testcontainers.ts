@@ -40,13 +40,11 @@ export class TestContainerManager {
     }
 
     if (options?.env) {
-      for (const [key, value] of Object.entries(options.env)) {
-        container = container.withEnvironment(key, value);
-      }
+      container = container.withEnvironment(options.env);
     }
 
     if (options?.cmd) {
-      container = container.withCmd(options.cmd);
+      container = container.withCommand(options.cmd);
     }
 
     const started = await container.start();
@@ -168,7 +166,9 @@ export async function waitForContainer(
  */
 export async function healthCheck(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'HEAD', timeout: 5000 });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(url, { method: 'HEAD', signal: controller.signal }).finally(() => clearTimeout(timeoutId));
     return response.ok || response.status === 404;
   } catch {
     return false;

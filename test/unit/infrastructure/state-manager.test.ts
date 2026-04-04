@@ -305,8 +305,8 @@ describe('State Manager', () => {
         sessions: {
           'session-1': {
             pid: 0,
-            lastSeen: legacyState.sessions['session-1'].lastSeen,
-            connectedAt: legacyState.sessions['session-1'].lastSeen,
+            lastSeen: legacyState.sessions['session-1']!.lastSeen,
+            connectedAt: legacyState.sessions['session-1']!.lastSeen,
           },
         },
         lastUpdated: Date.now(),

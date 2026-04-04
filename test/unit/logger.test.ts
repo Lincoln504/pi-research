@@ -21,13 +21,9 @@ import {
   setupEmergencyHandlers,
   suppressConsole,
   isVerbose,
-  type ILogger,
-  type LoggerOptions,
 } from '../../src/logger';
 
 describe('logger (refactored)', () => {
-  const originalConsole = { ...console };
-
   // Clean up global state between tests
   afterEach(() => {
     resetLogger();
@@ -335,7 +331,6 @@ describe('logger (refactored)', () => {
       });
 
       it('should replace existing logger', () => {
-        const logger1 = getLogger();
         const logger2 = new Logger({ verbose: true, setupEmergencyHandlers: false });
 
         expect(getLogger()).not.toBe(logger2);
@@ -391,30 +386,30 @@ describe('logger (refactored)', () => {
     });
 
     it('should return true when PI_RESEARCH_VERBOSE=1', () => {
-      process.env.PI_RESEARCH_VERBOSE = '1';
+      process.env['PI_RESEARCH_VERBOSE'] = '1';
       expect(isVerboseFromEnv()).toBe(true);
     });
 
     it('should return true when both conditions met', () => {
       process.argv = ['node', 'script', '--verbose'];
-      process.env.PI_RESEARCH_VERBOSE = '1';
+      process.env['PI_RESEARCH_VERBOSE'] = '1';
       expect(isVerboseFromEnv()).toBe(true);
     });
 
     it('should return false when no conditions met', () => {
       process.argv = ['node', 'script'];
-      delete process.env.PI_RESEARCH_VERBOSE;
+      delete process.env['PI_RESEARCH_VERBOSE'];
       expect(isVerboseFromEnv()).toBe(false);
     });
 
     it('should return false when PI_RESEARCH_VERBOSE is other value', () => {
-      process.env.PI_RESEARCH_VERBOSE = '0';
+      process.env['PI_RESEARCH_VERBOSE'] = '0';
       expect(isVerboseFromEnv()).toBe(false);
 
-      process.env.PI_RESEARCH_VERBOSE = 'true';
+      process.env['PI_RESEARCH_VERBOSE'] = 'true';
       expect(isVerboseFromEnv()).toBe(false);
 
-      process.env.PI_RESEARCH_VERBOSE = 'yes';
+      process.env['PI_RESEARCH_VERBOSE'] = 'yes';
       expect(isVerboseFromEnv()).toBe(false);
     });
 

@@ -111,7 +111,7 @@ describe('OSV Security Database Client', () => {
       };
 
       expect(vuln.affected).toHaveLength(1);
-      expect(vuln.affected[0].versions).toHaveLength(3);
+      expect(vuln.affected[0]!.versions).toHaveLength(3);
     });
 
     it('should extract references', () => {
@@ -124,7 +124,7 @@ describe('OSV Security Database Client', () => {
       };
 
       expect(vuln.references).toHaveLength(2);
-      expect(vuln.references[0].type).toMatch(/ADVISORY|WEB/);
+      expect(vuln.references[0]!.type).toMatch(/ADVISORY|WEB/);
     });
 
     it('should extract published date', () => {
@@ -151,7 +151,7 @@ describe('OSV Security Database Client', () => {
       };
 
       expect(vuln.severity).toHaveLength(1);
-      expect(vuln.severity[0].type).toBe('CVSS_V3');
+      expect(vuln.severity[0]!.type).toBe('CVSS_V3');
     });
 
     it('should support multiple severity types', () => {
@@ -210,7 +210,7 @@ describe('OSV Security Database Client', () => {
       };
 
       expect(response.vulns).toHaveLength(1);
-      expect(response.vulns[0].id).toMatch(/^GHSA-/);
+      expect(response.vulns[0]!.id).toMatch(/^GHSA-/);
     });
 
     it('should parse multiple vulnerabilities', () => {

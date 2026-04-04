@@ -5,8 +5,7 @@
  * Focuses on error handling, retry logic, and response parsing.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { logger } from '../../../src/logger.js';
+import { describe, it, expect, vi } from 'vitest';
 
 describe('NVD Integration', () => {
   describe('API response handling', () => {
@@ -36,7 +35,7 @@ describe('NVD Integration', () => {
       };
 
       expect(mockResponse.vulnerabilities).toHaveLength(1);
-      expect(mockResponse.vulnerabilities[0].cve.metrics.cvssMetricV31[0].cvssData.baseScore).toBe(9.8);
+      expect(mockResponse.vulnerabilities[0]!.cve.metrics.cvssMetricV31[0]!.cvssData.baseScore).toBe(9.8);
     });
 
     it('should parse multiple CVEs', async () => {
@@ -106,7 +105,7 @@ describe('NVD Integration', () => {
       const intervals = [];
 
       for (let i = 1; i < timestamps.length; i++) {
-        intervals.push(timestamps[i] - timestamps[i - 1]);
+        intervals.push(timestamps[i]! - timestamps[i - 1]!);
       }
 
       expect(intervals.every(i => i >= 6000)).toBe(true);

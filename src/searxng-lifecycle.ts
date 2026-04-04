@@ -56,6 +56,14 @@ export interface SearxngLifecycleConfig {
   getActiveConnectionCount?: () => number;
 }
 
+type ResolvedConfig = {
+  extensionDir: string;
+  logger: ILogger;
+  manager: DockerSearxngManager | null;
+  proxyUrl: string | undefined;
+  getActiveConnectionCount: (() => number) | undefined;
+};
+
 /**
  * Manager interface for dependency injection
  */
@@ -73,7 +81,7 @@ export interface ISearxngLifecycleManager {
 /**
  * Default configuration
  */
-const DEFAULT_CONFIG: Required<SearxngLifecycleConfig> = {
+const DEFAULT_CONFIG: ResolvedConfig = {
   extensionDir: EXTENSION_DIR,
   logger,
   manager: null,
@@ -97,10 +105,10 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
     url: '',
   };
   private statusCallbacks: StatusCallback[] = [];
-  private readonly config: Required<SearxngLifecycleConfig>;
+  private readonly config: ResolvedConfig;
 
   constructor(config: Partial<SearxngLifecycleConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...DEFAULT_CONFIG, ...config } as ResolvedConfig;
     // Set manager immediately if provided (for testing)
     if (this.config.manager) {
       this.manager = this.config.manager;

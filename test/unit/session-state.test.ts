@@ -43,7 +43,7 @@ describe('session-state', () => {
 
   describe('endResearchSession', () => {
     it('should clear current session', () => {
-      const sessionId = startResearchSession();
+      startResearchSession();
       endResearchSession();
       expect(getCurrentSessionId()).toBeNull();
       expect(getFailedResearchers()).toEqual([]);

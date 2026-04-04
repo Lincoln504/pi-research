@@ -342,7 +342,6 @@ describe('CISA Known Exploited Vulnerabilities Client', () => {
     });
 
     it('should calculate days until due date', () => {
-      const dateAdded = new Date('2024-01-15');
       const dueDate = new Date('2024-02-15');
 
       const daysUntilDue = Math.ceil(

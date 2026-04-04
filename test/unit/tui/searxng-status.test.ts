@@ -5,8 +5,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { Theme } from '@mariozechner/pi-coding-agent';
 import type { SearxngStatus } from '../../../src/searxng-lifecycle';
 import { getCapturedTui, createSearxngStatusComponent } from '../../../src/tui/searxng-status';
+
+const mockTheme = {} as unknown as Theme;
 
 /**
  * Create a mock SearXNG status
@@ -148,7 +151,7 @@ describe('SearXNG Status Component', () => {
       const componentFn = createSearxngStatusComponent(status);
 
       expect(() => {
-        componentFn({}, { colors: {} });
+        componentFn({}, mockTheme);
       }).not.toThrow();
     });
 
@@ -156,7 +159,7 @@ describe('SearXNG Status Component', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
 
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       expect(typeof component.render).toBe('function');
     });
@@ -165,7 +168,7 @@ describe('SearXNG Status Component', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
 
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       expect(typeof component.invalidate).toBe('function');
     });
@@ -174,7 +177,7 @@ describe('SearXNG Status Component', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
 
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       if ('dispose' in component) {
         expect(typeof component.dispose).toBe('function');
@@ -222,7 +225,7 @@ describe('SearXNG Status Component', () => {
 
       for (const s of statuses) {
         status = s;
-        const component = componentFn({}, { colors: {} });
+        const component = componentFn({}, mockTheme);
         expect(typeof component.render).toBe('function');
       }
     });
@@ -246,7 +249,7 @@ describe('SearXNG Status Component', () => {
     it('should invalidate component', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       expect(() => {
         component.invalidate();
@@ -256,7 +259,7 @@ describe('SearXNG Status Component', () => {
     it('should support multiple invalidate calls', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       expect(() => {
         component.invalidate();
@@ -300,11 +303,11 @@ describe('SearXNG Status Component', () => {
     it('should handle empty component creation and immediate disposal', () => {
       const status = createMockStatus();
       const componentFn = createSearxngStatusComponent(status);
-      const component = componentFn({}, { colors: {} });
+      const component = componentFn({}, mockTheme);
 
       if ('dispose' in component && component.dispose) {
         expect(() => {
-          component.dispose();
+          component.dispose!();
         }).not.toThrow();
       }
     });
@@ -318,9 +321,9 @@ describe('SearXNG Status Component', () => {
       const componentFn2 = createSearxngStatusComponent(status2);
       const componentFn3 = createSearxngStatusComponent(status3);
 
-      const component1 = componentFn1({}, { colors: {} });
-      const component2 = componentFn2({}, { colors: {} });
-      const component3 = componentFn3({}, { colors: {} });
+      const component1 = componentFn1({}, mockTheme);
+      const component2 = componentFn2({}, mockTheme);
+      const component3 = componentFn3({}, mockTheme);
 
       expect(typeof component1.render).toBe('function');
       expect(typeof component2.render).toBe('function');

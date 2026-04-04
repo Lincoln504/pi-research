@@ -89,7 +89,7 @@ describe('GitHub Security Advisories Client', () => {
       };
 
       expect(advisory.vulnerablePackages).toHaveLength(1);
-      expect(advisory.vulnerablePackages[0].name).toBe('lodash');
+      expect(advisory.vulnerablePackages[0]!.name).toBe('lodash');
     });
 
     it('should include CVE reference', () => {
@@ -121,7 +121,7 @@ describe('GitHub Security Advisories Client', () => {
       };
 
       expect(advisory.references).toHaveLength(2);
-      expect(advisory.references[0].url).toMatch(/^https:\/\//);
+      expect(advisory.references[0]!.url).toMatch(/^https:\/\//);
     });
   });
 
@@ -284,7 +284,7 @@ describe('GitHub Security Advisories Client', () => {
       };
 
       expect(error.errors).toHaveLength(1);
-      expect(error.errors[0].message).toBeDefined();
+      expect(error.errors[0]!.message).toBeDefined();
     });
   });
 

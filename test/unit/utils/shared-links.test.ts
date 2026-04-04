@@ -5,7 +5,7 @@
  * File system operations use /tmp directory for testing.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -64,8 +64,8 @@ describe('shared-links', () => {
       const sessionId = generateSessionId('test');
       const parts = sessionId.split('-');
       expect(parts).toHaveLength(2);
-      expect(parts[1]).toHaveLength(4);
-      expect(parts[1]).toMatch(/^[a-f0-9]{4}$/);
+      expect(parts[1]!).toHaveLength(4);
+      expect(parts[1]!).toMatch(/^[a-f0-9]{4}$/);
     });
   });
 
@@ -84,8 +84,8 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(2);
-        expect(result.cited[0].url).toBe('https://example.com/article1');
-        expect(result.cited[0].description).toBe('Great article about topic');
+        expect(result.cited[0]!.url).toBe('https://example.com/article1');
+        expect(result.cited[0]!.description).toBe('Great article about topic');
         expect(result.candidates).toEqual([]);
       });
 
@@ -97,8 +97,8 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.candidates).toHaveLength(2);
-        expect(result.candidates[0].url).toBe('https://example.com/candidate1');
-        expect(result.candidates[0].reason).toBe('Interesting but not used');
+        expect(result.candidates[0]!.url).toBe('https://example.com/candidate1');
+        expect(result.candidates[0]!.reason).toBe('Interesting but not used');
         expect(result.cited).toEqual([]);
       });
 
@@ -115,8 +115,8 @@ describe('shared-links', () => {
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(2);
         expect(result.candidates).toHaveLength(2);
-        expect(result.cited[0].url).toBe('https://example.com/article1');
-        expect(result.candidates[0].url).toBe('https://example.com/candidate1');
+        expect(result.cited[0]!.url).toBe('https://example.com/article1');
+        expect(result.candidates[0]!.url).toBe('https://example.com/candidate1');
       });
 
       it('should parse links without descriptions', () => {
@@ -127,8 +127,8 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(2);
-        expect(result.cited[0].description).toBe('');
-        expect(result.cited[1].description).toBe('');
+        expect(result.cited[0]!.description).toBe('');
+        expect(result.cited[1]!.description).toBe('');
       });
 
       it('should parse candidates without reasons', () => {
@@ -139,8 +139,8 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.candidates).toHaveLength(2);
-        expect(result.candidates[0].reason).toBe('No reason provided');
-        expect(result.candidates[1].reason).toBe('No reason provided');
+        expect(result.candidates[0]!.reason).toBe('No reason provided');
+        expect(result.candidates[1]!.reason).toBe('No reason provided');
       });
 
       it('should handle multiple links per section', () => {
@@ -168,7 +168,7 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(2);
-        expect(result.cited[0].url).toBe('https://example.com/article1');
+        expect(result.cited[0]!.url).toBe('https://example.com/article1');
       });
 
       it('should parse alternative section header formats', () => {
@@ -203,7 +203,7 @@ describe('shared-links', () => {
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(1);
-        expect(result.cited[0].url).toBe('https://example.com/article1');
+        expect(result.cited[0]!.url).toBe('https://example.com/article1');
       });
 
       it('should handle empty bullet points', () => {
@@ -245,7 +245,7 @@ Another paragraph
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(1);
-        expect(result.cited[0].url).toBe(longUrl);
+        expect(result.cited[0]!.url).toBe(longUrl);
       });
 
       it('should handle long description', () => {
@@ -256,8 +256,8 @@ Another paragraph
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(1);
-        expect(result.cited[0].description).toContain('Description');
-        expect(result.cited[0].description.length).toBeGreaterThan(100);
+        expect(result.cited[0]!.description).toContain('Description');
+        expect(result.cited[0]!.description.length).toBeGreaterThan(100);
       });
 
       it('should handle special characters in URLs', () => {
@@ -278,7 +278,7 @@ Another paragraph
 `;
         const result = parseResearcherLinks(response);
         expect(result.cited).toHaveLength(2);
-        expect(result.cited[0].url).toContain('日本語');
+        expect(result.cited[0]!.url).toContain('日本語');
       });
 
       it('should handle mixed markdown formatting', () => {
@@ -315,8 +315,8 @@ More content here...
       const responses = new Map([['1:1', response]]);
       const pool = buildSharedLinksPool(responses);
       expect(pool).toHaveProperty('1:1');
-      expect(pool['1:1'].cited).toHaveLength(1);
-      expect(pool['1:1'].cited[0].url).toBe('https://example.com/article1');
+      expect(pool['1:1']!.cited).toHaveLength(1);
+      expect(pool['1:1']!.cited[0]!.url).toBe('https://example.com/article1');
     });
 
     it('should build pool from multiple responses', () => {
@@ -335,8 +335,8 @@ More content here...
       const pool = buildSharedLinksPool(responses);
       expect(pool).toHaveProperty('1:1');
       expect(pool).toHaveProperty('2:1');
-      expect(pool['1:1'].cited).toHaveLength(1);
-      expect(pool['2:1'].cited).toHaveLength(1);
+      expect(pool['1:1']!.cited).toHaveLength(1);
+      expect(pool['2:1']!.cited).toHaveLength(1);
     });
 
     it('should preserve both cited and candidates', () => {
@@ -349,8 +349,8 @@ More content here...
 `;
       const responses = new Map([['1:1', response]]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool['1:1'].cited).toHaveLength(1);
-      expect(pool['1:1'].candidates).toHaveLength(1);
+      expect(pool['1:1']!.cited).toHaveLength(1);
+      expect(pool['1:1']!.candidates).toHaveLength(1);
     });
 
     it('should handle empty responses', () => {
@@ -359,10 +359,10 @@ More content here...
         ['2:1', 'No links here'],
       ]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool['1:1'].cited).toEqual([]);
-      expect(pool['1:1'].candidates).toEqual([]);
-      expect(pool['2:1'].cited).toEqual([]);
-      expect(pool['2:1'].candidates).toEqual([]);
+      expect(pool['1:1']!.cited).toEqual([]);
+      expect(pool['1:1']!.candidates).toEqual([]);
+      expect(pool['2:1']!.cited).toEqual([]);
+      expect(pool['2:1']!.candidates).toEqual([]);
     });
   });
 

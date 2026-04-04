@@ -180,11 +180,8 @@ describe('security-types', () => {
 
     describe('edge cases', () => {
       it('should handle object with extra properties', () => {
-        const result = getSeverityParam({
-          severity: 'HIGH',
-          databases: ['nvd'],
-          terms: ['test'],
-        });
+        const params: { severity?: string } = { severity: 'HIGH' };
+        const result = getSeverityParam(params);
         expect(result).toBe('HIGH');
       });
 

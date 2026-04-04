@@ -65,10 +65,8 @@ describe('Web Research Retry Utils', () => {
 
     it('should support addEventListener for abort', () => {
       const signal = createTimeoutSignal(100);
-      let called = false;
-
       signal.addEventListener('abort', () => {
-        called = true;
+        // intentionally empty — just verifying addEventListener exists
       });
 
       expect(typeof signal.addEventListener).toBe('function');
@@ -138,19 +136,17 @@ describe('Web Research Retry Utils', () => {
         throw new TypeError('type error');
       };
 
-      // Test that the function accepts error types
-      expect(() => {
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 });
-      }).not.toThrow();
+      await expect(
+        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 })
+      ).rejects.toThrow(TypeError);
     });
 
     it('should handle various rejection types', async () => {
       const fn = async () => Promise.reject(new Error('error'));
 
-      // Test that the function can handle rejections
-      expect(() => {
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 });
-      }).not.toThrow();
+      await expect(
+        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 })
+      ).rejects.toThrow('error');
     });
 
     it('should accept custom retry options', async () => {

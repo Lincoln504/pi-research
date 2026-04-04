@@ -5,7 +5,7 @@
  * Manages test container lifecycle.
  */
 
-import { beforeAll, afterAll } from 'vitest';
+import { afterAll } from 'vitest';
 
 // Global test container references
 const containers = new Map<string, any>();

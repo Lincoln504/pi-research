@@ -4,7 +4,7 @@
  * Tests tool usage tracking and limit enforcement.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 describe('tool-usage-tracker', () => {
   interface ToolLimits {

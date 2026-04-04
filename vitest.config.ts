@@ -22,7 +22,7 @@ export default defineConfig({
         '**/index.ts',
         'test/',
       ],
-      all: true,
+      reportOnFailure: true,
     },
     testTimeout: 60000,
     hookTimeout: 30000,

@@ -5,7 +5,7 @@
  * Focuses on state initialization, mode switching, and agent management.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import type { SearxngStatus } from '../../../src/searxng-lifecycle';
 import {
   createPanel,
@@ -14,9 +14,7 @@ import {
   setAgentFlash,
   addAgent,
   createInitialPanelState,
-  type PanelState,
   type SimplePanelState,
-  type FullPanelState,
 } from '../../../src/tui/panel-factory';
 
 /**
@@ -290,7 +288,7 @@ describe('TUI Panel Factory', () => {
       const tui = getCapturedTui();
 
       if (tui && 'requestRender' in tui && tui.requestRender) {
-        expect(() => tui.requestRender()).not.toThrow();
+        expect(() => tui.requestRender!()).not.toThrow();
       }
     });
   });

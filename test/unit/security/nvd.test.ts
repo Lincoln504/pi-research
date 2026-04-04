@@ -30,7 +30,7 @@ describe('NVD Security Database Client', () => {
     it('should support includeExploited flag', () => {
       const options1 = { includeExploited: true };
       const options2 = { includeExploited: false };
-      const options3 = {};
+      const options3: { includeExploited?: boolean } = {};
 
       expect(options1.includeExploited).toBe(true);
       expect(options2.includeExploited).toBe(false);
@@ -167,7 +167,7 @@ describe('NVD Security Database Client', () => {
       };
 
       expect(response.vulnerabilities).toHaveLength(1);
-      expect(response.vulnerabilities[0].cve.cveId).toMatch(/^CVE-/);
+      expect(response.vulnerabilities[0]!.cve.cveId).toMatch(/^CVE-/);
     });
 
     it('should handle empty results', () => {
@@ -237,7 +237,7 @@ describe('NVD Security Database Client', () => {
       };
 
       expect(vulnerability.configurations).toHaveLength(1);
-      expect(vulnerability.configurations[0].nodes[0].cpeMatch).toHaveLength(1);
+      expect(vulnerability.configurations[0]!.nodes[0]!.cpeMatch).toHaveLength(1);
     });
 
     it('should extract reference links', () => {
@@ -250,7 +250,7 @@ describe('NVD Security Database Client', () => {
       };
 
       expect(vulnerability.references).toHaveLength(2);
-      expect(vulnerability.references[0].url).toMatch(/^https:\/\//);
+      expect(vulnerability.references[0]!.url).toMatch(/^https:\/\//);
     });
   });
 

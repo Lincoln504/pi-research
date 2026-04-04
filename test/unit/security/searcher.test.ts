@@ -5,24 +5,23 @@
  * Uses mock implementations for all API clients to test without real API calls.
  */
 
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   SecuritySearcher,
   createSecuritySearcher,
   getSecuritySearcher,
   setSecuritySearcher,
   resetSecuritySearcher,
-  type SecuritySearchParams,
-  type SecuritySearchResult,
   type SecuritySearcherConfig,
-  type INVDClient,
-  type ICisaKevClient,
-  type IGitHubAdvisoriesClient,
-  type IOSVClient,
   searchSecurityDatabases,
   getDatabaseInfo,
 } from '../../../src/security/index';
 import type {
+  SecuritySearchParams,
+  INVDClient,
+  ICisaKevClient,
+  IGitHubAdvisoriesClient,
+  IOSVClient,
   Vulnerability,
   Advisory,
   NVDResult,
@@ -33,7 +32,7 @@ import type {
   CisaKevSearchOptions,
   GitHubSearchOptions,
   OSVSearchOptions,
-} from '../../src/security/types';
+} from '../../../src/security/types';
 
 // Mock implementations of API clients
 
@@ -288,10 +287,10 @@ describe('SecuritySearcher', () => {
 
       const calls = mockNVD.getSearchCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].terms).toEqual(['test']);
-      expect(calls[0].options?.severity).toBe('HIGH');
-      expect(calls[0].options?.maxResults).toBe(10);
-      expect(calls[0].options?.includeExploited).toBe(true);
+      expect(calls[0]!.terms).toEqual(['test']);
+      expect(calls[0]!.options?.severity).toBe('HIGH');
+      expect(calls[0]!.options?.maxResults).toBe(10);
+      expect(calls[0]!.options?.includeExploited).toBe(true);
     });
 
     it('should handle NVD errors', async () => {
@@ -423,9 +422,9 @@ describe('SecuritySearcher', () => {
 
       const calls = mockGitHub.getSearchCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].options?.ecosystem).toBe('npm');
-      expect(calls[0].options?.maxResults).toBe(10);
-      expect(calls[0].options?.repo).toBe('owner/repo');
+      expect(calls[0]!.options?.ecosystem).toBe('npm');
+      expect(calls[0]!.options?.maxResults).toBe(10);
+      expect(calls[0]!.options?.repo).toBe('owner/repo');
     });
   });
 
@@ -471,8 +470,8 @@ describe('SecuritySearcher', () => {
 
       const calls = mockOSV.getSearchCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].options?.ecosystem).toBe('PyPI');
-      expect(calls[0].options?.maxResults).toBe(10);
+      expect(calls[0]!.options?.ecosystem).toBe('PyPI');
+      expect(calls[0]!.options?.maxResults).toBe(10);
     });
   });
 
@@ -582,7 +581,7 @@ describe('SecuritySearcher', () => {
       await searcher.search(params);
 
       const calls = mockNVD.getSearchCalls();
-      expect(calls[0].options?.severity).toBe('HIGH');
+      expect(calls[0]!.options?.severity).toBe('HIGH');
     });
 
     it('should ignore invalid severity', async () => {
@@ -600,7 +599,7 @@ describe('SecuritySearcher', () => {
       await searcher.search(params);
 
       const calls = mockNVD.getSearchCalls();
-      expect(calls[0].options?.severity).toBeUndefined();
+      expect(calls[0]!.options?.severity).toBeUndefined();
     });
   });
 
@@ -733,10 +732,10 @@ describe('backward compatibility', () => {
       const info = getDatabaseInfo();
 
       expect(info.databases).toHaveLength(4);
-      expect(info.databases[0].id).toBe('nvd');
-      expect(info.databases[1].id).toBe('cisa_kev');
-      expect(info.databases[2].id).toBe('github');
-      expect(info.databases[3].id).toBe('osv');
+      expect(info.databases[0]!.id).toBe('nvd');
+      expect(info.databases[1]!.id).toBe('cisa_kev');
+      expect(info.databases[2]!.id).toBe('github');
+      expect(info.databases[3]!.id).toBe('osv');
     });
 
     it('should include required fields', () => {
@@ -769,8 +768,8 @@ describe('client interfaces', () => {
 
       const calls = client.getSearchCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].terms).toEqual(['test']);
-      expect(calls[0].options?.severity).toBe('HIGH');
+      expect(calls[0]!.terms).toEqual(['test']);
+      expect(calls[0]!.options?.severity).toBe('HIGH');
     });
 
     it('should return mock results', async () => {

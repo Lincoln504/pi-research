@@ -9,7 +9,6 @@
 import type {
   SecuritySearchParams,
   SecuritySearchResult,
-  SecurityDatabaseResults,
   INVDClient,
   ICisaKevClient,
   IGitHubAdvisoriesClient,
@@ -18,6 +17,10 @@ import type {
   CisaKevSearchOptions,
   GitHubSearchOptions,
   OSVSearchOptions,
+  NVDResult,
+  CisaKevResult,
+  GitHubResult,
+  OSVResult,
 } from './types.ts';
 import { searchNVD } from './nvd.ts';
 import { searchCisaKev } from './cisa-kev.ts';
@@ -115,7 +118,7 @@ export class SecuritySearcher {
    */
   async search(params: SecuritySearchParams): Promise<SecuritySearchResult> {
     const startTime = Date.now();
-    const results: SecurityDatabaseResults = {};
+    const results: { nvd?: NVDResult; cisa_kev?: CisaKevResult; github?: GitHubResult; osv?: OSVResult } = {};
     const errors: string[] = [];
     let totalVulnerabilities = 0;
 
