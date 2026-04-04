@@ -20,6 +20,23 @@ export interface SearxngContainer {
   stop: () => Promise<void>;
 }
 
+export interface SearchResults {
+  query: string;
+  results: SearchResult[];
+  answers?: {
+    answer: string;
+    url: string;
+  }[];
+}
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  engine?: string;
+  score?: number;
+}
+
 /**
  * Get default Searxng container configuration
  */
@@ -57,7 +74,6 @@ export async function startSearxngContainer(
   const url = `http://${host}:${port}`;
 
   console.log(`Searxng container started at ${url}`);
-  console.log(`Container logs:`, await startedContainer.logs());
 
   return {
     container: startedContainer,
@@ -72,57 +88,88 @@ export async function startSearxngContainer(
 }
 
 /**
- * Wait for Searxng to be ready
+ * Perform a search query against Searxng using GET request
  *
  * @param url The Searxng URL
- * @param maxAttempts Maximum number of attempts (default: 60)
- * @param intervalMs Interval between attempts in milliseconds (default: 2000)
+ * @param query Search query string
+ * @param options Optional search parameters
+ * @returns Promise resolving to search results
+ */
+export async function search(
+  url: string,
+  query: string,
+  options: {
+    format?: 'json' | 'csv' | 'rss';
+    language?: string;
+    time_range?: 'day' | 'week' | 'month' | 'year';
+    safesearch?: number;
+    categories?: string[];
+    pageno?: number;
+  } = {}
+): Promise<SearchResults> {
+  // Build URL with query parameters (using GET as per SearXNG API)
+  const searchUrl = new URL(`${url}/search`);
+  searchUrl.searchParams.append('q', query);
+  searchUrl.searchParams.append('format', options.format ?? 'json');
+
+  if (options.language) {
+    searchUrl.searchParams.append('language', options.language);
+  }
+  if (options.time_range) {
+    searchUrl.searchParams.append('time_range', options.time_range);
+  }
+  if (options.safesearch !== undefined) {
+    searchUrl.searchParams.append('safesearch', options.safesearch.toString());
+  }
+  if (options.categories) {
+    searchUrl.searchParams.append('categories', options.categories.join(','));
+  }
+  if (options.pageno !== undefined) {
+    searchUrl.searchParams.append('pageno', options.pageno.toString());
+  }
+
+  const response = await fetch(searchUrl.toString(), {
+    method: 'GET',
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Searxng search failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data as SearchResults;
+}
+
+/**
+ * Check if Searxng is ready by attempting a simple search
+ *
+ * @param url The Searxng URL
+ * @param maxAttempts Maximum number of attempts (default: 30)
+ * @param intervalMs Interval between attempts in milliseconds (default: 1000)
  * @returns Promise that resolves when Searxng is ready
  */
 export async function waitForSearxngReady(
   url: string,
-  maxAttempts: number = 60,
-  intervalMs: number = 2000
+  maxAttempts: number = 30,
+  intervalMs: number = 1000
 ): Promise<void> {
-  const searchUrl = `${url}/search`;
-
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      // Try GET request first to check if server is up
+      // Try a simple GET request to the root
       const getResponse = await fetch(url, {
         method: 'GET',
         signal: AbortSignal.timeout(5000),
       });
 
       if (getResponse.ok) {
-        console.log(`Searxng server is responding (GET) after ${attempt + 1} attempt(s)`);
-      }
-
-      // Try POST request to search endpoint
-      const response = await fetch(searchUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          q: 'test',
-          format: 'json',
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (response.ok) {
-        console.log(`Searxng search endpoint is ready after ${attempt + 1} attempt(s)`);
+        console.log(`Searxng is responding (GET) after ${attempt + 1} attempt(s)`);
         return;
-      } else {
-        console.log(`Searxng returned status ${response.status} on attempt ${attempt + 1}/${maxAttempts}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       if (attempt === maxAttempts - 1) {
-        throw new Error(`Searxng not ready after ${maxAttempts} attempts: ${errorMessage}`);
+        throw new Error(`Searxng not ready after ${maxAttempts} attempts: ${error}`);
       }
-      console.log(`Waiting for Searxng... (${attempt + 1}/${maxAttempts}): ${errorMessage}`);
     }
 
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -132,34 +179,21 @@ export async function waitForSearxngReady(
 }
 
 /**
- * Perform a test search to verify Searxng is working
+ * Get search engines available in Searxng
  *
  * @param url The Searxng URL
- * @returns Promise resolving to search results
+ * @returns Promise resolving to list of available engines
  */
-export async function testSearch(url: string): Promise<any> {
-  const searchUrl = `${url}/search`;
-
-  console.log(`Performing test search at ${searchUrl}`);
-
-  const response = await fetch(searchUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      q: 'test search',
-      format: 'json',
-    }),
+export async function getEngines(url: string): Promise<any[]> {
+  const response = await fetch(`${url}/config`, {
+    method: 'GET',
     signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
-    throw new Error(`Searxng search failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Failed to get Searxng config: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
-  console.log('Searxng test search successful:', JSON.stringify(data, null, 2));
-
-  return data;
+  const config = await response.json();
+  return config.engines || [];
 }
