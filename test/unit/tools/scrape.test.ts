@@ -26,74 +26,46 @@ describe('tools/scrape', () => {
     },
   } as any);
 
-  describe('createScrapeTool', () => {
-    it('should create tool with correct name', () => {
+  describe('Tool Definition', () => {
+    it('should create tool with correct metadata and guidelines', () => {
       const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
+
+      // Metadata
       expect(tool.name).toBe('scrape');
-    });
-
-    it('should create tool with correct label', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.label).toBe('Scrape');
-    });
-
-    it('should create tool with correct description', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.description).toContain('2-layer');
       expect(tool.description).toContain('Playwright');
       expect(tool.description).toContain('markdown');
-    });
 
-    it('should have prompt snippet', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
+      // Prompt snippet
       expect(tool.promptSnippet).toBeDefined();
       expect(tool.promptSnippet!.toLowerCase()).toContain('scrape');
       expect(tool.promptSnippet!.toLowerCase()).toContain('markdown');
-    });
 
-    it('should have prompt guidelines', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.promptGuidelines).toBeDefined();
+      // Guidelines
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
       expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
-    });
-
-    it('should have prompt guidelines mentioning fetch and Playwright', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('fetch');
       expect(guidelines).toContain('Playwright');
+      expect(guidelines).toContain('maxConcurrency');
     });
 
-    it('should have prompt guidelines mentioning maxConcurrency', () => {
+    it('should have execute function', () => {
       const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines!.join(' ');
-      expect(guidelines).toContain('maxConcurrency');
+      expect(typeof tool.execute).toBe('function');
     });
   });
 
-  describe('parameters', () => {
-    it('should require urls parameter', () => {
+  describe('Parameters', () => {
+    it('should have urls and maxConcurrency parameters properly defined', () => {
       const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters).toBeDefined();
-      expect((tool.parameters as any).properties).toHaveProperty('urls');
-    });
+      const props = (tool.parameters as any).properties;
 
-    it('should have urls as array of strings', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const urlsParam = (tool.parameters as any).properties.urls;
-      expect(urlsParam).toBeDefined();
-    });
-
-    it('should have optional maxConcurrency parameter', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('maxConcurrency');
-    });
-
-    it('should have maxConcurrency with correct defaults and constraints', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const maxConcurrencyParam = (tool.parameters as any).properties.maxConcurrency;
-      expect(maxConcurrencyParam).toBeDefined();
+      expect(props).toHaveProperty('urls');
+      expect(props).toHaveProperty('maxConcurrency');
+      expect(props.urls).toBeDefined();
+      expect(props.maxConcurrency).toBeDefined();
     });
   });
 
@@ -249,7 +221,7 @@ describe('tools/scrape', () => {
   });
 
   describe('execute - result formatting', () => {
-    it('should return text content', async () => {
+    it('should format results with URL, layer info, and markdown content', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.js');
       vi.mocked(scrapeSingle).mockResolvedValue({
         url: 'https://example.com',
@@ -268,49 +240,11 @@ describe('tools/scrape', () => {
       );
 
       expect(result.content[0]?.type).toBe('text');
-      expect((result.content[0] as any)?.text).toBeDefined();
-    });
-
-    it('should include URL in output', async () => {
-      const { scrapeSingle } = await import('../../../src/web-research/scrapers.js');
-      vi.mocked(scrapeSingle).mockResolvedValue({
-        url: 'https://example.com',
-        source: 'fetch',
-        layer: 'layer1',
-        markdown: '# Test',
-      });
-
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { urls: ['https://example.com'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('https://example.com');
-    });
-
-    it('should include layer information', async () => {
-      const { scrapeSingle } = await import('../../../src/web-research/scrapers.js');
-      vi.mocked(scrapeSingle).mockResolvedValue({
-        url: 'https://example.com',
-        source: 'fetch',
-        layer: 'layer1',
-        markdown: '# Test',
-      });
-
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { urls: ['https://example.com'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('layer1');
+      const text = (result.content[0] as any)?.text;
+      expect(text).toBeDefined();
+      expect(text).toContain('https://example.com');
+      expect(text).toContain('layer1');
+      expect(text).toContain('# Test');
     });
 
     it('should include character count', async () => {
@@ -380,25 +314,6 @@ describe('tools/scrape', () => {
       expect((result.content[0] as any)?.text).toContain('Failed Scrapes');
     });
 
-    it.skip('should include failed URLs in table', async () => {
-      const { scrape } = await import('../../../src/web-research/scrapers.js');
-      vi.mocked(scrape).mockResolvedValue([
-        { url: 'https://failed.com', source: 'failed', markdown: '', error: 'Timeout error' },
-      ]);
-
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { urls: ['https://failed.com'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('https://failed.com');
-      expect((result.content[0] as any)?.text).toContain('Timeout error');
-      expect((result.content[0] as any)?.text).toContain('Failed Scrapes');
-    });
   });
 
   describe('execute - details object', () => {

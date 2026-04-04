@@ -20,72 +20,44 @@ describe('tools/search', () => {
     },
   } as any);
 
-  describe('createSearchTool', () => {
-    it('should create tool with correct name', () => {
+  describe('Tool Definition', () => {
+    it('should create tool with correct metadata and guidelines', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
+
+      // Metadata
       expect(tool.name).toBe('search');
-    });
-
-    it('should create tool with correct label', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
       expect(tool.label).toBe('Search');
-    });
-
-    it('should create tool with correct description', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
       expect(tool.description).toContain('SearXNG');
       expect(tool.description).toContain('URLs, titles, and snippets');
-    });
 
-    it('should have prompt snippet', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      // Prompt snippet
       expect(tool.promptSnippet).toBeDefined();
       expect(tool.promptSnippet!.toLowerCase()).toContain('search');
       expect(tool.promptSnippet!).toContain('snippets');
-    });
 
-    it('should have prompt guidelines', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
-      expect(tool.promptGuidelines).toBeDefined();
+      // Guidelines
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
       expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
-    });
-
-    it('should have prompt guidelines mentioning scrape', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
       const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('scrape');
+      expect(guidelines).toContain('security_search');
     });
 
-    it('should have prompt guidelines mentioning security_search', () => {
+    it('should have execute function', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines!.join(' ');
-      expect(guidelines).toContain('security_search');
+      expect(typeof tool.execute).toBe('function');
     });
   });
 
-  describe('parameters', () => {
-    it('should require queries parameter', () => {
+  describe('Parameters', () => {
+    it('should have queries and maxResults parameters properly defined', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      expect(tool.parameters).toBeDefined();
-      expect((tool.parameters as any).properties).toHaveProperty('queries');
-    });
+      const props = (tool.parameters as any).properties;
 
-    it('should have queries as array of strings with minItems: 1', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const queriesParam = (tool.parameters as any).properties.queries;
-      expect(queriesParam).toBeDefined();
-    });
-
-    it('should have optional maxResults parameter', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('maxResults');
-    });
-
-    it('should have maxResults with correct defaults and constraints', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const maxResultsParam = (tool.parameters as any).properties.maxResults;
-      expect(maxResultsParam).toBeDefined();
+      expect(props).toHaveProperty('queries');
+      expect(props).toHaveProperty('maxResults');
+      expect(props.queries).toBeDefined();
+      expect(props.maxResults).toBeDefined();
     });
   });
 

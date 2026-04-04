@@ -21,98 +21,58 @@ describe('tools/security', () => {
   } as any);
 
   describe('createSecuritySearchTool', () => {
-    it('should create tool with correct name', () => {
+    it('should create tool with correct metadata and guidelines', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
+
+      // Metadata
       expect(tool.name).toBe('security_search');
-    });
-
-    it('should create tool with correct label', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.label).toBe('Security Search');
-    });
-
-    it('should create tool with correct description', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.description).toContain('security vulnerability');
       expect(tool.description).toContain('NVD');
       expect(tool.description).toContain('CISA');
       expect(tool.description).toContain('GitHub');
       expect(tool.description).toContain('OSV');
-    });
 
-    it('should have prompt snippet', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
+      // Prompt snippet
       expect(tool.promptSnippet).toBeDefined();
       expect(tool.promptSnippet!.toLowerCase()).toContain('security');
       expect(tool.promptSnippet!.toLowerCase()).toContain('cve');
-    });
 
-    it('should have prompt guidelines', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.promptGuidelines).toBeDefined();
+      // Guidelines
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
       expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
-    });
-
-    it('should have prompt guidelines mentioning NVD, CISA, GitHub, OSV', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('NVD');
       expect(guidelines).toContain('CISA');
       expect(guidelines).toContain('GitHub');
       expect(guidelines).toContain('OSV');
-    });
-
-    it('should have prompt guidelines mentioning filters', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('severity');
       expect(guidelines).toContain('CVE ID');
       expect(guidelines).toContain('package');
     });
+
+    it('should have execute function', () => {
+      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
+      expect(typeof tool.execute).toBe('function');
+    });
   });
 
   describe('parameters', () => {
-    it('should require terms parameter', () => {
+    it('should have all required and optional parameters properly defined', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters).toBeDefined();
-      expect((tool.parameters as any).properties).toHaveProperty('terms');
-    });
+      const props = (tool.parameters as any).properties;
 
-    it('should have terms as array of strings', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const termsParam = (tool.parameters as any).properties.terms;
-      expect(termsParam).toBeDefined();
-    });
+      // Required parameters
+      expect(props).toHaveProperty('terms');
+      expect(props.terms).toBeDefined();
 
-    it('should have optional databases parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('databases');
-    });
-
-    it('should have optional severity parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('severity');
-    });
-
-    it('should have optional maxResults parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('maxResults');
-    });
-
-    it('should have optional includeExploited parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('includeExploited');
-    });
-
-    it('should have optional ecosystem parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('ecosystem');
-    });
-
-    it('should have optional githubRepo parameter', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect((tool.parameters as any).properties).toHaveProperty('githubRepo');
+      // Optional parameters
+      expect(props).toHaveProperty('databases');
+      expect(props).toHaveProperty('severity');
+      expect(props).toHaveProperty('maxResults');
+      expect(props).toHaveProperty('includeExploited');
+      expect(props).toHaveProperty('ecosystem');
+      expect(props).toHaveProperty('githubRepo');
     });
   });
 
