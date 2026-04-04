@@ -71,7 +71,7 @@ outgoing:
   extra_proxy_timeout: 10
   proxies:
     all://:
-      - socks5://127.0.0.1:9050
+      - socks5://172.19.0.1:9050
 doi_resolvers:
   oadoi.org: https://oadoi.org/
   doi.org: https://doi.org/

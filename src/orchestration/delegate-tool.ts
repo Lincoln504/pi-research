@@ -28,6 +28,7 @@ import {
   recordResearcherFailure,
   shouldStopResearch,
   getResearchStopMessage,
+  getFailedResearchers,
 } from '../utils/session-state.js';
 
 export interface DelegateToolOptions {
@@ -58,21 +59,27 @@ function withTimeout<T>(
   const combinedSignal = signal
     ? AbortSignal.any([timeoutSignal, signal])
     : timeoutSignal;
+
+  logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
+
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => {
       // Timeout handler
       const timeoutId = setTimeout(() => {
+        logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
         timeoutController.abort();
         reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`));
       }, timeoutMs);
 
       // Abort handler
       if (combinedSignal.aborted) {
+        logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
         clearTimeout(timeoutId);
         reject(new Error(`Researcher ${label} cancelled`));
       } else {
         combinedSignal.addEventListener('abort', () => {
+          logger.error(`[withTimeout] ${label} ABORT SIGNAL FIRED`);
           clearTimeout(timeoutId);
           reject(new Error(`Researcher ${label} cancelled`));
         });
@@ -209,11 +216,14 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
 
       // Check if research should stop due to too many cumulative failures
       // This checks across ALL delegate_research calls in the session, not just this one
+      const failedCount = getFailedResearchers().length;
+      logger.log(`[delegate] Checking cumulative failures. Current failed researchers: ${failedCount}`);
       if (shouldStopResearch()) {
         const errorText = getResearchStopMessage();
-        logger.error('[delegate]', errorText);
+        logger.error('[delegate] STOPPING RESEARCH DUE TO CUMULATIVE FAILURES:', errorText);
         throw new Error(errorText);
       }
+      logger.log('[delegate] Cumulative failure check: PASS - proceeding with research');
 
       const effectiveMaxConcurrency = nonConcurrent ? 1 : 3;
       const mode = nonConcurrent ? 'non-concurrent (1)' : (simultaneous ? 'parallel' : 'sequential');
@@ -272,7 +282,9 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         logger.log(`[delegate] Starting researcher ${initialLabel}`);
 
         const sliceKey = initialLabel; // Map key — never changes (e.g., "1:1", "1:2", etc.)
+        logger.log(`[delegate] Creating researcher session for ${sliceKey}...`);
         const session = await createResearcherSession(options.researcherOptions);
+        logger.log(`[delegate] Researcher session created for ${sliceKey}`);
 
         // Token tracking and tool-call flash visualization
         // Note: Failure detection is done AFTER prompt() completes, not here
@@ -291,13 +303,16 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           ? `${slice}\n\n${existingLinksContext}`
           : slice;
         try {
+          logger.log(`[delegate] Calling prompt for ${sliceKey}. External signal aborted: ${options.signal?.aborted ?? 'no signal'}`);
           await withTimeout(
             withRetry(() => session.prompt(enhancedSlice), 3, 1000, sliceKey),
             options.timeoutMs,
             sliceKey,
             options.signal
           );
+          logger.log(`[delegate] Prompt completed successfully for ${sliceKey}`);
         } catch (err) {
+          logger.error(`[delegate] Prompt failed for ${sliceKey}:`, err instanceof Error ? err.message : String(err));
           session.abort().catch(() => {}); // stop ongoing API calls from this researcher
           throw err;
         }
