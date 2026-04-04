@@ -1,5 +1,5 @@
 /**
- * pi_stackexchange Tool
+ * stackexchange Tool
  *
  * Search and retrieve data from Stack Exchange network via REST API v2.3.
  */
@@ -8,18 +8,18 @@ import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@marioze
 import { Type } from '@sinclair/typebox';
 import { stackexchangeCommand } from '../stackexchange/index.js';
 
-export function createPiStackexchangeTool(options: {
+export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
 }): ToolDefinition {
   const { ctx } = options;
 
   return {
-    name: 'pi_stackexchange',
+    name: 'stackexchange',
     label: 'Stack Exchange Search',
     description: 'Search and retrieve data from Stack Exchange network via REST API v2.3 (anonymous: 300 requests/day, with key: 10,000 requests/day)',
     promptSnippet: 'Search Stack Overflow and other Stack Exchange sites for questions, answers, and user information',
     promptGuidelines: [
-      'Use pi_stackexchange to find technical answers on Stack Overflow',
+      'Use stackexchange to find technical answers on Stack Overflow',
       'Great for finding code solutions, debugging help, and best practices',
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',

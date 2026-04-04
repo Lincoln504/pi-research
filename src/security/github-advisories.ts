@@ -12,6 +12,7 @@
  */
 
 import type { Advisory, GitHubResult } from './types.ts';
+import { logger } from '../logger.js';
 import { createTimeoutSignal, retryWithBackoff } from '../web-research/retry-utils.ts';
 
 // ============================================================================
@@ -564,10 +565,10 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
   } catch (err: unknown) {
     // Check if it's a 404 error (not found) - return null instead of throwing
     if (err instanceof Error && err.message.includes('HTTP 404')) {
-      console.warn(`[GitHub Advisories] Advisory ${id} not found`);
+      logger.warn(`[GitHub Advisories] Advisory ${id} not found`);
       return null;
     }
-    console.error(`Error fetching advisory ${id}:`, err);
+    logger.error(`[GitHub Advisories] Error fetching advisory ${id}:`, err);
     return null;
   }
 }

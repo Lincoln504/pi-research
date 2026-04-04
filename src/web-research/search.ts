@@ -1,5 +1,5 @@
 /**
- * Web Research Extension - Search Only (pi_search)
+ * Web Research Extension - Search Only (search)
  *
  * Search via SearXNG and return URLs, titles, and snippets.
  */

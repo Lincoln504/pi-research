@@ -1,5 +1,5 @@
 /**
- * pi_security_search Tool
+ * security_search Tool
  *
  * Search security vulnerability databases (NVD, CISA KEV, GitHub Advisories, OSV).
  */
@@ -9,7 +9,7 @@ import { Type } from '@sinclair/typebox';
 import { searchSecurityDatabases } from '../security/index.js';
 import type { SecuritySearchParams } from '../security/types.js';
 
-interface PiSecuritySearchParams {
+interface SecuritySearchParamsType {
   databases?: string[];
   terms: string[];
   severity?: string;
@@ -20,18 +20,18 @@ interface PiSecuritySearchParams {
   [key: string]: unknown;
 }
 
-export function createPiSecuritySearchTool(_options: {
+export function createSecuritySearchTool(_options: {
   searxngUrl: string;
   ctx: ExtensionContext;
 }): ToolDefinition {
 
   return {
-    name: 'pi_security_search',
-    label: 'PI Security Search',
+    name: 'security_search',
+    label: 'Security Search',
     description: 'Search security vulnerability databases (NVD, CISA KEV, GitHub Advisories, OSV). Returns CVEs, advisories, and vulnerability details. Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
     promptSnippet: 'Search security vulnerability databases for CVEs and advisories',
     promptGuidelines: [
-      'Use pi_security_search to look up CVE IDs, package vulnerabilities, or security advisories.',
+      'Use security_search to look up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
     ],
@@ -73,7 +73,7 @@ export function createPiSecuritySearchTool(_options: {
       const paramsRecord = params as Record<string, unknown>;
 
       if (!isSecuritySearchParams(paramsRecord)) {
-        throw new Error('Invalid parameters for pi_security_search');
+        throw new Error('Invalid parameters for security_search');
       }
 
       const terms = paramsRecord['terms'] as string[];
@@ -253,7 +253,7 @@ export function createPiSecuritySearchTool(_options: {
   };
 }
 
-function isSecuritySearchParams(params: Record<string, unknown>): params is PiSecuritySearchParams {
+function isSecuritySearchParams(params: Record<string, unknown>): params is SecuritySearchParamsType {
   return (
     typeof params === 'object' &&
     params !== null &&

@@ -13,6 +13,7 @@
  */
 
 import type { Vulnerability, NVDResult } from './types.ts';
+import { logger } from '../logger.js';
 import { createTimeoutSignal, retryWithBackoff } from '../web-research/retry-utils.ts';
 
 // ============================================================================
@@ -525,7 +526,7 @@ export async function getCVEById(cveId: string): Promise<Vulnerability | null> {
     const results = await searchNVD([cveId], { maxResults: 1 });
     return results.vulnerabilities[0] ?? null;
   } catch (err) {
-    console.error(`Error fetching CVE ${cveId}:`, err);
+    logger.error(`[NVD] Error fetching CVE ${cveId}:`, err);
     return null;
   }
 }

@@ -6,10 +6,10 @@
  */
 
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { createPiSearchTool } from './tools/pi-search.js';
-import { createPiScrapeTool } from './tools/pi-scrape.js';
-import { createPiSecuritySearchTool } from './tools/pi-security.js';
-import { createPiStackexchangeTool } from './tools/pi-stackexchange.js';
+import { createSearchTool } from './tools/search.js';
+import { createScrapeTool } from './tools/scrape.js';
+import { createSecuritySearchTool } from './tools/security.js';
+import { createStackexchangeTool } from './tools/stackexchange.js';
 import { createGrepTool } from './tools/grep.js';
 
 interface CreateAgentToolsOptions {
@@ -26,17 +26,17 @@ export function createAgentTools(options: CreateAgentToolsOptions): ToolDefiniti
   // We just need to ensure the URL is available via getSearxngUrl()
 
   return [
-    createPiSearchTool(options),
-    createPiScrapeTool(options),
-    createPiSecuritySearchTool(options),
-    createPiStackexchangeTool(options),
+    createSearchTool(options),
+    createScrapeTool(options),
+    createSecuritySearchTool(options),
+    createStackexchangeTool(options),
     createGrepTool(),
   ];
 }
 
 // Export individual tool factory functions
-export { createPiSearchTool } from './tools/pi-search.js';
-export { createPiScrapeTool } from './tools/pi-scrape.js';
-export { createPiSecuritySearchTool } from './tools/pi-security.js';
-export { createPiStackexchangeTool } from './tools/pi-stackexchange.js';
+export { createSearchTool } from './tools/search.js';
+export { createScrapeTool } from './tools/scrape.js';
+export { createSecuritySearchTool } from './tools/security.js';
+export { createStackexchangeTool } from './tools/stackexchange.js';
 export { createGrepTool } from './tools/grep.js';

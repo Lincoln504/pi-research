@@ -71,7 +71,7 @@ The coordinator will determine if follow-up research is needed, not you.
 
 ## Tool Usage Guidelines
 
-**No limits** on: pi_security_search, pi_stackexchange, grep, or file read tools
+**No limits** on: security_search, stackexchange, grep, or file read tools
 
 ### Link Reporting (Required at end of response)
 
@@ -156,7 +156,7 @@ Any important context, caveats, conflicting information, or follow-up angles.
 
 ## Error Handling
 
-**Individual tool failures** (search timeout, scrape timeout, one tool returning no results): Continue research using other tools. Do NOT use "ERROR:" prefix. Simply note in your findings that the search returned no results or timed out, then use pi_scrape, pi_security_search, pi_stackexchange, or grep to fill gaps.
+**Individual tool failures** (search timeout, scrape timeout, one tool returning no results): Continue research using other tools. Do NOT use "ERROR:" prefix. Simply note in your findings that the search returned no results or timed out, then use scrape, security_search, stackexchange, or grep to fill gaps.
 
 **Only use "ERROR:" prefix** if you cannot complete any useful research at all — for example, if every single tool fails and you have no findings to report. This signals a systemic failure to the coordinator.
 

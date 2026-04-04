@@ -3,6 +3,7 @@
  */
 
 import * as fs from 'node:fs';
+import { logger } from '../logger.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -69,7 +70,7 @@ export function cacheSet<T>(key: string, data: T, ttl: number): void {
     };
     fs.writeFileSync(cachePath, JSON.stringify(entry));
   } catch (error) {
-    console.warn('[StackExchange] Failed to write cache:', error);
+    logger.warn('[StackExchange] Failed to write cache:', error);
   }
 }
 
@@ -80,7 +81,7 @@ export function cacheClear(): void {
       fs.unlinkSync(path.join(CACHE_DIR, file));
     }
   } catch (error) {
-    console.warn('[StackExchange] Failed to clear cache:', error);
+    logger.warn('[StackExchange] Failed to clear cache:', error);
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * pi_search Tool
+ * search Tool
  *
  * Search the web via SearXNG and return URLs, titles, and snippets.
  */
@@ -8,25 +8,25 @@ import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@marioze
 import { Type } from '@sinclair/typebox';
 import { search } from '../web-research/search.js';
 
-interface PiSearchParams {
+interface SearchParams {
   queries: string[];
   maxResults?: number;
   [key: string]: unknown;
 }
 
-export function createPiSearchTool(_options: {
+export function createSearchTool(_options: {
   ctx: ExtensionContext;
 }): ToolDefinition {
 
   return {
-    name: 'pi_search',
-    label: 'PI Search',
+    name: 'search',
+    label: 'Search',
     description: 'Search the web via SearXNG and return URLs, titles, and snippets.',
-    promptSnippet: 'Search web for URLs and information (returns snippets only, not full content)',
+    promptSnippet: 'Search the web for URLs and information (returns snippets only, not full content)',
     promptGuidelines: [
-      'Use pi_search when you need to find URLs or information about a topic.',
-      'This returns search results with snippets. Use pi_scrape to get full content from specific URLs.',
-      'For security research, use pi_security_search to query vulnerability databases.',
+      'Use search when you need to find URLs or information about a topic.',
+      'This returns search results with snippets. Use scrape to get full content from specific URLs.',
+      'For security research, use security_search to query vulnerability databases.',
     ],
     parameters: Type.Object({
       queries: Type.Array(Type.String({
@@ -44,7 +44,7 @@ export function createPiSearchTool(_options: {
       const paramsRecord = params as Record<string, unknown>;
 
       if (!isSearchParams(paramsRecord)) {
-        throw new Error('Invalid parameters for pi_search');
+        throw new Error('Invalid parameters for search');
       }
 
       const queries = paramsRecord['queries'] as string[];
@@ -107,7 +107,7 @@ export function createPiSearchTool(_options: {
   };
 }
 
-function isSearchParams(params: Record<string, unknown>): params is PiSearchParams {
+function isSearchParams(params: Record<string, unknown>): params is SearchParams {
   return (
     typeof params === 'object' &&
     params !== null &&

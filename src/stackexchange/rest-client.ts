@@ -4,6 +4,7 @@
  */
 
 import type { StackExchangeWrapper } from './types';
+import { logger } from '../logger.js';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
@@ -92,7 +93,7 @@ export class StackExchangeClient {
       // Handle backoff
       if (data.backoff) {
         this.lastBackoff = Date.now() + (data.backoff * 1000);
-        console.warn(`[StackExchange] Backoff required: ${data.backoff} seconds`);
+        logger.warn(`[StackExchange] Backoff required: ${data.backoff} seconds`);
       }
 
       return data;

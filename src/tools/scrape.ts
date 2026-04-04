@@ -1,5 +1,5 @@
 /**
- * pi_scrape Tool
+ * scrape Tool
  *
  * Scrape full content from one or more URLs using 2-layer architecture.
  */
@@ -9,24 +9,24 @@ import { Type } from '@sinclair/typebox';
 import { scrape, scrapeSingle } from '../web-research/scrapers.js';
 import { validateMaxConcurrency } from '../web-research/utils.js';
 
-interface PiScrapeParams {
+interface ScrapeParams {
   urls: string[];
   maxConcurrency?: number;
   [key: string]: unknown;
 }
 
-export function createPiScrapeTool(_options: {
+export function createScrapeTool(_options: {
   searxngUrl: string;
   ctx: ExtensionContext;
 }): ToolDefinition {
 
   return {
-    name: 'pi_scrape',
-    label: 'PI Scrape',
+    name: 'scrape',
+    label: 'Scrape',
     description: 'Scrape full content from one or more URLs using 2-layer architecture: fetch (fast, concurrent) → Playwright+Chromium (JS-heavy fallback). Returns markdown content.',
     promptSnippet: 'Scrape full content from URLs (returns full markdown)',
     promptGuidelines: [
-      'Use pi_scrape to get full content from specific URLs.',
+      'Use scrape to get full content from specific URLs.',
       'Uses 2-layer scraping: fetch first, then Playwright for JS-heavy pages.',
       'Set maxConcurrency for bulk scraping (default: 10 parallel requests).',
     ],
@@ -52,7 +52,7 @@ export function createPiScrapeTool(_options: {
       const paramsRecord = params as Record<string, unknown>;
 
       if (!isScrapeParams(paramsRecord)) {
-        throw new Error('Invalid parameters for pi_scrape');
+        throw new Error('Invalid parameters for scrape');
       }
 
       const urls = paramsRecord['urls'] as string[];
@@ -124,7 +124,7 @@ export function createPiScrapeTool(_options: {
   };
 }
 
-function isScrapeParams(params: Record<string, unknown>): params is PiScrapeParams {
+function isScrapeParams(params: Record<string, unknown>): params is ScrapeParams {
   return (
     typeof params === 'object' &&
     params !== null &&

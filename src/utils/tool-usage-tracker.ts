@@ -9,10 +9,10 @@ import { logger } from '../logger.js';
 
 export interface ToolLimits {
   // Maximum calls per tool (undefined = no limit)
-  pi_search?: number; // 6-8 searches max
-  pi_scrape?: number; // 5-6 scrapes max
-  pi_security_search?: number; // no limit
-  pi_stackexchange?: number; // no limit
+  search?: number; // 6-8 searches max
+  scrape?: number; // 5-6 scrapes max
+  security_search?: number; // no limit
+  stackexchange?: number; // no limit
   grep?: number; // no limit
   // read tool (default pi file read) has no limit
   read?: number; // no limit
@@ -79,7 +79,7 @@ export class ToolUsageTracker {
   }
 
   /**
-   * Get the current usage for a tool
+   * Get current usage for a tool
    */
   getUsage(toolName: string): ToolUsage {
     if (!this.usage.has(toolName)) {
@@ -93,7 +93,7 @@ export class ToolUsageTracker {
   }
 
   /**
-   * Get the limit for a tool
+   * Get limit for a tool
    */
   private getLimit(toolName: string): number | undefined {
     return this.limits[toolName as keyof ToolLimits];
@@ -119,10 +119,10 @@ export class ToolUsageTracker {
  */
 export function createDefaultToolLimits(): ToolLimits {
   return {
-    pi_search: 8, // 6-8 searches max
-    pi_scrape: 6, // 5-6 scrapes max
-    pi_security_search: undefined, // no limit
-    pi_stackexchange: undefined, // no limit
+    search: 8, // 6-8 searches max
+    scrape: 6, // 5-6 scrapes max
+    security_search: undefined, // no limit
+    stackexchange: undefined, // no limit
     grep: undefined, // no limit
     read: undefined, // no limit on default pi read tool
   };
