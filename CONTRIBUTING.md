@@ -52,14 +52,29 @@ pi-research/
 ├── config/                # SearXNG configuration
 └── index.ts               # Extension entry point
 ```
-
 ### Testing
+**Automated Testing**:
+```bash
+# Run all unit tests
+npm run test:unit
 
+# Run all tests (currently just unit tests)
+npm test
+
+# Watch mode for development
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
+```
+
+**Manual Testing**:
 1. Load the extension: `pi -e ./index.ts`
 2. Test with: `Please research: [your query]`
 3. Verify SearXNG container starts correctly
 4. Check TUI panel displays properly
 5. Test various query complexities
+**Note**: Always run `npm run test:unit` and `npm run type-check` before committing changes.
 
 ## Submitting Changes
 

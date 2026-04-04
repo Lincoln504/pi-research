@@ -35,9 +35,6 @@ export interface ILogger {
 /**
  * Logger configuration options
  */
-/**
- * Logger configuration options
- */
 export interface LoggerOptions {
   verbose: boolean;
   logFilePath?: string;
