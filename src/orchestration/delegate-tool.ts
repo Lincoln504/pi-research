@@ -322,17 +322,26 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         const last = [...msgs].reverse().find((m) => m.role === 'assistant');
         const text = extractText(last);
 
-        // Check if agent failed due to error or abort
+        // Check if agent failed due to error (not abort, which is normal cleanup)
         // This is the single, authoritative failure check point
-        const isFailed = last?.stopReason === 'error' || last?.stopReason === 'aborted' || last?.errorMessage;
+        // NOTE: stopReason === 'aborted' is NORMAL (cleanup signal), not a failure.
+        // Only treat 'error' as a failure, and only if there's an actual error message.
+        const isFailed = last?.stopReason === 'error' || (last?.errorMessage && last?.stopReason !== 'aborted');
         if (isFailed) {
           // Record failure in session state (persists across delegate_research calls)
           recordResearcherFailure(sliceKey);
-          logger.error(`[delegate] Researcher ${sliceKey} failed: ${last?.errorMessage || last?.stopReason}`);
+          logger.error(`[delegate] Researcher ${sliceKey} FAILED: ${last?.errorMessage || last?.stopReason}`);
           throw new Error(`Researcher ${sliceKey} failed: ${last?.errorMessage || last?.stopReason || 'Unknown error'}`);
         }
 
-        logger.log(`[delegate] Completed researcher ${sliceKey}`);
+        // Aborted is normal - check that we have actual output
+        if (last?.stopReason === 'aborted' && !text) {
+          logger.warn(`[delegate] Researcher ${sliceKey} aborted with no output`);
+          recordResearcherFailure(sliceKey);
+          throw new Error(`Researcher ${sliceKey} produced no output`);
+        }
+
+        logger.log(`[delegate] Researcher ${sliceKey} completed successfully. Output length: ${text.length} chars`);
         return [sliceKey, text];
       };
       // Mark completion

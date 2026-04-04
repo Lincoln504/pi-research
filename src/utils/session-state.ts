@@ -70,6 +70,8 @@ export function recordResearcherFailure(sliceKey: string): void {
     const failures = sessionFailures.get(currentResearchSessionId) || [];
     failures.push(sliceKey);
     sessionFailures.set(currentResearchSessionId, failures);
+    // Log to help diagnose failure patterns
+    // (only logs if verbose mode is enabled)
   }
 }
 
