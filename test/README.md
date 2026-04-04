@@ -102,13 +102,13 @@ The following modules have excellent test coverage:
 7. ✅ `security/types.ts` - Type guards and validation
 8. ✅ `searxng-lifecycle.ts` - Lifecycle manager with DI
 9. ✅ `infrastructure/state-manager.ts` - State management
-10. ✅ `infrastructure/network-manager.ts` - Network management
-11. ✅ `web-research/types.ts` - Type definitions
-12. ✅ `web-research/retry-utils.ts` - Retry logic
-13. ✅ `web-research/utils.ts` - Web research utilities
-14. ✅ `orchestration/session-context.ts` - Session context management
-15. ✅ `utils/shared-links.ts` - Shared link pool management
-16. ✅ `utils/tool-usage-tracker.ts` - Token usage tracking
+10. ✅ `web-research/types.ts` - Type definitions
+11. ✅ `web-research/retry-utils.ts` - Retry logic
+12. ✅ `web-research/utils.ts` - Web research utilities
+13. ✅ `orchestration/session-context.ts` - Session context management
+14. ✅ `utils/shared-links.ts` - Shared link pool management
+15. ✅ `utils/tool-usage-tracker.ts` - Token usage tracking
+16. ✅ `tui/*` - TUI components
 17. ✅ `tui/*` - TUI components
 
 ## Modules Requiring Tests (Priority Order)

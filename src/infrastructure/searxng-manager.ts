@@ -17,7 +17,6 @@ import Docker from 'dockerode';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { NetworkManager } from './network-manager';
 import { StateManager } from './state-manager';
 import { logger } from '../logger.js';
 
@@ -29,10 +28,6 @@ interface DockerContainerInspectInfo {
   };
   NetworkSettings: {
     Ports: Record<string, Array<{ HostPort: string }> | null> | null;
-    Networks?: Record<string, {
-      GlobalIPv6Address?: string;
-      [key: string]: unknown;
-    }>;
   };
 }
 
@@ -62,9 +57,6 @@ interface DockerContainerCreateOptions {
   };
   Env: string[];
   Labels: Record<string, string>;
-  NetworkingConfig?: {
-    EndpointsConfig: Record<string, {}>;
-  };
 }
 
 // Extension context type
@@ -81,8 +73,6 @@ const DEFAULT_CONFIG = {
   imageTag: 'latest',
   healthTimeout: 120000,
   pruneOldImages: true,
-  enableIPv6Rotation: true,
-  maxUptimeMinutes: 90,
 } as const;
 
 /**
@@ -99,8 +89,6 @@ interface EnvConfig {
   imageName?: string;
   imageTag?: string;
   healthTimeout?: number;
-  enableIPv6Rotation?: boolean;
-  maxUptimeMinutes?: number;
 }
 
 /**
@@ -129,19 +117,6 @@ function loadConfigFromEnv(): EnvConfig {
     const parsed = parseInt(healthTimeoutEnv, 10);
     if (!isNaN(parsed)) {
       config.healthTimeout = parsed * 1000;
-    }
-  }
-
-  const ipv6RotationEnv = process.env['SEARXNG_IPV6_ROTATION'];
-  if (ipv6RotationEnv !== undefined) {
-    config.enableIPv6Rotation = ipv6RotationEnv === 'true';
-  }
-
-  const maxUptimeEnv = process.env['SEARXNG_MAX_UPTIME_MINUTES'];
-  if (maxUptimeEnv !== undefined) {
-    const parsed = parseInt(maxUptimeEnv, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      config.maxUptimeMinutes = parsed;
     }
   }
 
@@ -230,8 +205,6 @@ export interface SearxngManagerConfig {
   imageTag?: string;
   healthTimeout?: number;
   pruneOldImages?: boolean;
-  enableIPv6Rotation?: boolean;
-  maxUptimeMinutes?: number;
 }
 
 /**
@@ -242,8 +215,6 @@ export interface SearxngContainerInfo {
   name: string;
   port: number;
   url: string;
-  ipv6Address?: string | null;
-  ipv6Enabled?: boolean;
 }
 
 /**
@@ -256,8 +227,6 @@ export interface SearxngStatus {
   containerName?: string;
   port?: number;
   url?: string;
-  ipv6Address?: string | null;
-  ipv6Enabled?: boolean;
   error?: string;
 }
 
@@ -275,15 +244,13 @@ export class DockerSearxngManager {
   private readonly config: Required<SearxngManagerConfig>;
   private ctx: ExtensionContext | null = null;
   private sessionId: string | null = null;
-  private networkManager: NetworkManager | null = null;
-  private starting: Promise<void> | null = null; // Mutex to prevent concurrent starts
+  private starting: Promise<void> | null = null;
   private readonly stateManager: StateManager;
   private readonly _extensionDir: string;
   private readonly _settingsPath: string;
   private containerStartupLock: Promise<void> | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private heartbeatRunning = false;
-  private containerStartTime: number | null = null;
 
   constructor(
     _extensionDir: string,
@@ -296,7 +263,6 @@ export class DockerSearxngManager {
     } as Required<SearxngManagerConfig>;
     this._extensionDir = _extensionDir;
     this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'default-settings.yml');
-    // Initialize Docker client
     // Initialize Docker client
     try {
       this.docker = new Docker({
@@ -408,57 +374,6 @@ export class DockerSearxngManager {
           // Remove sessions whose pi processes have died since the last cycle
           await this.cleanupStaleSessions();
           await this.verifyContainerHealthy();
-
-          // Check for uptime-based restart (for IP rotation)
-          const maxUptimeMs = this.config.maxUptimeMinutes * 60 * 1000;
-          if (
-            this.containerStartTime &&
-            this.container &&
-            this.sessionId &&
-            Date.now() - this.containerStartTime > maxUptimeMs
-          ) {
-            logger.log(
-              `[SearXNG Manager] Container reached ${this.config.maxUptimeMinutes}-minute uptime limit, ` +
-              'restarting for IP rotation',
-            );
-            this.notify(
-              `Restarting SearXNG container for IP rotation (${this.config.maxUptimeMinutes} min uptime reached)...`,
-              'info',
-            );
-
-            // Trigger graceful restart
-            this.starting = (async (): Promise<void> => {
-              try {
-                if (this.container) {
-                  try {
-                    await this.stopContainer(this.container);
-                  } catch { /* ignore — may already be stopped */ }
-                  try {
-                    await this.removeContainer(this.container);
-                  } catch { /* ignore — may already be gone */ }
-                  this.container = null;
-                  this.containerInfo = null;
-                  this.containerStartTime = null;
-                }
-                await this.startSingleton();
-                this.notify('SearXNG container restarted with fresh IPv6 address', 'success');
-                logger.log('[SearXNG Manager] Container restarted successfully for IP rotation');
-              } catch (error) {
-                const errMsg = error instanceof Error ? error.message : String(error);
-                logger.error('[SearXNG Manager] Error during uptime-triggered restart:', error);
-                this.notify(`Failed to restart SearXNG container: ${errMsg}`, 'error');
-              } finally {
-                this.starting = null;
-              }
-            })();
-
-            // Wait for restart to complete
-            try {
-              await this.starting;
-            } catch (error) {
-              logger.error('[SearXNG Manager] Restart wait failed:', error);
-            }
-          }
         } catch (error) {
           logger.error('[SearXNG Manager] Heartbeat check failed:', error);
         }
@@ -515,34 +430,11 @@ export class DockerSearxngManager {
               }
             }
 
-            // Check for IPv6 network attachment from existing container
-            let ipv6Address: string | null = null;
-            let ipv6Enabled = false;
-            const networks = info.NetworkSettings.Networks ?? {};
-            for (const [netName, networkInfo] of Object.entries(networks)) {
-              if (netName.startsWith('pi-searxng-net-')) {
-                // Try to get IPv6 address from container's network settings
-                const globalIPv6 = (networkInfo as { GlobalIPv6Address?: string }).GlobalIPv6Address;
-                if (globalIPv6) {
-                  ipv6Address = globalIPv6;
-                }
-
-                ipv6Enabled = true;
-                // Initialize networkManager for this container
-                if (this.config.enableIPv6Rotation && this.docker !== null) {
-                  this.networkManager = new NetworkManager(this.docker, 'singleton');
-                }
-                break;
-              }
-            }
-
             this.containerInfo = {
               id: existing.id,
               name: 'pi-searxng',
               port,
               url: `http://localhost:${port}`,
-              ipv6Address,
-              ipv6Enabled,
             };
             this.config.port = port;
           }
@@ -575,34 +467,11 @@ export class DockerSearxngManager {
             }
           }
 
-          // Check for IPv6 network attachment from existing container
-          let ipv6Address: string | null = null;
-          let ipv6Enabled = false;
-          const networks = info.NetworkSettings.Networks ?? {};
-          for (const [netName, networkInfo] of Object.entries(networks)) {
-            if (netName.startsWith('pi-searxng-net-')) {
-              // Try to get IPv6 address from container's network settings
-              const globalIPv6 = (networkInfo as { GlobalIPv6Address?: string }).GlobalIPv6Address;
-              if (globalIPv6) {
-                ipv6Address = globalIPv6;
-              }
-
-              ipv6Enabled = true;
-              // Initialize networkManager for this container
-              if (this.config.enableIPv6Rotation && this.docker !== null) {
-                this.networkManager = new NetworkManager(this.docker, 'singleton');
-              }
-              break;
-            }
-          }
-
           this.containerInfo = {
             id: existingContainer.id,
             name: containerName,
             port,
             url: `http://localhost:${port}`,
-            ipv6Address,
-            ipv6Enabled,
           };
 
           this.config.port = port;
@@ -665,19 +534,6 @@ export class DockerSearxngManager {
 
     await this.ensureImage();
 
-    // Initialize IPv6 network if enabled
-    let networkInfo: { ipv6Address?: string | null } | null = null;
-    if (this.config.enableIPv6Rotation && this.docker !== null) {
-      this.networkManager = new NetworkManager(this.docker, 'singleton');
-      networkInfo = await this.networkManager.createIPv6Network();
-
-      if (networkInfo.ipv6Address !== undefined && networkInfo.ipv6Address !== null) {
-        this.notify(`IPv6 rotation enabled: ${networkInfo.ipv6Address}`, 'info');
-      } else {
-        this.notify('IPv6 not available, using IPv4 only (search engines may be rate-limited)', 'warning');
-      }
-    }
-
     try {
       const containerResult = await this.createContainer(containerName, this.config.port);
       this.container = containerResult.container;
@@ -685,39 +541,16 @@ export class DockerSearxngManager {
 
       await this.startContainer(this.container);
 
-      // Ensure IPv6-only by disconnecting from bridge if attached
-      if (this.networkManager && this.docker) {
-        try {
-          const info: DockerContainerInspectInfo = await this.container.inspect() as DockerContainerInspectInfo;
-          const networks = Object.keys(info.NetworkSettings.Networks ?? {});
-
-          if (networks.includes('bridge')) {
-            const bridge = this.docker.getNetwork('bridge');
-            await bridge.disconnect({ Container: this.container.id, Force: true });
-            logger.log('[SearXNG Manager] Disconnected container from default bridge (enforcing IPv6-only)');
-          } else {
-            logger.log('[SearXNG Manager] Container is IPv6-only (bridge not attached)');
-          }
-        } catch (error) {
-          logger.warn('[SearXNG Manager] Warning: Could not verify/disconnect from bridge network:', error);
-        }
-      }
-
       this.containerInfo = {
         id: this.container.id,
         name: containerName,
         port: assignedPort,
         url: `http://localhost:${assignedPort}`,
-        ipv6Address: networkInfo?.ipv6Address ?? null,
-        ipv6Enabled: this.networkManager?.isIPv6Enabled() ?? false,
       };
 
       this.config.port = assignedPort;
 
       await this.waitForHealthy();
-
-      // Record start time for uptime-based restart
-      this.containerStartTime = Date.now();
 
       logger.log(`[SearXNG Manager] Singleton container started on port ${assignedPort}`);
     } catch (error) {
@@ -746,18 +579,6 @@ export class DockerSearxngManager {
       } finally {
         this.container = null;
         this.containerInfo = null;
-      }
-    }
-
-    // Clean up IPv6 network if enabled
-    if (this.networkManager) {
-      try {
-        await this.networkManager.removeNetwork();
-        logger.log('[SearXNG Manager] IPv6 network removed');
-      } catch (error) {
-        logger.warn('[SearXNG Manager] Error removing IPv6 network:', error);
-      } finally {
-        this.networkManager = null;
       }
     }
   }
@@ -993,16 +814,6 @@ export class DockerSearxngManager {
       },
     };
 
-    // Add network configuration if IPv6 is enabled
-    const networkName = this.networkManager?.getNetworkName();
-    if (networkName) {
-      containerConfig.NetworkingConfig = {
-        EndpointsConfig: {
-          [networkName]: {},
-        },
-      };
-    }
-
     const container = await this.docker.createContainer(containerConfig);
 
     // Query the actual assigned port (important for auto-assignment)
@@ -1201,18 +1012,6 @@ export class DockerSearxngManager {
 
     const containerName = `pi-searxng-${sessionId}`;
 
-    let networkInfo: { ipv6Address?: string | null } | null = null;
-    if (this.config.enableIPv6Rotation && this.docker !== null) {
-      this.networkManager = new NetworkManager(this.docker, sessionId);
-      networkInfo = await this.networkManager.createIPv6Network();
-
-      if (networkInfo.ipv6Address !== null) {
-        this.notify(`IPv6 rotation enabled: ${networkInfo.ipv6Address}`, 'info');
-      } else {
-        this.notify('IPv6 not available, using IPv4 only (search engines may be rate-limited)', 'warning');
-      }
-    }
-
     const existingContainer = await this.findContainerByName(containerName);
 
     if (existingContainer) {
@@ -1231,18 +1030,11 @@ export class DockerSearxngManager {
             }
           }
 
-          let ipv6Address: string | null = null;
-          if (networkInfo?.ipv6Address) {
-            ipv6Address = networkInfo.ipv6Address;
-          }
-
           this.containerInfo = {
             id: existingContainer.id,
             name: containerName,
             port,
             url: `http://localhost:${port}`,
-            ipv6Address,
-            ipv6Enabled: this.networkManager?.isIPv6Enabled() ?? false,
           };
 
           this.notify(`Reusing existing SearXNG container: ${containerName}`, 'info');
@@ -1277,13 +1069,12 @@ export class DockerSearxngManager {
       name: containerName,
       port: assignedPort,
       url: `http://localhost:${assignedPort}`,
-      ipv6Address: networkInfo ? networkInfo.ipv6Address : undefined,
-      ipv6Enabled: this.networkManager ? this.networkManager.isIPv6Enabled() : false,
     };
 
     this.config.port = assignedPort;
 
     await this.waitForHealthy();
+
     this.notify(`SearXNG container started successfully on port ${assignedPort}.`, 'success');
   }
 
@@ -1306,11 +1097,6 @@ export class DockerSearxngManager {
     try {
       await this.stopContainer(this.container);
       await this.removeContainer(this.container);
-
-      if (this.networkManager) {
-        await this.networkManager.removeNetwork();
-        this.networkManager = null;
-      }
 
       this.notify('SearXNG container stopped and removed.', 'info');
     } catch (error) {
@@ -1350,8 +1136,6 @@ export class DockerSearxngManager {
           containerName: this.containerInfo.name,
           port: this.containerInfo.port,
           url: this.containerInfo.url,
-          ipv6Address: this.containerInfo.ipv6Address,
-          ipv6Enabled: this.containerInfo.ipv6Enabled,
           healthy,
           dockerAvailable: true,
         };
@@ -1412,7 +1196,6 @@ export class DockerSearxngManager {
             } catch { /* ignore — may already be gone */ }
             this.container = null;
             this.containerInfo = null;
-            this.containerStartTime = null;
           }
           await this.startSingleton();
         } finally {

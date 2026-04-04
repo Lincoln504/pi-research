@@ -34,9 +34,6 @@ export interface SingletonState {
   containerId: string;
   containerName: string;
   port: number;
-  ipv6Address: string | null;
-  ipv6Enabled: boolean;
-  networkName: string;
   sessions: { [sessionId: string]: SessionInfo };
   lastUpdated: number;
 }
@@ -72,9 +69,6 @@ function isSingletonState(value: unknown): value is SingletonState {
     typeof state.containerId === 'string' &&
     typeof state.containerName === 'string' &&
     typeof state.port === 'number' &&
-    (state.ipv6Address === null || typeof state.ipv6Address === 'string') &&
-    typeof state.ipv6Enabled === 'boolean' &&
-    typeof state.networkName === 'string' &&
     typeof state.sessions === 'object' &&
     typeof state.lastUpdated === 'number'
   );
@@ -200,9 +194,6 @@ export class StateManager {
       containerId: '',
       containerName: '',
       port: 0,
-      ipv6Address: null,
-      ipv6Enabled: false,
-      networkName: '',
       sessions: {},
       lastUpdated: Date.now(),
     };
