@@ -194,6 +194,6 @@ export async function getEngines(url: string): Promise<any[]> {
     throw new Error(`Failed to get Searxng config: ${response.status} ${response.statusText}`);
   }
 
-  const config = await response.json();
-  return config.engines || [];
+  const config = await response.json() as Record<string, unknown>;
+  return (config['engines'] as unknown[]) || [];
 }

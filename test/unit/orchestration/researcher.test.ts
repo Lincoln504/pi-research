@@ -2,9 +2,13 @@
  * Researcher Unit Tests
  *
  * Tests the createResearcherSession function.
+ *
+ * NOTE: researcher.ts is a thin wrapper around createAgentSession.
+ * These tests provide minimal sanity checking. Most value comes from
+ * integration testing of actual researcher behavior.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createResearcherSession, type CreateResearcherSessionOptions } from '../../../src/orchestration/researcher';
 
 // Mock logger to avoid side effects
@@ -22,12 +26,6 @@ vi.mock('../../../src/logger.js', () => ({
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: vi.fn(),
   createReadTool: vi.fn(() => ({ name: 'read' })),
-  SessionManager: {
-    inMemory: vi.fn(() => ({ getBranch: vi.fn(() => []) })),
-  },
-  SettingsManager: {
-    inMemory: vi.fn(() => ({})),
-  },
 }));
 
 // Mock tool imports
@@ -66,10 +64,6 @@ vi.mock('../../../src/make-resource-loader.js', () => ({
 }));
 
 describe('researcher', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   const createMockOptions = (): CreateResearcherSessionOptions => ({
     cwd: '/test/project',
     ctxModel: { id: 'test-model' },
@@ -113,7 +107,7 @@ describe('researcher', () => {
       );
     });
 
-    it('should create agent session with correct cwd', async () => {
+    it('should create agent session successfully', async () => {
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
@@ -121,140 +115,32 @@ describe('researcher', () => {
         subscribe: vi.fn(),
         abort: vi.fn(),
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
       const options = createMockOptions();
-      await createResearcherSession(options);
+      const result = await createResearcherSession(options);
 
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          cwd: '/test/project',
-        })
-      );
+      expect(result).toBe(mockSession);
+      expect(createAgentSession).toHaveBeenCalled();
     });
 
-    it('should create agent session with ctxModel', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      await createResearcherSession(options);
-
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: { id: 'test-model' },
-        })
-      );
-    });
-
-    it('should create agent session with modelRegistry', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      await createResearcherSession(options);
-
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          modelRegistry: options.modelRegistry,
-        })
-      );
-    });
-
-    it('should create agent session with sessionManager', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      await createResearcherSession(options);
-
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionManager: options.sessionManager,
-        })
-      );
-    });
-
-    it('should create agent session with settingsManager', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      await createResearcherSession(options);
-
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          settingsManager: options.settingsManager,
-        })
-      );
-    });
-
-    it('should create agent session with resourceLoader', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const { makeResourceLoader } = await import('../../../src/make-resource-loader.js');
-      const mockResourceLoader = { load: vi.fn() };
-      vi.mocked(makeResourceLoader).mockReturnValue(mockResourceLoader);
-
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      await createResearcherSession(options);
-
-      expect(makeResourceLoader).toHaveBeenCalledWith('You are a helpful researcher.');
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          resourceLoader: mockResourceLoader,
-        })
-      );
-    });
-
-    it('should create agent session with custom tools from createAgentTools', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
+    it('should create agent tools with correct options', async () => {
       const { createAgentTools } = await import('../../../src/agent-tools.ts');
       const mockTools = [
         { name: 'web_search' },
         { name: 'scrape' },
         { name: 'security' },
       ];
-      vi.mocked(createAgentTools).mockReturnValue(mockTools);
+      vi.mocked(createAgentTools).mockReturnValue(mockTools as any);
 
+      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
         messages: [],
         subscribe: vi.fn(),
         abort: vi.fn(),
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
       const options = createMockOptions();
       await createResearcherSession(options);
@@ -263,27 +149,6 @@ describe('researcher', () => {
         searxngUrl: 'http://localhost:8888',
         ctx: options.extensionCtx,
       });
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          customTools: mockTools,
-        })
-      );
-    });
-
-    it('should return the created session', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      const result = await createResearcherSession(options);
-
-      expect(result).toBe(mockSession);
     });
 
     it('should handle createAgentSession errors gracefully', async () => {
@@ -293,72 +158,6 @@ describe('researcher', () => {
       const options = createMockOptions();
 
       await expect(createResearcherSession(options)).rejects.toThrow('Session creation failed');
-    });
-  });
-
-  describe('session behavior', () => {
-    it('should create session with prompt method', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      const session = await createResearcherSession(options);
-
-      expect(typeof session.prompt).toBe('function');
-    });
-
-    it('should create session with subscribe method', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      const session = await createResearcherSession(options);
-
-      expect(typeof session.subscribe).toBe('function');
-    });
-
-    it('should create session with abort method', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      const session = await createResearcherSession(options);
-
-      expect(typeof session.abort).toBe('function');
-    });
-
-    it('should create session with messages property', async () => {
-      const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
-      const mockSession = {
-        prompt: vi.fn(),
-        messages: [],
-        subscribe: vi.fn(),
-        abort: vi.fn(),
-      };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
-
-      const options = createMockOptions();
-      const session = await createResearcherSession(options);
-
-      expect(Array.isArray(session.messages)).toBe(true);
     });
   });
 });

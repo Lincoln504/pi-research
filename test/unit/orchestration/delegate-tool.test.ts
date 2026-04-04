@@ -70,7 +70,7 @@ describe('delegate-tool', () => {
     sessionId: 'test-session',
     breadthCounter: { value: 0 },
     panelState: {
-      searxngStatus: 'running',
+      searxngStatus: 'running' as any,
       totalTokens: 0,
       activeConnections: 0,
       slices: new Map(),
@@ -130,27 +130,27 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       expect(tool.parameters).toBeDefined();
       expect(tool.parameters).toHaveProperty('properties');
-      expect(tool.parameters.properties).toHaveProperty('slices');
+      expect((tool.parameters as any).properties).toHaveProperty('slices');
     });
 
     it('should require simultaneous parameter', () => {
       const tool = createDelegateTool(createMockOptions());
-      expect(tool.parameters.properties).toHaveProperty('simultaneous');
+      expect((tool.parameters as any).properties).toHaveProperty('simultaneous');
     });
 
     it('should have optional nonConcurrent parameter', () => {
       const tool = createDelegateTool(createMockOptions());
-      expect(tool.parameters.properties).toHaveProperty('nonConcurrent');
+      expect((tool.parameters as any).properties).toHaveProperty('nonConcurrent');
     });
 
     it('should have optional iterateOn parameter', () => {
       const tool = createDelegateTool(createMockOptions());
-      expect(tool.parameters.properties).toHaveProperty('iterateOn');
+      expect((tool.parameters as any).properties).toHaveProperty('iterateOn');
     });
 
     it('should have optional iterationNumber parameter', () => {
       const tool = createDelegateTool(createMockOptions());
-      expect(tool.parameters.properties).toHaveProperty('iterationNumber');
+      expect((tool.parameters as any).properties).toHaveProperty('iterationNumber');
     });
 
     it('should have execute function', () => {
@@ -173,7 +173,7 @@ describe('delegate-tool', () => {
   describe('execute - basic functionality', () => {
     it('should handle single slice', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
@@ -181,7 +181,7 @@ describe('delegate-tool', () => {
         { slices: ['single slice'], simultaneous: false },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -189,7 +189,7 @@ describe('delegate-tool', () => {
 
     it('should handle multiple slices', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
@@ -197,7 +197,7 @@ describe('delegate-tool', () => {
         { slices: ['slice1', 'slice2', 'slice3'], simultaneous: false },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -205,7 +205,7 @@ describe('delegate-tool', () => {
 
     it('should return markdown formatted results', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
@@ -213,11 +213,11 @@ describe('delegate-tool', () => {
         { slices: ['test'], simultaneous: false },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result.content[0]?.type).toBe('text');
-      expect(result.content[0]?.text).toBeDefined();
+      expect((result.content[0] as any)?.text).toBeDefined();
     });
   });
 
@@ -234,7 +234,7 @@ describe('delegate-tool', () => {
           { slices: ['test'], simultaneous: false },
           undefined,
           undefined,
-          undefined
+          undefined as any
         )
       ).rejects.toThrow('Too many failures');
     });
@@ -244,7 +244,7 @@ describe('delegate-tool', () => {
       vi.mocked(shouldStopResearch).mockReturnValue(false);
 
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
@@ -252,7 +252,7 @@ describe('delegate-tool', () => {
         { slices: ['test'], simultaneous: false },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -262,7 +262,7 @@ describe('delegate-tool', () => {
   describe('execute - mode configuration', () => {
     it('should recognize non-concurrent mode', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const { logger } = await import('../../../src/logger.js');
       const tool = createDelegateTool(createMockOptions());
@@ -271,7 +271,7 @@ describe('delegate-tool', () => {
         { slices: ['slice1'], simultaneous: false, nonConcurrent: true },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(logger.log).toHaveBeenCalledWith(
@@ -281,7 +281,7 @@ describe('delegate-tool', () => {
 
     it('should recognize parallel mode', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
       const { logger } = await import('../../../src/logger.js');
       const tool = createDelegateTool(createMockOptions());
@@ -290,7 +290,7 @@ describe('delegate-tool', () => {
         { slices: ['slice1'], simultaneous: true },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(logger.log).toHaveBeenCalledWith(

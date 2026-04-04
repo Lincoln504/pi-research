@@ -43,20 +43,20 @@ describe('tools/security', () => {
     it('should have prompt snippet', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.promptSnippet).toBeDefined();
-      expect(tool.promptSnippet.toLowerCase()).toContain('security');
-      expect(tool.promptSnippet.toLowerCase()).toContain('cve');
+      expect(tool.promptSnippet!.toLowerCase()).toContain('security');
+      expect(tool.promptSnippet!.toLowerCase()).toContain('cve');
     });
 
     it('should have prompt guidelines', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.promptGuidelines).toBeDefined();
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
-      expect(tool.promptGuidelines.length).toBeGreaterThan(0);
+      expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
     });
 
     it('should have prompt guidelines mentioning NVD, CISA, GitHub, OSV', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines.join(' ');
+      const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('NVD');
       expect(guidelines).toContain('CISA');
       expect(guidelines).toContain('GitHub');
@@ -65,7 +65,7 @@ describe('tools/security', () => {
 
     it('should have prompt guidelines mentioning filters', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines.join(' ');
+      const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('severity');
       expect(guidelines).toContain('CVE ID');
       expect(guidelines).toContain('package');
@@ -76,43 +76,43 @@ describe('tools/security', () => {
     it('should require terms parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       expect(tool.parameters).toBeDefined();
-      expect(tool.parameters.properties).toHaveProperty('terms');
+      expect((tool.parameters as any).properties).toHaveProperty('terms');
     });
 
     it('should have terms as array of strings', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      const termsParam = tool.parameters.properties.terms;
+      const termsParam = (tool.parameters as any).properties.terms;
       expect(termsParam).toBeDefined();
     });
 
     it('should have optional databases parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('databases');
+      expect((tool.parameters as any).properties).toHaveProperty('databases');
     });
 
     it('should have optional severity parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('severity');
+      expect((tool.parameters as any).properties).toHaveProperty('severity');
     });
 
     it('should have optional maxResults parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('maxResults');
+      expect((tool.parameters as any).properties).toHaveProperty('maxResults');
     });
 
     it('should have optional includeExploited parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('includeExploited');
+      expect((tool.parameters as any).properties).toHaveProperty('includeExploited');
     });
 
     it('should have optional ecosystem parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('ecosystem');
+      expect((tool.parameters as any).properties).toHaveProperty('ecosystem');
     });
 
     it('should have optional githubRepo parameter', () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('githubRepo');
+      expect((tool.parameters as any).properties).toHaveProperty('githubRepo');
     });
   });
 
@@ -120,21 +120,21 @@ describe('tools/security', () => {
     it('should throw error when params is not valid', async () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', {} as any, undefined, undefined, undefined)
+        tool.execute('test-id', {} as any, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for security_search');
     });
 
     it('should throw error when terms array is empty', async () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', { terms: [] }, undefined, undefined, undefined)
+        tool.execute('test-id', { terms: [] }, undefined, undefined, undefined as any)
       ).rejects.toThrow('At least one search term is required');
     });
 
     it('should throw error when terms is missing', async () => {
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', { databases: ['nvd'] }, undefined, undefined, undefined)
+        tool.execute('test-id', { databases: ['nvd'] }, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for security_search');
     });
 
@@ -143,8 +143,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -152,7 +153,7 @@ describe('tools/security', () => {
         { terms: ['CVE-2024-1234'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -164,8 +165,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -173,7 +175,7 @@ describe('tools/security', () => {
         { terms: ['CVE-2024-1234', 'openssl'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -186,8 +188,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 4,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       await tool.execute(
@@ -195,7 +198,7 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(searchSecurityDatabases).toHaveBeenCalledWith(
@@ -210,8 +213,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       await tool.execute(
@@ -219,7 +223,7 @@ describe('tools/security', () => {
         { terms: ['test'], databases: ['nvd', 'github'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(searchSecurityDatabases).toHaveBeenCalledWith(
@@ -236,8 +240,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -245,11 +250,11 @@ describe('tools/security', () => {
         { terms: ['CVE-2024-1234'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result.content[0]?.type).toBe('text');
-      expect(result.content[0]?.text).toBeDefined();
+      expect((result.content[0] as any)?.text).toBeDefined();
     });
 
     it('should include terms in output', async () => {
@@ -257,8 +262,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -266,11 +272,11 @@ describe('tools/security', () => {
         { terms: ['CVE-2024-1234', 'openssl'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('CVE-2024-1234');
-      expect(result.content[0]?.text).toContain('openssl');
+      expect((result.content[0] as any)?.text).toContain('CVE-2024-1234');
+      expect((result.content[0] as any)?.text).toContain('openssl');
     });
 
     it('should include duration in output', async () => {
@@ -278,8 +284,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -287,11 +294,11 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('Duration');
-      expect(result.content[0]?.text).toContain('s');
+      expect((result.content[0] as any)?.text).toContain('Duration');
+      expect((result.content[0] as any)?.text).toContain('s');
     });
   });
 
@@ -301,6 +308,7 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 2,
+        duration: 0,
         results: {
           nvd: {
             count: 2,
@@ -327,7 +335,7 @@ describe('tools/security', () => {
             ],
           },
         },
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -335,15 +343,15 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('NIST NVD');
-      expect(result.content[0]?.text).toContain('CVE-2024-1234');
-      expect(result.content[0]?.text).toContain('CVE-2024-5678');
-      expect(result.content[0]?.text).toContain('HIGH');
-      expect(result.content[0]?.text).toContain('CRITICAL');
-      expect(result.content[0]?.text).toContain('Actively Exploited');
+      expect((result.content[0] as any)?.text).toContain('NIST NVD');
+      expect((result.content[0] as any)?.text).toContain('CVE-2024-1234');
+      expect((result.content[0] as any)?.text).toContain('CVE-2024-5678');
+      expect((result.content[0] as any)?.text).toContain('HIGH');
+      expect((result.content[0] as any)?.text).toContain('CRITICAL');
+      expect((result.content[0] as any)?.text).toContain('Actively Exploited');
     });
 
     it('should handle NVD errors', async () => {
@@ -351,12 +359,15 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {
           nvd: {
+            count: 0,
+            vulnerabilities: [],
             error: 'Network timeout',
           },
         },
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -364,12 +375,12 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('NIST NVD');
-      expect(result.content[0]?.text).toContain('❌');
-      expect(result.content[0]?.text).toContain('Error');
+      expect((result.content[0] as any)?.text).toContain('NIST NVD');
+      expect((result.content[0] as any)?.text).toContain('❌');
+      expect((result.content[0] as any)?.text).toContain('Error');
     });
   });
 
@@ -379,6 +390,7 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 1,
+        duration: 0,
         results: {
           cisa_kev: {
             count: 1,
@@ -394,7 +406,7 @@ describe('tools/security', () => {
             ],
           },
         },
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -402,15 +414,15 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('CISA Known Exploited Vulnerabilities');
-      expect(result.content[0]?.text).toContain('CVE-2024-5678');
-      expect(result.content[0]?.text).toContain('Test Vendor');
-      expect(result.content[0]?.text).toContain('Test Product');
-      expect(result.content[0]?.text).toContain('Due Date');
-      expect(result.content[0]?.text).toContain('Required Action');
+      expect((result.content[0] as any)?.text).toContain('CISA Known Exploited Vulnerabilities');
+      expect((result.content[0] as any)?.text).toContain('CVE-2024-5678');
+      expect((result.content[0] as any)?.text).toContain('Test Vendor');
+      expect((result.content[0] as any)?.text).toContain('Test Product');
+      expect((result.content[0] as any)?.text).toContain('Due Date');
+      expect((result.content[0] as any)?.text).toContain('Required Action');
     });
   });
 
@@ -420,9 +432,10 @@ describe('tools/security', () => {
       const mockResults = {
         totalDatabases: 1,
         totalVulnerabilities: 2,
+        duration: 0,
         results: {},
       };
-      vi.mocked(searchSecurityDatabases).mockResolvedValue(mockResults);
+      vi.mocked(searchSecurityDatabases).mockResolvedValue(mockResults as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -430,11 +443,11 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result.details).toBeDefined();
-      expect(result.details.results).toEqual(mockResults);
+      expect((result.details as any).results).toEqual(mockResults);
     });
 
     it('should include totalDatabases in details', async () => {
@@ -442,8 +455,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 3,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -451,10 +465,10 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.totalDatabases).toBe(3);
+      expect((result.details as any).totalDatabases).toBe(3);
     });
 
     it('should include totalVulnerabilities in details', async () => {
@@ -462,8 +476,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 42,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -471,10 +486,10 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.totalVulnerabilities).toBe(42);
+      expect((result.details as any).totalVulnerabilities).toBe(42);
     });
 
     it('should include duration in details', async () => {
@@ -482,8 +497,9 @@ describe('tools/security', () => {
       vi.mocked(searchSecurityDatabases).mockResolvedValue({
         totalDatabases: 1,
         totalVulnerabilities: 0,
+        duration: 0,
         results: {},
-      });
+      } as any);
 
       const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext() });
       const result = await tool.execute(
@@ -491,12 +507,12 @@ describe('tools/security', () => {
         { terms: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.duration).toBeDefined();
-      expect(typeof result.details.duration).toBe('number');
-      expect(result.details.duration).toBeGreaterThanOrEqual(0);
+      expect((result.details as any).duration).toBeDefined();
+      expect(typeof (result.details as any).duration).toBe('number');
+      expect((result.details as any).duration).toBeGreaterThanOrEqual(0);
     });
   });
 });

@@ -1,0 +1,52 @@
+name: Setup Labels
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/labels.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labels:
+    name: Create Labels
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const labels = [
+              { name: 'bug', color: 'd73a4a', description: 'Something is not working' },
+              { name: 'enhancement', color: 'a2eeef', description: 'New feature or enhancement' },
+              { name: 'documentation', color: '0075ca', description: 'Improvements to documentation' },
+              { name: 'good first issue', color: '7057ff', description: 'Good for newcomers' },
+              { name: 'help wanted', color: '008672', description: 'Extra help is needed' },
+              { name: 'priority: high', color: 'b60205', description: 'High priority issue' },
+              { name: 'priority: medium', color: 'ff9900', description: 'Medium priority issue' },
+              { name: 'priority: low', color: 'e99695', description: 'Low priority issue' },
+              { name: 'question', color: 'd876e3', description: 'Question or clarification needed' },
+              { name: 'wontfix', color: 'ffffff', description: 'This will not be fixed' },
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description
+                });
+              } catch (error) {
+                // Label might already exist, which is fine
+                console.log(`Label ${label.name} might already exist`);
+              }
+            }

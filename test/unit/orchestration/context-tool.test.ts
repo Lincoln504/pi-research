@@ -83,7 +83,7 @@ describe('context-tool', () => {
       const tool = createInvestigateContextTool(mockOptions);
       expect(tool.parameters).toBeDefined();
       expect(tool.parameters).toHaveProperty('properties');
-      expect(tool.parameters.properties).toHaveProperty('question');
+      expect((tool.parameters as any).properties).toHaveProperty('question');
     });
 
     it('should have execute function', () => {
@@ -122,16 +122,16 @@ describe('context-tool', () => {
       vi.mocked(createAgentSession).mockResolvedValue({
         session: {
           prompt: vi.fn(),
-          messages: [{ role: 'assistant', content: 'Result' }],
+          messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Result' }] }],
         },
-      });
+      } as any);
 
       const result = await tool.execute(
         'tool-id-123',
         { question: 'Test' },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
       expect(result).toBeDefined();
     });
@@ -141,9 +141,9 @@ describe('context-tool', () => {
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
-        messages: [{ role: 'assistant', content: 'Result' }],
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Result' }] }],
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
       const abortController = new AbortController();
       const result = await tool.execute(
@@ -151,7 +151,7 @@ describe('context-tool', () => {
         { question: 'Test' },
         abortController.signal,
         undefined,
-        undefined
+        undefined as any
       );
       expect(result).toBeDefined();
     });
@@ -169,11 +169,11 @@ describe('context-tool', () => {
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
-        messages: [{ role: 'assistant', content: '' }],
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: '' }] }],
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
-      const result = await tool.execute('test-id', { question: '' }, undefined, undefined, undefined);
+      const result = await tool.execute('test-id', { question: '' }, undefined, undefined, undefined as any);
       expect(result.content).toBeDefined();
     });
 
@@ -182,12 +182,12 @@ describe('context-tool', () => {
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
-        messages: [{ role: 'assistant', content: 'Result' }],
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Result' }] }],
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
       const longQuestion = 'A'.repeat(1000);
-      const result = await tool.execute('test-id', { question: longQuestion }, undefined, undefined, undefined);
+      const result = await tool.execute('test-id', { question: longQuestion }, undefined, undefined, undefined as any);
       expect(result.content).toBeDefined();
     });
 
@@ -196,12 +196,12 @@ describe('context-tool', () => {
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
         prompt: vi.fn(),
-        messages: [{ role: 'assistant', content: 'Result' }],
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Result' }] }],
       };
-      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession });
+      vi.mocked(createAgentSession).mockResolvedValue({ session: mockSession } as any);
 
       const question = 'What about the async/await pattern? #typescript';
-      const result = await tool.execute('test-id', { question }, undefined, undefined, undefined);
+      const result = await tool.execute('test-id', { question }, undefined, undefined, undefined as any);
       expect(result.content).toBeDefined();
     });
   });

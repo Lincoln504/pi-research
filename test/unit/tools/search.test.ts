@@ -40,26 +40,26 @@ describe('tools/search', () => {
     it('should have prompt snippet', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       expect(tool.promptSnippet).toBeDefined();
-      expect(tool.promptSnippet.toLowerCase()).toContain('search');
-      expect(tool.promptSnippet).toContain('snippets');
+      expect(tool.promptSnippet!.toLowerCase()).toContain('search');
+      expect(tool.promptSnippet!).toContain('snippets');
     });
 
     it('should have prompt guidelines', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       expect(tool.promptGuidelines).toBeDefined();
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
-      expect(tool.promptGuidelines.length).toBeGreaterThan(0);
+      expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
     });
 
     it('should have prompt guidelines mentioning scrape', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines.join(' ');
+      const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('scrape');
     });
 
     it('should have prompt guidelines mentioning security_search', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      const guidelines = tool.promptGuidelines.join(' ');
+      const guidelines = tool.promptGuidelines!.join(' ');
       expect(guidelines).toContain('security_search');
     });
   });
@@ -68,23 +68,23 @@ describe('tools/search', () => {
     it('should require queries parameter', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       expect(tool.parameters).toBeDefined();
-      expect(tool.parameters.properties).toHaveProperty('queries');
+      expect((tool.parameters as any).properties).toHaveProperty('queries');
     });
 
     it('should have queries as array of strings with minItems: 1', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      const queriesParam = tool.parameters.properties.queries;
+      const queriesParam = (tool.parameters as any).properties.queries;
       expect(queriesParam).toBeDefined();
     });
 
     it('should have optional maxResults parameter', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      expect(tool.parameters.properties).toHaveProperty('maxResults');
+      expect((tool.parameters as any).properties).toHaveProperty('maxResults');
     });
 
     it('should have maxResults with correct defaults and constraints', () => {
       const tool = createSearchTool({ ctx: createMockContext() });
-      const maxResultsParam = tool.parameters.properties.maxResults;
+      const maxResultsParam = (tool.parameters as any).properties.maxResults;
       expect(maxResultsParam).toBeDefined();
     });
   });
@@ -93,21 +93,21 @@ describe('tools/search', () => {
     it('should throw error when params is not valid', async () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', {} as any, undefined, undefined, undefined)
+        tool.execute('test-id', {} as any, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for search');
     });
 
     it('should throw error when queries array is empty', async () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', { queries: [] }, undefined, undefined, undefined)
+        tool.execute('test-id', { queries: [] }, undefined, undefined, undefined as any)
       ).rejects.toThrow('At least one query is required');
     });
 
     it('should throw error when queries is missing', async () => {
       const tool = createSearchTool({ ctx: createMockContext() });
       await expect(
-        tool.execute('test-id', { maxResults: 10 }, undefined, undefined, undefined)
+        tool.execute('test-id', { maxResults: 10 }, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for search');
     });
 
@@ -123,7 +123,7 @@ describe('tools/search', () => {
         { queries: ['test query'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -143,7 +143,7 @@ describe('tools/search', () => {
         { queries: ['query1', 'query2'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -163,7 +163,7 @@ describe('tools/search', () => {
         { queries: ['test query'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(search).toHaveBeenCalledWith(['test query']);
@@ -182,7 +182,7 @@ describe('tools/search', () => {
         { queries: ['query1', 'query2'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(search).toHaveBeenCalledWith(['query1', 'query2']);
@@ -202,11 +202,11 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result.content[0]?.type).toBe('text');
-      expect(result.content[0]?.text).toBeDefined();
+      expect((result.content[0] as any)?.text).toBeDefined();
     });
 
     it('should include query in output', async () => {
@@ -221,10 +221,10 @@ describe('tools/search', () => {
         { queries: ['test query'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('test query');
+      expect((result.content[0] as any)?.text).toContain('test query');
     });
 
     it('should include duration in output', async () => {
@@ -239,11 +239,11 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('Duration');
-      expect(result.content[0]?.text).toContain('s');
+      expect((result.content[0] as any)?.text).toContain('Duration');
+      expect((result.content[0] as any)?.text).toContain('s');
     });
 
     it('should format results with titles and URLs', async () => {
@@ -263,12 +263,12 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('Test Page');
-      expect(result.content[0]?.text).toContain('https://example.com');
-      expect(result.content[0]?.text).toContain('Test content');
+      expect((result.content[0] as any)?.text).toContain('Test Page');
+      expect((result.content[0] as any)?.text).toContain('https://example.com');
+      expect((result.content[0] as any)?.text).toContain('Test content');
     });
 
     it('should truncate long snippets', async () => {
@@ -289,10 +289,10 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('...');
+      expect((result.content[0] as any)?.text).toContain('...');
     });
   });
 
@@ -316,11 +316,11 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       // Should only show 20 results by default
-      expect(result.content[0]?.text).toContain('found');
+      expect((result.content[0] as any)?.text).toContain('found');
     });
 
     it('should respect custom maxResults parameter', async () => {
@@ -342,7 +342,7 @@ describe('tools/search', () => {
         { queries: ['test'], maxResults: 5 },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result).toBeDefined();
@@ -362,11 +362,11 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('No results');
-      expect(result.content[0]?.text).toContain('📭');
+      expect((result.content[0] as any)?.text).toContain('No results');
+      expect((result.content[0] as any)?.text).toContain('📭');
     });
 
     it('should handle search errors', async () => {
@@ -381,12 +381,12 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.content[0]?.text).toContain('Error');
-      expect(result.content[0]?.text).toContain('⚠️');
-      expect(result.content[0]?.text).toContain('network_error');
+      expect((result.content[0] as any)?.text).toContain('Error');
+      expect((result.content[0] as any)?.text).toContain('⚠️');
+      expect((result.content[0] as any)?.text).toContain('network_error');
     });
   });
 
@@ -402,11 +402,11 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
       expect(result.details).toBeDefined();
-      expect(result.details.queryResults).toEqual(mockResults);
+      expect((result.details as any).queryResults).toEqual(mockResults);
     });
 
     it('should include totalQueries in details', async () => {
@@ -422,16 +422,16 @@ describe('tools/search', () => {
         { queries: ['test1', 'test2'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.totalQueries).toBe(2);
+      expect((result.details as any).totalQueries).toBe(2);
     });
 
     it('should include totalResults in details', async () => {
       const { search } = await import('../../../src/web-research/search.js');
       vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [{ url: 'url1', title: 't1' }, { url: 'url2', title: 't2' }] },
+        { query: 'test', results: [{ url: 'url1', title: 't1', content: '' }, { url: 'url2', title: 't2', content: '' }] },
       ]);
 
       const tool = createSearchTool({ ctx: createMockContext() });
@@ -440,10 +440,10 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.totalResults).toBe(2);
+      expect((result.details as any).totalResults).toBe(2);
     });
 
     it('should include duration in details', async () => {
@@ -456,12 +456,12 @@ describe('tools/search', () => {
         { queries: ['test'] },
         undefined,
         undefined,
-        undefined
+        undefined as any
       );
 
-      expect(result.details.duration).toBeDefined();
-      expect(typeof result.details.duration).toBe('number');
-      expect(result.details.duration).toBeGreaterThanOrEqual(0);
+      expect((result.details as any).duration).toBeDefined();
+      expect(typeof (result.details as any).duration).toBe('number');
+      expect((result.details as any).duration).toBeGreaterThanOrEqual(0);
     });
   });
 });

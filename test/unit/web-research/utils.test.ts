@@ -2,76 +2,30 @@
  * Web Research Utils Unit Tests
  *
  * Tests utility functions for connection counting and validation.
+ * Now imports actual functions instead of re-implementing them.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  validateMaxConcurrency,
+  incrementConnectionCount,
+  decrementConnectionCount,
+  getActiveConnectionCount,
+  getMaxConnectionCount,
+  resetConnectionCounters,
+  onConnectionCountChange,
+} from '../../../src/web-research/utils.js';
 
 describe('web-research/utils', () => {
-  // Mock the functions we're testing
-  let activeConnections = 0;
-  let maxConnections = 0;
-  const connectionCallbacks: Array<(count: number) => void> = [];
-
-  const notifyConnectionCountChange = (): void => {
-    for (const callback of connectionCallbacks) {
-      callback(activeConnections);
-    }
-  };
-
-  const onConnectionCountChange = (callback: (count: number) => void): (() => void) => {
-    connectionCallbacks.push(callback);
-    callback(activeConnections);
-    return () => {
-      const index = connectionCallbacks.indexOf(callback);
-      if (index !== -1) {
-        connectionCallbacks.splice(index, 1);
-      }
-    };
-  };
-
-  const incrementConnectionCount = (): void => {
-    activeConnections++;
-    if (activeConnections > maxConnections) {
-      maxConnections = activeConnections;
-    }
-    notifyConnectionCountChange();
-  };
-
-  const decrementConnectionCount = (): void => {
-    if (activeConnections > 0) {
-      activeConnections--;
-    }
-    notifyConnectionCountChange();
-  };
-
-  const getActiveConnectionCount = (): number => {
-    return activeConnections;
-  };
-
-  const getMaxConnectionCount = (): number => {
-    return maxConnections;
-  };
-
-  const resetConnectionCounters = (): void => {
-    activeConnections = 0;
-    maxConnections = 0;
-    notifyConnectionCountChange();
-  };
-
   beforeEach(() => {
-    activeConnections = 0;
-    maxConnections = 0;
-    connectionCallbacks.length = 0;
+    resetConnectionCounters();
+  });
+
+  afterEach(() => {
+    resetConnectionCounters();
   });
 
   describe('validateMaxConcurrency', () => {
-    const validateMaxConcurrency = (value?: number): number => {
-      if (value === undefined) {
-        return 10; // Default
-      }
-      return Math.min(Math.max(1, Math.floor(value)), 20);
-    };
-
     describe('positive cases', () => {
       it('should return default when undefined', () => {
         expect(validateMaxConcurrency(undefined)).toBe(10);
@@ -376,8 +330,15 @@ describe('web-research/utils', () => {
         const callback = vi.fn();
         const unsubscribe = onConnectionCountChange(callback);
 
-        // Call unsubscribe twice
+        incrementConnectionCount();
+        expect(callback).toHaveBeenCalledWith(1);
+
         unsubscribe();
+
+        incrementConnectionCount();
+        expect(callback).toHaveBeenCalledTimes(2); // Initial call + first increment
+
+        // Call unsubscribe twice - should not throw
         expect(() => unsubscribe()).not.toThrow();
       });
 

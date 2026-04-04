@@ -42,17 +42,17 @@ describe('grep tool', () => {
       const tool = createGrepTool();
       expect(tool.parameters).toBeDefined();
       expect(tool.parameters).toHaveProperty('properties');
-      expect(tool.parameters.properties).toHaveProperty('pattern');
+      expect((tool.parameters as any).properties).toHaveProperty('pattern');
     });
 
     it('should have optional path parameter', () => {
       const tool = createGrepTool();
-      expect(tool.parameters.properties).toHaveProperty('path');
+      expect((tool.parameters as any).properties).toHaveProperty('path');
     });
 
     it('should have optional flags parameter', () => {
       const tool = createGrepTool();
-      expect(tool.parameters.properties).toHaveProperty('flags');
+      expect((tool.parameters as any).properties).toHaveProperty('flags');
     });
 
     it('should have execute function', () => {
@@ -77,15 +77,15 @@ describe('grep tool', () => {
       const tool = createGrepTool();
       const result = await tool.execute('id', {}, undefined, undefined, {} as any);
 
-      expect(result.content[0]?.text).toContain('Error');
-      expect(result.content[0]?.text).toContain('pattern is required');
+      expect((result.content[0] as any)?.text).toContain('Error');
+      expect((result.content[0] as any)?.text).toContain('pattern is required');
     });
 
     it('should handle empty pattern', async () => {
       const tool = createGrepTool();
       const result = await tool.execute('id', { pattern: '' }, undefined, undefined, {} as any);
 
-      expect(result.content[0]?.text).toContain('Error');
+      expect((result.content[0] as any)?.text).toContain('Error');
     });
 
     it('should accept pattern without path or flags', async () => {
@@ -167,11 +167,9 @@ describe('grep tool', () => {
     it('should return markdown formatted results', async () => {
       const tool = createGrepTool();
       const { spawn } = await import('node:child_process');
-      let stdoutData = '';
       const mockChild = {
         stdout: { on: vi.fn((event, callback) => {
           if (event === 'data') callback('line1\nline2\n');
-          stdoutData = 'line1\nline2\n';
         })},
         stderr: { on: vi.fn() },
         on: vi.fn((event, callback) => {
@@ -183,14 +181,14 @@ describe('grep tool', () => {
       const result = await tool.execute('id', { pattern: 'test' }, undefined, undefined, {} as any);
 
       expect(result.content[0]?.type).toBe('text');
-      expect(result.content[0]?.text).toContain('Search Results');
+      expect((result.content[0] as any)?.text).toContain('Search Results');
     });
 
     it('should include pattern in output', async () => {
       const tool = createGrepTool();
       const { spawn } = await import('node:child_process');
       const mockChild = {
-        stdout: { on: vi.fn((event, callback) => callback('match\n')) },
+        stdout: { on: vi.fn((_event, callback) => callback('match\n')) },
         stderr: { on: vi.fn() },
         on: vi.fn((event, callback) => {
           if (event === 'close') callback(0);
@@ -200,14 +198,14 @@ describe('grep tool', () => {
 
       const result = await tool.execute('id', { pattern: 'async' }, undefined, undefined, {} as any);
 
-      expect(result.content[0]?.text).toContain('async');
+      expect((result.content[0] as any)?.text).toContain('async');
     });
 
     it('should include path in output when provided', async () => {
       const tool = createGrepTool();
       const { spawn } = await import('node:child_process');
       const mockChild = {
-        stdout: { on: vi.fn((event, callback) => callback('match\n')) },
+        stdout: { on: vi.fn((_event, callback) => callback('match\n')) },
         stderr: { on: vi.fn() },
         on: vi.fn((event, callback) => {
           if (event === 'close') callback(0);
@@ -217,7 +215,7 @@ describe('grep tool', () => {
 
       const result = await tool.execute('id', { pattern: 'test', path: './src' }, undefined, undefined, {} as any);
 
-      expect(result.content[0]?.text).toContain('./src');
+      expect((result.content[0] as any)?.text).toContain('./src');
     });
 
     it('should include exit code in output', async () => {
@@ -234,7 +232,7 @@ describe('grep tool', () => {
 
       const result = await tool.execute('id', { pattern: 'test' }, undefined, undefined, {} as any);
 
-      expect(result.content[0]?.text).toContain('42');
+      expect((result.content[0] as any)?.text).toContain('42');
     });
   });
 
@@ -305,8 +303,8 @@ describe('grep tool', () => {
       const result = await tool.execute('id', { pattern: 'test' }, undefined, undefined, {} as any);
 
       // Tool should catch errors and return error message
-      expect(result.content[0]?.text).toContain('Error');
-      expect(result.content[0]?.text).toContain('Neither rg nor grep is available');
+      expect((result.content[0] as any)?.text).toContain('Error');
+      expect((result.content[0] as any)?.text).toContain('Neither rg nor grep is available');
     });
 
     it('should handle grep fallback when rg fails', async () => {
@@ -333,7 +331,7 @@ describe('grep tool', () => {
       const result = await tool.execute('id', { pattern: 'test' }, undefined, undefined, {} as any);
 
       expect(rgCallCount).toBe(1);
-      expect(result.content[0]?.text).toContain('grep');
+      expect((result.content[0] as any)?.text).toContain('grep');
     });
   });
 });
