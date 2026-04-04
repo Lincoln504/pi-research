@@ -10,11 +10,12 @@ import { logger } from './logger.js';
 /**
  * Per-researcher timeout in milliseconds
  * Prevents individual researchers from hanging indefinitely
- * @default 60000 (60 seconds)
+ * Each researcher does 4-5 rounds of searches + 1 batch scrape, which realistically takes 2-4 minutes
+ * @default 240000 (4 minutes)
  * @env PI_RESEARCH_RESEARCHER_TIMEOUT_MS
  */
 export const RESEARCHER_TIMEOUT_MS = parseInt(
-  process.env['PI_RESEARCH_RESEARCHER_TIMEOUT_MS'] || '60000',
+  process.env['PI_RESEARCH_RESEARCHER_TIMEOUT_MS'] || '240000',
   10
 );
 
@@ -43,9 +44,9 @@ export const PROXY_URL = process.env['PROXY_URL'];
  * @throws {Error} if configuration is invalid
  */
 export function validateConfig(): void {
-  if (RESEARCHER_TIMEOUT_MS < 5000 || RESEARCHER_TIMEOUT_MS > 600000) {
+  if (RESEARCHER_TIMEOUT_MS < 30000 || RESEARCHER_TIMEOUT_MS > 600000) {
     throw new Error(
-      `PI_RESEARCH_RESEARCHER_TIMEOUT_MS must be between 5000 and 600000 ms, got ${RESEARCHER_TIMEOUT_MS}`
+      `PI_RESEARCH_RESEARCHER_TIMEOUT_MS must be between 30000ms (30s) and 600000ms (10m), got ${RESEARCHER_TIMEOUT_MS}ms`
     );
   }
 
