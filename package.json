@@ -2,7 +2,7 @@
   "name": "pi-research",
   "version": "2.0.0",
   "type": "module",
-  "private": true,
+  05|  "type": "module",
   "main": "index.ts",
   "scripts": {
     "lint": "npx eslint src/",

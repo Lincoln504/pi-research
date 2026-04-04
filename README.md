@@ -23,6 +23,7 @@ Install as a pi extension via npm or GitHub:
 npm install -g pi-research
 
 # Or install from GitHub
+npm install -g https://github.com/Lincoln504/pi-research-dev.git
 npm install -g https://github.com/your-org/pi-research.git
 
 # Or from local directory (development)
@@ -83,8 +84,8 @@ Query → Coordinator Agent → Researcher Agents (pi_search, pi_scrape, pi_secu
 7. **src/rg-grep.ts**: Standalone ripgrep/grep tool
 8. **src/searxng-lifecycle.ts**: SearXNG container lifecycle management
 9. **src/session-context.ts**: Formats parent session context
-10. **src/tui/combined-panel.ts**: Combined TUI widget (SearXNG status + research panel)
-11. **src/tui/panel.ts**: TUI panel component (legacy reference)
+10. **src/tui/research-panel.ts**: Combined TUI widget (SearXNG status + research panel)
+11. **src/tui/panel-factory.ts**: TUI panel factory for creating widget instances
 
 ## Research Process
 
@@ -371,4 +372,6 @@ curl --socks5 127.0.0.1:9050 https://check.torproject.org
 
 ## License
 
-Private extension for personal use.
+375:0a|## License
+05|
+MIT License - see LICENSE file for details.
