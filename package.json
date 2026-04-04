@@ -1,9 +1,38 @@
 {
   "name": "pi-research",
   "version": "2.0.0",
+  "description": "Multi-agent research orchestration extension for pi. Coordinator + parallel/sequential researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
-  "private": true,
+  "private": false,
   "main": "index.ts",
+  "files": [
+    "index.ts",
+    "src/",
+    "prompts/",
+    "config/",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lincoln504/pi-research.git"
+  },
+  "homepage": "https://github.com/Lincoln504/pi-research#readme",
+  "bugs": {
+    "url": "https://github.com/Lincoln504/pi-research/issues"
+  },
+  "keywords": [
+    "pi",
+    "research",
+    "agent",
+    "orchestration",
+    "web-search",
+    "scraping",
+    "security",
+    "stack-exchange"
+  ],
+  "author": "Lincoln504",
+  "license": "MIT",
   "scripts": {
     "lint": "npx eslint src/",
     "lint:fix": "npx eslint src/ --fix",

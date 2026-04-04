@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: npm ci
@@ -49,3 +50,9 @@ jobs:
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
           draft: false
           prerelease: false
+
+      - name: Publish to npm
+        if: success()
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
