@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
-
+export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
@@ -11,3 +11,4 @@ import baseConfig from './vitest.config';
     testTimeout: 120000,
     maxConcurrency: 2,
   },
+});
