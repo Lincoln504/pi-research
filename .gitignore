@@ -12,6 +12,7 @@ yarn-error.log*
 
 # Generated files
 config/tor-settings-generated.yml
+6e|config/proxy-settings-generated.yml
 /tmp/
 
 # TypeScript
