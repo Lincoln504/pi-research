@@ -7,7 +7,7 @@
 
 import type { Component } from '@mariozechner/pi-tui';
 import type { Theme } from '@mariozechner/pi-coding-agent';
-import type { SearxngStatus } from '../searxng-lifecycle.ts';
+import type { SearxngStatus } from '../infrastructure/searxng-lifecycle.ts';
 
 let capturedTui: { requestRender?(): void } | null = null;
 

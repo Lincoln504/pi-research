@@ -53,8 +53,8 @@ vi.mock('../../../src/tools/grep.ts', () => ({
 }));
 
 // Mock agent tools
-vi.mock('../../../src/agent-tools.ts', () => ({
-  createAgentTools: vi.fn(() => [
+vi.mock('../../../src/tools/index.ts', () => ({
+  createResearchTools: vi.fn(() => [
     { name: 'web_search' },
     { name: 'scrape' },
     { name: 'security' },
@@ -62,7 +62,7 @@ vi.mock('../../../src/agent-tools.ts', () => ({
 }));
 
 // Mock resource loader
-vi.mock('../../../src/make-resource-loader.ts', () => ({
+vi.mock('../../../src/utils/make-resource-loader.ts', () => ({
   makeResourceLoader: vi.fn(() => ({})),
 }));
 
@@ -121,14 +121,14 @@ describe('researcher', () => {
       expect(createAgentSession).toHaveBeenCalled();
     });
 
-    it('should create agent tools with correct options', async () => {
-      const { createAgentTools } = await import('../../../src/agent-tools.ts');
+    it('should create research tools with correct options', async () => {
+      const { createResearchTools } = await import('../../../src/tools/index.ts');
       const mockTools = [
         { name: 'web_search' },
         { name: 'scrape' },
         { name: 'security' },
       ];
-      vi.mocked(createAgentTools).mockReturnValue(mockTools as any);
+      vi.mocked(createResearchTools).mockReturnValue(mockTools as any);
 
       const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
       const mockSession = {
@@ -142,7 +142,7 @@ describe('researcher', () => {
       const options = createMockOptions();
       await createResearcherSession(options);
 
-      expect(createAgentTools).toHaveBeenCalledWith(expect.objectContaining({
+      expect(createResearchTools).toHaveBeenCalledWith(expect.objectContaining({
         searxngUrl: 'http://localhost:8888',
         ctx: options.extensionCtx,
         tracker: expect.anything(),

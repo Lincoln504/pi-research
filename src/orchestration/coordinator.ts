@@ -7,7 +7,7 @@
 
 import type { AgentSession, ModelRegistry, SessionManager, SettingsManager, ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool } from '@mariozechner/pi-coding-agent';
-import { makeResourceLoader } from '../make-resource-loader.ts';
+import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 
 export interface CreateCoordinatorSessionOptions {
   cwd: string;

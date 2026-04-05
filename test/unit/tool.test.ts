@@ -37,7 +37,7 @@ vi.mock('../../src/orchestration/context-tool.ts', () => ({
   createInvestigateContextTool: vi.fn(),
 }));
 
-vi.mock('../../src/searxng-lifecycle.ts', () => ({
+vi.mock('../../src/infrastructure/searxng-lifecycle.ts', () => ({
   initLifecycle: vi.fn(async () => undefined),
   ensureRunning: vi.fn(async () => 'http://localhost:8888'),
   getStatus: vi.fn(() => 'active'),

@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createSearchTool } from '../../src/tools/search.ts';
 import { createScrapeTool } from '../../src/tools/scrape.ts';
-import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.ts';
+import { initLifecycle, ensureRunning } from '../../src/infrastructure/searxng-lifecycle.ts';
 import { logger } from '../../src/logger.ts';
 import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 

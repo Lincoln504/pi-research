@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './src/tool.ts';
 import { logger, suppressConsole, isVerboseFromEnv } from './src/logger.ts';
-import { checkDockerAvailability } from './src/searxng-lifecycle.ts';
+import { checkDockerAvailability } from './src/infrastructure/searxng-lifecycle.ts';
 
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Extension loading...');

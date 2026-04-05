@@ -13,13 +13,13 @@
  */
 
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { DockerSearxngManager, type SearxngManagerConfig, verifyDockerInstalled } from './infrastructure/searxng-manager.ts';
-import { logger, type ILogger } from './logger.ts';
+import { DockerSearxngManager, type SearxngManagerConfig, verifyDockerInstalled } from './searxng-manager.ts';
+import { logger, type ILogger } from '../logger.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { PROXY_URL } from './config.ts';
-import { getActiveConnectionCount } from './web-research/utils.ts';
+import { PROXY_URL } from '../config.ts';
+import { getActiveConnectionCount } from '../web-research/utils.ts';
 
 /**
  * Extension directory for pi-research

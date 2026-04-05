@@ -64,7 +64,7 @@ pi research "What is a binary search tree?" --depth quick
 3. **Coordinator** (`src/orchestration/coordinator.ts`): Decomposes queries into slices, delegates to researchers, synthesizes findings
 4. **Delegate tool** (`src/orchestration/delegate-tool.ts`): Spawns researcher agents
 5. **Researcher** (`src/orchestration/researcher.ts`): Research agent session management
-6. **SearXNG lifecycle** (`src/searxng-lifecycle.ts`): Docker container management for SearXNG
+6. **SearXNG lifecycle** (`src/infrastructure/searxng-lifecycle.ts`): Docker container management for SearXNG
 7. **State management** (`src/infrastructure/state-manager.ts`): Tracks sessions, token usage, failures
 8. **Tools**:
    - `search.ts`: Web search via SearXNG
@@ -92,6 +92,7 @@ pi research "What is a binary search tree?" --depth quick
 
 #### Research levels
 
+- **Level 0 (Quick)**: No coordinator, single researcher session. (Activated by using the `quick` parameter).
 - **Level 1 (Brief)**: 1 slice, up to 1 follow-up. Default for simple factual queries.
 - **Level 2 (Normal)**: 2-3 slices, up to 2 follow-ups. For technical/multi-faceted topics.
 - **Level 3 (Deep)**: 4-5 slices, 3-4 follow-ups. For complex cross-domain analysis.
@@ -208,7 +209,6 @@ pi-research/
 │   ├── tool.ts              # Research tool orchestration
 │   ├── config.ts            # Configuration management
 │   ├── logger.ts            # Logging utilities
-│   ├── searxng-lifecycle.ts # SearXNG container management
 │   ├── orchestration/
 │   │   ├── coordinator.ts   # Coordinator agent session
 │   │   ├── delegate-tool.ts # Delegate tool implementation
@@ -216,7 +216,9 @@ pi-research/
 │   │   ├── context-tool.ts  # Context inspection tool
 │   │   └── session-context.ts # Session context utilities
 │   ├── infrastructure/
-│   │   └── state-manager.ts # Session/state management
+│   │   ├── state-manager.ts # Session/state management
+│   │   ├── searxng-manager.ts # SearXNG container manager
+│   │   └── searxng-lifecycle.ts # SearXNG lifecycle management
 │   ├── tools/
 │   │   ├── search.ts        # Web search tool
 │   │   ├── scrape.ts        # URL scraping tool
@@ -228,6 +230,7 @@ pi-research/
 │   ├── stackexchange/       # Stack Exchange API integration
 │   ├── tui/                 # Terminal UI components
 │   └── utils/               # Shared utilities
+│       └── make-resource-loader.ts # Resource loader factory
 ├── prompts/
 │   ├── coordinator.md       # Coordinator system prompt
 │   └── researcher.md        # Researcher system prompt

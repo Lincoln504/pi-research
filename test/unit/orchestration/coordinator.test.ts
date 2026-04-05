@@ -29,7 +29,7 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
 }));
 
 // Mock resource loader
-vi.mock('../../../src/make-resource-loader.ts', () => ({
+vi.mock('../../../src/utils/make-resource-loader.ts', () => ({
   makeResourceLoader: vi.fn(() => ({})),
 }));
 

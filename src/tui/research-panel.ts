@@ -6,7 +6,7 @@
 
 import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
 import type { Theme } from '@mariozechner/pi-coding-agent';
-import type { SearxngStatus } from '../searxng-lifecycle.ts';
+import type { SearxngStatus } from '../infrastructure/searxng-lifecycle.ts';
 
 export interface SliceState {
   id: string;

@@ -7,8 +7,8 @@
 
 import type { AgentSession, ModelRegistry, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool, SessionManager } from '@mariozechner/pi-coding-agent';
-import { createAgentTools } from '../agent-tools.ts';
-import { makeResourceLoader } from '../make-resource-loader.ts';
+import { createResearchTools } from '../tools/index.ts';
+import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 
 export interface CreateResearcherSessionOptions {
@@ -43,7 +43,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     const result = await createAgentSession({
       cwd,
       tools: [createReadTool(cwd)],
-      customTools: createAgentTools({ searxngUrl, ctx: extensionCtx, tracker }),
+      customTools: createResearchTools({ searxngUrl, ctx: extensionCtx, tracker }),
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,

@@ -23,7 +23,7 @@ import {
   shutdownLifecycle,
   isInitialized,
   getManager,
-} from '../../src/searxng-lifecycle';
+} from '../../../src/infrastructure/searxng-lifecycle';
 
 // Mock DockerSearxngManager
 class MockDockerSearxngManager {

@@ -40,8 +40,8 @@ import {
   onStatusChange,
   type SearxngStatus,
   getConnectionCount,
-} from './searxng-lifecycle.ts';
-import { getManager } from './searxng-lifecycle.ts';
+} from './infrastructure/searxng-lifecycle.ts';
+import { getManager } from './infrastructure/searxng-lifecycle.ts';
 import { onConnectionCountChange } from './web-research/utils.ts';
 import { createDelegateTool, type DelegateToolOptions } from './orchestration/delegate-tool.ts';
 import { createInvestigateContextTool } from './orchestration/context-tool.ts';

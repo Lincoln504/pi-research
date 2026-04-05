@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Theme } from '@mariozechner/pi-coding-agent';
-import type { SearxngStatus } from '../../../src/searxng-lifecycle';
+import type { SearxngStatus } from '../../../src/infrastructure/searxng-lifecycle';
 import { getCapturedTui, createSearxngStatusComponent } from '../../../src/tui/searxng-status';
 
 const mockTheme = {} as unknown as Theme;

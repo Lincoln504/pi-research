@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { runHealthCheck } from '../../src/healthcheck/index.ts';
-import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.ts';
+import { initLifecycle, ensureRunning } from '../../src/infrastructure/searxng-lifecycle.ts';
 import { logger } from '../../src/logger.ts';
 
 describe('Health Check Integration Tests', () => {
@@ -27,7 +27,7 @@ describe('Health Check Integration Tests', () => {
       } as any);
 
       // Register manager with web-research module
-      const { getManager } = await import('../../src/searxng-lifecycle.js');
+      const { getManager } = await import('../../src/infrastructure/searxng-lifecycle.ts');
       const manager = getManager();
       if (manager) {
         const { setSearxngManager } = await import('../../src/web-research/utils.js');

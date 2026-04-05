@@ -9,7 +9,7 @@ import type { ToolDefinition, AgentToolResult, ModelRegistry } from '@mariozechn
 import { Type } from '@sinclair/typebox';
 import { createAgentSession, createReadTool, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createGrepTool } from '../tools/grep.ts';
-import { makeResourceLoader } from '../make-resource-loader.ts';
+import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import { logger } from '../logger.ts';
 

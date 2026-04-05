@@ -10,7 +10,7 @@ import {
   getFailedResearchers,
   shouldStopResearch,
   getResearchStopMessage,
-} from '../../src/utils/session-state.ts';
+} from '../../../src/utils/session-state.ts';
 
 describe('utils/session-state', () => {
   let sessionId: string;
