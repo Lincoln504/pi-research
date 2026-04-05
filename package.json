@@ -1,6 +1,6 @@
 {
   "name": "pi-research",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "Multi-agent research orchestration extension for pi. Coordinator + parallel/sequential researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
   "private": false,
@@ -11,7 +11,9 @@
     "prompts/",
     "config/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md"
   ],
   "repository": {
     "type": "git",
