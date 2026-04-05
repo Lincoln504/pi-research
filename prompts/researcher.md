@@ -79,12 +79,19 @@ At the end of your response, provide **two lists**:
 
 **Why both lists?** Coordinator uses cited links for synthesis, scrape candidates for understanding what else exists and informing follow-up research.
 
-## Shared Link Pool
+## Shared Link Pool (Built into Your Context)
 
-You receive links already scraped by other researchers:
-- Check before your batch scrape to avoid duplication
-- You can reuse findings or re-scrape if your angle is different
-- Your new findings are automatically added to the pool for others
+At the top of your research context, you receive a section: **"Shared Links from Previous Research"**
+
+This shows all links from previous slices organized by slice ID (e.g., Slice 1:1, Slice 2:1):
+- **CITED LINKS**: Links previous researchers actually scraped and used
+- **SCRAPE CANDIDATES**: Links they found but didn't use (with reasons why)
+
+**How to use it:**
+- Before your batch scrape: Check if your target links are already in the pool
+- If a link was already scraped: Reuse those findings OR re-scrape for your specific angle
+- Build on previous work — don't duplicate effort
+- After you report, your findings automatically get added to the pool for future researchers in the same session
 
 ## About Your Assigned Topic
 

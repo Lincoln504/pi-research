@@ -37,15 +37,13 @@ Assess the query complexity and set your research depth accordingly. **Once set,
    - **Check each slice's "CITED LINKS" vs "SCRAPE CANDIDATES"** to understand what was actually used vs just examined.
    - **Note any dynamic slice name adjustments** - researchers may have discovered topics different from their assigned labels.
 
-4. **Build and maintain shared link pool**:
-   - After each delegation round, compile ALL links from:
-     - Each researcher's "CITED LINKS" section
-     - Each researcher's "SCRAPE CANDIDATES" section (organized by their slice label)
-   - This pool helps you and researchers avoid duplication and coordinate across slices
-   - **Dynamic slice labeling**: If a researcher's findings clearly focus on a different topic than their assigned label, consider this when planning follow-up:
-     - Example: Assigned "Economy" but found mostly geography data → rename follow-up to "Geography"
-     - Example: Assigned "Culture" but found mostly political information → rename follow-up to "Politics"
-     - This helps you understand what was actually discovered vs. what you intended
+4. **Shared link pool is automatic**:
+   - The system automatically builds the shared link pool from researcher responses (CITED LINKS + SCRAPE CANDIDATES from each slice)
+   - This pool is automatically provided to all future researchers in the same session
+   - **You don't need to manually compile or manage the pool** — just focus on reviewing findings and deciding follow-ups
+   - Dynamic slice labeling: If a researcher's findings clearly focus on a different topic, consider this for naming future slices:
+     - Example: Assigned "Economy" but found mostly geography data → next slice can be "Geography"
+     - This helps track the real research landscape
 
 5. **Synthesize** all findings into a final comprehensive answer. Write prose, no JSON, no headers unless the content naturally calls for them.
 
@@ -65,23 +63,23 @@ The shared link pool enables coordination across all researchers:
    - **CITED LINKS**: Links they actually used and cited
    - **SCRAPE CANDIDATES**: Links they scraped but didn't use (with reasons)
 
-2. You maintain a master pool organized by slice:
+2. Pool structure (for your reference):
    ```
    Shared Links Pool:
    Slice 1:1 - Economy:
-     CITED: [URL1, URL2, URL3]
-     CANDIDATES: [URL4 (off-topic), URL5 (low quality)]
-   
+     CITED: [URL1, URL2, URL3]  ← Links used by researcher
+     CANDIDATES: [URL4, URL5]    ← Links found but not used
    Slice 2:1 - Geography:
      CITED: [URL6, URL7]
      CANDIDATES: []
    ```
 
 3. When delegating follow-up research:
-   - Reference relevant parts of the shared pool
-   - Guide researchers to avoid re-scraping
-   - Encourage re-use of high-quality sources already examined
-   - Point out useful candidates from previous slices if relevant to new tasks
+   - **The shared pool is automatically injected into new researchers' context** — they see it as "Shared Links from Previous Research" at the start
+   - Researchers automatically check the pool before their batch scrape to avoid duplication
+   - You don't need to manually pass links; just call delegate_research for follow-ups
+   - Optionally, in your delegation call, you can reference prior findings: "Slice 1:1 found X. Follow up on dimension Y using candidates from that slice if relevant."
+   - New researchers will see the pool and use it intelligently
 
 ### Dynamic Slice Naming
 
