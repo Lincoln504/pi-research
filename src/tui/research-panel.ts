@@ -21,7 +21,7 @@
  * (Note: +2 would show in left column area indicating slices 1-2 hidden)
  */
 
-import { type Component } from '@mariozechner/pi-tui';
+import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
 import type { Theme } from '@mariozechner/pi-coding-agent';
 import type { SearxngStatus } from '../searxng-lifecycle.js';
 
@@ -141,8 +141,10 @@ export function createResearchPanel(
         const GAP = 1;
 
         // ── Right box geometry ────────────────────────────────────────────────
-        const rightBoxWidth = Math.max(20, width - LEFT_BOX_W - GAP);
-        const rightInner = rightBoxWidth - 2; // inside outer │ … │
+        // Ensure right box has minimum width to avoid rendering errors in narrow terminals
+        const minRightWidth = Math.max(3, width - LEFT_BOX_W - GAP);
+        const rightBoxWidth = Math.max(3, minRightWidth);
+        const rightInner = Math.max(1, rightBoxWidth - 2); // inside outer │ … │
 
         // ── Left box content ──────────────────────────────────────────────────
         const status = state.searxngStatus;
@@ -173,9 +175,16 @@ export function createResearchPanel(
 
         // ── Right box top border with title ──────────────────────────────────
         // Format: ┌── Research | glm-4.7  42.3k ──────┐
-        const titleText = ` Research | ${state.modelName}  ${formatTokens(state.totalTokens)} `;
+        let titleText = ` Research | ${state.modelName}  ${formatTokens(state.totalTokens)} `;
         const titlePrefixDashes = 2;
-        const titleFillDashes = Math.max(0, rightInner - titlePrefixDashes - titleText.length);
+
+        // Truncate title if too long for available width
+        const maxTitleWidth = rightInner - titlePrefixDashes;
+        if (visibleWidth(titleText) > maxTitleWidth) {
+          titleText = truncateToWidth(titleText, Math.max(3, maxTitleWidth - 1)) + ' ';
+        }
+
+        const titleFillDashes = Math.max(0, rightInner - titlePrefixDashes - visibleWidth(titleText));
         const rTopWithTitle =
           '┌' + '─'.repeat(titlePrefixDashes) +
           theme.fg('muted', titleText) +
@@ -204,16 +213,25 @@ export function createResearchPanel(
         const totalCols = showIndicator ? numVisible + 1 : numVisible; // +1 for indicator column when consolidating
 
         if (numVisible === 0) {
-          const rEmpty  = `│${' '.repeat(rightInner)}│`;
-          const rBottom = `└${'─'.repeat(rightInner)}┘`;
+          const rEmpty  = `│${' '.repeat(Math.max(1, rightInner))}│`;
+          const rBottom = `└${'─'.repeat(Math.max(1, rightInner))}┘`;
 
-          return [
+          const lines = [
             theme.fg('accent', leftBorder) + ' ' + rTopWithTitle,
             leftRow1                        + ' ' + theme.fg('accent', rEmpty),
             leftRow2                        + ' ' + theme.fg('accent', rEmpty),
             leftRow3                        + ' ' + theme.fg('accent', rEmpty),
             theme.fg('accent', leftBottom)  + ' ' + theme.fg('accent', rBottom),
           ];
+
+          // Truncate lines to terminal width if needed (safety fallback)
+          return lines.map(line => {
+            const vw = visibleWidth(line);
+            if (vw > width) {
+              return truncateToWidth(line, width);
+            }
+            return line;
+          });
         }
 
         // ── Right box: column layout ──────────────────────────────────────────
@@ -284,13 +302,23 @@ export function createResearchPanel(
           '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : '')
         ).join('') + '┘';
 
-        return [
+        // Build output lines with width safety check
+        const lines = [
           theme.fg('accent', leftBorder) + ' ' + rTop,
           leftRow1                        + ' ' + rEmpty,
           leftRow2                        + ' ' + rContent,
           leftRow3                        + ' ' + rEmpty,
           theme.fg('accent', leftBottom)  + ' ' + theme.fg('accent', rBottom),
         ];
+
+        // Truncate lines to terminal width if needed (safety fallback)
+        return lines.map(line => {
+          const vw = visibleWidth(line);
+          if (vw > width) {
+            return truncateToWidth(line, width);
+          }
+          return line;
+        });
       },
 
       invalidate(): void {
