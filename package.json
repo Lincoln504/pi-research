@@ -25,6 +25,7 @@
   },
   "keywords": [
     "pi",
+    "pi-package",
     "research",
     "agent",
     "orchestration",
@@ -52,11 +53,13 @@
   },
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.28.2",
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*",
     "dockerode": "^4.0.10",
     "js-yaml": "^4.1.1",
     "playwright": "^1.52.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
