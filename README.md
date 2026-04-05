@@ -131,8 +131,7 @@ Environment variables can be configured in a `.env` file in the project root.
 
 #### Logging & Verbose Mode
 
-Enable verbose logging by running `pi --verbose` or setting `PI_RESEARCH_VERBOSE=1`. 
-The extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run.
+When verbose mode is enabled (via `pi --verbose` or `PI_RESEARCH_VERBOSE=1`), the extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run. If verbose mode is not enabled, no log files are created.
 
 ### Terminal UI
 
