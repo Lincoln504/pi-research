@@ -60,13 +60,32 @@ export function createStackexchangeTool(options: {
       const paramsRecord = params as Record<string, unknown>;
       const command = paramsRecord['command'] as string;
 
+      if (!command || typeof command !== 'string') {
+        throw new Error('Stack Exchange command is required and must be a string');
+      }
 
-      return stackexchangeCommand({
-        command,
-        params: paramsRecord,
-        ctx,
-        signal,
-      });
+      try {
+        return await stackexchangeCommand({
+          command,
+          params: paramsRecord,
+          ctx,
+          signal,
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `# Stack Exchange Search Failed\n\n**Error:** ${errorMsg}\n\n**Command:** ${command}\n\nFailed to query Stack Exchange. This may be due to API rate limiting (300/day anonymous, 10,000/day with key), network issues, or invalid query parameters.`,
+            },
+          ],
+          details: {
+            command,
+            error: errorMsg,
+          },
+        };
+      }
     },
   };
 }

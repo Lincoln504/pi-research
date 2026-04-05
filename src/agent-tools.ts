@@ -6,11 +6,11 @@
  */
 
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { createSearchTool } from './tools/search.js';
-import { createScrapeTool } from './tools/scrape.js';
-import { createSecuritySearchTool } from './tools/security.js';
-import { createStackexchangeTool } from './tools/stackexchange.js';
-import { createGrepTool } from './tools/grep.js';
+import { createSearchTool } from './tools/search';
+import { createScrapeTool } from './tools/scrape';
+import { createSecuritySearchTool } from './tools/security';
+import { createStackexchangeTool } from './tools/stackexchange';
+import { createGrepTool } from './tools/grep';
 
 interface CreateAgentToolsOptions {
   searxngUrl: string;
@@ -35,8 +35,8 @@ export function createAgentTools(options: CreateAgentToolsOptions): ToolDefiniti
 }
 
 // Export individual tool factory functions
-export { createSearchTool } from './tools/search.js';
-export { createScrapeTool } from './tools/scrape.js';
-export { createSecuritySearchTool } from './tools/security.js';
-export { createStackexchangeTool } from './tools/stackexchange.js';
-export { createGrepTool } from './tools/grep.js';
+export { createSearchTool } from './tools/search';
+export { createScrapeTool } from './tools/scrape';
+export { createSecuritySearchTool } from './tools/security';
+export { createStackexchangeTool } from './tools/stackexchange';
+export { createGrepTool } from './tools/grep';

@@ -2,6 +2,10 @@
 
 ![pi-research banner](README-banner.jpg)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
+[![CI Status](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml)
+
 Multi-agent research orchestration extension for pi. Uses a coordinator to delegate parallel/sequential researcher agents, then synthesizes findings into comprehensive answers.
 
 ## Features

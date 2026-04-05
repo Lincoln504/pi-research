@@ -140,6 +140,21 @@ My search for "Rust 2025 features" returned no results. I scraped the official R
 
 **Use "ERROR:" prefix ONLY if you cannot complete any useful research** — every tool fails, you have no findings. This signals systemic failure to the coordinator.
 
+**When using ERROR: prefix, include specific failure details:**
+- List each tool call attempted (search query, scrape URL, etc.)
+- Include the exact error message returned by the tool (e.g., "SearXNG client error (400)", "No results returned", "Scrape failed: HTTP 503 Service Unavailable")
+- Report any partial results or patterns observed
+
+Example format:
+```
+ERROR: All searches and scrapes failed. Details:
+- Search "greek yogurt nutrition": SearXNG client error (400 Bad Request)
+- Search "greek yogurt production": No results returned
+- Search "strained yogurt composition": SearXNG client error (400 Bad Request)
+- Scrape https://example.com: HTTP 503 Service Unavailable
+No usable research data could be retrieved from any source.
+```
+
 ## Research Lifecycle
 
 1. You receive an assignment (topic/slice name)

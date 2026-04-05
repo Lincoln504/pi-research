@@ -10,6 +10,7 @@ import { Type } from '@sinclair/typebox';
 
 const DEFAULT_MAX_BYTES = 100 * 1024; // 100KB
 const DEFAULT_MAX_LINES = 200;
+const STREAM_MAX_BYTES = 10 * 1024 * 1024; // 10MB max in stream (prevent RangeError)
 
 interface RgGrepParams {
   pattern: string;
@@ -49,14 +50,23 @@ function truncateHead(content: string, maxBytes: number, maxLines: number): stri
 async function execCommand(
   command: string,
   args: string[],
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number | null; wasTruncated: boolean }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args);
     let stdout = '';
     let stderr = '';
+    let wasTruncated = false;
 
     child.stdout?.on('data', (data) => {
-      stdout += data.toString();
+      // Check if adding this chunk would exceed stream limit
+      const chunk = data.toString();
+      if (stdout.length + chunk.length > STREAM_MAX_BYTES) {
+        // Stop collecting data to prevent RangeError
+        wasTruncated = true;
+        child.kill();
+        return;
+      }
+      stdout += chunk;
     });
 
     child.stderr?.on('data', (data) => {
@@ -64,7 +74,7 @@ async function execCommand(
     });
 
     child.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code });
+      resolve({ stdout, stderr, exitCode: code, wasTruncated });
     });
 
     child.on('error', (error) => {
@@ -141,7 +151,7 @@ export function createGrepTool(): ToolDefinition {
       // Try rg first
       try {
         const rgArgs = ['--no-heading', '-n', ...flagParts, ...patternParts, path];
-        const { stdout, stderr, exitCode } = await execCommand('rg', rgArgs);
+        const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
         const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
@@ -150,6 +160,10 @@ export function createGrepTool(): ToolDefinition {
         markdown += `**Path:** \`${path}\`\n`;
         if (flags) markdown += `**Flags:** \`${flags}\`\n`;
         markdown += `**Exit Code:** ${exitCode}\n\n`;
+
+        if (wasTruncated) {
+          markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+        }
 
         if (truncated) {
           markdown += '```\n' + truncated + '\n```';
@@ -167,13 +181,14 @@ export function createGrepTool(): ToolDefinition {
             command: 'rg',
             args: rgArgs,
             exitCode,
+            wasTruncated,
           },
         };
       } catch (rgError) {
         // rg not found, try grep
         try {
           const grepArgs = ['-rn', ...flagParts, pattern, path];
-          const { stdout, stderr, exitCode } = await execCommand('grep', grepArgs);
+          const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
           const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
@@ -183,6 +198,10 @@ export function createGrepTool(): ToolDefinition {
           if (flags) markdown += `**Flags:** \`${flags}\`\n`;
           markdown += `**Exit Code:** ${exitCode}\n\n`;
           markdown += '*Note: Using grep fallback (rg not available)*\n\n';
+
+          if (wasTruncated) {
+            markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+          }
 
           if (truncated) {
             markdown += '```\n' + truncated + '\n```';
@@ -200,6 +219,7 @@ export function createGrepTool(): ToolDefinition {
               command: 'grep',
               args: grepArgs,
               exitCode,
+              wasTruncated,
             },
           };
         } catch (grepError) {
@@ -233,7 +253,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
   // Try rg first
   try {
     const rgArgs = ['--no-heading', '-n', ...flagParts, ...patternParts, path];
-    const { stdout, stderr, exitCode } = await execCommand('rg', rgArgs);
+    const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
     let markdown = '# Search Results (rg)\n\n';
     markdown += `**Pattern:** \`${pattern}\`\n`;
@@ -242,6 +262,11 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     markdown += `**Exit Code:** ${exitCode}\n\n`;
 
     const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+
+    if (wasTruncated) {
+      markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+    }
+
     if (truncated) {
       markdown += '```\n' + truncated + '\n```';
     } else {
@@ -257,7 +282,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     // rg not found, try grep
     try {
       const grepArgs = ['-rn', ...flagParts, pattern, path];
-      const { stdout, stderr, exitCode } = await execCommand('grep', grepArgs);
+      const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
       let markdown = '# Search Results (grep)\n\n';
       markdown += `**Pattern:** \`${pattern}\`\n`;
@@ -267,6 +292,11 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
       markdown += '*Note: Using grep fallback (rg not available)*\n\n';
 
       const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+
+      if (wasTruncated) {
+        markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+      }
+
       if (truncated) {
         markdown += '```\n' + truncated + '\n```';
       } else {

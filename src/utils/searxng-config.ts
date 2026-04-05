@@ -50,7 +50,7 @@ function parseYamlEngines(content: string): Array<{ name: string; disabled?: boo
       if (currentEngine) {
         engines.push(currentEngine);
       }
-      currentEngine = { name: nameMatch[1].trim() };
+      currentEngine = { name: nameMatch[1]!.trim() };
       continue;
     }
 

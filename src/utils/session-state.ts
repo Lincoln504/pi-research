@@ -108,17 +108,22 @@ export function shouldStopResearch(): boolean {
 export function getResearchStopMessage(): string {
   const failed = getFailedResearchers();
   const count = failed.length;
-  
+
   return [
     `Research stopped: ${count} researcher(s) failed: ${failed.join(', ')}.`,
     '',
-    'This suggests a systemic issue (network connectivity, SearXNG unavailability, or configuration).',
+    'This indicates infrastructure failure — multiple researchers could not complete research.',
+    'Possible causes: network unavailable, SearXNG container not running, search engines returning errors.',
+    '',
+    '▎ If the health check passed (search and scrape verified), this failure is at the AI session layer —',
+    '   check model availability, API key, and context settings.',
     '',
     'Troubleshooting:',
-    '• Check network connection',
-    '• Verify SearXNG is running: `docker ps | grep searxng`',
-    '• Check SearXNG logs: `docker logs searxng`',
-    '• Verify environment variables (SEARXNG_URL, TOR_ENABLED, etc.)',
+    '• Verify network connection is active',
+    '• Check SearXNG container: `docker ps | grep searxng`',
+    '• View SearXNG logs: `docker logs pi-searxng` (check for engine HTTP errors like 503, 400)',
+    '• Verify PROXY_URL if configured (optional): should be socks5://host:port or http://host:port',
+    '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 4 minutes)',
     '',
     'Partial results may be available below.',
   ].join('\n');

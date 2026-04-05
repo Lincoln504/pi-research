@@ -55,24 +55,78 @@ export function createInvestigateContextTool(options: ContextToolOptions): ToolD
     ): Promise<AgentToolResult<unknown>> {
       const { question } = params as { question: string };
 
+      if (!question || typeof question !== 'string') {
+        logger.error('[context] Invalid question parameter');
+        return {
+          content: [{ type: 'text', text: 'Error: question is required and must be a string' }],
+          details: {},
+        };
+      }
+
       logger.log(`[context] Investigating project context: ${question.slice(0, 50)}...`);
 
-      const { session } = await createAgentSession({
-        cwd: options.cwd,
-        tools: [createReadTool(options.cwd)],
-        customTools: [createGrepTool()], // read + rg only, no search/scrape
-        sessionManager: SessionManager.inMemory(),
-        settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
-        model: options.ctxModel,
-        modelRegistry: options.modelRegistry,
-        resourceLoader: makeResourceLoader('You investigate project context. Use read and rg_grep only.'),
-      });
+      let session;
+      try {
+        const result = await createAgentSession({
+          cwd: options.cwd,
+          tools: [createReadTool(options.cwd)],
+          customTools: [createGrepTool()], // read + rg only, no search/scrape
+          sessionManager: SessionManager.inMemory(),
+          settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
+          model: options.ctxModel,
+          modelRegistry: options.modelRegistry,
+          resourceLoader: makeResourceLoader('You investigate project context. Use read and rg_grep only.'),
+        });
+        session = result.session;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('[context] Failed to create session:', errorMsg);
+        return {
+          content: [{ type: 'text', text: `Error: Failed to create context investigation session: ${errorMsg}` }],
+          details: {},
+        };
+      }
 
-      await session.prompt(question);
+      try {
+        await session.prompt(question);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('[context] Prompt failed:', errorMsg);
+        session.abort().catch(() => {});
+        return {
+          content: [{ type: 'text', text: `Error: Context investigation failed: ${errorMsg}` }],
+          details: {},
+        };
+      }
 
       const msgs = session.messages;
       const last = [...msgs].reverse().find((m) => m.role === 'assistant');
+
+      if (!last) {
+        logger.error('[context] No assistant message in response');
+        return {
+          content: [{ type: 'text', text: 'Error: No response from context investigation' }],
+          details: {},
+        };
+      }
+
+      if (last.stopReason === 'error' || (last.errorMessage && last.stopReason !== 'aborted')) {
+        const errorMsg = last.errorMessage || last.stopReason || 'Unknown error';
+        logger.error('[context] Provider error:', errorMsg);
+        return {
+          content: [{ type: 'text', text: `Error: Context investigation encountered provider error: ${errorMsg}` }],
+          details: {},
+        };
+      }
+
       const text = extractText(last);
+      if (!text || text.trim().length === 0) {
+        logger.warn('[context] Investigation returned empty response');
+        return {
+          content: [{ type: 'text', text: 'Warning: Context investigation returned no usable output' }],
+          details: {},
+        };
+      }
 
       logger.log('[context] Investigation complete');
       return { content: [{ type: 'text', text }], details: {} };

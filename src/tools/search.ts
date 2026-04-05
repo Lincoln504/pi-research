@@ -56,7 +56,26 @@ export function createSearchTool(_options: {
 
       const queriesText = queries.length === 1 ? 'query' : 'queries';
 
-      const queryResults = await search(queries);
+      let queryResults;
+      try {
+        queryResults = await search(queries);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const elapsed = Date.now() - startTime;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `# Web Search Failed\n\n**Error:** ${errorMsg}\n\n**Queries Attempted:** ${queries.length}\n\n**Duration:** ${(elapsed / 1000).toFixed(2)}s\n\nFailed to search the web. This may be due to network issues, SearXNG unavailability, or search engine blocking.`,
+            },
+          ],
+          details: {
+            queries,
+            error: errorMsg,
+            duration: elapsed,
+          },
+        };
+      }
 
       const elapsed = Date.now() - startTime;
 

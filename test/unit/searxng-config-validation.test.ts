@@ -63,9 +63,6 @@ describe('SearXNG Configuration Validation', () => {
 
   describe('validateEngineListConsistency()', () => {
     it('should detect when healthcheck expects different engines than config provides', () => {
-      // Get actual engines from config
-      const actualEngines = getActiveSearxngEngines();
-
       // Create a mismatched expected list
       const wrongExpectedList = ['duckduckgo', 'bing', 'brave']; // includes disabled DuckDuckGo
 

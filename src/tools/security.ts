@@ -88,16 +88,34 @@ export function createSecuritySearchTool(_options: {
 
       const maxResults = (paramsRecord['maxResults'] as number | undefined) ?? 20;
 
-
-      const results = await searchSecurityDatabases({
-        databases,
-        terms,
-        severity: paramsRecord['severity'] as string | undefined,
-        maxResults,
-        includeExploited: (paramsRecord['includeExploited'] as boolean | undefined) ?? false,
-        ecosystem: paramsRecord['ecosystem'] as string | undefined,
-        githubRepo: paramsRecord['githubRepo'] as string | undefined,
-      } as SecuritySearchParams);
+      let results;
+      try {
+        results = await searchSecurityDatabases({
+          databases,
+          terms,
+          severity: paramsRecord['severity'] as string | undefined,
+          maxResults,
+          includeExploited: (paramsRecord['includeExploited'] as boolean | undefined) ?? false,
+          ecosystem: paramsRecord['ecosystem'] as string | undefined,
+          githubRepo: paramsRecord['githubRepo'] as string | undefined,
+        } as SecuritySearchParams);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `# Security Vulnerability Search Failed\n\n**Error:** ${errorMsg}\n\n**Databases:** ${databases.join(', ')}\n\n**Terms:** ${terms.join(', ')}\n\nUnable to search security databases. This may be a temporary issue - try again later.`,
+            },
+          ],
+          details: {
+            error: errorMsg,
+            databases,
+            terms,
+            duration: Date.now() - startTime,
+          },
+        };
+      }
 
       const elapsed = Date.now() - startTime;
 

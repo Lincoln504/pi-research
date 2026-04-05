@@ -17,6 +17,8 @@ export interface Config {
   FLASH_TIMEOUT_MS: number;
   /** Proxy URL for SearXNG searches (optional) */
   PROXY_URL?: string;
+  /** Health check timeout in milliseconds (default: 15000) */
+  HEALTH_CHECK_TIMEOUT_MS?: number;
 }
 
 /**
@@ -26,7 +28,8 @@ const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 240000,
   FLASH_TIMEOUT_MS: 1000,
   PROXY_URL: undefined,
-} as const;
+  HEALTH_CHECK_TIMEOUT_MS: 15000,
+};
 /**
  * Parse environment variable to number with default
  */
@@ -79,6 +82,11 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       10
     ),
     PROXY_URL: parseEnvString(env, 'PROXY_URL'),
+    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(
+      env,
+      'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
+      DEFAULTS.HEALTH_CHECK_TIMEOUT_MS as number,
+    ),
   };
 }
 
@@ -139,6 +147,7 @@ export function validateConfig(config: Config = getConfig()): void {
     RESEARCHER_TIMEOUT_MS: config.RESEARCHER_TIMEOUT_MS,
     FLASH_TIMEOUT_MS: config.FLASH_TIMEOUT_MS,
     PROXY_URL: config.PROXY_URL,
+    HEALTH_CHECK_TIMEOUT_MS: config.HEALTH_CHECK_TIMEOUT_MS,
   });
 }
 

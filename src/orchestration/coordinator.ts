@@ -26,16 +26,31 @@ export async function createCoordinatorSession(options: CreateCoordinatorSession
     throw new Error('No model selected. Please select a model before using the research tool.');
   }
 
-  const { session } = await createAgentSession({
-    cwd,
-    tools: [createReadTool(cwd)],
-    customTools,
-    sessionManager,
-    settingsManager,
-    model: ctxModel,
-    modelRegistry,
-    resourceLoader: makeResourceLoader(systemPrompt),
-  });
+  if (!systemPrompt || typeof systemPrompt !== 'string') {
+    throw new Error('Invalid system prompt: must be a non-empty string');
+  }
 
-  return session;
+  try {
+    const result = await createAgentSession({
+      cwd,
+      tools: [createReadTool(cwd)],
+      customTools,
+      sessionManager,
+      settingsManager,
+      model: ctxModel,
+      modelRegistry,
+      resourceLoader: makeResourceLoader(systemPrompt),
+    });
+
+    if (!result || !result.session) {
+      throw new Error('Session creation returned invalid result');
+    }
+
+    return result.session;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create coordinator session: ${errorMsg}`, {
+      cause: error,
+    });
+  }
 }

@@ -44,29 +44,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   ]);
 }
 
-/**
- * QUICK search validation: just check results exist and have basic structure
- */
-function validateSearchResults(results: any[]): { valid: boolean; error?: string } {
-  if (!Array.isArray(results)) {
-    return { valid: false, error: 'Results not an array' };
-  }
-
-  if (results.length === 0) {
-    return { valid: false, error: 'No search results' };
-  }
-
-  const first = results[0];
-  if (!first || typeof first.url !== 'string' || !first.url.startsWith('http')) {
-    return { valid: false, error: 'Invalid result URL' };
-  }
-
-  if (!first.title || typeof first.title !== 'string') {
-    return { valid: false, error: 'Invalid result title' };
-  }
-
-  return { valid: true };
-}
 
 /**
  * QUICK scrape validation: just check content exists and is readable

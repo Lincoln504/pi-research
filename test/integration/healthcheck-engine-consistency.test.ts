@@ -26,8 +26,6 @@ describe('Healthcheck Engine Consistency Integration', () => {
   });
 
   it('should validate that expected healthcheck engines match config', () => {
-    const actualEngines = getActiveSearxngEngines();
-
     // These are the engines that healthcheck now expects
     // If config adds/removes engines, this validation will catch it
     const expectedHealthcheckEngines = ['google', 'bing', 'brave'];

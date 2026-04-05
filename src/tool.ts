@@ -20,10 +20,15 @@ import type {
 import { Type } from '@sinclair/typebox';
 import { SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createCoordinatorSession } from './orchestration/coordinator.js';
-import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.js';
+import { createResearcherSession } from "./orchestration/researcher.js";
+import { validateConfig, RESEARCHER_TIMEOUT_MS, FLASH_TIMEOUT_MS } from './config.js';
 import {
   createResearchPanel,
   clearAllFlashTimeouts,
+  addSlice,
+  activateSlice,
+  completeSlice,
+  flashSlice,
   type ResearchPanelState,
 } from './tui/research-panel.js';
 import { formatParentContext } from './orchestration/session-context.js';
@@ -63,6 +68,9 @@ export function createResearchTool(): ToolDefinition {
       query: Type.String({
         description: 'Research query or topic to investigate',
       }),
+      depth: Type.Optional(Type.String({
+        description: 'Research depth: "quick" (single researcher, no coordinator, fast) or "deep" (coordinator + multi-agent, default)',
+      })),
       model: Type.Optional(Type.String({
         description: 'Model ID to use for all research agents (defaults to the currently active model)',
       })),
@@ -74,7 +82,9 @@ export function createResearchTool(): ToolDefinition {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, model: modelId } = params as { query: string; model?: string };
+      const { query, model: modelId } = params as { query: string; depth?: string; model?: string };
+      const depthParam = ((params as any).depth as string | undefined)?.toLowerCase() ?? 'deep';
+      const isQuick = depthParam === 'quick';
 
       // Suppress ALL console output immediately — catches SearXNG Manager init messages,
       // internal module logs, and any other module that uses console.* directly.
@@ -226,13 +236,9 @@ export function createResearchTool(): ToolDefinition {
       };
       signal?.addEventListener('abort', cleanup, { once: true });
 
-      // 6. Mutable label state
-      const breadthCounter = { value: 0 };
-
-      // 7. Shared options for researcher creation
+      // 6. Shared session infrastructure
       const sessionManager = SessionManager.inMemory();
       const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
-      const coordinatorPrompt = readFileSync(join(__dirname, '..', 'prompts', 'coordinator.md'), 'utf-8');
       const researcherPrompt = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
 
       const researcherOptions: CreateResearcherSessionOptions = {
@@ -246,107 +252,178 @@ export function createResearchTool(): ToolDefinition {
         extensionCtx: ctx,
       };
 
-      // 8. Create tools for coordinator
+      // 8. Shared token tracking function
       const onTokens = (n: number) => {
         panelState.totalTokens += n;
         updateWidget();
       };
 
-      const delegateToolOptions: DelegateToolOptions = {
-        sessionId,  // Pass session ID for shared links
-        breadthCounter,
-        panelState,
-        onTokens,
-        onUpdate: updateWidget,  // Callback to trigger widget re-render
-        researcherOptions,
-        signal,
-        timeoutMs: RESEARCHER_TIMEOUT_MS,
-        flashTimeoutMs: 1000,
-      };
-      const delegateTool = createDelegateTool(delegateToolOptions);
-      const contextTool = createInvestigateContextTool({
-        cwd: ctx.cwd,
-        ctxModel: selectedModel,
-        modelRegistry: ctx.modelRegistry,
-      });
-
-      // 9. Create coordinator session
-      const coordinatorSession = await createCoordinatorSession({
-        cwd: ctx.cwd,
-        ctxModel: selectedModel,
-        modelRegistry: ctx.modelRegistry,
-        sessionManager,
-        settingsManager,
-        systemPrompt: coordinatorPrompt,
-        customTools: [delegateTool, contextTool],
-      });
-
-      // 10. Token tracking for coordinator itself
-      coordinatorSession.subscribe((event: AgentSessionEvent) => {
-        if (event.type === 'message_end' && event.message.role === 'assistant') {
-          const tokens = (event.message as any).usage?.totalTokens;
-          if (tokens) onTokens(tokens);
-        }
-      });
-
-      // 11. Create internal abort controller for research session
+      // 9. Create internal abort controller
       const researchAbortController = new AbortController();
-      const researchSignal = researchAbortController.signal;
-
-      // Combine external signal (ESC/Ctrl+C) with internal abort controller
-      const combinedSignal = AbortSignal.any([signal ?? AbortSignal.timeout(86400000), researchSignal]);
-
-      // 12. When ESC/Ctrl+C is pressed, abort all sessions immediately
+      const combinedSignal = AbortSignal.any([signal ?? AbortSignal.timeout(86400000), researchAbortController.signal]);
       const abortHandler = () => {
         researchAbortController.abort();
       };
       signal?.addEventListener('abort', abortHandler, { once: true });
 
-      // 13. Single prompt — coordinator converges on its own
-      try {
-        const context = formatParentContext(ctx);
-        // Race the coordinator prompt against abort signal
-        await Promise.race([
-          coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`),
-          new Promise((_, reject) => {
-            if (combinedSignal.aborted) {
-              reject(new Error('Research cancelled by user'));
-            } else {
-              combinedSignal.addEventListener('abort', () => {
-                reject(new Error('Research cancelled by user'));
-              });
+      // 10. Branch: Quick mode vs Deep mode
+      if (isQuick) {
+        // ===== QUICK MODE: Single researcher, no coordinator =====
+        const sliceLabel = '1:1';
+        addSlice(panelState, sliceLabel, sliceLabel, false);
+        activateSlice(panelState, sliceLabel);
+        updateWidget();
+
+        try {
+          // Create researcher session
+          const researcherSession = await createResearcherSession(researcherOptions);
+
+          // Subscribe to session events
+          researcherSession.subscribe((event: AgentSessionEvent) => {
+            if (event.type === 'message_end' && event.message.role === 'assistant') {
+              const tokens = (event.message as any).usage?.totalTokens;
+              if (tokens) onTokens(tokens);
             }
-          })
-        ]);
-        const msgs = coordinatorSession.messages;
-        const last = [...msgs].reverse().find((m) => m.role === 'assistant');
-        const text = extractText(last) || 'No answer synthesized.';
-        cleanup();
-        return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
-      } catch (error) {
-        // Abort the coordinator session to stop any in-progress API calls
-        coordinatorSession.abort().catch(() => {});
-        cleanup();
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        
-        // Check if it was a user cancellation
-        if (errorMsg.includes('cancelled by user') || combinedSignal.aborted) {
+            if (event.type === 'tool_execution_end') {
+              const color = (event as any).error ? 'red' : 'green';
+              flashSlice(panelState, sliceLabel, color, FLASH_TIMEOUT_MS, updateWidget);
+            }
+          });
+
+          // Prompt researcher with full query
+          const context = formatParentContext(ctx);
+          let timeoutId: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              researcherSession.prompt(`Context:\n${context}\n\nQuery: ${query}`),
+              new Promise<void>((_, reject) => {
+                if (combinedSignal.aborted) {
+                  reject(new Error('Research cancelled by user'));
+                  return;
+                }
+                timeoutId = setTimeout(() => {
+                  reject(new Error(`Quick researcher timeout after ${RESEARCHER_TIMEOUT_MS}ms`));
+                }, RESEARCHER_TIMEOUT_MS);
+                combinedSignal.addEventListener('abort', () => {
+                  if (timeoutId) clearTimeout(timeoutId);
+                  reject(new Error('Research cancelled by user'));
+                });
+              })
+            ]);
+          } finally {
+            // Clean up timeout when prompt completes (success or failure)
+            if (timeoutId) clearTimeout(timeoutId);
+          }
+
+          // Extract result
+          const msgs = researcherSession.messages;
+          const last = [...msgs].reverse().find((m: any) => m.role === 'assistant');
+          const text = extractText(last) || 'No answer found.';
+
+          completeSlice(panelState, sliceLabel);
+          updateWidget();
+          cleanup();
+          return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
+        } catch (error) {
+          cleanup();
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (errorMsg.includes('cancelled by user') || combinedSignal.aborted) {
+            return {
+              content: [{ type: 'text', text: 'Research cancelled by user (ESC/Ctrl+C)' }],
+              details: {},
+            };
+          }
           return {
-            content: [{ type: 'text', text: 'Research cancelled by user (ESC/Ctrl+C)' }],
+            content: [{ type: 'text', text: `Quick research failed: ${errorMsg}` }],
             details: {},
           };
+        } finally {
+          signal?.removeEventListener('abort', abortHandler);
         }
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Research failed: ${errorMsg}`,
-            },
-          ],
-          details: {},
+      } else {
+        // ===== DEEP MODE: Coordinator + multi-researcher =====
+        const breadthCounter = { value: 0 };
+        const coordinatorPrompt = readFileSync(join(__dirname, '..', 'prompts', 'coordinator.md'), 'utf-8');
+
+        const delegateToolOptions: DelegateToolOptions = {
+          sessionId,
+          breadthCounter,
+          panelState,
+          onTokens,
+          onUpdate: updateWidget,
+          researcherOptions,
+          signal,
+          timeoutMs: RESEARCHER_TIMEOUT_MS,
+          flashTimeoutMs: FLASH_TIMEOUT_MS,
         };
-      } finally {
-        signal?.removeEventListener('abort', abortHandler);
+        const delegateTool = createDelegateTool(delegateToolOptions);
+        const contextTool = createInvestigateContextTool({
+          cwd: ctx.cwd,
+          ctxModel: selectedModel,
+          modelRegistry: ctx.modelRegistry,
+        });
+
+        // Create coordinator session
+        const coordinatorSession = await createCoordinatorSession({
+          cwd: ctx.cwd,
+          ctxModel: selectedModel,
+          modelRegistry: ctx.modelRegistry,
+          sessionManager,
+          settingsManager,
+          systemPrompt: coordinatorPrompt,
+          customTools: [delegateTool, contextTool],
+        });
+
+        // Token tracking for coordinator
+        coordinatorSession.subscribe((event: AgentSessionEvent) => {
+          if (event.type === 'message_end' && event.message.role === 'assistant') {
+            const tokens = (event.message as any).usage?.totalTokens;
+            if (tokens) onTokens(tokens);
+          }
+        });
+
+        // Execute coordinator
+        try {
+          const context = formatParentContext(ctx);
+          await Promise.race([
+            coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`),
+            new Promise((_, reject) => {
+              if (combinedSignal.aborted) {
+                reject(new Error('Research cancelled by user'));
+              } else {
+                combinedSignal.addEventListener('abort', () => {
+                  reject(new Error('Research cancelled by user'));
+                });
+              }
+            })
+          ]);
+          const msgs = coordinatorSession.messages;
+          const last = [...msgs].reverse().find((m) => m.role === 'assistant');
+          const text = extractText(last) || 'No answer synthesized.';
+          cleanup();
+          return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
+        } catch (error) {
+          coordinatorSession.abort().catch(() => {});
+          cleanup();
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (errorMsg.includes('cancelled by user') || combinedSignal.aborted) {
+            return {
+              content: [{ type: 'text', text: 'Research cancelled by user (ESC/Ctrl+C)' }],
+              details: {},
+            };
+          }
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Research failed: ${errorMsg}`,
+              },
+            ],
+            details: {},
+          };
+        } finally {
+          signal?.removeEventListener('abort', abortHandler);
+        }
       }
     },
   };

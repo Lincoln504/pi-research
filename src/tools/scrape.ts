@@ -62,16 +62,33 @@ export function createScrapeTool(_options: {
 
       const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
-
       let scrapeResults: Array<{ url: string; source: string; layer?: string; markdown: string; error?: string }>;
-      if (urls.length === 1) {
-        const url = urls[0];
-        if (url === undefined) {
-          throw new Error('URL is undefined');
+      try {
+        if (urls.length === 1) {
+          const url = urls[0];
+          if (url === undefined) {
+            throw new Error('URL is undefined');
+          }
+          scrapeResults = [await scrapeSingle(url, signal)];
+        } else {
+          scrapeResults = await scrape(urls, maxConcurrency, signal);
         }
-        scrapeResults = [await scrapeSingle(url, signal)];
-      } else {
-        scrapeResults = await scrape(urls, maxConcurrency, signal);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const elapsed = Date.now() - startTime;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `# URL Scrape Failed\n\n**Error:** ${errorMsg}\n\n**URLs Attempted:** ${urls.length}\n\n**Duration:** ${(elapsed / 1000).toFixed(2)}s\n\nFailed to scrape the requested URLs. The error may be due to network issues, timeouts, or unavailable pages.`,
+            },
+          ],
+          details: {
+            urls,
+            error: errorMsg,
+            duration: elapsed,
+          },
+        };
       }
 
       const elapsed = Date.now() - startTime;
