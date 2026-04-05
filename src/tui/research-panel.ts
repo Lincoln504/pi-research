@@ -237,11 +237,12 @@ export function createResearchPanel(
         // ── Right box: column layout ──────────────────────────────────────────
         // rightInner = sum of column widths + (totalCols-1) dividers
         const dividers = totalCols - 1;
-        const contentTotal = rightInner - dividers;
+        // Ensure contentTotal is never negative (happens on very narrow terminals)
+        const contentTotal = Math.max(0, rightInner - dividers);
         const colBase = Math.floor(contentTotal / totalCols);
         const extra   = contentTotal % totalCols; // first `extra` columns get +1
 
-        const colW = (i: number) => colBase + (i < extra ? 1 : 0);
+        const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
 
         // Top border: title fills first section, then ┬ dividers for column breaks
         // Build raw dash+divider string, then splice title into the front
