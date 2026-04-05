@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getActiveSearxngEngines, validateEngineListConsistency } from '../../src/utils/searxng-config.js';
+import { getActiveSearxngEngines, validateEngineListConsistency } from '../../src/utils/searxng-config.ts';
 
 describe('Healthcheck Engine Consistency Integration', () => {
   it('should load engines from config dynamically', () => {

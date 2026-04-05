@@ -5,6 +5,10 @@
  */
 
 import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface SearxngContainerConfig {
   image?: string;
@@ -65,6 +69,17 @@ export async function startSearxngContainer(
 
   const container = new GenericContainer(imageWithTag)
     .withExposedPorts(finalConfig.port ?? 8080)
+    .withEnvironment({
+      SEARXNG_SETTINGS: JSON.stringify({
+        server: {
+          secret_key: 'test-secret-key',
+          formats: ['json', 'html'],
+        },
+        search: {
+          safe_search: 0,
+        },
+      })
+    })
     .withStartupTimeout(120000); // 2 minute startup timeout
 
   const startedContainer = await container.start();

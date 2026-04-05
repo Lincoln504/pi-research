@@ -1,35 +1,18 @@
 /**
  * Research TUI Panel
  *
- * Two-box layout for research status:
- * - Left box (9 cols): SearXNG status — line1: "SearXNG", line2: ":55732", line3: "12"
- * - Right box (fills remaining width): Up to 6 visible slice columns, consolidates with "+N" indicator on LEFT
- *
- * Layout (example, 5 slices):
- * ┌───────┐ ┌────┬────┬────┬────┬────┐
- * │SearXNG│ │    │    │    │    │    │
- * │:55732 │ │ 1  │ 2  │ 3  │ 4  │ 5  │
- * │   12  │ │    │    │    │    │    │
- * └───────┘ └────┴────┴────┴────┴────┘
- *
- * Consolidation (example, 8 slices, max 6 visible, +N on LEFT):
- * ┌───────┐ ┌────┬────┬────┬────┬────┬────┐
- * │SearXNG│ │    │    │    │    │    │    │
- * │:55732 │ │ 3  │ 4  │ 5  │ 6  │ 7  │ 8  │
- * │   12  │ │    │    │    │    │    │    │
- * └───────┘ └────┴────┴────┴────┴────┴────┘
- * (Note: +2 would show in left column area indicating slices 1-2 hidden)
+ * Side-by-side layout for SearXNG status and research slices.
  */
 
 import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
 import type { Theme } from '@mariozechner/pi-coding-agent';
-import type { SearxngStatus } from '../searxng-lifecycle.js';
+import type { SearxngStatus } from '../searxng-lifecycle.ts';
 
 export interface SliceState {
   id: string;
-  label: string; // Displayed label: "1:1", "1:2", "2:1", "3:1", etc. (X = slice number, Y = iteration number)
+  label: string; // Displayed label: "1:1", "1:2", "2:1", "3:1", etc.
   completed: boolean;
-  queued: boolean; // True if waiting in backlog (not yet started)
+  queued: boolean;
   flash: 'green' | 'red' | null;
 }
 
@@ -37,12 +20,16 @@ export interface ResearchPanelState {
   searxngStatus: SearxngStatus;
   totalTokens: number;
   activeConnections: number;
-  slices: Map<string, SliceState>; // slice ID → state
+  slices: Map<string, SliceState>;
   modelName: string;
+  hideSearxng?: boolean;
 }
 
 const activeTimeouts = new Set<NodeJS.Timeout>();
 
+/**
+ * Clear all active flash timeouts
+ */
 export function clearAllFlashTimeouts(): void {
   for (const timeout of activeTimeouts) {
     clearTimeout(timeout);
@@ -50,21 +37,35 @@ export function clearAllFlashTimeouts(): void {
   activeTimeouts.clear();
 }
 
-/** Add a new slice column */
-export function addSlice(state: ResearchPanelState, sliceId: string, label: string, queued: boolean = false): void {
-  state.slices.set(sliceId, { id: sliceId, label, completed: false, queued, flash: null });
+/**
+ * Add a new slice column
+ */
+export function addSlice(state: ResearchPanelState, id: string, label: string, queued: boolean = false): void {
+  state.slices.set(id, { id, label, completed: false, queued, flash: null });
 }
 
-/** Mark slice as complete — shows ✓ prefix, no flash */
-export function completeSlice(state: ResearchPanelState, sliceId: string): void {
-  const slice = state.slices.get(sliceId);
+/**
+ * Mark slice as active (start from queued state)
+ */
+export function activateSlice(state: ResearchPanelState, id: string): void {
+  const slice = state.slices.get(id);
+  if (slice) slice.queued = false;
+}
+
+/**
+ * Mark slice as complete
+ */
+export function completeSlice(state: ResearchPanelState, id: string): void {
+  const slice = state.slices.get(id);
   if (slice) {
     slice.completed = true;
     slice.queued = false;
   }
 }
 
-/** Flash a slice green or red for durationMs, independent of completion state */
+/**
+ * Flash a slice green or red
+ */
 export function flashSlice(
   state: ResearchPanelState,
   sliceId: string,
@@ -73,7 +74,7 @@ export function flashSlice(
   onUpdate?: () => void
 ): void {
   const slice = state.slices.get(sliceId);
-  if (!slice || slice.completed || slice.queued) return;  // Guard: don't flash completed or queued slices
+  if (!slice || slice.completed || slice.queued) return;
   slice.flash = color;
   onUpdate?.();
   const timeout = setTimeout(() => {
@@ -84,15 +85,24 @@ export function flashSlice(
   activeTimeouts.add(timeout);
 }
 
-/** Mark slice as active (start from queued state) */
-export function activateSlice(state: ResearchPanelState, sliceId: string): void {
-  const slice = state.slices.get(sliceId);
-  if (slice) {
-    slice.queued = false;
-  }
+/**
+ * Create initial panel state
+ */
+export function createInitialPanelState(searxngStatus: SearxngStatus, modelName: string): ResearchPanelState {
+  return {
+    searxngStatus,
+    totalTokens: 0,
+    activeConnections: 0,
+    slices: new Map(),
+    modelName,
+  };
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+let capturedTui: { requestRender?(): void } | null = null;
+
+export function getCapturedTui(): { requestRender?(): void } | null {
+  return capturedTui;
+}
 
 function formatTokens(tokens: number): string {
   if (tokens < 1000) return tokens.toString();
@@ -111,162 +121,104 @@ function getStatusText(state: string): string {
   }
 }
 
-/** Extract ":PORT" from a URL string, e.g. "http://localhost:55732" → ":55732" */
 function extractPort(url: string): string {
   if (!url) return '';
   const m = url.match(/:(\d+)(?:\/|$)/);
   return m ? `:${m[1]}` : '';
 }
 
-// ─── component factory ─────────────────────────────────────────────────────────
-
 /**
- * Create research panel component.
- * Left box is exactly LEFT_BOX_W columns wide (borders included).
- * Right box fills rest.
+ * Create research panel component
  */
 export function createResearchPanel(
   state: ResearchPanelState
 ): (tui: unknown, theme: Theme) => Component & { dispose?(): void } {
-  return (_tui: unknown, theme: Theme) => {
+  return (tui: unknown, theme: Theme) => {
+    capturedTui = tui as { requestRender?(): void };
+
     const component: Component = {
       render(width: number): string[] {
-        // ── Left box geometry ──────────────────────────────────────────────────
-        // Inner content is 7 chars: 3 lines of content
-        // Line 1: "SearXNG" (7 chars)
-        // Line 2: ":55732" (6 chars, padded to 7)
-        // Line 3: "12" (connection count, padded to 7)
         const LEFT_INNER = 7;
-        const LEFT_BOX_W = LEFT_INNER + 2; // 9 (borders, ~20% thinner)
+        const LEFT_BOX_W = LEFT_INNER + 2;
         const GAP = 1;
+        
+        // Use consistent total offset regardless of whether SearXNG box is shown
+        // This ensures stacked panels align correctly vertically.
+        const totalLeftOffset = LEFT_BOX_W + GAP;
+        const rightBoxWidth = Math.max(3, width - totalLeftOffset);
+        const rightInner = Math.max(1, rightBoxWidth - 2);
 
-        // ── Right box geometry ────────────────────────────────────────────────
-        // Ensure right box has minimum width to avoid rendering errors in narrow terminals
-        const minRightWidth = Math.max(3, width - LEFT_BOX_W - GAP);
-        const rightBoxWidth = Math.max(3, minRightWidth);
-        const rightInner = Math.max(1, rightBoxWidth - 2); // inside outer │ … │
+        // Prep left box lines if not hidden
+        let leftLines: string[];
+        if (!state.hideSearxng) {
+          const status = state.searxngStatus;
+          const statusText = getStatusText(status.state);
+          const portStr = extractPort(status.url);
+          const statusColor = status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted';
 
-        // ── Left box content ──────────────────────────────────────────────────
-        const status = state.searxngStatus;
-        const statusText = getStatusText(status.state);
-        const portStr = extractPort(status.url);
-        const statusColor = status.state === 'error'
-          ? 'error'
-          : (status.state === 'active' || status.state === 'starting_up')
-            ? 'success'
-            : 'muted';
+          const leftRow1 = theme.fg('accent', '│') + theme.fg(statusColor, statusText) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - statusText.length)) + '│');
+          const leftRow2 = theme.fg('accent', '│') + theme.fg('accent', portStr) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - portStr.length)) + '│');
+          const connStr = state.activeConnections.toString();
+          const connColor = state.activeConnections > 0 ? 'text' : 'muted';
+          const leftRow3 = theme.fg('accent', '│') + theme.fg(connColor, connStr) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - connStr.length)) + '│');
 
-        // Line 1: "SearXNG" or "Offline" or "Error"
-        const pad1 = LEFT_INNER - statusText.length;
-        const leftRow1 = theme.fg('accent', '│') + theme.fg(statusColor, statusText) + theme.fg('accent', ' '.repeat(Math.max(0, pad1)) + '│');
+          const leftBorder = theme.fg('accent', '┌' + '─'.repeat(LEFT_INNER) + '┐');
+          const leftBottom = theme.fg('accent', '└' + '─'.repeat(LEFT_INNER) + '┘');
+          leftLines = [leftBorder, leftRow1, leftRow2, leftRow3, leftBottom];
+        } else {
+          // Empty spaces for indentation if SearXNG box is hidden
+          leftLines = Array(5).fill(' '.repeat(LEFT_BOX_W));
+        }
 
-        // Line 2: ":55732" (port)
-        const pad2 = LEFT_INNER - portStr.length;
-        const leftRow2 = theme.fg('accent', '│') + theme.fg('accent', portStr) + theme.fg('accent', ' '.repeat(Math.max(0, pad2)) + '│');
-
-        // Line 3: connection count (no "conn" label)
-        const connStr = state.activeConnections.toString();
-        const connColor = state.activeConnections > 0 ? 'text' : 'muted';
-        const pad3 = LEFT_INNER - connStr.length;
-        const leftRow3 = theme.fg('accent', '│') + theme.fg(connColor, connStr) + theme.fg('accent', ' '.repeat(Math.max(0, pad3)) + '│');
-
-        const leftBorder = theme.fg('accent', '┌' + '─'.repeat(LEFT_INNER) + '┐');
-        const leftBottom = theme.fg('accent', '└' + '─'.repeat(LEFT_INNER) + '┘');
-
-        // ── Right box top border with title ──────────────────────────────────
-        // Format: ┌── Research | glm-4.7  42.3k ──────┐
         let titleText = ` Research | ${state.modelName}  ${formatTokens(state.totalTokens)} `;
         const titlePrefixDashes = 2;
-
-        // Truncate title if too long for available width
         const maxTitleWidth = rightInner - titlePrefixDashes;
         if (visibleWidth(titleText) > maxTitleWidth) {
           titleText = truncateToWidth(titleText, Math.max(3, maxTitleWidth - 1)) + ' ';
         }
 
         const titleFillDashes = Math.max(0, rightInner - titlePrefixDashes - visibleWidth(titleText));
-        const rTopWithTitle =
-          theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) +
-          theme.fg('muted', titleText) +
-          theme.fg('accent', '─'.repeat(titleFillDashes) + '┐');
+        const rTopWithTitle = theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) + theme.fg('muted', titleText) + theme.fg('accent', '─'.repeat(titleFillDashes) + '┐');
 
-        // ── Right box: 0-slice empty state ────────────────────────────────────
-        // IMPORTANT: Only show non-queued slices (active or completed)
-        // Queued slices are hidden until they become active
-        const MAX_VISIBLE_SLICES = 6;
-        const sliceIds = Array.from(state.slices.keys()).filter(id => {
-          const slice = state.slices.get(id);
-          return slice && !slice.queued;
-        });
+        const sliceIds = Array.from(state.slices.keys()).filter(id => !state.slices.get(id)!.queued);
         const numSlices = sliceIds.length;
-
-        // Apply max visible slices limit with consolidation
+        const MAX_VISIBLE_SLICES = 6;
         let visibleSliceIds = sliceIds;
         let showIndicator = false;
         let hiddenCount = 0;
         if (numSlices > MAX_VISIBLE_SLICES) {
-          visibleSliceIds = sliceIds.slice(numSlices - MAX_VISIBLE_SLICES); // Show last N slices
+          visibleSliceIds = sliceIds.slice(numSlices - MAX_VISIBLE_SLICES);
           hiddenCount = numSlices - MAX_VISIBLE_SLICES;
           showIndicator = true;
         }
         const numVisible = showIndicator ? MAX_VISIBLE_SLICES : numSlices;
-        const totalCols = showIndicator ? numVisible + 1 : numVisible; // +1 for indicator column when consolidating
+        const totalCols = showIndicator ? numVisible + 1 : numVisible;
 
         if (numVisible === 0) {
-          const rEmpty  = theme.fg('accent', '│') + ' '.repeat(Math.max(1, rightInner)) + theme.fg('accent', '│');
+          const rEmpty = theme.fg('accent', '│') + ' '.repeat(Math.max(1, rightInner)) + theme.fg('accent', '│');
           const rBottom = theme.fg('accent', '└' + '─'.repeat(Math.max(1, rightInner)) + '┘');
-
-          const lines = [
-            theme.fg('accent', leftBorder) + ' ' + rTopWithTitle,
-            leftRow1                        + ' ' + rEmpty,
-            leftRow2                        + ' ' + rEmpty,
-            leftRow3                        + ' ' + rEmpty,
-            theme.fg('accent', leftBottom)  + ' ' + rBottom,
+          
+          return [
+            leftLines[0] + ' ' + rTopWithTitle,
+            leftLines[1] + ' ' + rEmpty,
+            leftLines[2] + ' ' + rEmpty,
+            leftLines[3] + ' ' + rEmpty,
+            leftLines[4] + ' ' + rBottom,
           ];
-
-          // Truncate lines to terminal width if needed (safety fallback)
-          return lines.map(line => {
-            const vw = visibleWidth(line);
-            if (vw > width) {
-              return truncateToWidth(line, width);
-            }
-            return line;
-          });
         }
 
-        // ── Right box: column layout ──────────────────────────────────────────
-        // rightInner = sum of column widths + (totalCols-1) dividers
         const dividers = totalCols - 1;
-        // Ensure contentTotal is never negative (happens on very narrow terminals)
         const contentTotal = Math.max(0, rightInner - dividers);
         const colBase = Math.floor(contentTotal / totalCols);
-        const extra   = contentTotal % totalCols; // first `extra` columns get +1
-
+        const extra = contentTotal % totalCols;
         const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
 
-        // Top border: title fills first section, then ┬ dividers for column breaks
-        // Build raw dash+divider string, then splice title into the front
-        const rawTopInner = Array.from({ length: totalCols }, (_, i) =>
-          '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')
-        ).join('');
-        
-        // Skip the portion of rawTopInner consumed by: titlePrefixDashes (explicit dashes) + titleText.
-        // Both are placed before rawTopInner.slice(skipChars), so rawTopInner must advance by both.
-        // rawTopInner.slice(skipChars).length == rightInner - titlePrefixDashes - titleText.length
-        // which is exactly the remaining border width needed — no second .slice() required.
+        const rawTopInner = Array.from({ length: totalCols }, (_, i) => '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')).join('');
         const skipChars = titlePrefixDashes + titleText.length;
+        const rTop = theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) + theme.fg('muted', titleText) + theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
 
-        const rTop =
-          theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) +
-          theme.fg('muted', titleText) +
-          theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
+        const rEmpty = theme.fg('accent', '│') + Array.from({ length: totalCols }, (_, i) => ' '.repeat(colW(i)) + (i < totalCols - 1 ? theme.fg('accent', '│') : '')).join('') + theme.fg('accent', '│');
 
-        // Empty rows (above and below content)
-        const rEmpty = theme.fg('accent', '│') + Array.from({ length: totalCols }, (_, i) =>
-          ' '.repeat(colW(i)) + (i < totalCols - 1 ? theme.fg('accent', '│') : '')
-        ).join('') + theme.fg('accent', '│');
-
-        // Content row (row 2 = middle of 4)
         const cols = visibleSliceIds.map((id, i) => {
           const slice = state.slices.get(id)!;
           const w = colW(showIndicator ? i + 1 : i);
@@ -275,58 +227,33 @@ export function createResearchPanel(
           const pL = Math.max(0, Math.floor((w - content.length) / 2));
           const pR = Math.max(0, w - content.length - pL);
           const cell = ' '.repeat(pL) + content + ' '.repeat(pR);
-          const colored =
-            slice.flash === 'green' ? theme.fg('success', cell) :
-            slice.flash === 'red'   ? theme.fg('error',   cell) :
-                                      theme.fg('text',    cell);
-          // Only add divider if not last slice column
-          // Add divider for all except last column (use absolute index)
-          const absIndex = i + (showIndicator ? 1 : 0);
-          return colored + (absIndex < totalCols - 1 ? theme.fg('accent', '│') : '');
+          const colored = slice.flash === 'green' ? theme.fg('success', cell) : slice.flash === 'red' ? theme.fg('error', cell) : theme.fg('text', cell);
+          return colored + (i + (showIndicator ? 1 : 0) < totalCols - 1 ? theme.fg('accent', '│') : '');
         });
 
-        // Add indicator column on LEFT (before slice columns)
         if (showIndicator) {
-          const indicatorContent = `+${hiddenCount}`;
           const w = colW(0);
-          const pL = Math.max(0, Math.floor((w - indicatorContent.length) / 2));
-          const pR = Math.max(0, w - indicatorContent.length - pL);
-          const cell = ' '.repeat(pL) + indicatorContent + ' '.repeat(pR);
-          // Add divider after indicator (since it's followed by slice columns)
+          const cell = `+${hiddenCount}`.padStart(Math.ceil((w + 2) / 2)).padEnd(w);
           cols.unshift(theme.fg('muted', cell) + theme.fg('accent', '│'));
         }
 
         const rContent = theme.fg('accent', '│') + cols.join('') + theme.fg('accent', '│');
+        const rBottom = theme.fg('accent', '└') + Array.from({ length: totalCols }, (_, i) => theme.fg('accent', '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : ''))).join('') + theme.fg('accent', '┘');
 
-        // Bottom border with ┴ dividers
-        const rBottom = theme.fg('accent', '└') + Array.from({ length: totalCols }, (_, i) =>
-          theme.fg('accent', '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : ''))
-        ).join('') + theme.fg('accent', '┘');
+        const rightLines = [rTop, rEmpty, rContent, rEmpty, rBottom];
 
-        // Build output lines with width safety check
-        const lines = [
-          theme.fg('accent', leftBorder) + ' ' + rTop,
-          leftRow1                        + ' ' + rEmpty,
-          leftRow2                        + ' ' + rContent,
-          leftRow3                        + ' ' + rEmpty,
-          theme.fg('accent', leftBottom)  + ' ' + rBottom,
+        return [
+          leftLines[0] + ' ' + rightLines[0],
+          leftLines[1] + ' ' + rightLines[1],
+          leftLines[2] + ' ' + rightLines[2],
+          leftLines[3] + ' ' + rightLines[3],
+          leftLines[4] + ' ' + rightLines[4],
         ];
-
-        // Truncate lines to terminal width if needed (safety fallback)
-        return lines.map(line => {
-          const vw = visibleWidth(line);
-          if (vw > width) {
-            return truncateToWidth(line, width);
-          }
-          return line;
-        });
       },
-
       invalidate(): void {
-        // No-op — re-renders are driven by onUpdate() callback
+        capturedTui?.requestRender?.();
       },
     };
-
     return component;
   };
 }

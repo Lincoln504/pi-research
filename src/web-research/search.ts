@@ -7,7 +7,7 @@
 import { getSearxngUrl, incrementConnectionCount, decrementConnectionCount } from './utils.ts';
 import { createTimeoutSignal } from './retry-utils.ts';
 import type { SearXNGResult, QueryResultWithError } from './types.ts';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 // ============================================================================
 // Type Definitions

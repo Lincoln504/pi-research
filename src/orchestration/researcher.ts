@@ -5,16 +5,16 @@
  * Researchers use web search, scraping, security databases, and code search tools.
  */
 
-import type { AgentSession, ModelRegistry, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
-import { createAgentSession, createReadTool } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, ModelRegistry, SettingsManager } from '@mariozechner/pi-coding-agent';
+import { createAgentSession, createReadTool, SessionManager } from '@mariozechner/pi-coding-agent';
 import { createAgentTools } from '../agent-tools.ts';
 import { makeResourceLoader } from '../make-resource-loader.ts';
+import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
   ctxModel: any; // Model<any> | undefined
   modelRegistry: ModelRegistry;
-  sessionManager: SessionManager;
   settingsManager: SettingsManager;
   systemPrompt: string;
   searxngUrl: string;
@@ -22,7 +22,7 @@ export interface CreateResearcherSessionOptions {
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
-  const { cwd, ctxModel, modelRegistry, sessionManager, settingsManager, systemPrompt, searxngUrl, extensionCtx } = options;
+  const { cwd, ctxModel, modelRegistry, settingsManager, systemPrompt, searxngUrl, extensionCtx } = options;
 
   if (!ctxModel) {
     throw new Error('No model selected. Please select a model before using the research tool.');
@@ -36,12 +36,15 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     throw new Error('Invalid SearXNG URL: must be a non-empty string');
   }
 
+  // Create tool usage tracker for this researcher
+  const tracker = new ToolUsageTracker(createDefaultToolLimits());
+
   try {
     const result = await createAgentSession({
       cwd,
       tools: [createReadTool(cwd)],
-      customTools: createAgentTools({ searxngUrl, ctx: extensionCtx }),
-      sessionManager,
+      customTools: createAgentTools({ searxngUrl, ctx: extensionCtx, tracker }),
+      sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,
       modelRegistry,

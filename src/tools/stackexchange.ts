@@ -6,12 +6,14 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { stackexchangeCommand } from '../stackexchange/index.js';
+import { stackexchangeCommand } from '../stackexchange/index.ts';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }): ToolDefinition {
-  const { ctx } = options;
+  const { tracker } = options;
 
   return {
     name: 'stackexchange',
@@ -24,6 +26,7 @@ export function createStackexchangeTool(options: {
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
+      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       command: Type.String({
@@ -55,8 +58,11 @@ export function createStackexchangeTool(options: {
       params,
       signal,
       _onUpdate,
-      _extensionCtx,
+      extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
+      // Record call in tracker
+      tracker.recordCall('stackexchange');
+
       const paramsRecord = params as Record<string, unknown>;
       const command = paramsRecord['command'] as string;
 
@@ -68,7 +74,7 @@ export function createStackexchangeTool(options: {
         return await stackexchangeCommand({
           command,
           params: paramsRecord,
-          ctx,
+          ctx: extensionCtx,
           signal,
         });
       } catch (error) {

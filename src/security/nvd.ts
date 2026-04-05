@@ -13,7 +13,7 @@
  */
 
 import type { Vulnerability, NVDResult } from './types.ts';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff } from '../web-research/retry-utils.ts';
 
 // ============================================================================

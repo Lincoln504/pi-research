@@ -17,8 +17,9 @@ import Docker from 'dockerode';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { StateManager } from './state-manager';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 // Docker type definitions
 interface DockerContainerInspectInfo {
@@ -73,6 +74,7 @@ const DEFAULT_CONFIG = {
   imageTag: 'latest',
   healthTimeout: 120000,
   pruneOldImages: true,
+  containerName: 'pi-searxng',
 } as const;
 
 /**
@@ -89,6 +91,7 @@ interface EnvConfig {
   imageName?: string;
   imageTag?: string;
   healthTimeout?: number;
+  containerName?: string;
 }
 
 /**
@@ -118,6 +121,11 @@ function loadConfigFromEnv(): EnvConfig {
     if (!isNaN(parsed)) {
       config.healthTimeout = parsed * 1000;
     }
+  }
+
+  const containerNameEnv = process.env['SEARXNG_CONTAINER_NAME'];
+  if (containerNameEnv) {
+    config.containerName = containerNameEnv;
   }
 
   return config;
@@ -205,6 +213,7 @@ export interface SearxngManagerConfig {
   imageTag?: string;
   healthTimeout?: number;
   pruneOldImages?: boolean;
+  containerName?: string;
 }
 
 /**
@@ -237,6 +246,31 @@ export interface SearxngStatus {
  * Session-scoped lifecycle with deterministic container naming.
  * Also manages Docker images (pulls latest, prunes old images).
  */
+/**
+ * Verify Docker is installed and daemon is responsive
+ */
+export async function verifyDockerInstalled(): Promise<{ installed: boolean; running: boolean; error?: string }> {
+  try {
+    const docker = new Docker({
+      socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
+    });
+    
+    // Check if daemon is responsive
+    await docker.ping();
+    
+    return { installed: true, running: true };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    
+    // Distinguish between not installed/not running
+    if (errorMsg.includes('ENOENT') || errorMsg.includes('connect ECONNREFUSED')) {
+      return { installed: true, running: false, error: 'Docker daemon is not running. Please start Docker.' };
+    }
+    
+    return { installed: false, running: false, error: `Docker not found or inaccessible: ${errorMsg}` };
+  }
+}
+
 export class DockerSearxngManager {
   private readonly docker: Docker | null = null;
   private container: Docker.Container | null = null;
@@ -274,7 +308,8 @@ export class DockerSearxngManager {
     }
 
     // Initialize StateManager for singleton mode
-    this.stateManager = new StateManager();
+    const stateDir = process.env['PI_STATE_DIR'] || path.join(os.homedir(), '.pi', 'state');
+    this.stateManager = new StateManager(stateDir);
     // Note: signal handling (SIGTERM/SIGINT) is managed by pi-research tool.ts, not here.
     // Registering handlers here would create duplicate handlers and competing process.exit(0) calls.
   }
@@ -416,7 +451,7 @@ export class DockerSearxngManager {
       // so ensureReady() and getStatus() work correctly.
       if (!this.container) {
         try {
-          const existing = await this.findContainerByName('pi-searxng');
+          const existing = await this.findContainerByName(this.config.containerName);
           if (existing) {
             const info: DockerContainerInspectInfo = await existing.inspect() as DockerContainerInspectInfo;
             this.container = existing;
@@ -432,7 +467,7 @@ export class DockerSearxngManager {
 
             this.containerInfo = {
               id: existing.id,
-              name: 'pi-searxng',
+              name: this.config.containerName,
               port,
               url: `http://localhost:${port}`,
             };
@@ -447,7 +482,7 @@ export class DockerSearxngManager {
 
     this.containerStartupLock = (async (): Promise<void> => {
       try {
-        const containerName = 'pi-searxng';
+        const containerName = this.config.containerName;
         logger.log(`[SearXNG Manager] Acquiring container for session ${sessionId}`);
 
         const existingContainer = await this.findContainerByName(containerName);
@@ -528,7 +563,7 @@ export class DockerSearxngManager {
    * Start singleton container
    */
   private async startSingleton(): Promise<void> {
-    const containerName = 'pi-searxng';
+    const containerName = this.config.containerName;
 
     logger.log(`[SearXNG Manager] Starting singleton container: ${containerName}`);
 

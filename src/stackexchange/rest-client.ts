@@ -4,7 +4,7 @@
  */
 
 import type { StackExchangeWrapper } from './types';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 

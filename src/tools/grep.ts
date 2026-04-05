@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 const DEFAULT_MAX_BYTES = 100 * 1024; // 100KB
 const DEFAULT_MAX_LINES = 200;
@@ -109,16 +110,19 @@ function sanitizeInput(input: string): string[] {
   return result;
 }
 
-export function createGrepTool(): ToolDefinition {
+export function createGrepTool(options: {
+  tracker: ToolUsageTracker;
+}): ToolDefinition {
   return {
-    name: 'rg_grep',
+    name: 'grep',
     label: 'Code Search',
     description: 'Search codebase using ripgrep (rg) or grep fallback. Fast recursive text search.',
     promptSnippet: 'Search codebase using ripgrep/grep',
     promptGuidelines: [
-      'Use rg_grep for fast recursive text search in codebases.',
+      'Use grep for fast recursive text search in codebases.',
       'Pattern supports regex. Path and flags are optional.',
       'Falls back to grep if rg is not available.',
+      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       pattern: Type.String({ description: 'Search pattern (regex supported)' }),
@@ -132,6 +136,9 @@ export function createGrepTool(): ToolDefinition {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
+      // Record call in tracker
+      options.tracker.recordCall('grep');
+
       const record = params as RgGrepParams;
       const { pattern } = record;
       const path = record.path ?? '.';

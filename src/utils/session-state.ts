@@ -1,26 +1,30 @@
 /**
  * Research Session State Management
  *
- * Tracks failures and state across the entire research session
- * (not just per delegate_research call).
- *
- * This enables robust failure tracking:
- * - Cumulative failures across multiple delegation rounds
- * - Unique researcher counting (same researcher failing N times = 1 failure)
- * - Proper cleanup to prevent memory leaks
+ * Tracks failures and state for multiple simultaneous research sessions.
  */
 
-/**
- * Current research session ID
- * Null when no research session is active
- */
-let currentResearchSessionId: string | null = null;
+import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
 
 /**
  * Map of session ID → array of failed researcher sliceKeys
- * Tracks which specific researchers failed (by sliceKey)
  */
 const sessionFailures = new Map<string, string[]>();
+
+/**
+ * Ordered list of active session IDs for TUI stacking
+ */
+const activeSessionOrder: string[] = [];
+
+/**
+ * Registry of update functions for each session to allow coordinated re-renders
+ */
+const sessionUpdateRegistry = new Map<string, () => void>();
+
+/**
+ * Subscribers for session order changes
+ */
+const orderChangeSubscribers: Array<() => void> = [];
 
 /**
  * Maximum allowed unique failed researchers before stopping research
@@ -28,85 +32,131 @@ const sessionFailures = new Map<string, string[]>();
 const MAX_FAILED_RESEARCHERS = 2;
 
 /**
- * Generate a unique session ID
+ * Subscribe to session order changes
  */
-function generateSessionId(): string {
-  return `research-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+export function onSessionOrderChange(callback: () => void): () => void {
+  orderChangeSubscribers.push(callback);
+  return () => {
+    const index = orderChangeSubscribers.indexOf(callback);
+    if (index !== -1) {
+      orderChangeSubscribers.splice(index, 1);
+    }
+  };
+}
+
+/**
+ * Notify subscribers of session order change
+ */
+function notifyOrderChange(): void {
+  for (const subscriber of orderChangeSubscribers) {
+    subscriber();
+  }
+}
+
+/**
+ * Register an update function for a session
+ */
+export function registerSessionUpdate(sessionId: string, update: () => void): void {
+  sessionUpdateRegistry.set(sessionId, update);
+  // Add to active order only when registered for updates
+  // This ensures the first one to register becomes the bottom-most in TUI
+  if (!activeSessionOrder.includes(sessionId)) {
+    activeSessionOrder.push(sessionId);
+    notifyOrderChange();
+  }
+}
+
+/**
+ * Unregister an update function for a session
+ */
+export function unregisterSessionUpdate(sessionId: string): void {
+  sessionUpdateRegistry.delete(sessionId);
+}
+
+/**
+ * Refresh all active sessions in their stable order
+ * This prevents panels from "switching places" in the TUI stack.
+ */
+export function refreshAllSessions(): void {
+  for (const sessionId of activeSessionOrder) {
+    const update = sessionUpdateRegistry.get(sessionId);
+    if (update) {
+      update();
+    }
+  }
+}
+
+/**
+ * Get ordered list of active session IDs
+ */
+export function getActiveSessionOrder(): string[] {
+  return [...activeSessionOrder];
 }
 
 /**
  * Start a new research session
- *
- * Initializes session state with empty failure list.
- * Should be called at the start of research tool execution.
  */
 export function startResearchSession(): string {
-  const sessionId = generateSessionId();
-  currentResearchSessionId = sessionId;
+  const sessionId = generateUniqueSessionId('research');
   sessionFailures.set(sessionId, []);
+  // Note: activeSessionOrder.push happens in registerSessionUpdate
   return sessionId;
 }
 
 /**
- * End the current research session
- *
- * Cleans up session state to prevent memory leaks.
- * Should be called when research tool completes (success or error).
+ * End a research session
  */
-export function endResearchSession(): void {
-  if (currentResearchSessionId) {
-    sessionFailures.delete(currentResearchSessionId);
-    currentResearchSessionId = null;
+export function endResearchSession(sessionId: string): void {
+  sessionFailures.delete(sessionId);
+  unregisterSessionUpdate(sessionId);
+  const index = activeSessionOrder.indexOf(sessionId);
+  if (index !== -1) {
+    activeSessionOrder.splice(index, 1);
+    notifyOrderChange();
   }
+}
+
+/**
+ * Check if a session is the bottom-most active research session
+ * (The one that should show the SearXNG status box)
+ * 
+ * In pi's TUI with 'aboveEditor' placement, widgets are rendered in the order
+ * they are added. The last widget added is closest to the editor (bottom-most).
+ */
+export function isBottomMostSession(sessionId: string): boolean {
+  if (activeSessionOrder.length === 0) return false;
+  return activeSessionOrder[activeSessionOrder.length - 1] === sessionId;
 }
 
 /**
  * Record a researcher failure
- *
- * @param sliceKey - The sliceKey of the failed researcher (e.g., "1:1", "2:3")
  */
-export function recordResearcherFailure(sliceKey: string): void {
-  if (currentResearchSessionId) {
-    const failures = sessionFailures.get(currentResearchSessionId) || [];
-    failures.push(sliceKey);
-    sessionFailures.set(currentResearchSessionId, failures);
-    // Log to help diagnose failure patterns
-    // (only logs if verbose mode is enabled)
-  }
+export function recordResearcherFailure(sessionId: string, sliceKey: string): void {
+  const failures = sessionFailures.get(sessionId) || [];
+  failures.push(sliceKey);
+  sessionFailures.set(sessionId, failures);
 }
 
 /**
- * Get list of unique failed researchers in current session
- *
- * Uses Set to deduplicate - same researcher failing multiple times
- * counts as 1 failed researcher.
- *
- * @returns Array of unique sliceKeys that failed
+ * Get list of unique failed researchers in a session
  */
-export function getFailedResearchers(): string[] {
-  if (!currentResearchSessionId) return [];
-  const failures = sessionFailures.get(currentResearchSessionId) || [];
+export function getFailedResearchers(sessionId: string): string[] {
+  const failures = sessionFailures.get(sessionId) || [];
   return [...new Set(failures)];
 }
 
 /**
- * Check if research should stop due to too many unique failures
- *
- * @returns True if 2+ unique researchers have failed
+ * Check if research should stop due to too many unique failures in a session
  */
-export function shouldStopResearch(): boolean {
-  return getFailedResearchers().length >= MAX_FAILED_RESEARCHERS;
+export function shouldStopResearch(sessionId: string): boolean {
+  return getFailedResearchers(sessionId).length >= MAX_FAILED_RESEARCHERS;
 }
 
 /**
  * Get formatted error message for research stoppage
- *
- * Includes which researchers failed and suggests actions.
- *
- * @returns Detailed error message
  */
-export function getResearchStopMessage(): string {
-  const failed = getFailedResearchers();
+export function getResearchStopMessage(sessionId: string): string {
+  const failed = getFailedResearchers(sessionId);
   const count = failed.length;
 
   return [
@@ -130,18 +180,7 @@ export function getResearchStopMessage(): string {
 }
 
 /**
- * Get current session ID (for debugging)
- *
- * @returns Current session ID or null
- */
-export function getCurrentSessionId(): string | null {
-  return currentResearchSessionId;
-}
-
-/**
  * Get all active sessions (for debugging)
- *
- * @returns Map of session IDs to their failure counts
  */
 export function getAllSessions(): Map<string, number> {
   const result = new Map<string, number>();

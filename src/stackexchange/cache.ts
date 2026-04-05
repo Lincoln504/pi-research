@@ -3,7 +3,7 @@
  */
 
 import * as fs from 'node:fs';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
 

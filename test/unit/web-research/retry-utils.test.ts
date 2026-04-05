@@ -1,326 +1,76 @@
-/**
- * Web Research Retry Utils Unit Tests
- *
- * Tests for timeout signals and retry logic.
- */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { retryWithBackoff, createTimeoutSignal } from '../../../src/web-research/retry-utils.ts';
 
-import { describe, it, expect } from 'vitest';
-import { createTimeoutSignal, retryWithBackoff, type RetryOptions } from '../../../src/web-research/retry-utils';
+vi.mock('../../../src/logger.ts');
 
-describe('Web Research Retry Utils', () => {
-  describe('createTimeoutSignal', () => {
-    it('should create a valid AbortSignal', () => {
-      const signal = createTimeoutSignal(1000);
-      expect(signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should return an AbortSignal object', () => {
-      const signal = createTimeoutSignal(100);
-      expect(typeof signal).toBe('object');
-      expect('aborted' in signal).toBe(true);
-    });
-
-    it('should accept positive timeout values', () => {
-      const signal1 = createTimeoutSignal(100);
-      const signal2 = createTimeoutSignal(1000);
-      const signal3 = createTimeoutSignal(10000);
-
-      expect(signal1).toBeInstanceOf(AbortSignal);
-      expect(signal2).toBeInstanceOf(AbortSignal);
-      expect(signal3).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should handle zero timeout', () => {
-      const signal = createTimeoutSignal(0);
-      expect(signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should handle large timeout values', () => {
-      const signal = createTimeoutSignal(1000000);
-      expect(signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should combine with existing abort signal', () => {
-      const controller = new AbortController();
-      const signal = createTimeoutSignal(1000, controller.signal);
-
-      expect(signal).toBeInstanceOf(AbortSignal);
-
-      // Abort the original signal
-      controller.abort();
-
-      // Combined signal should also be aborted
-      expect(signal.aborted).toBe(true);
-    });
-
-    it('should handle multiple timeout signals independently', () => {
-      const signal1 = createTimeoutSignal(100);
-      const signal2 = createTimeoutSignal(200);
-      const signal3 = createTimeoutSignal(300);
-
-      expect(signal1).toBeInstanceOf(AbortSignal);
-      expect(signal2).toBeInstanceOf(AbortSignal);
-      expect(signal3).toBeInstanceOf(AbortSignal);
-    });
-
-    it('should support addEventListener for abort', () => {
-      const signal = createTimeoutSignal(100);
-      signal.addEventListener('abort', () => {
-        // intentionally empty — just verifying addEventListener exists
-      });
-
-      expect(typeof signal.addEventListener).toBe('function');
-    });
+describe('retry-utils', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   describe('retryWithBackoff', () => {
-    it('should execute function successfully on first try', async () => {
-      const fn = async () => 'success';
-
+    it('should return result on first success', async () => {
+      const fn = vi.fn().mockResolvedValue('success');
       const result = await retryWithBackoff(fn);
-
+      
       expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(1);
     });
 
-    it('should return successful result without retrying', async () => {
-      let callCount = 0;
-      const fn = async () => {
-        callCount++;
-        return 'success';
-      };
-
-      const result = await retryWithBackoff(fn, { maxRetries: 3, initialDelay: 5, maxDelay: 50 });
-
+    it('should retry on 429 error (using fake timers)', async () => {
+      vi.useFakeTimers();
+      const fn = vi.fn()
+        .mockRejectedValueOnce(new Error('HTTP 429: Too Many Requests'))
+        .mockResolvedValueOnce('success');
+        
+      const promise = retryWithBackoff(fn, { initialDelay: 100 });
+      
+      // Move past the first failure and wait for the retry
+      await vi.advanceTimersByTimeAsync(200); 
+      
+      const result = await promise;
       expect(result).toBe('success');
-      expect(callCount).toBe(1);
+      expect(fn).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
     });
 
-    it('should attempt retries', async () => {
-      let callCount = 0;
-      const fn = async () => {
-        callCount++;
-        return 'success';
-      };
-
-      const result = await retryWithBackoff(fn, { maxRetries: 3, initialDelay: 1, maxDelay: 1 });
-
-      expect(result).toBe('success');
-      expect(callCount).toBeGreaterThanOrEqual(1);
+    it('should NOT retry on 404 error', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('HTTP 404: Not Found'));
+      
+      await expect(retryWithBackoff(fn)).rejects.toThrow('HTTP 404');
+      expect(fn).toHaveBeenCalledTimes(1);
     });
 
-    it('should return promise-like behavior', async () => {
-      const fn = async () => 'test';
-
-      const result = await retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 });
-
-      expect(result).toBeDefined();
-    });
-
-    it('should handle zero max retries', async () => {
-      let callCount = 0;
-      const fn = async () => {
-        callCount++;
-        throw new Error('fails');
-      };
-
-      await expect(
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 5, maxDelay: 50 })
-      ).rejects.toThrow();
-
-      // Should only try once with no retries
-      expect(callCount).toBe(1);
-    });
-
-    it('should handle error types', async () => {
-      const fn = async () => {
-        throw new TypeError('type error');
-      };
-
-      await expect(
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 })
-      ).rejects.toThrow(TypeError);
-    });
-
-    it('should handle various rejection types', async () => {
-      const fn = async () => Promise.reject(new Error('error'));
-
-      await expect(
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 1, maxDelay: 1 })
-      ).rejects.toThrow('error');
-    });
-
-    it('should accept custom retry options', async () => {
-      const fn = async () => 'success';
-
-      const options: RetryOptions = {
-        maxRetries: 5,
-        initialDelay: 20,
-        maxDelay: 200,
-      };
-
-      const result = await retryWithBackoff(fn, options);
-
-      expect(result).toBe('success');
-    });
-
-    it('should work with minimal retry options', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, {
-        maxRetries: 0,
-        initialDelay: 1,
-        maxDelay: 1,
-      });
-
-      expect(result).toBe('success');
-    });
-
-    it('should preserve function result type', async () => {
-      const testData = { id: 1, name: 'test', value: 100 };
-      const fn = async () => testData;
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toEqual(testData);
-      expect(result.id).toBe(1);
-      expect(result.name).toBe('test');
-      expect(result.value).toBe(100);
-    });
-
-    it('should handle async functions with delays', async () => {
-      const fn = async () => {
-        return new Promise((resolve) => {
-          setTimeout(() => resolve('async result'), 10);
-        });
-      };
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBe('async result');
-    });
-
-    it('should handle promises that return null', async () => {
-      const fn = async () => null;
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBeNull();
-    });
-
-    it('should handle promises that return undefined', async () => {
-      const fn = async () => undefined;
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBeUndefined();
-    });
-
-    it('should handle promises that return false', async () => {
-      const fn = async () => false;
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBe(false);
-    });
-
-    it('should handle promises that return zero', async () => {
-      const fn = async () => 0;
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBe(0);
-    });
-
-    it('should handle promises that return empty string', async () => {
-      const fn = async () => '';
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBe('');
-    });
-
-    it('should work with maxRetries equal to 1', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, {
-        maxRetries: 1,
-        initialDelay: 1,
-        maxDelay: 1,
-      });
-
-      expect(result).toBe('success');
-    });
-
-    it('should handle synchronous errors in async function', async () => {
-      const fn = async () => {
-        throw new Error('sync error');
-      };
-
-      await expect(
-        retryWithBackoff(fn, { maxRetries: 0, initialDelay: 5, maxDelay: 20 })
-      ).rejects.toThrow();
-    });
-
-    it('should work with large max retries', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, {
-        maxRetries: 100,
-        initialDelay: 1,
-        maxDelay: 1,
-      });
-
-      expect(result).toBe('success');
-    });
-
-    it('should handle function without explicit return', async () => {
-      let executed = false;
-      const fn = async () => {
-        executed = true;
-      };
-
-      const result = await retryWithBackoff(fn);
-
-      expect(executed).toBe(true);
-      expect(result).toBeUndefined();
+    it('should exhaust retries and throw last error (using real timers with short delays)', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('HTTP 429'));
+      
+      // Using very short delays to keep tests fast without fake timer headaches
+      const start = Date.now();
+      await expect(retryWithBackoff(fn, { maxRetries: 2, initialDelay: 10, maxDelay: 50 })).rejects.toThrow('HTTP 429');
+      const duration = Date.now() - start;
+      
+      expect(fn).toHaveBeenCalledTimes(3); 
+      // Should have taken at least 10ms + 20ms = 30ms (roughly)
+      expect(duration).toBeGreaterThanOrEqual(20);
     });
   });
 
-  describe('Retry Options', () => {
-    it('should work with default options', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn);
-
-      expect(result).toBe('success');
+  describe('createTimeoutSignal', () => {
+    it('should create a signal that aborts after timeout', async () => {
+      // Use short real timer for this one
+      const signal = createTimeoutSignal(50);
+      expect(signal.aborted).toBe(false);
+      
+      await new Promise(r => setTimeout(r, 100));
+      expect(signal.aborted).toBe(true);
     });
 
-    it('should work with partial options', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, { maxRetries: 1 });
-
-      expect(result).toBe('success');
-    });
-
-    it('should work with empty partial options', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, {});
-
-      expect(result).toBe('success');
-    });
-
-    it('should work with full options', async () => {
-      const fn = async () => 'success';
-
-      const result = await retryWithBackoff(fn, {
-        maxRetries: 5,
-        initialDelay: 20,
-        maxDelay: 200,
-      });
-
-      expect(result).toBe('success');
+    it('should combine with existing signal', async () => {
+      const controller = new AbortController();
+      const signal = createTimeoutSignal(1000, controller.signal);
+      
+      controller.abort();
+      expect(signal.aborted).toBe(true);
     });
   });
 });

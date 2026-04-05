@@ -7,7 +7,7 @@
  * Used by: NVD, GitHub Advisories, OSV, CISA KEV, Search
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 // ============================================================================
 // Type Definitions

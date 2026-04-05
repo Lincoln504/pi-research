@@ -13,12 +13,13 @@
  */
 
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { DockerSearxngManager, type SearxngManagerConfig } from './infrastructure/searxng-manager.js';
-import { logger, type ILogger } from './logger.js';
+import { DockerSearxngManager, type SearxngManagerConfig, verifyDockerInstalled } from './infrastructure/searxng-manager.ts';
+import { logger, type ILogger } from './logger.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { PROXY_URL } from './config.js';
+import { PROXY_URL } from './config.ts';
+import { getActiveConnectionCount } from './web-research/utils.ts';
 
 /**
  * Extension directory for pi-research
@@ -223,6 +224,20 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       return;
     }
 
+    // Check Docker daemon before initializing
+    const dockerCheck = await verifyDockerInstalled();
+    if (!dockerCheck.running) {
+      this.currentStatus = {
+        state: 'error',
+        connectionCount: 0,
+        url: '',
+      };
+      this.notifyStatusChange();
+      const errorMsg = `Docker health check failed: ${dockerCheck.error}`;
+      logger.error(`[pi-research] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
     // Set state to starting_up
     this.currentStatus = {
       state: 'starting_up',
@@ -342,8 +357,9 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
     // Get actual active connection count from web-research module
     try {
-      const { getActiveConnectionCount } = require('../web-research/utils.js');
-      return getActiveConnectionCount();
+      const count = getActiveConnectionCount();
+      // Maintain baseline of 1 if active, 0 if not
+      return Math.max(this.currentStatus.state === 'active' ? 1 : 0, count);
     } catch {
       // Fallback: return 1 if active, 0 if not (singleton pattern)
       return this.currentStatus.state === 'active' ? 1 : 0;
@@ -488,6 +504,13 @@ export async function shutdownLifecycle(): Promise<void> {
  */
 export function isInitialized(): boolean {
   return getLifecycleManager().isInitialized();
+}
+
+/**
+ * Check if Docker is installed and running
+ */
+export async function checkDockerAvailability(): Promise<{ installed: boolean; running: boolean; error?: string }> {
+  return verifyDockerInstalled();
 }
 
 // Export original type for compatibility

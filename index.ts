@@ -8,8 +8,9 @@
  */
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
-import { createResearchTool } from './src/tool.js';
-import { logger, suppressConsole, isVerboseFromEnv } from './src/logger.js';
+import { createResearchTool } from './src/tool.ts';
+import { logger, suppressConsole, isVerboseFromEnv } from './src/logger.ts';
+import { checkDockerAvailability } from './src/searxng-lifecycle.ts';
 
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Extension loading...');
@@ -23,8 +24,14 @@ export default function (pi: ExtensionAPI) {
   // No session_shutdown or session_switch handlers needed
   // SearXNG is initialized on first research() call in tool.ts
 
-  // Notify user of log file location when starting a new session (verbose mode only)
-  pi.on('session_start', (_event, ctx) => {
+  // Notify user of Docker status and log file location when starting a new session
+  pi.on('session_start', async (_event, ctx) => {
+    // Check Docker availability on startup
+    const dockerCheck = await checkDockerAvailability();
+    if (!dockerCheck.running) {
+      ctx.ui.notify(`pi-research: ${dockerCheck.error}`, 'warning');
+    }
+
     if (isVerboseFromEnv()) {
       ctx.ui.notify('pi-research: debug log → /tmp/pi-research-debug.log', 'info');
     }

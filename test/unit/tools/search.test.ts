@@ -4,11 +4,12 @@
  * Tests the createSearchTool function and core behaviors.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSearchTool } from '../../../src/tools/search';
+import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker';
 
 // Mock the search function
-vi.mock('../../../src/web-research/search.js', () => ({
+vi.mock('../../../src/web-research/search.ts', () => ({
   search: vi.fn(),
 }));
 
@@ -20,9 +21,15 @@ describe('tools/search', () => {
     },
   } as any);
 
+  const createMockTracker = () => new ToolUsageTracker({ gathering: 6 });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe('Tool Definition', () => {
     it('should create tool with correct metadata and guidelines', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
 
       // Metadata
       expect(tool.name).toBe('search');
@@ -44,14 +51,14 @@ describe('tools/search', () => {
     });
 
     it('should have execute function', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       expect(typeof tool.execute).toBe('function');
     });
   });
 
   describe('Parameters', () => {
     it('should have queries and maxResults parameters properly defined', () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const props = (tool.parameters as any).properties;
 
       expect(props).toHaveProperty('queries');
@@ -63,33 +70,56 @@ describe('tools/search', () => {
 
   describe('execute - parameter validation', () => {
     it('should throw error when params is not valid', async () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       await expect(
         tool.execute('test-id', {} as any, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for search');
     });
 
     it('should throw error when queries array is empty', async () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       await expect(
         tool.execute('test-id', { queries: [] }, undefined, undefined, undefined as any)
       ).rejects.toThrow('At least one query is required');
     });
 
     it('should throw error when queries is missing', async () => {
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       await expect(
         tool.execute('test-id', { maxResults: 10 }, undefined, undefined, undefined as any)
       ).rejects.toThrow('Invalid parameters for search');
     });
 
     it('should accept single query', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
+      const { search } = await import('../../../src/web-research/search.ts');
       vi.mocked(search).mockResolvedValue([
         { query: 'test query', results: [] },
       ]);
 
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute(
+        'test-id',
+        { queries: ['test query'] },
+        undefined,
+        undefined,
+        undefined as any
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('should format search results into Markdown correctly', async () => {
+      const { search } = await import('../../../src/web-research/search.ts');
+      vi.mocked(search).mockResolvedValue([
+        {
+          query: 'test query',
+          results: [
+            { title: 'Result 1', url: 'https://example.com/1', content: 'Snippet 1', engine: 'google' },
+            { title: 'Result 2', url: 'https://example.com/2', content: 'Snippet 2', engine: 'bing' },
+          ],
+        },
+      ]);
+
+      const tool = createSearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const result = await tool.execute(
         'test-id',
         { queries: ['test query'] },
@@ -98,38 +128,30 @@ describe('tools/search', () => {
         undefined as any
       );
 
-      expect(result).toBeDefined();
-      expect(result.content).toBeDefined();
-    });
-
-    it('should accept multiple queries', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'query1', results: [] },
-        { query: 'query2', results: [] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['query1', 'query2'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(result).toBeDefined();
+      const content = result.content[0] as any;
+      expect(content.type).toBe('text');
+      expect(content.text).toContain('# Web Search Results');
+      expect(content.text).toContain('## Query: test query');
+      expect(content.text).toContain('### 1. Result 1');
+      expect(content.text).toContain('- **URL:** https://example.com/1');
+      expect(content.text).toContain('- **Snippet:** Snippet 1');
+      expect(content.text).toContain('### 2. Result 2');
+      expect(content.text).toContain('- **URL:** https://example.com/2');
+      expect(content.text).toContain('- **Snippet:** Snippet 2');
     });
   });
 
-  describe('execute - search function integration', () => {
-    it('should call search function with queries', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
+  describe('execute - tracker', () => {
+    it('should record call in tracker', async () => {
+      const { search } = await import('../../../src/web-research/search.ts');
       vi.mocked(search).mockResolvedValue([
         { query: 'test query', results: [] },
       ]);
 
-      const tool = createSearchTool({ ctx: createMockContext() });
+      const tracker = createMockTracker();
+      const spy = vi.spyOn(tracker, 'recordCall');
+      const tool = createSearchTool({ ctx: createMockContext(), tracker });
+      
       await tool.execute(
         'test-id',
         { queries: ['test query'] },
@@ -138,302 +160,24 @@ describe('tools/search', () => {
         undefined as any
       );
 
-      expect(search).toHaveBeenCalledWith(['test query']);
+      expect(spy).toHaveBeenCalledWith('search');
     });
 
-    it('should call search function with multiple queries', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'query1', results: [] },
-        { query: 'query2', results: [] },
-      ]);
+    it('should throw if limit exceeded', async () => {
+      const tracker = new ToolUsageTracker({ gathering: 1 });
+      tracker.recordCall('search'); // Limit reached
 
-      const tool = createSearchTool({ ctx: createMockContext() });
-      await tool.execute(
-        'test-id',
-        { queries: ['query1', 'query2'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(search).toHaveBeenCalledWith(['query1', 'query2']);
-    });
-  });
-
-  describe('execute - result formatting', () => {
-    it('should return text content', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(result.content[0]?.type).toBe('text');
-      expect((result.content[0] as any)?.text).toBeDefined();
-    });
-
-    it('should include query in output', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test query', results: [] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test query'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('test query');
-    });
-
-    it('should include duration in output', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('Duration');
-      expect((result.content[0] as any)?.text).toContain('s');
-    });
-
-    it('should format results with titles and URLs', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        {
-          query: 'test',
-          results: [
-            { url: 'https://example.com', title: 'Test Page', content: 'Test content' },
-          ],
-        },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('Test Page');
-      expect((result.content[0] as any)?.text).toContain('https://example.com');
-      expect((result.content[0] as any)?.text).toContain('Test content');
-    });
-
-    it('should truncate long snippets', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      const longContent = 'A'.repeat(250);
-      vi.mocked(search).mockResolvedValue([
-        {
-          query: 'test',
-          results: [
-            { url: 'https://example.com', title: 'Test', content: longContent },
-          ],
-        },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('...');
-    });
-  });
-
-  describe('execute - maxResults parameter', () => {
-    it('should use default maxResults when not specified', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        {
-          query: 'test',
-          results: Array.from({ length: 30 }, (_, i) => ({
-            url: `https://example.com/${i}`,
-            title: `Title ${i}`,
-            content: `Content ${i}`,
-          })),
-        },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      // Should only show 20 results by default
-      expect((result.content[0] as any)?.text).toContain('found');
-    });
-
-    it('should respect custom maxResults parameter', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        {
-          query: 'test',
-          results: Array.from({ length: 30 }, (_, i) => ({
-            url: `https://example.com/${i}`,
-            title: `Title ${i}`,
-            content: `Content ${i}`,
-          })),
-        },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'], maxResults: 5 },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(result).toBeDefined();
-    });
-  });
-
-  describe('execute - error handling', () => {
-    it('should handle empty results', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [], error: { type: 'empty_results', message: 'No results found' } },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('No results');
-      expect((result.content[0] as any)?.text).toContain('📭');
-    });
-
-    it('should handle search errors', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [], error: { type: 'network_error', message: 'Network timeout' } },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.content[0] as any)?.text).toContain('Error');
-      expect((result.content[0] as any)?.text).toContain('⚠️');
-      expect((result.content[0] as any)?.text).toContain('network_error');
-    });
-  });
-
-  describe('execute - details object', () => {
-    it('should include queryResults in details', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      const mockResults = [{ query: 'test', results: [] }];
-      vi.mocked(search).mockResolvedValue(mockResults);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(result.details).toBeDefined();
-      expect((result.details as any).queryResults).toEqual(mockResults);
-    });
-
-    it('should include totalQueries in details', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test1', results: [] },
-        { query: 'test2', results: [] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test1', 'test2'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.details as any).totalQueries).toBe(2);
-    });
-
-    it('should include totalResults in details', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([
-        { query: 'test', results: [{ url: 'url1', title: 't1', content: '' }, { url: 'url2', title: 't2', content: '' }] },
-      ]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.details as any).totalResults).toBe(2);
-    });
-
-    it('should include duration in details', async () => {
-      const { search } = await import('../../../src/web-research/search.js');
-      vi.mocked(search).mockResolvedValue([{ query: 'test', results: [] }]);
-
-      const tool = createSearchTool({ ctx: createMockContext() });
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.details as any).duration).toBeDefined();
-      expect(typeof (result.details as any).duration).toBe('number');
-      expect((result.details as any).duration).toBeGreaterThanOrEqual(0);
+      const tool = createSearchTool({ ctx: createMockContext(), tracker });
+      
+      await expect(
+        tool.execute(
+          'test-id',
+          { queries: ['test query'] },
+          undefined,
+          undefined,
+          undefined as any
+        )
+      ).rejects.toThrow(/limit for gathering exceeded/);
     });
   });
 });

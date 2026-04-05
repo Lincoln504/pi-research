@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createResearcherSession, type CreateResearcherSessionOptions } from '../../../src/orchestration/researcher';
 
 // Mock logger to avoid side effects
-vi.mock('../../../src/logger.js', () => ({
+vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
     info: vi.fn(),
@@ -26,6 +26,9 @@ vi.mock('../../../src/logger.js', () => ({
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: vi.fn(),
   createReadTool: vi.fn(() => ({ name: 'read' })),
+  SessionManager: {
+    inMemory: vi.fn(() => ({})),
+  },
 }));
 
 // Mock tool imports
@@ -59,7 +62,7 @@ vi.mock('../../../src/agent-tools.ts', () => ({
 }));
 
 // Mock resource loader
-vi.mock('../../../src/make-resource-loader.js', () => ({
+vi.mock('../../../src/make-resource-loader.ts', () => ({
   makeResourceLoader: vi.fn(() => ({})),
 }));
 
@@ -71,12 +74,6 @@ describe('researcher', () => {
       getAll: vi.fn(() => []),
       get: vi.fn(),
       register: vi.fn(),
-    } as any,
-    sessionManager: {
-      getBranch: vi.fn(() => []),
-      set: vi.fn(),
-      get: vi.fn(),
-      delete: vi.fn(),
     } as any,
     settingsManager: {} as any,
     systemPrompt: 'You are a helpful researcher.',
@@ -145,10 +142,11 @@ describe('researcher', () => {
       const options = createMockOptions();
       await createResearcherSession(options);
 
-      expect(createAgentTools).toHaveBeenCalledWith({
+      expect(createAgentTools).toHaveBeenCalledWith(expect.objectContaining({
         searxngUrl: 'http://localhost:8888',
         ctx: options.extensionCtx,
-      });
+        tracker: expect.anything(),
+      }));
     });
 
     it('should handle createAgentSession errors gracefully', async () => {

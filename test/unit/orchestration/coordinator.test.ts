@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createCoordinatorSession, type CreateCoordinatorSessionOptions } from '../../../src/orchestration/coordinator';
 
 // Mock logger to avoid side effects
-vi.mock('../../../src/logger.js', () => ({
+vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
     info: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
 }));
 
 // Mock resource loader
-vi.mock('../../../src/make-resource-loader.js', () => ({
+vi.mock('../../../src/make-resource-loader.ts', () => ({
   makeResourceLoader: vi.fn(() => ({})),
 }));
 

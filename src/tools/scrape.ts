@@ -6,8 +6,9 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { scrape, scrapeSingle } from '../web-research/scrapers.js';
-import { validateMaxConcurrency } from '../web-research/utils.js';
+import { scrape, scrapeSingle } from '../web-research/scrapers.ts';
+import { validateMaxConcurrency } from '../web-research/utils.ts';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 interface ScrapeParams {
   urls: string[];
@@ -15,9 +16,10 @@ interface ScrapeParams {
   [key: string]: unknown;
 }
 
-export function createScrapeTool(_options: {
+export function createScrapeTool(options: {
   searxngUrl: string;
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }): ToolDefinition {
 
   return {
@@ -29,6 +31,7 @@ export function createScrapeTool(_options: {
       'Use scrape to get full content from specific URLs.',
       'Uses 2-layer scraping: fetch first, then Playwright for JS-heavy pages.',
       'Set maxConcurrency for bulk scraping (default: 10 parallel requests).',
+      'CRITICAL: You are only allowed ONE call to this tool per research cycle. Batch all URLs into a single call.',
     ],
     parameters: Type.Object({
       urls: Type.Array(Type.String({
@@ -48,6 +51,9 @@ export function createScrapeTool(_options: {
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
+      // Record call in tracker - this will throw if limit (1) exceeded
+      options.tracker.recordCall('scrape');
+
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;
 

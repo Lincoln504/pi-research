@@ -8,7 +8,7 @@
 
 import type { Vulnerability, OSVResult } from './types.ts';
 import { createTimeoutSignal } from '../web-research/retry-utils.ts';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 const OSV_BASE_URL = 'https://api.osv.dev/v1';
 const DEFAULT_MAX_RESULTS = 20;

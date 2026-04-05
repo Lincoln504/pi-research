@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getActiveSearxngEngines, validateEngineListConsistency } from '../../src/utils/searxng-config.js';
+import { getActiveSearxngEngines, validateEngineListConsistency } from '../../src/utils/searxng-config.ts';
 
 describe('SearXNG Configuration Validation', () => {
   describe('getActiveSearxngEngines()', () => {

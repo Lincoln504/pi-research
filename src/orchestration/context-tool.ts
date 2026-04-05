@@ -10,6 +10,7 @@ import { Type } from '@sinclair/typebox';
 import { createAgentSession, createReadTool, SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createGrepTool } from '../tools/grep.ts';
 import { makeResourceLoader } from '../make-resource-loader.ts';
+import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import { logger } from '../logger.ts';
 
 export interface ContextToolOptions {
@@ -65,14 +66,17 @@ export function createInvestigateContextTool(options: ContextToolOptions): ToolD
 
       logger.log(`[context] Investigating project context: ${question.slice(0, 50)}...`);
 
+      // Create tracker for context investigation
+      const tracker = new ToolUsageTracker(createDefaultToolLimits());
+
       let session;
       try {
         const result = await createAgentSession({
           cwd: options.cwd,
           tools: [createReadTool(options.cwd)],
-          customTools: [createGrepTool()], // read + rg only, no search/scrape
+          customTools: [createGrepTool({ tracker })], // read + rg only, no search/scrape
           sessionManager: SessionManager.inMemory(),
-          settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
+          settingsManager: SettingsManager.inMemory({ compaction: { enabled: true } }),
           model: options.ctxModel,
           modelRegistry: options.modelRegistry,
           resourceLoader: makeResourceLoader('You investigate project context. Use read and rg_grep only.'),

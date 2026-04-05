@@ -6,11 +6,11 @@
  * Fast timeouts, simple checks (just verify tools respond with content).
  */
 
-import { logger } from '../logger.js';
-import { getConfig } from '../config.js';
-import { search } from '../web-research/search.js';
-import { scrapeSingle } from '../web-research/scrapers.js';
-import { getActiveSearxngEngines } from '../utils/searxng-config.js';
+import { logger } from '../logger.ts';
+import { getConfig } from '../config.ts';
+import { search } from '../web-research/search.ts';
+import { scrapeSingle } from '../web-research/scrapers.ts';
+import { getActiveSearxngEngines } from '../utils/searxng-config.ts';
 
 // Get timeout from config or use defaults
 const config = getConfig();
@@ -77,6 +77,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     success: false,
     searchOk: false,
     scrapeOk: false,
+    error: undefined,
     details: {},
   };
 

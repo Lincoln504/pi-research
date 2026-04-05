@@ -12,24 +12,23 @@
 
 import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.js';
-import type { ResearchPanelState } from '../tui/research-panel.js';
-import { addSlice, completeSlice, flashSlice, activateSlice } from '../tui/research-panel.js';
-import { logger } from '../logger.js';
+import { createResearcherSession, type CreateResearcherSessionOptions } from './researcher.ts';
+import { addSlice, completeSlice, flashSlice, activateSlice, type ResearchPanelState } from '../tui/research-panel.ts';
+import { logger } from '../logger.ts';
 import {
   buildSharedLinksPool,
   saveSharedLinks,
   loadSharedLinks,
   formatSharedLinksForPrompt,
   type SharedLinksPool,
-} from '../utils/shared-links.js';
-import { extractText } from '../utils/text-utils.js';
+} from '../utils/shared-links.ts';
+import { extractText } from '../utils/text-utils.ts';
 import {
   recordResearcherFailure,
   shouldStopResearch,
   getResearchStopMessage,
   getFailedResearchers,
-} from '../utils/session-state.js';
+} from '../utils/session-state.ts';
 
 export interface DelegateToolOptions {
   sessionId: string; // Unique session ID for shared links
@@ -63,20 +62,22 @@ function withTimeout<T>(
   logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
 
   let raceWon = false;
-  let rejectPromise: Promise<T>;
+  let timeoutId: NodeJS.Timeout | undefined;
 
   const wrappedPromise = promise.then((val) => {
     raceWon = true;
+    if (timeoutId) clearTimeout(timeoutId);
     return val;
   });
 
-  rejectPromise = new Promise<T>((_, reject) => {
+  const rejectPromise = new Promise<T>((_, reject) => {
     // Timeout handler
-    const timeoutId = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
       timeoutController.abort();
       reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
+    }, timeoutMs);
+
     if (combinedSignal.aborted) {
       logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
       clearTimeout(timeoutId);
@@ -85,15 +86,16 @@ function withTimeout<T>(
       combinedSignal.addEventListener('abort', () => {
         if (!raceWon) {
           logger.error(`[withTimeout] ${label} ABORT SIGNAL FIRED`);
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           reject(new Error(`Researcher ${label} cancelled`));
         }
-      });
+      }, { once: true });
     }
   });
 
   return Promise.race([wrappedPromise, rejectPromise]).finally(() => {
     // Clean up on completion or error
+    if (timeoutId) clearTimeout(timeoutId);
     timeoutController.abort();
   });
 }
@@ -224,10 +226,10 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
 
       // Check if research should stop due to too many cumulative failures
       // This checks across ALL delegate_research calls in the session, not just this one
-      const failedCount = getFailedResearchers().length;
-      logger.log(`[delegate] Checking cumulative failures. Current failed researchers: ${failedCount}`);
-      if (shouldStopResearch()) {
-        const errorText = getResearchStopMessage();
+      const failedCount = getFailedResearchers(options.sessionId).length;
+      logger.log(`[delegate] Checking cumulative failures for ${options.sessionId}. Current failed researchers: ${failedCount}`);
+      if (shouldStopResearch(options.sessionId)) {
+        const errorText = getResearchStopMessage(options.sessionId);
         logger.error('[delegate] STOPPING RESEARCH DUE TO CUMULATIVE FAILURES:', errorText);
         throw new Error(errorText);
       }
@@ -337,7 +339,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         const msgs = session.messages;
         if (!Array.isArray(msgs) || msgs.length === 0) {
           logger.error(`[delegate] Researcher ${sliceKey}: No messages in session`);
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           throw new Error(`Researcher ${sliceKey} produced no output`);
         }
 
@@ -345,7 +347,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
 
         if (!last) {
           logger.error(`[delegate] Researcher ${sliceKey}: No assistant message found`);
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           throw new Error(`Researcher ${sliceKey} produced no assistant message`);
         }
 
@@ -358,7 +360,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
           // Abort session on provider error to cancel inflight API calls
           session.abort().catch(() => {});
           // Record failure in session state (persists across delegate_research calls)
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           const errorMsg = last.errorMessage || last.stopReason || 'Unknown error';
           logger.error(`[delegate] Researcher ${sliceKey} FAILED: ${errorMsg}`);
           throw new Error(`Researcher ${sliceKey} failed: ${errorMsg}`);
@@ -395,20 +397,20 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         // Aborted is normal - check that we have actual output
         if (last.stopReason === 'aborted' && !text) {
           logger.warn(`[delegate] Researcher ${sliceKey} aborted with no output`);
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           throw new Error(`Researcher ${sliceKey} produced no output`);
         }
 
         if (!text || typeof text !== 'string') {
           logger.error(`[delegate] Researcher ${sliceKey}: Failed to extract valid text from message`);
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           throw new Error(`Researcher ${sliceKey} returned invalid output format`);
         }
 
         const trimmedText = text.trim();
         if (trimmedText.length === 0) {
           logger.warn(`[delegate] Researcher ${sliceKey}: Message contains only whitespace`);
-          recordResearcherFailure(sliceKey);
+          recordResearcherFailure(options.sessionId, sliceKey);
           throw new Error(`Researcher ${sliceKey} produced empty output`);
         }
 
@@ -511,8 +513,8 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       // Check if too many cumulative failures - abort research
       // This check runs AFTER all researchers complete (or one throws in sequential mode)
       // Failures are tracked across ALL delegate_research calls in the session
-      if (shouldStopResearch()) {
-        const errorText = getResearchStopMessage();
+      if (shouldStopResearch(options.sessionId)) {
+        const errorText = getResearchStopMessage(options.sessionId);
         logger.error('[delegate]', errorText);
         throw new Error(errorText);
       }

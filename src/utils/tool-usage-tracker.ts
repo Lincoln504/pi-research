@@ -5,21 +5,19 @@
  * Prevents excessive calls to prevent rate limiting and control costs.
  */
 
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 export interface ToolLimits {
-  // Maximum calls per tool (undefined = no limit)
-  search?: number; // 6-8 searches max
-  scrape?: number; // 5-6 scrapes max
-  security_search?: number; // no limit
-  stackexchange?: number; // no limit
-  grep?: number; // no limit
+  // Combined gathering limit (search, security_search, stackexchange, grep)
+  gathering?: number; 
+  // Scrape limit
+  scrape?: number;
   // read tool (default pi file read) has no limit
-  read?: number; // no limit
+  read?: number;
 }
 
 export interface ToolUsage {
-  toolName: string;
+  category: string;
   callCount: number;
   limit?: number;
 }
@@ -33,20 +31,30 @@ export class ToolUsageTracker {
   }
 
   /**
+   * Get category for a tool
+   */
+  private getCategory(toolName: string): string {
+    const gatheringTools = ['search', 'security_search', 'stackexchange', 'grep'];
+    if (gatheringTools.includes(toolName)) {
+      return 'gathering';
+    }
+    return toolName;
+  }
+
+  /**
    * Check if a tool can be called (within limits)
-   * @throws Error if limit exceeded
    */
   canCall(toolName: string): boolean {
-    const limit = this.getLimit(toolName);
+    const category = this.getCategory(toolName);
+    const limit = this.limits[category as keyof ToolLimits];
     if (limit === undefined) {
-      // No limit
       return true;
     }
 
-    const usage = this.getUsage(toolName);
+    const usage = this.getUsage(category);
     if (usage.callCount >= limit) {
       logger.warn(
-        `[tool-usage] Tool ${toolName} limit exceeded: ${usage.callCount}/${limit}`
+        `[tool-usage] category ${category} limit exceeded: ${usage.callCount}/${limit}`
       );
       return false;
     }
@@ -56,58 +64,45 @@ export class ToolUsageTracker {
 
   /**
    * Record a tool call and check limits
-   * @throws Error if limit exceeded
    */
   recordCall(toolName: string): void {
-    const limit = this.getLimit(toolName);
+    const category = this.getCategory(toolName);
+    const limit = this.limits[category as keyof ToolLimits];
 
-    const usage = this.getUsage(toolName);
+    const usage = this.getUsage(category);
     usage.callCount++;
 
     if (limit !== undefined && usage.callCount > limit) {
       throw new Error(
-        `Tool ${toolName} usage limit exceeded: ${usage.callCount}/${limit}. ` +
+        `Tool usage limit for ${category} exceeded: ${usage.callCount}/${limit}. ` +
         `Please adjust your research strategy to stay within limits.`
       );
     }
-
-    if (limit !== undefined && usage.callCount === limit) {
-      logger.warn(
-        `[tool-usage] Tool ${toolName} at limit: ${usage.callCount}/${limit}`
-      );
-    }
   }
 
   /**
-   * Get current usage for a tool
+   * Get current usage for a category
    */
-  getUsage(toolName: string): ToolUsage {
-    if (!this.usage.has(toolName)) {
-      this.usage.set(toolName, {
-        toolName,
+  getUsage(category: string): ToolUsage {
+    if (!this.usage.has(category)) {
+      this.usage.set(category, {
+        category,
         callCount: 0,
-        limit: this.getLimit(toolName),
+        limit: this.limits[category as keyof ToolLimits],
       });
     }
-    return this.usage.get(toolName)!;
+    return this.usage.get(category)!;
   }
 
   /**
-   * Get limit for a tool
-   */
-  private getLimit(toolName: string): number | undefined {
-    return this.limits[toolName as keyof ToolLimits];
-  }
-
-  /**
-   * Get usage statistics for all tools
+   * Get usage statistics for all categories
    */
   getStats(): Map<string, ToolUsage> {
     return new Map(this.usage);
   }
 
   /**
-   * Reset all usage (for new researcher session)
+   * Reset all usage
    */
   reset(): void {
     this.usage.clear();
@@ -119,11 +114,8 @@ export class ToolUsageTracker {
  */
 export function createDefaultToolLimits(): ToolLimits {
   return {
-    search: 8, // 6-8 searches max
-    scrape: 6, // 5-6 scrapes max
-    security_search: undefined, // no limit
-    stackexchange: undefined, // no limit
-    grep: undefined, // no limit
-    read: undefined, // no limit on default pi read tool
+    gathering: 6, // 6 rounds of information gathering total
+    scrape: 1,    // Only ONE batch scrape allowed
+    read: undefined,
   };
 }

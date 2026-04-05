@@ -1,8 +1,5 @@
 /**
  * Session State Unit Tests
- *
- * Tests pure functions that don't require refactoring.
- * Can run immediately with existing code.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -13,148 +10,60 @@ import {
   getFailedResearchers,
   shouldStopResearch,
   getResearchStopMessage,
-  getCurrentSessionId,
-  getAllSessions,
-} from '../../src/utils/session-state';
+} from '../../src/utils/session-state.ts';
 
-describe('session-state', () => {
+describe('utils/session-state', () => {
+  let sessionId: string;
+
   beforeEach(() => {
-    endResearchSession();
+    sessionId = startResearchSession();
   });
 
-  describe('startResearchSession', () => {
-    it('should start a new session and return session ID', () => {
-      const sessionId = startResearchSession();
-      expect(sessionId).toMatch(/^research-\d+-[a-z0-9]+$/);
-      expect(getCurrentSessionId()).toBe(sessionId);
-    });
-
-    it('should create empty failure list for new session', () => {
-      startResearchSession();
-      expect(getFailedResearchers()).toEqual([]);
-    });
-
-    it('should generate unique session IDs', () => {
-      const id1 = startResearchSession();
-      const id2 = startResearchSession();
-      expect(id1).not.toBe(id2);
-    });
+  it('should start a new session with unique ID', () => {
+    const id1 = startResearchSession();
+    const id2 = startResearchSession();
+    expect(id1).toBeDefined();
+    expect(id2).toBeDefined();
+    expect(id1).not.toBe(id2);
   });
 
-  describe('endResearchSession', () => {
-    it('should clear current session', () => {
-      startResearchSession();
-      endResearchSession();
-      expect(getCurrentSessionId()).toBeNull();
-      expect(getFailedResearchers()).toEqual([]);
-    });
-
-    it('should not throw when no session is active', () => {
-      expect(() => endResearchSession()).not.toThrow();
-    });
+  it('should track failures per session', () => {
+    const session2 = startResearchSession();
+    
+    recordResearcherFailure(sessionId, '1:1');
+    recordResearcherFailure(session2, '2:1');
+    
+    expect(getFailedResearchers(sessionId)).toEqual(['1:1']);
+    expect(getFailedResearchers(session2)).toEqual(['2:1']);
   });
 
-  describe('recordResearcherFailure', () => {
-    it('should record failure for current session', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      expect(getFailedResearchers()).toEqual(['1:1']);
-    });
-
-    it('should record multiple failures', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('2:1');
-      recordResearcherFailure('3:1');
-      expect(getFailedResearchers()).toEqual(['1:1', '2:1', '3:1']);
-    });
-
-    it('should record duplicate failures', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('1:1');
-      expect(getFailedResearchers()).toEqual(['1:1']); // Deduplicated
-    });
-
-    it('should not record when no session is active', () => {
-      expect(() => recordResearcherFailure('1:1')).not.toThrow();
-      expect(getFailedResearchers()).toEqual([]);
-    });
+  it('should deduplicate failures in same session', () => {
+    recordResearcherFailure(sessionId, '1:1');
+    recordResearcherFailure(sessionId, '1:1');
+    
+    expect(getFailedResearchers(sessionId)).toHaveLength(1);
+    expect(getFailedResearchers(sessionId)).toEqual(['1:1']);
   });
 
-  describe('shouldStopResearch', () => {
-    it('should return false with no failures', () => {
-      startResearchSession();
-      expect(shouldStopResearch()).toBe(false);
-    });
-
-    it('should return false with one failure', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      expect(shouldStopResearch()).toBe(false);
-    });
-
-    it('should return true with two unique failures', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('2:1');
-      expect(shouldStopResearch()).toBe(true);
-    });
-
-    it('should return true with three unique failures', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('2:1');
-      recordResearcherFailure('3:1');
-      expect(shouldStopResearch()).toBe(true);
-    });
-
-    it('should deduplicate failures before checking', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('1:1');
-      expect(shouldStopResearch()).toBe(false); // Only 1 unique failure
-    });
+  it('should identify when research should stop', () => {
+    recordResearcherFailure(sessionId, '1:1');
+    expect(shouldStopResearch(sessionId)).toBe(false);
+    
+    recordResearcherFailure(sessionId, '2:1');
+    expect(shouldStopResearch(sessionId)).toBe(true);
   });
 
-  describe('getResearchStopMessage', () => {
-    it('should return formatted error message with failures', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-      recordResearcherFailure('2:1');
-
-      const message = getResearchStopMessage();
-      expect(message).toContain('Research stopped: 2 researcher(s) failed: 1:1, 2:1');
-      expect(message).toContain('Troubleshooting:');
-      expect(message).toContain('Check network connection');
-    });
-
-    it('should return message with single failure', () => {
-      startResearchSession();
-      recordResearcherFailure('1:1');
-
-      const message = getResearchStopMessage();
-      expect(message).toContain('Research stopped: 1 researcher(s) failed: 1:1');
-    });
+  it('should return formatted stop message', () => {
+    recordResearcherFailure(sessionId, '1:1');
+    recordResearcherFailure(sessionId, '2:1');
+    
+    const message = getResearchStopMessage(sessionId);
+    expect(message).toContain('Research stopped: 2 researcher(s) failed: 1:1, 2:1');
   });
 
-  describe('getCurrentSessionId', () => {
-    it('should return null when no session is active', () => {
-      expect(getCurrentSessionId()).toBeNull();
-    });
-
-    it('should return session ID when session is active', () => {
-      const sessionId = startResearchSession();
-      expect(getCurrentSessionId()).toBe(sessionId);
-    });
-  });
-
-  describe('getAllSessions', () => {
-    it('should return a map instance', () => {
-      const sessions = getAllSessions();
-      expect(sessions).toBeInstanceOf(Map);
-    });
+  it('should cleanup session on end', () => {
+    recordResearcherFailure(sessionId, '1:1');
+    endResearchSession(sessionId);
+    expect(getFailedResearchers(sessionId)).toHaveLength(0);
   });
 });

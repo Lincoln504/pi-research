@@ -6,8 +6,9 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { searchSecurityDatabases } from '../security/index.js';
-import type { SecuritySearchParams } from '../security/types.js';
+import { searchSecurityDatabases } from '../security/index.ts';
+import type { SecuritySearchParams } from '../security/types.ts';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 interface SecuritySearchParamsType {
   databases?: string[];
@@ -20,9 +21,10 @@ interface SecuritySearchParamsType {
   [key: string]: unknown;
 }
 
-export function createSecuritySearchTool(_options: {
+export function createSecuritySearchTool(options: {
   searxngUrl: string;
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }): ToolDefinition {
 
   return {
@@ -34,6 +36,7 @@ export function createSecuritySearchTool(_options: {
       'Use security_search to look up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
+      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       databases: Type.Optional(Type.Array(Type.String({
@@ -69,6 +72,9 @@ export function createSecuritySearchTool(_options: {
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
+      // Record call in tracker
+      options.tracker.recordCall('security_search');
+
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;
 

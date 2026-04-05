@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createInvestigateContextTool, type ContextToolOptions } from '../../../src/orchestration/context-tool';
 
 // Mock logger to avoid side effects
-vi.mock('../../../src/logger.js', () => ({
+vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
     info: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('../../../src/tools/grep.ts', () => ({
 }));
 
 // Mock resource loader
-vi.mock('../../../src/make-resource-loader.js', () => ({
+vi.mock('../../../src/make-resource-loader.ts', () => ({
   makeResourceLoader: vi.fn(() => ({})),
 }));
 

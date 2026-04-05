@@ -1,163 +1,237 @@
 # pi-research
 
-![pi-research banner](README-banner.jpg)
+An opinionated web research extension for pi coding agent.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
-[![CI Status](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml)
+## Overview
 
-**Multi-agent research orchestration** for pi. Supports both single-agent research and multi-agent research with a coordinator that delegates parallel/sequential researchers, then synthesizes findings into comprehensive answers.
+This extension provides a set of web research tools and a restricted subagent system which utilizes them to do either quick (single agent) or deep (multi-agent) research.
 
-## Core Capabilities
+## Capabilities
 
-- **Single Research** (`depth: "quick"`) - Single researcher for fast, focused queries
-- **Multi-Agent Research** (`depth: "deep"`, default) - Coordinator delegates to parallel researchers for comprehensive coverage
-- **Web Search** via SearXNG with Docker container management
-- **URL Scraping** with 2-layer architecture (fetch → Playwright fallback)
-- **Security Search** via NVD, CISA KEV, GitHub, OSV databases
-- **Stack Exchange API** integration for technical answers
-- **Code Search** using ripgrep (rg) with grep fallback
-- **Visual TUI** progress tracking showing active researchers and slices
-- **Proxy Support** for Tor or HTTP proxy connections
+- **Single-agent research** (`depth: "quick"`): Fast, focused queries with one researcher
+- **Multi-agent research** (`depth: "deep"`, default): Coordinator orchestrates parallel/sequential researchers
+- **Web search**: SearXNG integration via Docker container
+- **URL scraping**: Two-layer architecture (fetch → Playwright fallback for JavaScript-heavy pages)
+- **Security database queries**: NVD, CISA KEV, GitHub Advisories, OSV
+- **Stack Exchange API**: Integration with Stack Overflow and Stack Exchange network
+- **Code search**: ripgrep (rg) with grep fallback for local codebase queries
+- **Terminal UI**: Progress tracking panel showing SearXNG status and active research slices
+- **Proxy support**: SOCKS5 (Tor) or HTTP/HTTPS proxy configuration
 
-## Quick Start
+## Installation
 
+### From npm
 ```bash
-# Install
 npm install -g pi-research
-
-# Or from GitHub
-npm install -g https://github.com/Lincoln504/pi-research-dev.git
-
-# Run
-pi research "query here"
 ```
 
-## Usage Examples
-
-### Single Agent Research
-
+### From source
 ```bash
-# Single researcher for quick, focused research
-pi research "What is a binary search tree?"
-
-# Deep multi-agent research with coordinator
-pi research "complex query" --depth deep
+git clone https://github.com/Lincoln504/pi-research.git
+cd pi-research
+npm install
+pi -e ./index.ts
 ```
 
-### Multi-Agent Research with Coordinator
+## Usage
 
+### Via pi agent
+
+Once the extension is loaded, ask the pi agent to research a topic:
+```text
+Please research "What is a binary search tree?"
+```
+
+### Via tool invocation
+
+Invoke the research tool directly:
 ```bash
-# Deep multi-agent research with coordinator
-pi research "complex query" --depth deep
-
-# Deep multi-agent research with explicit mode
-pi research "complex query" --mode deep
-
-# Deep multi-agent research with model selection
-pi research "complex query" --depth deep --model gem-3
-
-# Deep multi-agent research with parallel execution
-pi research "complex query" --mode deep --parallel
+pi research "What is a binary search tree?" --depth quick
 ```
 
-### Programmatic Usage
+### Parameters
 
-```python
-from pi_research import research
+| Parameter | Type   | Default | Description                                             |
+|-----------|--------|---------|---------------------------------------------------------|
+| `query`   | string | required| Research query or topic to investigate                  |
+| `depth`   | string | "deep"  | "quick" (single researcher) or "deep" (multi-agent)     |
+| `model`   | string | -       | Model ID for research agents (defaults to active model) |
 
-result = research("binary search tree")
-print(result.answer)
-```
+## Architecture
+
+### Layers
+
+1. **Extension entry point** (`index.ts`): Registers the `research` tool with pi
+2. **Tool orchestration** (`src/tool.ts`): Main entry point for research calls, initializes SearXNG, manages TUI
+3. **Coordinator** (`src/orchestration/coordinator.ts`): Decomposes queries into slices, delegates to researchers, synthesizes findings
+4. **Delegate tool** (`src/orchestration/delegate-tool.ts`): Allows coordinator to spawn researcher agents
+5. **Researcher** (`src/orchestration/researcher.ts`): Research agent session management
+6. **SearXNG lifecycle** (`src/searxng-lifecycle.ts`): Docker container management for SearXNG
+7. **State management** (`src/infrastructure/state-manager.ts`): Tracks sessions, token usage, failures
+8. **Tools**:
+   - `search.ts`: Web search via SearXNG
+   - `scrape.ts`: URL scraping with retry logic
+   - `security.ts`: Security database queries (NVD, CISA, GitHub, OSV)
+   - `stackexchange.ts`: Stack Exchange API queries
+   - `grep.ts`: Local code search
+9. **Web research** (`src/web-research/`): Search, scraping, retry utilities
+10. **Security** (`src/security/`): Security database integrations
+11. **Stack Exchange** (`src/stackexchange/`): API client, caching, output formatting
+12. **TUI** (`src/tui/`): Terminal UI panel for progress tracking
+13. **Utils**: Shared utilities (text formatting, session state, shared links)
+14. **Prompts**: System prompts for coordinator and researcher agents
+
+### Research workflow
+
+1. **Coordinator receives query**: Assesses complexity level (Level 1/2/3 based on query)
+2. **Delegate research**: Coordinator decomposes query into slices and spawns researcher agents
+3. **Researcher cycles**:
+   - Phase 1: 6 rounds of gathering (search, security_search, stackexchange, grep)
+   - Phase 2: Single batch scrape of 5-10 links
+   - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
+4. **Shared link pool**: Automatic coordination via pool of all scraped links
+5. **Synthesis**: Coordinator combines all slice findings into final answer
+
+### Research levels
+
+- **Level 1 (Brief)**: 1 slice, up to 1 follow-up. Default for simple factual queries.
+- **Level 2 (Normal)**: 2-3 slices, up to 2 follow-ups. For technical/multi-faceted topics.
+- **Level 3 (Deep)**: 4-5 slices, 3-4 follow-ups. For complex cross-domain analysis.
+
+### SearXNG management
+
+SearXNG is managed as a singleton Docker container:
+- Initialized on first `research()` call (lazy initialization)
+- Lives for the duration of the pi process
+- Shared across all agents in all sessions
+- Health checks and automatic restart on failure
+
+### Shared link pool
+
+Researchers report links in two categories:
+- **CITED LINKS**: URLs scraped and used in findings
+- **SCRAPE CANDIDATES**: URLs found but not scraped
+
+The pool is automatically:
+- Built from each researcher's response
+- Injected into subsequent researchers' context
+- Used to avoid duplicate scraping
 
 ## Configuration
 
-Copy the example configuration file:
+Copy `.env.example` to `.env` and edit:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` to set options:
+### Environment variables
 
-```bash
-# Researcher timeout (default: 240000ms / 4 minutes)
-PI_RESEARCH_RESEARCHER_TIMEOUT_MS=240000
-
-# Flash duration for TUI (default: 1000ms)
-PI_RESEARCH_FLASH_TIMEOUT_MS=1000
-
-# TUI mode (simple or full)
-PI_RESEARCH_TUI_MODE=simple
-
-# Proxy URL (optional)
-PROXY_URL=socks5://127.0.0.1:9050
-```
-
-Source the configuration:
-
-```bash
-source .env
-pi research "query here"
-```
-
-## Quick Reference
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `depth` | Research depth | "deep" |
-| `mode` | Research mode (deep/quick) | "deep" |
-| `model` | Model ID for agents | current active model |
-| `parallel` | Execution mode | parallel |
-
-## TUI Modes
-
-### Simple Mode
-
-Shows active researcher status with current token consumption.
-
-```bash
-PI_RESEARCH_TUI_MODE=simple
-```
-
-### Full Mode
-
-Shows full research coordinator with all slices and their progress.
-
-```bash
-PI_RESEARCH_TUI_MODE=full
-```
+| Variable                      | Default   | Description                                           |
+|-------------------------------|-----------|-------------------------------------------------------|
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000    | Per-researcher timeout in milliseconds (30s-10m)      |
+| `PI_RESEARCH_FLASH_TIMEOUT_MS`     | 1000      | TUI flash indicator duration in milliseconds          |
+| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS`| 15000    | SearXNG health check timeout in milliseconds          |
+| `PROXY_URL`                   | -         | Proxy URL for SearXNG (optional)                      |
 
 ## Proxy Support
 
-For Tor or HTTP proxy support, configure in `.env`:
+Proxy support is disabled by default. Configure in `.env`:
 
 ```bash
 # Tor
 PROXY_URL=socks5://127.0.0.1:9050
 
-# HTTP proxy
+# Tor Browser
+PROXY_URL=socks5://127.0.0.1:9150
+
+# HTTP/HTTPS proxy
 PROXY_URL=http://proxy.example.com:8080
 
 # Authenticated proxy
 PROXY_URL=http://user:pass@proxy.example.com:8080
 ```
 
-See `TOR.md` for detailed Tor setup instructions.
+Source the file before running pi:
+```bash
+source .env
+pi
+```
 
-## Dependencies
+### How proxy routing works
 
-- `@mariozechner/pi-coding-agent`: pi core SDK
-- `@sinclair/typebox`: Parameter schema validation
-- `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion
-- `dockerode`: Docker API client
-- `js-yaml`: YAML parsing
-- `playwright`: Headless browser for JS-heavy scraping
+1. pi-research generates SearXNG settings with the proxy URL
+2. SearXNG container routes outbound HTTP requests through the proxy
+3. Only SearXNG-to-search-engine requests go through the proxy
+4. pi-research connections to SearXNG are direct
+
+## TUI (Terminal User Interface)
+
+The TUI shows a two-box panel:
+
+```
+┌───────┐ ┌── Research | glm-4  42.3k ──────┐
+│SearXNG│ │                                  │
+│:55732 │ │ 1:1  │ 1:2  │ 2:1  │ 3:1  │ 4:1  │
+│   1   │ │                                  │
+└───────┘ └──────────────────────────────────┘
+```
+
+**Left box**: SearXNG status
+- Line 1: Service name (online/offline/error)
+- Line 2: Port number
+- Line 3: Active connection count
+
+**Right box**: Research progress
+- Header: Active model and token usage
+- Columns: Active research slices (X:Y format, X=slice, Y=iteration)
+- Status indicators:
+  - ✓: Slice completed
+  - Green flash: Tool call succeeded
+  - Red flash: Tool call failed
+
+## Project structure
+
+```
+pi-research/
+├── index.ts                 # Extension entry point
+├── src/
+│   ├── tool.ts              # Research tool orchestration
+│   ├── config.ts            # Configuration management
+│   ├── logger.ts            # Logging utilities
+│   ├── searxng-lifecycle.ts # SearXNG container management
+│   ├── orchestration/
+│   │   ├── coordinator.ts   # Coordinator agent session
+│   │   ├── delegate-tool.ts # Delegate tool implementation
+│   │   ├── researcher.ts    # Researcher agent session
+│   │   ├── context-tool.ts  # Context inspection tool
+│   │   └── session-context.ts # Session context utilities
+│   ├── infrastructure/
+│   │   └── state-manager.ts # Session/state management
+│   ├── tools/
+│   │   ├── search.ts        # Web search tool
+│   │   ├── scrape.ts        # URL scraping tool
+│   │   ├── security.ts      # Security database tool
+│   │   ├── stackexchange.ts # Stack Exchange tool
+│   │   └── grep.ts          # Code search tool
+│   ├── web-research/        # Search/scraping utilities
+│   ├── security/            # Security database integrations
+│   ├── stackexchange/       # Stack Exchange API integration
+│   ├── tui/                 # Terminal UI components
+│   └── utils/               # Shared utilities
+├── prompts/
+│   ├── coordinator.md       # Coordinator system prompt
+│   └── researcher.md        # Researcher system prompt
+├── test/                    # Test suite
+├── .env.example             # Example configuration
+├── package.json             # Package metadata
+└── README.md                # This file
+```
 
 ## Development
 
 ```bash
-cd ~/Documents/pi-research
+cd pi-research
 
 # Install dependencies
 npm install
@@ -171,6 +245,18 @@ npm run lint
 # Run tests
 npm test
 ```
+
+## Dependencies
+
+- `@mariozechner/pi-coding-agent`: pi core SDK
+- `@sinclair/typebox`: Parameter schema validation
+- `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion
+- `dockerode`: Docker API client
+- `js-yaml`: YAML parsing
+- `playwright`: Headless browser for scraping
+- `ms`: Millisecond utilities
+- `axios`: HTTP client
+- `node-fetch`: Fetch API implementation
 
 ## License
 

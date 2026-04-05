@@ -6,15 +6,17 @@
  */
 
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { createSearchTool } from './search.js';
-import { createScrapeTool } from './scrape.js';
-import { createSecuritySearchTool } from './security.js';
-import { createStackexchangeTool } from './stackexchange.js';
-import { createGrepTool } from './grep.js';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import { createSearchTool } from './search.ts';
+import { createScrapeTool } from './scrape.ts';
+import { createSecuritySearchTool } from './security.ts';
+import { createStackexchangeTool } from './stackexchange.ts';
+import { createGrepTool } from './grep.ts';
 
 interface CreateToolsOptions {
   searxngUrl: string;
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }
 
 /**
@@ -26,15 +28,15 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createScrapeTool(options),
     createSecuritySearchTool(options),
     createStackexchangeTool(options),
-    createGrepTool(),
+    createGrepTool(options),
   ];
 }
 
 /**
  * Create individual tool exports for direct registration
  */
-export { createSearchTool } from './search.js';
-export { createScrapeTool } from './scrape.js';
-export { createSecuritySearchTool } from './security.js';
-export { createStackexchangeTool } from './stackexchange.js';
-export { createGrepTool } from './grep.js';
+export { createSearchTool } from './search.ts';
+export { createScrapeTool } from './scrape.ts';
+export { createSecuritySearchTool } from './security.ts';
+export { createStackexchangeTool } from './stackexchange.ts';
+export { createGrepTool } from './grep.ts';

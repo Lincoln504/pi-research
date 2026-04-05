@@ -6,7 +6,8 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { search } from '../web-research/search.js';
+import { search } from '../web-research/search.ts';
+import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 interface SearchParams {
   queries: string[];
@@ -14,8 +15,9 @@ interface SearchParams {
   [key: string]: unknown;
 }
 
-export function createSearchTool(_options: {
+export function createSearchTool(options: {
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }): ToolDefinition {
 
   return {
@@ -27,6 +29,7 @@ export function createSearchTool(_options: {
       'Use search when you need to find URLs or information about a topic.',
       'This returns search results with snippets. Use scrape to get full content from specific URLs.',
       'For security research, use security_search to query vulnerability databases.',
+      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       queries: Type.Array(Type.String({
@@ -40,6 +43,9 @@ export function createSearchTool(_options: {
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _extensionCtx): Promise<AgentToolResult<unknown>> {
+      // Record call in tracker - this will throw if limit (6) exceeded
+      options.tracker.recordCall('search');
+
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;
 

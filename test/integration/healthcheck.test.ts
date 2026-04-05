@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { runHealthCheck } from '../../src/healthcheck/index.js';
-import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.js';
-import { logger } from '../../src/logger.js';
+import { runHealthCheck } from '../../src/healthcheck/index.ts';
+import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.ts';
+import { logger } from '../../src/logger.ts';
 
 describe('Health Check Integration Tests', () => {
   beforeAll(async () => {
@@ -25,6 +25,14 @@ describe('Health Check Integration Tests', () => {
           setWidget: () => {},
         },
       } as any);
+
+      // Register manager with web-research module
+      const { getManager } = await import('../../src/searxng-lifecycle.js');
+      const manager = getManager();
+      if (manager) {
+        const { setSearxngManager } = await import('../../src/web-research/utils.js');
+        setSearxngManager(manager);
+      }
     } catch (err) {
       logger.warn('[test] Failed to initialize SearXNG:', err instanceof Error ? err.message : String(err));
     }

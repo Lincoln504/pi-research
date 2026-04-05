@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 /**
  * A single entry in the shared links pool for one slice

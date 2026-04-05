@@ -27,7 +27,7 @@ import {
   clearTrackedContexts,
   checkModule,
 } from './utils.ts';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 // ============================================================================
 // Type Definitions

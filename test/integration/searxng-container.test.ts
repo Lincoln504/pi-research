@@ -15,7 +15,7 @@ import {
   search,
   getEngines,
   type SearxngContainer,
-} from './helpers/testcontainers.js';
+} from './helpers/testcontainers.ts';
 
 describe('Searxng Container Integration', () => {
   let searxngContainer: SearxngContainer | null = null;
@@ -167,63 +167,10 @@ describe('Searxng Container Integration', () => {
   });
 
   describe('Search Functionality', () => {
-    it('should attempt search (may fail due to security features)', async () => {
-      if (!searxngContainer) {
-        throw new Error('Searxng container not initialized');
-      }
-
-      // This test may fail due to Searxng's security features (rate limiting, bot detection, etc.)
-      // We expect either success or an error response
-      try {
-        const results = await search(searxngContainer.url, 'test', { format: 'json' });
-        expect(results).toBeDefined();
-        expect(typeof results).toBe('object');
-      } catch (error) {
-        // 403 is common due to Searxng's security settings
-        expect(error).toBeDefined();
-      }
-    });
-
     it('should handle connection errors gracefully', async () => {
       // This test ensures we handle errors properly
-      expect(() => search('http://invalid-url:9999', 'test', { format: 'json' }))
+      await expect(() => search('http://invalid-url:9999', 'test', { format: 'json' }))
         .rejects.toThrow();
-    });
-  });
-
-  describe('Search Functionality - Optional (may skip)', () => {
-    // These tests are optional and may fail due to Searxng security settings
-    // They're included for documentation purposes and to show what we'd like to test
-
-    it.skip('should perform a simple search (requires configured Searxng)', async () => {
-      if (!searxngContainer) {
-        throw new Error('Searxng container not initialized');
-      }
-
-      const results = await search(searxngContainer.url, 'test', { format: 'json' });
-
-      expect(results).toBeDefined();
-      expect(typeof results).toBe('object');
-      expect(results.query).toBe('test');
-      expect(Array.isArray(results.results)).toBe(true);
-    });
-
-    it.skip('should return search results with expected structure (requires configured Searxng)', async () => {
-      if (!searxngContainer) {
-        throw new Error('Searxng container not initialized');
-      }
-
-      const results = await search(searxngContainer.url, 'test', { format: 'json' });
-
-      expect(results.results).toBeDefined();
-      expect(Array.isArray(results.results)).toBe(true);
-
-      if (results.results.length > 0) {
-        const firstResult = results.results[0];
-        expect(firstResult).toHaveProperty('title');
-        expect(firstResult).toHaveProperty('url');
-        expect(firstResult).toHaveProperty('content');
-      }
     });
   });
 

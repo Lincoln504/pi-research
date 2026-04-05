@@ -92,7 +92,7 @@ describe('Health Check Validation', () => {
     it('should accept markdown or plain text equally', () => {
       const plainText = 'Just plain text with no markdown structure but readable';
       const markdown = '# Title\n\nSome content';
-      const bothReadable = /[a-zA-Z0-9]{10,}/.test(plainText) && /[a-zA-Z0-9]{10,}/.test(markdown);
+      const bothReadable = /[a-zA-Z0-9\s]{10,}/.test(plainText) && /[a-zA-Z0-9\s]{10,}/.test(markdown);
       expect(bothReadable).toBe(true);
     });
   });

@@ -12,7 +12,7 @@ import { createResearchTool } from '../../src/tool';
 // ============================================================================
 
 // Mock all external dependencies
-vi.mock('../../src/logger.js', () => ({
+vi.mock('../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
     info: vi.fn(),
@@ -24,20 +24,20 @@ vi.mock('../../src/logger.js', () => ({
   isVerboseFromEnv: vi.fn(() => false),
 }));
 
-vi.mock('../../src/orchestration/coordinator.js', () => ({
+vi.mock('../../src/orchestration/coordinator.ts', () => ({
   createCoordinatorSession: vi.fn(),
 }));
 
-vi.mock('../../src/orchestration/researcher.js', () => ({
+vi.mock('../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: vi.fn(),
 }));
 
-vi.mock('../../src/orchestration/delegate-tool.js');
-vi.mock('../../src/orchestration/context-tool.js', () => ({
+vi.mock('../../src/orchestration/delegate-tool.ts');
+vi.mock('../../src/orchestration/context-tool.ts', () => ({
   createInvestigateContextTool: vi.fn(),
 }));
 
-vi.mock('../../src/searxng-lifecycle.js', () => ({
+vi.mock('../../src/searxng-lifecycle.ts', () => ({
   initLifecycle: vi.fn(async () => undefined),
   ensureRunning: vi.fn(async () => 'http://localhost:8888'),
   getStatus: vi.fn(() => 'active'),
@@ -46,34 +46,50 @@ vi.mock('../../src/searxng-lifecycle.js', () => ({
   getManager: vi.fn(() => ({})),
 }));
 
-vi.mock('../../src/healthcheck/index.js', () => ({
+vi.mock('../../src/healthcheck/index.ts', () => ({
   runHealthCheck: vi.fn(),
 }));
 
-vi.mock('../../src/tui/research-panel.js', () => ({
+vi.mock('../../src/tui/research-panel.ts', () => ({
   createResearchPanel: vi.fn(() => ({})),
   clearAllFlashTimeouts: vi.fn(),
   addSlice: vi.fn(),
   activateSlice: vi.fn(),
   completeSlice: vi.fn(),
   flashSlice: vi.fn(),
+  createInitialPanelState: vi.fn(() => ({
+    searxngStatus: { state: 'active', connectionCount: 0, url: '' },
+    totalTokens: 0,
+    activeConnections: 0,
+    slices: new Map(),
+    modelName: 'test-model',
+  })),
 }));
 
-vi.mock('../../src/utils/session-state.js', () => ({
+vi.mock('../../src/utils/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
   endResearchSession: vi.fn(),
+  recordResearcherFailure: vi.fn(),
+  shouldStopResearch: vi.fn((_sid) => false),
+  getResearchStopMessage: vi.fn((_sid) => ''),
+  getFailedResearchers: vi.fn((_sid) => []),
+  isBottomMostSession: vi.fn((_sid) => true),
+  onSessionOrderChange: vi.fn(() => vi.fn()),
+  registerSessionUpdate: vi.fn(),
+  unregisterSessionUpdate: vi.fn(),
+  refreshAllSessions: vi.fn(),
 }));
 
-vi.mock('../../src/utils/shared-links.js', () => ({
+vi.mock('../../src/utils/shared-links.ts', () => ({
   generateSessionId: vi.fn(() => 'session-id-123'),
   cleanupSharedLinks: vi.fn(),
 }));
 
-vi.mock('../../src/orchestration/session-context.js', () => ({
+vi.mock('../../src/orchestration/session-context.ts', () => ({
   formatParentContext: vi.fn(() => 'test context'),
 }));
 
-vi.mock('../../src/web-research/utils.js', () => ({
+vi.mock('../../src/web-research/utils.ts', () => ({
   onConnectionCountChange: vi.fn(() => vi.fn()),
   setSearxngManager: vi.fn(),
 }));
@@ -94,10 +110,10 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
 }));
 
 // Import mocks after they're defined
-import { createCoordinatorSession } from '../../src/orchestration/coordinator.js';
-import { createResearcherSession } from '../../src/orchestration/researcher.js';
-import { runHealthCheck } from '../../src/healthcheck/index.js';
-import { addSlice, activateSlice, completeSlice } from '../../src/tui/research-panel.js';
+import { createCoordinatorSession } from '../../src/orchestration/coordinator.ts';
+import { createResearcherSession } from '../../src/orchestration/researcher.ts';
+import { runHealthCheck } from '../../src/healthcheck/index.ts';
+import { addSlice, activateSlice, completeSlice } from '../../src/tui/research-panel.ts';
 
 // ============================================================================
 // HELPERS
@@ -137,6 +153,10 @@ function createMockContext() {
     modelRegistry: { getAll: () => [], register: vi.fn() },
     cwd: '/test',
     ui: { setWidget: vi.fn(), notify: vi.fn() },
+    sessionManager: {
+      getBranch: vi.fn().mockReturnValue([]),
+      buildSessionContext: vi.fn().mockReturnValue({ messages: [] }),
+    },
   } as any;
 }
 
@@ -202,15 +222,15 @@ describe('createResearchTool', () => {
       expect(vi.mocked(createCoordinatorSession)).not.toHaveBeenCalled();
     });
 
-    it('creates and completes TUI slice "1:1"', async () => {
+    it('creates and completes TUI slice "researching ..."', async () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
 
-      expect(vi.mocked(addSlice)).toHaveBeenCalledWith(expect.any(Object), '1:1', '1:1', false);
-      expect(vi.mocked(activateSlice)).toHaveBeenCalledWith(expect.any(Object), '1:1');
-      expect(vi.mocked(completeSlice)).toHaveBeenCalledWith(expect.any(Object), '1:1');
+      expect(vi.mocked(addSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...', 'researching ...', false);
+      expect(vi.mocked(activateSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
+      expect(vi.mocked(completeSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
     });
 
     it('extracts and returns researcher response', async () => {

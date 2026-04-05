@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
-import { logger } from '../logger.js';
+import { logger } from '../logger.ts';
 
 /**
  * State metrics interface
@@ -115,9 +115,11 @@ export class StateManager {
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
 
-  constructor() {
-    const homeDir = os.homedir();
-    const stateDir = path.join(homeDir, '.pi', 'state');
+  constructor(stateDir?: string) {
+    if (!stateDir) {
+      const homeDir = os.homedir();
+      stateDir = path.join(homeDir, '.pi', 'state');
+    }
 
     this.stateFilePath = path.join(stateDir, 'searxng-singleton.json');
     this.lockDirPath = path.join(stateDir, '.locks');
@@ -206,46 +208,49 @@ export class StateManager {
    */
   public async readState(): Promise<SingletonState> {
     await this.ensureDirectories();
+    return this.withLock(() => this._readState());
+  }
 
-    return this.withLock(async (): Promise<SingletonState> => {
-      try {
-        const content = await fs.readFile(this.stateFilePath, 'utf-8');
-        const state = JSON.parse(content) as unknown;
+  /**
+   * Internal read without lock acquisition (caller must hold lock)
+   */
+  private async _readState(): Promise<SingletonState> {
+    try {
+      const content = await fs.readFile(this.stateFilePath, 'utf-8');
+      const state = JSON.parse(content) as unknown;
 
-        // Validate state structure and version
-        this.validateState(state);
+      // Validate state structure and version
+      this.validateState(state);
 
-        return state as SingletonState;
-      } catch (error: unknown) {
-        if (error instanceof Error && 'code' in error) {
-          const errnoError = error as NodeJS.ErrnoException;
-          if (errnoError.code === 'ENOENT') {
-            // File doesn't exist, return default state
-            return this.getDefaultState();
-          }
+      return state as SingletonState;
+    } catch (error: unknown) {
+      if (error instanceof Error && 'code' in error) {
+        const errnoError = error as NodeJS.ErrnoException;
+        if (errnoError.code === 'ENOENT') {
+          // File doesn't exist, return default state
+          return this.getDefaultState();
         }
-
-        // Check for corruption
-        if (error instanceof SyntaxError || (error instanceof Error && error.message.includes('parse'))) {
-          logger.error('[StateManager] State file corrupted, attempting recovery...');
-          // Recover directly — we already hold the lock, so we must NOT call
-          // recoverFromCorruption() (which calls writeState() → withLock() → deadlock).
-          await this.recoverFromCorruptionDirect();
-          // Re-read directly (still inside our lock, not via readState() which would deadlock).
-          try {
-            const recovered = await fs.readFile(this.stateFilePath, 'utf-8');
-            const recoveredState = JSON.parse(recovered) as unknown;
-            this.validateState(recoveredState);
-            return recoveredState as SingletonState;
-          } catch {
-            // Recovery produced an unreadable file — return safe default.
-            return this.getDefaultState();
-          }
-        }
-
-        throw new Error(`Failed to read state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
       }
-    });
+
+      // Check for corruption
+      if (error instanceof SyntaxError || (error instanceof Error && error.message.includes('parse'))) {
+        logger.error('[StateManager] State file corrupted, attempting recovery...');
+        // Recover directly — we already hold the lock
+        await this.recoverFromCorruptionDirect();
+        // Re-read directly
+        try {
+          const recovered = await fs.readFile(this.stateFilePath, 'utf-8');
+          const recoveredState = JSON.parse(recovered) as unknown;
+          this.validateState(recoveredState);
+          return recoveredState as SingletonState;
+        } catch {
+          // Recovery produced an unreadable file — return safe default.
+          return this.getDefaultState();
+        }
+      }
+
+      throw new Error(`Failed to read state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
   }
 
   /**
@@ -255,34 +260,38 @@ export class StateManager {
    */
   public async writeState(state: SingletonState): Promise<void> {
     await this.ensureDirectories();
+    return this.withLock(() => this._writeState(state));
+  }
 
+  /**
+   * Internal write without lock acquisition (caller must hold lock)
+   */
+  private async _writeState(state: SingletonState): Promise<void> {
     this.validateState(state);
 
     // Update lastUpdated timestamp
     state.lastUpdated = Date.now();
 
-    return this.withLock(async (): Promise<void> => {
-      try {
-        // Create backup before writing
-        await this.createBackup();
+    try {
+      // Create backup before writing
+      await this.createBackup();
 
-        // Create temporary file with UUID for atomic write
-        const tempFileName = `searxng-singleton-${crypto.randomBytes(16).toString('hex')}.tmp`;
-        const tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
+      // Create temporary file with UUID for atomic write
+      const tempFileName = `searxng-singleton-${crypto.randomBytes(16).toString('hex')}.tmp`;
+      const tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
 
-        // Write to temporary file
-        const content = JSON.stringify(state, null, 2);
-        await fs.writeFile(tempFilePath, content, 'utf-8');
+      // Write to temporary file
+      const content = JSON.stringify(state, null, 2);
+      await fs.writeFile(tempFilePath, content, 'utf-8');
 
-        // Atomic rename to target file
-        await fs.rename(tempFilePath, this.stateFilePath);
+      // Atomic rename to target file
+      await fs.rename(tempFilePath, this.stateFilePath);
 
-        // Cleanup old backups
-        await this.cleanupOldBackups();
-      } catch (error: unknown) {
-        throw new Error(`Failed to write state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-      }
-    });
+      // Cleanup old backups
+      await this.cleanupOldBackups();
+    } catch (error: unknown) {
+      throw new Error(`Failed to write state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
   }
 
   /**
@@ -290,11 +299,13 @@ export class StateManager {
    * @param updater Function that receives current state and returns updated state
    * @throws Error if unable to read, update, or write state
    */
-   
   public async updateState(updater: (state: SingletonState) => SingletonState | Promise<SingletonState>): Promise<void> {
-    const currentState = await this.readState();
-    const newState = await updater(currentState);
-    await this.writeState(newState);
+    await this.ensureDirectories();
+    return this.withLock(async () => {
+      const currentState = await this._readState();
+      const newState = await updater(currentState);
+      await this._writeState(newState);
+    });
   }
 
   /**

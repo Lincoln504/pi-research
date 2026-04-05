@@ -11,26 +11,24 @@ import { createScrapeTool } from './tools/scrape';
 import { createSecuritySearchTool } from './tools/security';
 import { createStackexchangeTool } from './tools/stackexchange';
 import { createGrepTool } from './tools/grep';
+import type { ToolUsageTracker } from './utils/tool-usage-tracker.ts';
 
 interface CreateAgentToolsOptions {
   searxngUrl: string;
   ctx: ExtensionContext;
+  tracker: ToolUsageTracker;
 }
 
 /**
  * Create all agent tools for researcher agents
  */
 export function createAgentTools(options: CreateAgentToolsOptions): ToolDefinition[] {
-  // Set SearXNG URL for internal modules
-  // Note: SearxngManager is set by tool.ts during session startup
-  // We just need to ensure the URL is available via getSearxngUrl()
-
   return [
     createSearchTool(options),
     createScrapeTool(options),
     createSecuritySearchTool(options),
     createStackexchangeTool(options),
-    createGrepTool(),
+    createGrepTool(options),
   ];
 }
 

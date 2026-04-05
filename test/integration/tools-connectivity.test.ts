@@ -6,10 +6,11 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createSearchTool } from '../../src/tools/search.js';
-import { createScrapeTool } from '../../src/tools/scrape.js';
-import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.js';
-import { logger } from '../../src/logger.js';
+import { createSearchTool } from '../../src/tools/search.ts';
+import { createScrapeTool } from '../../src/tools/scrape.ts';
+import { initLifecycle, ensureRunning } from '../../src/searxng-lifecycle.ts';
+import { logger } from '../../src/logger.ts';
+import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 
 describe('Search and Scrape Tools Connectivity', () => {
   const mockExtensionCtx = {
@@ -38,14 +39,14 @@ describe('Search and Scrape Tools Connectivity', () => {
 
   describe('Search Tool', () => {
     it('should instantiate search tool', () => {
-      const tool = createSearchTool({ ctx: mockExtensionCtx as any });
+      const tool = createSearchTool({ ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ gathering: 6 }) });
       expect(tool).toBeDefined();
       expect(tool.name).toBe('search');
       expect(tool.execute).toBeDefined();
     });
 
     it('should execute search with valid results', async () => {
-      const tool = createSearchTool({ ctx: mockExtensionCtx as any });
+      const tool = createSearchTool({ ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ gathering: 6 }) });
       const result = await tool.execute(
         'test-call-1',
         { queries: ['python programming'] },
@@ -62,7 +63,7 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
 
     it('should return markdown formatted results', async () => {
-      const tool = createSearchTool({ ctx: mockExtensionCtx as any });
+      const tool = createSearchTool({ ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ gathering: 6 }) });
       const result = await tool.execute(
         'test-call-2',
         { queries: ['machine learning'] },
@@ -79,7 +80,7 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
 
     it('should reject empty queries', async () => {
-      const tool = createSearchTool({ ctx: mockExtensionCtx as any });
+      const tool = createSearchTool({ ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ gathering: 6 }) });
       try {
         await tool.execute(
           'test-call-3',
@@ -97,14 +98,14 @@ describe('Search and Scrape Tools Connectivity', () => {
 
   describe('Scrape Tool', () => {
     it('should instantiate scrape tool', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
       expect(tool).toBeDefined();
       expect(tool.name).toBe('scrape');
       expect(tool.execute).toBeDefined();
     });
 
     it('should scrape Wikipedia successfully', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
       const result = await tool.execute(
         'test-call-4',
         { urls: ['https://en.wikipedia.org/wiki/Python_(programming_language)'] },
@@ -124,7 +125,7 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
 
     it('should handle multiple URLs concurrently', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
       const urls = [
         'https://en.wikipedia.org/wiki/Python_(programming_language)',
         'https://en.wikipedia.org/wiki/JavaScript',
@@ -147,7 +148,7 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
 
     it('should reject empty URLs', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
       try {
         await tool.execute(
           'test-call-6',

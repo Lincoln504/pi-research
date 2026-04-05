@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createDelegateTool, type DelegateToolOptions } from '../../../src/orchestration/delegate-tool';
 
 // Mock logger
-vi.mock('../../../src/logger.js', () => ({
+vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
     info: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock('../../../src/logger.js', () => ({
 }));
 
 // Mock researcher
-vi.mock('../../../src/orchestration/researcher.js', () => ({
+vi.mock('../../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: vi.fn(),
 }));
 
@@ -36,9 +36,9 @@ vi.mock('../../../src/utils/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
   endResearchSession: vi.fn(),
   recordResearcherFailure: vi.fn(),
-  shouldStopResearch: vi.fn(() => false),
-  getResearchStopMessage: vi.fn(() => ''),
-  getFailedResearchers: vi.fn(() => []),
+  shouldStopResearch: vi.fn((_sid) => false),
+  getResearchStopMessage: vi.fn((_sid) => ''),
+  getFailedResearchers: vi.fn((_sid) => []),
 }));
 
 // Mock text-utils
@@ -85,12 +85,6 @@ describe('delegate-tool', () => {
         getAll: vi.fn(() => []),
         get: vi.fn(),
         register: vi.fn(),
-      } as any,
-      sessionManager: {
-        getBranch: vi.fn(() => []),
-        set: vi.fn(),
-        get: vi.fn(),
-        delete: vi.fn(),
       } as any,
       settingsManager: {} as any,
       systemPrompt: 'You are a helpful researcher.',

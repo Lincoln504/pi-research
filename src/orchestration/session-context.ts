@@ -4,7 +4,8 @@
  * Formats parent session context for the coordinator agent.
  */
 
-import type { ExtensionContext, SessionEntry, SessionMessageEntry } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import { buildSessionContext } from '@mariozechner/pi-coding-agent';
 import type { AssistantMessage, UserMessage } from '@mariozechner/pi-ai';
 
 function isAssistantMessage(message: unknown): message is AssistantMessage {
@@ -32,18 +33,13 @@ function extractTextContent(message: AssistantMessage | UserMessage): string {
   return '';
 }
 
-function isMessageEntry(entry: SessionEntry): entry is SessionMessageEntry {
-  return entry.type === 'message';
-}
-
 export function formatParentContext(ctx: ExtensionContext): string {
-  const entries = ctx.sessionManager.getBranch();
-
-  // Filter for message entries only
-  const messageEntries = entries.filter(isMessageEntry);
+  const branch = ctx.sessionManager.getBranch();
+  const sessionContext = buildSessionContext(branch);
+  const allMessages = sessionContext.messages;
 
   // Take last 10 messages
-  const lastMessages = messageEntries.slice(-10);
+  const lastMessages = allMessages.slice(-10);
 
   if (lastMessages.length === 0) {
     return '';
@@ -52,9 +48,7 @@ export function formatParentContext(ctx: ExtensionContext): string {
   const lines: string[] = [];
   lines.push('Context:');
 
-  for (const entry of lastMessages) {
-    const message = entry.message;
-
+  for (const message of lastMessages) {
     if (isUserMessage(message)) {
       const text = extractTextContent(message);
       const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
@@ -63,6 +57,12 @@ export function formatParentContext(ctx: ExtensionContext): string {
       const text = extractTextContent(message);
       const preview = text.length > 200 ? `${text.slice(0, 200)}...` : text;
       lines.push(`[Assistant]: ${preview}`);
+    } else if (message.role === 'compactionSummary' || message.role === 'branchSummary') {
+      const summaryContent = (message as any).summary || (message as any).content;
+      if (typeof summaryContent === 'string') {
+        const preview = summaryContent.length > 200 ? `${summaryContent.slice(0, 200)}...` : summaryContent;
+        lines.push(`[System Summary]: ${preview}`);
+      }
     }
   }
 
