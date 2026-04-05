@@ -1,5 +1,7 @@
 # pi-research
 
+![pi-research banner](README-banner.jpg)
+
 An opinionated web research extension for pi coding agent.
 
 ## Overview
