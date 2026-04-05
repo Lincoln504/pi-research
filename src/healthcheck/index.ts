@@ -140,7 +140,8 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
 
     // Check for at least one result from a GENERAL WEB search engine (not Wikipedia)
     // Wikipedia is an encyclopedic engine, not suitable for general web research
-    const generalEngines = ['bing', 'duckduckgo', 'brave'];
+    // NOTE: This list must match the active general search engines in default-settings.yml
+    const generalEngines = ['google', 'bing', 'brave'];
     const generalResults = qr.results.filter((r: any) =>
       generalEngines.includes((r.engine || '').toLowerCase())
     );
@@ -158,7 +159,8 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       const engineReport = Array.from(engineCounts.entries())
         .map(([e, c]) => `${e}: ${c}`)
         .join(', ');
-      result.error = `All general web search engines failed (${engineReport}). Only encyclopedic engines (Wikipedia) are responding. Real web research will fail.`;
+      const allEngines = qr.results.map((r: any) => r.engine || 'unknown').join(', ');
+      result.error = `All general web search engines failed (${engineReport}). Only these engines responded: ${allEngines}. Real web research will fail.`;
       logger.error('[healthcheck] Search validation failed:', result.error);
       return result;
     }
