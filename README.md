@@ -2,13 +2,9 @@
 
 [![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 
-An opinionated web research extension for pi coding agent.
+Opinionated web research extension for pi coding agent. Provides a set of web research tools and a restricted subagent system which utilizes them to do either quick (single agent) or deep (multi-agent) research.
 
-## Overview
-
-This extension provides a set of web research tools and a restricted subagent system which utilizes them to do either quick (single agent) or deep (multi-agent) research.
-
-## Capabilities
+#### Capabilities
 
 - **Single-agent research** (`depth: "quick"`): Fast, focused queries with one researcher
 - **Multi-agent research** (`depth: "deep"`, default): Coordinator orchestrates parallel/sequential researchers
@@ -20,14 +16,14 @@ This extension provides a set of web research tools and a restricted subagent sy
 - **Terminal UI**: Progress tracking panel showing SearXNG status and active research slices
 - **Proxy support**: SOCKS5 (Tor) or HTTP/HTTPS proxy configuration
 
-## Installation
+#### Installation
 
-### From npm
+##### From npm
 ```bash
 npm install -g pi-research
 ```
 
-### From source
+##### From source
 ```bash
 git clone https://github.com/Lincoln504/pi-research.git
 cd pi-research
@@ -35,23 +31,23 @@ npm install
 pi -e ./index.ts
 ```
 
-## Usage
+#### Usage
 
-### Via pi agent
+##### Via pi agent
 
-Once the extension is loaded, ask the pi agent to research a topic:
+Once extension is loaded, ask pi agent to research a topic:
 ```text
 Please research "What is a binary search tree?"
 ```
 
-### Via tool invocation
+##### Via tool invocation
 
-Invoke the research tool directly:
+Invoke research tool directly:
 ```bash
 pi research "What is a binary search tree?" --depth quick
 ```
 
-### Parameters
+##### Parameters
 
 | Parameter | Type   | Default | Description                                             |
 |-----------|--------|---------|---------------------------------------------------------|
@@ -59,14 +55,14 @@ pi research "What is a binary search tree?" --depth quick
 | `depth`   | string | "deep"  | "quick" (single researcher) or "deep" (multi-agent)     |
 | `model`   | string | -       | Model ID for research agents (defaults to active model) |
 
-## Architecture
+#### Architecture
 
-### Layers
+##### Layers
 
-1. **Extension entry point** (`index.ts`): Registers the `research` tool with pi
+1. **Extension entry point** (`index.ts`): Registers `research` tool with pi
 2. **Tool orchestration** (`src/tool.ts`): Main entry point for research calls, initializes SearXNG, manages TUI
 3. **Coordinator** (`src/orchestration/coordinator.ts`): Decomposes queries into slices, delegates to researchers, synthesizes findings
-4. **Delegate tool** (`src/orchestration/delegate-tool.ts`): Allows coordinator to spawn researcher agents
+4. **Delegate tool** (`src/orchestration/delegate-tool.ts`): Spawns researcher agents
 5. **Researcher** (`src/orchestration/researcher.ts`): Research agent session management
 6. **SearXNG lifecycle** (`src/searxng-lifecycle.ts`): Docker container management for SearXNG
 7. **State management** (`src/infrastructure/state-manager.ts`): Tracks sessions, token usage, failures
@@ -83,7 +79,7 @@ pi research "What is a binary search tree?" --depth quick
 13. **Utils**: Shared utilities (text formatting, session state, shared links)
 14. **Prompts**: System prompts for coordinator and researcher agents
 
-### Research workflow
+##### Research workflow
 
 1. **Coordinator receives query**: Assesses complexity level (Level 1/2/3 based on query)
 2. **Delegate research**: Coordinator decomposes query into slices and spawns researcher agents
@@ -91,35 +87,35 @@ pi research "What is a binary search tree?" --depth quick
    - Phase 1: 6 rounds of gathering (search, security_search, stackexchange, grep)
    - Phase 2: Single batch scrape of 5-10 links
    - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
-4. **Shared link pool**: Automatic coordination via pool of all scraped links
-5. **Synthesis**: Coordinator combines all slice findings into final answer
+4. **Shared link pool**: Automatic coordination via pool of scraped links
+5. **Synthesis**: Coordinator combines slice findings into final answer
 
-### Research levels
+##### Research levels
 
 - **Level 1 (Brief)**: 1 slice, up to 1 follow-up. Default for simple factual queries.
 - **Level 2 (Normal)**: 2-3 slices, up to 2 follow-ups. For technical/multi-faceted topics.
 - **Level 3 (Deep)**: 4-5 slices, 3-4 follow-ups. For complex cross-domain analysis.
 
-### SearXNG management
+##### SearXNG management
 
-SearXNG is managed as a singleton Docker container:
+Managed as singleton Docker container:
 - Initialized on first `research()` call (lazy initialization)
-- Lives for the duration of the pi process
-- Shared across all agents in all sessions
+- Lives for duration of pi process
+- Shared across agents in all sessions
 - Health checks and automatic restart on failure
 
-### Shared link pool
+##### Shared link pool
 
 Researchers report links in two categories:
 - **CITED LINKS**: URLs scraped and used in findings
 - **SCRAPE CANDIDATES**: URLs found but not scraped
 
-The pool is automatically:
-- Built from each researcher's response
+Pool is automatically:
+- Built from researcher responses
 - Injected into subsequent researchers' context
 - Used to avoid duplicate scraping
 
-## Configuration
+#### Configuration
 
 Copy `.env.example` to `.env` and edit:
 
@@ -127,7 +123,7 @@ Copy `.env.example` to `.env` and edit:
 cp .env.example .env
 ```
 
-### Environment variables
+##### Environment variables
 
 | Variable                      | Default   | Description                                           |
 |-------------------------------|-----------|-------------------------------------------------------|
@@ -136,7 +132,7 @@ cp .env.example .env
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS`| 15000    | SearXNG health check timeout in milliseconds          |
 | `PROXY_URL`                   | -         | Proxy URL for SearXNG (optional)                      |
 
-## Proxy Support
+#### Proxy Support
 
 Proxy support is disabled by default. Configure in `.env`:
 
@@ -160,39 +156,50 @@ source .env
 pi
 ```
 
-### How proxy routing works
+##### How proxy routing works
 
-1. pi-research generates SearXNG settings with the proxy URL
-2. SearXNG container routes outbound HTTP requests through the proxy
-3. Only SearXNG-to-search-engine requests go through the proxy
+1. pi-research generates SearXNG settings with proxy URL
+2. SearXNG container routes outbound HTTP requests through proxy
+3. Only SearXNG-to-search-engine requests use proxy
 4. pi-research connections to SearXNG are direct
 
-## TUI (Terminal User Interface)
+#### Terminal UI
 
-The TUI shows a two-box panel:
+Displays dedicated TUI panel to track progress in real-time.
 
+##### Components
+
+1. **SearXNG Status** (Left box):
+   - **Service Name**: Shows `SearXNG`, `Offline`, or `Error`.
+   - **Port**: Displays local port (e.g., `:55732`).
+   - **Connections**: Shows active concurrent search connections.
+
+2. **Research Progress** (Right box):
+   - **Header**: Displays active model (e.g., `qwen/qwen3.5-35b-a3b`) and cumulative token usage.
+   - **Slices**: Vertical columns representing research "slices" or agents.
+   - **Status Indicators**: 
+     - `1:1`, `2:1`: Active/Running.
+     - `✓1:1`: Completed successfully.
+     - **Flash effects**: Slices flash **green** on successful tool calls and **red** on errors.
+
+##### Modes
+
+- **Deep Mode** (Default): Shows multiple slice columns as coordinator delegates work to parallel researchers.
+- **Quick Mode**: Shows exactly one research slice box for single researcher.
+
+##### Layout Example
+
+```text
+┌───────┐ ┌─ Research | qwen/qwen3.5-35b-a3b  40.5k ┬────────────────────┐
+│SearXNG│ │                    │                    │                    │
+│:55732 │ │        ✓1:1        │        ✓2:1        │         3:1        │
+│1      │ │                    │                    │                    │
+└───────┘ └────────────────────┴────────────────────┴────────────────────┘
 ```
-┌───────┐ ┌── Research | glm-4  42.3k ──────┐
-│SearXNG│ │                                  │
-│:55732 │ │ 1:1  │ 1:2  │ 2:1  │ 3:1  │ 4:1  │
-│   1   │ │                                  │
-└───────┘ └──────────────────────────────────┘
-```
 
-**Left box**: SearXNG status
-- Line 1: Service name (online/offline/error)
-- Line 2: Port number
-- Line 3: Active connection count
+*Note: In actual terminal, walls and borders are colored (green/gray/accent) and active tool calls cause temporary color flashes.*
 
-**Right box**: Research progress
-- Header: Active model and token usage
-- Columns: Active research slices (X:Y format, X=slice, Y=iteration)
-- Status indicators:
-  - ✓: Slice completed
-  - Green flash: Tool call succeeded
-  - Red flash: Tool call failed
-
-## Project structure
+#### Project structure
 
 ```
 pi-research/
@@ -230,7 +237,7 @@ pi-research/
 └── README.md                # This file
 ```
 
-## Development
+#### Development
 
 ```bash
 cd pi-research
@@ -248,7 +255,7 @@ npm run lint
 npm test
 ```
 
-## Dependencies
+#### Dependencies
 
 - `@mariozechner/pi-coding-agent`: pi core SDK
 - `@sinclair/typebox`: Parameter schema validation
@@ -260,6 +267,6 @@ npm test
 - `axios`: HTTP client
 - `node-fetch`: Fetch API implementation
 
-## License
+#### License
 
 MIT
