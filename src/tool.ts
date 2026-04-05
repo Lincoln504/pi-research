@@ -75,8 +75,9 @@ export function createResearchTool(): ToolDefinition {
       query: Type.String({
         description: 'Research query or topic to investigate',
       }),
-      depth: Type.Optional(Type.String({
-        description: 'Research depth: "quick" (single researcher, no coordinator, fast) or "deep" (coordinator + multi-agent, default)',
+      quick: Type.Optional(Type.Boolean({
+        description: 'Enable quick mode: fast investigation using a single researcher session without a coordinator.',
+        default: false,
       })),
       model: Type.Optional(Type.String({
         description: 'Model ID to use for all research agents (defaults to the currently active model)',
@@ -89,9 +90,7 @@ export function createResearchTool(): ToolDefinition {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, model: modelId } = params as { query: string; depth?: string; model?: string };
-      const depthParam = ((params as any).depth as string | undefined)?.toLowerCase() ?? 'deep';
-      const isQuick = depthParam === 'quick';
+      const { query, model: modelId, quick: isQuick = false } = params as { query: string; quick?: boolean; model?: string };
 
       // Suppress ALL console output immediately — catches SearXNG Manager init messages,
       // internal module logs, and any other module that uses console.* directly.

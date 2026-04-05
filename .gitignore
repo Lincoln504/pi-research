@@ -47,6 +47,9 @@ cov/
 .nyc_output/
 *.lcov
 lcov.info
+vitest.config.ts.timestamp-*
+vitest.config.unit.ts.timestamp-*
+vitest.config.integration.ts.timestamp-*
 
 # Playwright
 test-results/

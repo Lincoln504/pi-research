@@ -6,8 +6,8 @@ Opinionated web research extension for pi coding agent. Provides a set of web re
 
 ### Capabilities
 
-- **Single-agent research** (`depth: "quick"`): Fast, focused queries with one researcher
-- **Multi-agent research** (`depth: "deep"`, default): Coordinator orchestrates parallel/sequential researchers
+- **Single-agent research** (`quick: true`): Fast, focused queries with one researcher
+- **Multi-agent research** (default): Coordinator orchestrates parallel/sequential researchers
 - **Web search**: SearXNG integration via Docker container
 - **URL scraping**: Two-layer architecture (fetch → Playwright fallback for JavaScript-heavy pages)
 - **Security database queries**: NVD, CISA KEV, GitHub Advisories, OSV
@@ -44,16 +44,16 @@ Please research "What is a binary search tree?"
 
 Invoke research tool directly:
 ```bash
-pi research "What is a binary search tree?" --depth quick
+pi research "What is a binary search tree?" --quick
 ```
 
 #### Parameters
 
-| Parameter | Type   | Default | Description                                             |
-|-----------|--------|---------|---------------------------------------------------------|
-| `query`   | string | required| Research query or topic to investigate                  |
-| `depth`   | string | "deep"  | "quick" (single researcher) or "deep" (multi-agent)     |
-| `model`   | string | -       | Model ID for research agents (defaults to active model) |
+| Parameter | Type    | Default | Description                                             |
+|-----------|---------|---------|---------------------------------------------------------|
+| `query`   | string  | required| Research query or topic to investigate                  |
+| `quick`   | boolean | false   | Enable quick mode: single researcher session (Level 0)  |
+| `model`   | string  | -       | Model ID for research agents (defaults to active model) |
 
 ### Architecture
 

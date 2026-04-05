@@ -192,22 +192,21 @@ describe('createResearchTool', () => {
       expect(required).toContain('query');
     });
 
-    it('has optional depth parameter with correct description', () => {
+    it('has optional quick parameter with correct description', () => {
       const tool = createResearchTool();
       const props = (tool.parameters as any).properties;
-      expect(props.depth).toBeDefined();
-      expect(props.depth.description).toContain('quick');
-      expect(props.depth.description).toContain('deep');
+      expect(props.quick).toBeDefined();
+      expect(props.quick.description).toContain('quick mode');
     });
   });
 
-  describe('Quick Mode Branching (depth: "quick")', () => {
-    it('calls createResearcherSession when depth="quick"', async () => {
+  describe('Quick Mode Branching (quick: true)', () => {
+    it('calls createResearcherSession when quick=true', async () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
       vi.mocked(createCoordinatorSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(createResearcherSession)).toHaveBeenCalled();
       expect(vi.mocked(createCoordinatorSession)).not.toHaveBeenCalled();
@@ -217,7 +216,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(createCoordinatorSession)).not.toHaveBeenCalled();
     });
@@ -226,7 +225,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(addSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...', 'researching ...', false);
       expect(vi.mocked(activateSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
@@ -238,7 +237,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession(responseText));
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toBe(responseText);
     });
@@ -247,34 +246,24 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect((result.details as any).totalTokens).toBeGreaterThan(0);
     });
-
-    it('handles case-insensitive depth ("QUICK")', async () => {
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
-
-      const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'QUICK' }, undefined, undefined, createMockContext());
-
-      expect(vi.mocked(createResearcherSession)).toHaveBeenCalled();
-      expect(vi.mocked(createCoordinatorSession)).not.toHaveBeenCalled();
-    });
   });
 
-  describe('Deep Mode Branching (depth: "deep" or omitted)', () => {
-    it('calls createCoordinatorSession when depth="deep"', async () => {
+  describe('Coordinator Mode Branching (quick: false or omitted)', () => {
+    it('calls createCoordinatorSession when quick=false', async () => {
       vi.mocked(createCoordinatorSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'deep' }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', quick: false }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(createCoordinatorSession)).toHaveBeenCalled();
       expect(vi.mocked(createResearcherSession)).not.toHaveBeenCalled();
     });
 
-    it('calls createCoordinatorSession when depth is omitted (defaults to deep)', async () => {
+    it('calls createCoordinatorSession when quick is omitted (defaults to false)', async () => {
       vi.mocked(createCoordinatorSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
@@ -284,22 +273,13 @@ describe('createResearchTool', () => {
     });
 
     it('extracts and returns coordinator response', async () => {
-      const responseText = 'Deep mode coordinated result';
+      const responseText = 'Coordinator mode result';
       vi.mocked(createCoordinatorSession).mockResolvedValue(createMockSession(responseText));
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'deep' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: false }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toBe(responseText);
-    });
-
-    it('handles case-insensitive depth ("DEEP")', async () => {
-      vi.mocked(createCoordinatorSession).mockResolvedValue(createMockSession());
-
-      const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 'DEEP' }, undefined, undefined, createMockContext());
-
-      expect(vi.mocked(createCoordinatorSession)).toHaveBeenCalled();
     });
   });
 
@@ -325,7 +305,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockRejectedValue(new Error('Search failed'));
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toContain('failed');
     });
@@ -334,7 +314,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockRejectedValue(new Error('Network error'));
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toContain('failed');
     });
@@ -342,17 +322,17 @@ describe('createResearchTool', () => {
 
 
   describe('Parameter Handling', () => {
-    it('accepts all depth parameter values correctly', () => {
+    it('accepts all parameters correctly', () => {
       const tool = createResearchTool();
       const props = (tool.parameters as any).properties;
-      expect(props.depth).toBeDefined();
+      expect(props.quick).toBeDefined();
       expect(props.model).toBeDefined();
     });
 
-    it('depth parameter is optional', () => {
+    it('quick parameter is optional', () => {
       const tool = createResearchTool();
       const props = (tool.parameters as any).properties;
-      expect(props.depth).toBeDefined();
+      expect(props.quick).toBeDefined();
     });
   });
 
@@ -364,7 +344,7 @@ describe('createResearchTool', () => {
       vi.mocked(createResearcherSession).mockResolvedValue(mockSession);
 
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 'quick' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       // Verify completion happened
       expect((result.content[0] as any).text).toBe('Quick result');
