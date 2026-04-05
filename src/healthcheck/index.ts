@@ -10,6 +10,7 @@ import { logger } from '../logger.js';
 import { getConfig } from '../config.js';
 import { search } from '../web-research/search.js';
 import { scrapeSingle } from '../web-research/scrapers.js';
+import { getActiveSearxngEngines } from '../utils/searxng-config.js';
 
 // Get timeout from config or use defaults
 const config = getConfig();
@@ -140,8 +141,15 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
 
     // Check for at least one result from a GENERAL WEB search engine (not Wikipedia)
     // Wikipedia is an encyclopedic engine, not suitable for general web research
-    // NOTE: This list must match the active general search engines in default-settings.yml
-    const generalEngines = ['google', 'bing', 'brave'];
+    // Load the list of active engines from the actual SearXNG config (not hardcoded)
+    const generalEngines = getActiveSearxngEngines();
+    if (generalEngines.length === 0) {
+      result.error = 'No active general search engines found in SearXNG configuration';
+      logger.error('[healthcheck]', result.error);
+      return result;
+    }
+    logger.log(`[healthcheck] Checking for results from engines: [${generalEngines.join(', ')}]`);
+
     const generalResults = qr.results.filter((r: any) =>
       generalEngines.includes((r.engine || '').toLowerCase())
     );
