@@ -158,20 +158,20 @@ export function createResearchPanel(
 
         // Line 1: "SearXNG" or "Offline" or "Error"
         const pad1 = LEFT_INNER - statusText.length;
-        const leftRow1 = `│${theme.fg(statusColor, statusText)}${' '.repeat(Math.max(0, pad1))}│`;
+        const leftRow1 = theme.fg('accent', '│') + theme.fg(statusColor, statusText) + theme.fg('accent', ' '.repeat(Math.max(0, pad1)) + '│');
 
         // Line 2: ":55732" (port)
         const pad2 = LEFT_INNER - portStr.length;
-        const leftRow2 = `│${theme.fg('accent', portStr)}${' '.repeat(Math.max(0, pad2))}│`;
+        const leftRow2 = theme.fg('accent', '│') + theme.fg('accent', portStr) + theme.fg('accent', ' '.repeat(Math.max(0, pad2)) + '│');
 
         // Line 3: connection count (no "conn" label)
         const connStr = state.activeConnections.toString();
         const connColor = state.activeConnections > 0 ? 'text' : 'muted';
         const pad3 = LEFT_INNER - connStr.length;
-        const leftRow3 = `│${theme.fg(connColor, connStr)}${' '.repeat(Math.max(0, pad3))}│`;
+        const leftRow3 = theme.fg('accent', '│') + theme.fg(connColor, connStr) + theme.fg('accent', ' '.repeat(Math.max(0, pad3)) + '│');
 
-        const leftBorder = `┌${'─'.repeat(LEFT_INNER)}┐`;
-        const leftBottom = `└${'─'.repeat(LEFT_INNER)}┘`;
+        const leftBorder = theme.fg('accent', '┌' + '─'.repeat(LEFT_INNER) + '┐');
+        const leftBottom = theme.fg('accent', '└' + '─'.repeat(LEFT_INNER) + '┘');
 
         // ── Right box top border with title ──────────────────────────────────
         // Format: ┌── Research | glm-4.7  42.3k ──────┐
@@ -186,7 +186,7 @@ export function createResearchPanel(
 
         const titleFillDashes = Math.max(0, rightInner - titlePrefixDashes - visibleWidth(titleText));
         const rTopWithTitle =
-          '┌' + '─'.repeat(titlePrefixDashes) +
+          theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) +
           theme.fg('muted', titleText) +
           theme.fg('accent', '─'.repeat(titleFillDashes) + '┐');
 
@@ -213,15 +213,15 @@ export function createResearchPanel(
         const totalCols = showIndicator ? numVisible + 1 : numVisible; // +1 for indicator column when consolidating
 
         if (numVisible === 0) {
-          const rEmpty  = `│${' '.repeat(Math.max(1, rightInner))}│`;
-          const rBottom = `└${'─'.repeat(Math.max(1, rightInner))}┘`;
+          const rEmpty  = theme.fg('accent', '│') + ' '.repeat(Math.max(1, rightInner)) + theme.fg('accent', '│');
+          const rBottom = theme.fg('accent', '└' + '─'.repeat(Math.max(1, rightInner)) + '┘');
 
           const lines = [
             theme.fg('accent', leftBorder) + ' ' + rTopWithTitle,
-            leftRow1                        + ' ' + theme.fg('accent', rEmpty),
-            leftRow2                        + ' ' + theme.fg('accent', rEmpty),
-            leftRow3                        + ' ' + theme.fg('accent', rEmpty),
-            theme.fg('accent', leftBottom)  + ' ' + theme.fg('accent', rBottom),
+            leftRow1                        + ' ' + rEmpty,
+            leftRow2                        + ' ' + rEmpty,
+            leftRow3                        + ' ' + rEmpty,
+            theme.fg('accent', leftBottom)  + ' ' + rBottom,
           ];
 
           // Truncate lines to terminal width if needed (safety fallback)
@@ -257,14 +257,14 @@ export function createResearchPanel(
         const skipChars = titlePrefixDashes + titleText.length;
 
         const rTop =
-          '┌' + '─'.repeat(titlePrefixDashes) +
+          theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) +
           theme.fg('muted', titleText) +
           theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
 
         // Empty rows (above and below content)
-        const rEmpty = '│' + Array.from({ length: totalCols }, (_, i) =>
-          ' '.repeat(colW(i)) + (i < totalCols - 1 ? '│' : '')
-        ).join('') + '│';
+        const rEmpty = theme.fg('accent', '│') + Array.from({ length: totalCols }, (_, i) =>
+          ' '.repeat(colW(i)) + (i < totalCols - 1 ? theme.fg('accent', '│') : '')
+        ).join('') + theme.fg('accent', '│');
 
         // Content row (row 2 = middle of 4)
         const cols = visibleSliceIds.map((id, i) => {
@@ -282,7 +282,7 @@ export function createResearchPanel(
           // Only add divider if not last slice column
           // Add divider for all except last column (use absolute index)
           const absIndex = i + (showIndicator ? 1 : 0);
-          return colored + (absIndex < totalCols - 1 ? '│' : '');
+          return colored + (absIndex < totalCols - 1 ? theme.fg('accent', '│') : '');
         });
 
         // Add indicator column on LEFT (before slice columns)
@@ -293,15 +293,15 @@ export function createResearchPanel(
           const pR = Math.max(0, w - indicatorContent.length - pL);
           const cell = ' '.repeat(pL) + indicatorContent + ' '.repeat(pR);
           // Add divider after indicator (since it's followed by slice columns)
-          cols.unshift(theme.fg('muted', cell + '│'));
+          cols.unshift(theme.fg('muted', cell) + theme.fg('accent', '│'));
         }
 
-        const rContent = '│' + cols.join('') + '│';
+        const rContent = theme.fg('accent', '│') + cols.join('') + theme.fg('accent', '│');
 
         // Bottom border with ┴ dividers
-        const rBottom = '└' + Array.from({ length: totalCols }, (_, i) =>
-          '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : '')
-        ).join('') + '┘';
+        const rBottom = theme.fg('accent', '└') + Array.from({ length: totalCols }, (_, i) =>
+          theme.fg('accent', '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : ''))
+        ).join('') + theme.fg('accent', '┘');
 
         // Build output lines with width safety check
         const lines = [
@@ -309,7 +309,7 @@ export function createResearchPanel(
           leftRow1                        + ' ' + rEmpty,
           leftRow2                        + ' ' + rContent,
           leftRow3                        + ' ' + rEmpty,
-          theme.fg('accent', leftBottom)  + ' ' + theme.fg('accent', rBottom),
+          theme.fg('accent', leftBottom)  + ' ' + rBottom,
         ];
 
         // Truncate lines to terminal width if needed (safety fallback)
