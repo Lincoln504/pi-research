@@ -78,12 +78,6 @@ const DEFAULT_CONFIG = {
 } as const;
 
 /**
- * Singleton mode - shared SearXNG container across all sessions
- * Enabled by default, set ENABLE_SINGLETON=false to use session-scoped mode
- */
-const ENABLE_SINGLETON = (process.env['ENABLE_SINGLETON'] ?? 'true') !== 'false';
-
-/**
  * Configuration from environment variables
  */
 interface EnvConfig {
@@ -100,32 +94,12 @@ interface EnvConfig {
 function loadConfigFromEnv(): EnvConfig {
   const config: EnvConfig = {};
 
-  const portEnv = process.env['SEARXNG_PORT'];
-  if (portEnv !== undefined) {
-    const parsed = parseInt(portEnv, 10);
-    if (!isNaN(parsed)) {
-      config.port = parsed;
-    }
-  }
-
-  const imageEnv = process.env['SEARXNG_IMAGE'];
-  if (imageEnv) {
-    const parts = imageEnv.split(':');
-    config.imageName = parts[0];
-    config.imageTag = parts[1] ?? 'latest';
-  }
-
-  const healthTimeoutEnv = process.env['SEARXNG_HEALTH_TIMEOUT'];
+  const healthTimeoutEnv = process.env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'];
   if (healthTimeoutEnv !== undefined) {
     const parsed = parseInt(healthTimeoutEnv, 10);
     if (!isNaN(parsed)) {
-      config.healthTimeout = parsed * 1000;
+      config.healthTimeout = parsed;
     }
-  }
-
-  const containerNameEnv = process.env['SEARXNG_CONTAINER_NAME'];
-  if (containerNameEnv) {
-    config.containerName = containerNameEnv;
   }
 
   return config;
@@ -136,43 +110,6 @@ function loadConfigFromEnv(): EnvConfig {
  */
 function sleep(ms: number): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Clean up orphaned SearXNG containers from previous sessions
- * This prevents port conflicts when sessions crash
- */
-async function cleanupOrphanedContainers(docker: Docker, currentSessionId: string): Promise<void> {
-  try {
-    const containers: DockerContainerListInfo[] = await docker.listContainers({ all: true });
-
-    for (const container of containers) {
-      // Check if this is a SearXNG container
-      if (container.Names.some((n: string) => n.startsWith('/pi-searxng-'))) {
-        const firstContainerName = container.Names[0];
-        if (!firstContainerName) {
-          continue;
-        }
-        const containerName = firstContainerName.substring(1); // Remove leading '/'
-
-        // Skip our current session's container
-        if (containerName === `pi-searxng-${currentSessionId}`) {
-          continue;
-        }
-
-        // Remove old containers
-        try {
-          const c = docker.getContainer(container.Id);
-          await c.remove({ v: true, force: true });
-          logger.log(`[SearXNG Manager] Removed orphaned container: ${containerName}`);
-        } catch (error) {
-          logger.warn(`[SearXNG Manager] Failed to remove container ${containerName}:`, error);
-        }
-      }
-    }
-  } catch (error) {
-    logger.warn('[SearXNG Manager] Error cleaning up orphaned containers:', error);
-  }
 }
 
 /**
@@ -214,6 +151,7 @@ export interface SearxngManagerConfig {
   healthTimeout?: number;
   pruneOldImages?: boolean;
   containerName?: string;
+  stateDir?: string;
 }
 
 /**
@@ -289,6 +227,7 @@ export class DockerSearxngManager {
   constructor(
     _extensionDir: string,
     config: SearxngManagerConfig = {},
+    options?: { docker?: Docker },
   ) {
     this.config = {
       ...DEFAULT_CONFIG,
@@ -299,7 +238,7 @@ export class DockerSearxngManager {
     this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'default-settings.yml');
     // Initialize Docker client
     try {
-      this.docker = new Docker({
+      this.docker = options?.docker || new Docker({
         socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
       });
     } catch (error) {
@@ -308,8 +247,7 @@ export class DockerSearxngManager {
     }
 
     // Initialize StateManager for singleton mode
-    const stateDir = process.env['PI_STATE_DIR'] || path.join(os.homedir(), '.pi', 'state');
-    this.stateManager = new StateManager(stateDir);
+    this.stateManager = new StateManager(config.stateDir);
     // Note: signal handling (SIGTERM/SIGINT) is managed by pi-research tool.ts, not here.
     // Registering handlers here would create duplicate handlers and competing process.exit(0) calls.
   }
@@ -845,7 +783,7 @@ export class DockerSearxngManager {
       ],
       Labels: {
         'managed-by': 'pi-research',
-        'mode': ENABLE_SINGLETON ? 'singleton' : 'session-scoped',
+        'mode': 'singleton',
       },
     };
 
@@ -1029,116 +967,20 @@ export class DockerSearxngManager {
       throw new Error('Docker not available');
     }
 
-    if (ENABLE_SINGLETON) {
-      logger.log('[SearXNG Manager] Singleton mode enabled');
+    logger.log('[SearXNG Manager] Starting in singleton mode');
 
-      await this.cleanupStaleSessions();
-      await this.acquire(sessionId);
-      this.startHeartbeat();
-
-      return;
-    }
-
-    if (this.docker) {
-      await cleanupOrphanedContainers(this.docker, sessionId);
-    }
-
-    await this.ensureImage();
-
-    const containerName = `pi-searxng-${sessionId}`;
-
-    const existingContainer = await this.findContainerByName(containerName);
-
-    if (existingContainer) {
-      try {
-        const info: DockerContainerInspectInfo = await existingContainer.inspect() as DockerContainerInspectInfo;
-
-        if (info.State.Running) {
-          this.container = existingContainer;
-
-          let port = this.config.port;
-          const portBindings = info.NetworkSettings.Ports?.['8080/tcp'];
-          if (portBindings && portBindings.length > 0) {
-            const hostPort = portBindings[0]?.HostPort;
-            if (hostPort) {
-              port = parseInt(hostPort, 10);
-            }
-          }
-
-          this.containerInfo = {
-            id: existingContainer.id,
-            name: containerName,
-            port,
-            url: `http://localhost:${port}`,
-          };
-
-          this.notify(`Reusing existing SearXNG container: ${containerName}`, 'info');
-
-          await this.waitForHealthy();
-          return;
-        } else {
-          await this.removeContainer(existingContainer);
-        }
-      } catch {
-        await this.removeContainer(existingContainer).catch(() => {});
-      }
-    }
-
-    let containerResult: { container: Docker.Container; assignedPort: number };
-    try {
-      containerResult = await this.createContainer(containerName, this.config.port);
-    } catch (portError: unknown) {
-      const portErrorStr = String(portError);
-      if (portErrorStr.includes('port') || portErrorStr.includes('already in use')) {
-        this.notify(`Preferred port ${this.config.port} unavailable, using auto-assigned port`, 'warning');
-        containerResult = await this.createContainer(containerName, null);
-      } else {
-        throw portError;
-      }
-    }
-    this.container = containerResult.container;
-    const assignedPort = containerResult.assignedPort;
-    await this.startContainer(this.container);
-    this.containerInfo = {
-      id: this.container.id,
-      name: containerName,
-      port: assignedPort,
-      url: `http://localhost:${assignedPort}`,
-    };
-
-    this.config.port = assignedPort;
-
-    await this.waitForHealthy();
-
-    this.notify(`SearXNG container started successfully on port ${assignedPort}.`, 'success');
+    await this.cleanupStaleSessions();
+    await this.acquire(sessionId);
+    this.startHeartbeat();
   }
 
   /**
    * Stop SearXNG container
    */
   async stop(): Promise<void> {
-    if (ENABLE_SINGLETON && this.sessionId) {
-      logger.log(`[SearXNG Manager] Singleton mode: releasing container for session ${this.sessionId}`);
+    if (this.sessionId) {
+      logger.log(`[SearXNG Manager] Releasing container for session ${this.sessionId}`);
       await this.release(this.sessionId);
-      this.sessionId = null;
-      this.starting = null;
-      return;
-    }
-
-    if (!this.container) {
-      return;
-    }
-
-    try {
-      await this.stopContainer(this.container);
-      await this.removeContainer(this.container);
-
-      this.notify('SearXNG container stopped and removed.', 'info');
-    } catch (error) {
-      logger.warn('[SearXNG Manager] Cleanup error:', error);
-    } finally {
-      this.container = null;
-      this.containerInfo = null;
       this.sessionId = null;
       this.starting = null;
     }

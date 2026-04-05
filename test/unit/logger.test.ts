@@ -13,12 +13,10 @@ describe('logger', () => {
   beforeEach(() => {
     // Clear verbose flag for each test
     process.argv = process.argv.filter(arg => arg !== '--verbose');
-    delete process.env['PI_RESEARCH_VERBOSE'];
   });
 
   afterEach(() => {
     resetLogger();
-    delete process.env['PI_RESEARCH_VERBOSE'];
     process.argv = process.argv.filter(arg => arg !== '--verbose');
 
     // Clean up test log files
@@ -105,11 +103,6 @@ describe('logger', () => {
   describe('isVerboseFromEnv', () => {
     it('should detect --verbose in process.argv', () => {
       process.argv.push('--verbose');
-      expect(isVerboseFromEnv()).toBe(true);
-    });
-
-    it('should detect PI_RESEARCH_VERBOSE=1 in env', () => {
-      process.env['PI_RESEARCH_VERBOSE'] = '1';
       expect(isVerboseFromEnv()).toBe(true);
     });
 

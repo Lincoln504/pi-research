@@ -22,13 +22,11 @@ describe('DockerSearxngManager Integration', () => {
 
     await fs.mkdir(testStateDir, { recursive: true });
     
-    // Set environment variable for StateManager directory
-    process.env['PI_STATE_DIR'] = testStateDir;
-    
     manager = new DockerSearxngManager(extensionDir, {
       containerName: testContainerName,
       port: 55733, // Use different port than default
       healthTimeout: 180000,
+      stateDir: testStateDir,
     });
   });
 
@@ -39,7 +37,6 @@ describe('DockerSearxngManager Integration', () => {
     try {
       await fs.rm(testStateDir, { recursive: true, force: true });
     } catch { /* ignore */ }
-    delete process.env['PI_STATE_DIR'];
   }, 60000);
 
   it('should verify docker is installed', async () => {

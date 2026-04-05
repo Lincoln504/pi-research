@@ -126,12 +126,11 @@ Environment variables can be configured in a `.env` file in the project root.
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
 | `PI_RESEARCH_FLASH_TIMEOUT_MS` | 1000 | TUI flash indicator duration in milliseconds. |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
-| `PI_RESEARCH_VERBOSE` | - | Set to `1` to enable file logging (same as `pi --verbose`). |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
 #### Logging & Verbose Mode
 
-When verbose mode is enabled (via `pi --verbose` or `PI_RESEARCH_VERBOSE=1`), the extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run. If verbose mode is not enabled, no log files are created.
+When verbose mode is enabled (via `pi --verbose`), the extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run. If verbose mode is not enabled, no log files are created.
 
 ### Terminal UI
 

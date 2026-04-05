@@ -1,7 +1,7 @@
 /**
  * Logger — File-based logging with global console suppression
  *
- * Silent by default. When --verbose or PI_RESEARCH_VERBOSE=1 is set,
+ * Silent by default. When --verbose is set,
  * writes timestamped lines to /tmp/pi-research-debug-{hash}.log where {hash}
  * is a random 4-character alphanumeric suffix (a-z, 0-9) to keep logs separate per run.
  *
@@ -57,10 +57,7 @@ function generateHash(): string {
  * Check if verbose mode is enabled from environment
  */
 export function isVerboseFromEnv(): boolean {
-  return (
-    process.argv.includes('--verbose') ||
-    process.env['PI_RESEARCH_VERBOSE'] === '1'
-  );
+  return process.argv.includes('--verbose');
 }
 
 /**
