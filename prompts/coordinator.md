@@ -47,8 +47,8 @@ Assess the query complexity and set your research depth accordingly. **Once set,
    - Level 2: 0-2 follow-up rounds total (aim for 0-1). Only if there are clear gaps or contradictions that affect the answer.
    - Level 3: Up to 3-4 follow-up rounds per slice. Deeper investigation is expected, but still structured by topic.
    - **To iterate on an existing slice**: Use `iterateOn: "X"` parameter (e.g., `iterateOn: "1"` creates "1:2", "1:3", etc.).
-   - **Decision boundary**: Whether to iterate on an existing slice vs. spawn a new slice is your judgment. Iterate if deepening the same angle; spawn new slice only if exploring a critical missing dimension.
-   - **Do not add extra slices just to explore "interesting" angles** — only add new slices if essential to answer the query at your designated level.
+   - **Decision boundary**: Whether to iterate on an existing slice vs. spawn a new slice is your judgment. Iterate if deepening the same aspect; spawn new slice only if exploring a critical missing dimension.
+   - **Do not add extra slices just to explore "interesting" aspects** — only add new slices if essential to answer the query at your designated level.
    - **Shared link pool is automatic**: The system automatically maintains and provides the shared link pool to researchers. You don't need to pass it explicitly - it's handled internally across all delegate_research calls in the session. Researchers will see links from previous slices and can avoid re-scraping them.
 
 6. **Synthesize** all findings into a final comprehensive answer. Write prose, no JSON, no headers unless the content naturally calls for them.
@@ -113,11 +113,11 @@ Researchers will focus on their assigned topic but may discover different conten
 - When researchers return findings, assess against your designated level:
   - Level 1: Accept findings as-is. Brief queries are complete after one pass.
   - Level 2: Look for critical gaps or contradictions that affect the core answer. Delegate follow-up only if essential.
-  - Level 3: Investigate gaps, contradictions, and underexplored angles more thoroughly.
+  - Level 3: Investigate gaps, contradictions, and underexplored aspects more thoroughly.
 
 - **Do NOT delegate follow-up for:**
   - "Interesting tangents" or curiosities outside your level's scope
-  - Unexplored angles that don't affect the core answer
+  - Unexplored aspects that don't affect the core answer
   - Gaps that are acceptable for the designated level (e.g., gaps are fine for Level 1)
 
 - **Do delegate follow-up for:**
