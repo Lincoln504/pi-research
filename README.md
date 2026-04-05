@@ -260,12 +260,10 @@ npm test
 - `@mariozechner/pi-coding-agent`: pi core SDK
 - `@sinclair/typebox`: Parameter schema validation
 - `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion
-- `dockerode`: Docker API client
-- `js-yaml`: YAML parsing
-- `playwright`: Headless browser for scraping
-- `ms`: Millisecond utilities
-- `axios`: HTTP client
-- `node-fetch`: Fetch API implementation
+- `dockerode`: Docker API client for container management
+- `js-yaml`: YAML parsing for SearXNG settings
+- `playwright`: Headless browser for JS-heavy web scraping
+- `Native fetch`: Built-in Node.js fetch for HTTP requests
 
 ### License
 
