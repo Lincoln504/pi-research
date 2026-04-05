@@ -6,62 +6,71 @@
 [![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 [![CI Status](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml)
 
-Multi-agent research orchestration extension for pi. Uses a coordinator to delegate parallel/sequential researcher agents, then synthesizes findings into comprehensive answers.
+**Multi-agent research orchestration** for pi. Supports both single-agent research and multi-agent research with a coordinator that delegates parallel/sequential researchers, then synthesizes findings into comprehensive answers.
 
-## Features
+## Core Capabilities
 
-- Multi-agent orchestration with coordinator + parallel/sequential researchers
-- Web search via SearXNG with Docker container management
-- URL scraping with 2-layer architecture (fetch → Playwright fallback)
-- Security vulnerability database search (NVD, CISA KEV, GitHub, OSV)
-- Stack Exchange API integration for technical answers
-- Code search using ripgrep (rg) with grep fallback
-- Visual progress tracking with TUI panel
-- Optional Tor and HTTP proxy support
+- **Single Research** (`depth: "quick"`) - Single researcher for fast, focused queries
+- **Multi-Agent Research** (`depth: "deep"`, default) - Coordinator delegates to parallel researchers for comprehensive coverage
+- **Web Search** via SearXNG with Docker container management
+- **URL Scraping** with 2-layer architecture (fetch → Playwright fallback)
+- **Security Search** via NVD, CISA KEV, GitHub, OSV databases
+- **Stack Exchange API** integration for technical answers
+- **Code Search** using ripgrep (rg) with grep fallback
+- **Visual TUI** progress tracking showing active researchers and slices
+- **Proxy Support** for Tor or HTTP proxy connections
 
-## Installation
-
-### From npm
+## Quick Start
 
 ```bash
+# Install
 npm install -g pi-research
-```
 
-### From GitHub
-
-```bash
+# Or from GitHub
 npm install -g https://github.com/Lincoln504/pi-research-dev.git
+
+# Run
+pi research "query here"
 ```
 
-### Development
+## Usage Examples
+
+### Single Agent Research
 
 ```bash
-cd ~/Documents/pi-research
-npm install
-pi -e ./index.ts
+# Single researcher for quick, focused research
+pi research "What is a binary search tree?"
+
+# Deep multi-agent research with coordinator
+pi research "complex query" --depth deep
 ```
 
-## Usage
-
-### Basic Research
+### Multi-Agent Research with Coordinator
 
 ```bash
-pi
-```
+# Deep multi-agent research with coordinator
+pi research "complex query" --depth deep
 
-Then ask:
+# Deep multi-agent research with explicit mode
+pi research "complex query" --mode deep
 
-```
-Please research: What is a binary search tree?
+# Deep multi-agent research with model selection
+pi research "complex query" --depth deep --model gem-3
+
+# Deep multi-agent research with parallel execution
+pi research "complex query" --mode deep --parallel
 ```
 
 ### Programmatic Usage
 
 ```python
-research("history of the internet")
+from pi_research import research
+
+result = research("binary search tree")
+print(result.answer)
 ```
 
-### Configuration
+## Configuration
 
 Copy the example configuration file:
 
@@ -72,120 +81,51 @@ cp .env.example .env
 Edit `.env` to set options:
 
 ```bash
-# Proxy URL (optional)
-PROXY_URL=socks5://127.0.0.1:9050
-
-# Researcher timeout (default: 240000ms / 4 minutes)
-PI_RESEARCH_RESEARCHER_TIMEOUT_MS=240000
-
-# TUI mode (simple or full)
-PI_RESEARCH_TUI_MODE=simple
-```
-
-Source the configuration:
-
-```bash
-source .env
-pi
-```
-
-## Architecture
-
-```
-Query → Coordinator → Researchers (search, scrape, security_search, stackexchange, rg_grep)
-                        ↓
-                   Synthesis
-                        ↓
-                   Final Answer
-```
-
-## Components
-
-- `src/tool.ts`: Main orchestration and research tool
-- `src/orchestration/coordinator.ts`: Coordinator session management
-- `src/orchestration/researcher.ts`: Researcher session management
-- `src/agent-tools.ts`: Agent tool factories
-- `src/tools/search.ts`: Web search via SearXNG
-- `src/tools/scrape.ts`: URL scraping
-- `src/tools/security.ts`: Security vulnerability database search
-- `src/tools/stackexchange.ts`: Stack Exchange API
-- `src/tools/grep.ts`: Code search (rg_grep)
-- `src/web-research/`: Web search and scraping utilities
-- `src/security/`: Security database clients
-- `src/stackexchange/`: Stack Exchange client and caching
-- `src/searxng-lifecycle.ts`: SearXNG Docker container management
-- `src/tui/`: Visual progress tracking widgets
-
-## Research Process
-
-1. User submits query
-2. Coordinator receives context + query
-3. SearXNG container starts (if not running)
-4. TUI panel displays progress
-5. Coordinator assesses complexity and delegates to researchers
-6. Researchers investigate using available tools
-7. Coordinator reviews findings, may delegate follow-up research
-8. Final answer synthesized and returned
-
-## Available Tools
-
-### Researchers have access to:
-
-- `search`: Web search via SearXNG
-- `scrape`: URL scraping with 2-layer architecture
-- `security_search`: Security vulnerability database search
-- `stackexchange`: Stack Exchange API search
-- `rg_grep`: Code search using ripgrep/grep
-- `read`: Read project files
-
-### Coordinator has access to:
-
-- `delegate_research`: Spawn researcher agents
-- `investigate_context`: Inspect local project (read + grep only)
-- `rg_grep`: Code search
-
-## TUI Modes
-
-### Simple Mode (default)
-
-```
-┌─ Research Panel ─────────────────────────┐
-│ ● active  http://localhost:8080  tk: 10.2k │
-│ ● Coordinator  ●1 ●2 ●3              │
-└────────────────────────────────────────────┘
-```
-
-### Full Mode
-
-```
-┌─ Research Coordinator ── tk: 42.3k ──────┐
-│    1         2         3                │
-│   ●●        ●●        ●●               │
-│   ○1.1      ○         ○                │
-│   ○1.2      ○         ○                │
-└───────────────────────────────────────────┘
-```
-
-Set TUI mode via environment variable:
-
-```bash
-export PI_RESEARCH_TUI_MODE=simple|full
-```
-
-## Configuration Options
-
-```bash
 # Researcher timeout (default: 240000ms / 4 minutes)
 PI_RESEARCH_RESEARCHER_TIMEOUT_MS=240000
 
 # Flash duration for TUI (default: 1000ms)
 PI_RESEARCH_FLASH_TIMEOUT_MS=1000
 
+# TUI mode (simple or full)
+PI_RESEARCH_TUI_MODE=simple
+
 # Proxy URL (optional)
 PROXY_URL=socks5://127.0.0.1:9050
+```
 
-# TUI mode (default: simple)
+Source the configuration:
+
+```bash
+source .env
+pi research "query here"
+```
+
+## Quick Reference
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `depth` | Research depth | "deep" |
+| `mode` | Research mode (deep/quick) | "deep" |
+| `model` | Model ID for agents | current active model |
+| `parallel` | Execution mode | parallel |
+
+## TUI Modes
+
+### Simple Mode
+
+Shows active researcher status with current token consumption.
+
+```bash
 PI_RESEARCH_TUI_MODE=simple
+```
+
+### Full Mode
+
+Shows full research coordinator with all slices and their progress.
+
+```bash
+PI_RESEARCH_TUI_MODE=full
 ```
 
 ## Proxy Support
@@ -227,6 +167,9 @@ npx tsc --noEmit
 
 # Linting
 npm run lint
+
+# Run tests
+npm test
 ```
 
 ## License
