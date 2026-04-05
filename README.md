@@ -14,7 +14,7 @@ Opinionated web research extension for pi coding agent. Provides a set of web re
 - **Stack Exchange API**: Integration with Stack Overflow and Stack Exchange network
 - **Code search**: ripgrep (rg) with grep fallback for local codebase queries
 - **Terminal UI**: Progress tracking panel showing SearXNG status and active research slices
-- **Proxy support**: SOCKS5 (Tor) or HTTP/HTTPS proxy configuration
+- **Proxy support**: (optional, for avoiding search engine rate limits, configure via environment)
 
 ### Installation
 
@@ -118,51 +118,21 @@ Pool is automatically:
 
 ### Configuration
 
-Copy `.env.example` to `.env` and edit:
+Environment variables can be configured in a `.env` file in the project root.
 
-```bash
-cp .env.example .env
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`). |
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
+| `PI_RESEARCH_FLASH_TIMEOUT_MS` | 1000 | TUI flash indicator duration in milliseconds. |
+| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
+| `PI_RESEARCH_VERBOSE` | - | Set to `1` to enable file logging (same as `pi --verbose`). |
+| `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
-#### Environment variables
+#### Logging & Verbose Mode
 
-| Variable                      | Default   | Description                                           |
-|-------------------------------|-----------|-------------------------------------------------------|
-| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000    | Per-researcher timeout in milliseconds (30s-10m)      |
-| `PI_RESEARCH_FLASH_TIMEOUT_MS`     | 1000      | TUI flash indicator duration in milliseconds          |
-| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS`| 15000    | SearXNG health check timeout in milliseconds          |
-| `PROXY_URL`                   | -         | Proxy URL for SearXNG (optional)                      |
-
-### Proxy Support
-
-Proxy support is disabled by default. Configure in `.env`:
-
-```bash
-# Tor
-PROXY_URL=socks5://127.0.0.1:9050
-
-# Tor Browser
-PROXY_URL=socks5://127.0.0.1:9150
-
-# HTTP/HTTPS proxy
-PROXY_URL=http://proxy.example.com:8080
-
-# Authenticated proxy
-PROXY_URL=http://user:pass@proxy.example.com:8080
-```
-
-Source the file before running pi:
-```bash
-source .env
-pi
-```
-
-#### How proxy routing works
-
-1. pi-research generates SearXNG settings with proxy URL
-2. SearXNG container routes outbound HTTP requests through proxy
-3. Only SearXNG-to-search-engine requests use proxy
-4. pi-research connections to SearXNG are direct
+Enable verbose logging by running `pi --verbose` or setting `PI_RESEARCH_VERBOSE=1`. 
+The extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run.
 
 ### Terminal UI
 
@@ -197,8 +167,6 @@ Displays dedicated TUI panel to track progress in real-time.
 │1      │ │                    │                    │                     │
 └───────┘ └────────────────────┴────────────────────┴─────────────────────┘
 ```
-
-*Note: In actual terminal, walls and borders are colored (green/gray/accent) and active tool calls cause temporary color flashes.*
 
 ### Project structure
 
