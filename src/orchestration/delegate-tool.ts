@@ -46,6 +46,9 @@ export interface DelegateToolOptions {
 /**
  * Wraps a promise with a timeout and abort signal support
  */
+/**
+ * Wraps a promise with a timeout and abort signal support
+ */
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -54,38 +57,42 @@ function withTimeout<T>(
 ): Promise<T> {
   const timeoutController = new AbortController();
   const timeoutSignal = timeoutController.signal;
-
-  // Create combined abort signal if external signal provided
   const combinedSignal = signal
     ? AbortSignal.any([timeoutSignal, signal])
     : timeoutSignal;
-
   logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
 
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      // Timeout handler
-      const timeoutId = setTimeout(() => {
-        logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
-        timeoutController.abort();
-        reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
+  let raceWon = false;
+  let rejectPromise: Promise<T>;
 
-      // Abort handler
-      if (combinedSignal.aborted) {
-        logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
-        clearTimeout(timeoutId);
-        reject(new Error(`Researcher ${label} cancelled`));
-      } else {
-        combinedSignal.addEventListener('abort', () => {
+  const wrappedPromise = promise.then((val) => {
+    raceWon = true;
+    return val;
+  });
+
+  rejectPromise = new Promise<T>((_, reject) => {
+    // Timeout handler
+    const timeoutId = setTimeout(() => {
+      logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
+      timeoutController.abort();
+      reject(new Error(`Researcher ${label} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    if (combinedSignal.aborted) {
+      logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
+      clearTimeout(timeoutId);
+      reject(new Error(`Researcher ${label} cancelled`));
+    } else {
+      combinedSignal.addEventListener('abort', () => {
+        if (!raceWon) {
           logger.error(`[withTimeout] ${label} ABORT SIGNAL FIRED`);
           clearTimeout(timeoutId);
           reject(new Error(`Researcher ${label} cancelled`));
-        });
-      }
-    }),
-  ]).finally(() => {
+        }
+      });
+    }
+  });
+
+  return Promise.race([wrappedPromise, rejectPromise]).finally(() => {
     // Clean up on completion or error
     timeoutController.abort();
   });
@@ -171,13 +178,14 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
   return {
     name: 'delegate_research',
     label: 'Delegate Research',
-    description: 'Spawn researcher agents to investigate multiple topics in parallel or sequentially. Labels use "X:Y" format: X = slice number, Y = iteration number. Complexity: Level 1 (brief, 1-2 slices, single pass only), Level 2 (normal, 3-5 slices, 0-3 follow-ups), Level 3 (deep, 5+ slices, extensive follow-ups). Always honor user-specified complexity levels.',
+    description: 'Spawn researcher agents to investigate multiple topics in parallel or sequentially. Labels use "X:Y" format: X = slice number, Y = iteration number. Complexity: Level 0 (1 slice, no follow-ups), Level 1 (1-2 slices, up to 1 follow-up), Level 2 (3-5 slices, up to 2 follow-ups), Level 3 (5+ slices, up to 3-4 follow-ups). Always honor user-specified complexity levels.',
     promptSnippet: 'Research multiple topics via parallel or sequential researcher agents',
     promptGuidelines: [
-      'Use delegate_research to spawn researcher agents for comprehensive investigation.',
-      'CRITICAL: If the user explicitly specified a complexity level ("level 1", "brief", "quick", "simple", "level 2", "level 3", "deep"), honor that request exactly.',
-      'Otherwise, assess complexity internally: Level 1 = brief factual lookup (1-2 slices, single pass), Level 2 = normal multi-faceted topic (3-5 slices, 0-3 follow-ups), Level 3 = deep cross-domain analysis (5+ slices, extensive follow-ups).',
-      'Include extra slices (at least 1-2 more than seems strictly necessary) to ensure thorough coverage.',
+      'Use delegate_research to spawn researcher agents, but MINIMIZE initial slice count.',
+      'CRITICAL: If the user explicitly specified a complexity level ("level 0", "level 1", "brief", "quick", "simple", "level 2", "level 3", "deep", "exhaustive"), honor that request exactly and do not escalate mid-research.',
+      'Otherwise: Level 0 = fact (1 slice, no follow-ups), Level 1 = brief (1-2 slices, default for most queries, max 1 follow-up), Level 2 = multi-faceted if explicitly requested (3-4 slices, max 2 follow-ups), Level 3 = deep if explicitly requested (5+ slices, max 3-4 follow-ups).',
+      'START WITH THE MINIMUM SLICE COUNT. For Level 1, start with 1 slice unless the query clearly has 2 distinct parts. Do not add slices "just in case."',
+      'Do NOT expand scope mid-research. If findings suggest more research is needed, only do follow-up delegations if they directly answer a gap in the user\'s question.',
       'Use simultaneous: true for parallel execution, simultaneous: false for sequential order.',
     ],
     parameters: Type.Object({
@@ -305,7 +313,15 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         try {
           logger.log(`[delegate] Calling prompt for ${sliceKey}. External signal aborted: ${options.signal?.aborted ?? 'no signal'}`);
           await withTimeout(
-            withRetry(() => session.prompt(enhancedSlice), 3, 1000, sliceKey),
+            withRetry(async () => {
+              await session.prompt(enhancedSlice);
+              // Check for provider errors after prompt completes and retry if detected
+              const msgs = session.messages;
+              const last = [...msgs].reverse().find((m) => m.role === 'assistant');
+              if (last?.stopReason === 'error') {
+                throw new Error(`Provider error: ${last?.errorMessage || 'Unknown error'}`);
+              }
+            }, 3, 1000, sliceKey),
             options.timeoutMs,
             sliceKey,
             options.signal
@@ -319,30 +335,85 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
 
         // Extract final message text and check for failure AFTER prompt completes
         const msgs = session.messages;
-        const last = [...msgs].reverse().find((m) => m.role === 'assistant');
-        const text = extractText(last);
+        if (!Array.isArray(msgs) || msgs.length === 0) {
+          logger.error(`[delegate] Researcher ${sliceKey}: No messages in session`);
+          recordResearcherFailure(sliceKey);
+          throw new Error(`Researcher ${sliceKey} produced no output`);
+        }
+
+        const last = [...msgs].reverse().find((m) => m && typeof m === 'object' && m.role === 'assistant');
+
+        if (!last) {
+          logger.error(`[delegate] Researcher ${sliceKey}: No assistant message found`);
+          recordResearcherFailure(sliceKey);
+          throw new Error(`Researcher ${sliceKey} produced no assistant message`);
+        }
 
         // Check if agent failed due to error (not abort, which is normal cleanup)
         // This is the single, authoritative failure check point
         // NOTE: stopReason === 'aborted' is NORMAL (cleanup signal), not a failure.
         // Only treat 'error' as a failure, and only if there's an actual error message.
-        const isFailed = last?.stopReason === 'error' || (last?.errorMessage && last?.stopReason !== 'aborted');
+        const isFailed = last.stopReason === 'error' || (last.errorMessage && last.stopReason !== 'aborted');
         if (isFailed) {
+          // Abort session on provider error to cancel inflight API calls
+          session.abort().catch(() => {});
           // Record failure in session state (persists across delegate_research calls)
           recordResearcherFailure(sliceKey);
-          logger.error(`[delegate] Researcher ${sliceKey} FAILED: ${last?.errorMessage || last?.stopReason}`);
-          throw new Error(`Researcher ${sliceKey} failed: ${last?.errorMessage || last?.stopReason || 'Unknown error'}`);
+          const errorMsg = last.errorMessage || last.stopReason || 'Unknown error';
+          logger.error(`[delegate] Researcher ${sliceKey} FAILED: ${errorMsg}`);
+          throw new Error(`Researcher ${sliceKey} failed: ${errorMsg}`);
+        }
+
+        // Extract text safely
+        const text = extractText(last);
+
+        // Add diagnostic logging when extractText returns empty
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+          const contentBlocks = last.content || [];
+          logger.error(`[delegate] Researcher ${sliceKey}: Failed to extract valid text from message`, {
+            stopReason: last.stopReason,
+            errorMessage: last.errorMessage,
+            contentBlockTypes: contentBlocks.map((block: any) => block.type),
+            contentBlockCount: contentBlocks.length,
+            hasToolUseContent: contentBlocks.some((block: any) => block.type === 'tool_use'),
+            hasTextContent: contentBlocks.some((block: any) => block.type === 'text'),
+            messageRole: last.role,
+            totalContentLength: JSON.stringify(last.content || []).length,
+          });
+
+          // DEBUG: If stopReason is 'aborted', show why it was aborted
+          if (last.stopReason === 'aborted') {
+            logger.error(`[delegate] ${sliceKey} was aborted - likely due to:`, {
+              stopReason: 'aborted',
+              hadError: !!last.errorMessage,
+              errorMsg: last.errorMessage,
+              contentEmpty: (contentBlocks || []).length === 0,
+            });
+          }
         }
 
         // Aborted is normal - check that we have actual output
-        if (last?.stopReason === 'aborted' && !text) {
+        if (last.stopReason === 'aborted' && !text) {
           logger.warn(`[delegate] Researcher ${sliceKey} aborted with no output`);
           recordResearcherFailure(sliceKey);
           throw new Error(`Researcher ${sliceKey} produced no output`);
         }
 
-        logger.log(`[delegate] Researcher ${sliceKey} completed successfully. Output length: ${text.length} chars`);
-        return [sliceKey, text];
+        if (!text || typeof text !== 'string') {
+          logger.error(`[delegate] Researcher ${sliceKey}: Failed to extract valid text from message`);
+          recordResearcherFailure(sliceKey);
+          throw new Error(`Researcher ${sliceKey} returned invalid output format`);
+        }
+
+        const trimmedText = text.trim();
+        if (trimmedText.length === 0) {
+          logger.warn(`[delegate] Researcher ${sliceKey}: Message contains only whitespace`);
+          recordResearcherFailure(sliceKey);
+          throw new Error(`Researcher ${sliceKey} produced empty output`);
+        }
+
+        logger.log(`[delegate] Researcher ${sliceKey} completed successfully. Output length: ${trimmedText.length} chars`);
+        return [sliceKey, trimmedText];
       };
       // Mark completion
       const runWithFlash = async (assignment: { label: string; slice: string }): Promise<[string, string]> => {
