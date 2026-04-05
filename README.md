@@ -1,6 +1,6 @@
-# pi-research
-
 ![pi-research banner](README-banner.jpg)
+
+[![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 
 An opinionated web research extension for pi coding agent.
 
