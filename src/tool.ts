@@ -21,7 +21,7 @@ import { Type } from '@sinclair/typebox';
 import { SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createCoordinatorSession } from './orchestration/coordinator.ts';
 import { createResearcherSession } from "./orchestration/researcher.ts";
-import { validateConfig, RESEARCHER_TIMEOUT_MS, FLASH_TIMEOUT_MS } from './config.ts';
+import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.ts';
 import {
   createResearchPanel,
   clearAllFlashTimeouts,
@@ -303,7 +303,7 @@ export function createResearchTool(): ToolDefinition {
             }
             if (event.type === 'tool_execution_end') {
               const color = (event as any).error ? 'red' : 'green';
-              flashSlice(panelState, sliceLabel, color, FLASH_TIMEOUT_MS, refreshAllSessions);
+              flashSlice(panelState, sliceLabel, color, 1000, refreshAllSessions);
             }
           });
 
@@ -373,7 +373,7 @@ export function createResearchTool(): ToolDefinition {
           researcherOptions,
           signal,
           timeoutMs: RESEARCHER_TIMEOUT_MS,
-          flashTimeoutMs: FLASH_TIMEOUT_MS,
+          flashTimeoutMs: 1000,
         };
         const delegateTool = createDelegateTool(delegateToolOptions);
         const contextTool = createInvestigateContextTool({

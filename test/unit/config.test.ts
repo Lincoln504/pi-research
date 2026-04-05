@@ -21,7 +21,6 @@ describe('config (refactored)', () => {
         const config = createConfig(env);
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000);
-        expect(config.FLASH_TIMEOUT_MS).toBe(1000);
         expect(config.PROXY_URL).toBeUndefined();
       });
 
@@ -30,13 +29,6 @@ describe('config (refactored)', () => {
         const config = createConfig(env);
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(300000);
-      });
-
-      it('should use custom FLASH_TIMEOUT_MS from env', () => {
-        const env = { PI_RESEARCH_FLASH_TIMEOUT_MS: '2000' };
-        const config = createConfig(env);
-
-        expect(config.FLASH_TIMEOUT_MS).toBe(2000);
       });
 
       it('should use custom PROXY_URL from env', () => {
@@ -49,13 +41,11 @@ describe('config (refactored)', () => {
       it('should parse all custom values from env', () => {
         const env = {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180000',
-          PI_RESEARCH_FLASH_TIMEOUT_MS: '1500',
           PROXY_URL: 'socks5://127.0.0.1:9050',
         };
         const config = createConfig(env);
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
-        expect(config.FLASH_TIMEOUT_MS).toBe(1500);
         expect(config.PROXY_URL).toBe('socks5://127.0.0.1:9050');
       });
     });
@@ -68,36 +58,25 @@ describe('config (refactored)', () => {
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
       });
 
-      it('should handle invalid FLASH_TIMEOUT_MS string', () => {
-        const env = { PI_RESEARCH_FLASH_TIMEOUT_MS: 'not-a-number' };
-        const config = createConfig(env);
-
-        expect(config.FLASH_TIMEOUT_MS).toBe(1000); // Default
-      });
-
       it('should handle empty string values', () => {
         const env = {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '',
-          PI_RESEARCH_FLASH_TIMEOUT_MS: '',
           PROXY_URL: '',
         };
         const config = createConfig(env);
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
-        expect(config.FLASH_TIMEOUT_MS).toBe(1000); // Default
         expect(config.PROXY_URL).toBe(''); // Empty string, not undefined
       });
 
       it('should handle undefined values in env object', () => {
         const env = {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: undefined,
-          PI_RESEARCH_FLASH_TIMEOUT_MS: undefined,
           PROXY_URL: undefined,
         };
         const config = createConfig(env);
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
-        expect(config.FLASH_TIMEOUT_MS).toBe(1000); // Default
         expect(config.PROXY_URL).toBeUndefined();
       });
     });
@@ -147,7 +126,6 @@ describe('config (refactored)', () => {
 
         expect(config).toBeDefined();
         expect(typeof config.RESEARCHER_TIMEOUT_MS).toBe('number');
-        expect(typeof config.FLASH_TIMEOUT_MS).toBe('number');
       });
 
       it('should return same config on subsequent calls', () => {
@@ -161,7 +139,6 @@ describe('config (refactored)', () => {
         const config = getConfig();
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBeGreaterThan(0);
-        expect(config.FLASH_TIMEOUT_MS).toBeGreaterThan(0);
       });
     });
 
@@ -184,7 +161,6 @@ describe('config (refactored)', () => {
       it('should set custom configuration', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 180000,
-          FLASH_TIMEOUT_MS: 1500,
           PROXY_URL: 'http://custom-proxy.com',
         };
 
@@ -192,7 +168,6 @@ describe('config (refactored)', () => {
         const config = getConfig();
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
-        expect(config.FLASH_TIMEOUT_MS).toBe(1500);
         expect(config.PROXY_URL).toBe('http://custom-proxy.com');
       });
 
@@ -202,7 +177,6 @@ describe('config (refactored)', () => {
 
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 99999,
-          FLASH_TIMEOUT_MS: config1.FLASH_TIMEOUT_MS,
           PROXY_URL: config1.PROXY_URL,
         };
 
@@ -216,7 +190,6 @@ describe('config (refactored)', () => {
       it('should persist across multiple getConfig calls', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 12345,
-          FLASH_TIMEOUT_MS: 6789,
         };
 
         setConfig(customConfig);
@@ -235,14 +208,12 @@ describe('config (refactored)', () => {
       it('should allow setting invalid values (validated separately)', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: -1, // Invalid
-          FLASH_TIMEOUT_MS: 99999, // Invalid
         };
 
         expect(() => setConfig(customConfig)).not.toThrow();
 
         const config = getConfig();
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(-1);
-        expect(config.FLASH_TIMEOUT_MS).toBe(99999);
       });
     });
   });
@@ -252,7 +223,6 @@ describe('config (refactored)', () => {
       it('should clear global configuration', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 12345,
-          FLASH_TIMEOUT_MS: 6789,
         };
 
         setConfig(customConfig);
@@ -269,12 +239,11 @@ describe('config (refactored)', () => {
       });
 
       it('should allow new config after reset', () => {
-        setConfig({ RESEARCHER_TIMEOUT_MS: 99999, FLASH_TIMEOUT_MS: 8888 });
+        setConfig({ RESEARCHER_TIMEOUT_MS: 99999 });
         resetConfig();
 
         const newConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 55555,
-          FLASH_TIMEOUT_MS: 4444,
         };
         setConfig(newConfig);
 
@@ -288,7 +257,6 @@ describe('config (refactored)', () => {
       it('should validate default config', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: 1000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -297,7 +265,6 @@ describe('config (refactored)', () => {
       it('should validate minimum valid values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 30000,
-          FLASH_TIMEOUT_MS: 100,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -306,7 +273,6 @@ describe('config (refactored)', () => {
       it('should validate maximum valid values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 600000,
-          FLASH_TIMEOUT_MS: 5000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -315,7 +281,6 @@ describe('config (refactored)', () => {
       it('should validate mid-range values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 180000,
-          FLASH_TIMEOUT_MS: 2500,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -324,7 +289,6 @@ describe('config (refactored)', () => {
       it('should use global config if none provided', () => {
         setConfig({
           RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: 1000,
         });
 
         expect(() => validateConfig()).not.toThrow();
@@ -335,7 +299,6 @@ describe('config (refactored)', () => {
       it('should throw for RESEARCHER_TIMEOUT_MS below minimum', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 29999,
-          FLASH_TIMEOUT_MS: 1000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -344,34 +307,14 @@ describe('config (refactored)', () => {
       it('should throw for RESEARCHER_TIMEOUT_MS above maximum', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 600001,
-          FLASH_TIMEOUT_MS: 1000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
       });
 
-      it('should throw for FLASH_TIMEOUT_MS below minimum', () => {
-        const config: Config = {
-          RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: 99,
-        };
-
-        expect(() => validateConfig(config)).toThrow('must be between 100 and 5000 ms');
-      });
-
-      it('should throw for FLASH_TIMEOUT_MS above maximum', () => {
-        const config: Config = {
-          RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: 5001,
-        };
-
-        expect(() => validateConfig(config)).toThrow('must be between 100 and 5000 ms');
-      });
-
       it('should throw for negative RESEARCHER_TIMEOUT_MS', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: -1,
-          FLASH_TIMEOUT_MS: 1000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -380,47 +323,32 @@ describe('config (refactored)', () => {
       it('should throw for zero RESEARCHER_TIMEOUT_MS', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 0,
-          FLASH_TIMEOUT_MS: 1000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
-      });
-
-      it('should throw for negative FLASH_TIMEOUT_MS', () => {
-        const config: Config = {
-          RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: -1,
-        };
-
-        expect(() => validateConfig(config)).toThrow('must be between 100 and 5000 ms');
       });
     });
 
     describe('edge cases', () => {
       it('should handle boundary values exactly', () => {
-        const config1: Config = { RESEARCHER_TIMEOUT_MS: 30000, FLASH_TIMEOUT_MS: 100 };
-        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600000, FLASH_TIMEOUT_MS: 5000 };
+        const config1: Config = { RESEARCHER_TIMEOUT_MS: 30000 };
+        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600000 };
 
         expect(() => validateConfig(config1)).not.toThrow();
         expect(() => validateConfig(config2)).not.toThrow();
       });
 
       it('should handle off-by-one boundary values', () => {
-        const config1: Config = { RESEARCHER_TIMEOUT_MS: 29999, FLASH_TIMEOUT_MS: 100 };
-        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600001, FLASH_TIMEOUT_MS: 100 };
-        const config3: Config = { RESEARCHER_TIMEOUT_MS: 240000, FLASH_TIMEOUT_MS: 99 };
-        const config4: Config = { RESEARCHER_TIMEOUT_MS: 240000, FLASH_TIMEOUT_MS: 5001 };
+        const config1: Config = { RESEARCHER_TIMEOUT_MS: 29999 };
+        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600001 };
 
         expect(() => validateConfig(config1)).toThrow();
         expect(() => validateConfig(config2)).toThrow();
-        expect(() => validateConfig(config3)).toThrow();
-        expect(() => validateConfig(config4)).toThrow();
       });
 
       it('should handle config with proxy', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 240000,
-          FLASH_TIMEOUT_MS: 1000,
           PROXY_URL: 'http://proxy.example.com:8080',
         };
 
@@ -438,7 +366,6 @@ describe('config (refactored)', () => {
       // Set custom config
       const customConfig: Config = {
         RESEARCHER_TIMEOUT_MS: 180000,
-        FLASH_TIMEOUT_MS: 1500,
         PROXY_URL: 'http://proxy.com',
       };
       setConfig(customConfig);
@@ -461,12 +388,10 @@ describe('config (refactored)', () => {
     it('should work with test environment', () => {
       const testEnv: Record<string, string | undefined> = {
         PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '120000',
-        PI_RESEARCH_FLASH_TIMEOUT_MS: '500',
       };
 
       const config = createConfig(testEnv);
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(120000);
-      expect(config.FLASH_TIMEOUT_MS).toBe(500);
 
       expect(() => validateConfig(config)).not.toThrow();
     });

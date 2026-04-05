@@ -124,7 +124,6 @@ Environment variables can be configured in a `.env` file in the project root.
 |----------|---------|-------------|
 | `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
-| `PI_RESEARCH_FLASH_TIMEOUT_MS` | 1000 | TUI flash indicator duration in milliseconds. |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
