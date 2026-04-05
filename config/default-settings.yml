@@ -85,10 +85,9 @@ default_doi_resolver: 'oadoi.org'
 # Search engines configuration
 engines:
   # General web engines (run for all unqualified queries)
-  - name: duckduckgo
-    engine: duckduckgo
-    disabled: true
-    shortcut: ddg
+  - name: google
+    engine: google
+    shortcut: g
 
   - name: bing
     engine: bing
@@ -105,39 +104,18 @@ engines:
     weight: 1.5
 
   # Images (only when category=images is requested)
-  - name: duckduckgo images
-    engine: duckduckgo_extra
-    disabled: true
-    categories: [images]
-    ddg_category: images
-    shortcut: ddi
-
   - name: bing images
     engine: bing_images
     categories: [images]
     shortcut: bii
 
   # News (only when category=news is requested)
-  - name: duckduckgo news
-    engine: duckduckgo_extra
-    disabled: true
-    categories: [news]
-    ddg_category: news
-    shortcut: ddn
-
   - name: bing news
     engine: bing_news
     categories: [news]
     shortcut: bin
 
   # Videos (only when category=videos is requested)
-  - name: duckduckgo videos
-    engine: duckduckgo_extra
-    disabled: true
-    categories: [videos]
-    ddg_category: videos
-    shortcut: ddv
-
   - name: bing videos
     engine: bing_videos
     categories: [videos]
