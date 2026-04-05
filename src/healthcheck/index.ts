@@ -11,6 +11,7 @@ import { getConfig } from '../config.ts';
 import { search } from '../web-research/search.ts';
 import { scrapeSingle } from '../web-research/scrapers.ts';
 import { getActiveSearxngEngines } from '../utils/searxng-config.ts';
+import type { SearXNGResult } from '../web-research/types.ts';
 
 // Get timeout from config or use defaults
 const config = getConfig();
@@ -128,7 +129,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     }
     logger.log(`[healthcheck] Checking for results from engines: [${generalEngines.join(', ')}]`);
 
-    const generalResults = qr.results.filter((r: any) =>
+    const generalResults = qr.results.filter((r: SearXNGResult) =>
       generalEngines.includes((r.engine || '').toLowerCase())
     );
 
@@ -136,7 +137,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       // No results from general web engines — report which engines responded vs which didn't
       const engineCounts = new Map<string, number>();
       generalEngines.forEach(e => engineCounts.set(e, 0));
-      qr.results.forEach((r: any) => {
+      qr.results.forEach((r: SearXNGResult) => {
         const engine = (r.engine || '').toLowerCase();
         if (engineCounts.has(engine)) {
           engineCounts.set(engine, (engineCounts.get(engine) || 0) + 1);
@@ -145,7 +146,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       const engineReport = Array.from(engineCounts.entries())
         .map(([e, c]) => `${e}: ${c}`)
         .join(', ');
-      const allEngines = qr.results.map((r: any) => r.engine || 'unknown').join(', ');
+      const allEngines = qr.results.map((r: SearXNGResult) => r.engine || 'unknown').join(', ');
       result.error = `All general web search engines failed (${engineReport}). Only these engines responded: ${allEngines}. Real web research will fail.`;
       logger.error('[healthcheck] Search validation failed:', result.error);
       return result;

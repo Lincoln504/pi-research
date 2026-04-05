@@ -80,7 +80,7 @@ describe('delegate-tool', () => {
     onUpdate: vi.fn(),
     researcherOptions: {
       cwd: '/test/project',
-      ctxModel: { id: 'test-model' },
+      ctxModel: { id: 'test-model' } as any,
       modelRegistry: {
         getAll: vi.fn(() => []),
         get: vi.fn(),
@@ -114,10 +114,9 @@ describe('delegate-tool', () => {
       expect(tool.label).toBe('Delegate Research');
     });
 
-    it('should create tool with description mentioning parallel or sequential', () => {
+    it('should create tool with description mentioning parallel execution', () => {
       const tool = createDelegateTool(createMockOptions());
       expect(tool.description.toLowerCase()).toContain('parallel');
-      expect(tool.description.toLowerCase()).toContain('sequential');
     });
 
     it('should require slices parameter', () => {
@@ -125,16 +124,6 @@ describe('delegate-tool', () => {
       expect(tool.parameters).toBeDefined();
       expect(tool.parameters).toHaveProperty('properties');
       expect((tool.parameters as any).properties).toHaveProperty('slices');
-    });
-
-    it('should require simultaneous parameter', () => {
-      const tool = createDelegateTool(createMockOptions());
-      expect((tool.parameters as any).properties).toHaveProperty('simultaneous');
-    });
-
-    it('should have optional nonConcurrent parameter', () => {
-      const tool = createDelegateTool(createMockOptions());
-      expect((tool.parameters as any).properties).toHaveProperty('nonConcurrent');
     });
 
     it('should have optional iterateOn parameter', () => {
@@ -172,7 +161,7 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
         'test-id',
-        { slices: ['single slice'], simultaneous: false },
+        { slices: ['single slice'] },
         undefined,
         undefined,
         undefined as any
@@ -188,7 +177,7 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
         'test-id',
-        { slices: ['slice1', 'slice2', 'slice3'], simultaneous: false },
+        { slices: ['slice1', 'slice2', 'slice3'] },
         undefined,
         undefined,
         undefined as any
@@ -204,7 +193,7 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
         'test-id',
-        { slices: ['test'], simultaneous: false },
+        { slices: ['test'] },
         undefined,
         undefined,
         undefined as any
@@ -225,7 +214,7 @@ describe('delegate-tool', () => {
       await expect(
         tool.execute(
           'test-id',
-          { slices: ['test'], simultaneous: false },
+          { slices: ['test'] },
           undefined,
           undefined,
           undefined as any
@@ -243,7 +232,7 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       const result = await tool.execute(
         'test-id',
-        { slices: ['test'], simultaneous: false },
+        { slices: ['test'] },
         undefined,
         undefined,
         undefined as any
@@ -253,8 +242,8 @@ describe('delegate-tool', () => {
     });
   });
 
-  describe('execute - mode configuration', () => {
-    it('should recognize non-concurrent mode', async () => {
+  describe('execute - execution mode', () => {
+    it('should run with concurrent workers', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
 
@@ -262,33 +251,14 @@ describe('delegate-tool', () => {
       const tool = createDelegateTool(createMockOptions());
       await tool.execute(
         'test-id',
-        { slices: ['slice1'], simultaneous: false, nonConcurrent: true },
+        { slices: ['slice1', 'slice2', 'slice3'] },
         undefined,
         undefined,
         undefined as any
       );
 
       expect(logger.log).toHaveBeenCalledWith(
-        expect.stringContaining('non-concurrent (1)')
-      );
-    });
-
-    it('should recognize parallel mode', async () => {
-      const { createResearcherSession } = await import('../../../src/orchestration/researcher.js');
-      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession() as any);
-
-      const { logger } = await import('../../../src/logger.js');
-      const tool = createDelegateTool(createMockOptions());
-      await tool.execute(
-        'test-id',
-        { slices: ['slice1'], simultaneous: true },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect(logger.log).toHaveBeenCalledWith(
-        expect.stringContaining('parallel')
+        expect.stringContaining('concurrent worker')
       );
     });
   });

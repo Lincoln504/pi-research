@@ -69,7 +69,7 @@ vi.mock('../../../src/utils/make-resource-loader.ts', () => ({
 describe('researcher', () => {
   const createMockOptions = (): CreateResearcherSessionOptions => ({
     cwd: '/test/project',
-    ctxModel: { id: 'test-model' },
+    ctxModel: { id: 'test-model' } as any,
     modelRegistry: {
       getAll: vi.fn(() => []),
       get: vi.fn(),

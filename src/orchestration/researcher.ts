@@ -5,25 +5,27 @@
  * Researchers use web search, scraping, security databases, and code search tools.
  */
 
-import type { AgentSession, ModelRegistry, SettingsManager } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool, SessionManager } from '@mariozechner/pi-coding-agent';
+import type { Model } from '@mariozechner/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
-  ctxModel: any; // Model<any> | undefined
+  ctxModel: Model<any> | undefined;
   modelRegistry: ModelRegistry;
   settingsManager: SettingsManager;
   systemPrompt: string;
   searxngUrl: string;
-  extensionCtx: any; // ExtensionContext
+  extensionCtx: ExtensionContext;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
   const { cwd, ctxModel, modelRegistry, settingsManager, systemPrompt, searxngUrl, extensionCtx } = options;
 
+  // Validate required parameters
   if (!ctxModel) {
     throw new Error('No model selected. Please select a model before using the research tool.');
   }

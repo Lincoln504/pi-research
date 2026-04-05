@@ -167,7 +167,7 @@ export function checkModule(name: string): boolean {
 export async function cleanupAllContexts(): Promise<void> {
   const cleanupPromises: Promise<void>[] = [];
 
-  Array.from(activeContexts.values()).forEach((ctx) => {
+  for (const ctx of activeContexts.values()) {
     cleanupPromises.push(
       (async (): Promise<void> => {
         try {
@@ -184,7 +184,7 @@ export async function cleanupAllContexts(): Promise<void> {
         }
       })(),
     );
-  });
+  }
 
   // Clear AFTER promises complete to prevent race condition
   await Promise.allSettled(cleanupPromises);

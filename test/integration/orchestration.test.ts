@@ -34,7 +34,7 @@ describe('Orchestration Integration', () => {
     it('should create a researcher session with expected tools', async () => {
       const session = await createResearcherSession({
         cwd: process.cwd(),
-        ctxModel: mockModel,
+        ctxModel: mockModel as any,
         modelRegistry: mockModelRegistry as any,
         settingsManager: settingsManager as any,
         systemPrompt: 'You are a researcher.',
@@ -62,7 +62,7 @@ describe('Orchestration Integration', () => {
     it('should create a coordinator session', async () => {
       const session = await createCoordinatorSession({
         cwd: process.cwd(),
-        ctxModel: mockModel,
+        ctxModel: mockModel as any,
         modelRegistry: mockModelRegistry as any,
         sessionManager: SessionManager.inMemory(),
         settingsManager: settingsManager as any,

@@ -5,10 +5,6 @@
  */
 
 import { GenericContainer, type StartedTestContainer } from 'testcontainers';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface SearxngContainerConfig {
   image?: string;

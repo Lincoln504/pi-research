@@ -129,8 +129,7 @@ export class StateManager {
     // Clean up any stale locks on initialization (fire and forget)
     this.cleanupStaleLocksOnStartup().catch((error: unknown) => {
       logger.warn('[StateManager] Failed to cleanup stale locks on startup:', error instanceof Error ? error.message : String(error));
-    },
-    );
+    });
   }
 
   /**
@@ -723,32 +722,45 @@ export class StateManager {
     timeout: number = 30000,
   ): Promise<T> {
     let lockAcquired = false;
+    let lockAcquisitionTimeoutHandle: NodeJS.Timeout | null = null;
+    let callbackTimeoutHandle: NodeJS.Timeout | null = null;
 
     try {
       // Acquire lock with timeout
       await Promise.race([
         this.acquireLock(),
         new Promise<never>((_resolve, reject) => {
-          const timeoutHandle: NodeJS.Timeout = setTimeout(() => {
+          lockAcquisitionTimeoutHandle = setTimeout(() => {
             reject(new Error(`Lock acquisition timed out after ${timeout}ms`));
           }, timeout);
-          // Store the handle for potential cleanup (though we don't use it here)
-          return timeoutHandle;
         }),
       ]);
       lockAcquired = true;
+
+      // Clear lock acquisition timeout since we acquired the lock
+      if (lockAcquisitionTimeoutHandle) {
+        clearTimeout(lockAcquisitionTimeoutHandle);
+        lockAcquisitionTimeoutHandle = null;
+      }
 
       // Execute callback with timeout
       return await Promise.race([
         callback(),
         new Promise<never>((_resolve, reject) => {
-          const timeoutHandle: NodeJS.Timeout = setTimeout(() => {
+          callbackTimeoutHandle = setTimeout(() => {
             reject(new Error(`Lock operation timed out after ${timeout}ms`));
           }, timeout);
-          return timeoutHandle;
         }),
       ]);
     } finally {
+      // Clear any remaining timeout handles
+      if (lockAcquisitionTimeoutHandle) {
+        clearTimeout(lockAcquisitionTimeoutHandle);
+      }
+      if (callbackTimeoutHandle) {
+        clearTimeout(callbackTimeoutHandle);
+      }
+
       if (lockAcquired) {
         try {
           await this.releaseLock();

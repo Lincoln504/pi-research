@@ -2,19 +2,19 @@
 
 [![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 
-Opinionated web research extension for pi coding agent. Provides a set of web research tools and a restricted subagent system which utilizes them to do either quick (single agent) or deep (multi-agent) research.
+Multi-agent web research for pi. Coordinate parallel researchers or run single-agent queries. Search the web, scrape URLs, query security databases, access Stack Exchange, search code, and track progress via terminal UI.
 
 ### Capabilities
 
-- **Single-agent research** (`quick: true`): Fast, focused queries with one researcher
-- **Multi-agent research** (default): Coordinator orchestrates parallel/sequential researchers
-- **Web search**: SearXNG integration via Docker container
-- **URL scraping**: Two-layer architecture (fetch → Playwright fallback for JavaScript-heavy pages)
-- **Security database queries**: NVD, CISA KEV, GitHub Advisories, OSV
-- **Stack Exchange API**: Integration with Stack Overflow and Stack Exchange network
-- **Code search**: ripgrep (rg) with grep fallback for local codebase queries
-- **Terminal UI**: Progress tracking panel showing SearXNG status and active research slices
-- **Proxy support**: (optional, for avoiding search engine rate limits, configure via environment)
+- **Single-agent research** (`quick: true`) — Fast, focused queries with one researcher
+- **Multi-agent research** (default) — Coordinator orchestrates parallel researchers
+- **Web search** — SearXNG via Docker container
+- **URL scraping** — Two-layer architecture (fetch → Playwright for JavaScript-heavy pages)
+- **Security databases** — NVD, CISA KEV, GitHub Advisories, OSV
+- **Stack Exchange** — Query Stack Overflow and Stack Exchange network
+- **Code search** — ripgrep (rg) with grep fallback for local queries
+- **Terminal UI** — Real-time progress tracking with SearXNG status and research slices
+- **Proxy support** — Optional proxy configuration to avoid rate limits
 
 ### Installation
 
@@ -35,14 +35,14 @@ pi -e ./index.ts
 
 #### Via pi agent
 
-Once extension is loaded, ask pi agent to research a topic:
+Ask pi to research a topic:
 ```text
 Please research "What is a binary search tree?"
 ```
 
-#### Via tool invocation
+#### Via CLI
 
-Invoke research tool directly:
+Run research directly:
 ```bash
 pi research "What is a binary search tree?" --quick
 ```
@@ -59,36 +59,36 @@ pi research "What is a binary search tree?" --quick
 
 #### Layers
 
-1. **Extension entry point** (`index.ts`): Registers `research` tool with pi
-2. **Tool orchestration** (`src/tool.ts`): Main entry point for research calls, initializes SearXNG, manages TUI
-3. **Coordinator** (`src/orchestration/coordinator.ts`): Decomposes queries into slices, delegates to researchers, synthesizes findings
-4. **Delegate tool** (`src/orchestration/delegate-tool.ts`): Spawns researcher agents
-5. **Researcher** (`src/orchestration/researcher.ts`): Research agent session management
-6. **SearXNG lifecycle** (`src/infrastructure/searxng-lifecycle.ts`): Docker container management for SearXNG
-7. **State management** (`src/infrastructure/state-manager.ts`): Tracks sessions, token usage, failures
+1. **Extension entry point** (`index.ts`) — Register `research` tool
+2. **Tool orchestration** (`src/tool.ts`) — Main entry point, initialize SearXNG, manage TUI
+3. **Coordinator** (`src/orchestration/coordinator.ts`) — Decompose queries, delegate to researchers, synthesize findings
+4. **Delegate tool** (`src/orchestration/delegate-tool.ts`) — Spawn researcher agents
+5. **Researcher** (`src/orchestration/researcher.ts`) — Manage researcher agent sessions
+6. **SearXNG lifecycle** (`src/infrastructure/searxng-lifecycle.ts`) — Manage Docker container
+7. **State management** (`src/infrastructure/state-manager.ts`) — Track sessions, token usage, failures
 8. **Tools**:
-   - `search.ts`: Web search via SearXNG
-   - `scrape.ts`: URL scraping with retry logic
-   - `security.ts`: Security database queries (NVD, CISA, GitHub, OSV)
-   - `stackexchange.ts`: Stack Exchange API queries
-   - `grep.ts`: Local code search
-9. **Web research** (`src/web-research/`): Search, scraping, retry utilities
-10. **Security** (`src/security/`): Security database integrations
-11. **Stack Exchange** (`src/stackexchange/`): API client, caching, output formatting
-12. **TUI** (`src/tui/`): Terminal UI panel for progress tracking
-13. **Utils**: Shared utilities (text formatting, session state, shared links)
-14. **Prompts**: System prompts for coordinator and researcher agents
+   - `search.ts` — Web search via SearXNG
+   - `scrape.ts` — URL scraping with retry logic
+   - `security.ts` — Query NVD, CISA KEV, GitHub, OSV
+   - `stackexchange.ts` — Query Stack Exchange API
+   - `grep.ts` — Local code search
+9. **Web research** (`src/web-research/`) — Search, scraping, retry utilities
+10. **Security** (`src/security/`) — Security database integrations
+11. **Stack Exchange** (`src/stackexchange/`) — API client, caching, formatting
+12. **TUI** (`src/tui/`) — Terminal UI for progress tracking
+13. **Utils** — Shared utilities (text, session state, link pools)
+14. **Prompts** — System prompts for coordinator and researchers
 
 #### Research workflow
 
-1. **Coordinator receives query**: Assesses complexity level (Level 1/2/3 based on query)
-2. **Delegate research**: Coordinator decomposes query into slices and spawns researcher agents
-3. **Researcher cycles**:
+1. Assess query complexity (Level 1/2/3)
+2. Decompose query into slices and spawn researcher agents
+3. Researchers cycle through phases:
    - Phase 1: 6 rounds of gathering (search, security_search, stackexchange, grep)
-   - Phase 2: Single batch scrape of 5-10 links
+   - Phase 2: Batch scrape 5-10 links
    - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
-4. **Shared link pool**: Automatic coordination via pool of scraped links
-5. **Synthesis**: Coordinator combines slice findings into final answer
+4. Coordinate via shared link pool to avoid duplicate scraping
+5. Synthesize slice findings into final answer
 
 #### Research levels
 
@@ -99,61 +99,62 @@ pi research "What is a binary search tree?" --quick
 
 #### SearXNG management
 
-Managed as singleton Docker container:
-- Initialized on first `research()` call (lazy initialization)
+Singleton Docker container:
+- Lazily initialized on first `research()` call
 - Lives for duration of pi process
-- Shared across agents in all sessions
-- Health checks and automatic restart on failure
+- Shared across all agents and sessions
+- Automatic health checks and restart on failure
 
 #### Shared link pool
 
-Researchers report links in two categories:
-- **CITED LINKS**: URLs scraped and used in findings
-- **SCRAPE CANDIDATES**: URLs found but not scraped
+Report findings in two categories:
+- **CITED LINKS** — URLs scraped and used in findings
+- **SCRAPE CANDIDATES** — URLs found but not yet scraped
 
-Pool is automatically:
-- Built from researcher responses
-- Injected into subsequent researchers' context
-- Used to avoid duplicate scraping
+Automatically:
+- Build pool from researcher responses
+- Inject into subsequent researchers' context
+- Avoid duplicate scraping
 
 ### Configuration
 
-Environment variables can be configured in a `.env` file in the project root.
+Set environment variables in `.env` file (see `.env.example`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
+| `DOCKER_SOCKET` | /var/run/docker.sock | Docker socket path for container management. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
 #### Logging & Verbose Mode
 
-When verbose mode is enabled (via `pi --verbose`), the extension writes timestamped logs to `/tmp/pi-research-debug-{hash}.log`, where `{hash}` is a unique 4-character suffix per run. If verbose mode is not enabled, no log files are created.
+Enable verbose logging with `pi --verbose`. Writes timestamped logs to `/tmp/pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per run). Without verbose mode, no log files are created.
 
 ### Terminal UI
 
-Displays dedicated TUI panel to track progress in real-time.
+Real-time progress tracking with two panels.
 
 #### Components
 
-1. **SearXNG Status** (Left box):
-   - **Service Name**: Shows `SearXNG`, `Offline`, or `Error`.
-   - **Port**: Displays local port (e.g., `:55732`).
-   - **Connections**: Shows active concurrent search connections.
+1. **SearXNG Status** (Left):
+   - Status: `SearXNG`, `Offline`, or `Error`
+   - Port: Local port (e.g., `:55732`)
+   - Connections: Active concurrent search connections
 
-2. **Research Progress** (Right box):
-   - **Header**: Displays active model (e.g., `qwen/qwen3.5-35b-a3b`) and cumulative token usage.
-   - **Slices**: Vertical columns representing research "slices" or agents.
-   - **Status Indicators**: 
-     - `1:1`, `2:1`: Active/Running.
-     - `✓1:1`: Completed successfully.
-     - **Flash effects**: Slices flash **green** on successful tool calls and **red** on errors.
+2. **Research Progress** (Right):
+   - Header: Active model and cumulative token usage
+   - Slices: Vertical columns per research slice/agent
+   - Status:
+     - `1:1`, `2:1` = Active/Running
+     - `✓1:1` = Completed
+     - Flash **green** on success, **red** on error
 
 #### Modes
 
-- **Deep Mode** (Default): Shows multiple slice columns as coordinator delegates work to parallel researchers.
-- **Quick Mode**: Shows exactly one research slice box for single researcher.
+- **Deep Mode** (Default) — Multiple slice columns for parallel researchers
+- **Quick Mode** — Single research slice for one researcher
 
 #### Layout Example
 

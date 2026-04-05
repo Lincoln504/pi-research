@@ -72,6 +72,8 @@ interface PlaywrightModule {
   };
 }
 
+import { shutdownManager } from '../utils/shutdown-manager.ts';
+
 // ============================================================================
 // Module State
 // ============================================================================
@@ -80,6 +82,7 @@ let playwrightAvailable: boolean = false;
 
 export function initScraperDependencies(): void {
   playwrightAvailable = checkModule('playwright');
+  shutdownManager.register(stopChromium);
 }
 
 // ============================================================================

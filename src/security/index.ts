@@ -95,10 +95,10 @@ export interface SecuritySearcherConfig {
 }
 
 const DEFAULT_CONFIG: Required<SecuritySearcherConfig> = {
-  nvdClient: null as any, // Will be set to default implementation
-  cisaKevClient: null as any,
-  githubAdvisoriesClient: null as any,
-  osvClient: null as any,
+  nvdClient: null as unknown as INVDClient,
+  cisaKevClient: null as unknown as ICisaKevClient,
+  githubAdvisoriesClient: null as unknown as IGitHubAdvisoriesClient,
+  osvClient: null as unknown as IOSVClient,
   requestDelay: 6500,
 };
 

@@ -40,9 +40,8 @@ Describe how you tested these changes:
 - [ ] My code follows the project's code style
 - [ ] I have performed a self-review of my own code
 - [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
+- [ ] I have made corresponding changes to the documentation (README.md, etc.)
 - [ ] My changes generate no new warnings
-- [ ] I have updated the CHANGELOG.md (if applicable)
 
 ## Screenshots (if applicable)
 

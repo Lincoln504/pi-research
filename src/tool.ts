@@ -32,7 +32,7 @@ import {
   createInitialPanelState,
 } from './tui/research-panel.ts';
 import { formatParentContext } from './orchestration/session-context.ts';
-import { extractText } from './utils/text-utils.ts';
+import { extractText, ensureAssistantResponse } from './utils/text-utils.ts';
 import {
   initLifecycle,
   ensureRunning,
@@ -135,7 +135,7 @@ export function createResearchTool(): ToolDefinition {
       // 3. Resolve model — use specified model ID if valid, else fall back to active model
       let selectedModel = ctx.model;
       if (modelId) {
-        const found = ctx.modelRegistry.getAll().find((m: any) => m.id === modelId);
+        const found = ctx.modelRegistry.getAll().find((m) => m.id === modelId);
         if (found) {
           selectedModel = found;
           logger.log(`[research] Using model: ${modelId}`);
@@ -416,9 +416,8 @@ export function createResearchTool(): ToolDefinition {
               }
             })
           ]);
-          const msgs = coordinatorSession.messages;
-          const last = [...msgs].reverse().find((m) => m.role === 'assistant');
-          const text = extractText(last) || 'No answer synthesized.';
+          
+          const text = ensureAssistantResponse(coordinatorSession, 'coordinator') || 'No answer synthesized.';
           cleanup();
           return { content: [{ type: 'text', text }], details: { totalTokens: panelState.totalTokens } };
         } catch (error) {

@@ -4,7 +4,7 @@
  * Shared utilities for API rate limiting, retry logic with exponential backoff,
  * and timeout signal creation with Node.js compatibility.
  *
- * Used by: NVD, GitHub Advisories, OSV, CISA KEV, Search
+ * Used by: NVD, GitHub Advisories, OSV, CISA KEV, Search, Delegate Research
  */
 
 import { logger } from '../logger.ts';
@@ -20,12 +20,6 @@ interface TimeoutHandle {
   unref?(): void;
 }
 
-/**
- * Extend the global setTimeout return type for our purposes
- */
-// Note: Global setTimeout is already properly typed in modern TypeScript/Node.js
-// This ensures compatibility with our TimeoutHandle interface
-
 // ============================================================================
 // Retry Options
 // ============================================================================
@@ -34,6 +28,8 @@ export interface RetryOptions {
   readonly maxRetries: number;
   readonly initialDelay: number;
   readonly maxDelay: number;
+  readonly label?: string;
+  readonly isTransientError?: (error: unknown) => boolean;
 }
 
 // ============================================================================
@@ -70,20 +66,107 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
   }
 }
 
+/**
+ * Wraps a promise with a timeout and abort signal support
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  signal?: AbortSignal
+): Promise<T> {
+  const timeoutController = new AbortController();
+  const timeoutSignal = timeoutController.signal;
+  const combinedSignal = signal
+    ? AbortSignal.any([timeoutSignal, signal])
+    : timeoutSignal;
+    
+  logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
+
+  let raceWon = false;
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  const wrappedPromise = promise.then((val) => {
+    raceWon = true;
+    if (timeoutId) clearTimeout(timeoutId);
+    return val;
+  });
+
+  const rejectPromise = new Promise<T>((_, reject) => {
+    // Timeout handler
+    timeoutId = setTimeout(() => {
+      logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
+      timeoutController.abort();
+      reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    // Unref so it doesn't keep the process alive
+    (timeoutId as TimeoutHandle).unref?.();
+
+    if (combinedSignal.aborted) {
+      logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
+      if (timeoutId) clearTimeout(timeoutId);
+      reject(new Error(`${label} cancelled`));
+    } else {
+      combinedSignal.addEventListener('abort', () => {
+        if (!raceWon) {
+          logger.error(`[withTimeout] ${label} ABORT SIGNAL FIRED`);
+          if (timeoutId) clearTimeout(timeoutId);
+          reject(new Error(`${label} cancelled`));
+        }
+      }, { once: true });
+    }
+  });
+
+  return Promise.race([wrappedPromise, rejectPromise]).finally(() => {
+    // Clean up on completion or error
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutController.abort();
+  });
+}
+
 // ============================================================================
 // Retry with Exponential Backoff
 // ============================================================================
 
 /**
+ * Default transient error detector
+ */
+export function isTransientError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  // Network errors
+  if (message.includes('econnrefused') || message.includes('enotfound') || message.includes('timeout') || message.includes('etimedout')) {
+    return true;
+  }
+
+  // Rate limiting
+  if (message.includes('429') || message.includes('rate') || message.includes('quota')) {
+    return true;
+  }
+
+  // Temporary service unavailability or server errors
+  if (
+    message.includes('503') || 
+    message.includes('500') || 
+    message.includes('502') || 
+    message.includes('504') ||
+    message.includes('temporarily') || 
+    message.includes('unavailable') ||
+    message.includes('http 5')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Retry helper with exponential backoff and jitter for transient errors.
- *
- * Retryable errors:
- * - HTTP 429 (rate limit)
- * - HTTP 5xx (server errors)
- *
- * Non-retryable errors:
- * - HTTP 4xx (client errors, except 429)
- * - Network errors that aren't timeout
  *
  * @param fn - The async function to retry
  * @param options - Retry configuration
@@ -98,6 +181,8 @@ export async function retryWithBackoff<T>(
     maxRetries: 3,
     initialDelay: 1000,
     maxDelay: 10000,
+    label: 'operation',
+    isTransientError: options.isTransientError ?? isTransientError,
     ...options,
   };
 
@@ -110,13 +195,7 @@ export async function retryWithBackoff<T>(
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Check if this is a retryable error (429 rate limit or 5xx server errors)
-      const isRetryable =
-        lastError.message.includes('HTTP 429') ||
-        lastError.message.includes('rate limit') ||
-        lastError.message.includes('HTTP 5');
-
-      if (!isRetryable || attempt === opts.maxRetries) {
+      if (!opts.isTransientError(lastError) || attempt === opts.maxRetries) {
         throw lastError;
       }
 
@@ -125,9 +204,9 @@ export async function retryWithBackoff<T>(
       const jitter = Math.random() * 0.5 * baseDelay; // ±50% jitter
       const delay = Math.min(baseDelay + jitter, opts.maxDelay);
 
-      logger.warn(`[Retry] Request failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
+      logger.warn(`[Retry] ${opts.label} failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
 
-      // Unref the timeout so it doesn't prevent process exit
+      // Wait before retrying
       await new Promise<void>(resolve => {
         const timeoutId = setTimeout(resolve, delay);
         (timeoutId as TimeoutHandle).unref?.();

@@ -17,7 +17,6 @@ import Docker from 'dockerode';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { StateManager } from './state-manager';
 import { logger } from '../logger.ts';
 

@@ -7,11 +7,12 @@
 
 import type { AgentSession, ModelRegistry, SessionManager, SettingsManager, ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createAgentSession, createReadTool } from '@mariozechner/pi-coding-agent';
+import type { Model } from '@mariozechner/pi-ai';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 
 export interface CreateCoordinatorSessionOptions {
   cwd: string;
-  ctxModel: any; // Model<any> | undefined
+  ctxModel: Model<any> | undefined;
   modelRegistry: ModelRegistry;
   sessionManager: SessionManager;
   settingsManager: SettingsManager;
@@ -22,6 +23,7 @@ export interface CreateCoordinatorSessionOptions {
 export async function createCoordinatorSession(options: CreateCoordinatorSessionOptions): Promise<AgentSession> {
   const { cwd, ctxModel, modelRegistry, sessionManager, settingsManager, systemPrompt, customTools = [] } = options;
 
+  // Validate required parameters
   if (!ctxModel) {
     throw new Error('No model selected. Please select a model before using the research tool.');
   }

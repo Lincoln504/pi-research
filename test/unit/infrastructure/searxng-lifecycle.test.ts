@@ -7,7 +7,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import type { DockerSearxngManager } from '../../src/infrastructure/searxng-manager';
+import type { DockerSearxngManager } from '../../../src/infrastructure/searxng-manager.ts';
 import {
   SearxngLifecycleManager,
   createSearxngLifecycleManager,

@@ -4,9 +4,7 @@
  * Tests security_search, stackexchange, and grep tools in a real environment.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
+import { describe, it, expect } from 'vitest';
 import { createSecuritySearchTool } from '../../src/tools/security.ts';
 import { createStackexchangeTool } from '../../src/tools/stackexchange.ts';
 import { createGrepTool } from '../../src/tools/grep.ts';

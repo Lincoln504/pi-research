@@ -70,8 +70,7 @@ export function createConfig(env: Record<string, string | undefined> = process.e
     RESEARCHER_TIMEOUT_MS: parseEnvNumber(
       env,
       'PI_RESEARCH_RESEARCHER_TIMEOUT_MS',
-      DEFAULTS.RESEARCHER_TIMEOUT_MS,
-      10
+      DEFAULTS.RESEARCHER_TIMEOUT_MS
     ),
     PROXY_URL: parseEnvString(env, 'PROXY_URL'),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(
@@ -141,17 +140,21 @@ export function validateConfig(config: Config = getConfig()): void {
 // ============================================================================
 
 /**
- * @deprecated Use getConfig() instead
+ * @deprecated Use getConfig().RESEARCHER_TIMEOUT_MS instead
+ * Returns current config value - reflects environment changes if config is reset
  */
-export const RESEARCHER_TIMEOUT_MS = (() => {
-  const config = getConfig();
-  return config.RESEARCHER_TIMEOUT_MS;
-})();
+export function getResearcherTimeoutMs(): number {
+  return getConfig().RESEARCHER_TIMEOUT_MS;
+}
 
 /**
- * @deprecated Use getConfig() instead
+ * @deprecated Use getConfig().PROXY_URL instead
+ * Returns current config value - reflects environment changes if config is reset
  */
-export const PROXY_URL = (() => {
-  const config = getConfig();
-  return config.PROXY_URL;
-})();
+export function getProxyUrl(): string | undefined {
+  return getConfig().PROXY_URL;
+}
+
+// Legacy variable exports (for backward compatibility, but reflect module load time values)
+export const RESEARCHER_TIMEOUT_MS = getResearcherTimeoutMs();
+export const PROXY_URL = getProxyUrl();

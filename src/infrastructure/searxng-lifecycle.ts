@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { PROXY_URL } from '../config.ts';
 import { getActiveConnectionCount } from '../web-research/utils.ts';
+import { shutdownManager } from '../utils/shutdown-manager.ts';
 
 /**
  * Extension directory for pi-research
@@ -462,6 +463,8 @@ export function getManager(): DockerSearxngManager | null {
  */
 export async function initLifecycle(ctx: ExtensionContext): Promise<void> {
   await getLifecycleManager().init(ctx);
+  // Register for global process shutdown
+  shutdownManager.register(shutdownLifecycle);
 }
 
 /**

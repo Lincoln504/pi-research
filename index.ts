@@ -11,9 +11,13 @@ import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './src/tool.ts';
 import { logger, suppressConsole, isVerboseFromEnv } from './src/logger.ts';
 import { checkDockerAvailability } from './src/infrastructure/searxng-lifecycle.ts';
+import { shutdownManager } from './src/utils/shutdown-manager.ts';
 
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Extension loading...');
+  
+  // Setup global shutdown hooks
+  shutdownManager.setup();
 
   // Suppress console output globally (catches third-party modules like SearXNG).
   // Pi's TUI doesn't use console.* directly, so this is safe for the entire session.
@@ -33,7 +37,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (isVerboseFromEnv()) {
-      ctx.ui.notify('pi-research: debug log → /tmp/pi-research-debug.log', 'info');
+      ctx.ui.notify('pi-research: debug log → /tmp/pi-research-debug-{hash}.log', 'info');
     }
   });
 

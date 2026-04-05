@@ -11,9 +11,7 @@
     "prompts/",
     "config/",
     "LICENSE",
-    "README.md",
-    "CHANGELOG.md",
-    "CONTRIBUTING.md"
+    "README.md"
   ],
   "repository": {
     "type": "git",
