@@ -25,6 +25,14 @@ import {
 } from './output/compact';
 import type { ExtensionContext, AgentToolResult } from '@mariozechner/pi-coding-agent';
 
+function notify(
+  ctx: ExtensionContext,
+  message: string,
+  type: 'info' | 'warning' | 'error',
+): void {
+  ctx.ui?.notify?.(message, type);
+}
+
 /**
  * Load configuration from environment variables or defaults
  */
@@ -61,7 +69,8 @@ export async function stackexchangeCommand(options: {
     // Check quota before making requests
     if (client.isQuotaExhausted()) {
       const quota = client.getQuotaInfo();
-      ctx.ui.notify(
+      notify(
+        ctx,
         `Stack Exchange API quota exhausted (${quota.remaining}/${quota.max} remaining)`,
         'error',
       );
@@ -77,7 +86,8 @@ export async function stackexchangeCommand(options: {
     // Warn if quota is low
     if (client.isQuotaLow()) {
       const quota = client.getQuotaInfo();
-      ctx.ui.notify(
+      notify(
+        ctx,
         `Stack Exchange API quota low: ${quota.remaining}/${quota.max} remaining`,
         'warning',
       );
@@ -127,7 +137,7 @@ export async function stackexchangeCommand(options: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`Stack Exchange error: ${message}`, 'error');
+    notify(ctx, `Stack Exchange error: ${message}`, 'error');
     return {
       content: [{ type: 'text', text: `❌ Stack Exchange error: ${message}` }],
       details: {

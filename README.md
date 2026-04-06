@@ -18,9 +18,36 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Installation
 
-tododododo
+Requirements:
 
-Requires Docker to be installed.
+- Node.js `22.13.0` or any supported `24.x+` release (`.nvmrc` pins `22.13.0`)
+- `pi` CLI installed on your machine
+- Docker installed and running for SearXNG-backed web search
+
+Setup:
+
+```bash
+# Use the pinned Node version
+nvm use
+
+# Install dependencies
+npm install
+
+# Optional: create local config file
+cp .env.example .env
+```
+
+Install into `pi` from this repo:
+
+```bash
+pi install .
+```
+
+Or load it directly for a single session:
+
+```bash
+pi -e ./index.ts
+```
 
 ### Usage
 
@@ -139,8 +166,6 @@ pi-research/
 ### Development
 
 ```bash
-cd pi-research
-
 # Install dependencies
 npm install
 

@@ -35,6 +35,9 @@
   ],
   "author": "Lincoln504",
   "license": "MIT",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
   "scripts": {
     "lint": "npx eslint --config configs/eslint.config.js src/",
     "lint:fix": "npx eslint --config configs/eslint.config.js src/ --fix",
@@ -54,9 +57,12 @@
     "@kreuzberg/html-to-markdown-node": "^2.28.2",
     "dockerode": "^4.0.10",
     "js-yaml": "^4.1.1",
+    "node-html-markdown": "^2.0.0",
     "playwright": "^1.52.0"
   },
   "optionalDependencies": {
+    "@kreuzberg/html-to-markdown-node-darwin-arm64": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-darwin-x64": "^2.30.0",
     "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
   },
   "peerDependencies": {

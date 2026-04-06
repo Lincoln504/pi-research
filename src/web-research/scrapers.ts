@@ -5,16 +5,11 @@
  * Layer 1: fetch (Node built-in, concurrent, no browser overhead)
  * Layer 2: Playwright + Chromium (standard headless, for JS-heavy sites)
  *
- * Content filtering uses html-to-markdown's visitor pattern
- * The native NAPI bindings require visitor callbacks to return JSON strings
+ * Native HTML-to-Markdown conversion is preferred when available because it
+ * offers the best filtering control. On macOS, the upstream native package is
+ * currently published without the actual binary artifact, so we lazily fall
+ * back to a pure-JS converter instead of failing module load.
  */
-
-import {
-  convertWithVisitor,
-  JsHeadingStyle,
-  JsCodeBlockStyle,
-  type JsNodeContext,
-} from '@kreuzberg/html-to-markdown-node';
 
 import {
   PRIMARY_SCRAPER_TIMEOUT,
@@ -28,6 +23,7 @@ import {
   checkModule,
 } from './utils.ts';
 import { logger } from '../logger.ts';
+import { NodeHtmlMarkdown } from 'node-html-markdown';
 
 // ============================================================================
 // Type Definitions
@@ -79,6 +75,37 @@ import { shutdownManager } from '../utils/shutdown-manager.ts';
 // ============================================================================
 
 let playwrightAvailable: boolean = false;
+let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
+
+interface NativeJsNodeContext {
+  tagName: string;
+}
+
+interface NativeHtmlToMarkdownModule {
+  convertWithVisitor(
+    html: string,
+    options: {
+      headingStyle: unknown;
+      codeBlockStyle: unknown;
+      wrap: boolean;
+    },
+    visitor: Record<string, (_ctxJson?: string) => Promise<string>>,
+  ): Promise<string>;
+  JsHeadingStyle: { Atx: unknown };
+  JsCodeBlockStyle: { Backticks: unknown };
+}
+
+const FILTERED_TAGS = [
+  'nav', 'header', 'footer', 'aside',
+  'script', 'style', 'noscript',
+  'form', 'input', 'select', 'textarea', 'button',
+  'object', 'embed',
+  'svg', 'symbol', 'use', 'defs', 'path', 'circle', 'rect', 'line', 'polygon',
+  'img', 'iframe',
+] as const;
+
+const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png|jpe?g|gif|webp|bmp|ico)(?:\?[^)]*)?)\)/gi;
+const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((?:data:image\/[^)]+|[^)\s]+)\)/gi;
 
 export function initScraperDependencies(): void {
   playwrightAvailable = checkModule('playwright');
@@ -183,6 +210,33 @@ export async function stopChromium(): Promise<void> {
  * The native NAPI bindings expect callbacks with signature: (jsonString: string) => Promise<string>
  */
 async function convertToMarkdown(html: string): Promise<string> {
+  const converter = await getMarkdownConverter();
+  return converter(html);
+}
+
+async function getMarkdownConverter(): Promise<(html: string) => Promise<string>> {
+  if (markdownConverterPromise !== null) {
+    return markdownConverterPromise;
+  }
+
+  markdownConverterPromise = (async () => {
+    try {
+      const nativeModule = await import('@kreuzberg/html-to-markdown-node') as NativeHtmlToMarkdownModule;
+      logger.debug('[Scrapers] Using native HTML-to-Markdown converter');
+      return createNativeMarkdownConverter(nativeModule);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`[Scrapers] Native HTML-to-Markdown unavailable, falling back to pure JS converter: ${errorMessage}`);
+      return createJsMarkdownConverter();
+    }
+  })();
+
+  return markdownConverterPromise;
+}
+
+function createNativeMarkdownConverter(
+  nativeModule: NativeHtmlToMarkdownModule,
+): (html: string) => Promise<string> {
   // Visitor object for element-level filtering
   // Each method receives JSON context string and must return JSON result string
   const visitor = {
@@ -200,8 +254,8 @@ async function convertToMarkdown(html: string): Promise<string> {
      * These appear as [text](data:image/svg+xml;base64,...) in markdown output
      */
      
-    async visitLink(ctxJson: string): Promise<string> {
-      const parsed = JSON.parse(ctxJson) as { href?: string };
+    async visitLink(ctxJson?: string): Promise<string> {
+      const parsed = JSON.parse(ctxJson ?? '{}') as { href?: string };
       const href = parsed.href;
       if (href !== undefined && (
         href.startsWith('data:image/svg+xml') ||
@@ -232,33 +286,47 @@ async function convertToMarkdown(html: string): Promise<string> {
      * visitImage callback is NOT triggered for inline <svg> elements
      */
      
-    async visitElementStart(ctxJson: string): Promise<string> {
+    async visitElementStart(ctxJson?: string): Promise<string> {
       // Parse JSON context string to object
-      const ctx = JSON.parse(ctxJson) as JsNodeContext;
-      const skipTags: string[] = [
-        'nav', 'header', 'footer', 'aside',
-        'script', 'style', 'noscript',
-        'form', 'input', 'select', 'textarea', 'button',
-        'object', 'embed',
-        // SVG elements get converted to base64 images by html-to-markdown
-        // visitImage callback is NOT triggered for inline <svg> elements
-        'svg', 'symbol', 'use', 'defs', 'path', 'circle', 'rect', 'line', 'polygon',
-      ];
-      if (skipTags.includes(ctx.tagName)) {
+      const ctx = JSON.parse(ctxJson ?? '{}') as Partial<NativeJsNodeContext>;
+      if (ctx.tagName !== undefined && (FILTERED_TAGS as readonly string[]).includes(ctx.tagName)) {
         return JSON.stringify({ type: 'skip' });
       }
       return JSON.stringify({ type: 'continue' });
     },
   };
 
-  // Use convertWithVisitor with the visitor and list configuration
-  const markdown = await convertWithVisitor(html, {
-    headingStyle: JsHeadingStyle.Atx,
-    codeBlockStyle: JsCodeBlockStyle.Backticks,
-    wrap: false,
-  }, visitor);
+  return async (html: string): Promise<string> => {
+    const markdown = await nativeModule.convertWithVisitor(html, {
+      headingStyle: nativeModule.JsHeadingStyle.Atx,
+      codeBlockStyle: nativeModule.JsCodeBlockStyle.Backticks,
+      wrap: false,
+    }, visitor);
+    return stripImageLinks(markdown);
+  };
+}
 
-  return markdown;
+function createJsMarkdownConverter(): (html: string) => Promise<string> {
+  const converter = new NodeHtmlMarkdown({
+    codeBlockStyle: 'fenced',
+    textReplace: [
+      [/\u00a0/g, ' '],
+    ],
+    ignore: [...FILTERED_TAGS],
+  });
+
+  return async (html: string): Promise<string> => {
+    const markdown = converter.translate(html);
+    return stripImageLinks(markdown);
+  };
+}
+
+function stripImageLinks(markdown: string): string {
+  return markdown
+    .replace(MARKDOWN_IMAGE_PATTERN, '')
+    .replace(IMAGE_LINK_PATTERN, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // ============================================================================
