@@ -6,24 +6,24 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Capabilities
 
-- **Single-agent research** (`quick: true`) — Fast, focused queries with one researcher
-- **Multi-agent research** (default) — Coordinator orchestrates parallel researchers
-- **Web search** — SearXNG via Docker container
-- **URL scraping** — Two-layer architecture (fetch → Playwright for JavaScript-heavy pages)
-- **Security databases** — NVD, CISA KEV, GitHub Advisories, OSV
-- **Stack Exchange** — Query Stack Overflow and Stack Exchange network
-- **Code search** — ripgrep (rg) with grep fallback for local queries
-- **Terminal UI** — Real-time progress tracking with SearXNG status and researcher progress
-- **Proxy support** — Optional proxy configuration to avoid rate limits
+- Single-agent research (`quick: true`) — Fast, focused queries with one researcher
+- Multi-agent research (default) — Coordinator orchestrates parallel researchers
+- Web search — SearXNG via Docker container
+- URL scraping — Two-layer architecture (fetch → Playwright for JavaScript-heavy pages)
+- Security databases — NVD, CISA KEV, GitHub Advisories, OSV
+- Stack Exchange — Query Stack Overflow and Stack Exchange network
+- Code search — ripgrep (rg) with grep fallback for local queries
+- Terminal UI — Real-time progress tracking with SearXNG status and researcher progress
+- Proxy support — Optional proxy configuration to avoid rate limits
 
 ### Installation
 
-#### From npm
+Install as a pi package:
 ```bash
-npm install -g pi-research
+npm install pi-research
 ```
 
-#### From source
+Or load directly from source:
 ```bash
 git clone https://github.com/Lincoln504/pi-research.git
 cd pi-research
@@ -31,81 +31,33 @@ npm install
 pi -e ./index.ts
 ```
 
-**Note:** Requires Docker to be installed.
+Requires Docker to be installed.
 
 ### Usage
 
-#### Via pi agent
+Once installed, ask for research. The model will use the research tool naturally:
 
-Ask pi to research a topic:
 ```text
-Please research "What is a binary search tree?"
+Research "What is a binary search tree?"
 ```
 
-#### Via CLI
-
-Run research directly:
-```bash
-pi research "What is a binary search tree?" --quick
-```
-
-#### Parameters
-
-| Parameter | Type    | Default | Description                                             |
-|-----------|---------|---------|---------------------------------------------------------|
-| `query`   | string  | required| Research query or topic to investigate                  |
-| `quick`   | boolean | false   | Enable quick mode: single researcher session (Level 0)  |
-| `model`   | string  | -       | Model ID for research agents (defaults to active model) |
+The research tool supports parameters: `query` (required, the research topic), `quick` (boolean, defaults to false for multi-agent coordination), and `model` (optional, defaults to active model).
 
 ### Architecture
 
-#### Layers
+Entry point (`index.ts`) registers the research tool. The tool orchestration layer (`src/tool.ts`) initializes SearXNG, manages the TUI, and branches between quick and deep modes.
 
-1. **Extension entry point** (`index.ts`) — Register `research` tool
-2. **Tool orchestration** (`src/tool.ts`) — Main entry point, initialize SearXNG, manage TUI
-3. **Coordinator** (`src/orchestration/coordinator.ts`) — Decompose queries, delegate to researchers, synthesize findings
-4. **Delegate tool** (`src/orchestration/delegate-tool.ts`) — Spawn researcher agents
-5. **Researcher** (`src/orchestration/researcher.ts`) — Manage researcher agent sessions
-6. **SearXNG lifecycle** (`src/infrastructure/searxng-lifecycle.ts`) — Manage Docker container
-7. **State management** (`src/infrastructure/state-manager.ts`) — Track sessions, token usage, failures
-8. **Tools**:
-   - `search.ts` — Web search via SearXNG
-   - `scrape.ts` — URL scraping with retry logic
-   - `security.ts` — Query NVD, CISA KEV, GitHub, OSV
-   - `stackexchange.ts` — Query Stack Exchange API
-   - `grep.ts` — Local code search
-9. **Web research** (`src/web-research/`) — Search, scraping, retry utilities
-10. **Security** (`src/security/`) — Security database integrations
-11. **Stack Exchange** (`src/stackexchange/`) — API client, caching, formatting
-12. **TUI** (`src/tui/`) — Terminal UI for progress tracking
-13. **Utils** — Shared utilities (text, session state, link pools)
-14. **Prompts** — System prompts for coordinator and researchers
+In deep mode, a coordinator agent (`src/orchestration/coordinator.ts`) decomposes the query into research aspects and spawns parallel researcher agents via the delegate tool (`src/orchestration/delegate-tool.ts`). Researchers (`src/orchestration/researcher.ts`) cycle through three phases: gathering (6 rounds max via search, security_search, stackexchange, grep), batch scraping (5-10 URLs), and reporting findings with cited links and scrape candidates. A shared link pool coordinates across researchers to avoid duplicate scraping.
 
-#### Research workflow
+In quick mode, a single researcher session runs without a coordinator, returning results directly.
 
-1. Assess query complexity (Level 1/2/3)
-2. Decompose query into research aspects and spawn researcher agents
-3. Researchers cycle through phases:
-   - Phase 1: 6 rounds or less of gathering (search, security_search, stackexchange, grep)
-   - Phase 2: Batch scrape 5-10 links
-   - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
-4. Coordinate via shared link pool to avoid duplicate scraping
-5. Synthesize researcher findings into final answer
+SearXNG manages a singleton Docker container (`src/infrastructure/searxng-lifecycle.ts`) that's lazily initialized on first call and lives for the pi process duration. Tools include search (web via SearXNG), scrape (with retry and JS rendering), security (NVD, CISA KEV, GitHub, OSV), stackexchange (Stack Exchange API), and grep (local code search). Web research utilities handle searching, scraping, and retries; security utilities integrate multiple databases; Stack Exchange utilities handle API access and caching.
 
-#### Research levels
+Complexity assessment determines researcher count:
 
-- **Level 0 (Quick)**: No coordinator, single researcher session. (Activated by using the `quick` parameter).
-- **Level 1 (Brief)**: 1–2 researchers. Default for simple factual queries.
-- **Level 2 (Normal)**: 2–3 researchers. For technical/multi-faceted topics.
-- **Level 3 (Deep)**: 3–5 researchers. For complex cross-domain analysis.
-
-#### SearXNG management
-
-Singleton Docker container:
-- Lazily initialized on first `research()` call
-- Lives for duration of pi process
-- Shared across all agents and sessions
-- Automatic health checks and restart on failure
+- Level 1 (Brief) — 1–2 researchers. Default for simple factual queries.
+- Level 2 (Normal) — 2–3 researchers. For technical/multi-faceted topics.
+- Level 3 (Deep) — 3–5 researchers. For complex cross-domain analysis.
 
 ### Configuration
 
@@ -119,28 +71,11 @@ Set environment variables in `.env` file (see `.env.example`):
 | `DOCKER_SOCKET` | /var/run/docker.sock | Docker socket path for container management. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
-#### Logging & Verbose Mode
-
-Enable verbose logging with `pi --verbose`. Writes timestamped logs to `/tmp/pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per run). Without verbose mode, no log files are created.
+Enable verbose logging with `pi --verbose`. Logs are written to `/tmp/pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per run). Without verbose mode, no log files are created.
 
 ### Terminal UI
 
-Real-time progress tracking with two panels.
-
-#### Components
-
-1. **SearXNG Status** (Left):
-   - Status: `SearXNG`, `Offline`, or `Error`
-   - Port: Local port (e.g., `:55732`)
-   - Connections: Active concurrent search connections
-
-2. **Research Progress** (Right):
-   - Header: Active model and cumulative token usage
-   - Researchers: Vertical columns per researcher agent
-   - Status:
-     - `1`, `2` = Active/Running
-     - `✓1` = Completed
-     - Flash **green** on tool success, **red** on tool error
+Real-time progress tracking with two panels. The left panel shows SearXNG status (status, port, active connections). The right panel shows research progress with the active model, cumulative token usage, researcher columns (numbered 1, 2, 3...), completion status (`✓1`, `✓2`), and tool results (flashing green on success, red on error).
 
 ```text
 ┌───────┐ ┌─ Research | qwen/qwen3.5-35b-a3b  40.5k ──┐
@@ -149,11 +84,6 @@ Real-time progress tracking with two panels.
 │1      │ │           │           │             │
 └───────┘ └───────────┴───────────┴─────────────┘
 ```
-
-#### Modes
-
-- **Deep Mode** (Default) — Multiple parallel researchers determined by complexity level. Coordinator agent returns consolidated report.
-- **Quick Mode** — Single researcher session, results returned directly.
 
 ### Project structure
 
@@ -185,7 +115,6 @@ pi-research/
 │   ├── stackexchange/       # Stack Exchange API integration
 │   ├── tui/                 # Terminal UI components
 │   └── utils/               # Shared utilities
-│       └── make-resource-loader.ts # Resource loader factory
 ├── prompts/
 │   ├── coordinator.md       # Coordinator system prompt
 │   └── researcher.md        # Researcher system prompt
@@ -217,14 +146,14 @@ npm test
 
 All dependencies (except Docker) are installed with the extension.
 
-- `@mariozechner/pi-coding-agent`: pi core SDK
-- `@sinclair/typebox`: Parameter schema validation
-- `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion
-- `js-yaml`: YAML parsing for SearXNG settings
-- `playwright`: Headless browser for JS-heavy web scraping
-- `chromium`: Browser engine for Playwright (auto-installed)
-- `dockerode`: Docker API client for container management (requires Docker installed separately)
-- `Native fetch`: Built-in Node.js fetch for HTTP requests
+- `@mariozechner/pi-coding-agent` — pi core SDK
+- `@sinclair/typebox` — Parameter schema validation
+- `@kreuzberg/html-to-markdown-node` — HTML to Markdown conversion
+- `js-yaml` — YAML parsing for SearXNG settings
+- `playwright` — Headless browser for JS-heavy web scraping
+- `chromium` — Browser engine for Playwright (auto-installed)
+- `dockerode` — Docker API client for container management (requires Docker installed separately)
+- Native fetch — Built-in Node.js fetch for HTTP requests
 
 ### License
 
