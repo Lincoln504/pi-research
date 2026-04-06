@@ -8,8 +8,12 @@ on:
 
 jobs:
   lint:
-    name: Lint
-    runs-on: ubuntu-latest
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,8 +32,12 @@ jobs:
         run: npm run lint
 
   type-check:
-    name: Type Check
-    runs-on: ubuntu-latest
+    name: Type Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,8 +56,12 @@ jobs:
         run: npm run type-check
 
   test-unit:
-    name: Unit Tests
-    runs-on: ubuntu-latest
+    name: Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
