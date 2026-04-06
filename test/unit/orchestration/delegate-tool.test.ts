@@ -126,15 +126,6 @@ describe('delegate-tool', () => {
       expect((tool.parameters as any).properties).toHaveProperty('slices');
     });
 
-    it('should have optional iterateOn parameter', () => {
-      const tool = createDelegateTool(createMockOptions());
-      expect((tool.parameters as any).properties).toHaveProperty('iterateOn');
-    });
-
-    it('should have optional iterationNumber parameter', () => {
-      const tool = createDelegateTool(createMockOptions());
-      expect((tool.parameters as any).properties).toHaveProperty('iterationNumber');
-    });
 
     it('should have execute function', () => {
       const tool = createDelegateTool(createMockOptions());

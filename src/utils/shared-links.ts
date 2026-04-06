@@ -1,7 +1,7 @@
 /**
  * Shared Links Pool Management
  *
- * Maintains a shared pool of links across research slices to prevent
+ * Maintains a shared pool of links across researchers to prevent
  * redundant scraping and enable coordination between researchers.
  *
  * Files are stored as: /tmp/research-links-{baseId}{hash}.json
@@ -17,7 +17,7 @@ import * as crypto from 'crypto';
 import { logger } from '../logger.ts';
 
 /**
- * A single entry in the shared links pool for one slice
+ * A single entry in the shared links pool for one researcher
  */
 export interface SharedLinksEntry {
   /** Links that were actually cited in the researcher's summary */
@@ -34,11 +34,11 @@ export interface SharedLinksEntry {
 }
 
 /**
- * The complete shared links pool across all slices
- * Maps slice ID (e.g., "1:1", "2:1") to their links
+ * The complete shared links pool across all researchers
+ * Maps researcher ID (e.g., "1", "2") to their links
  */
 export interface SharedLinksPool {
-  [sliceId: string]: SharedLinksEntry;
+  [researcherId: string]: SharedLinksEntry;
 }
 
 /**
@@ -115,15 +115,15 @@ export function parseResearcherLinks(researcherResponse: string): ParsedLinks {
 
 /**
  * Build a shared links pool from multiple researcher responses
- * @param responses Map of slice ID to researcher response
+ * @param responses Map of researcher ID to researcher response
  * @returns Complete shared links pool
  */
 export function buildSharedLinksPool(responses: Map<string, string>): SharedLinksPool {
   const pool: SharedLinksPool = {};
 
-  for (const [sliceId, response] of responses.entries()) {
+  for (const [researcherId, response] of responses.entries()) {
     const { cited, candidates } = parseResearcherLinks(response);
-    pool[sliceId] = { cited, candidates };
+    pool[researcherId] = { cited, candidates };
   }
 
   return pool;
@@ -199,8 +199,8 @@ export function formatSharedLinksForPrompt(pool: SharedLinksPool | null): string
   let output = '## Shared Links from Previous Research\n\n';
   output += 'The following links have been examined by other researchers:\n\n';
 
-  for (const [sliceId, entry] of Object.entries(pool).sort()) {
-    output += `### Slice ${sliceId}\n\n`;
+  for (const [researcherId, entry] of Object.entries(pool).sort((a, b) => parseInt(a[0]) - parseInt(b[0]))) {
+    output += `### Researcher ${researcherId}\n\n`;
 
     if (entry.cited.length > 0) {
       output += '### CITED LINKS\n';
@@ -238,7 +238,7 @@ export function getSharedLinksSummary(pool: SharedLinksPool | null): string {
     return 'No shared links yet';
   }
 
-  const sliceCount = Object.keys(pool).length;
+  const researcherCount = Object.keys(pool).length;
   let citedCount = 0;
   let candidateCount = 0;
 
@@ -247,5 +247,5 @@ export function getSharedLinksSummary(pool: SharedLinksPool | null): string {
     candidateCount += entry.candidates.length;
   }
 
-  return `${sliceCount} slice(s), ${citedCount} cited, ${candidateCount} candidate(s)`;
+  return `${researcherCount} researcher(s), ${citedCount} cited, ${candidateCount} candidate(s)`;
 }

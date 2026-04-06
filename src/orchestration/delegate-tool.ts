@@ -50,26 +50,20 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
   return {
     name: 'delegate_research',
     label: 'Delegate Research',
-    description: 'Spawn researcher agents to investigate multiple topics in parallel. Labels use "X:Y" format: X = slice number, Y = iteration number. Complexity: Level 0 (1 slice, no follow-ups), Level 1 (1-2 slices, up to 1 follow-up), Level 2 (3-5 slices, up to 2 follow-ups), Level 3 (5+ slices, up to 3-4 follow-ups). Always honor user-specified complexity levels.',
+    description: 'Spawn researcher agents to investigate multiple topics in parallel. Researchers are numbered sequentially: 1, 2, 3, etc. Always honor user-specified complexity levels.',
     promptSnippet: 'Research multiple topics via parallel researcher agents',
     promptGuidelines: [
-      'Use delegate_research to spawn researcher agents, but MINIMIZE initial slice count.',
-      'CRITICAL: If the user explicitly specified a complexity level ("level 0", "level 1", "brief", "quick", "simple", "level 2", "level 3", "deep", "exhaustive"), honor that request exactly and do not escalate mid-research.',
-      'Otherwise: Level 0 = fact (1 slice, no follow-ups), Level 1 = brief (1-2 slices, default for most queries, max 1 follow-up), Level 2 = multi-faceted if explicitly requested (3-4 slices, max 2 follow-ups), Level 3 = deep if explicitly requested (5+ slices, max 3-4 follow-ups).',
-      'START WITH THE MINIMUM SLICE COUNT. For Level 1, start with 1 slice unless the query clearly has 2 distinct parts. Do not add slices "just in case."',
-      'Do NOT expand scope mid-research. If findings suggest more research is needed, only do follow-up delegations if they directly answer a gap in the user\'s question.',
+      'Use delegate_research to spawn researcher agents, but MINIMIZE initial researcher count.',
+      'CRITICAL: If the user explicitly specified a complexity level ("level 1", "brief", "quick", "simple", "level 2", "level 3", "deep", "exhaustive"), honor that request exactly and do not escalate mid-research.',
+      'Otherwise: Level 1 = brief (1-2 researchers, default for most queries), Level 2 = multi-faceted if explicitly requested (2-3 researchers), Level 3 = deep if explicitly requested (3-5 researchers).',
+      'START WITH THE MINIMUM RESEARCHER COUNT. For Level 1, start with 1 researcher unless the query clearly has 2 distinct parts. Do not add researchers "just in case."',
+      'Do NOT expand scope mid-research. If findings suggest more research is needed, only spawn additional researchers if they directly answer a gap in the user\'s question.',
     ],
     parameters: Type.Object({
       slices: Type.Array(
         Type.String({ description: 'Research task per researcher' }),
         { minItems: 1 }
       ),
-      iterateOn: Type.Optional(Type.String({
-        description: 'Slice identifier to iterate on (e.g., "1" to create "1:2", "2" to create "2:3"). Omit for new slices.',
-      })),
-      iterationNumber: Type.Optional(Type.Number({
-        description: 'Explicit iteration number to use (e.g., 2 for "1:2"). Defaults to auto-increment if omitted.',
-      })),
     }),
     async execute(
       _id: string,
@@ -78,10 +72,8 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       _onUpdate: unknown,
       _ctx: unknown
     ): Promise<AgentToolResult<unknown>> {
-      const { slices, iterateOn, iterationNumber } = params as {
+      const { slices } = params as {
         slices: string[];
-        iterateOn?: string;
-        iterationNumber?: number;
       };
 
       // Log execution mode
@@ -98,16 +90,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
 
       const effectiveMaxConcurrency = 3;
       const assignments: Array<{ label: string; slice: string }> = slices.map((slice, index) => {
-        let sliceNum: string;
-        let iterNum: number;
-        if (iterateOn) {
-          sliceNum = iterateOn;
-          iterNum = (iterationNumber ?? 1) + index;
-        } else {
-          sliceNum = `${++options.breadthCounter.value}`;
-          iterNum = 1;
-        }
-        const label = `${sliceNum}:${iterNum}`;
+        const label = `${++options.breadthCounter.value}`;
         addSlice(options.panelState, label, label, true);
         return { label, slice };
       });
@@ -117,7 +100,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       const queue = [...assignments];
 
       const runOne = async (assignment: { label: string; slice: string }): Promise<[string, string]> => {
-        const sliceKey = assignment.label;
+        const researcherId = assignment.label;
         const session = await createResearcherSession(options.researcherOptions);
 
         session.subscribe((event) => {
@@ -126,38 +109,38 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
             if (tokens) options.onTokens(tokens);
           } else if (event.type === 'tool_execution_end') {
             const color = (event as any).isError ? 'red' : 'green';
-            flashSlice(options.panelState, sliceKey, color, options.flashTimeoutMs, options.onUpdate);
+            flashSlice(options.panelState, researcherId, color, options.flashTimeoutMs, options.onUpdate);
           }
         });
 
         const enhancedSlice = existingLinksContext ? `${assignment.slice}\n\n${existingLinksContext}` : assignment.slice;
-        
+
         try {
-          activateSlice(options.panelState, sliceKey);
+          activateSlice(options.panelState, researcherId);
           options.onUpdate();
 
           await withTimeout(
             retryWithBackoff(async () => {
               await session.prompt(enhancedSlice);
-              ensureAssistantResponse(session, sliceKey);
-            }, { 
-              maxRetries: 3, 
-              initialDelay: 1000, 
-              label: sliceKey 
+              ensureAssistantResponse(session, researcherId);
+            }, {
+              maxRetries: 3,
+              initialDelay: 1000,
+              label: researcherId
             }),
             options.timeoutMs,
-            sliceKey,
+            researcherId,
             options.signal
           );
 
-          const text = ensureAssistantResponse(session, sliceKey);
-          completeSlice(options.panelState, sliceKey);
+          const text = ensureAssistantResponse(session, researcherId);
+          completeSlice(options.panelState, researcherId);
           options.onUpdate();
 
-          return [sliceKey, text];
+          return [researcherId, text];
         } catch (err) {
-          recordResearcherFailure(options.sessionId, sliceKey);
-          completeSlice(options.panelState, sliceKey);
+          recordResearcherFailure(options.sessionId, researcherId);
+          completeSlice(options.panelState, researcherId);
           options.onUpdate();
           throw err;
         }
@@ -186,7 +169,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
         throw new Error(getResearchStopMessage(options.sessionId));
       }
 
-      const combinedText = results.map(([label, text]) => `## Researcher ${label}\n\n${text}`).join('\n\n');
+      const combinedText = results.map(([label, text]) => `## Research ${label}\n\n${text}`).join('\n\n');
       return { content: [{ type: 'text', text: combinedText }], details: {} };
     },
   };

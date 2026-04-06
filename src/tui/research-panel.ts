@@ -1,7 +1,7 @@
 /**
  * Research TUI Panel
  *
- * Side-by-side layout for SearXNG status and research slices.
+ * Side-by-side layout for SearXNG status and researcher progress.
  */
 
 import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
@@ -10,7 +10,7 @@ import type { SearxngStatus } from '../infrastructure/searxng-lifecycle.ts';
 
 export interface SliceState {
   id: string;
-  label: string; // Displayed label: "1:1", "1:2", "2:1", "3:1", etc.
+  label: string; // Displayed label: "1", "2", "3", etc.
   completed: boolean;
   queued: boolean;
   flash: 'green' | 'red' | null;
@@ -38,14 +38,14 @@ export function clearAllFlashTimeouts(): void {
 }
 
 /**
- * Add a new slice column
+ * Add a new researcher column
  */
 export function addSlice(state: ResearchPanelState, id: string, label: string, queued: boolean = false): void {
   state.slices.set(id, { id, label, completed: false, queued, flash: null });
 }
 
 /**
- * Mark slice as active (start from queued state)
+ * Mark researcher as active (start from queued state)
  */
 export function activateSlice(state: ResearchPanelState, id: string): void {
   const slice = state.slices.get(id);
@@ -53,7 +53,7 @@ export function activateSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
- * Mark slice as complete
+ * Mark researcher as complete
  */
 export function completeSlice(state: ResearchPanelState, id: string): void {
   const slice = state.slices.get(id);
@@ -64,16 +64,16 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
- * Flash a slice green or red
+ * Flash a researcher green or red
  */
 export function flashSlice(
   state: ResearchPanelState,
-  sliceId: string,
+  researcherId: string,
   color: 'green' | 'red',
   durationMs: number = 1000,
   onUpdate?: () => void
 ): void {
-  const slice = state.slices.get(sliceId);
+  const slice = state.slices.get(researcherId);
   if (!slice || slice.completed || slice.queued) return;
   slice.flash = color;
   onUpdate?.();

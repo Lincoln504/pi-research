@@ -312,11 +312,11 @@ More content here...
 ### CITED LINKS
 * [https://example.com/article1] - Description
 `;
-      const responses = new Map([['1:1', response]]);
+      const responses = new Map([['1', response]]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool).toHaveProperty('1:1');
-      expect(pool['1:1']!.cited).toHaveLength(1);
-      expect(pool['1:1']!.cited[0]!.url).toBe('https://example.com/article1');
+      expect(pool).toHaveProperty('1');
+      expect(pool['1']!.cited).toHaveLength(1);
+      expect(pool['1']!.cited[0]!.url).toBe('https://example.com/article1');
     });
 
     it('should build pool from multiple responses', () => {
@@ -329,14 +329,14 @@ More content here...
 * [https://example.com/article2] - Description
 `;
       const responses = new Map([
-        ['1:1', response1],
-        ['2:1', response2],
+        ['1', response1],
+        ['2', response2],
       ]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool).toHaveProperty('1:1');
-      expect(pool).toHaveProperty('2:1');
-      expect(pool['1:1']!.cited).toHaveLength(1);
-      expect(pool['2:1']!.cited).toHaveLength(1);
+      expect(pool).toHaveProperty('1');
+      expect(pool).toHaveProperty('2');
+      expect(pool['1']!.cited).toHaveLength(1);
+      expect(pool['2']!.cited).toHaveLength(1);
     });
 
     it('should preserve both cited and candidates', () => {
@@ -347,22 +347,22 @@ More content here...
 ### SCRAPE CANDIDATES
 * [https://example.com/candidate1] - Not used
 `;
-      const responses = new Map([['1:1', response]]);
+      const responses = new Map([['1', response]]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool['1:1']!.cited).toHaveLength(1);
-      expect(pool['1:1']!.candidates).toHaveLength(1);
+      expect(pool['1']!.cited).toHaveLength(1);
+      expect(pool['1']!.candidates).toHaveLength(1);
     });
 
     it('should handle empty responses', () => {
       const responses = new Map([
-        ['1:1', ''],
-        ['2:1', 'No links here'],
+        ['1', ''],
+        ['2', 'No links here'],
       ]);
       const pool = buildSharedLinksPool(responses);
-      expect(pool['1:1']!.cited).toEqual([]);
-      expect(pool['1:1']!.candidates).toEqual([]);
-      expect(pool['2:1']!.cited).toEqual([]);
-      expect(pool['2:1']!.candidates).toEqual([]);
+      expect(pool['1']!.cited).toEqual([]);
+      expect(pool['1']!.candidates).toEqual([]);
+      expect(pool['2']!.cited).toEqual([]);
+      expect(pool['2']!.candidates).toEqual([]);
     });
   });
 
@@ -370,7 +370,7 @@ More content here...
     it('should save and load shared links pool', () => {
       const sessionId = generateSessionId('test');
       const pool = {
-        '1:1': {
+        '1': {
           cited: [{ url: 'https://example.com/article1', description: 'Description' }],
           candidates: [],
         },
@@ -401,7 +401,7 @@ More content here...
     it('should handle complex pool', () => {
       const sessionId = generateSessionId('test');
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/1', description: 'First' },
             { url: 'https://example.com/2', description: 'Second' },
@@ -410,7 +410,7 @@ More content here...
             { url: 'https://example.com/3', reason: 'Not used' },
           ],
         },
-        '2:1': {
+        '2': {
           cited: [
             { url: 'https://example.com/4', description: 'Another' },
           ],
@@ -484,7 +484,7 @@ More content here...
 
     it('should format pool with cited links', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/article1', description: 'Description' },
           ],
@@ -495,7 +495,7 @@ More content here...
       const formatted = formatSharedLinksForPrompt(pool);
 
       expect(formatted).toContain('## Shared Links from Previous Research');
-      expect(formatted).toContain('### Slice 1:1');
+      expect(formatted).toContain('### Researcher 1');
       expect(formatted).toContain('### CITED LINKS');
       expect(formatted).toContain('https://example.com/article1');
       expect(formatted).toContain('Description');
@@ -504,7 +504,7 @@ More content here...
 
     it('should format pool with candidates', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [],
           candidates: [
             { url: 'https://example.com/candidate1', reason: 'Not used' },
@@ -514,7 +514,7 @@ More content here...
 
       const formatted = formatSharedLinksForPrompt(pool);
 
-      expect(formatted).toContain('### Slice 1:1');
+      expect(formatted).toContain('### Researcher 1');
       expect(formatted).toContain('### SCRAPE CANDIDATES');
       expect(formatted).toContain('https://example.com/candidate1');
       expect(formatted).toContain('Not used');
@@ -522,7 +522,7 @@ More content here...
 
     it('should format pool with both cited and candidates', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/article1', description: 'Used' },
           ],
@@ -538,13 +538,13 @@ More content here...
       expect(formatted).toContain('### SCRAPE CANDIDATES');
     });
 
-    it('should format pool with multiple slices', () => {
+    it('should format pool with multiple researchers', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [{ url: 'https://example.com/1', description: 'First' }],
           candidates: [],
         },
-        '2:1': {
+        '2': {
           cited: [{ url: 'https://example.com/2', description: 'Second' }],
           candidates: [],
         },
@@ -552,29 +552,29 @@ More content here...
 
       const formatted = formatSharedLinksForPrompt(pool);
 
-      expect(formatted).toContain('### Slice 1:1');
-      expect(formatted).toContain('### Slice 2:1');
+      expect(formatted).toContain('### Researcher 1');
+      expect(formatted).toContain('### Researcher 2');
     });
 
-    it('should sort slices alphabetically', () => {
+    it('should sort researchers numerically', () => {
       const pool = {
-        '3:1': { cited: [], candidates: [] },
-        '1:1': { cited: [], candidates: [] },
-        '2:1': { cited: [], candidates: [] },
+        '3': { cited: [], candidates: [] },
+        '1': { cited: [], candidates: [] },
+        '2': { cited: [], candidates: [] },
       };
 
       const formatted = formatSharedLinksForPrompt(pool);
-      const slice1Index = formatted.indexOf('### Slice 1:1');
-      const slice2Index = formatted.indexOf('### Slice 2:1');
-      const slice3Index = formatted.indexOf('### Slice 3:1');
+      const researcher1Index = formatted.indexOf('### Researcher 1');
+      const researcher2Index = formatted.indexOf('### Researcher 2');
+      const researcher3Index = formatted.indexOf('### Researcher 3');
 
-      expect(slice1Index).toBeLessThan(slice2Index);
-      expect(slice2Index).toBeLessThan(slice3Index);
+      expect(researcher1Index).toBeLessThan(researcher2Index);
+      expect(researcher2Index).toBeLessThan(researcher3Index);
     });
 
     it('should format links without descriptions', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [{ url: 'https://example.com/article1', description: '' }],
           candidates: [],
         },
@@ -585,9 +585,9 @@ More content here...
       expect(formatted).toContain('* [https://example.com/article1]\n');
     });
 
-    it('should indicate empty slice', () => {
+    it('should indicate empty researcher', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [],
           candidates: [],
         },
@@ -600,7 +600,7 @@ More content here...
 
     it('should handle special characters in URLs', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/path?query=1&param=test#fragment', description: 'Special chars' },
           ],
@@ -615,7 +615,7 @@ More content here...
 
     it('should handle unicode in descriptions', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/article', description: '日本語 text with Тест and emoji 🎉' },
           ],
@@ -644,7 +644,7 @@ More content here...
 
     it('should summarize pool with cited links', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [
             { url: 'https://example.com/1', description: 'First' },
             { url: 'https://example.com/2', description: 'Second' },
@@ -655,12 +655,12 @@ More content here...
 
       const summary = getSharedLinksSummary(pool);
 
-      expect(summary).toBe('1 slice(s), 2 cited, 0 candidate(s)');
+      expect(summary).toBe('1 researcher(s), 2 cited, 0 candidate(s)');
     });
 
     it('should summarize pool with candidates', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [],
           candidates: [
             { url: 'https://example.com/1', reason: 'Not used' },
@@ -671,16 +671,16 @@ More content here...
 
       const summary = getSharedLinksSummary(pool);
 
-      expect(summary).toBe('1 slice(s), 0 cited, 2 candidate(s)');
+      expect(summary).toBe('1 researcher(s), 0 cited, 2 candidate(s)');
     });
 
-    it('should summarize pool with multiple slices', () => {
+    it('should summarize pool with multiple researchers', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [{ url: 'https://example.com/1', description: 'First' }],
           candidates: [],
         },
-        '2:1': {
+        '2': {
           cited: [{ url: 'https://example.com/2', description: 'Second' }],
           candidates: [],
         },
@@ -688,18 +688,18 @@ More content here...
 
       const summary = getSharedLinksSummary(pool);
 
-      expect(summary).toBe('2 slice(s), 2 cited, 0 candidate(s)');
+      expect(summary).toBe('2 researcher(s), 2 cited, 0 candidate(s)');
     });
 
-    it('should aggregate counts across slices', () => {
+    it('should aggregate counts across researchers', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [{ url: 'https://example.com/1', description: 'First' }],
           candidates: [
             { url: 'https://example.com/2', reason: 'Not used' },
           ],
         },
-        '2:1': {
+        '2': {
           cited: [
             { url: 'https://example.com/3', description: 'Second' },
             { url: 'https://example.com/4', description: 'Third' },
@@ -710,16 +710,16 @@ More content here...
 
       const summary = getSharedLinksSummary(pool);
 
-      expect(summary).toBe('2 slice(s), 3 cited, 1 candidate(s)');
+      expect(summary).toBe('2 researcher(s), 3 cited, 1 candidate(s)');
     });
 
-    it('should handle slice with no links', () => {
+    it('should handle researcher with no links', () => {
       const pool = {
-        '1:1': {
+        '1': {
           cited: [],
           candidates: [],
         },
-        '2:1': {
+        '2': {
           cited: [{ url: 'https://example.com/1', description: 'First' }],
           candidates: [],
         },
@@ -727,7 +727,7 @@ More content here...
 
       const summary = getSharedLinksSummary(pool);
 
-      expect(summary).toBe('2 slice(s), 1 cited, 0 candidate(s)');
+      expect(summary).toBe('2 researcher(s), 1 cited, 0 candidate(s)');
     });
   });
 });

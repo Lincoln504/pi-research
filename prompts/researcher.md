@@ -89,7 +89,7 @@ At the end of your response, provide **two lists**:
 
 At the top of your research context, you receive a section: **"Shared Links from Previous Research"**
 
-This shows all links from previous slices organized by slice ID (e.g., Slice 1:1, Slice 2:1):
+This shows all links from previous researchers organized by researcher ID (e.g., Researcher 1, Researcher 2):
 - **CITED LINKS**: Links previous researchers actually scraped and used
 - **SCRAPE CANDIDATES**: Links they found but didn't use (with reasons why)
 

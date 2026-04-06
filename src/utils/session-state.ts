@@ -7,7 +7,7 @@
 import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
 
 /**
- * Map of session ID → array of failed researcher sliceKeys
+ * Map of session ID → array of failed researcher IDs
  */
 const sessionFailures = new Map<string, string[]>();
 
@@ -131,9 +131,9 @@ export function isBottomMostSession(sessionId: string): boolean {
 /**
  * Record a researcher failure
  */
-export function recordResearcherFailure(sessionId: string, sliceKey: string): void {
+export function recordResearcherFailure(sessionId: string, researcherId: string): void {
   const failures = sessionFailures.get(sessionId) || [];
-  failures.push(sliceKey);
+  failures.push(researcherId);
   sessionFailures.set(sessionId, failures);
 }
 

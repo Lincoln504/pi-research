@@ -5,7 +5,7 @@
  * Creates coordinator session that naturally calls delegate_research and investigate_context tools.
  * Initializes SearXNG on first call (lazy initialization).
  *
- * TUI: Two-box layout (SearXNG status + slice columns)
+ * TUI: Two-box layout (SearXNG status + researcher columns)
  */
 
 import { readFileSync } from 'node:fs';
@@ -67,7 +67,7 @@ export function createResearchTool(): ToolDefinition {
     promptSnippet: 'Conduct multi-agent research on a topic',
     promptGuidelines: [
       'Use research to investigate complex topics requiring multiple perspectives.',
-      'The coordinator breaks down query into research slices.',
+      'The coordinator breaks down query into research tasks.',
       'Researchers investigate using web search, scraping, security databases, and code search.',
       'Results are synthesized into a final comprehensive answer.',
     ],
@@ -331,7 +331,7 @@ export function createResearchTool(): ToolDefinition {
             if (timeoutId) clearTimeout(timeoutId);
           }
 
-          // Complete slice and extract result
+          // Complete research and extract result
           completeSlice(panelState, sliceLabel);
           refreshAllSessions();
 

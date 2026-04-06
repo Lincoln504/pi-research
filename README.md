@@ -95,9 +95,9 @@ pi research "What is a binary search tree?" --quick
 #### Research levels
 
 - **Level 0 (Quick)**: No coordinator, single researcher session. (Activated by using the `quick` parameter).
-- **Level 1 (Brief)**: 1 slice, up to 1 follow-up. Default for simple factual queries.
-- **Level 2 (Normal)**: 2-3 slices, up to 2 follow-ups. For technical/multi-faceted topics.
-- **Level 3 (Deep)**: 4-5 slices, 3-4 follow-ups. For complex cross-domain analysis.
+- **Level 1 (Brief)**: 1–2 researchers. Default for simple factual queries.
+- **Level 2 (Normal)**: 2–3 researchers. For technical/multi-faceted topics.
+- **Level 3 (Deep)**: 3–5 researchers. For complex cross-domain analysis.
 
 #### SearXNG management
 
@@ -136,18 +136,18 @@ Real-time progress tracking with two panels.
 
 2. **Research Progress** (Right):
    - Header: Active model and cumulative token usage
-   - Slices: Vertical columns per research slice/agent
+   - Researchers: Vertical columns per researcher agent
    - Status:
-     - `1:1`, `2:1` = Active/Running
-     - `✓1:1` = Completed
+     - `1`, `2` = Active/Running
+     - `✓1` = Completed
      - Flash **green** on tool success, **red** on tool error
 
 ```text
 ┌───────┐ ┌─ Research | qwen/qwen3.5-35b-a3b  40.5k ──┐
-│SearXNG│ │              │              │             │
-│:55732 │ │    ✓1:1      │    ✓2:1      │     3:1     │
-│1      │ │              │              │             │
-└───────┘ └──────────────┴──────────────┴─────────────┘
+│SearXNG│ │           │           │             │
+│:55732 │ │    ✓1     │    ✓2     │      3      │
+│1      │ │           │           │             │
+└───────┘ └───────────┴───────────┴─────────────┘
 ```
 
 #### Modes
