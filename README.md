@@ -110,7 +110,7 @@ Set environment variables in `.env` file (see `.env.example`):
 | `DOCKER_SOCKET` | /var/run/docker.sock | Docker socket path for container management. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
-Enable verbose logging with `pi --verbose`. Logs are written to `/tmp/pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per run). Without verbose mode, no log files are created.
+Enable verbose logging with `pi --verbose`. Logs are written to your OS temp directory as `pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per run). Without verbose mode, no log files are created.
 
 ### Terminal UI
 

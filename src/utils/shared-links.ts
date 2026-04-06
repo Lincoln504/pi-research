@@ -4,15 +4,17 @@
  * Maintains a shared pool of links across researchers to prevent
  * redundant scraping and enable coordination between researchers.
  *
- * Files are stored as: /tmp/research-links-{baseId}{hash}.json
+ * Files are stored in the OS temp directory as:
+ * {tmpdir}/research-links-{baseId}{hash}.json
  * - baseId: Session identifier (e.g., from request ID)
  * - hash: 4-char alphanumeric for uniqueness
  *
- * Example: /tmp/research-links-abc123-x9k2.json
+ * Example: {tmpdir}/research-links-abc123-x9k2.json
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'node:os';
 import * as crypto from 'crypto';
 import { logger } from '../logger.ts';
 
@@ -135,7 +137,7 @@ export function buildSharedLinksPool(responses: Map<string, string>): SharedLink
  * @returns Full file path
  */
 function getSharedLinksFilePath(sessionId: string): string {
-  return path.join('/tmp', `research-links-${sessionId}.json`);
+  return path.join(os.tmpdir(), `research-links-${sessionId}.json`);
 }
 
 /**

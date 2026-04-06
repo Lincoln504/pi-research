@@ -2,12 +2,13 @@
  * Shared Links Pool Unit Tests
  *
  * Tests pure functions for managing shared links across researchers.
- * File system operations use /tmp directory for testing.
+ * File system operations use the OS temp directory for testing.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   generateSessionId,
   parseResearcherLinks,
@@ -22,7 +23,7 @@ import {
 describe('shared-links', () => {
   // Clean up any test files after each test
   afterEach(() => {
-    const tempDir = '/tmp';
+    const tempDir = os.tmpdir();
     const files = fs.readdirSync(tempDir).filter(f => f.startsWith('research-links-test-'));
     for (const file of files) {
       fs.unlinkSync(path.join(tempDir, file));
@@ -424,13 +425,13 @@ More content here...
       expect(loaded).toEqual(pool);
     });
 
-    it('should save to correct file path', () => {
+    it('should save to the platform temp directory', () => {
       const sessionId = 'test-session-abc1';
       const pool = {};
 
       saveSharedLinks(sessionId, pool);
 
-      const expectedPath = `/tmp/research-links-${sessionId}.json`;
+      const expectedPath = path.join(os.tmpdir(), `research-links-${sessionId}.json`);
       expect(fs.existsSync(expectedPath)).toBe(true);
 
       // Cleanup

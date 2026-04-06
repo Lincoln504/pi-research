@@ -2,15 +2,17 @@
  * Logger — File-based logging with global console suppression
  *
  * Silent by default. When --verbose is set,
- * writes timestamped lines to /tmp/pi-research-debug-{hash}.log where {hash}
+ * writes timestamped lines to {tmpdir}/pi-research-debug-{hash}.log where {hash}
  * is a random 4-character alphanumeric suffix (a-z, 0-9) to keep logs separate per run.
  *
- * When NOT verbose: logFile is null, preventing all /tmp writes.
+ * When NOT verbose: logFile is null, preventing all temp-dir writes.
  * suppressConsole() globally patches console.* to either noop or file-write,
  * catching third-party module output too (e.g., SearXNG lifecycle).
  */
 
 import { appendFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 /**
  * Log level enum
@@ -53,6 +55,14 @@ function generateHash(): string {
   return hash;
 }
 
+function buildDefaultDebugLogPath(hash: string): string {
+  return path.join(os.tmpdir(), `pi-research-debug-${hash}.log`);
+}
+
+export function getDefaultDebugLogPathTemplate(): string {
+  return buildDefaultDebugLogPath('{hash}');
+}
+
 /**
  * Check if verbose mode is enabled from environment
  */
@@ -72,7 +82,7 @@ export class Logger implements ILogger {
     // Only set logFile path if verbose mode is enabled
     if (this.verbose) {
       const hash = generateHash();
-      this.logFile = options.logFilePath ?? `/tmp/pi-research-debug-${hash}.log`;
+      this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(hash);
     } else {
       this.logFile = null;
     }
