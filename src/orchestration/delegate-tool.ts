@@ -57,7 +57,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       'CRITICAL: If the user explicitly specified a complexity level ("level 1", "brief", "quick", "simple", "level 2", "level 3", "deep", "exhaustive"), honor that request exactly and do not escalate mid-research.',
       'Otherwise: Level 1 = brief (1-2 researchers, default for most queries), Level 2 = multi-faceted if explicitly requested (2-3 researchers), Level 3 = deep if explicitly requested (3-5 researchers).',
       'START WITH THE MINIMUM RESEARCHER COUNT. For Level 1, start with 1 researcher unless the query clearly has 2 distinct aspects. Do not add researchers "just in case."',
-      'Do NOT expand scope mid-research. If you identify gaps in YOUR research agenda, only spawn additional researchers to address those gaps.',
+      'Do NOT expand scope mid-research. If you identify gaps in your research agenda, only spawn additional researchers to address those gaps.',
     ],
     parameters: Type.Object({
       slices: Type.Array(

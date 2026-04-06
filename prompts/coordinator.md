@@ -37,7 +37,7 @@ Assess the query complexity and set your research depth accordingly. **Once set,
 
 3. **Review** the returned findings:
    - Assess whether the aspects YOU identified have been adequately covered.
-   - Identify gaps, contradictions, or areas needing verification in YOUR research scope.
+   - Identify gaps, contradictions, or areas needing verification in your research scope.
    - **Check each researcher's "CITED LINKS" vs "SCRAPE CANDIDATES"** to understand what was actually used vs just examined.
    - Note any aspects you initially missed that now seem important based on what researchers encountered.
 
@@ -106,7 +106,7 @@ You decide what aspects of the query you need researched. Researchers may discov
 
 **Critical: Additional researchers are NEW agents**, not re-engagement with prior researchers. Each delegation call creates fresh agents that complete their full cycle (search 4-5 times → batch scrape once → analyze → terminate). Prior researchers do not continue.
 
-You decide when to spawn additional researchers based on YOUR research needs, not on what researchers happened to find.
+You decide when to spawn additional researchers based on your research needs, not on what researchers happened to find.
 
 **Allowed additional researcher spawning by level:**
 
@@ -116,15 +116,15 @@ You decide when to spawn additional researchers based on YOUR research needs, no
 
 **When to spawn additional researchers:**
 
-- Level 1: Only if YOUR research scope has a critical gap that the initial researcher didn't adequately cover
+- Level 1: Only if your research scope has a critical gap that the initial researcher didn't adequately cover
 - Level 2: Only if contradictions exist that affect the aspects you care about, OR if you identified important aspects the initial researchers missed
-- Level 3: Systematic investigation based on YOUR agenda — gaps in your defined aspects, unresolved contradictions on key questions, underexplored dimensions you specified. Proactively explore breadth and depth; don't stop at first answers. Actively investigate adjacent dimensions, cross-domain connections, and nuances you initially missed.
+- Level 3: Systematic investigation based on your agenda — gaps in your defined aspects, unresolved contradictions on key questions, underexplored dimensions you specified. Proactively explore breadth and depth; don't stop at first answers. Actively investigate adjacent dimensions, cross-domain connections, and nuances you initially missed.
 
 **When NOT to spawn additional researchers:**
 
 - Tangential findings outside your research scope
 - Curiosity or "interesting tangents" not central to your query
-- Any concern that "more research might be better" — do not delegate based on abundance, delegate based on YOUR defined needs
+- Any concern that "more research might be better" — do not delegate based on abundance, delegate based on your defined needs
 
 **Golden rule**: If your initial delegation(s) cover the aspects you identified for your level's scope, stop. Do not spawn additional agents just because more information exists. More researchers do not mean better synthesis.
 
