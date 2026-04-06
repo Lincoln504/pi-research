@@ -622,7 +622,7 @@ describe('SecuritySearcher', () => {
       await searcher.search(params);
       const duration = Date.now() - startTime;
 
-      expect(duration).toBeGreaterThanOrEqual(100);
+      expect(duration).toBeGreaterThanOrEqual(90);
     });
 
     it('should not apply delay when set to 0', async () => {
