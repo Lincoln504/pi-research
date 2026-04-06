@@ -10,5 +10,7 @@ export default defineConfig({
     setupFiles: [],
     testTimeout: 180000, // 3 minute timeout for integration tests
     maxConcurrency: 1, // Only one integration test at a time due to containers
+    fileParallelism: false,
+    pool: 'forks',
   },
 });

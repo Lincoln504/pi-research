@@ -18,6 +18,7 @@ import { logger, type ILogger } from '../logger.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { PROXY_URL } from '../config.ts';
 import { getActiveConnectionCount } from '../web-research/utils.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
@@ -25,13 +26,42 @@ import { shutdownManager } from '../utils/shutdown-manager.ts';
 /**
  * Extension directory for pi-research
  */
-const EXTENSION_DIR = path.join(
-  process.env['HOME'] ?? os.homedir(),
-  '.pi',
-  'agent',
-  'extensions',
-  'pi-research',
-);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function hasExtensionAssets(dir: string): boolean {
+  return (
+    fs.existsSync(path.join(dir, 'config', 'default-settings.yml')) &&
+    fs.existsSync(path.join(dir, 'config', 'limiter.toml'))
+  );
+}
+
+function resolveExtensionDir(): string {
+  const envOverride = process.env['PI_RESEARCH_EXTENSION_DIR']?.trim();
+  if (envOverride && hasExtensionAssets(envOverride)) {
+    return envOverride;
+  }
+
+  const installedDir = path.join(
+    process.env['HOME'] ?? os.homedir(),
+    '.pi',
+    'agent',
+    'extensions',
+    'pi-research',
+  );
+  if (hasExtensionAssets(installedDir)) {
+    return installedDir;
+  }
+
+  const repoDir = path.resolve(__dirname, '..', '..');
+  if (hasExtensionAssets(repoDir)) {
+    return repoDir;
+  }
+
+  return installedDir;
+}
+
+const EXTENSION_DIR = resolveExtensionDir();
 
 /**
  * Track status for TUI display (minimal: starting_up | active | inactive | error)
@@ -225,18 +255,20 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       return;
     }
 
-    // Check Docker daemon before initializing
-    const dockerCheck = await verifyDockerInstalled();
-    if (!dockerCheck.running) {
-      this.currentStatus = {
-        state: 'error',
-        connectionCount: 0,
-        url: '',
-      };
-      this.notifyStatusChange();
-      const errorMsg = `Docker health check failed: ${dockerCheck.error}`;
-      logger.error(`[pi-research] ${errorMsg}`);
-      throw new Error(errorMsg);
+    // Skip real Docker verification when a test/dummy manager is injected.
+    if (!this.config.manager) {
+      const dockerCheck = await verifyDockerInstalled();
+      if (!dockerCheck.running) {
+        this.currentStatus = {
+          state: 'error',
+          connectionCount: 0,
+          url: '',
+        };
+        this.notifyStatusChange();
+        const errorMsg = `Docker health check failed: ${dockerCheck.error}`;
+        logger.error(`[pi-research] ${errorMsg}`);
+        throw new Error(errorMsg);
+      }
     }
 
     // Set state to starting_up
