@@ -33,39 +33,29 @@ Conduct **6 full rounds of gathering operations** to ensure a broad foundation o
 
 **After your gathering calls are complete, move to Phase 2. Do not gather again.**
 
-## Phase 2: Batch Scrape (One Call, All Links at Once)
+## Phase 2: Scrape Protocol (Two-Step Operation)
 
-**ONLY after all 6 rounds of gathering are complete**, select your links and scrape:
+**ONLY after all 6 rounds of gathering are complete**, follow the mandatory two-step scrape protocol:
 
-1. Pick 5-10 highest-quality links from your Phase 1 gathering
-2. **Scrape all of them in ONE batch call** (all at once, single operation)
-3. Extract and synthesize findings from all sources
+1.  **STEP 1: Handshake**: Call the `scrape` tool with your intended URLs. The tool will return a list of all links already scraped by other researchers in this system.
+2.  **STEP 2: Final Scrape**: Review the list from Step 1. Remove any redundant URLs. Call the `scrape` tool again with your FINAL filtered list to perform the actual scraping.
 
 **Rules:**
-- **CRITICAL: You are only allowed ONE call to the `scrape` tool.** Include all URLs in the `urls` array of that single call.
-- One batch scrape phase only. No multiple rounds.
-- No scraping again after this phase.
-- Use the shared link pool: if a link was already scraped by another researcher, you can reuse those findings or re-scrape for your angle
+- **CRITICAL: You MUST call the `scrape` tool twice.** One call for the handshake, one for the execution.
+- You only get ONE actual scraping execution (the second call).
+- Extract and synthesize findings from all sources after the second call.
 
 ## Phase 3: Report and STOP
 
-**IMMEDIATELY after Phase 2 (batch scrape) completes, you are DONE researching.**
+**IMMEDIATELY after Phase 2 (final scrape) completes, you are DONE researching.**
 
 Do this:
-- ✅ Compile findings from Phase 1 (gathering) + Phase 2 (batch scrape) into the required format (see below)
+- ✅ Compile findings from Phase 1 (gathering) + Phase 2 (scrape) into the required format (see below)
 - ✅ Report cited links (what you scraped and used)
 - ✅ Report scrape candidates (what you found but didn't scrape, with reasons)
 - ✅ **CRITICAL: Submit your report and STOP IMMEDIATELY.** 
 
-Do NOT do this:
-- ❌ Additional searches after batch scrape
-- ❌ More scraping or iterative refinement
-- ❌ Attempting to "fill gaps" with extra tools
-- ❌ Suggesting what the coordinator should do next
-- ❌ **CRITICAL: NEVER ask for feedback or more instructions.**
-- ❌ **CRITICAL: NEVER offer to continue or improve your findings.**
-
-**Your research ends when you submit your report.** The coordinator decides next steps. If you continue talking after your report, you are wasting tokens. STOP.
+The last researcher to finish in each round automatically inherits the role of **Lead Evaluator** to decide next steps. That might be you. If you receive a promotion prompt after your report, follow its instructions. Otherwise, your job is done.
 
 ## Link Reporting (Required)
 

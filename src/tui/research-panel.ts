@@ -68,6 +68,13 @@ export function addSlice(state: ResearchPanelState, id: string, label: string, q
 }
 
 /**
+ * Remove a researcher column
+ */
+export function removeSlice(state: ResearchPanelState, id: string): void {
+  state.slices.delete(id);
+}
+
+/**
  * Mark researcher as active (start from queued state)
  */
 export function activateSlice(state: ResearchPanelState, id: string): void {

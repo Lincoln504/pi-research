@@ -16,7 +16,14 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 
 describe('tools/scrape', () => {
   const createMockContext = () => ({} as any);
-  const createMockTracker = () => new ToolUsageTracker({ scrape: 1 });
+  const createMockTracker = () => new ToolUsageTracker({ scrape: 2 });
+  const createMockOptions = (tracker = createMockTracker()) => ({
+    searxngUrl: 'http://localhost:8888',
+    ctx: createMockContext(),
+    tracker,
+    getGlobalState: vi.fn(() => ({ allScrapedLinks: [] } as any)),
+    updateGlobalLinks: vi.fn(),
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -24,36 +31,51 @@ describe('tools/scrape', () => {
 
   describe('Tool Definition', () => {
     it('should create tool with correct metadata', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker: createMockTracker() });
+      const tool = createScrapeTool(createMockOptions());
       expect(tool.name).toBe('scrape');
       expect(tool.label).toBe('Scrape');
     });
   });
 
-  describe('execute - tracker', () => {
-    it('should record call in tracker', async () => {
+  describe('execute - protocol', () => {
+    it('should return handshake on first call', async () => {
+      const options = createMockOptions();
+      const tool = createScrapeTool(options);
+      
+      const result = await tool.execute('test-id', { urls: ['http://test.com'] }, undefined, undefined, undefined as any);
+
+      expect((result.details as any).protocol).toBe('handshake');
+      expect((result.content[0] as any).text).toContain('Call 1 (Handshake)');
+      expect(options.tracker.getCallCount('scrape')).toBe(1);
+    });
+
+    it('should perform scrape on second call', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
       vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://test.com', source: 'fetch', markdown: 'content' });
 
-      const tracker = createMockTracker();
-      const spy = vi.spyOn(tracker, 'recordCall');
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker });
+      const options = createMockOptions();
+      const tool = createScrapeTool(options);
       
+      // First call (handshake)
       await tool.execute('test-id', { urls: ['http://test.com'] }, undefined, undefined, undefined as any);
-
-      expect(spy).toHaveBeenCalledWith('scrape');
-    });
-
-    it('should return blocked response if limit exceeded', async () => {
-      const tracker = new ToolUsageTracker({ scrape: 1 });
-      tracker.recordCall('scrape'); // Limit reached
-
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker });
-
+      
+      // Second call (execution)
       const result = await tool.execute('test-id', { urls: ['http://test.com'] }, undefined, undefined, undefined as any);
 
-      expect((result.details as any).blocked).toBe(true);
-      expect((result.content[0] as any).text).toContain('SCRAPE LIMIT REACHED');
+      expect(scrapeSingle).toHaveBeenCalled();
+      expect(options.updateGlobalLinks).toHaveBeenCalledWith(['http://test.com']);
+      expect((result.content[0] as any).text).toContain('URL Scrape Results');
+    });
+
+    it('should lock out on third call', async () => {
+      const options = createMockOptions();
+      const tool = createScrapeTool(options);
+      
+      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 1
+      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 2
+      const result = await tool.execute('3', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 3
+
+      expect((result.details as any).locked).toBe(true);
     });
   });
 });

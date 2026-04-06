@@ -1,7 +1,7 @@
 /**
  * pi-research Extension
  *
- * Orchestrates multi-agent research using a coordinator + parallel/sequential researcher architecture.
+ * Orchestrates multi-agent research using a state-driven swarm architecture.
  * Manages SearXNG as singleton (shared across all agents).
  * SearXNG is initialized on first research() call, NOT on session_start.
  * Extension-owned cleanup is delegated to pi's session lifecycle.

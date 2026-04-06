@@ -7,6 +7,7 @@
 
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import type { SystemResearchState } from '../orchestration/swarm-types.ts';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
 import { createSecuritySearchTool } from './security.ts';
@@ -17,6 +18,8 @@ interface CreateToolsOptions {
   searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
+  getGlobalState: () => SystemResearchState;
+  updateGlobalLinks: (links: string[]) => void;
 }
 
 /**

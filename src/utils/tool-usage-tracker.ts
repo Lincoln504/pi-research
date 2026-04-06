@@ -69,6 +69,14 @@ export class ToolUsageTracker {
   }
 
   /**
+   * Get current call count for a tool
+   */
+  getCallCount(toolName: string): number {
+    const category = this.getCategory(toolName);
+    return this.getUsage(category).callCount;
+  }
+
+  /**
    * Get limit-reached message for a blocked tool
    */
   getLimitMessage(toolName: string): string {
