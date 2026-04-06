@@ -158,7 +158,7 @@ Real-time progress tracking with two panels.
 - **Deep Mode** (Default) — Multiple slice columns for parallel researchers
 - **Quick Mode** — Single research slice for one researcher
 
-#### Layout Example
+#### TUI Layout Example
 
 ```text
 ┌───────┐ ┌─ Research | qwen/qwen3.5-35b-a3b  40.5k ──┐
