@@ -8,64 +8,24 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { load } from 'js-yaml';
 import { logger } from '../logger.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-/**
- * Parse YAML manually (no external dependency)
- * Only extracts the engines section - very targeted parsing
- */
 function parseYamlEngines(content: string): Array<{ name: string; disabled?: boolean }> {
-  const engines: Array<{ name: string; disabled?: boolean }> = [];
+  const parsed = load(content) as { engines?: Array<{ name?: string; disabled?: boolean }> } | undefined;
+  const engines = parsed?.engines;
 
-  // Find the engines: section
-  const enginesMatch = content.match(/^engines:\s*$/m);
-  if (!enginesMatch) {
+  if (!Array.isArray(engines)) {
     logger.warn('[searxng-config] No engines section found in config');
-    return engines;
+    return [];
   }
 
-  // Extract lines after "engines:" that are engine definitions
-  const enginesStart = enginesMatch.index! + enginesMatch[0].length;
-  const remainingContent = content.substring(enginesStart);
-
-  // Split into lines and find engine blocks (lines starting with "  - name:")
-  const lines = remainingContent.split('\n');
-  let currentEngine: { name: string; disabled?: boolean } | null = null;
-
-  for (const line of lines) {
-    // Stop if we hit a non-indented line (next config section)
-    if (line && !line.startsWith('  ') && !line.startsWith('\t')) {
-      if (currentEngine) {
-        engines.push(currentEngine);
-      }
-      break;
-    }
-
-    // Check for engine name
-    const nameMatch = line.match(/^\s*- name:\s*(.+)$/);
-    if (nameMatch) {
-      if (currentEngine) {
-        engines.push(currentEngine);
-      }
-      currentEngine = { name: nameMatch[1]!.trim() };
-      continue;
-    }
-
-    // Check for disabled flag
-    if (currentEngine && line.match(/^\s*disabled:\s*true\s*$/)) {
-      currentEngine.disabled = true;
-    }
-  }
-
-  // Don't forget the last engine
-  if (currentEngine) {
-    engines.push(currentEngine);
-  }
-
-  return engines;
+  return engines
+    .filter((engine): engine is { name: string; disabled?: boolean } => typeof engine?.name === 'string')
+    .map((engine) => ({ name: engine.name.trim(), disabled: engine.disabled === true }));
 }
 
 /**

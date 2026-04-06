@@ -30,7 +30,7 @@ describe('Health Check Integration Tests', () => {
       const { getManager } = await import('../../src/infrastructure/searxng-lifecycle.ts');
       const manager = getManager();
       if (manager) {
-        const { setSearxngManager } = await import('../../src/web-research/utils.js');
+        const { setSearxngManager } = await import('../../src/web-research/utils.ts');
         setSearxngManager(manager);
       }
     } catch (err) {

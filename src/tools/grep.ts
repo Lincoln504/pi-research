@@ -110,6 +110,10 @@ function sanitizeInput(input: string): string[] {
   return result;
 }
 
+function normalizeSearchOutput(output: string): string {
+  return process.platform === 'win32' ? output.replace(/\\/g, '/') : output;
+}
+
 export function createGrepTool(options: {
   tracker: ToolUsageTracker;
 }): ToolDefinition {
@@ -158,15 +162,14 @@ export function createGrepTool(options: {
       }
 
       // Sanitize inputs to prevent shell injection
-      const patternParts = sanitizeInput(pattern);
       const flagParts = flags ? sanitizeInput(flags) : [];
 
       // Try rg first
       try {
-        const rgArgs = ['--no-heading', '-n', ...flagParts, ...patternParts, path];
+        const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, path];
         const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
-        const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+        const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
         let markdown = '# Search Results (rg)\n\n';
         markdown += `**Pattern:** \`${pattern}\`\n`;
@@ -203,7 +206,7 @@ export function createGrepTool(options: {
           const grepArgs = ['-rn', ...flagParts, pattern, path];
           const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
-          const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+          const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
           let markdown = '# Search Results (grep)\n\n';
           markdown += `**Pattern:** \`${pattern}\`\n`;
@@ -260,12 +263,11 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
   }
 
   // Sanitize inputs to prevent shell injection
-  const patternParts = sanitizeInput(pattern);
   const flagParts = flags ? sanitizeInput(flags) : [];
 
   // Try rg first
   try {
-    const rgArgs = ['--no-heading', '-n', ...flagParts, ...patternParts, path];
+    const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, path];
     const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
     let markdown = '# Search Results (rg)\n\n';
@@ -274,7 +276,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     if (flags) markdown += `**Flags:** \`${flags}\`\n`;
     markdown += `**Exit Code:** ${exitCode}\n\n`;
 
-    const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+    const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
     if (wasTruncated) {
       markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
@@ -304,7 +306,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
       markdown += `**Exit Code:** ${exitCode}\n\n`;
       markdown += '*Note: Using grep fallback (rg not available)*\n\n';
 
-      const truncated = truncateHead(stdout, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
+      const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
       if (wasTruncated) {
         markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';

@@ -173,7 +173,7 @@ export function createResearchTool(): ToolDefinition {
         try {
           const manager = getManager();
           if (manager) {
-            const { setSearxngManager } = await import('./web-research/utils.js');
+            const { setSearxngManager } = await import('./web-research/utils.ts');
             setSearxngManager(manager);
             logger.debug('[research] Registered SearXNG manager with web-research module');
           }

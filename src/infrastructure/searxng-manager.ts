@@ -87,6 +87,73 @@ interface EnvConfig {
   containerName?: string;
 }
 
+type DockerConnectionOptions = ConstructorParameters<typeof Docker>[0];
+
+function normalizeSocketPath(socketPath: string): string {
+  const trimmed = socketPath.trim();
+  if (trimmed.startsWith('\\\\.\\pipe\\')) {
+    return `//./pipe/${trimmed.slice('\\\\.\\pipe\\'.length)}`;
+  }
+  return trimmed;
+}
+
+function parseDockerHost(host: string): DockerConnectionOptions {
+  if (host.startsWith('unix://')) {
+    return { socketPath: host.slice('unix://'.length) };
+  }
+
+  if (host.startsWith('npipe://')) {
+    return { socketPath: normalizeSocketPath(host.slice('npipe://'.length)) };
+  }
+
+  const url = new URL(host);
+  const protocol = url.protocol.replace(':', '');
+  return {
+    host: url.hostname,
+    port: url.port ? parseInt(url.port, 10) : undefined,
+    protocol: protocol === 'https' ? 'https' : protocol === 'ssh' ? 'ssh' : 'http',
+  };
+}
+
+export function getDockerConnectionCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+): DockerConnectionOptions[] {
+  const candidates: DockerConnectionOptions[] = [];
+  const socketOverride = env['DOCKER_SOCKET']?.trim();
+  if (socketOverride) {
+    candidates.push({ socketPath: normalizeSocketPath(socketOverride) });
+  }
+
+  const hostOverride = env['DOCKER_HOST']?.trim();
+  if (hostOverride) {
+    try {
+      candidates.push(parseDockerHost(hostOverride));
+    } catch {
+      // Ignore malformed DOCKER_HOST and fall through to platform defaults.
+    }
+  }
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      { socketPath: '//./pipe/docker_engine' },
+      { socketPath: '//./pipe/dockerDesktopLinuxEngine' },
+      { socketPath: '//./pipe/dockerDesktopWindowsEngine' },
+    );
+  } else {
+    candidates.push({ socketPath: '/var/run/docker.sock' });
+  }
+
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = JSON.stringify(candidate);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Load configuration from environment variables
  */
@@ -187,25 +254,27 @@ export interface SearxngStatus {
  * Verify Docker is installed and daemon is responsive
  */
 export async function verifyDockerInstalled(): Promise<{ installed: boolean; running: boolean; error?: string }> {
-  try {
-    const docker = new Docker({
-      socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
-    });
-    
-    // Check if daemon is responsive
-    await docker.ping();
-    
-    return { installed: true, running: true };
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    
-    // Distinguish between not installed/not running
-    if (errorMsg.includes('ENOENT') || errorMsg.includes('connect ECONNREFUSED')) {
-      return { installed: true, running: false, error: 'Docker daemon is not running. Please start Docker.' };
+  let lastError = 'Docker daemon is not running. Please start Docker.';
+
+  for (const candidate of getDockerConnectionCandidates()) {
+    try {
+      const docker = new Docker(candidate);
+      await docker.ping();
+      return { installed: true, running: true };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
     }
-    
-    return { installed: false, running: false, error: `Docker not found or inaccessible: ${errorMsg}` };
   }
+
+  if (
+    lastError.includes('ENOENT') ||
+    lastError.includes('ECONNREFUSED') ||
+    lastError.includes('The system cannot find the file specified')
+  ) {
+    return { installed: true, running: false, error: 'Docker daemon is not running. Please start Docker.' };
+  }
+
+  return { installed: false, running: false, error: `Docker not found or inaccessible: ${lastError}` };
 }
 
 export class DockerSearxngManager {
@@ -237,9 +306,7 @@ export class DockerSearxngManager {
     this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'default-settings.yml');
     // Initialize Docker client
     try {
-      this.docker = options?.docker || new Docker({
-        socketPath: (process.env['DOCKER_SOCKET'] ?? '/var/run/docker.sock'),
-      });
+      this.docker = options?.docker || new Docker(getDockerConnectionCandidates()[0]);
     } catch (error) {
       logger.warn('[SearXNG Manager] Failed to initialize Docker client:', error);
       this.docker = null;

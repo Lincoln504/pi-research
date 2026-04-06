@@ -56,6 +56,9 @@
     "js-yaml": "^4.1.1",
     "playwright": "^1.52.0"
   },
+  "optionalDependencies": {
+    "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
