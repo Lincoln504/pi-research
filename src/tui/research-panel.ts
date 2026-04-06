@@ -30,6 +30,11 @@ export interface ResearchPanelState {
 const sessionTimeouts = new Map<string, Set<NodeJS.Timeout>>();
 
 /**
+ * Default duration for researcher cell flash indicators
+ */
+export const DEFAULT_FLASH_DURATION_MS = 1000;
+
+/**
  * Clear all active flash timeouts for a specific session
  */
 export function clearAllFlashTimeouts(sessionId?: string): void {
@@ -88,7 +93,7 @@ export function flashSlice(
   state: ResearchPanelState,
   researcherId: string,
   color: 'green' | 'red',
-  durationMs: number = 1000,
+  durationMs: number = DEFAULT_FLASH_DURATION_MS,
   onUpdate?: () => void
 ): void {
   const slice = state.slices.get(researcherId);

@@ -17,6 +17,10 @@ export interface Config {
   PROXY_URL?: string;
   /** Health check timeout in milliseconds (default: 15000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
+  /** Global TUI refresh debounce in milliseconds (default: 10) */
+  TUI_REFRESH_DEBOUNCE_MS: number;
+  /** Console restore delay after research in milliseconds (default: 15000) */
+  CONSOLE_RESTORE_DELAY_MS: number;
 }
 
 /**
@@ -26,6 +30,8 @@ const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 240000,
   PROXY_URL: undefined,
   HEALTH_CHECK_TIMEOUT_MS: 15000,
+  TUI_REFRESH_DEBOUNCE_MS: 10,
+  CONSOLE_RESTORE_DELAY_MS: 15000,
 };
 
 /**
@@ -77,6 +83,16 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       env,
       'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
       DEFAULTS.HEALTH_CHECK_TIMEOUT_MS as number,
+    ),
+    TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(
+      env,
+      'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS',
+      DEFAULTS.TUI_REFRESH_DEBOUNCE_MS
+    ),
+    CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(
+      env,
+      'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS',
+      DEFAULTS.CONSOLE_RESTORE_DELAY_MS
     ),
   };
 }

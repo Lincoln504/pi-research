@@ -6,6 +6,7 @@
 
 import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
 import { logger } from '../logger.ts';
+import { getConfig } from '../config.ts';
 
 /**
  * Map of session ID → array of failed researcher IDs
@@ -14,9 +15,9 @@ const sessionFailures = new Map<string, string[]>();
 
 /**
  * Ordered list of active session IDs for TUI stacking
- * Using a stack structure for reliable LIFO ordering
+ * Index 0 = oldest (bottom-most), Index N-1 = newest (top-most)
  */
-const activeSessionStack: string[] = [];
+const activeSessionOrder: string[] = [];
 
 /**
  * Registry of update functions for each session to allow coordinated re-renders
@@ -62,7 +63,7 @@ function notifyOrderChange(): void {
     try {
       subscriber();
     } catch (error) {
-      console.error('Error in session order change subscriber:', error);
+      logger.error('Error in session order change subscriber:', error);
     }
   }
 }
@@ -73,10 +74,9 @@ function notifyOrderChange(): void {
 export function registerSessionUpdate(sessionId: string, update: () => void): void {
   sessionUpdateRegistry.set(sessionId, update);
   
-  // Use stack-based ordering: new sessions always go on top
-  // This ensures deterministic LIFO behavior
-  if (!activeSessionStack.includes(sessionId)) {
-    activeSessionStack.push(sessionId);
+  // New sessions always go on top (end of the list)
+  if (!activeSessionOrder.includes(sessionId)) {
+    activeSessionOrder.push(sessionId);
     notifyOrderChange();
   }
 }
@@ -104,38 +104,39 @@ export function refreshAllSessions(): void {
     clearTimeout(globalRefreshTimeout);
   }
 
-  // Debounce by 10ms to batch concurrent calls (multiple sources trigger refreshes simultaneously)
+  // Debounce to batch concurrent calls (multiple sources trigger refreshes simultaneously)
+  const debounceMs = getConfig().TUI_REFRESH_DEBOUNCE_MS;
   globalRefreshTimeout = setTimeout(() => {
     try {
-      // Validate session stack integrity before processing
-      const validSessionIds = activeSessionStack.filter(sessionId =>
+      // Validate session order integrity before processing
+      const validSessionIds = activeSessionOrder.filter(sessionId =>
         sessionUpdateRegistry.has(sessionId) && sessionFailures.has(sessionId)
       );
 
       // If we have invalid sessions, clean them up
-      if (validSessionIds.length !== activeSessionStack.length) {
-        for (const sessionId of activeSessionStack) {
+      if (validSessionIds.length !== activeSessionOrder.length) {
+        for (const sessionId of activeSessionOrder) {
           if (!validSessionIds.includes(sessionId)) {
             logger.warn(`[session-state] Cleaning up invalid session: ${sessionId}`);
             sessionFailures.delete(sessionId);
             unregisterSessionUpdate(sessionId);
           }
         }
-        // Update stack to only include valid sessions
-        activeSessionStack.length = 0;
-        activeSessionStack.push(...validSessionIds);
+        // Update order to only include valid sessions
+        activeSessionOrder.length = 0;
+        activeSessionOrder.push(...validSessionIds);
       }
 
       // Process from newest to oldest (top to bottom in TUI)
-      // Render newest first, oldest last - ensures oldest stays on bottom
-      for (let i = activeSessionStack.length - 1; i >= 0; i--) {
-        const sessionId = activeSessionStack[i]!;
+      // Render newest first (at the top), oldest last (at the bottom)
+      for (let i = activeSessionOrder.length - 1; i >= 0; i--) {
+        const sessionId = activeSessionOrder[i]!;
         const update = sessionUpdateRegistry.get(sessionId);
         if (update) {
           try {
             update();
           } catch (error) {
-            console.error(`Error updating session ${sessionId}:`, error);
+            logger.error(`Error updating session ${sessionId}:`, error);
           }
         }
       }
@@ -143,14 +144,14 @@ export function refreshAllSessions(): void {
       globalRefreshPending = false;
       globalRefreshTimeout = null;
     }
-  }, 10);
+  }, debounceMs);
 }
 
 /**
  * Get ordered list of active session IDs (oldest first, newest last)
  */
 export function getActiveSessionOrder(): string[] {
-  return [...activeSessionStack];
+  return [...activeSessionOrder];
 }
 
 /**
@@ -159,7 +160,7 @@ export function getActiveSessionOrder(): string[] {
 export function startResearchSession(): string {
   const sessionId = generateUniqueSessionId('research');
   sessionFailures.set(sessionId, []);
-  // Note: activeSessionStack.push happens in registerSessionUpdate
+  // Note: activeSessionOrder.push happens in registerSessionUpdate
   return sessionId;
 }
 
@@ -181,10 +182,10 @@ export function endResearchSession(sessionId: string): void {
   sessionFailures.delete(sessionId);
   unregisterSessionUpdate(sessionId);
 
-  // Remove from stack and maintain order
-  const index = activeSessionStack.indexOf(sessionId);
+  // Remove from order and maintain relative order of others
+  const index = activeSessionOrder.indexOf(sessionId);
   if (index !== -1) {
-    activeSessionStack.splice(index, 1);
+    activeSessionOrder.splice(index, 1);
     notifyOrderChange();
   }
 }
@@ -194,8 +195,8 @@ export function endResearchSession(sessionId: string): void {
  * (The one that should show the SearXNG status box)
  */
 export function isBottomMostSession(sessionId: string): boolean {
-  if (activeSessionStack.length === 0) return false;
-  return activeSessionStack[0] === sessionId;  // First item in stack is bottom-most
+  if (activeSessionOrder.length === 0) return false;
+  return activeSessionOrder[0] === sessionId;  // First item in list is oldest/bottom-most
 }
 
 /**

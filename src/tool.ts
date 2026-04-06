@@ -21,7 +21,7 @@ import { Type } from '@sinclair/typebox';
 import { SessionManager, SettingsManager } from '@mariozechner/pi-coding-agent';
 import { createCoordinatorSession } from './orchestration/coordinator.ts';
 import { createResearcherSession } from "./orchestration/researcher.ts";
-import { validateConfig, RESEARCHER_TIMEOUT_MS } from './config.ts';
+import { validateConfig, getConfig } from './config.ts';
 import {
   createResearchPanel,
   clearAllFlashTimeouts,
@@ -204,28 +204,17 @@ export function createResearchTool(): ToolDefinition {
       const modelName = (selectedModel as any)?.id ?? 'unknown';
       const panelState = createInitialPanelState(sessionId, searxngStatus, modelName);
 
-      // Widget update function with debouncing to prevent excessive renders
-      let updatePending = false;
-      let updateTimeout: NodeJS.Timeout | null = null;
-      
+      // Widget update function — coordinated via refreshAllSessions
+      // Note: pi's 'aboveEditor' placement appends widgets in registration order.
+      // This means the first-registered session (oldest) is closest to the editor.
       const updateWidget = () => {
-        if (updatePending) return; // Debounce: skip if update already pending
-        
-        updatePending = true;
-        if (updateTimeout) clearTimeout(updateTimeout);
-        
-        updateTimeout = setTimeout(() => {
-          try {
-            // Only show SearXNG box if this is the bottom-most active research session
-            panelState.hideSearxng = !isBottomMostSession(sessionId);
-            ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
-          } catch (error) {
-            console.error(`Error updating widget for session ${sessionId}:`, error);
-          } finally {
-            updatePending = false;
-            updateTimeout = null;
-          }
-        }, 50); // 50ms debounce to prevent visual flickering
+        try {
+          // Only show SearXNG box if this is the bottom-most active research session
+          panelState.hideSearxng = !isBottomMostSession(sessionId);
+          ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
+        } catch (error) {
+          logger.error(`Error updating widget for session ${sessionId}:`, error);
+        }
       };
 
       // Register this session's update function globally to coordinate re-renders
@@ -259,12 +248,6 @@ export function createResearchTool(): ToolDefinition {
         cleaned = true;
         logger.log('[research] Cleaning up...');
 
-        // Clear pending widget update timeout
-        if (updateTimeout) {
-          clearTimeout(updateTimeout);
-          updateTimeout = null;
-        }
-
         try {
           endResearchSession(sessionId);  // Clear session state
         } catch (error) {
@@ -291,7 +274,7 @@ export function createResearchTool(): ToolDefinition {
         // Clear any pending global refresh and do a final refresh with remaining sessions
         clearPendingRefresh();
         refreshAllSessions(); // Re-render remaining panels to update SearXNG box visibility
-        setTimeout(restoreConsole, 15000).unref?.();
+        setTimeout(restoreConsole, getConfig().CONSOLE_RESTORE_DELAY_MS).unref?.();
       };
       signal?.addEventListener('abort', cleanup, { once: true });
 
@@ -360,8 +343,8 @@ export function createResearchTool(): ToolDefinition {
                   return;
                 }
                 timeoutId = setTimeout(() => {
-                  reject(new Error(`Quick researcher timeout after ${RESEARCHER_TIMEOUT_MS}ms`));
-                }, RESEARCHER_TIMEOUT_MS);
+                  reject(new Error(`Quick researcher timeout after ${getConfig().RESEARCHER_TIMEOUT_MS}ms`));
+                }, getConfig().RESEARCHER_TIMEOUT_MS);
                 combinedSignal.addEventListener('abort', () => {
                   if (timeoutId) clearTimeout(timeoutId);
                   reject(new Error('Research cancelled by user'));
@@ -415,7 +398,7 @@ export function createResearchTool(): ToolDefinition {
           onUpdate: updateWidget,
           researcherOptions,
           signal,
-          timeoutMs: RESEARCHER_TIMEOUT_MS,
+          timeoutMs: getConfig().RESEARCHER_TIMEOUT_MS,
           flashTimeoutMs: 1000,
         };
         const delegateTool = createDelegateTool(delegateToolOptions);
