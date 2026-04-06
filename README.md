@@ -18,18 +18,7 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Installation
 
-Install as a pi package:
-```bash
-npm install pi-research
-```
-
-Or load directly from source:
-```bash
-git clone https://github.com/Lincoln504/pi-research.git
-cd pi-research
-npm install
-pi -e ./index.ts
-```
+todo
 
 Requires Docker to be installed.
 
