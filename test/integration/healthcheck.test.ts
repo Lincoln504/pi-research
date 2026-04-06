@@ -7,39 +7,29 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { runHealthCheck } from '../../src/healthcheck/index.ts';
-import { initLifecycle, ensureRunning } from '../../src/infrastructure/searxng-lifecycle.ts';
+import { initLifecycle, ensureRunning, shutdownLifecycle } from '../../src/infrastructure/searxng-lifecycle.ts';
 import { logger } from '../../src/logger.ts';
 
 describe('Health Check Integration Tests', () => {
   beforeAll(async () => {
     logger.log('[test] Setting up health check tests...');
-    // Initialize SearXNG before running health checks
-    try {
-      await initLifecycle({
-        cwd: process.cwd(),
-        model: { id: 'test-model' },
-        modelRegistry: {
-          getAll: () => [{ id: 'test-model' }],
-        },
-        ui: {
-          setWidget: () => {},
-        },
-      } as any);
+    await initLifecycle({
+      cwd: process.cwd(),
+      model: { id: 'test-model' },
+      modelRegistry: {
+        getAll: () => [{ id: 'test-model' }],
+      },
+      ui: {
+        setWidget: () => {},
+      },
+    } as any);
 
-      // Register manager with web-research module
-      const { getManager } = await import('../../src/infrastructure/searxng-lifecycle.ts');
-      const manager = getManager();
-      if (manager) {
-        const { setSearxngManager } = await import('../../src/web-research/utils.ts');
-        setSearxngManager(manager);
-      }
-    } catch (err) {
-      logger.warn('[test] Failed to initialize SearXNG:', err instanceof Error ? err.message : String(err));
-    }
+    await ensureRunning();
   });
 
   afterAll(async () => {
     logger.log('[test] Cleaning up health check tests...');
+    await shutdownLifecycle();
   });
 
   it('should pass complete health check when network is healthy', async () => {

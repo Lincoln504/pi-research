@@ -8,8 +8,10 @@
 
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
+import { getManager } from '../infrastructure/searxng-lifecycle.ts';
 import { search } from '../web-research/search.ts';
 import { scrapeSingle } from '../web-research/scrapers.ts';
+import { setSearxngManager } from '../web-research/utils.ts';
 import { getActiveSearxngEngines } from '../utils/searxng-config.ts';
 import type { SearXNGResult } from '../web-research/types.ts';
 
@@ -68,6 +70,20 @@ function validateScrapeOutput(markdown: string): { valid: boolean; error?: strin
 }
 
 /**
+ * Healthcheck uses the same web-research search/scrape helpers as the main tool.
+ * Ensure they are wired to the current lifecycle manager instead of relying on
+ * an external caller to have registered it beforehand.
+ */
+function ensureHealthcheckManager(): void {
+  const manager = getManager();
+  if (!manager) {
+    throw new Error('SearXNG manager not initialized. Call initLifecycle() before runHealthCheck().');
+  }
+
+  setSearxngManager(manager);
+}
+
+/**
  * Run health check: test search and scrape functionality with deterministic URLs
  * Uses hardcoded queries and URLs to ensure reproducible results
  */
@@ -83,6 +99,8 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
   };
 
   try {
+    ensureHealthcheckManager();
+
     // PHASE 1: Test general web search engines (Bing, DuckDuckGo, Brave — NOT Wikipedia)
     logger.log('[healthcheck] Phase 1: Testing general web search engines (timeout: ' + SEARCH_TIMEOUT_MS + 'ms)...');
     const searchQuery = 'open source software';
