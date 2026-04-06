@@ -2,60 +2,108 @@
  * Session Context Formatter
  *
  * Formats parent session context for the coordinator agent.
+ * Implements a "fork vs compact" strategy:
+ * - Low token count: Returns a serialized conversation history (last 15 messages).
+ * - High token count: Returns a compacted summary of the conversation.
  */
 
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { buildSessionContext } from '@mariozechner/pi-coding-agent';
-import type { AssistantMessage, UserMessage } from '@mariozechner/pi-ai';
-import { extractText } from '../utils/text-utils.ts';
+import { 
+  buildSessionContext, 
+  estimateTokens, 
+  convertToLlm, 
+  serializeConversation 
+} from '@mariozechner/pi-coding-agent';
+import { complete } from '@mariozechner/pi-ai';
+import { logger } from '../logger.ts';
 
-function isAssistantMessage(message: unknown): message is AssistantMessage {
-  return typeof message === 'object' && message !== null && 'role' in message && (message as { role: string }).role === 'assistant';
-}
+const CONTEXT_THRESHOLD_TOKENS = 2000;
+const MAX_MESSAGES_FOR_FORK = 15;
 
-function isUserMessage(message: unknown): message is UserMessage {
-  return typeof message === 'object' && message !== null && 'role' in message && (message as { role: string }).role === 'user';
-}
+const COMPACTION_PROMPT = `You are a context transfer assistant. Given the conversation history, generate a focused, compact summary that:
+1. Summarizes the core goal and specific progress made so far.
+2. Lists any key decisions, findings, or identified constraints.
+3. Clearly state the current problem or task to be researched.
+Keep the summary concise and objective. Avoid conversational filler.`;
 
 /**
- * Create a preview of text truncated to 200 characters
+ * Formats parent context for the coordinator.
+ * Returns either a direct conversation history or a compacted summary based on token count.
  */
-function createPreview(text: string): string {
-  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
-}
-
-export function formatParentContext(ctx: ExtensionContext): string {
+export async function formatParentContext(ctx: ExtensionContext): Promise<string> {
   const branch = ctx.sessionManager.getBranch();
   const sessionContext = buildSessionContext(branch);
   const allMessages = sessionContext.messages;
 
-  // Take last 10 messages
-  const lastMessages = allMessages.slice(-10);
-
-  if (lastMessages.length === 0) {
-    return '';
+  if (allMessages.length === 0) {
+    return 'No previous context available.';
   }
 
-  const lines: string[] = [];
-  lines.push('Context:');
+  // 1. Estimate tokens for the entire branch
+  const llmMessages = convertToLlm(allMessages);
+  const totalTokens = estimateTokens(llmMessages);
 
-  for (const message of lastMessages) {
-    if (isUserMessage(message)) {
-      const text = extractText(message);
-      const preview = createPreview(text);
-      lines.push(`[User]: ${preview}`);
-    } else if (isAssistantMessage(message)) {
-      const text = extractText(message);
-      const preview = createPreview(text);
-      lines.push(`[Assistant]: ${preview}`);
-    } else if (message.role === 'compactionSummary' || message.role === 'branchSummary') {
-      const summaryContent = (message as any).summary || (message as any).content;
-      if (typeof summaryContent === 'string') {
-        const preview = createPreview(summaryContent);
-        lines.push(`[System Summary]: ${preview}`);
+  logger.log(`[session-context] Parent branch has ~${totalTokens} tokens and ${allMessages.length} messages.`);
+
+  // 2. Decide: Fork (Direct Messages) vs Compact (Summary)
+  if (totalTokens < CONTEXT_THRESHOLD_TOKENS) {
+    // --- FORK MODE: Provide actual history ---
+    const lastMessages = allMessages.slice(-MAX_MESSAGES_FOR_FORK);
+    const serialized = serializeConversation(convertToLlm(lastMessages));
+    
+    return [
+      '## Recent Conversation History',
+      'The following is a direct excerpt from the current conversation:',
+      '',
+      serialized
+    ].join('\n');
+  } else {
+    // --- COMPACT MODE: Provide LLM-generated summary ---
+    logger.log('[session-context] Threshold exceeded. Generating compacted context summary...');
+    
+    try {
+      if (!ctx.model) {
+        throw new Error('No model available for compaction.');
       }
+
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+      if (!auth.ok || !auth.apiKey) {
+        throw new Error(`Auth failed: ${auth.error || 'No API key'}`);
+      }
+
+      const conversationText = serializeConversation(llmMessages);
+      const response = await complete(
+        ctx.model,
+        { 
+          systemPrompt: COMPACTION_PROMPT, 
+          messages: [
+            { 
+              role: 'user', 
+              content: [{ type: 'text', text: `## Conversation History\n\n${conversationText}` }],
+              timestamp: Date.now()
+            }
+          ] 
+        },
+        { apiKey: auth.apiKey, headers: auth.headers, signal: ctx.getSignal() }
+      );
+
+      const summary = response.content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map((c) => c.text)
+        .join('\n');
+
+      return [
+        '## Compacted Context Summary',
+        'The following is a summary of the parent conversation (compacted due to length):',
+        '',
+        summary
+      ].join('\n');
+    } catch (error) {
+      logger.error('[session-context] Failed to generate compacted summary:', error);
+      // Fallback: Just return the last few messages if summary fails
+      const lastMessages = allMessages.slice(-5);
+      const serialized = serializeConversation(convertToLlm(lastMessages));
+      return `## Recent Context (Summary Failed)\n\n${serialized}`;
     }
   }
-
-  return lines.join('\n');
 }

@@ -87,7 +87,7 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
 }));
 
 vi.mock('../../src/orchestration/session-context.ts', () => ({
-  formatParentContext: vi.fn(() => 'test context'),
+  formatParentContext: vi.fn(async () => 'test context'),
 }));
 
 vi.mock('../../src/web-research/utils.ts', () => ({

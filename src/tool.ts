@@ -431,7 +431,7 @@ export function createResearchTool(): ToolDefinition {
 
         // Execute coordinator
         try {
-          const context = formatParentContext(ctx);
+          const context = await formatParentContext(ctx);
           await Promise.race([
             coordinatorSession.prompt(`Context:\n${context}\n\nQuery: ${query}`),
             new Promise((_, reject) => {
