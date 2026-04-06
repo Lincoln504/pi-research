@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 
-Multi-agent web research for pi. Coordinate parallel researchers or run single-agent queries. Search the web, scrape URLs, query security databases, access Stack Exchange, search code, and track progress via terminal UI. Multiple search providers with no cost thanks to [SearXNG](https://github.com/searxng/searxng). 
+Multi-agent web research for pi. Coordinate parallel researchers or run single-agent queries. Search the web, scrape URLs, query security databases, access Stack Exchange, search code, and track progress via terminal UI. Search multiple providers (Google, Bing, Brave, and others) with no cost thanks to [SearXNG](https://github.com/searxng/searxng). 
 
 ### Capabilities
 
