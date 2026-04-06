@@ -67,7 +67,7 @@ export function createResearchTool(): ToolDefinition {
     promptSnippet: 'Conduct multi-agent research on a topic',
     promptGuidelines: [
       'Use research to investigate complex topics requiring multiple perspectives.',
-      'The coordinator breaks down query into research tasks.',
+      'The coordinator breaks down query into research aspects.',
       'Researchers investigate using web search, scraping, security databases, and code search.',
       'Results are synthesized into a final comprehensive answer.',
     ],

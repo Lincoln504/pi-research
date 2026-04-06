@@ -84,7 +84,7 @@ pi research "What is a binary search tree?" --quick
 #### Research workflow
 
 1. Assess query complexity (Level 1/2/3)
-2. Decompose query into slices and spawn researcher agents
+2. Decompose query into research aspects and spawn researcher agents
 3. Researchers cycle through phases:
    - Phase 1: 6 rounds or less of gathering (search, security_search, stackexchange, grep)
    - Phase 2: Batch scrape 5-10 links
