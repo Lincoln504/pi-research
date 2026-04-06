@@ -8,8 +8,8 @@
  * Status states: 'starting_up' | 'active' | 'inactive' | 'error'
  *
  * Lifecycle: Container lives for duration of pi process.
- * No session-based shutdown - container persists across sessions.
- * Use shutdownLifecycle() only for manual cleanup or extension unload.
+ * Cleanup is triggered via pi lifecycle hooks rather than process signal ownership.
+ * Use shutdownLifecycle() for extension-owned cleanup paths.
  */
 
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -495,7 +495,7 @@ export function getManager(): DockerSearxngManager | null {
  */
 export async function initLifecycle(ctx: ExtensionContext): Promise<void> {
   await getLifecycleManager().init(ctx);
-  // Register for global process shutdown
+  // Register extension-owned cleanup once; repeated initLifecycle() calls are safe.
   shutdownManager.register(shutdownLifecycle);
 }
 

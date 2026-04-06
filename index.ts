@@ -4,7 +4,7 @@
  * Orchestrates multi-agent research using a coordinator + parallel/sequential researcher architecture.
  * Manages SearXNG as singleton (shared across all agents).
  * SearXNG is initialized on first research() call, NOT on session_start.
- * SearXNG lives for the lifetime of the pi process (no session-based shutdown).
+ * Extension-owned cleanup is delegated to pi's session lifecycle.
  */
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
@@ -15,18 +15,17 @@ import { shutdownManager } from './src/utils/shutdown-manager.ts';
 
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Extension loading...');
-  
-  // Setup global shutdown hooks
-  shutdownManager.setup();
 
   // Suppress console output globally (catches third-party modules like SearXNG).
   // Pi's TUI doesn't use console.* directly, so this is safe for the entire session.
   suppressConsole();
 
-  // NOTE: SearXNG lifecycle is managed independently of sessions
-  // Container lives for the duration of the pi process
-  // No session_shutdown or session_switch handlers needed
-  // SearXNG is initialized on first research() call in tool.ts
+  // NOTE: SearXNG is still initialized lazily on first research() call in tool.ts.
+  // Cleanup runs on pi's session lifecycle instead of owning host process signals.
+
+  pi.on('session_shutdown', async (_event, _ctx) => {
+    await shutdownManager.runCleanup('session_shutdown');
+  });
 
   // Notify user of Docker status and log file location when starting a new session
   pi.on('session_start', async (_event, ctx) => {

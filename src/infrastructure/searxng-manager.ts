@@ -1,12 +1,12 @@
 /**
  * SearXNG Container Manager - Simplified Design
  *
- * Session-scoped SearXNG container management.
+ * Singleton-style SearXNG container management shared by research sessions.
  *
  * DESIGN PRINCIPLES:
- * 1. Session-scoped containers - one per pi session, named by session ID
- * 2. Explicit lifecycle - start on session_start, stop on session_shutdown
- * 3. Stateless manager - fresh instance per session, no singleton
+ * 1. Shared container reuse across research sessions
+ * 2. Lazy startup on first use
+ * 3. Explicit extension-owned cleanup when the extension shuts down
  * 4. Simple error recovery - if container is gone, recreate it
  * 5. No AutoRemove - manage cleanup explicitly
  * 6. No complex reuse logic - just check for container by name
@@ -314,8 +314,7 @@ export class DockerSearxngManager {
 
     // Initialize StateManager for singleton mode
     this.stateManager = new StateManager(config.stateDir);
-    // Note: signal handling (SIGTERM/SIGINT) is managed by pi-research tool.ts, not here.
-    // Registering handlers here would create duplicate handlers and competing process.exit(0) calls.
+    // Cleanup is orchestrated by the extension lifecycle hook in index.ts, not by process signals here.
   }
 
   /**
