@@ -36,8 +36,8 @@
   "author": "Lincoln504",
   "license": "MIT",
   "scripts": {
-    "lint": "npx eslint src/",
-    "lint:fix": "npx eslint src/ --fix",
+    "lint": "npx eslint --config configs/eslint.config.js src/",
+    "lint:fix": "npx eslint --config configs/eslint.config.js src/ --fix",
     "type-check": "tsc --noEmit",
     "test": "vitest run --config configs/vitest.config.unit.ts",
     "test:unit": "vitest run --config configs/vitest.config.unit.ts",
