@@ -1,59 +1,15 @@
-name: Release
+name: Release Placeholder
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  release:
-    name: Create Release
+  release-placeholder:
+    name: Release Disabled
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
-
-      - name: Run type check
-        run: npm run type-check
-
-      - name: Run linter
-        run: npm run lint
-
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body: |
-            ## Changes in this Release
-
-            See the commit history and merged pull requests for release details.
-          draft: false
-          prerelease: false
-
-      - name: Publish to npm
-        if: success()
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Explain current state
+        run: |
+          echo "Release and npm publish automation are intentionally disabled."
+          echo "This repository currently uses CI only for validation checks."
+          echo "Publishing can be added later once npm release flow is ready."
