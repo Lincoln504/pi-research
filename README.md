@@ -86,7 +86,7 @@ pi research "What is a binary search tree?" --quick
 1. Assess query complexity (Level 1/2/3)
 2. Decompose query into slices and spawn researcher agents
 3. Researchers cycle through phases:
-   - Phase 1: 6 rounds of gathering (search, security_search, stackexchange, grep)
+   - Phase 1: 6 rounds or less of gathering (search, security_search, stackexchange, grep)
    - Phase 2: Batch scrape 5-10 links
    - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
 4. Coordinate via shared link pool to avoid duplicate scraping
@@ -151,7 +151,7 @@ Real-time progress tracking with two panels.
    - Status:
      - `1:1`, `2:1` = Active/Running
      - `✓1:1` = Completed
-     - Flash **green** on success, **red** on error
+     - Flash **green** on tool success, **red** on tool error
 
 #### Modes
 
