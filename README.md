@@ -45,13 +45,39 @@ The research tool supports parameters: `query` (required, the research topic), `
 
 ### Architecture
 
-Entry point (`index.ts`) registers the research tool. The tool orchestration layer (`src/tool.ts`) initializes SearXNG, manages the TUI, and branches between quick and deep modes.
+**Entry Point & Orchestration**
+- Entry point (`index.ts`) registers the research tool
+- Tool orchestration layer (`src/tool.ts`) initializes SearXNG, manages the TUI, and branches between quick and deep modes
 
-In deep mode, a coordinator agent (`src/orchestration/coordinator.ts`) decomposes the query into research aspects and spawns parallel researcher agents via the delegate tool (`src/orchestration/delegate-tool.ts`). Researchers (`src/orchestration/researcher.ts`) cycle through three phases: gathering (6 rounds max via search, security_search, stackexchange, grep), batch scraping (5-10 URLs), and reporting findings with cited links and scrape candidates. A shared link pool coordinates across researchers to avoid duplicate scraping.
+**Deep Mode (Multi-Agent)**
+- Coordinator agent (`src/orchestration/coordinator.ts`) decomposes the query into research aspects
+- Spawns parallel researcher agents via delegate tool (`src/orchestration/delegate-tool.ts`)
+- Researchers (`src/orchestration/researcher.ts`) cycle through three phases:
+  - Gathering (6 rounds max via search, security_search, stackexchange, grep)
+  - Batch scraping (5-10 URLs)
+  - Reporting findings with cited links and scrape candidates
+- Shared link pool coordinates across researchers to avoid duplicate scraping
 
-In quick mode, a single researcher session runs without a coordinator, returning results directly.
+**Quick Mode (Single-Agent)**
+- Single researcher session runs without a coordinator
+- Returns results directly
 
-SearXNG manages a singleton Docker container (`src/infrastructure/searxng-lifecycle.ts`) that's lazily initialized on first call and lives for the pi process duration. Tools include search (web via SearXNG), scrape (with retry and JS rendering), security (NVD, CISA KEV, GitHub, OSV), stackexchange (Stack Exchange API), and grep (local code search). Web research utilities handle searching, scraping, and retries; security utilities integrate multiple databases; Stack Exchange utilities handle API access and caching.
+**SearXNG Container Management**
+- Singleton Docker container (`src/infrastructure/searxng-lifecycle.ts`)
+- Lazily initialized on first call
+- Lives for the pi process duration
+
+**Available Tools**
+- Search — Web via SearXNG
+- Scrape — With retry and JS rendering
+- Security — NVD, CISA KEV, GitHub, OSV
+- Stack Exchange — Stack Exchange API
+- Grep — Local code search
+
+**Utility Layers**
+- Web research utilities — Searching, scraping, and retries
+- Security utilities — Multiple database integration
+- Stack Exchange utilities — API access and caching
 
 Complexity assessment determines researcher count:
 
