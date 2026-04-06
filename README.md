@@ -18,7 +18,7 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Installation
 
-todo
+tododododo
 
 Requires Docker to be installed.
 
