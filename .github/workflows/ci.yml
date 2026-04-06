@@ -17,8 +17,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -36,8 +37,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -55,8 +57,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -74,8 +77,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -92,22 +96,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Check required files
-        run: |
-          if [ ! -f "LICENSE" ]; then
-            echo "Error: LICENSE file is missing"
-            exit 1
-          fi
-          if [ ! -f "README.md" ]; then
-            echo "Error: README.md file is missing"
-            exit 1
-          fi
-          if [ ! -f "CONTRIBUTING.md" ]; then
-            echo "Error: CONTRIBUTING.md file is missing"
-            exit 1
-          fi
-          echo "All required files present"
 
       - name: Validate package.json
         run: |

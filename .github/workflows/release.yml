@@ -21,8 +21,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -47,7 +48,7 @@ jobs:
           body: |
             ## Changes in this Release
 
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+            See the commit history and merged pull requests for release details.
           draft: false
           prerelease: false
 
