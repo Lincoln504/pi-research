@@ -17,6 +17,7 @@ export interface SliceState {
 }
 
 export interface ResearchPanelState {
+  sessionId: string;
   searxngStatus: SearxngStatus;
   totalTokens: number;
   activeConnections: number;
@@ -25,16 +26,33 @@ export interface ResearchPanelState {
   hideSearxng?: boolean;
 }
 
-const activeTimeouts = new Set<NodeJS.Timeout>();
+// Store timeouts per session ID to prevent cross-session conflicts
+const sessionTimeouts = new Map<string, Set<NodeJS.Timeout>>();
 
 /**
- * Clear all active flash timeouts
+ * Clear all active flash timeouts for a specific session
  */
-export function clearAllFlashTimeouts(): void {
-  for (const timeout of activeTimeouts) {
-    clearTimeout(timeout);
+export function clearAllFlashTimeouts(sessionId?: string): void {
+  if (sessionId) {
+    // Clear timeouts for specific session
+    const timeouts = sessionTimeouts.get(sessionId);
+    if (timeouts) {
+      for (const timeout of timeouts) {
+        clearTimeout(timeout);
+      }
+      timeouts.clear();
+      sessionTimeouts.delete(sessionId);
+    }
+  } else {
+    // Clear all timeouts across all sessions
+    for (const timeouts of sessionTimeouts.values()) {
+      for (const timeout of timeouts) {
+        clearTimeout(timeout);
+      }
+      timeouts.clear();
+    }
+    sessionTimeouts.clear();
   }
-  activeTimeouts.clear();
 }
 
 /**
@@ -75,21 +93,33 @@ export function flashSlice(
 ): void {
   const slice = state.slices.get(researcherId);
   if (!slice || slice.completed || slice.queued) return;
+  
   slice.flash = color;
   onUpdate?.();
+
   const timeout = setTimeout(() => {
     slice.flash = null;
     onUpdate?.();
-    activeTimeouts.delete(timeout);
+    // Remove timeout from session-specific set
+    const timeouts = sessionTimeouts.get(state.sessionId);
+    if (timeouts) {
+      timeouts.delete(timeout);
+    }
   }, durationMs);
-  activeTimeouts.add(timeout);
+
+  // Add timeout to session-specific set
+  if (!sessionTimeouts.has(state.sessionId)) {
+    sessionTimeouts.set(state.sessionId, new Set());
+  }
+  sessionTimeouts.get(state.sessionId)!.add(timeout);
 }
 
 /**
  * Create initial panel state
  */
-export function createInitialPanelState(searxngStatus: SearxngStatus, modelName: string): ResearchPanelState {
+export function createInitialPanelState(sessionId: string, searxngStatus: SearxngStatus, modelName: string): ResearchPanelState {
   return {
+    sessionId,
     searxngStatus,
     totalTokens: 0,
     activeConnections: 0,
@@ -98,11 +128,8 @@ export function createInitialPanelState(searxngStatus: SearxngStatus, modelName:
   };
 }
 
-let capturedTui: { requestRender?(): void } | null = null;
-
-export function getCapturedTui(): { requestRender?(): void } | null {
-  return capturedTui;
-}
+// Remove global capturedTui - each component should manage its own references
+// This prevents stale references when multiple sessions run
 
 function formatTokens(tokens: number): string {
   if (tokens < 1000) return tokens.toString();
@@ -129,12 +156,14 @@ function extractPort(url: string): string {
 
 /**
  * Create research panel component
+ * Each component instance maintains its own state and tui reference
  */
 export function createResearchPanel(
   state: ResearchPanelState
 ): (tui: unknown, theme: Theme) => Component & { dispose?(): void } {
   return (tui: unknown, theme: Theme) => {
-    capturedTui = tui as { requestRender?(): void };
+    // Store tui reference locally for this component instance only
+    const localTui = tui as { requestRender?(): void };
 
     const component: Component = {
       render(width: number): string[] {
@@ -251,7 +280,7 @@ export function createResearchPanel(
         ];
       },
       invalidate(): void {
-        capturedTui?.requestRender?.();
+        localTui?.requestRender?.();
       },
     };
     return component;

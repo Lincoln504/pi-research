@@ -70,6 +70,7 @@ describe('delegate-tool', () => {
     sessionId: 'test-session',
     breadthCounter: { value: 0 },
     panelState: {
+      sessionId: 'test-session',
       searxngStatus: 'running' as any,
       totalTokens: 0,
       activeConnections: 0,

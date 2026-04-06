@@ -78,6 +78,7 @@ vi.mock('../../src/utils/session-state.ts', () => ({
   registerSessionUpdate: vi.fn(),
   unregisterSessionUpdate: vi.fn(),
   refreshAllSessions: vi.fn(),
+  clearPendingRefresh: vi.fn(),
 }));
 
 vi.mock('../../src/utils/shared-links.ts', () => ({

@@ -55,6 +55,7 @@ import {
   onSessionOrderChange,
   registerSessionUpdate,
   refreshAllSessions,
+  clearPendingRefresh,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 const __filename = fileURLToPath(import.meta.url);
@@ -193,29 +194,43 @@ export function createResearchTool(): ToolDefinition {
         };
       }
 
-      // 5. Setup TUI
-      const searxngStatus = getStatus();
-      const modelName = (selectedModel as any)?.id ?? 'unknown';
-      const panelState = createInitialPanelState(searxngStatus, modelName);
-
       // Unique widget ID for simultaneous research sessions
       // This allows multiple panels to stack in the UI
       const sessionId = startResearchSession();
       const widgetId = `pi-research-panel-${sessionId}`;
 
-      // Widget update function - re-sets widget to trigger re-render
-      // Widgets don't support requestRender(), so we must re-set the widget
+      // 5. Setup TUI
+      const searxngStatus = getStatus();
+      const modelName = (selectedModel as any)?.id ?? 'unknown';
+      const panelState = createInitialPanelState(sessionId, searxngStatus, modelName);
+
+      // Widget update function with debouncing to prevent excessive renders
+      let updatePending = false;
+      let updateTimeout: NodeJS.Timeout | null = null;
+      
       const updateWidget = () => {
-        // Only show SearXNG box if this is the bottom-most active research session
-        panelState.hideSearxng = !isBottomMostSession(sessionId);
-        ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
+        if (updatePending) return; // Debounce: skip if update already pending
+        
+        updatePending = true;
+        if (updateTimeout) clearTimeout(updateTimeout);
+        
+        updateTimeout = setTimeout(() => {
+          try {
+            // Only show SearXNG box if this is the bottom-most active research session
+            panelState.hideSearxng = !isBottomMostSession(sessionId);
+            ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
+          } catch (error) {
+            console.error(`Error updating widget for session ${sessionId}:`, error);
+          } finally {
+            updatePending = false;
+            updateTimeout = null;
+          }
+        }, 50); // 50ms debounce to prevent visual flickering
       };
 
       // Register this session's update function globally to coordinate re-renders
+      // This automatically triggers a refresh via notifyOrderChange
       registerSessionUpdate(sessionId, updateWidget);
-
-      // Initial render - triggers a global refresh to ensure order
-      refreshAllSessions();
 
       // Subscribe to SearXNG status changes
       const unsubStatus = onStatusChange((status: SearxngStatus) => {
@@ -243,13 +258,38 @@ export function createResearchTool(): ToolDefinition {
         if (cleaned) return;
         cleaned = true;
         logger.log('[research] Cleaning up...');
-        endResearchSession(sessionId);  // Clear session state
-        cleanupSharedLinks(sessionId);  // Clean up shared links pool file
+
+        // Clear pending widget update timeout
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+          updateTimeout = null;
+        }
+
+        try {
+          endResearchSession(sessionId);  // Clear session state
+        } catch (error) {
+          logger.warn(`[research] Error ending research session ${sessionId}:`, error);
+        }
+
+        try {
+          cleanupSharedLinks(sessionId);  // Clean up shared links pool file
+        } catch (error) {
+          logger.warn(`[research] Error cleaning up shared links for session ${sessionId}:`, error);
+        }
+
         unsubStatus();
         unsubConnectionCount();
         unsubOrder();
-        clearAllFlashTimeouts();
-        ctx.ui.setWidget(widgetId, undefined);
+        clearAllFlashTimeouts(sessionId);
+
+        try {
+          ctx.ui.setWidget(widgetId, undefined);
+        } catch (error) {
+          logger.warn(`[research] Error clearing widget for session ${sessionId}:`, error);
+        }
+
+        // Clear any pending global refresh and do a final refresh with remaining sessions
+        clearPendingRefresh();
         refreshAllSessions(); // Re-render remaining panels to update SearXNG box visibility
         setTimeout(restoreConsole, 15000).unref?.();
       };

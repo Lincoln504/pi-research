@@ -5,6 +5,7 @@
  */
 
 import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
+import { logger } from '../logger.ts';
 
 /**
  * Map of session ID → array of failed researcher IDs
@@ -13,8 +14,9 @@ const sessionFailures = new Map<string, string[]>();
 
 /**
  * Ordered list of active session IDs for TUI stacking
+ * Using a stack structure for reliable LIFO ordering
  */
-const activeSessionOrder: string[] = [];
+const activeSessionStack: string[] = [];
 
 /**
  * Registry of update functions for each session to allow coordinated re-renders
@@ -30,6 +32,13 @@ const orderChangeSubscribers: Array<() => void> = [];
  * Maximum allowed unique failed researchers before stopping research
  */
 const MAX_FAILED_RESEARCHERS = 2;
+
+/**
+ * Global debounce state for batching concurrent refresh calls
+ * Ensures only one refresh executes at a time, preventing render order conflicts
+ */
+let globalRefreshPending = false;
+let globalRefreshTimeout: NodeJS.Timeout | null = null;
 
 /**
  * Subscribe to session order changes
@@ -48,8 +57,13 @@ export function onSessionOrderChange(callback: () => void): () => void {
  * Notify subscribers of session order change
  */
 function notifyOrderChange(): void {
+  // Execute all subscribers synchronously to ensure consistent state
   for (const subscriber of orderChangeSubscribers) {
-    subscriber();
+    try {
+      subscriber();
+    } catch (error) {
+      console.error('Error in session order change subscriber:', error);
+    }
   }
 }
 
@@ -58,10 +72,11 @@ function notifyOrderChange(): void {
  */
 export function registerSessionUpdate(sessionId: string, update: () => void): void {
   sessionUpdateRegistry.set(sessionId, update);
-  // Add to active order only when registered for updates
-  // This ensures the first one to register becomes the bottom-most in TUI
-  if (!activeSessionOrder.includes(sessionId)) {
-    activeSessionOrder.push(sessionId);
+  
+  // Use stack-based ordering: new sessions always go on top
+  // This ensures deterministic LIFO behavior
+  if (!activeSessionStack.includes(sessionId)) {
+    activeSessionStack.push(sessionId);
     notifyOrderChange();
   }
 }
@@ -75,22 +90,67 @@ export function unregisterSessionUpdate(sessionId: string): void {
 
 /**
  * Refresh all active sessions in their stable order
- * This prevents panels from "switching places" in the TUI stack.
+ * Uses global debouncing to batch concurrent refresh calls
+ * Ensures only one refresh executes, preventing render order conflicts
  */
 export function refreshAllSessions(): void {
-  for (const sessionId of activeSessionOrder) {
-    const update = sessionUpdateRegistry.get(sessionId);
-    if (update) {
-      update();
-    }
+  // If refresh already pending, skip - the pending one will use latest state
+  if (globalRefreshPending) return;
+
+  globalRefreshPending = true;
+
+  // Clear any existing timeout to reset the debounce timer
+  if (globalRefreshTimeout) {
+    clearTimeout(globalRefreshTimeout);
   }
+
+  // Debounce by 10ms to batch concurrent calls (multiple sources trigger refreshes simultaneously)
+  globalRefreshTimeout = setTimeout(() => {
+    try {
+      // Validate session stack integrity before processing
+      const validSessionIds = activeSessionStack.filter(sessionId =>
+        sessionUpdateRegistry.has(sessionId) && sessionFailures.has(sessionId)
+      );
+
+      // If we have invalid sessions, clean them up
+      if (validSessionIds.length !== activeSessionStack.length) {
+        for (const sessionId of activeSessionStack) {
+          if (!validSessionIds.includes(sessionId)) {
+            logger.warn(`[session-state] Cleaning up invalid session: ${sessionId}`);
+            sessionFailures.delete(sessionId);
+            unregisterSessionUpdate(sessionId);
+          }
+        }
+        // Update stack to only include valid sessions
+        activeSessionStack.length = 0;
+        activeSessionStack.push(...validSessionIds);
+      }
+
+      // Process from newest to oldest (top to bottom in TUI)
+      // Render newest first, oldest last - ensures oldest stays on bottom
+      for (let i = activeSessionStack.length - 1; i >= 0; i--) {
+        const sessionId = activeSessionStack[i]!;
+        const update = sessionUpdateRegistry.get(sessionId);
+        if (update) {
+          try {
+            update();
+          } catch (error) {
+            console.error(`Error updating session ${sessionId}:`, error);
+          }
+        }
+      }
+    } finally {
+      globalRefreshPending = false;
+      globalRefreshTimeout = null;
+    }
+  }, 10);
 }
 
 /**
- * Get ordered list of active session IDs
+ * Get ordered list of active session IDs (oldest first, newest last)
  */
 export function getActiveSessionOrder(): string[] {
-  return [...activeSessionOrder];
+  return [...activeSessionStack];
 }
 
 /**
@@ -99,8 +159,19 @@ export function getActiveSessionOrder(): string[] {
 export function startResearchSession(): string {
   const sessionId = generateUniqueSessionId('research');
   sessionFailures.set(sessionId, []);
-  // Note: activeSessionOrder.push happens in registerSessionUpdate
+  // Note: activeSessionStack.push happens in registerSessionUpdate
   return sessionId;
+}
+
+/**
+ * Clear pending global refresh (used during cleanup)
+ */
+export function clearPendingRefresh(): void {
+  if (globalRefreshTimeout) {
+    clearTimeout(globalRefreshTimeout);
+    globalRefreshTimeout = null;
+  }
+  globalRefreshPending = false;
 }
 
 /**
@@ -109,9 +180,11 @@ export function startResearchSession(): string {
 export function endResearchSession(sessionId: string): void {
   sessionFailures.delete(sessionId);
   unregisterSessionUpdate(sessionId);
-  const index = activeSessionOrder.indexOf(sessionId);
+
+  // Remove from stack and maintain order
+  const index = activeSessionStack.indexOf(sessionId);
   if (index !== -1) {
-    activeSessionOrder.splice(index, 1);
+    activeSessionStack.splice(index, 1);
     notifyOrderChange();
   }
 }
@@ -119,13 +192,10 @@ export function endResearchSession(sessionId: string): void {
 /**
  * Check if a session is the bottom-most active research session
  * (The one that should show the SearXNG status box)
- * 
- * In pi's TUI with 'aboveEditor' placement, widgets are rendered in the order
- * they are added. The last widget added is closest to the editor (bottom-most).
  */
 export function isBottomMostSession(sessionId: string): boolean {
-  if (activeSessionOrder.length === 0) return false;
-  return activeSessionOrder[activeSessionOrder.length - 1] === sessionId;
+  if (activeSessionStack.length === 0) return false;
+  return activeSessionStack[0] === sessionId;  // First item in stack is bottom-most
 }
 
 /**
@@ -190,3 +260,4 @@ export function getAllSessions(): Map<string, number> {
   }
   return result;
 }
+
