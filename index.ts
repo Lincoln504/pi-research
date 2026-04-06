@@ -44,5 +44,12 @@ export default function (pi: ExtensionAPI) {
   // Register research tool
   pi.registerTool(createResearchTool());
 
+  // Append a usage message to the system prompt for the main chat
+  pi.on('before_agent_start', async (event) => {
+    const researchMessage =
+      '\n\nThe `research` tool (from pi-research) is specifically for web/internet research. It is NOT for local file examination or local on-disk context gathering/research. It accepts a `query`, an optional `model` (defaults to your current model), and an optional `quick` parameter for straightforward factual lookups. For normal research (no `quick` option), ensure the `query` precisely reflects the nessesary depth (or lack of need for depth), specificity (or the lack of it, i.e. if the reserach is open ended), and scope (whether broad, nuanced, or both) as demanded by the task. If a reserach task is judged to you to be on the simpler side, choose to use the `quick` research mode.';
+    return { systemPrompt: event.systemPrompt + researchMessage };
+  });
+
   logger.log('[pi-research] Extension loaded');
 }

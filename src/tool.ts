@@ -65,12 +65,14 @@ export function createResearchTool(): ToolDefinition {
     name: 'research',
     label: 'Research',
     description:
-      'Orchestrate multi-agent research: coordinator delegates to parallel/sequential researchers, synthesizes findings. Uses web search, scraping, security databases, and code search.',
-    promptSnippet: 'Conduct multi-agent research on a topic',
+      'Perform deep web/internet research using a multi-agent orchestration (not for local file or project exploration). Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
+    promptSnippet: 'Conduct multi-agent web/internet research',
     promptGuidelines: [
-      'Use research to investigate complex topics requiring multiple perspectives.',
+      'Specifically for web research, not local project exploration.',
+      'Accepts a query, an optional model (defaults to yours), and an optional quick flag for simple lookups.',
+      'For normal research (no quick), form the query with appropriate depth, specificity, and scope.',
       'The coordinator breaks down query into research aspects.',
-      'Researchers investigate using web search, scraping, security databases, and code search.',
+      'Researchers investigate using web search, scraping, security databases, and more.',
       'Results are synthesized into a final comprehensive answer.',
     ],
     parameters: Type.Object({

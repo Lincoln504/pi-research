@@ -179,12 +179,15 @@ export function createResearchPanel(
         // Use consistent total offset regardless of whether SearXNG box is shown
         // This ensures stacked panels align correctly vertically.
         const totalLeftOffset = LEFT_BOX_W + GAP;
-        const rightBoxWidth = Math.max(3, width - totalLeftOffset);
+        
+        // If width is very narrow, we might need to prioritize the right box
+        const MIN_RIGHT_WIDTH = 20;
+        const rightBoxWidth = Math.max(MIN_RIGHT_WIDTH, width - totalLeftOffset);
         const rightInner = Math.max(1, rightBoxWidth - 2);
 
         // Prep left box lines if not hidden
         let leftLines: string[];
-        if (!state.hideSearxng) {
+        if (!state.hideSearxng && width >= totalLeftOffset + MIN_RIGHT_WIDTH) {
           const status = state.searxngStatus;
           const statusText = getStatusText(status.state);
           const portStr = extractPort(status.url);
@@ -200,8 +203,8 @@ export function createResearchPanel(
           const leftBottom = theme.fg('accent', '└' + '─'.repeat(LEFT_INNER) + '┘');
           leftLines = [leftBorder, leftRow1, leftRow2, leftRow3, leftBottom];
         } else {
-          // Empty spaces for indentation if SearXNG box is hidden
-          leftLines = Array(5).fill(' '.repeat(LEFT_BOX_W));
+          // If SearXNG is hidden OR terminal is too narrow, just indent
+          leftLines = Array(5).fill(' '.repeat(totalLeftOffset));
         }
 
         let titleText = ` Research | ${state.modelName}  ${formatTokens(state.totalTokens)} `;

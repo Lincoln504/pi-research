@@ -187,6 +187,12 @@ describe('createResearchTool', () => {
       expect(tool.label).toBe('Research');
     });
 
+    it('has web research in description', () => {
+      const tool = createResearchTool();
+      expect(tool.description).toContain('web/internet research');
+      expect(tool.description).toContain('not for local');
+    });
+
     it('has query as required parameter', () => {
       const tool = createResearchTool();
       const required = (tool.parameters as any).required;

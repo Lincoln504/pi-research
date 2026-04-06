@@ -12,12 +12,12 @@ You complete ONE research cycle:
 
 ## Phase 1: Information Gathering (Max 6 Rounds)
 
-Conduct **6 rounds of gathering operations**. In each round, use multiple queries to ensure breadth and variance.
+Conduct **6 full rounds of gathering operations** to ensure a broad foundation of information. In each round, use multiple queries to explore breadth and identify diverse sources.
 
 **Gathering Strategy per Round:**
 - Use multiple queries in the `queries` array of a single `search` call.
 - Include queries of **similar variance** (slight wording changes) and **wider variance** (different dimensions).
-- Aim for total breadth across all 6 rounds.
+- Aim for total breadth across all 6 rounds to provide the coordinator with a high-quality landscape of the topic.
 
 **Available Tools:**
 - `search`: General web search (Bing, Google, etc. via SearXNG)
