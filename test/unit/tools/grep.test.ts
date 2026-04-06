@@ -38,15 +38,16 @@ describe('tools/grep', () => {
       expect(spy).toHaveBeenCalledWith('grep');
     });
 
-    it('should throw if limit exceeded', async () => {
+    it('should return blocked response if limit exceeded', async () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('grep'); // Limit reached
 
       const tool = createGrepTool({ tracker });
-      
-      await expect(
-        tool.execute('test-id', { pattern: 'test' }, undefined, undefined, {} as any)
-      ).rejects.toThrow(/limit for gathering exceeded/);
+
+      const result = await tool.execute('test-id', { pattern: 'test' }, undefined, undefined, {} as any);
+
+      expect((result.details as any).blocked).toBe(true);
+      expect((result.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
     });
   });
 });

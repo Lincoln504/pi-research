@@ -47,6 +47,7 @@ import { createDelegateTool, type DelegateToolOptions } from './orchestration/de
 import { createInvestigateContextTool } from './orchestration/context-tool.ts';
 import type { CreateResearcherSessionOptions } from './orchestration/researcher.ts';
 import { logger, suppressConsole } from './logger.ts';
+import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
   endResearchSession,
@@ -257,7 +258,8 @@ export function createResearchTool(): ToolDefinition {
       // 6. Shared session infrastructure
       const sessionManager = SessionManager.inMemory();
       const settingsManager = SettingsManager.inMemory({ compaction: { enabled: true } });
-      const researcherPrompt = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+      const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+      const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
 
       const researcherOptions: CreateResearcherSessionOptions = {
         cwd: ctx.cwd,
@@ -362,7 +364,8 @@ export function createResearchTool(): ToolDefinition {
       } else {
         // ===== DEEP MODE: Coordinator + multi-researcher =====
         const breadthCounter = { value: 0 };
-        const coordinatorPrompt = readFileSync(join(__dirname, '..', 'prompts', 'coordinator.md'), 'utf-8');
+        const coordinatorPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'coordinator.md'), 'utf-8');
+        const coordinatorPrompt = injectCurrentDate(coordinatorPromptRaw, 'coordinator');
 
         const delegateToolOptions: DelegateToolOptions = {
           sessionId,

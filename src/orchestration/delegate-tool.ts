@@ -89,7 +89,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       }
 
       const effectiveMaxConcurrency = 3;
-      const assignments: Array<{ label: string; slice: string }> = slices.map((slice, index) => {
+      const assignments: Array<{ label: string; slice: string }> = slices.map((slice) => {
         const label = `${++options.breadthCounter.value}`;
         addSlice(options.panelState, label, label, true);
         return { label, slice };
