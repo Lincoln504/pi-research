@@ -41,7 +41,7 @@ export async function formatParentContext(ctx: ExtensionContext): Promise<string
 
   // 1. Estimate tokens for the entire branch
   const llmMessages = convertToLlm(allMessages);
-  const totalTokens = estimateTokens(llmMessages);
+  const totalTokens = llmMessages.reduce((acc, msg) => acc + estimateTokens(msg), 0);
 
   logger.log(`[session-context] Parent branch has ~${totalTokens} tokens and ${allMessages.length} messages.`);
 
@@ -67,8 +67,11 @@ export async function formatParentContext(ctx: ExtensionContext): Promise<string
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-      if (!auth.ok || !auth.apiKey) {
-        throw new Error(`Auth failed: ${auth.error || 'No API key'}`);
+      if (!auth.ok) {
+        throw new Error(`Auth failed: ${auth.error}`);
+      }
+      if (!auth.apiKey) {
+        throw new Error('Auth failed: No API key');
       }
 
       const conversationText = serializeConversation(llmMessages);
@@ -84,7 +87,7 @@ export async function formatParentContext(ctx: ExtensionContext): Promise<string
             }
           ] 
         },
-        { apiKey: auth.apiKey, headers: auth.headers, signal: ctx.getSignal() }
+        { apiKey: auth.apiKey, headers: auth.headers, signal: ctx.signal }
       );
 
       const summary = response.content

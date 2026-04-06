@@ -23,7 +23,7 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
   buildSessionContext: vi.fn(() => ({ messages: [] })),
   estimateTokens: vi.fn(),
   serializeConversation: vi.fn(),
-  convertToLlm: vi.fn(),
+  convertToLlm: vi.fn((m) => m),
 }));
 
 // Mock ai
