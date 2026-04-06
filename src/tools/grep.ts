@@ -136,8 +136,14 @@ export function createGrepTool(options: {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker
-      options.tracker.recordCall('grep');
+      // Record call in tracker - returns false if limit reached
+      const allowed = options.tracker.recordCall('grep');
+      if (!allowed) {
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
+          details: { blocked: true },
+        };
+      }
 
       const record = params as RgGrepParams;
       const { pattern } = record;

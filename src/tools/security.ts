@@ -72,8 +72,14 @@ export function createSecuritySearchTool(options: {
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker
-      options.tracker.recordCall('security_search');
+      // Record call in tracker - returns false if limit reached
+      const allowed = options.tracker.recordCall('security_search');
+      if (!allowed) {
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
+          details: { blocked: true },
+        };
+      }
 
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;

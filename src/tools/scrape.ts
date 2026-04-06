@@ -51,8 +51,14 @@ export function createScrapeTool(options: {
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker - this will throw if limit (1) exceeded
-      options.tracker.recordCall('scrape');
+      // Record call in tracker - returns false if limit reached
+      const allowed = options.tracker.recordCall('scrape');
+      if (!allowed) {
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('scrape') }],
+          details: { blocked: true },
+        };
+      }
 
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;

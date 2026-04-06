@@ -60,8 +60,14 @@ export function createStackexchangeTool(options: {
       _onUpdate,
       extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker
-      tracker.recordCall('stackexchange');
+      // Record call in tracker - returns false if limit reached
+      const allowed = tracker.recordCall('stackexchange');
+      if (!allowed) {
+        return {
+          content: [{ type: 'text', text: tracker.getLimitMessage('stackexchange') }],
+          details: { blocked: true },
+        };
+      }
 
       const paramsRecord = params as Record<string, unknown>;
       const command = paramsRecord['command'] as string;

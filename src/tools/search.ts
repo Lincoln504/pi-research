@@ -43,8 +43,14 @@ export function createSearchTool(options: {
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _extensionCtx): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker - this will throw if limit (6) exceeded
-      options.tracker.recordCall('search');
+      // Record call in tracker - returns false if limit reached
+      const allowed = options.tracker.recordCall('search');
+      if (!allowed) {
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('search') }],
+          details: { blocked: true },
+        };
+      }
 
       const startTime = Date.now();
       const paramsRecord = params as Record<string, unknown>;

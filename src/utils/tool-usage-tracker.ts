@@ -43,33 +43,46 @@ export class ToolUsageTracker {
   }
 
   /**
-   * Record a tool call and enforce limits
-   * Checks limit BEFORE incrementing to maintain accurate counter state.
-   * If limit is hit, throws immediately without incrementing.
+   * Record a tool call and enforce limits gracefully
+   * Returns true if call is allowed and recorded, false if limit is reached.
+   * On block: counter is NOT incremented, tool should return a limit message.
    */
-  recordCall(toolName: string): void {
+  recordCall(toolName: string): boolean {
     const category = this.getCategory(toolName);
     const limit = this.limits[category as keyof ToolLimits];
     const usage = this.getUsage(category);
 
-    // Check limit BEFORE incrementing — ensures counter state is accurate if we throw
+    // Check limit — if reached, return false without incrementing
     if (limit !== undefined && usage.callCount >= limit) {
-      const errorMsg = category === 'scrape'
-        ? `SCRAPE LIMIT REACHED: You have already used your 1 allowed scrape call. ` +
-          `Call scrape is no longer available. Proceed to Phase 3: synthesize and report your findings now.`
-        : `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
-          `No further search, security_search, stackexchange, or grep calls are allowed. ` +
-          `Proceed to Phase 2: call scrape with your collected URLs now.`;
-      throw new Error(errorMsg);
+      logger.debug(
+        `[tool-usage] category=${category} blocked tool=${toolName} (limit=${limit})`
+      );
+      return false;
     }
 
-    // Only increment on success (after passing the limit check)
+    // Allowed — increment and log
     usage.callCount++;
-
-    // Log successful call for debugging
     logger.debug(
       `[tool-usage] category=${category} calls=${usage.callCount}/${limit ?? 'unlimited'} tool=${toolName}`
     );
+    return true;
+  }
+
+  /**
+   * Get limit-reached message for a blocked tool
+   */
+  getLimitMessage(toolName: string): string {
+    const category = this.getCategory(toolName);
+    const usage = this.getUsage(category);
+    const limit = usage.limit;
+
+    if (category === 'scrape') {
+      return `SCRAPE LIMIT REACHED: You have already used your 1 allowed scrape call. ` +
+        `This tool cannot be used again. Proceed to Phase 3: synthesize and report your findings now.`;
+    }
+    return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
+      `This tool and all other gathering tools cannot be used again. ` +
+      `Proceed to Phase 2: call scrape with your collected URLs now.`;
   }
 
   /**

@@ -11,81 +11,90 @@ describe('tool-usage-tracker', () => {
   describe('ToolUsageTracker', () => {
 
     describe('recordCall', () => {
-      it('should record first call', () => {
+      it('should record first call and return true', () => {
         const tracker = new ToolUsageTracker({ gathering: 5 });
-        tracker.recordCall('search');
+        const allowed = tracker.recordCall('search');
 
+        expect(allowed).toBe(true);
         expect(tracker.getUsage('gathering').callCount).toBe(1);
       });
 
-      it('should record multiple calls in same category', () => {
+      it('should record multiple calls in same category and return true', () => {
         const tracker = new ToolUsageTracker({ gathering: 5 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        tracker.recordCall('stackexchange');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
+        expect(tracker.recordCall('stackexchange')).toBe(true);
 
         expect(tracker.getUsage('gathering').callCount).toBe(3);
       });
 
-      it('should throw when limit reached (on 7th call of 6 limit)', () => {
+      it('should return false when limit reached (on 7th call of 6 limit)', () => {
         const tracker = new ToolUsageTracker({ gathering: 6 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        tracker.recordCall('stackexchange');
-        tracker.recordCall('security_search');
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
+        expect(tracker.recordCall('stackexchange')).toBe(true);
+        expect(tracker.recordCall('security_search')).toBe(true);
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
 
-        // 7th call should throw, counter should stay at 6
-        expect(() => tracker.recordCall('search')).toThrow('GATHERING LIMIT REACHED');
+        // 7th call should return false, counter should stay at 6
+        expect(tracker.recordCall('search')).toBe(false);
         expect(tracker.getUsage('gathering').callCount).toBe(6);
       });
 
-      it('should maintain accurate counter state on throw', () => {
+      it('should return false when limit reached without incrementing', () => {
         const tracker = new ToolUsageTracker({ gathering: 2 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
 
-        // Counter is at 2. Attempting 3rd call should throw without incrementing
-        expect(() => tracker.recordCall('stackexchange')).toThrow('GATHERING LIMIT REACHED');
+        // Counter is at 2. Attempting 3rd call should return false without incrementing
+        expect(tracker.recordCall('stackexchange')).toBe(false);
         expect(tracker.getUsage('gathering').callCount).toBe(2);
 
-        // Even after throw, counter should still be 2
+        // Subsequent calls also blocked
+        expect(tracker.recordCall('search')).toBe(false);
         expect(tracker.getUsage('gathering').callCount).toBe(2);
       });
 
-      it('should allow calls up to limit', () => {
+      it('should allow calls up to limit and return true', () => {
         const tracker = new ToolUsageTracker({ gathering: 3 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        tracker.recordCall('stackexchange');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
+        expect(tracker.recordCall('stackexchange')).toBe(true);
 
         expect(tracker.getUsage('gathering').callCount).toBe(3);
       });
 
-      it('should not throw for unlimited tools', () => {
+      it('should always return true for unlimited tools', () => {
         const tracker = new ToolUsageTracker({ gathering: 5 });
-        expect(() => {
-          for (let i = 0; i < 100; i++) {
-            tracker.recordCall('read');
-          }
-        }).not.toThrow();
+        for (let i = 0; i < 100; i++) {
+          expect(tracker.recordCall('read')).toBe(true);
+        }
 
         expect(tracker.getUsage('read').callCount).toBe(100);
       });
 
-      it('should throw with SCRAPE LIMIT REACHED for scrape', () => {
+      it('should return false with SCRAPE LIMIT REACHED for scrape', () => {
         const tracker = new ToolUsageTracker({ scrape: 1 });
-        tracker.recordCall('scrape');
+        expect(tracker.recordCall('scrape')).toBe(true);
 
-        expect(() => tracker.recordCall('scrape')).toThrow('SCRAPE LIMIT REACHED');
+        const allowed = tracker.recordCall('scrape');
+        expect(allowed).toBe(false);
+
+        const msg = tracker.getLimitMessage('scrape');
+        expect(msg).toContain('SCRAPE LIMIT REACHED');
       });
 
-      it('should throw with phase-transition guidance', () => {
+      it('should provide phase-transition guidance in limit message', () => {
         const tracker = new ToolUsageTracker({ gathering: 1 });
         tracker.recordCall('search');
 
-        expect(() => tracker.recordCall('grep')).toThrow(/Proceed to Phase 2/);
+        // Get blocked and check the message
+        const allowed = tracker.recordCall('grep');
+        expect(allowed).toBe(false);
+
+        const msg = tracker.getLimitMessage('grep');
+        expect(msg).toContain('Proceed to Phase 2');
       });
     });
 
@@ -101,8 +110,8 @@ describe('tool-usage-tracker', () => {
 
       it('should return existing usage entry', () => {
         const tracker = new ToolUsageTracker({ gathering: 5 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
 
         const usage = tracker.getUsage('gathering');
         expect(usage.callCount).toBe(2);
@@ -126,9 +135,9 @@ describe('tool-usage-tracker', () => {
 
       it('should return stats for used categories', () => {
         const tracker = new ToolUsageTracker({ gathering: 5, scrape: 3 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        tracker.recordCall('scrape');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('grep')).toBe(true);
+        expect(tracker.recordCall('scrape')).toBe(true);
 
         const stats = tracker.getStats();
 
@@ -138,11 +147,29 @@ describe('tool-usage-tracker', () => {
       });
     });
 
+    describe('getLimitMessage', () => {
+      it('should provide gathering limit message', () => {
+        const tracker = new ToolUsageTracker({ gathering: 6 });
+        const msg = tracker.getLimitMessage('search');
+
+        expect(msg).toContain('GATHERING LIMIT REACHED');
+        expect(msg).toContain('Phase 2');
+      });
+
+      it('should provide scrape limit message', () => {
+        const tracker = new ToolUsageTracker({ scrape: 1 });
+        const msg = tracker.getLimitMessage('scrape');
+
+        expect(msg).toContain('SCRAPE LIMIT REACHED');
+        expect(msg).toContain('Phase 3');
+      });
+    });
+
     describe('reset', () => {
       it('should clear all usage', () => {
         const tracker = new ToolUsageTracker({ gathering: 5, scrape: 3 });
-        tracker.recordCall('search');
-        tracker.recordCall('scrape');
+        expect(tracker.recordCall('search')).toBe(true);
+        expect(tracker.recordCall('scrape')).toBe(true);
 
         expect(tracker.getStats().size).toBe(2);
 
@@ -156,13 +183,13 @@ describe('tool-usage-tracker', () => {
         tracker.recordCall('search');
         tracker.recordCall('grep');
 
-        // Counter at 2, should throw on 3rd
-        expect(() => tracker.recordCall('stackexchange')).toThrow();
+        // Counter at 2, should block on 3rd
+        expect(tracker.recordCall('stackexchange')).toBe(false);
 
         tracker.reset();
 
         // After reset, calls should work again
-        expect(() => tracker.recordCall('search')).not.toThrow();
+        expect(tracker.recordCall('search')).toBe(true);
       });
     });
   });
