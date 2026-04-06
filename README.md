@@ -63,11 +63,6 @@ The research tool supports parameters: `query` (required, the research topic), `
 - Stack Exchange — Stack Exchange API
 - Grep — Local code search
 
-**Utility Layers**
-- Web research utilities — Searching, scraping, and retries
-- Security utilities — Multiple database integration
-- Stack Exchange utilities — API access and caching
-
 Complexity assessment determines researcher count:
 
 - Level 1 (Brief) — 1–2 researchers. Default for simple factual queries.
