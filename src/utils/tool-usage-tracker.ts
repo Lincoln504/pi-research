@@ -3,13 +3,14 @@
  *
  * Tracks and enforces limits on researcher tool usage.
  * Prevents excessive calls to prevent rate limiting and control costs.
+ * Enforcement is code-based only — when a limit is hit, the tool throws.
  */
 
 import { logger } from '../logger.ts';
 
 export interface ToolLimits {
   // Combined gathering limit (search, security_search, stackexchange, grep)
-  gathering?: number; 
+  gathering?: number;
   // Scrape limit
   scrape?: number;
   // read tool (default pi file read) has no limit
@@ -42,42 +43,33 @@ export class ToolUsageTracker {
   }
 
   /**
-   * Check if a tool can be called (within limits)
-   */
-  canCall(toolName: string): boolean {
-    const category = this.getCategory(toolName);
-    const limit = this.limits[category as keyof ToolLimits];
-    if (limit === undefined) {
-      return true;
-    }
-
-    const usage = this.getUsage(category);
-    if (usage.callCount >= limit) {
-      logger.warn(
-        `[tool-usage] category ${category} limit exceeded: ${usage.callCount}/${limit}`
-      );
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Record a tool call and check limits
+   * Record a tool call and enforce limits
+   * Checks limit BEFORE incrementing to maintain accurate counter state.
+   * If limit is hit, throws immediately without incrementing.
    */
   recordCall(toolName: string): void {
     const category = this.getCategory(toolName);
     const limit = this.limits[category as keyof ToolLimits];
-
     const usage = this.getUsage(category);
+
+    // Check limit BEFORE incrementing — ensures counter state is accurate if we throw
+    if (limit !== undefined && usage.callCount >= limit) {
+      const errorMsg = category === 'scrape'
+        ? `SCRAPE LIMIT REACHED: You have already used your 1 allowed scrape call. ` +
+          `Call scrape is no longer available. Proceed to Phase 3: synthesize and report your findings now.`
+        : `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
+          `No further search, security_search, stackexchange, or grep calls are allowed. ` +
+          `Proceed to Phase 2: call scrape with your collected URLs now.`;
+      throw new Error(errorMsg);
+    }
+
+    // Only increment on success (after passing the limit check)
     usage.callCount++;
 
-    if (limit !== undefined && usage.callCount > limit) {
-      throw new Error(
-        `Tool usage limit for ${category} exceeded: ${usage.callCount}/${limit}. ` +
-        `Please adjust your research strategy to stay within limits.`
-      );
-    }
+    // Log successful call for debugging
+    logger.debug(
+      `[tool-usage] category=${category} calls=${usage.callCount}/${limit ?? 'unlimited'} tool=${toolName}`
+    );
   }
 
   /**

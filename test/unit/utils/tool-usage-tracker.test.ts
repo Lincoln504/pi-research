@@ -9,58 +9,6 @@ import { ToolUsageTracker, createDefaultToolLimits } from '../../../src/utils/to
 
 describe('tool-usage-tracker', () => {
   describe('ToolUsageTracker', () => {
-    describe('canCall', () => {
-      it('should return true for tool with no limit', () => {
-        const tracker = new ToolUsageTracker({ gathering: 5 });
-        expect(tracker.canCall('scrape')).toBe(true);
-      });
-
-      it('should return true for tool under limit (gathering)', () => {
-        const tracker = new ToolUsageTracker({ gathering: 5 });
-        expect(tracker.canCall('search')).toBe(true);
-      });
-
-      it('should return false when gathering limit is reached', () => {
-        const tracker = new ToolUsageTracker({ gathering: 2 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        expect(tracker.canCall('search')).toBe(false);
-        expect(tracker.canCall('stackexchange')).toBe(false);
-      });
-
-      it('should return false when gathering limit is exceeded', () => {
-        const tracker = new ToolUsageTracker({ gathering: 1 });
-        tracker.recordCall('search');
-        expect(tracker.canCall('security_search')).toBe(false);
-      });
-
-      it('should handle unlimited tools', () => {
-        const tracker = new ToolUsageTracker({ gathering: 5 });
-        for (let i = 0; i < 100; i++) {
-          expect(tracker.canCall('read')).toBe(true);
-        }
-      });
-
-      it('should track gathering vs scrape limits', () => {
-        const tracker = new ToolUsageTracker({ gathering: 2, scrape: 1 });
-        tracker.recordCall('search');
-        tracker.recordCall('grep');
-        tracker.recordCall('scrape');
-
-        expect(tracker.canCall('search')).toBe(false);
-        expect(tracker.canCall('scrape')).toBe(false);
-      });
-
-      it('should handle tool not yet called', () => {
-        const tracker = new ToolUsageTracker({ gathering: 5 });
-        expect(tracker.canCall('search')).toBe(true);
-      });
-
-      it('should return false for zero limit', () => {
-        const tracker = new ToolUsageTracker({ gathering: 0 });
-        expect(tracker.canCall('search')).toBe(false);
-      });
-    });
 
     describe('recordCall', () => {
       it('should record first call', () => {
@@ -79,12 +27,31 @@ describe('tool-usage-tracker', () => {
         expect(tracker.getUsage('gathering').callCount).toBe(3);
       });
 
-      it('should throw when limit exceeded', () => {
+      it('should throw when limit reached (on 7th call of 6 limit)', () => {
+        const tracker = new ToolUsageTracker({ gathering: 6 });
+        tracker.recordCall('search');
+        tracker.recordCall('grep');
+        tracker.recordCall('stackexchange');
+        tracker.recordCall('security_search');
+        tracker.recordCall('search');
+        tracker.recordCall('grep');
+
+        // 7th call should throw, counter should stay at 6
+        expect(() => tracker.recordCall('search')).toThrow('GATHERING LIMIT REACHED');
+        expect(tracker.getUsage('gathering').callCount).toBe(6);
+      });
+
+      it('should maintain accurate counter state on throw', () => {
         const tracker = new ToolUsageTracker({ gathering: 2 });
         tracker.recordCall('search');
         tracker.recordCall('grep');
 
-        expect(() => tracker.recordCall('stackexchange')).toThrow('Tool usage limit for gathering exceeded');
+        // Counter is at 2. Attempting 3rd call should throw without incrementing
+        expect(() => tracker.recordCall('stackexchange')).toThrow('GATHERING LIMIT REACHED');
+        expect(tracker.getUsage('gathering').callCount).toBe(2);
+
+        // Even after throw, counter should still be 2
+        expect(tracker.getUsage('gathering').callCount).toBe(2);
       });
 
       it('should allow calls up to limit', () => {
@@ -105,6 +72,20 @@ describe('tool-usage-tracker', () => {
         }).not.toThrow();
 
         expect(tracker.getUsage('read').callCount).toBe(100);
+      });
+
+      it('should throw with SCRAPE LIMIT REACHED for scrape', () => {
+        const tracker = new ToolUsageTracker({ scrape: 1 });
+        tracker.recordCall('scrape');
+
+        expect(() => tracker.recordCall('scrape')).toThrow('SCRAPE LIMIT REACHED');
+      });
+
+      it('should throw with phase-transition guidance', () => {
+        const tracker = new ToolUsageTracker({ gathering: 1 });
+        tracker.recordCall('search');
+
+        expect(() => tracker.recordCall('grep')).toThrow(/Proceed to Phase 2/);
       });
     });
 
@@ -175,11 +156,13 @@ describe('tool-usage-tracker', () => {
         tracker.recordCall('search');
         tracker.recordCall('grep');
 
-        expect(tracker.canCall('search')).toBe(false);
+        // Counter at 2, should throw on 3rd
+        expect(() => tracker.recordCall('stackexchange')).toThrow();
 
         tracker.reset();
 
-        expect(tracker.canCall('search')).toBe(true);
+        // After reset, calls should work again
+        expect(() => tracker.recordCall('search')).not.toThrow();
       });
     });
   });
