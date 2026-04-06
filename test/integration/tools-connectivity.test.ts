@@ -15,7 +15,7 @@ import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 describe('Search and Scrape Tools Connectivity', () => {
   const mockExtensionCtx = {
     cwd: process.cwd(),
-    ui: { setWidget: () => {} },
+    ui: { setWidget: () => {}, notify: () => {} },
   };
 
   beforeAll(async () => {
@@ -29,6 +29,7 @@ describe('Search and Scrape Tools Connectivity', () => {
         },
         ui: {
           setWidget: () => {},
+          notify: () => {},
         },
       } as any);
       await ensureRunning();

@@ -21,6 +21,7 @@ describe('Health Check Integration Tests', () => {
       },
       ui: {
         setWidget: () => {},
+        notify: () => {},
       },
     } as any);
 

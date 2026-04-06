@@ -13,7 +13,7 @@ import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 describe('Extended Tools Integration', () => {
   const mockExtensionCtx = {
     cwd: process.cwd(),
-    ui: { setWidget: () => {} },
+    ui: { setWidget: () => {}, notify: () => {} },
   };
 
   describe('Security Search Tool', () => {
