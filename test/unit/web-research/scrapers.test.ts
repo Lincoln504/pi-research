@@ -33,6 +33,11 @@ describe('scrapers', () => {
     it('should handle stopping when no browser is active', async () => {
       await expect(stopChromium()).resolves.not.toThrow();
     });
+
+    it('should remain safe when stopping repeatedly', async () => {
+      await expect(stopChromium()).resolves.not.toThrow();
+      await expect(stopChromium()).resolves.not.toThrow();
+    });
   });
 
   // Note: convertToMarkdown is private in scrapers.ts, so we can't test it directly

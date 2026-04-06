@@ -106,11 +106,19 @@ const FILTERED_TAGS = [
 
 const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png|jpe?g|gif|webp|bmp|ico)(?:\?[^)]*)?)\)/gi;
 const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((?:data:image\/[^)]+|[^)\s]+)\)/gi;
+let scraperDependenciesInitialized = false;
 
 export function initScraperDependencies(): void {
+  if (scraperDependenciesInitialized) {
+    return;
+  }
+
+  scraperDependenciesInitialized = true;
   playwrightAvailable = checkModule('playwright');
   shutdownManager.register(stopChromium);
 }
+
+initScraperDependencies();
 
 // ============================================================================
 // Chromium singleton browser
@@ -122,7 +130,8 @@ export function initScraperDependencies(): void {
 //
 // Lifecycle:
 //   - Lazily started on first Layer 2 scrape attempt
-//   - stopChromium() called on session_shutdown / SIGTERM (exported)
+//   - stopChromium() is registered with the extension cleanup registry
+//   - pi triggers that cleanup from session_shutdown
 //   - On /reload, the old browser var is reset to null; the old Chromium process
 //     is an orphan but Playwright registers an on-exit handler that kills it when
 //     the Node process exits — acceptable bounded leak for the /reload case

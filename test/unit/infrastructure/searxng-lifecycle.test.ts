@@ -566,6 +566,19 @@ describe('backward compatibility exports', () => {
 
       expect(isInitialized()).toBe(false);
     });
+
+    it('should be safe to call shutdownLifecycle repeatedly', async () => {
+      const mockManager = new MockDockerSearxngManager();
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
+      setLifecycleManager(lifecycleManager);
+
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
+      await lifecycleManager.init(ctx);
+
+      await expect(shutdownLifecycle()).resolves.toBeUndefined();
+      await expect(shutdownLifecycle()).resolves.toBeUndefined();
+      expect(isInitialized()).toBe(false);
+    });
   });
 
   describe('isInitialized', () => {
