@@ -162,6 +162,8 @@ describe('config (refactored)', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 180000,
           PROXY_URL: 'http://custom-proxy.com',
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         setConfig(customConfig);
@@ -178,6 +180,8 @@ describe('config (refactored)', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 99999,
           PROXY_URL: config1.PROXY_URL,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         setConfig(customConfig);
@@ -190,6 +194,8 @@ describe('config (refactored)', () => {
       it('should persist across multiple getConfig calls', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 12345,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         setConfig(customConfig);
@@ -208,6 +214,8 @@ describe('config (refactored)', () => {
       it('should allow setting invalid values (validated separately)', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: -1, // Invalid
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => setConfig(customConfig)).not.toThrow();
@@ -223,6 +231,8 @@ describe('config (refactored)', () => {
       it('should clear global configuration', () => {
         const customConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 12345,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         setConfig(customConfig);
@@ -239,11 +249,17 @@ describe('config (refactored)', () => {
       });
 
       it('should allow new config after reset', () => {
-        setConfig({ RESEARCHER_TIMEOUT_MS: 99999 });
+        setConfig({
+          RESEARCHER_TIMEOUT_MS: 99999,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
+        });
         resetConfig();
 
         const newConfig: Config = {
           RESEARCHER_TIMEOUT_MS: 55555,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
         setConfig(newConfig);
 
@@ -257,6 +273,8 @@ describe('config (refactored)', () => {
       it('should validate default config', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 240000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -265,6 +283,8 @@ describe('config (refactored)', () => {
       it('should validate minimum valid values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 30000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -273,6 +293,8 @@ describe('config (refactored)', () => {
       it('should validate maximum valid values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 600000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -281,6 +303,8 @@ describe('config (refactored)', () => {
       it('should validate mid-range values', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 180000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -289,6 +313,8 @@ describe('config (refactored)', () => {
       it('should use global config if none provided', () => {
         setConfig({
           RESEARCHER_TIMEOUT_MS: 240000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         });
 
         expect(() => validateConfig()).not.toThrow();
@@ -299,6 +325,8 @@ describe('config (refactored)', () => {
       it('should throw for RESEARCHER_TIMEOUT_MS below minimum', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 29999,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -307,6 +335,8 @@ describe('config (refactored)', () => {
       it('should throw for RESEARCHER_TIMEOUT_MS above maximum', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 600001,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -315,6 +345,8 @@ describe('config (refactored)', () => {
       it('should throw for negative RESEARCHER_TIMEOUT_MS', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: -1,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -323,6 +355,8 @@ describe('config (refactored)', () => {
       it('should throw for zero RESEARCHER_TIMEOUT_MS', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 0,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -331,16 +365,32 @@ describe('config (refactored)', () => {
 
     describe('edge cases', () => {
       it('should handle boundary values exactly', () => {
-        const config1: Config = { RESEARCHER_TIMEOUT_MS: 30000 };
-        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600000 };
+        const config1: Config = {
+          RESEARCHER_TIMEOUT_MS: 30000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
+        };
+        const config2: Config = {
+          RESEARCHER_TIMEOUT_MS: 600000,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
+        };
 
         expect(() => validateConfig(config1)).not.toThrow();
         expect(() => validateConfig(config2)).not.toThrow();
       });
 
       it('should handle off-by-one boundary values', () => {
-        const config1: Config = { RESEARCHER_TIMEOUT_MS: 29999 };
-        const config2: Config = { RESEARCHER_TIMEOUT_MS: 600001 };
+        const config1: Config = {
+          RESEARCHER_TIMEOUT_MS: 29999,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
+        };
+        const config2: Config = {
+          RESEARCHER_TIMEOUT_MS: 600001,
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
+        };
 
         expect(() => validateConfig(config1)).toThrow();
         expect(() => validateConfig(config2)).toThrow();
@@ -350,6 +400,8 @@ describe('config (refactored)', () => {
         const config: Config = {
           RESEARCHER_TIMEOUT_MS: 240000,
           PROXY_URL: 'http://proxy.example.com:8080',
+          TUI_REFRESH_DEBOUNCE_MS: 10,
+          CONSOLE_RESTORE_DELAY_MS: 15000,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -367,6 +419,8 @@ describe('config (refactored)', () => {
       const customConfig: Config = {
         RESEARCHER_TIMEOUT_MS: 180000,
         PROXY_URL: 'http://proxy.com',
+        TUI_REFRESH_DEBOUNCE_MS: 10,
+        CONSOLE_RESTORE_DELAY_MS: 15000,
       };
       setConfig(customConfig);
 

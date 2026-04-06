@@ -78,6 +78,8 @@ Set environment variables in `.env` file (see `.env.example`):
 | `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
+| `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | 10 | Global TUI refresh debounce in milliseconds. |
+| `PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS` | 15000 | Console restore delay after research in milliseconds. |
 | `DOCKER_SOCKET` | /var/run/docker.sock | Docker socket path for container management. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
