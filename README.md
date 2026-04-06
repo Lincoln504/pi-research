@@ -155,8 +155,8 @@ Real-time progress tracking with two panels.
 
 #### Modes
 
-- **Deep Mode** (Default) — Multiple slice columns for parallel researchers
-- **Quick Mode** — Single research slice for one researcher
+- **Deep Mode** (Default) — Multiple slices and iterations for parallel research. Coordinator agent returns consolidated report.
+- **Quick Mode** — Single research pass results returned. 
 
 #### TUI Layout Example
 
