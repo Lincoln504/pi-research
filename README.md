@@ -107,17 +107,6 @@ Singleton Docker container:
 - Shared across all agents and sessions
 - Automatic health checks and restart on failure
 
-#### Shared link pool
-
-Report findings in two categories:
-- **CITED LINKS** — URLs scraped and used in findings
-- **SCRAPE CANDIDATES** — URLs found but not yet scraped
-
-Automatically:
-- Build pool from researcher responses
-- Inject into subsequent researchers' context
-- Avoid duplicate scraping
-
 ### Configuration
 
 Set environment variables in `.env` file (see `.env.example`):
@@ -153,13 +142,6 @@ Real-time progress tracking with two panels.
      - `✓1:1` = Completed
      - Flash **green** on tool success, **red** on tool error
 
-#### Modes
-
-- **Deep Mode** (Default) — Multiple slices and iterations for parallel research. Coordinator agent returns consolidated report.
-- **Quick Mode** — Single research pass results returned. 
-
-#### TUI Layout Example
-
 ```text
 ┌───────┐ ┌─ Research | qwen/qwen3.5-35b-a3b  40.5k ──┐
 │SearXNG│ │              │              │             │
@@ -167,6 +149,11 @@ Real-time progress tracking with two panels.
 │1      │ │              │              │             │
 └───────┘ └──────────────┴──────────────┴─────────────┘
 ```
+
+#### Modes
+
+- **Deep Mode** (Default) — Multiple slices and iterations for parallel research. Coordinator agent returns consolidated report.
+- **Quick Mode** — Single research pass results returned.
 
 ### Project structure
 
