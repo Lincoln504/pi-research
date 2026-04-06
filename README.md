@@ -1,4 +1,4 @@
-![pi-research banner](README-banner.jpg)
+![pi-research banner](assets/README-banner.jpg)
 
 [![npm version](https://img.shields.io/npm/v/pi-research.svg)](https://www.npmjs.com/package/pi-research)
 
