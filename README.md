@@ -31,6 +31,8 @@ npm install
 pi -e ./index.ts
 ```
 
+**Note:** Requires Docker to be installed.
+
 ### Usage
 
 #### Via pi agent
@@ -226,12 +228,15 @@ npm test
 
 ### Dependencies
 
+All dependencies (except Docker) are installed with the extension.
+
 - `@mariozechner/pi-coding-agent`: pi core SDK
 - `@sinclair/typebox`: Parameter schema validation
 - `@kreuzberg/html-to-markdown-node`: HTML to Markdown conversion
-- `dockerode`: Docker API client for container management
 - `js-yaml`: YAML parsing for SearXNG settings
 - `playwright`: Headless browser for JS-heavy web scraping
+- `chromium`: Browser engine for Playwright (auto-installed)
+- `dockerode`: Docker API client for container management (requires Docker installed separately)
 - `Native fetch`: Built-in Node.js fetch for HTTP requests
 
 ### License
