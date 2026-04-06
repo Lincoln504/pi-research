@@ -61,7 +61,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
     ],
     parameters: Type.Object({
       slices: Type.Array(
-        Type.String({ description: 'Research task per researcher' }),
+        Type.String({ description: 'Research aspect per researcher' }),
         { minItems: 1 }
       ),
     }),
@@ -77,7 +77,7 @@ export function createDelegateTool(options: DelegateToolOptions): ToolDefinition
       };
 
       // Log execution mode
-      logger.log(`[delegate] Running ${slices.length} research task(s) with ${Math.min(3, slices.length)} concurrent worker(s)`);
+      logger.log(`[delegate] Running ${slices.length} research aspect(s) with ${Math.min(3, slices.length)} concurrent worker(s)`);
 
       // Check if research should stop due to too many cumulative failures
       const failedCount = getFailedResearchers(options.sessionId).length;

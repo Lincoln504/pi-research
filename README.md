@@ -13,7 +13,7 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 - **Security databases** — NVD, CISA KEV, GitHub Advisories, OSV
 - **Stack Exchange** — Query Stack Overflow and Stack Exchange network
 - **Code search** — ripgrep (rg) with grep fallback for local queries
-- **Terminal UI** — Real-time progress tracking with SearXNG status and research slices
+- **Terminal UI** — Real-time progress tracking with SearXNG status and researcher progress
 - **Proxy support** — Optional proxy configuration to avoid rate limits
 
 ### Installation
@@ -90,7 +90,7 @@ pi research "What is a binary search tree?" --quick
    - Phase 2: Batch scrape 5-10 links
    - Phase 3: Report findings with CITED LINKS and SCRAPE CANDIDATES
 4. Coordinate via shared link pool to avoid duplicate scraping
-5. Synthesize slice findings into final answer
+5. Synthesize researcher findings into final answer
 
 #### Research levels
 
@@ -152,8 +152,8 @@ Real-time progress tracking with two panels.
 
 #### Modes
 
-- **Deep Mode** (Default) — Multiple slices and iterations for parallel research. Coordinator agent returns consolidated report.
-- **Quick Mode** — Single research pass results returned.
+- **Deep Mode** (Default) — Multiple parallel researchers determined by complexity level. Coordinator agent returns consolidated report.
+- **Quick Mode** — Single researcher session, results returned directly.
 
 ### Project structure
 
