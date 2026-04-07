@@ -2,6 +2,13 @@
  * Swarm State Manager
  * 
  * Handles reading and writing the SystemResearchState to the Pi Session Tree.
+ * 
+ * DEPENDENCY: Requires pi-coding-agent sessionManager API:
+ * - ctx.sessionManager.getEntries?() - returns session entries array
+ * - ctx.sessionManager.appendCustomEntry(type, data) - adds custom entry
+ * 
+ * These APIs may change in future pi versions. The code uses optional chaining
+ * and try-catch blocks to gracefully degrade if the API is unavailable.
  */
 
 import type { ExtensionContext, CustomEntry } from '@mariozechner/pi-coding-agent';
@@ -14,13 +21,24 @@ export class SwarmStateManager {
   constructor(private ctx: ExtensionContext) {}
 
   /**
+   * Checks if the required sessionManager API is available.
+   */
+  private hasSessionManagerAPI(): boolean {
+    const sessionManager = (this.ctx as any).sessionManager;
+    return sessionManager !== null && sessionManager !== undefined;
+  }
+
+  /**
    * Loads the most recent research state from the session history.
    */
   load(): SystemResearchState | null {
+    if (!this.hasSessionManagerAPI()) {
+      logger.debug('[swarm-state] SessionManager API not available, cannot load state');
+      return null;
+    }
+
     try {
       const sessionManager = (this.ctx as any).sessionManager;
-      if (!sessionManager) return null;
-
       const entries = sessionManager.getEntries?.();
       if (!entries || !Array.isArray(entries)) return null;
 
@@ -42,6 +60,12 @@ export class SwarmStateManager {
    */
   save(state: SystemResearchState): void {
     state.lastUpdated = Date.now();
+
+    if (!this.hasSessionManagerAPI()) {
+      logger.debug('[swarm-state] SessionManager API not available, cannot save state');
+      return;
+    }
+
     try {
       (this.ctx.sessionManager as any).appendCustomEntry(ENTRY_TYPE, state);
       logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);

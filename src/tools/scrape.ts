@@ -1,13 +1,13 @@
 /**
  * scrape Tool
  *
- * Scrape full content from one or more URLs using 2-layer architecture.
- * Implements a state-aware protocol:
- * 1. First call: Returns a list of all links already scraped in the global session.
- * 2. Second call: Performs the actual scraping and updates the global link pool.
- * 3. Third call+: Locked out.
+ * Scrape full content from URLs using a 3-call state-aware protocol:
+ * 1. Call 1 (Handshake): Returns list of already-scraped links in the session
+ * 2. Call 2 (First Batch): Performs scraping of up to MAX_BATCH_SIZE URLs
+ * 3. Call 3 (Second Batch): Optional additional scraping of up to MAX_BATCH_SIZE URLs
+ * 4. Call 4+: Locked out
  *
- * Batch size is limited to MAX_BATCH_SIZE URLs per scrape pass to manage context window.
+ * Total maximum: 2 * MAX_BATCH_SIZE URLs per researcher (6 URLs with MAX_BATCH_SIZE=3)
  */
 
 /** Maximum number of URLs that can be scraped in a single batch. */

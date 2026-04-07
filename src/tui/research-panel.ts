@@ -14,6 +14,8 @@ export interface SliceState {
   completed: boolean;
   queued: boolean;
   flash: 'green' | 'red' | null;
+  tokens?: number; // Tokens for this specific agent
+  cost?: number;   // Cost for this specific agent
 }
 
 export interface ResearchPanelState {
@@ -80,6 +82,17 @@ export function removeSlice(state: ResearchPanelState, id: string): void {
 export function activateSlice(state: ResearchPanelState, id: string): void {
   const slice = state.slices.get(id);
   if (slice) slice.queued = false;
+}
+
+/**
+ * Update researcher tokens and cost (accumulates)
+ */
+export function updateSliceTokens(state: ResearchPanelState, id: string, tokens: number, cost: number): void {
+  const slice = state.slices.get(id);
+  if (slice) {
+    slice.tokens = (slice.tokens || 0) + tokens;
+    slice.cost = (slice.cost || 0) + cost;
+  }
 }
 
 /**
@@ -150,6 +163,20 @@ function formatTokens(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 
+function formatCost(cost: number): string {
+  if (cost < 0.0001) return '$0.00';
+  if (cost < 1) return `$${cost.toFixed(4)}`;
+  if (cost < 100) return `$${cost.toFixed(2)}`;
+  return `$${cost.toFixed(0)}`;
+}
+
+function truncateMiddle(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  if (maxLen <= 3) return str.slice(0, maxLen);
+  const keep = maxLen - 1;
+  return str.slice(0, Math.floor(keep / 2)) + '…' + str.slice(-Math.ceil(keep / 2));
+}
+
 function getStatusText(state: string): string {
   switch (state) {
     case 'starting_up': return 'SearXNG';
@@ -188,10 +215,8 @@ export function createResearchPanel(
         const totalLeftOffset = LEFT_BOX_W + GAP;
 
         // Ensure we never exceed terminal width
-        // availableForRight is the space remaining after left section
         const availableForRight = Math.max(1, width - totalLeftOffset);
-        const rightBoxWidth = availableForRight;
-        const rightInner = Math.max(1, rightBoxWidth - 2);
+        const rightInner = Math.max(1, availableForRight - 2);
 
         // Prep left box lines if not hidden
         let leftLines: string[];
@@ -215,16 +240,7 @@ export function createResearchPanel(
           leftLines = Array(5).fill(' '.repeat(totalLeftOffset));
         }
 
-        let titleText = ` Research | ${state.modelName}  ${formatTokens(state.totalTokens)} `;
-        const titlePrefixDashes = 2;
-        const maxTitleWidth = rightInner - titlePrefixDashes;
-        if (visibleWidth(titleText) > maxTitleWidth) {
-          titleText = truncateToWidth(titleText, Math.max(3, maxTitleWidth - 1)) + ' ';
-        }
-
-        const titleFillDashes = Math.max(0, rightInner - titlePrefixDashes - visibleWidth(titleText));
-        const rTopWithTitle = theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) + theme.fg('muted', titleText) + theme.fg('accent', '─'.repeat(titleFillDashes) + '┐');
-
+        // Get visible slices (non-queued)
         const sliceIds = Array.from(state.slices.keys()).filter(id => !state.slices.get(id)!.queued);
         const numSlices = sliceIds.length;
         const MAX_VISIBLE_SLICES = 6;
@@ -239,12 +255,29 @@ export function createResearchPanel(
         const numVisible = showIndicator ? MAX_VISIBLE_SLICES : numSlices;
         const totalCols = showIndicator ? numVisible + 1 : numVisible;
 
+        // Calculate column widths for the right section
+        const dividers = totalCols - 1;
+        const contentTotal = Math.max(0, rightInner - dividers);
+        const colBase = Math.floor(contentTotal / totalCols);
+        const extra = contentTotal % totalCols;
+        const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
+
+        // Minimum width needed per box: 3 (token) + 1 newline + 3 (cost) + 1 newline + 1 (label) = 8
+        // But we need at least 1 char for content
+        const MIN_BOX_WIDTH = 5;
+
+        // Check if boxes are wide enough for the new layout
+        const minColW = Math.min(...Array.from({ length: totalCols }, (_, i) => colW(i)));
+        const canShowDetails = minColW >= MIN_BOX_WIDTH && numVisible > 0;
+
         if (numVisible === 0) {
+          // Empty state - show placeholder
+          const rTop = theme.fg('accent', '┌' + '─'.repeat(Math.max(1, rightInner)) + '┐');
           const rEmpty = theme.fg('accent', '│') + ' '.repeat(Math.max(1, rightInner)) + theme.fg('accent', '│');
           const rBottom = theme.fg('accent', '└' + '─'.repeat(Math.max(1, rightInner)) + '┘');
           
           return [
-            leftLines[0] + ' ' + rTopWithTitle,
+            leftLines[0] + ' ' + rTop,
             leftLines[1] + ' ' + rEmpty,
             leftLines[2] + ' ' + rEmpty,
             leftLines[3] + ' ' + rEmpty,
@@ -252,47 +285,207 @@ export function createResearchPanel(
           ];
         }
 
-        const dividers = totalCols - 1;
-        const contentTotal = Math.max(0, rightInner - dividers);
-        const colBase = Math.floor(contentTotal / totalCols);
-        const extra = contentTotal % totalCols;
-        const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
+        // Build each box with its own header (token count + cost) and label
+        const buildBox = (sliceId: string | null, index: number): string[] => {
+          const w = colW(index);
+          const lines: string[] = [];
 
-        const rawTopInner = Array.from({ length: totalCols }, (_, i) => '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┬' : '')).join('');
-        const skipChars = titlePrefixDashes + titleText.length;
-        const rTop = theme.fg('accent', '┌' + '─'.repeat(titlePrefixDashes)) + theme.fg('muted', titleText) + theme.fg('accent', rawTopInner.slice(skipChars) + '┐');
+          if (sliceId === null) {
+            // Indicator box for hidden slices
+            const cell = `+${hiddenCount}`.padEnd(w);
+            return [
+              theme.fg('accent', '┌' + '─'.repeat(w) + '┐'),
+              theme.fg('muted', '│' + cell + '│'),
+              theme.fg('accent', '└' + '─'.repeat(w) + '┘'),
+            ];
+          }
 
-        const rEmpty = theme.fg('accent', '│') + Array.from({ length: totalCols }, (_, i) => ' '.repeat(colW(i)) + (i < totalCols - 1 ? theme.fg('accent', '│') : '')).join('') + theme.fg('accent', '│');
+          const slice = state.slices.get(sliceId)!;
+          const tokens = slice.tokens || 0;
+          const cost = slice.cost || 0;
+          const tokenStr = formatTokens(tokens);
+          const costStr = formatCost(cost);
+          const labelStr = slice.completed ? `✓${slice.label}` : slice.label;
 
-        const cols = visibleSliceIds.map((id, i) => {
-          const slice = state.slices.get(id)!;
-          const w = colW(showIndicator ? i + 1 : i);
-          const raw = slice.completed ? `✓${slice.label}` : slice.label;
-          const content = raw.length > w ? raw.slice(0, w) : raw;
-          const pL = Math.max(0, Math.floor((w - content.length) / 2));
-          const pR = Math.max(0, w - content.length - pL);
-          const cell = ' '.repeat(pL) + content + ' '.repeat(pR);
-          const colored = slice.flash === 'green' ? theme.fg('success', cell) : slice.flash === 'red' ? theme.fg('error', cell) : theme.fg('text', cell);
-          return colored + (i + (showIndicator ? 1 : 0) < totalCols - 1 ? theme.fg('accent', '│') : '');
-        });
+          // Determine colors based on state
+          const getCellColor = () => {
+            if (slice.flash === 'green') return 'success';
+            if (slice.flash === 'red') return 'error';
+            if (slice.completed) return 'muted';
+            return 'text';
+          };
 
-        if (showIndicator) {
-          const w = colW(0);
-          const cell = `+${hiddenCount}`.padStart(Math.ceil((w + 2) / 2)).padEnd(w);
-          cols.unshift(theme.fg('muted', cell) + theme.fg('accent', '│'));
+          if (canShowDetails) {
+            // Show full details: token count, cost, and label
+            // Format: [token count] on top line, [cost] on second line, [label] on third line
+            
+            const tokenDisplay = truncateMiddle(tokenStr, Math.max(1, w - 2));
+            const tokenPadded = tokenDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            
+            const costDisplay = truncateMiddle(costStr, Math.max(1, w - 2));
+            const costPadded = costDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            
+            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
+            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            
+            const color = getCellColor();
+            
+            lines.push(theme.fg('accent', '┌' + '─'.repeat(w) + '┐'));
+            lines.push(theme.fg(color, '│' + tokenPadded + '│'));
+            lines.push(theme.fg(color, '│' + costPadded + '│'));
+            lines.push(theme.fg(color, '│' + labelPadded + '│'));
+            lines.push(theme.fg('accent', '└' + '─'.repeat(w) + '┘'));
+          } else {
+            // Not enough space - just show label
+            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
+            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            const color = getCellColor();
+            
+            lines.push(theme.fg('accent', '┌' + '─'.repeat(w) + '┐'));
+            lines.push(theme.fg(color, '│' + labelPadded + '│'));
+            lines.push(theme.fg('accent', '└' + '─'.repeat(w) + '┘'));
+          }
+
+          return lines;
+        };
+
+        // Build the right section - each slice is its own box with headers
+        const rightLines: string[] = [];
+        
+        if (canShowDetails) {
+          // With details: 5 lines per slice box (top, token, cost, label, bottom)
+          // Top border
+          const topParts: string[] = [];
+          for (let i = 0; i < totalCols; i++) {
+            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
+            const w = colW(i);
+            if (i === 0) {
+              topParts.push(theme.fg('accent', '┌' + '─'.repeat(w)));
+            } else {
+              topParts.push(theme.fg('accent', '┬' + '─'.repeat(w)));
+            }
+          }
+          rightLines.push(theme.fg('accent', '│') + topParts.join('') + theme.fg('accent', '┐'));
+
+          // Token rows
+          const tokenRows: string[] = [];
+          for (let i = 0; i < totalCols; i++) {
+            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
+            const slice = sliceId ? state.slices.get(sliceId) : null;
+            const tokens = slice?.tokens || 0;
+            const tokenStr = formatTokens(tokens);
+            const w = colW(i);
+            const tokenDisplay = truncateMiddle(tokenStr, Math.max(1, w - 2));
+            const tokenPadded = tokenDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            const color = sliceId ? (slice.completed ? 'muted' : 'text') : 'muted';
+            
+            if (i === 0) {
+              tokenRows.push(theme.fg(color, '│' + tokenPadded));
+            } else {
+              tokenRows.push(theme.fg('accent', '│') + theme.fg(color, tokenPadded));
+            }
+          }
+          rightLines.push(tokenRows.join('') + theme.fg('accent', '│'));
+
+          // Cost rows
+          const costRows: string[] = [];
+          for (let i = 0; i < totalCols; i++) {
+            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
+            const slice = sliceId ? state.slices.get(sliceId) : null;
+            const cost = slice?.cost || 0;
+            const costStr = formatCost(cost);
+            const w = colW(i);
+            const costDisplay = truncateMiddle(costStr, Math.max(1, w - 2));
+            const costPadded = costDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            const color = sliceId ? (slice.completed ? 'muted' : 'text') : 'muted';
+            
+            if (i === 0) {
+              costRows.push(theme.fg(color, '│' + costPadded));
+            } else {
+              costRows.push(theme.fg('accent', '│') + theme.fg(color, costPadded));
+            }
+          }
+          rightLines.push(costRows.join('') + theme.fg('accent', '│'));
+
+          // Label rows
+          const labelRows: string[] = [];
+          for (let i = 0; i < totalCols; i++) {
+            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
+            const slice = sliceId ? state.slices.get(sliceId) : null;
+            const labelStr = slice ? (slice.completed ? `✓${slice.label}` : slice.label) : `+${hiddenCount}`;
+            const w = colW(i);
+            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
+            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            const color = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : (slice?.completed ? 'muted' : 'text');
+            
+            if (i === 0) {
+              labelRows.push(theme.fg(color, '│' + labelPadded));
+            } else {
+              labelRows.push(theme.fg('accent', '│') + theme.fg(color, labelPadded));
+            }
+          }
+          rightLines.push(labelRows.join('') + theme.fg('accent', '│'));
+
+          // Bottom border
+          const bottomParts: string[] = [];
+          for (let i = 0; i < totalCols; i++) {
+            const w = colW(i);
+            if (i === 0) {
+              bottomParts.push(theme.fg('accent', '└' + '─'.repeat(w)));
+            } else {
+              bottomParts.push(theme.fg('accent', '┴' + '─'.repeat(w)));
+            }
+          }
+          rightLines.push(bottomParts.join('') + theme.fg('accent', '┘'));
+
+        } else {
+          // Compact mode - just labels in boxes
+          const topParts: string[] = [];
+          const contentParts: string[] = [];
+          const bottomParts: string[] = [];
+          
+          for (let i = 0; i < totalCols; i++) {
+            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
+            const slice = sliceId ? state.slices.get(sliceId) : null;
+            const w = colW(i);
+            const labelStr = slice ? (slice.completed ? `✓${slice.label}` : slice.label) : `+${hiddenCount}`;
+            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
+            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
+            const color = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : (slice?.completed ? 'muted' : 'text');
+            
+            if (i === 0) {
+              topParts.push(theme.fg('accent', '┌' + '─'.repeat(w)));
+              contentParts.push(theme.fg(color, '│' + labelPadded));
+              bottomParts.push(theme.fg('accent', '└' + '─'.repeat(w)));
+            } else {
+              topParts.push(theme.fg('accent', '┬' + '─'.repeat(w)));
+              contentParts.push(theme.fg('accent', '│') + theme.fg(color, labelPadded));
+              bottomParts.push(theme.fg('accent', '┴' + '─'.repeat(w)));
+            }
+          }
+          
+          rightLines.push(theme.fg('accent', '│') + topParts.join('') + theme.fg('accent', '┐'));
+          rightLines.push(contentParts.join('') + theme.fg('accent', '│'));
+          rightLines.push(bottomParts.join('') + theme.fg('accent', '┘'));
         }
 
-        const rContent = theme.fg('accent', '│') + cols.join('') + theme.fg('accent', '│');
-        const rBottom = theme.fg('accent', '└') + Array.from({ length: totalCols }, (_, i) => theme.fg('accent', '─'.repeat(colW(i)) + (i < totalCols - 1 ? '┴' : ''))).join('') + theme.fg('accent', '┘');
-
-        const rightLines = [rTop, rEmpty, rContent, rEmpty, rBottom];
+        // Ensure we have 5 lines total for alignment with left box
+        while (rightLines.length < 5) {
+          if (canShowDetails && rightLines.length < 5) {
+            rightLines.unshift('');
+          } else if (!canShowDetails && rightLines.length < 3) {
+            rightLines.unshift('');
+          }
+        }
+        // If we have more than 5 lines, trim (shouldn't happen)
+        const trimmedRightLines = rightLines.slice(0, 5);
 
         const result = [
-          leftLines[0] + ' ' + rightLines[0],
-          leftLines[1] + ' ' + rightLines[1],
-          leftLines[2] + ' ' + rightLines[2],
-          leftLines[3] + ' ' + rightLines[3],
-          leftLines[4] + ' ' + rightLines[4],
+          leftLines[0] + ' ' + trimmedRightLines[0],
+          leftLines[1] + ' ' + trimmedRightLines[1],
+          leftLines[2] + ' ' + trimmedRightLines[2],
+          leftLines[3] + ' ' + trimmedRightLines[3],
+          leftLines[4] + ' ' + trimmedRightLines[4],
         ];
 
         // Safety: truncate any line that exceeds terminal width

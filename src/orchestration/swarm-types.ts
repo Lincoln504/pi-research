@@ -14,7 +14,8 @@ export type SwarmEvent =
   | { type: 'SIBLING_FAILED'; id: string; error: string }
   | { type: 'LINKS_SCRAPED'; links: string[] }
   | { type: 'PROMOTION_STARTED'; id: string }
-  | { type: 'PROMOTION_DECISION'; nextQueries: string[]; finalSynthesis?: string; maxRounds: number };
+  | { type: 'PROMOTION_DECISION'; nextQueries: string[]; finalSynthesis?: string; maxRounds: number }
+  | { type: 'SIBLING_TOKENS'; id: string; tokens: number; cost: number };
 
 export interface ResearchSibling {
   id: string; // e.g. "1.1", "2.1"
@@ -23,6 +24,7 @@ export interface ResearchSibling {
   report?: string;
   error?: string;
   tokens?: number;
+  cost?: number;
 }
 
 export interface SystemResearchState {

@@ -64,6 +64,21 @@ export function swarmReducer(state: SystemResearchState, event: SwarmEvent): Sys
       break;
     }
 
+    case 'SIBLING_TOKENS': {
+      const aspect = newState.aspects[event.id];
+      if (aspect) {
+        // Accumulate tokens and cost for this sibling
+        const currentTokens = aspect.tokens || 0;
+        const currentCost = aspect.cost || 0;
+        newState.aspects[event.id] = {
+          ...aspect,
+          tokens: currentTokens + event.tokens,
+          cost: currentCost + event.cost
+        };
+      }
+      break;
+    }
+
     case 'LINKS_SCRAPED': {
       newState.allScrapedLinks = [...new Set([...newState.allScrapedLinks, ...event.links])];
       break;
@@ -76,10 +91,12 @@ export function swarmReducer(state: SystemResearchState, event: SwarmEvent): Sys
 
     case 'PROMOTION_DECISION': {
       if (event.finalSynthesis) {
+        // Case 1: Lead Evaluator chose to synthesize - complete with synthesis
         newState.finalSynthesis = event.finalSynthesis;
         newState.status = 'completed';
         newState.promotedId = undefined;
       } else if (event.nextQueries.length > 0 && newState.currentRound < event.maxRounds) {
+        // Case 2: Lead Evaluator chose to continue AND we're under max rounds
         newState.currentRound++;
         newState.status = 'researching';
         newState.promotedId = undefined; // Reset for new round
@@ -88,6 +105,10 @@ export function swarmReducer(state: SystemResearchState, event: SwarmEvent): Sys
           newState.aspects[id] = { id, query: q, status: 'pending' };
         });
       } else {
+        // Case 3: Max rounds reached OR no next queries
+        // Note: Per lead-evaluator prompt, when max rounds are reached, the evaluator
+        // should synthesize. If nextQueries are provided at max rounds, this is a
+        // protocol violation, and we enforce the constraint by completing anyway.
         newState.status = 'completed';
         newState.promotedId = undefined;
       }

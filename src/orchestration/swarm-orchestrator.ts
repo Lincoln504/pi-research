@@ -301,7 +301,7 @@ You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound}
 - **Topic**: ${aspect.query}
 - **Round**: ${roundNumber} of 3
 ${isLastInRound ? '\n⚠️ **You are the LAST researcher in this round.** After you report, you may be promoted to Lead Evaluator.' : ''}
-- **Tool Usage**: 4 gathering calls + 1 batch scrape allowed`;
+- **Tool Usage**: 4 gathering calls + 2 scraping batches (max 3 URLs each) allowed`;
   }
 
   private buildAllFindingsContext(): string {

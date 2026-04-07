@@ -35,6 +35,18 @@ Every researcher in this round has completed their investigation. You have in yo
 **If current round ≥ 3**: Synthesize (no more rounds allowed)
 **Otherwise**: Can continue if gaps exist
 
+### Important Note on Researcher Scrape Protocol
+
+Each researcher in this round followed a 3-call scrape protocol:
+1. **Handshake**: Researchers check for already-scraped links
+2. **First Batch**: Up to 3 URLs per researcher
+3. **Second Batch**: Up to 3 additional URLs per researcher (optional)
+
+This means researchers may have scraped different links for related information, and you may see multiple sources covering similar topics. When synthesizing, look for:
+- **Corroborating sources**: Multiple researchers found similar information
+- **Complementary sources**: Different researchers covered different aspects
+- **Conflicting information**: Sources disagree and need reconciliation
+
 ## Synthesis Output
 
 If synthesizing, you MUST provide the **full level of breadth, depth, and nuance of information gathered from the sources**. This is the final result of the entire research swarm; do not settle for brevity.
