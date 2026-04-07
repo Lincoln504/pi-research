@@ -34,6 +34,9 @@
     "stack-exchange"
   ],
   "author": "Lincoln504",
+  "contributors": [
+    "MuratAitov"
+  ],
   "license": "MIT",
   "engines": {
     "node": "^22.13.0 || >=24.0.0"

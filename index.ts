@@ -9,16 +9,12 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './src/tool.ts';
-import { logger, suppressConsole, isVerboseFromEnv, getDefaultDebugLogPathTemplate } from './src/logger.ts';
+import { logger, isVerboseFromEnv, getDefaultDebugLogPathTemplate } from './src/logger.ts';
 import { checkDockerAvailability } from './src/infrastructure/searxng-lifecycle.ts';
 import { shutdownManager } from './src/utils/shutdown-manager.ts';
 
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Extension loading...');
-
-  // Suppress console output globally (catches third-party modules like SearXNG).
-  // Pi's TUI doesn't use console.* directly, so this is safe for the entire session.
-  suppressConsole();
 
   // NOTE: SearXNG is still initialized lazily on first research() call in tool.ts.
   // Cleanup runs on pi's session lifecycle instead of owning host process signals.
