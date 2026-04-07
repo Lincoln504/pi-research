@@ -338,6 +338,20 @@ npm run test:integration
 
 Integration tests may pull and start SearXNG containers. Start Docker before running them.
 
+### Release
+
+Normal branch pushes and pull requests run validation only; they do not publish the package. npm publishing is gated by Git tags that match `v*.*.*`.
+
+Release flow:
+
+```bash
+npm version patch
+git push origin main
+git push origin v0.1.1
+```
+
+The release workflow checks that the tag matches `package.json` exactly (`v${version}`), runs lint, type-check, unit tests, verifies package contents with `npm pack --dry-run`, and then publishes to npm using the `NPM_TOKEN` repository secret.
+
 ### Dependencies
 
 All Node dependencies are installed with the extension. Docker itself must be installed separately.
