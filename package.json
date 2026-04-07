@@ -16,11 +16,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Lincoln504/pi-research.git"
+    "url": "https://github.com/Lincoln504/pi-research-dev.git"
   },
-  "homepage": "https://github.com/Lincoln504/pi-research#readme",
+  "homepage": "https://github.com/Lincoln504/pi-research-dev#readme",
   "bugs": {
-    "url": "https://github.com/Lincoln504/pi-research/issues"
+    "url": "https://github.com/Lincoln504/pi-research-dev/issues"
   },
   "keywords": [
     "pi",
