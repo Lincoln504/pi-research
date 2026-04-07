@@ -103,11 +103,11 @@ Set environment variables in `.env` file (see `.env.example`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`). |
+| `PROXY_URL` | - | Proxy URL for SearXNG (optional, e.g., `socks5://127.0.0.1:9050`; host loopback is mapped to Docker's portable `host.docker.internal` alias inside the container). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | 240000 | Per-researcher timeout in milliseconds (30s-10m). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | 15000 | SearXNG health check timeout in milliseconds. |
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | 10 | Global TUI refresh debounce in milliseconds. |
-| `DOCKER_SOCKET` | /var/run/docker.sock | Docker socket path for container management. |
+| `DOCKER_SOCKET` | platform default | Optional Docker socket override. Defaults are platform-specific: Unix socket on Linux/macOS, Docker named pipes on Windows. |
 | `STACKEXCHANGE_API_KEY` | - | Optional API key for higher Stack Exchange rate limits. |
 
 Enable verbose diagnostics with `pi --verbose` or `PI_RESEARCH_VERBOSE=1`. Logs are written as JSONL to your OS temp directory as `pi-research-debug-{hash}.log` (where `{hash}` is a unique 4-character suffix per process). Without verbose mode, no log files are created. Normal TUI, JSON/RPC, and headless runs do not receive diagnostic chatter on stdout or stderr. Entries from research runs include scoped fields such as Pi session id, session file, cwd, research run id, tool name, level, timestamp, message, and error stack when available.

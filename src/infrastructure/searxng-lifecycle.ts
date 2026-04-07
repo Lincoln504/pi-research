@@ -13,7 +13,12 @@
  */
 
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { DockerSearxngManager, type SearxngManagerConfig, verifyDockerInstalled } from './searxng-manager.ts';
+import {
+  DOCKER_HOST_INTERNAL_HOSTNAME,
+  DockerSearxngManager,
+  type SearxngManagerConfig,
+  verifyDockerInstalled,
+} from './searxng-manager.ts';
 import { logger, type ILogger } from '../logger.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -62,6 +67,14 @@ function resolveExtensionDir(): string {
 }
 
 const EXTENSION_DIR = resolveExtensionDir();
+const LOCALHOST_PROXY_HOST_PATTERN = /^([a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?)(localhost|127\.0\.0\.1)(?=[:/?#]|$)/i;
+
+export function rewriteLocalhostProxyForContainer(proxyUrl: string): string {
+  return proxyUrl.replace(
+    LOCALHOST_PROXY_HOST_PATTERN,
+    `$1${DOCKER_HOST_INTERNAL_HOSTNAME}`,
+  );
+}
 
 /**
  * Track status for TUI display (minimal: starting_up | active | inactive | error)
@@ -198,8 +211,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
    * Generate proxy-enabled SearXNG settings file dynamically
    * Uses configured PROXY_URL from config
    *
-   * Automatically converts localhost (127.0.0.1) to Docker gateway IP (172.19.0.1)
-   * because containers cannot access host's 127.0.0.1 directly.
+   * Automatically converts localhost (127.0.0.1) to Docker's portable host alias
+   * because containers cannot access host loopback directly.
    */
   private async generateProxySettings(proxyUrl: string): Promise<string> {
     const defaultSettingsPath = path.join(
@@ -221,13 +234,9 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       const yaml = await import('js-yaml');
       const settings = yaml.load(defaultSettings) as any;
 
-      // Convert localhost addresses for Docker container access
-      // When user specifies socks5://127.0.0.1:9050, container cannot reach host's 127.0.0.1
-      // Instead, use Docker gateway IP (172.19.0.1) which can reach host
-      let containerProxyUrl = proxyUrl;
-      if (proxyUrl.includes('127.0.0.1') || proxyUrl.includes('localhost')) {
-        containerProxyUrl = proxyUrl.replace(/127\.0\.0\.1|localhost/g, '172.19.0.1');
-        logger.log(`[pi-research] Converting localhost proxy to Docker gateway: ${proxyUrl} → ${containerProxyUrl}`);
+      const containerProxyUrl = rewriteLocalhostProxyForContainer(proxyUrl);
+      if (containerProxyUrl !== proxyUrl) {
+        logger.log(`[pi-research] Converting localhost proxy to Docker host alias: ${proxyUrl} -> ${containerProxyUrl}`);
       }
 
       // Add proxy configuration
