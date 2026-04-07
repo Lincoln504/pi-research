@@ -18,12 +18,18 @@ export class SwarmStateManager {
    */
   load(): SystemResearchState | null {
     try {
-      const entries = this.ctx.sessionManager.getEntries();
+      const sessionManager = (this.ctx as any).sessionManager;
+      if (!sessionManager) return null;
+
+      const entries = sessionManager.getEntries?.();
+      if (!entries || !Array.isArray(entries)) return null;
+
       // Scan backwards for the latest state entry
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
-        if (entry.type === ENTRY_TYPE) {
-          return (entry as CustomEntry<SystemResearchState>).data;
+        if (entry && entry.type === ENTRY_TYPE) {
+          const data = (entry as CustomEntry<SystemResearchState>).data;
+          if (data) return data;
         }
       }
     } catch (err) {
@@ -38,8 +44,11 @@ export class SwarmStateManager {
   save(state: SystemResearchState): void {
     state.lastUpdated = Date.now();
     try {
-      this.ctx.appendEntry(ENTRY_TYPE, state);
-      logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
+      const appendEntry = (this.ctx as any).appendEntry;
+      if (typeof appendEntry === 'function') {
+        appendEntry(ENTRY_TYPE, state);
+        logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
+      }
     } catch (err) {
       logger.error('[swarm-state] Failed to save state to session history:', err);
     }
@@ -52,6 +61,15 @@ export class SwarmStateManager {
     const existing = this.load();
     if (existing && existing.rootQuery === query) {
       logger.log('[swarm-state] Resuming existing research system.');
+      
+      // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again
+      // This handles cases where the agent was stopped mid-research.
+      for (const id in existing.aspects) {
+        if (existing.aspects[id].status === 'running') {
+          existing.aspects[id].status = 'pending';
+        }
+      }
+      
       return existing;
     }
 
@@ -62,6 +80,7 @@ export class SwarmStateManager {
       currentRound: 1,
       status: 'planning',
       lastUpdated: Date.now(),
+      initialAgenda: [],
       allScrapedLinks: [],
       aspects: {}
     };

@@ -29,7 +29,7 @@ export function createSearchTool(options: {
       'Use search when you need to find URLs or information about a topic.',
       'This returns search results with snippets. Use scrape to get full content from specific URLs.',
       'For security research, use security_search to query vulnerability databases.',
-      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
+      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       queries: Type.Array(Type.String({

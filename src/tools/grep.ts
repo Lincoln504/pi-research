@@ -126,7 +126,7 @@ export function createGrepTool(options: {
       'Use grep for fast recursive text search in codebases.',
       'Pattern supports regex. Path and flags are optional.',
       'Falls back to grep if rg is not available.',
-      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
+      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       pattern: Type.String({ description: 'Search pattern (regex supported)' }),

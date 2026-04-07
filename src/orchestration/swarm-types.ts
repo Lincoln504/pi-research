@@ -7,6 +7,15 @@
 export type ResearchStatus = 'planning' | 'researching' | 'evaluating' | 'synthesizing' | 'completed' | 'failed';
 export type SiblingStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type SwarmEvent =
+  | { type: 'PLANNING_COMPLETE'; agenda: string[]; initialCount: number }
+  | { type: 'SIBLING_STARTED'; id: string }
+  | { type: 'SIBLING_COMPLETED'; id: string; report: string }
+  | { type: 'SIBLING_FAILED'; id: string; error: string }
+  | { type: 'LINKS_SCRAPED'; links: string[] }
+  | { type: 'PROMOTION_STARTED'; id: string }
+  | { type: 'PROMOTION_DECISION'; nextQueries: string[]; finalSynthesis?: string; maxRounds: number };
+
 export interface ResearchSibling {
   id: string; // e.g. "1.1", "2.1"
   query: string;
@@ -35,6 +44,9 @@ export interface SystemResearchState {
     [id: string]: ResearchSibling;
   };
   
+  // Track who was promoted to Lead Evaluator in this round to prevent race conditions
+  promotedId?: string;
+
   // Final result if completed
   finalSynthesis?: string;
 }

@@ -68,15 +68,23 @@ vi.mock('../../../src/tui/research-panel', () => ({
   flashSlice: vi.fn(),
 }));
 
+vi.mock('../../../src/orchestration/swarm-reducer', async (importOriginal) => {
+  const actual = await importOriginal<any>();
+  return {
+    ...actual,
+    swarmReducer: vi.fn(actual.swarmReducer),
+  };
+});
+
 describe('SwarmOrchestrator', () => {
   const createMockOptions = () => ({
     ctx: {
-      model: { id: 'test-model' },
       modelRegistry: {
         getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'test-key', headers: {} })),
       },
       cwd: '/test/cwd',
     } as any,
+    model: { id: 'test-model' } as any,
     query: 'test query',
     complexity: 2 as 1 | 2 | 3,
     onTokens: vi.fn(),
@@ -93,12 +101,10 @@ describe('SwarmOrchestrator', () => {
     const options = createMockOptions();
     const orchestrator = new SwarmOrchestrator(options);
     
-    const state = (orchestrator as any).state;
-    
     // Mock the run loop to complete after planning
     vi.spyOn(orchestrator as any, 'doPlanning').mockImplementation(async () => {
-      state.status = 'completed';
-      state.finalSynthesis = 'final synthesis';
+      (orchestrator as any).state.status = 'completed';
+      (orchestrator as any).state.finalSynthesis = 'final synthesis';
     });
 
     const result = await orchestrator.run();
@@ -109,11 +115,11 @@ describe('SwarmOrchestrator', () => {
   it('should transition from planning to researching', async () => {
     const options = createMockOptions();
     const orchestrator = new SwarmOrchestrator(options);
-    const state = (orchestrator as any).state;
 
     // Run planning
     await (orchestrator as any).doPlanning();
 
+    const state = (orchestrator as any).state;
     expect(state.status).toBe('researching');
     expect(state.initialAgenda).toEqual(['aspect 1', 'aspect 2']);
     expect(Object.keys(state.aspects)).toHaveLength(2);
@@ -122,29 +128,25 @@ describe('SwarmOrchestrator', () => {
   it('should handle sibling execution and promotion', async () => {
     const options = createMockOptions();
     const orchestrator = new SwarmOrchestrator(options);
-    const state = (orchestrator as any).state;
-    state.status = 'researching';
-    state.aspects['1.1'] = { id: '1.1', query: 'q1', status: 'pending' };
+
+    // Setup orchestrator state
+    (orchestrator as any).state.status = 'researching';
+    (orchestrator as any).state.aspects['1.1'] = { id: '1.1', query: 'q1', status: 'pending' };
 
     // Mock completion to synthesize
-    const { createResearcherSession } = await import('../../../src/orchestration/researcher');
-    const mockSession: any = {
-      subscribe: vi.fn(),
-      prompt: vi.fn(async (p) => {
-        if (p.includes('Lead Evaluator')) {
-          return; // Lead evaluation prompt
-        }
-      }),
-      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'final synthesis' }] }],
-      agent: {},
-    };
-    vi.mocked(createResearcherSession).mockResolvedValue(mockSession);
+    const { complete } = await import('@mariozechner/pi-ai');
+    vi.mocked(complete).mockResolvedValue({
+      content: [{ type: 'text', text: '# final synthesis' }],
+    } as any);
 
     // Run sibling
-    await (orchestrator as any).executeSibling(state.aspects['1.1']);
+    const aspect = (orchestrator as any).state.aspects['1.1'];
+    await (orchestrator as any).executeSibling(aspect);
 
-    expect(state.aspects['1.1'].status).toBe('completed');
-    expect(state.status).toBe('completed');
-    expect(state.finalSynthesis).toContain('final synthesis');
+    // Check orchestrator's internal state
+    const finalState = (orchestrator as any).state;
+    expect(finalState.aspects['1.1'].status).toBe('completed');
+    expect(finalState.status).toBe('completed');
+    expect(finalState.finalSynthesis).toContain('final synthesis');
   });
 });

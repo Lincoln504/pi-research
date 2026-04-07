@@ -10,7 +10,7 @@ import { SessionManager } from '@mariozechner/pi-coding-agent';
 
 // Mock dependencies
 vi.mock('@mariozechner/pi-ai', () => ({
-  complete: vi.fn(async (model, options) => {
+  complete: vi.fn(async (_model, options) => {
     const prompt = (options.messages[0].content[0] as any).text;
     if (prompt.includes('Research Planner')) {
       return { content: [{ type: 'text', text: '["aspect 1", "aspect 2"]' }] };
@@ -53,6 +53,7 @@ describe('Swarm Integration', () => {
   it('should run a full research swarm from planning to synthesis', async () => {
     const orchestrator = new SwarmOrchestrator({
       ctx: mockCtx,
+      model: mockCtx.model,
       query: 'how to build a swarm',
       complexity: 2,
       onTokens: vi.fn(),

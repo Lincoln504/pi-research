@@ -85,8 +85,8 @@ export class ToolUsageTracker {
     const limit = usage.limit;
 
     if (category === 'scrape') {
-      return `SCRAPE LIMIT REACHED: You have already used your 1 allowed scrape call. ` +
-        `This tool cannot be used again. Proceed to Phase 3: synthesize and report your findings now.`;
+      return `SCRAPE PROTOCOL COMPLETE: You have completed both scrape calls (handshake + execution). ` +
+        `This tool cannot be used again. Proceed immediately to Phase 3: synthesize your findings and submit your report.`;
     }
     return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
       `This tool and all other gathering tools cannot be used again. ` +
@@ -127,8 +127,8 @@ export class ToolUsageTracker {
  */
 export function createDefaultToolLimits(): ToolLimits {
   return {
-    gathering: 6, // 6 rounds of information gathering total
-    scrape: 1,    // Only ONE batch scrape allowed
+    gathering: 4, // 4 rounds of information gathering total
+    scrape: 2,    // TWO scrape calls: 1 handshake + 1 execution
     read: undefined,
   };
 }

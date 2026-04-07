@@ -12,7 +12,6 @@ import * as crypto from 'crypto';
  */
 const CITED_SECTION_REGEX = /###?\s*CITED\s*LINKS?\s*\n([\s\S]*?)(?=\n###|$)/i;
 const CANDIDATES_SECTION_REGEX = /###?\s*SCRAPE\s*CANDIDATES?\s*\n([\s\S]*?)(?=\n###|$)/i;
-const BULLET_LINK_REGEX = /\*\s*\[([^\]]+)\]\s*(-\s*(.+))?$/gm;
 
 /**
  * Generate a 4-character alphanumeric hash

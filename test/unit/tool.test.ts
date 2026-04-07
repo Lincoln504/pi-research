@@ -4,7 +4,7 @@
  * Meaningful, robust tests for quick vs swarm mode branching and core behaviors.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createResearchTool } from '../../src/tool';
 
 // ============================================================================
@@ -102,7 +102,6 @@ vi.mock('@mariozechner/pi-ai', () => ({
 }));
 
 // Import mocks
-import { SwarmOrchestrator } from '../../src/orchestration/swarm-orchestrator.ts';
 import { createResearcherSession } from '../../src/orchestration/researcher.ts';
 import { addSlice, activateSlice, completeSlice } from '../../src/tui/research-panel.ts';
 

@@ -26,7 +26,7 @@ export function createStackexchangeTool(options: {
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
-      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
+      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       command: Type.String({

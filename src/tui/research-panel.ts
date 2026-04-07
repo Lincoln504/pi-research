@@ -182,19 +182,20 @@ export function createResearchPanel(
         const LEFT_INNER = 7;
         const LEFT_BOX_W = LEFT_INNER + 2;
         const GAP = 1;
-        
+
         // Use consistent total offset regardless of whether SearXNG box is shown
         // This ensures stacked panels align correctly vertically.
         const totalLeftOffset = LEFT_BOX_W + GAP;
-        
-        // If width is very narrow, we might need to prioritize the right box
-        const MIN_RIGHT_WIDTH = 20;
-        const rightBoxWidth = Math.max(MIN_RIGHT_WIDTH, width - totalLeftOffset);
+
+        // Ensure we never exceed terminal width
+        // availableForRight is the space remaining after left section
+        const availableForRight = Math.max(1, width - totalLeftOffset);
+        const rightBoxWidth = availableForRight;
         const rightInner = Math.max(1, rightBoxWidth - 2);
 
         // Prep left box lines if not hidden
         let leftLines: string[];
-        if (!state.hideSearxng && width >= totalLeftOffset + MIN_RIGHT_WIDTH) {
+        if (!state.hideSearxng && width >= totalLeftOffset + 10) {
           const status = state.searxngStatus;
           const statusText = getStatusText(status.state);
           const portStr = extractPort(status.url);
@@ -286,13 +287,22 @@ export function createResearchPanel(
 
         const rightLines = [rTop, rEmpty, rContent, rEmpty, rBottom];
 
-        return [
+        const result = [
           leftLines[0] + ' ' + rightLines[0],
           leftLines[1] + ' ' + rightLines[1],
           leftLines[2] + ' ' + rightLines[2],
           leftLines[3] + ' ' + rightLines[3],
           leftLines[4] + ' ' + rightLines[4],
         ];
+
+        // Safety: truncate any line that exceeds terminal width
+        return result.map(line => {
+          const w = visibleWidth(line);
+          if (w > width) {
+            return truncateToWidth(line, Math.max(3, width - 1));
+          }
+          return line;
+        });
       },
       invalidate(): void {
         localTui?.requestRender?.();

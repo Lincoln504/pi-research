@@ -12,7 +12,6 @@ import type {
   ToolDefinition,
   AgentToolResult,
   ExtensionContext,
-  AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { complete } from '@mariozechner/pi-ai';
@@ -20,35 +19,28 @@ import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig, getConfig } from './config.ts';
 import {
   createResearchPanel,
-  clearAllFlashTimeouts,
   addSlice,
   activateSlice,
   completeSlice,
-  removeSlice,
   createInitialPanelState,
+  clearAllFlashTimeouts,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
 import {
   initLifecycle,
   ensureRunning,
   getStatus,
-  onStatusChange,
-  type SearxngStatus,
-  getConnectionCount,
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
-import { onConnectionCountChange } from './web-research/utils.ts';
 import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
-import { logger, suppressConsole } from './logger.ts';
+import { suppressConsole } from './logger.ts';
 import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
   endResearchSession,
   isBottomMostSession,
-  onSessionOrderChange,
   registerSessionUpdate,
   refreshAllSessions,
-  clearPendingRefresh,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 
@@ -95,6 +87,9 @@ export function createResearchTool(): ToolDefinition {
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
 
+      let aborted = false;
+      let cleanup: (() => void) | null = null;
+
       try {
         validateConfig();
         await initLifecycle(ctx);
@@ -125,14 +120,22 @@ export function createResearchTool(): ToolDefinition {
           refreshAllSessions();
         };
 
-        const cleanup = () => {
+        cleanup = () => {
           endResearchSession(sessionId);
           cleanupSharedLinks(sessionId);
+          // Clear all flash timeouts for this session to prevent lingering updates
+          clearAllFlashTimeouts(sessionId);
+          // Clear all slices from panel state so widget has no content to render
+          panelState.slices.clear();
+          // Now unset the widget
           ctx.ui.setWidget(widgetId, undefined);
           refreshAllSessions();
           setTimeout(restoreConsole, getConfig().CONSOLE_RESTORE_DELAY_MS).unref?.();
         };
-        signal?.addEventListener('abort', cleanup, { once: true });
+        signal?.addEventListener('abort', () => {
+          aborted = true;
+          cleanup?.();
+        }, { once: true });
 
         if (isQuick) {
           const sliceLabel = 'researching ...';
@@ -173,6 +176,7 @@ Rate complexity from 1 to 3:
 Output ONLY the number 1, 2, or 3.`;
 
           const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
+          if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
           const compResp = await complete(selectedModel, {
             messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
           }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
@@ -181,6 +185,7 @@ Output ONLY the number 1, 2, or 3.`;
 
           const orchestrator = new SwarmOrchestrator({
             ctx,
+            model: selectedModel as any,
             query,
             complexity: complexity as 1 | 2 | 3,
             onTokens,
@@ -194,8 +199,14 @@ Output ONLY the number 1, 2, or 3.`;
           return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
         }
       } catch (error) {
+        // If aborted, don't treat as error - just return gracefully
+        if (aborted) {
+          return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
+        }
+        cleanup?.();
         restoreConsole();
-        return { content: [{ type: 'text', text: `Research failed: ${error}` }], details: {} };
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: 'text', text: `Research failed: ${errorMsg}` }], details: {} };
       }
     },
   };

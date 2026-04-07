@@ -11,6 +11,7 @@ import type { Model } from '@mariozechner/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
+import type { SystemResearchState } from './swarm-types.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -20,10 +21,23 @@ export interface CreateResearcherSessionOptions {
   systemPrompt: string;
   searxngUrl: string;
   extensionCtx: ExtensionContext;
+  // Optional: real closures for global state management
+  getGlobalState?: () => SystemResearchState;
+  updateGlobalLinks?: (links: string[]) => void;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
-  const { cwd, ctxModel, modelRegistry, settingsManager, systemPrompt, searxngUrl, extensionCtx } = options;
+  const {
+    cwd,
+    ctxModel,
+    modelRegistry,
+    settingsManager,
+    systemPrompt,
+    searxngUrl,
+    extensionCtx,
+    getGlobalState,
+    updateGlobalLinks
+  } = options;
 
   // Validate required parameters
   if (!ctxModel) {
@@ -41,11 +55,21 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   // Create tool usage tracker for this researcher
   const tracker = new ToolUsageTracker(createDefaultToolLimits());
 
+  // Use provided closures or fallback to safe dummies
+  const globalState = getGlobalState || (() => ({} as any));
+  const globalLinks = updateGlobalLinks || (() => {});
+
   try {
     const result = await createAgentSession({
       cwd,
       tools: [createReadTool(cwd)],
-      customTools: createResearchTools({ searxngUrl, ctx: extensionCtx, tracker }),
+      customTools: createResearchTools({
+        searxngUrl,
+        ctx: extensionCtx,
+        tracker,
+        getGlobalState: globalState,
+        updateGlobalLinks: globalLinks
+      }),
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,

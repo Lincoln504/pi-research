@@ -15,13 +15,6 @@ import { validateMaxConcurrency } from '../web-research/utils.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/swarm-types.ts';
 
-interface ScrapeParams {
-  urls: string[];
-  maxConcurrency?: number;
-  excludeLinks?: string[];
-  [key: string]: unknown;
-}
-
 export function createScrapeTool(options: {
   searxngUrl: string;
   ctx: ExtensionContext;
@@ -76,7 +69,7 @@ export function createScrapeTool(options: {
               '# Scrape Protocol: Call 1 (Handshake)',
               'You have requested to scrape URLs. To avoid redundancy, here are all links already scraped in this research session:',
               '',
-              state.allScrapedLinks.length > 0 
+              state.allScrapedLinks && state.allScrapedLinks.length > 0 
                 ? state.allScrapedLinks.map(l => `- ${l}`).join('\n')
                 : '*No links have been scraped yet.*',
               '',
@@ -86,7 +79,7 @@ export function createScrapeTool(options: {
               '3. Call the `scrape` tool again with your FINAL filtered list to proceed with scraping.'
             ].join('\n')
           }],
-          details: { protocol: 'handshake', previouslyScrapedCount: state.allScrapedLinks.length },
+          details: { protocol: 'handshake', previouslyScrapedCount: state.allScrapedLinks?.length || 0 },
         };
       }
 
@@ -99,11 +92,11 @@ export function createScrapeTool(options: {
 
         const startTime = Date.now();
         const paramsRecord = params as Record<string, unknown>;
-        const urls = (paramsRecord['urls'] as string[]) || [];
+        const urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
-        if (urls.length === 0) {
-          throw new Error('At least one URL is required for scraping.');
+        if (urls.length === 0 || !urls.every(u => typeof u === 'string')) {
+          throw new Error('At least one valid URL string is required for scraping.');
         }
 
         // IMMEDIATELY update global link pool before starting the actual scrape
@@ -113,7 +106,8 @@ export function createScrapeTool(options: {
         let scrapeResults: any[];
         try {
           if (urls.length === 1) {
-            scrapeResults = [await scrapeSingle(urls[0], signal)];
+            const url = urls[0]!;
+            scrapeResults = [await scrapeSingle(url, signal)];
           } else {
             scrapeResults = await scrape(urls, maxConcurrency, signal);
           }
