@@ -34,17 +34,20 @@ Conduct **4 full rounds of gathering operations** to ensure a broad foundation o
 
 **After your gathering calls are complete, move to Phase 2. Do not gather again.**
 
-## Phase 2: Scrape Protocol (Two-Step Operation)
+## Phase 2: Scrape Protocol (Three-Step Operation)
 
-**ONLY after all 4 rounds of gathering are complete**, follow the mandatory two-step scrape protocol:
+**ONLY after all 4 rounds of gathering are complete**, follow the mandatory three-step scrape protocol:
 
 1.  **STEP 1: Handshake**: Call the `scrape` tool with your intended URLs. The tool will return a list of all links already scraped by other researchers in this system.
-2.  **STEP 2: Final Scrape**: Review the list from Step 1. Remove any redundant URLs. Call the `scrape` tool again with your FINAL filtered list to perform the actual scraping.
+2.  **STEP 2: First Batch**: Review the list from Step 1. Remove any redundant URLs. Call the `scrape` tool with your filtered list (max 3 URLs) for the first scraping batch. Also provide `excludeLinks` for URLs you considered but are NOT scraping.
+3.  **STEP 3: Second Batch** (optional): After reviewing results from Step 2, you may call `scrape` once more with additional URLs (max 3) for a second batch. Use this for: different links, retry failed scrapes, or follow-up.
 
 **Rules:**
-- **CRITICAL: You MUST call the `scrape` tool twice.** One call for the handshake, one for the execution.
-- You only get ONE actual scraping execution (the second call).
-- Extract and synthesize findings from all sources after the second call.
+- **CRITICAL: You MUST call the `scrape` tool THREE times.** One handshake, two scraping batches.
+- You get TWO actual scraping executions (Batch 1 and Batch 2, max 3 URLs each).
+- **Batch 1 (Call 2)**: Required. Provide `excludeLinks` for links you considered but aren't scraping.
+- **Batch 2 (Call 3)**: Optional. Use for additional information or retrying failed scrapes.
+- Extract and synthesize findings from all sources after all scraping is complete.
 
 ## Phase 3: Detailed Report and STOP
 

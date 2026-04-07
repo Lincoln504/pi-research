@@ -16,7 +16,7 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 
 describe('tools/scrape', () => {
   const createMockContext = () => ({} as any);
-  const createMockTracker = () => new ToolUsageTracker({ scrape: 2 });
+  const createMockTracker = () => new ToolUsageTracker({ scrape: 3 });
   const createMockOptions = (tracker = createMockTracker()) => ({
     searxngUrl: 'http://localhost:8888',
     ctx: createMockContext(),
@@ -49,7 +49,7 @@ describe('tools/scrape', () => {
       expect(options.tracker.getCallCount('scrape')).toBe(1);
     });
 
-    it('should perform scrape on second call', async () => {
+    it('should perform scrape on second call (Batch 1)', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
       vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://test.com', source: 'fetch', markdown: 'content' });
 
@@ -59,21 +59,39 @@ describe('tools/scrape', () => {
       // First call (handshake)
       await tool.execute('test-id', { urls: ['http://test.com'] }, undefined, undefined, undefined as any);
       
-      // Second call (execution)
+      // Second call (Batch 1)
       const result = await tool.execute('test-id', { urls: ['http://test.com'] }, undefined, undefined, undefined as any);
 
       expect(scrapeSingle).toHaveBeenCalled();
       expect(options.updateGlobalLinks).toHaveBeenCalledWith(['http://test.com']);
       expect((result.content[0] as any).text).toContain('URL Scrape Results');
+      expect((result.content[0] as any).text).toContain('Batch 1 of 2');
     });
 
-    it('should lock out on third call', async () => {
+    it('should perform scrape on third call (Batch 2)', async () => {
+      const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
+      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://test2.com', source: 'fetch', markdown: 'content' });
+
       const options = createMockOptions();
       const tool = createScrapeTool(options);
       
-      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 1
-      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 2
-      const result = await tool.execute('3', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 3
+      await tool.execute('test-id', { urls: ['http://test1.com'] }, undefined, undefined, undefined as any); // 1: handshake
+      await tool.execute('test-id', { urls: ['http://test1.com'] }, undefined, undefined, undefined as any); // 2: batch 1
+      const result = await tool.execute('test-id', { urls: ['http://test2.com'] }, undefined, undefined, undefined as any); // 3: batch 2
+
+      expect(scrapeSingle).toHaveBeenCalled();
+      expect((result.content[0] as any).text).toContain('Batch 2 of 2');
+      expect((result.content[0] as any).text).toContain('All scrape batches complete');
+    });
+
+    it('should lock out on fourth call', async () => {
+      const options = createMockOptions();
+      const tool = createScrapeTool(options);
+      
+      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 1: handshake
+      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 2: batch 1
+      await tool.execute('3', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 3: batch 2
+      const result = await tool.execute('4', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 4: locked
 
       expect((result.details as any).locked).toBe(true);
     });

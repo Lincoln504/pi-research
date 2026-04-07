@@ -196,11 +196,11 @@ describe('tool-usage-tracker', () => {
   });
 
   describe('createDefaultToolLimits', () => {
-    it('should return default limits (4 gathering, 2 scrape)', () => {
+    it('should return default limits (4 gathering, 3 scrape)', () => {
       const limits = createDefaultToolLimits();
 
       expect(limits.gathering).toBe(4);
-      expect(limits.scrape).toBe(2);
+      expect(limits.scrape).toBe(3);
       expect(limits.read).toBeUndefined();
     });
 
