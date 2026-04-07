@@ -16,7 +16,7 @@ import type {
 import { Type } from '@sinclair/typebox';
 import { complete } from '@mariozechner/pi-ai';
 import { createResearcherSession } from "./orchestration/researcher.ts";
-import { validateConfig, getConfig } from './config.ts';
+import { validateConfig } from './config.ts';
 import {
   createResearchPanel,
   addSlice,
@@ -33,7 +33,7 @@ import {
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
 import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
-import { suppressConsole } from './logger.ts';
+import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
 import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
@@ -46,6 +46,15 @@ import { cleanupSharedLinks } from './utils/shared-links.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function getPiSessionMetadata(ctx: ExtensionContext) {
+  const sessionManager = (ctx as any).sessionManager;
+  return {
+    sessionId: typeof sessionManager?.getSessionId === 'function' ? String(sessionManager.getSessionId()) : undefined,
+    sessionFile: typeof sessionManager?.getSessionFile === 'function' ? String(sessionManager.getSessionFile()) : undefined,
+    cwd: ctx.cwd,
+  };
+}
 
 export function createResearchTool(): ToolDefinition {
   return {
@@ -80,34 +89,45 @@ export function createResearchTool(): ToolDefinition {
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
       const { query, model: modelId, quick: isQuick = false } = params as { query: string; quick?: boolean; model?: string };
-      const restoreConsole = suppressConsole();
 
       if (!query || !ctx.model) {
-        restoreConsole();
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
 
-      let aborted = false;
-      let cleanup: (() => void) | null = null;
+      const baseModel = ctx.model;
+      const researchRunId = createResearchRunId();
+      return runWithLogContext({
+        ...getPiSessionMetadata(ctx),
+        researchRunId,
+        toolName: 'research',
+      }, async () => {
+        let aborted = false;
+        let cleanup: (() => void) | null = null;
 
-      try {
-        validateConfig();
-        await initLifecycle(ctx);
-        const searxngUrl = await ensureRunning();
-        const manager = getManager();
-        if (manager) {
-          const { setSearxngManager } = await import('./web-research/utils.ts');
-          setSearxngManager(manager);
-        }
+        try {
+          logger.info('[research] run started', { quick: isQuick, modelId });
+          validateConfig();
+          await initLifecycle(ctx);
+          const searxngUrl = await ensureRunning();
+          const manager = getManager();
+          if (manager) {
+            const { setSearxngManager } = await import('./web-research/utils.ts');
+            setSearxngManager(manager);
+          }
 
-        let selectedModel = ctx.model;
-        if (modelId) {
-          selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || ctx.model;
-        }
+          let selectedModel = baseModel;
+          if (modelId) {
+            selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
+          }
 
         const sessionId = startResearchSession();
         const widgetId = `pi-research-panel-${sessionId}`;
         const panelState = createInitialPanelState(sessionId, getStatus(), (selectedModel as any)?.id || 'unknown');
+        logger.info('[research] session initialized', {
+          mode: isQuick ? 'quick' : 'swarm',
+          uiSessionId: sessionId,
+          selectedModelId: (selectedModel as any)?.id || 'unknown',
+        });
 
         const updateWidget = () => {
           panelState.hideSearxng = !isBottomMostSession(sessionId);
@@ -130,10 +150,11 @@ export function createResearchTool(): ToolDefinition {
           // Now unset the widget
           ctx.ui.setWidget(widgetId, undefined);
           refreshAllSessions();
-          setTimeout(restoreConsole, getConfig().CONSOLE_RESTORE_DELAY_MS).unref?.();
+          logger.info('[research] cleanup completed', { uiSessionId: sessionId });
         };
         signal?.addEventListener('abort', () => {
           aborted = true;
+          logger.warn('[research] run aborted', { uiSessionId: sessionId });
           cleanup?.();
         }, { once: true });
 
@@ -204,10 +225,11 @@ Output ONLY the number 1, 2, or 3.`;
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
         cleanup?.();
-        restoreConsole();
         const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error('[research] run failed', error);
         return { content: [{ type: 'text', text: `Research failed: ${errorMsg}` }], details: {} };
       }
+      });
     },
   };
 }

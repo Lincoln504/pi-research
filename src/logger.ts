@@ -1,16 +1,17 @@
 /**
- * Logger — File-based logging with global console suppression
+ * Logger — scoped file-based diagnostics
  *
- * Silent by default. When --verbose is set,
+ * Silent by default. When --verbose or PI_RESEARCH_VERBOSE=1 is set,
  * writes timestamped lines to {tmpdir}/pi-research-debug-{hash}.log where {hash}
  * is a random 4-character alphanumeric suffix (a-z, 0-9) to keep logs separate per run.
  *
  * When NOT verbose: logFile is null, preventing all temp-dir writes.
- * suppressConsole() globally patches console.* to either noop or file-write,
- * catching third-party module output too (e.g., SearXNG lifecycle).
+ * This module never patches process-global console.* methods.
  */
 
 import { appendFileSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -43,6 +44,18 @@ export interface LoggerOptions {
   logFilePath?: string;
 }
 
+export interface LogContext {
+  sessionId?: string;
+  sessionFile?: string;
+  cwd?: string;
+  researchRunId?: string;
+  toolName?: string;
+  phase?: string;
+  eventName?: string;
+}
+
+const logContextStorage = new AsyncLocalStorage<LogContext>();
+
 /**
  * Generate a 4-character alphanumeric hash for uniqueness
  */
@@ -67,7 +80,38 @@ export function getDefaultDebugLogPathTemplate(): string {
  * Check if verbose mode is enabled from environment
  */
 export function isVerboseFromEnv(): boolean {
-  return process.argv.includes('--verbose');
+  return process.argv.includes('--verbose') || process.env['PI_RESEARCH_VERBOSE'] === '1';
+}
+
+export function createResearchRunId(): string {
+  return `run-${randomBytes(4).toString('hex')}`;
+}
+
+export function getLogContext(): LogContext {
+  return logContextStorage.getStore() ?? {};
+}
+
+export function runWithLogContext<T>(context: LogContext, callback: () => T): T {
+  const parent = logContextStorage.getStore() ?? {};
+  return logContextStorage.run({ ...parent, ...context }, callback);
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 0);
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+function formatArg(arg: unknown): string {
+  if (arg instanceof Error) {
+    return arg.stack ?? arg.message;
+  }
+  if (typeof arg === 'object' && arg !== null) {
+    return safeJsonStringify(arg);
+  }
+  return String(arg);
 }
 
 /**
@@ -98,17 +142,18 @@ export class Logger implements ILogger {
       return;
     }
 
-    // Format message
     const timestamp = new Date().toISOString();
-    const msg = args
-      .map((a) => (a instanceof Error
-        ? `${a.message}`
-        : typeof a === 'object'
-          ? JSON.stringify(a, null, 0)
-          : String(a)))
-      .join(' ');
-
-    const line = `[${timestamp}] [${level}] ${msg}\n`;
+    const firstError = args.find((arg): arg is Error => arg instanceof Error);
+    const entry = {
+      timestamp,
+      level,
+      ...getLogContext(),
+      message: args.map(formatArg).join(' '),
+      ...(firstError
+        ? { errorMessage: firstError.message, errorStack: firstError.stack }
+        : {}),
+    };
+    const line = `${safeJsonStringify(entry)}\n`;
 
     // Write to file
     try {
@@ -199,64 +244,3 @@ export const logger = {
   warn:  (...args: unknown[]) => getLogger().warn(...args),
   debug: (...args: unknown[]) => getLogger().debug(...args),
 };
-
-/**
- * Globally suppress/redirect all console.* calls.
- * When verbose: redirect to file. When silent: replace with noop.
- * Catches third-party module output too (e.g., SearXNG lifecycle).
- * Returns a restore function to undo the patching.
- */
-export function suppressConsole(): () => void {
-  const saved = {
-    log:   console.log,
-    info:  (console as any).info,
-    error: console.error,
-    warn:  console.warn,
-    debug: (console as any).debug,
-  };
-
-  const logger = getLogger();
-  const verbose = logger.isVerbose();
-  const logFile = logger.getLogFilePath();
-
-  const noop = () => {};
-
-  const toFile = (level: string) => (...args: unknown[]) => {
-    if (!logFile) return;
-    const msg = args
-      .map((a) => (a instanceof Error
-        ? `${a.message}`
-        : typeof a === 'object'
-          ? JSON.stringify(a, null, 0)
-          : String(a)))
-      .join(' ');
-    const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
-    try {
-      appendFileSync(logFile, line);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  if (verbose) {
-    console.log          = toFile('INFO')  as typeof console.log;
-    (console as any).info  = toFile('INFO');
-    console.error        = toFile('ERROR') as typeof console.error;
-    console.warn         = toFile('WARN')  as typeof console.warn;
-    (console as any).debug = toFile('DEBUG');
-  } else {
-    console.log          = noop as typeof console.log;
-    (console as any).info  = noop;
-    console.error        = noop as typeof console.error;
-    console.warn         = noop as typeof console.warn;
-    (console as any).debug = noop;
-  }
-
-  return () => {
-    console.log          = saved.log;
-    (console as any).info  = saved.info;
-    console.error        = saved.error;
-    console.warn         = saved.warn;
-    (console as any).debug = saved.debug;
-  };
-}

@@ -19,7 +19,8 @@ vi.mock('../../src/logger.ts', () => ({
     error: vi.fn(),
     debug: vi.fn(),
   },
-  suppressConsole: vi.fn(() => vi.fn()),
+  createResearchRunId: vi.fn(() => 'run-test'),
+  runWithLogContext: vi.fn((_context, callback) => callback()),
   isVerboseFromEnv: vi.fn(() => false),
 }));
 
@@ -146,6 +147,8 @@ function createMockContext() {
     ui: { setWidget: vi.fn(), notify: vi.fn() },
     sessionManager: {
       getBranch: vi.fn().mockReturnValue([]),
+      getSessionId: vi.fn(() => 'pi-session-123'),
+      getSessionFile: vi.fn(() => '/tmp/pi-session.json'),
     },
   } as any;
 }
@@ -167,6 +170,26 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(createResearcherSession)).toHaveBeenCalled();
+    });
+
+    it('does not mutate console methods on successful quick research', async () => {
+      vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
+      const originalConsole = {
+        log: console.log,
+        info: console.info,
+        error: console.error,
+        warn: console.warn,
+        debug: console.debug,
+      };
+
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
+
+      expect(console.log).toBe(originalConsole.log);
+      expect(console.info).toBe(originalConsole.info);
+      expect(console.error).toBe(originalConsole.error);
+      expect(console.warn).toBe(originalConsole.warn);
+      expect(console.debug).toBe(originalConsole.debug);
     });
 
     it('creates and completes TUI slice "researching ..."', async () => {
@@ -193,10 +216,22 @@ describe('createResearchTool', () => {
 
   describe('Error Handling', () => {
     it('rejects empty query', async () => {
+      const originalConsole = {
+        log: console.log,
+        info: console.info,
+        error: console.error,
+        warn: console.warn,
+        debug: console.debug,
+      };
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: '' }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toContain('required');
+      expect(console.log).toBe(originalConsole.log);
+      expect(console.info).toBe(originalConsole.info);
+      expect(console.error).toBe(originalConsole.error);
+      expect(console.warn).toBe(originalConsole.warn);
+      expect(console.debug).toBe(originalConsole.debug);
     });
   });
 });
