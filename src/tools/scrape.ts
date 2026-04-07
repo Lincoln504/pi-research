@@ -6,7 +6,12 @@
  * 1. First call: Returns a list of all links already scraped in the global session.
  * 2. Second call: Performs the actual scraping and updates the global link pool.
  * 3. Third call+: Locked out.
+ *
+ * Batch size is limited to MAX_BATCH_SIZE URLs per scrape pass to manage context window.
  */
+
+/** Maximum number of URLs that can be scraped in a single batch. */
+const MAX_BATCH_SIZE = 4;
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
@@ -34,10 +39,11 @@ export function createScrapeTool(options: {
       'REVIEW: Compare your list with the returned list. Remove any duplicates.',
       'CALL 2: Provide your FINAL filtered list of URLs to perform the actual scraping.',
       'CRITICAL: You only get ONE actual scraping execution. Use it wisely.',
+      `BATCH LIMIT: You can scrape a maximum of ${MAX_BATCH_SIZE} URLs per batch. If you have more links, prioritize the most important ones.`,
     ],
     parameters: Type.Object({
       urls: Type.Array(Type.String({
-        description: 'URLs to scrape',
+        description: `URLs to scrape (max ${MAX_BATCH_SIZE} per batch)`,
       }), { minItems: 1 }),
       maxConcurrency: Type.Optional(Type.Number({
         description: 'Max parallel scrapes (default: 10)',
@@ -76,7 +82,8 @@ export function createScrapeTool(options: {
               '**Action Required:**',
               '1. Review the list above.',
               '2. Remove any of these links from your intended scrape list.',
-              '3. Call the `scrape` tool again with your FINAL filtered list to proceed with scraping.'
+              '3. Call the `scrape` tool again with your FINAL filtered list to proceed with scraping.',
+              `Note: You can scrape at most ${MAX_BATCH_SIZE} URLs per batch. If you have more links, prioritize the most important ones.`
             ].join('\n')
           }],
           details: { protocol: 'handshake', previouslyScrapedCount: state.allScrapedLinks?.length || 0 },
@@ -94,6 +101,10 @@ export function createScrapeTool(options: {
         const paramsRecord = params as Record<string, unknown>;
         const urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
+
+        if (urls.length > MAX_BATCH_SIZE) {
+          return { content: [{ type: 'text', text: `Error: Batch size limit exceeded. You can scrape at most ${MAX_BATCH_SIZE} URLs per batch, but provided ${urls.length}. Please prioritize the most important URLs.` }], details: { blocked: true } };
+        }
 
         if (urls.length === 0 || !urls.every(u => typeof u === 'string')) {
           throw new Error('At least one valid URL string is required for scraping.');
