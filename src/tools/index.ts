@@ -18,20 +18,39 @@ interface CreateToolsOptions {
   searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
-  getGlobalState: () => SystemResearchState;
-  updateGlobalLinks: (links: string[]) => void;
+  getGlobalState?: () => SystemResearchState;
+  updateGlobalLinks?: (links: string[]) => void;
 }
 
 /**
  * Create all research tools
  */
 export function createResearchTools(options: CreateToolsOptions): ToolDefinition[] {
+  const fallbackState: SystemResearchState = {
+    version: 1,
+    rootQuery: '',
+    complexity: 1,
+    currentRound: 1,
+    status: 'researching',
+    lastUpdated: Date.now(),
+    initialAgenda: [],
+    allScrapedLinks: [],
+    aspects: {},
+  };
+  const resolvedOptions = {
+    ...options,
+    getGlobalState: options.getGlobalState ?? (() => fallbackState),
+    updateGlobalLinks: options.updateGlobalLinks ?? ((links: string[]) => {
+      fallbackState.allScrapedLinks = [...new Set([...fallbackState.allScrapedLinks, ...links])];
+    }),
+  };
+
   return [
-    createSearchTool(options),
-    createScrapeTool(options),
-    createSecuritySearchTool(options),
-    createStackexchangeTool(options),
-    createGrepTool(options),
+    createSearchTool(resolvedOptions),
+    createScrapeTool(resolvedOptions),
+    createSecuritySearchTool(resolvedOptions),
+    createStackexchangeTool(resolvedOptions),
+    createGrepTool(resolvedOptions),
   ];
 }
 

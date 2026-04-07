@@ -26,9 +26,9 @@ describe('shared-links', () => {
 
     it('should format links from reports', () => {
       const aspects = {
-        '1.1': { 
-          id: '1.1', 
-          query: 'q1', 
+        '1.1': {
+          id: '1.1',
+          query: 'q1',
           report: `
 ### CITED LINKS
 * [https://example.com/1] - Desc 1

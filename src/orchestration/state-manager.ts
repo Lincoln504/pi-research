@@ -27,9 +27,8 @@ export class SwarmStateManager {
       // Scan backwards for the latest state entry
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
-        if (entry && entry.type === ENTRY_TYPE) {
-          const data = (entry as CustomEntry<SystemResearchState>).data;
-          if (data) return data;
+        if (entry?.type === 'custom' && entry.customType === ENTRY_TYPE) {
+          return (entry as CustomEntry<SystemResearchState>).data ?? null;
         }
       }
     } catch (err) {
@@ -44,11 +43,8 @@ export class SwarmStateManager {
   save(state: SystemResearchState): void {
     state.lastUpdated = Date.now();
     try {
-      const appendEntry = (this.ctx as any).appendEntry;
-      if (typeof appendEntry === 'function') {
-        appendEntry(ENTRY_TYPE, state);
-        logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
-      }
+      (this.ctx.sessionManager as any).appendCustomEntry(ENTRY_TYPE, state);
+      logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
     } catch (err) {
       logger.error('[swarm-state] Failed to save state to session history:', err);
     }
@@ -65,8 +61,9 @@ export class SwarmStateManager {
       // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again
       // This handles cases where the agent was stopped mid-research.
       for (const id in existing.aspects) {
-        if (existing.aspects[id].status === 'running') {
-          existing.aspects[id].status = 'pending';
+        const aspect = existing.aspects[id];
+        if (aspect?.status === 'running') {
+          aspect.status = 'pending';
         }
       }
       

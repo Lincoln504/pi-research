@@ -249,7 +249,7 @@ export class SwarmOrchestrator {
     }
   }
 
-  private async handleSiblingCompletion(finished: ResearchSibling, session: AgentSession, signal?: AbortSignal) {
+  private async handleSiblingCompletion(finished: ResearchSibling, _session: AgentSession, signal?: AbortSignal) {
     const currentRound = this.state.currentRound;
     const allInRound = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
     const runningSiblings = allInRound.filter(s => s.status === 'running' && s.id !== finished.id);

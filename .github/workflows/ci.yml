@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -98,9 +99,6 @@ jobs:
 
       - name: Run integration tests
         run: npm run test:integration
-        env:
-          # Disable Docker-dependent tests in CI unless specifically enabled
-          SKIP_DOCKER_TESTS: true
 
   validate-config:
     name: Validate Configuration

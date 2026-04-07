@@ -43,7 +43,6 @@ describe('Swarm Integration', () => {
     },
     cwd: '/test/cwd',
     sessionManager: SessionManager.inMemory(),
-    appendEntry: vi.fn(),
   } as any;
 
   beforeEach(() => {
@@ -64,6 +63,10 @@ describe('Swarm Integration', () => {
 
     const result = await orchestrator.run();
     expect(result).toBeDefined();
-    expect(mockCtx.appendEntry).toHaveBeenCalledWith('pi-research-state', expect.anything());
+    expect(mockCtx.sessionManager.getEntries()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'custom', customType: 'pi-research-state' }),
+      ]),
+    );
   });
 });
