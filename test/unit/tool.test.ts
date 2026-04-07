@@ -101,6 +101,7 @@ vi.mock('@mariozechner/pi-ai', () => ({
   })),
 }));
 
+// Import mocks
 import { createResearcherSession } from '../../src/orchestration/researcher.ts';
 import { addSlice, activateSlice, completeSlice } from '../../src/tui/research-panel.ts';
 

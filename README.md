@@ -66,13 +66,14 @@ The research tool supports parameters: `query` (required, the research topic), `
 - Tool orchestration layer (`src/tool.ts`) initializes SearXNG, manages the TUI, and branches between quick and deep modes
 
 **Deep Mode (Multi-Agent)**
-- Coordinator agent (`src/orchestration/coordinator.ts`) decomposes the query into research aspects
-- Spawns parallel researcher agents via delegate tool (`src/orchestration/delegate-tool.ts`)
+- Planning Phase: Swarm Orchestrator (`src/orchestration/swarm-orchestrator.ts`) uses an AI coordinator to decompose the query into a research agenda.
+- Execution Phase: Spawns parallel researcher agents.
 - Researchers (`src/orchestration/researcher.ts`) cycle through three phases:
-  - Gathering (6 rounds max via search, security_search, stackexchange, grep)
-  - Batch scraping (5-10 URLs)
+  - Gathering (4 calls max via search, security_search, stackexchange, grep)
+  - Batch scraping (Two-step protocol: handshake then execution)
   - Reporting findings with cited links and scrape candidates
-- Shared link pool coordinates across researchers to avoid duplicate scraping
+- Lead Evaluation: The last researcher in a round is promoted to Lead Evaluator to decide whether to synthesize the final report or delegate another round of research.
+- Shared link pool coordinates across researchers to avoid duplicate scraping.
 
 **Quick Mode (Single-Agent)**
 - Single researcher session runs without a coordinator
@@ -133,30 +134,32 @@ pi-research/
 │   ├── tool.ts              # Research tool orchestration
 │   ├── config.ts            # Configuration management
 │   ├── logger.ts            # Logging utilities
-│   ├── orchestration/
-│   │   ├── coordinator.ts   # Coordinator agent session
-│   │   ├── delegate-tool.ts # Delegate tool implementation
-│   │   ├── researcher.ts    # Researcher agent session
-│   │   ├── context-tool.ts  # Context inspection tool
-│   │   └── session-context.ts # Session context utilities
-│   ├── infrastructure/
-│   │   ├── state-manager.ts # Session/state management
-│   │   ├── searxng-manager.ts # SearXNG container manager
-│   │   └── searxng-lifecycle.ts # SearXNG lifecycle management
-│   ├── tools/
-│   │   ├── search.ts        # Web search tool
-│   │   ├── scrape.ts        # URL scraping tool
-│   │   ├── security.ts      # Security database tool
-│   │   ├── stackexchange.ts # Stack Exchange tool
-│   │   └── grep.ts          # Code search tool
-│   ├── web-research/        # Search/scraping utilities
-│   ├── security/            # Security database integrations
-│   ├── stackexchange/       # Stack Exchange API integration
-│   ├── tui/                 # Terminal UI components
-│   └── utils/               # Shared utilities
+├── orchestration/
+│   ├── swarm-orchestrator.ts # Main swarm lifecycle manager
+│   ├── swarm-reducer.ts    # Pure state transition logic
+│   ├── swarm-types.ts      # Research state schemas
+│   ├── researcher.ts       # Researcher agent session
+│   ├── state-manager.ts    # Session state persistence
+│   ├── id-utils.ts         # Hierarchical ID to display mapping
+│   └── session-context.ts  # Parent context utilities
+├── infrastructure/
+│   ├── searxng-manager.ts # SearXNG container manager
+│   └── searxng-lifecycle.ts # SearXNG lifecycle management
+├── tools/
+│   ├── search.ts        # Web search tool
+│   ├── scrape.ts        # URL scraping tool
+│   ├── security.ts      # Security database tool
+│   ├── stackexchange.ts # Stack Exchange tool
+│   └── grep.ts          # Code search tool
+├── web-research/        # Search/scraping utilities
+├── security/            # Security database integrations
+├── stackexchange/       # Stack Exchange API integration
+├── tui/                 # Terminal UI components
+└── utils/               # Shared utilities
 ├── prompts/
-│   ├── coordinator.md       # Coordinator system prompt
-│   └── researcher.md        # Researcher system prompt
+│   ├── system-coordinator.md # Planning prompt
+│   ├── researcher.md         # Researcher workflow prompt
+│   └── system-lead-evaluator.md # Final synthesis/orchestration prompt
 ├── test/                    # Test suite
 ├── .env.example             # Example configuration
 ├── package.json             # Package metadata

@@ -18,7 +18,12 @@ export class SwarmStateManager {
    */
   load(): SystemResearchState | null {
     try {
-      const entries = this.ctx.sessionManager.getEntries();
+      const sessionManager = (this.ctx as any).sessionManager;
+      if (!sessionManager) return null;
+
+      const entries = sessionManager.getEntries?.();
+      if (!entries || !Array.isArray(entries)) return null;
+
       // Scan backwards for the latest state entry
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
@@ -52,6 +57,16 @@ export class SwarmStateManager {
     const existing = this.load();
     if (existing && existing.rootQuery === query) {
       logger.log('[swarm-state] Resuming existing research system.');
+      
+      // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again
+      // This handles cases where the agent was stopped mid-research.
+      for (const id in existing.aspects) {
+        const aspect = existing.aspects[id];
+        if (aspect?.status === 'running') {
+          aspect.status = 'pending';
+        }
+      }
+      
       return existing;
     }
 

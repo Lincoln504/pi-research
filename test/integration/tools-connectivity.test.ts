@@ -99,40 +99,67 @@ describe('Search and Scrape Tools Connectivity', () => {
 
   describe('Scrape Tool', () => {
     it('should instantiate scrape tool', () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }), getGlobalState: () => ({} as any), updateGlobalLinks: () => {} });
       expect(tool).toBeDefined();
       expect(tool.name).toBe('scrape');
       expect(tool.execute).toBeDefined();
     });
 
     it('should scrape Wikipedia successfully', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
-      const result = await tool.execute(
-        'test-call-4',
-        { urls: ['https://en.wikipedia.org/wiki/Python_(programming_language)'] },
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker, getGlobalState: () => ({} as any), updateGlobalLinks: () => {} });
+      const urls = ['https://en.wikipedia.org/wiki/Python_(programming_language)'];
+      
+      // Step 1: Handshake
+      const result1 = await tool.execute(
+        'test-call-4a',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result1.details).toHaveProperty('protocol', 'handshake');
+
+      // Step 2: Execution
+      const result2 = await tool.execute(
+        'test-call-4b',
+        { urls },
         undefined,
         undefined,
         mockExtensionCtx as any
       );
 
-      expect(result).toBeDefined();
-      expect(result.content).toBeDefined();
-      expect(Array.isArray(result.content)).toBe(true);
-      expect(result.content.length).toBeGreaterThan(0);
-      if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+      expect(result2).toBeDefined();
+      expect(result2.content).toBeDefined();
+      expect(Array.isArray(result2.content)).toBe(true);
+      expect(result2.content.length).toBeGreaterThan(0);
+      if (result2.content[0]?.type === 'text') {
+        const text = result2.content[0].text as string;
+        expect(text).toContain('Python');
         expect(text.length).toBeGreaterThan(100);
       }
     });
 
     it('should handle multiple URLs concurrently', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker, getGlobalState: () => ({} as any), updateGlobalLinks: () => {} });
       const urls = [
         'https://en.wikipedia.org/wiki/Python_(programming_language)',
         'https://en.wikipedia.org/wiki/JavaScript',
       ];
+
+      // Step 1: Handshake
+      await tool.execute(
+        'test-call-5a',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      // Step 2: Execution
       const result = await tool.execute(
-        'test-call-5',
+        'test-call-5b',
         { urls, maxConcurrency: 2 },
         undefined,
         undefined,
@@ -144,12 +171,14 @@ describe('Search and Scrape Tools Connectivity', () => {
       if (result.content[0]?.type === 'text') {
         const text = result.content[0].text as string;
         // Should have content for both URLs
+        expect(text).toContain('Python');
+        expect(text).toContain('JavaScript');
         expect(text.length).toBeGreaterThan(100);
       }
     });
 
     it('should reject empty URLs', async () => {
-      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }) });
+      const tool = createScrapeTool({ searxngUrl: 'http://localhost:8080', ctx: mockExtensionCtx as any, tracker: new ToolUsageTracker({ scrape: 10 }), getGlobalState: () => ({} as any), updateGlobalLinks: () => {} });
       try {
         await tool.execute(
           'test-call-6',

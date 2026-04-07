@@ -74,15 +74,16 @@ describe('tool-usage-tracker', () => {
         expect(tracker.getUsage('read').callCount).toBe(100);
       });
 
-      it('should return false with SCRAPE LIMIT REACHED for scrape', () => {
-        const tracker = new ToolUsageTracker({ scrape: 1 });
+      it('should return false with SCRAPE PROTOCOL COMPLETE for scrape', () => {
+        const tracker = new ToolUsageTracker({ scrape: 2 });
+        expect(tracker.recordCall('scrape')).toBe(true);
         expect(tracker.recordCall('scrape')).toBe(true);
 
         const allowed = tracker.recordCall('scrape');
         expect(allowed).toBe(false);
 
         const msg = tracker.getLimitMessage('scrape');
-        expect(msg).toContain('SCRAPE LIMIT REACHED');
+        expect(msg).toContain('SCRAPE PROTOCOL COMPLETE');
       });
 
       it('should provide phase-transition guidance in limit message', () => {
@@ -157,10 +158,10 @@ describe('tool-usage-tracker', () => {
       });
 
       it('should provide scrape limit message', () => {
-        const tracker = new ToolUsageTracker({ scrape: 1 });
+        const tracker = new ToolUsageTracker({ scrape: 2 });
         const msg = tracker.getLimitMessage('scrape');
 
-        expect(msg).toContain('SCRAPE LIMIT REACHED');
+        expect(msg).toContain('SCRAPE PROTOCOL COMPLETE');
         expect(msg).toContain('Phase 3');
       });
     });
@@ -195,11 +196,11 @@ describe('tool-usage-tracker', () => {
   });
 
   describe('createDefaultToolLimits', () => {
-    it('should return default limits (6 gathering, 1 scrape)', () => {
+    it('should return default limits (4 gathering, 2 scrape)', () => {
       const limits = createDefaultToolLimits();
 
-      expect(limits.gathering).toBe(6);
-      expect(limits.scrape).toBe(1);
+      expect(limits.gathering).toBe(4);
+      expect(limits.scrape).toBe(2);
       expect(limits.read).toBeUndefined();
     });
 

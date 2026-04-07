@@ -23,6 +23,7 @@ import {
   activateSlice,
   completeSlice,
   createInitialPanelState,
+  clearAllFlashTimeouts,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
 import {
@@ -86,6 +87,9 @@ export function createResearchTool(): ToolDefinition {
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
 
+      let aborted = false;
+      let cleanup: (() => void) | null = null;
+
       try {
         validateConfig();
         await initLifecycle(ctx);
@@ -116,14 +120,22 @@ export function createResearchTool(): ToolDefinition {
           refreshAllSessions();
         };
 
-        const cleanup = () => {
+        cleanup = () => {
           endResearchSession(sessionId);
           cleanupSharedLinks(sessionId);
+          // Clear all flash timeouts for this session to prevent lingering updates
+          clearAllFlashTimeouts(sessionId);
+          // Clear all slices from panel state so widget has no content to render
+          panelState.slices.clear();
+          // Now unset the widget
           ctx.ui.setWidget(widgetId, undefined);
           refreshAllSessions();
           setTimeout(restoreConsole, getConfig().CONSOLE_RESTORE_DELAY_MS).unref?.();
         };
-        signal?.addEventListener('abort', cleanup, { once: true });
+        signal?.addEventListener('abort', () => {
+          aborted = true;
+          cleanup?.();
+        }, { once: true });
 
         if (isQuick) {
           const sliceLabel = 'researching ...';
@@ -164,17 +176,16 @@ Rate complexity from 1 to 3:
 Output ONLY the number 1, 2, or 3.`;
 
           const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
-          if (!auth.ok) {
-            throw new Error(auth.error);
-          }
+          if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
           const compResp = await complete(selectedModel, {
             messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
-          }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+          }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
           
           const complexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10) || 2;
 
           const orchestrator = new SwarmOrchestrator({
             ctx,
+            model: selectedModel as any,
             query,
             complexity: complexity as 1 | 2 | 3,
             onTokens,
@@ -188,8 +199,14 @@ Output ONLY the number 1, 2, or 3.`;
           return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
         }
       } catch (error) {
+        // If aborted, don't treat as error - just return gracefully
+        if (aborted) {
+          return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
+        }
+        cleanup?.();
         restoreConsole();
-        return { content: [{ type: 'text', text: `Research failed: ${error}` }], details: {} };
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: 'text', text: `Research failed: ${errorMsg}` }], details: {} };
       }
     },
   };

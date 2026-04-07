@@ -55,13 +55,23 @@ describe('SwarmStateManager', () => {
   });
 
   describe('initialize', () => {
-    it('should resume existing state if query matches', () => {
-      const existingState = { rootQuery: 'test query', complexity: 2, status: 'researching' };
+    it('should resume existing state if query matches and reset running siblings', () => {
+      const existingState = { 
+        rootQuery: 'test query', 
+        complexity: 2, 
+        status: 'researching',
+        aspects: {
+          '1.1': { id: '1.1', query: 'q1', status: 'completed' },
+          '1.2': { id: '1.2', query: 'q2', status: 'running' }
+        }
+      };
       const ctx = createMockCtx([{ type: 'custom', customType: 'pi-research-state', data: existingState }]);
       const manager = new SwarmStateManager(ctx);
       
       const state = manager.initialize('test query', 2);
-      expect(state).toEqual(existingState);
+      expect(state.rootQuery).toBe('test query');
+      expect(state.aspects['1.1']?.status).toBe('completed');
+      expect(state.aspects['1.2']?.status).toBe('pending');
     });
 
     it('should return fresh state if no existing state matches', () => {

@@ -52,6 +52,7 @@ describe('Swarm Integration', () => {
   it('should run a full research swarm from planning to synthesis', async () => {
     const orchestrator = new SwarmOrchestrator({
       ctx: mockCtx,
+      model: mockCtx.model,
       query: 'how to build a swarm',
       complexity: 2,
       onTokens: vi.fn(),

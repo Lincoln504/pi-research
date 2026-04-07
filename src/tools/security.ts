@@ -36,7 +36,7 @@ export function createSecuritySearchTool(options: {
       'Use security_search to look up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
-      'CRITICAL: You are allowed a maximum of 6 gathering calls total across ALL tools. Use them for breadth.',
+      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
     ],
     parameters: Type.Object({
       databases: Type.Optional(Type.Array(Type.String({

@@ -46,7 +46,7 @@ export default function (pi: ExtensionAPI) {
   // Append a usage message to the system prompt for the main chat
   pi.on('before_agent_start', async (event) => {
     const researchMessage =
-      '\n\nThe `research` tool (from pi-research) is specifically for web/internet research. It is NOT for local file examination or local on-disk context gathering/research. It accepts a `query`, an optional `model` (defaults to your current model), and an optional `quick` parameter for straightforward factual lookups. For normal research (no `quick` option), ensure the `query` precisely reflects the necessary depth (or lack thereof), specificity, and scope (whether broad, nuanced, or both) as demanded by the task. If a research task is judged to be on the simpler side, favor the `quick` research mode.';
+      '\n\n### RESEARCH TOOL USAGE\nThe `research` tool (from pi-research) is for web/internet research ONLY. It is NOT for local code/file research.\n\n**CRITICAL INSTRUCTION: DEFAULT TO QUICK MODE.**\nYou MUST set `quick: true` for almost all research tasks. Only omit `quick: true` (entering deep swarm research) if you explicitly see words like "deep", "exhaustive", "comprehensive", "swarm", or "multi-agent", or if the situation\'s context warrants deep research. For all other general informative queries, ALWAYS use `quick: true`.';
     return { systemPrompt: event.systemPrompt + researchMessage };
   });
 
