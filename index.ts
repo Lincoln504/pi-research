@@ -9,7 +9,7 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './src/tool.ts';
-import { logger, suppressConsole, isVerboseFromEnv } from './src/logger.ts';
+import { logger, suppressConsole, isVerboseFromEnv, getDefaultDebugLogPathTemplate } from './src/logger.ts';
 import { checkDockerAvailability } from './src/infrastructure/searxng-lifecycle.ts';
 import { shutdownManager } from './src/utils/shutdown-manager.ts';
 
@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (isVerboseFromEnv()) {
-      ctx.ui.notify('pi-research: debug log → /tmp/pi-research-debug-{hash}.log', 'info');
+      ctx.ui.notify(`pi-research: debug log → ${getDefaultDebugLogPathTemplate()}`, 'info');
     }
   });
 

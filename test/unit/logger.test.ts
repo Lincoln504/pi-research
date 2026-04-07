@@ -7,7 +7,11 @@
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { unlinkSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Logger, createLogger, getLogger, setLogger, resetLogger, isVerboseFromEnv, suppressConsole } from '../../src/logger';
+
+const TEST_LOG_PATH = path.join(os.tmpdir(), 'pi-research-test.log');
 
 describe('logger', () => {
   beforeEach(() => {
@@ -20,7 +24,7 @@ describe('logger', () => {
     process.argv = process.argv.filter(arg => arg !== '--verbose');
 
     // Clean up test log files
-    const testLogPaths = ['/tmp/test.log'];
+    const testLogPaths = [TEST_LOG_PATH];
     for (const path of testLogPaths) {
       try {
         unlinkSync(path);
@@ -42,7 +46,7 @@ describe('logger', () => {
     });
 
     it('should be silent when not verbose', () => {
-      const logger = new Logger({ verbose: false, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: false, logFilePath: TEST_LOG_PATH });
 
       expect(() => {
         logger.log('test message');
@@ -53,12 +57,12 @@ describe('logger', () => {
     });
 
     it('should detect verbose from isVerbose()', () => {
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       expect(logger.isVerbose()).toBe(true);
     });
 
     it('should handle error objects', () => {
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
 
       const testError = new Error('test error');
       expect(() => {
@@ -67,7 +71,7 @@ describe('logger', () => {
     });
 
     it('should handle object arguments', () => {
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
 
       const testData = { key: 'value', number: 42 };
       expect(() => {
@@ -76,8 +80,8 @@ describe('logger', () => {
     });
 
     it('should return log file path', () => {
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
-      expect(logger.getLogFilePath()).toBe('/tmp/test.log');
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      expect(logger.getLogFilePath()).toBe(TEST_LOG_PATH);
     });
 
     it('should return isVerbose status', () => {
@@ -91,7 +95,9 @@ describe('logger', () => {
     it('should have default log file path with hash suffix', () => {
       const logger = new Logger({ verbose: true });
       const logPath = logger.getLogFilePath();
-      expect(logPath).toMatch(/^\/tmp\/pi-research-debug-[a-z0-9]{4}\.log$/);
+      expect(logPath).not.toBeNull();
+      expect(path.dirname(logPath!)).toBe(os.tmpdir());
+      expect(path.basename(logPath!)).toMatch(/^pi-research-debug-[a-z0-9]{4}\.log$/);
     });
 
     it('should have null log file path when not verbose', () => {
@@ -155,7 +161,7 @@ describe('logger', () => {
   describe('suppressConsole', () => {
     it('should suppress console when not verbose', () => {
       resetLogger();
-      const logger = new Logger({ verbose: false, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: false, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalLog = console.log;
@@ -176,7 +182,7 @@ describe('logger', () => {
 
     it('should patch console when verbose', () => {
       resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalLog = console.log;
@@ -197,7 +203,7 @@ describe('logger', () => {
 
     it('should handle console.error', () => {
       resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalError = console.error;
@@ -215,7 +221,7 @@ describe('logger', () => {
 
     it('should handle console.warn', () => {
       resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalWarn = console.warn;
@@ -233,7 +239,7 @@ describe('logger', () => {
 
     it('should handle console.debug', () => {
       resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalDebug = (console as any).debug;
@@ -251,7 +257,7 @@ describe('logger', () => {
 
     it('should restore original console methods', () => {
       resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: '/tmp/test.log' });
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       setLogger(logger);
 
       const originalLog = console.log;
