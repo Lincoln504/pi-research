@@ -23,6 +23,7 @@ import {
   shutdownLifecycle,
   isInitialized,
   getManager,
+  rewriteLocalhostProxyForContainer,
 } from '../../../src/infrastructure/searxng-lifecycle';
 
 // Mock DockerSearxngManager
@@ -378,6 +379,22 @@ describe('SearxngLifecycleManager', () => {
 
       expect(lifecycleManager.isInitialized()).toBe(false);
     });
+  });
+});
+
+describe('rewriteLocalhostProxyForContainer', () => {
+  it('rewrites localhost proxy hosts to Docker host alias', () => {
+    expect(rewriteLocalhostProxyForContainer('socks5://localhost:9050'))
+      .toBe('socks5://host.docker.internal:9050');
+    expect(rewriteLocalhostProxyForContainer('socks5://127.0.0.1:9050'))
+      .toBe('socks5://host.docker.internal:9050');
+  });
+
+  it('preserves credentials and non-local proxy hosts', () => {
+    expect(rewriteLocalhostProxyForContainer('socks5://user:pass@127.0.0.1:9050'))
+      .toBe('socks5://user:pass@host.docker.internal:9050');
+    expect(rewriteLocalhostProxyForContainer('socks5://proxy.example.com:9050'))
+      .toBe('socks5://proxy.example.com:9050');
   });
 });
 

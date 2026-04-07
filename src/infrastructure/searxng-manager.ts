@@ -54,10 +54,13 @@ interface DockerContainerCreateOptions {
     PortBindings: Record<string, Array<{ HostPort: string }>>;
     Binds: string[];
     AutoRemove: boolean;
+    ExtraHosts?: string[];
   };
   Env: string[];
   Labels: Record<string, string>;
 }
+
+export const DOCKER_HOST_INTERNAL_HOSTNAME = 'host.docker.internal';
 
 // Extension context type
 interface ExtensionContext {
@@ -152,6 +155,10 @@ export function getDockerConnectionCandidates(
     seen.add(key);
     return true;
   });
+}
+
+export function getDockerHostGatewayExtraHosts(platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'linux' ? [`${DOCKER_HOST_INTERNAL_HOSTNAME}:host-gateway`] : [];
 }
 
 /**
@@ -842,6 +849,7 @@ export class DockerSearxngManager {
           `${limiterConfigPath}:/etc/searxng/limiter.toml:ro`,
         ],
         AutoRemove: false,
+        ExtraHosts: getDockerHostGatewayExtraHosts(),
       },
       Env: [
         // No SEARXNG_LIMITER or SEARXNG_BIND_ADDRESS - use mounted config files only
