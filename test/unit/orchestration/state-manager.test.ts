@@ -9,8 +9,10 @@ describe('SwarmStateManager', () => {
   const createMockCtx = (entries: any[] = []) => ({
     sessionManager: {
       getEntries: vi.fn(() => entries),
+      appendCustomEntry: vi.fn((customType: string, data: unknown) => {
+        entries.push({ type: 'custom', customType, data });
+      }),
     },
-    appendEntry: vi.fn(),
   } as any);
 
   beforeEach(() => {
@@ -28,9 +30,9 @@ describe('SwarmStateManager', () => {
       const state1 = { status: 'planning', currentRound: 1 };
       const state2 = { status: 'researching', currentRound: 1 };
       const ctx = createMockCtx([
-        { type: 'pi-research-state', data: state1 },
+        { type: 'custom', customType: 'pi-research-state', data: state1 },
         { type: 'message' },
-        { type: 'pi-research-state', data: state2 },
+        { type: 'custom', customType: 'pi-research-state', data: state2 },
       ]);
       const manager = new SwarmStateManager(ctx);
       expect(manager.load()).toEqual(state2);
@@ -45,7 +47,7 @@ describe('SwarmStateManager', () => {
       
       manager.save(state);
       
-      expect(ctx.appendEntry).toHaveBeenCalledWith('pi-research-state', expect.objectContaining({
+      expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith('pi-research-state', expect.objectContaining({
         status: 'completed',
         lastUpdated: expect.any(Number),
       }));
@@ -55,7 +57,7 @@ describe('SwarmStateManager', () => {
   describe('initialize', () => {
     it('should resume existing state if query matches', () => {
       const existingState = { rootQuery: 'test query', complexity: 2, status: 'researching' };
-      const ctx = createMockCtx([{ type: 'pi-research-state', data: existingState }]);
+      const ctx = createMockCtx([{ type: 'custom', customType: 'pi-research-state', data: existingState }]);
       const manager = new SwarmStateManager(ctx);
       
       const state = manager.initialize('test query', 2);

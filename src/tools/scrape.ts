@@ -15,20 +15,28 @@ import { validateMaxConcurrency } from '../web-research/utils.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/swarm-types.ts';
 
-interface ScrapeParams {
-  urls: string[];
-  maxConcurrency?: number;
-  excludeLinks?: string[];
-  [key: string]: unknown;
-}
-
 export function createScrapeTool(options: {
   searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
-  getGlobalState: () => SystemResearchState;
-  updateGlobalLinks: (links: string[]) => void;
+  getGlobalState?: () => SystemResearchState;
+  updateGlobalLinks?: (links: string[]) => void;
 }): ToolDefinition {
+  const fallbackState: SystemResearchState = {
+    version: 1,
+    rootQuery: '',
+    complexity: 1,
+    currentRound: 1,
+    status: 'researching',
+    lastUpdated: Date.now(),
+    initialAgenda: [],
+    allScrapedLinks: [],
+    aspects: {},
+  };
+  const getGlobalState = options.getGlobalState ?? (() => fallbackState);
+  const updateGlobalLinks = options.updateGlobalLinks ?? ((links: string[]) => {
+    fallbackState.allScrapedLinks = [...new Set([...fallbackState.allScrapedLinks, ...links])];
+  });
 
   return {
     name: 'scrape',
@@ -64,7 +72,7 @@ export function createScrapeTool(options: {
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
       const callCount = options.tracker.getCallCount('scrape');
-      const state = options.getGlobalState();
+      const state = getGlobalState();
 
       // --- CALL 1: Handshake (Info Only) ---
       if (callCount === 0) {
@@ -108,12 +116,12 @@ export function createScrapeTool(options: {
 
         // IMMEDIATELY update global link pool before starting the actual scrape
         // This ensures Sibling B sees Sibling A's intent immediately
-        options.updateGlobalLinks(urls);
+        updateGlobalLinks(urls);
 
         let scrapeResults: any[];
         try {
           if (urls.length === 1) {
-            scrapeResults = [await scrapeSingle(urls[0], signal)];
+            scrapeResults = [await scrapeSingle(urls[0]!, signal)];
           } else {
             scrapeResults = await scrape(urls, maxConcurrency, signal);
           }

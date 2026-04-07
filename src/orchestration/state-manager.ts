@@ -22,8 +22,8 @@ export class SwarmStateManager {
       // Scan backwards for the latest state entry
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
-        if (entry.type === ENTRY_TYPE) {
-          return (entry as CustomEntry<SystemResearchState>).data;
+        if (entry?.type === 'custom' && entry.customType === ENTRY_TYPE) {
+          return (entry as CustomEntry<SystemResearchState>).data ?? null;
         }
       }
     } catch (err) {
@@ -38,7 +38,7 @@ export class SwarmStateManager {
   save(state: SystemResearchState): void {
     state.lastUpdated = Date.now();
     try {
-      this.ctx.appendEntry(ENTRY_TYPE, state);
+      (this.ctx.sessionManager as any).appendCustomEntry(ENTRY_TYPE, state);
       logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
     } catch (err) {
       logger.error('[swarm-state] Failed to save state to session history:', err);
@@ -62,6 +62,7 @@ export class SwarmStateManager {
       currentRound: 1,
       status: 'planning',
       lastUpdated: Date.now(),
+      initialAgenda: [],
       allScrapedLinks: [],
       aspects: {}
     };

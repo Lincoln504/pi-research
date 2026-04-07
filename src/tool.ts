@@ -12,7 +12,6 @@ import type {
   ToolDefinition,
   AgentToolResult,
   ExtensionContext,
-  AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { complete } from '@mariozechner/pi-ai';
@@ -20,11 +19,9 @@ import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig, getConfig } from './config.ts';
 import {
   createResearchPanel,
-  clearAllFlashTimeouts,
   addSlice,
   activateSlice,
   completeSlice,
-  removeSlice,
   createInitialPanelState,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
@@ -32,23 +29,17 @@ import {
   initLifecycle,
   ensureRunning,
   getStatus,
-  onStatusChange,
-  type SearxngStatus,
-  getConnectionCount,
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
-import { onConnectionCountChange } from './web-research/utils.ts';
 import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
-import { logger, suppressConsole } from './logger.ts';
+import { suppressConsole } from './logger.ts';
 import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
   endResearchSession,
   isBottomMostSession,
-  onSessionOrderChange,
   registerSessionUpdate,
   refreshAllSessions,
-  clearPendingRefresh,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 
@@ -173,9 +164,12 @@ Rate complexity from 1 to 3:
 Output ONLY the number 1, 2, or 3.`;
 
           const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
+          if (!auth.ok) {
+            throw new Error(auth.error);
+          }
           const compResp = await complete(selectedModel, {
             messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
-          }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
+          }, { apiKey: auth.apiKey, headers: auth.headers, signal });
           
           const complexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10) || 2;
 

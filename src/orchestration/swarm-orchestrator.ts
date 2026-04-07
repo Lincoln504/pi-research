@@ -21,8 +21,6 @@ import { formatParentContext } from './session-context.ts';
 import { formatSharedLinksFromState } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
-import { createResearchTools } from '../tools/index.ts';
-import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice } from '../tui/research-panel.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -93,9 +91,12 @@ HISTORY: ${parentConvo}
 QUERY: ${this.state.rootQuery}`;
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.ctx.model!);
+      if (!auth.ok) {
+        throw new Error(auth.error);
+      }
       const response = await complete(this.options.ctx.model!, {
         messages: [{ role: 'user', content: [{ type: 'text', text: plannerPrompt }], timestamp: Date.now() }]
-      }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
+      }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
       const text = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
       const agenda: string[] = JSON.parse(text.match(/\[.*\]/s)?.[0] || '[]');
@@ -143,18 +144,6 @@ QUERY: ${this.state.rootQuery}`;
     const sharedLinksMarkdown = formatSharedLinksFromState(this.state.aspects);
     const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher') + '\n\n' + sharedLinksMarkdown;
 
-    const tracker = new ToolUsageTracker(createDefaultToolLimits());
-    const tools = createResearchTools({
-      searxngUrl: this.options.searxngUrl,
-      ctx: this.options.ctx,
-      tracker,
-      getGlobalState: () => this.state,
-      updateGlobalLinks: (links) => {
-        this.state.allScrapedLinks = [...new Set([...this.state.allScrapedLinks, ...links])];
-        this.stateManager.save(this.state);
-      }
-    } as any);
-
     const session = await createResearcherSession({
       cwd: this.options.ctx.cwd,
       ctxModel: this.options.ctx.model,
@@ -162,10 +151,13 @@ QUERY: ${this.state.rootQuery}`;
       settingsManager: (this.options.ctx as any).settingsManager,
       systemPrompt: researcherPrompt,
       searxngUrl: this.options.searxngUrl,
-      extensionCtx: this.options.ctx
+      extensionCtx: this.options.ctx,
+      getGlobalState: () => this.state,
+      updateGlobalLinks: (links) => {
+        this.state.allScrapedLinks = [...new Set([...this.state.allScrapedLinks, ...links])];
+        this.stateManager.save(this.state);
+      },
     });
-
-    (session as any).agent.customTools = tools;
     this.activeSessions.set(aspect.id, session);
 
     session.subscribe((event: AgentSessionEvent) => {
@@ -207,17 +199,8 @@ QUERY: ${this.state.rootQuery}`;
         const targetSession = this.activeSessions.get(target.id);
         if (targetSession) {
           logger.log(`[swarm] Injecting ${finished.id} -> ${target.id}`);
-          // Steering: Abort current turn, inject update, and continue
-          targetSession.abort().catch(() => {});
-          targetSession.appendMessage({
-            role: 'user',
-            content: [{ 
-              type: 'text', 
-              text: `UPDATE: Sibling ${finished.id} just finished aspect "${finished.query}".\n\nFINDINGS:\n${finished.report}\n\nKeep these findings in mind as you continue your work.` 
-            }],
-            timestamp: Date.now()
-          });
-          targetSession.continue().catch(e => logger.error(`[swarm] Failed to continue ${target.id}:`, e));
+          targetSession.steer(`UPDATE: Sibling ${finished.id} just finished aspect "${finished.query}".\n\nFINDINGS:\n${finished.report}\n\nKeep these findings in mind as you continue your work.`)
+            .catch((e: unknown) => logger.error(`[swarm] Failed to steer ${target.id}:`, e));
         }
       }
     }
@@ -230,7 +213,7 @@ QUERY: ${this.state.rootQuery}`;
     }
   }
 
-  private async promoteToLead(lead: ResearchSibling, session: AgentSession, signal?: AbortSignal) {
+  private async promoteToLead(_lead: ResearchSibling, session: AgentSession, signal?: AbortSignal) {
     const currentRound = this.state.currentRound;
     const completedAspectQueries = Object.values(this.state.aspects).map(a => a.query);
     const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));

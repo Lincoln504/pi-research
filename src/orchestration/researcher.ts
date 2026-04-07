@@ -9,6 +9,7 @@ import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } f
 import { createAgentSession, createReadTool, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { Model } from '@mariozechner/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
+import type { SystemResearchState } from './swarm-types.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 
@@ -20,10 +21,12 @@ export interface CreateResearcherSessionOptions {
   systemPrompt: string;
   searxngUrl: string;
   extensionCtx: ExtensionContext;
+  getGlobalState?: () => SystemResearchState;
+  updateGlobalLinks?: (links: string[]) => void;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
-  const { cwd, ctxModel, modelRegistry, settingsManager, systemPrompt, searxngUrl, extensionCtx } = options;
+  const { cwd, ctxModel, modelRegistry, settingsManager, systemPrompt, searxngUrl, extensionCtx, getGlobalState, updateGlobalLinks } = options;
 
   // Validate required parameters
   if (!ctxModel) {
@@ -45,7 +48,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     const result = await createAgentSession({
       cwd,
       tools: [createReadTool(cwd)],
-      customTools: createResearchTools({ searxngUrl, ctx: extensionCtx, tracker }),
+      customTools: createResearchTools({ searxngUrl, ctx: extensionCtx, tracker, getGlobalState, updateGlobalLinks }),
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,
