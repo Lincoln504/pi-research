@@ -16,6 +16,10 @@ You complete ONE research cycle:
 
 Conduct **4 full rounds of gathering operations** to ensure a broad foundation of information. In each round, use multiple queries to explore breadth and identify diverse sources.
 
+**Search Disambiguation & Quality:**
+- **Detect Ambiguity**: If your queries return tech-heavy or irrelevant results (e.g., "ROM" emulators when searching for "Rome"), immediately refine your next round with explicit context keywords (e.g., "ancient history", "archaeology", "Roman Republic").
+- **Exhaustive Breadth**: Do not settle for the first few links. Use the `queries` array to hit different angles of your topic in parallel.
+
 **Gathering Strategy per Round:**
 - Use multiple queries in the `queries` array of a single `search` call.
 - Include queries of **similar variance** (slight wording changes) and **wider variance** (different dimensions).

@@ -18,7 +18,7 @@ import { complete } from '@mariozechner/pi-ai';
 import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig } from './config.ts';
 import {
-  createResearchPanel,
+  createMasterResearchPanel,
   addSlice,
   activateSlice,
   completeSlice,
@@ -43,9 +43,11 @@ import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
   endResearchSession,
-  isBottomMostSession,
-  registerSessionUpdate,
+  registerSessionPanel,
+  registerMasterUpdate,
   refreshAllSessions,
+  onSessionOrderChange,
+  getPiActivePanels,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 
@@ -60,14 +62,14 @@ const __dirname = dirname(__filename);
  */
 async function ensureFunctionalHealth(
   panelState: any, 
-  updateWidget: () => void
+  onUpdate: () => void
 ): Promise<void> {
   if (isFunctional()) return;
 
   const sliceLabel = 'health check ...';
   addSlice(panelState, sliceLabel, sliceLabel, false);
   activateSlice(panelState, sliceLabel);
-  updateWidget();
+  onUpdate();
 
   try {
     const { runHealthCheck } = await import('./healthcheck/index.ts');
@@ -80,14 +82,15 @@ async function ensureFunctionalHealth(
     setFunctional(true);
   } finally {
     removeSlice(panelState, sliceLabel);
-    updateWidget();
+    onUpdate();
   }
 }
 
 function getPiSessionMetadata(ctx: ExtensionContext) {
   const sessionManager = (ctx as any).sessionManager;
+  const piSessionId = typeof sessionManager?.getSessionId === 'function' ? String(sessionManager.getSessionId()) : 'default';
   return {
-    sessionId: typeof sessionManager?.getSessionId === 'function' ? String(sessionManager.getSessionId()) : undefined,
+    piSessionId,
     sessionFile: typeof sessionManager?.getSessionFile === 'function' ? String(sessionManager.getSessionFile()) : undefined,
     cwd: ctx.cwd,
   };
@@ -133,8 +136,11 @@ export function createResearchTool(): ToolDefinition {
 
       const baseModel = ctx.model;
       const researchRunId = createResearchRunId();
+      const metadata = getPiSessionMetadata(ctx);
+      const piSessionId = metadata.piSessionId;
+
       return runWithLogContext({
-        ...getPiSessionMetadata(ctx),
+        ...metadata,
         researchRunId,
         toolName: 'research',
       }, async () => {
@@ -157,44 +163,59 @@ export function createResearchTool(): ToolDefinition {
             selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
           }
 
-          const sessionId = startResearchSession();
-          const widgetId = `pi-research-panel-${sessionId}`;
-          const panelState = createInitialPanelState(sessionId, getStatus(), (selectedModel as any)?.id || 'unknown');
-          logger.info('[research] session initialized', {
+          const researchId = startResearchSession(piSessionId);
+          const masterWidgetId = `pi-research-master-${piSessionId}`;
+          const panelState = createInitialPanelState(researchId, query, getStatus(), (selectedModel as any)?.id || 'unknown');
+          
+          logger.info('[research] run initialized', {
             mode: isQuick ? 'quick' : 'swarm',
-            uiSessionId: sessionId,
+            piSessionId,
+            researchId,
             selectedModelId: (selectedModel as any)?.id || 'unknown',
           });
 
-          const updateWidget = () => {
-            panelState.hideSearxng = !isBottomMostSession(sessionId);
-            ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
+          // Single master update function for this Pi session
+          const updateMasterWidget = () => {
+            const masterPanelCreator = createMasterResearchPanel(piSessionId);
+            ctx.ui.setWidget(masterWidgetId, masterPanelCreator, { placement: 'aboveEditor' });
           };
-          registerSessionUpdate(sessionId, updateWidget);
+
+          // Register this research run's state and the master update function
+          registerSessionPanel(piSessionId, researchId, panelState);
+          registerMasterUpdate(piSessionId, updateMasterWidget);
+          
+          // Subscribe to order changes to ensure refresh when ANY run starts/ends
+          const unsubOrder = onSessionOrderChange(piSessionId, () => refreshAllSessions(piSessionId));
 
           // Robust functional health check before research starts
-          await ensureFunctionalHealth(panelState, updateWidget);
+          await ensureFunctionalHealth(panelState, () => refreshAllSessions(piSessionId));
 
           const onTokens = (n: number) => {
             panelState.totalTokens += n;
-            refreshAllSessions();
+            refreshAllSessions(piSessionId);
           };
 
           cleanup = () => {
-            endResearchSession(sessionId);
-            cleanupSharedLinks(sessionId);
-            // Clear all flash timeouts for this session to prevent lingering updates
-            clearAllFlashTimeouts(sessionId);
-            // Clear all slices from panel state so widget has no content to render
-            panelState.slices.clear();
-            // Now unset the widget
-            ctx.ui.setWidget(widgetId, undefined);
-            refreshAllSessions();
-            logger.info('[research] cleanup completed', { uiSessionId: sessionId });
+            unsubOrder();
+            endResearchSession(piSessionId, researchId);
+            cleanupSharedLinks(researchId);
+            // Clear all flash timeouts for this specific run
+            clearAllFlashTimeouts(researchId);
+            
+            // If no more research runs are active in this Pi session, remove the master widget
+            const activePanels = getPiActivePanels(piSessionId);
+            if (activePanels.length === 0) {
+              ctx.ui.setWidget(masterWidgetId, undefined);
+            } else {
+              // Otherwise, just refresh to remove this run's block
+              refreshAllSessions(piSessionId);
+            }
+            
+            logger.info('[research] cleanup completed', { piSessionId, researchId });
           };
           signal?.addEventListener('abort', () => {
             aborted = true;
-            logger.warn('[research] run aborted', { uiSessionId: sessionId });
+            logger.warn('[research] run aborted', { piSessionId, researchId });
             cleanup?.();
           }, { once: true });
 
@@ -202,8 +223,7 @@ export function createResearchTool(): ToolDefinition {
             const sliceLabel = 'researching ...';
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
-            updateWidget();
-
+            refreshAllSessions(piSessionId);
             const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
             const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
             const session = await createResearcherSession({
@@ -235,13 +255,13 @@ export function createResearchTool(): ToolDefinition {
                   if (tokens > 0) {
                     onTokens(tokens);
                     updateSliceTokens(panelState, sliceLabel, tokens, cost);
-                    refreshAllSessions();
+                    refreshAllSessions(piSessionId);
                   }
                 }
               } else if (event.type === 'tool_execution_end') {
                 const color = (event as any).isError ? 'red' : 'green';
                 const duration = (event as any).isError ? 400 : 60;
-                flashSlice(panelState, sliceLabel, color, duration, updateWidget);
+                flashSlice(panelState, sliceLabel, color, duration, () => refreshAllSessions(piSessionId));
               }
             });
 
@@ -277,11 +297,10 @@ Output ONLY the number 1, 2, or 3.`;
               query,
               complexity: complexity as 1 | 2 | 3,
               onTokens,
-              onUpdate: updateWidget,
+              onUpdate: () => refreshAllSessions(piSessionId),
               searxngUrl,
               panelState,
-            });
-
+              });
             const result = await orchestrator.run(signal);
             cleanup();
             return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };

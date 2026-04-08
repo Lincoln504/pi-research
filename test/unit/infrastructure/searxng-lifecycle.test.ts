@@ -14,10 +14,6 @@ import {
   setLifecycleManager,
   resetLifecycleManager,
   getStatus,
-  onStatusChange,
-  shutdownLifecycle,
-  isInitialized,
-  getManager,
   rewriteLocalhostProxyForContainer,
   createSearxngLifecycleManager,
 } from '../../../src/infrastructure/searxng-lifecycle';

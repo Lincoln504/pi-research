@@ -1,33 +1,56 @@
 /**
  * Research Session State Management
  *
- * Tracks failures and state for multiple simultaneous research sessions.
+ * Tracks failures and state for multiple simultaneous research sessions,
+ * scoped by parent Pi session to prevent cross-context interference.
  */
 
 import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
+import type { ResearchPanelState } from '../tui/research-panel.ts';
 
 /**
- * Map of session ID → array of failed researcher IDs
+ * State container for a single Pi session
  */
-const sessionFailures = new Map<string, string[]>();
+interface PiSessionState {
+  /** Map of research run ID → array of failed researcher IDs */
+  failures: Map<string, string[]>;
+  /** Ordered list of research run IDs for TUI stacking (Index 0 = oldest/bottom-most) */
+  order: string[];
+  /** Registry of panel states for each research run */
+  panels: Map<string, ResearchPanelState>;
+  /** Subscribers for order changes in this Pi session */
+  subscribers: Array<() => void>;
+  /** Global debounce timer for this specific Pi session */
+  refreshTimeout: NodeJS.Timeout | null;
+  /** Single update function for the Master Widget of this Pi session */
+  masterUpdate: (() => void) | null;
+}
 
 /**
- * Ordered list of active session IDs for TUI stacking
- * Index 0 = oldest (bottom-most), Index N-1 = newest (top-most)
+ * Global map of Pi session ID → PiSessionState
  */
-const activeSessionOrder: string[] = [];
+const piSessions = new Map<string, PiSessionState>();
 
 /**
- * Registry of update functions for each session to allow coordinated re-renders
+ * Get or create state for a specific Pi session
  */
-const sessionUpdateRegistry = new Map<string, () => void>();
-
-/**
- * Subscribers for session order changes
- */
-const orderChangeSubscribers: Array<() => void> = [];
+function getPiState(piSessionId: string): PiSessionState {
+  let state = piSessions.get(piSessionId);
+  if (!state) {
+    state = {
+      failures: new Map(),
+      order: [],
+      panels: new Map(),
+      subscribers: [],
+      refreshTimeout: null,
+      masterUpdate: null,
+    };
+    piSessions.set(piSessionId, state);
+  }
+  return state;
+}
 
 /**
  * Maximum allowed unique failed researchers before stopping research
@@ -35,21 +58,15 @@ const orderChangeSubscribers: Array<() => void> = [];
 const MAX_FAILED_RESEARCHERS = 2;
 
 /**
- * Global debounce state for batching concurrent refresh calls
- * Ensures only one refresh executes at a time, preventing render order conflicts
+ * Subscribe to session order changes for a specific Pi session
  */
-let globalRefreshPending = false;
-let globalRefreshTimeout: NodeJS.Timeout | null = null;
-
-/**
- * Subscribe to session order changes
- */
-export function onSessionOrderChange(callback: () => void): () => void {
-  orderChangeSubscribers.push(callback);
+export function onSessionOrderChange(piSessionId: string, callback: () => void): () => void {
+  const state = getPiState(piSessionId);
+  state.subscribers.push(callback);
   return () => {
-    const index = orderChangeSubscribers.indexOf(callback);
+    const index = state.subscribers.indexOf(callback);
     if (index !== -1) {
-      orderChangeSubscribers.splice(index, 1);
+      state.subscribers.splice(index, 1);
     }
   };
 }
@@ -57,177 +74,174 @@ export function onSessionOrderChange(callback: () => void): () => void {
 /**
  * Notify subscribers of session order change
  */
-function notifyOrderChange(): void {
-  // Execute all subscribers synchronously to ensure consistent state
-  for (const subscriber of orderChangeSubscribers) {
+function notifyOrderChange(piSessionId: string): void {
+  const state = getPiState(piSessionId);
+  for (const subscriber of state.subscribers) {
     try {
       subscriber();
     } catch (error) {
-      logger.error('Error in session order change subscriber:', error);
+      logger.error(`[session-state] Error in subscriber for ${piSessionId}:`, error);
     }
   }
 }
 
 /**
- * Register an update function for a session
+ * Register a panel state for a research run
  */
-export function registerSessionUpdate(sessionId: string, update: () => void): void {
-  sessionUpdateRegistry.set(sessionId, update);
+export function registerSessionPanel(piSessionId: string, researchId: string, panel: ResearchPanelState): void {
+  const state = getPiState(piSessionId);
+  state.panels.set(researchId, panel);
   
-  // New sessions always go on top (end of the list)
-  if (!activeSessionOrder.includes(sessionId)) {
-    activeSessionOrder.push(sessionId);
-    notifyOrderChange();
+  if (!state.order.includes(researchId)) {
+    state.order.push(researchId);
+    notifyOrderChange(piSessionId);
   }
 }
 
 /**
- * Unregister an update function for a session
+ * Unregister a panel state
  */
-export function unregisterSessionUpdate(sessionId: string): void {
-  sessionUpdateRegistry.delete(sessionId);
+export function unregisterSessionPanel(piSessionId: string, researchId: string): void {
+  const state = getPiState(piSessionId);
+  state.panels.delete(researchId);
 }
 
 /**
- * Refresh all active sessions in their stable order
- * Uses global debouncing to batch concurrent refresh calls
- * Ensures only one refresh executes, preventing render order conflicts
+ * Register the update function for a Pi session's Master Widget
  */
-export function refreshAllSessions(): void {
-  // If refresh already pending, skip - the pending one will use latest state
-  if (globalRefreshPending) return;
+export function registerMasterUpdate(piSessionId: string, update: () => void): void {
+  const state = getPiState(piSessionId);
+  state.masterUpdate = update;
+}
 
-  globalRefreshPending = true;
+/**
+ * Refresh the Master Widget for a Pi session
+ */
+export function refreshAllSessions(piSessionId: string): void {
+  const state = getPiState(piSessionId);
 
-  // Clear any existing timeout to reset the debounce timer
-  if (globalRefreshTimeout) {
-    clearTimeout(globalRefreshTimeout);
+  // Clear existing timeout for this specific Pi session
+  if (state.refreshTimeout) {
+    clearTimeout(state.refreshTimeout);
   }
 
-  // Debounce to batch concurrent calls (multiple sources trigger refreshes simultaneously)
   const debounceMs = getConfig().TUI_REFRESH_DEBOUNCE_MS;
-  globalRefreshTimeout = setTimeout(() => {
+  state.refreshTimeout = setTimeout(() => {
     try {
-      // Validate session order integrity before processing
-      const validSessionIds = activeSessionOrder.filter(sessionId =>
-        sessionUpdateRegistry.has(sessionId) && sessionFailures.has(sessionId)
+      // Validate order integrity
+      const validIds = state.order.filter(id =>
+        state.panels.has(id) && state.failures.has(id)
       );
 
-      // If we have invalid sessions, clean them up
-      if (validSessionIds.length !== activeSessionOrder.length) {
-        for (const sessionId of activeSessionOrder) {
-          if (!validSessionIds.includes(sessionId)) {
-            logger.warn(`[session-state] Cleaning up invalid session: ${sessionId}`);
-            sessionFailures.delete(sessionId);
-            unregisterSessionUpdate(sessionId);
+      if (validIds.length !== state.order.length) {
+        for (const id of state.order) {
+          if (!validIds.includes(id)) {
+            state.failures.delete(id);
+            state.panels.delete(id);
           }
         }
-        // Update order to only include valid sessions
-        activeSessionOrder.length = 0;
-        activeSessionOrder.push(...validSessionIds);
+        state.order.length = 0;
+        state.order.push(...validIds);
       }
 
-      // Process from newest to oldest (top to bottom in TUI)
-      // Render newest first (at the top), oldest last (at the bottom)
-      for (let i = activeSessionOrder.length - 1; i >= 0; i--) {
-        const sessionId = activeSessionOrder[i]!;
-        const update = sessionUpdateRegistry.get(sessionId);
-        if (update) {
-          try {
-            update();
-          } catch (error) {
-            logger.error(`Error updating session ${sessionId}:`, error);
-          }
+      // Trigger the single Master Update for this Pi session
+      if (state.masterUpdate) {
+        try {
+          state.masterUpdate();
+        } catch (error) {
+          logger.error(`[session-state] Error updating Master Widget for ${piSessionId}:`, error);
         }
       }
     } finally {
-      globalRefreshPending = false;
-      globalRefreshTimeout = null;
+      state.refreshTimeout = null;
     }
   }, debounceMs);
 }
 
 /**
- * Get ordered list of active session IDs (oldest first, newest last)
+ * Start a new research run within a Pi session
  */
-export function getActiveSessionOrder(): string[] {
-  return [...activeSessionOrder];
+export function startResearchSession(piSessionId: string): string {
+  const researchId = generateUniqueSessionId('research');
+  const state = getPiState(piSessionId);
+  state.failures.set(researchId, []);
+  return researchId;
 }
 
 /**
- * Start a new research session
+ * Clear pending refreshes for a Pi session
  */
-export function startResearchSession(): string {
-  const sessionId = generateUniqueSessionId('research');
-  sessionFailures.set(sessionId, []);
-  // Note: activeSessionOrder.push happens in registerSessionUpdate
-  return sessionId;
-}
-
-/**
- * Clear pending global refresh (used during cleanup)
- */
-export function clearPendingRefresh(): void {
-  if (globalRefreshTimeout) {
-    clearTimeout(globalRefreshTimeout);
-    globalRefreshTimeout = null;
+export function clearPendingRefresh(piSessionId: string): void {
+  const state = piSessions.get(piSessionId);
+  if (state?.refreshTimeout) {
+    clearTimeout(state.refreshTimeout);
+    state.refreshTimeout = null;
   }
-  globalRefreshPending = false;
 }
 
 /**
- * End a research session
+ * End a research run
  */
-export function endResearchSession(sessionId: string): void {
-  sessionFailures.delete(sessionId);
-  unregisterSessionUpdate(sessionId);
+export function endResearchSession(piSessionId: string, researchId: string): void {
+  const state = piSessions.get(piSessionId);
+  if (!state) return;
 
-  // Remove from order and maintain relative order of others
-  const index = activeSessionOrder.indexOf(sessionId);
+  state.failures.delete(researchId);
+  state.panels.delete(researchId);
+
+  const index = state.order.indexOf(researchId);
   if (index !== -1) {
-    activeSessionOrder.splice(index, 1);
-    notifyOrderChange();
+    state.order.splice(index, 1);
+    notifyOrderChange(piSessionId);
+  }
+
+  // If this was the last research run in the Pi session, clean up the state
+  if (state.order.length === 0 && state.panels.size === 0 && state.subscribers.length === 0) {
+    clearPendingRefresh(piSessionId);
+    piSessions.delete(piSessionId);
   }
 }
 
 /**
- * Check if a session is the bottom-most active research session
- * (The one that should show the SearXNG status box)
+ * Check if a research run is the bottom-most in its Pi session
  */
-export function isBottomMostSession(sessionId: string): boolean {
-  if (activeSessionOrder.length === 0) return false;
-  return activeSessionOrder[0] === sessionId;  // First item in list is oldest/bottom-most
+export function isBottomMostSession(piSessionId: string, researchId: string): boolean {
+  const state = piSessions.get(piSessionId);
+  if (!state || state.order.length === 0) return false;
+  return state.order[0] === researchId;
 }
 
 /**
  * Record a researcher failure
  */
-export function recordResearcherFailure(sessionId: string, researcherId: string): void {
-  const failures = sessionFailures.get(sessionId) || [];
+export function recordResearcherFailure(piSessionId: string, researchId: string, researcherId: string): void {
+  const state = getPiState(piSessionId);
+  const failures = state.failures.get(researchId) || [];
   failures.push(researcherId);
-  sessionFailures.set(sessionId, failures);
+  state.failures.set(researchId, failures);
 }
 
 /**
- * Get list of unique failed researchers in a session
+ * Get list of unique failed researchers in a research run
  */
-export function getFailedResearchers(sessionId: string): string[] {
-  const failures = sessionFailures.get(sessionId) || [];
+export function getFailedResearchers(piSessionId: string, researchId: string): string[] {
+  const state = getPiState(piSessionId);
+  const failures = state.failures.get(researchId) || [];
   return [...new Set(failures)];
 }
 
 /**
- * Check if research should stop due to too many unique failures in a session
+ * Check if research should stop due to too many unique failures
  */
-export function shouldStopResearch(sessionId: string): boolean {
-  return getFailedResearchers(sessionId).length >= MAX_FAILED_RESEARCHERS;
+export function shouldStopResearch(piSessionId: string, researchId: string): boolean {
+  return getFailedResearchers(piSessionId, researchId).length >= MAX_FAILED_RESEARCHERS;
 }
 
 /**
  * Get formatted error message for research stoppage
  */
-export function getResearchStopMessage(sessionId: string): string {
-  const failed = getFailedResearchers(sessionId);
+export function getResearchStopMessage(piSessionId: string, researchId: string): string {
+  const failed = getFailedResearchers(piSessionId, researchId);
   const count = failed.length;
 
   return [
@@ -251,14 +265,31 @@ export function getResearchStopMessage(sessionId: string): string {
 }
 
 /**
- * Get all active sessions (for debugging)
+ * Get all active research panels in a Pi session, in display order (newest first)
  */
-export function getAllSessions(): Map<string, number> {
-  const result = new Map<string, number>();
-  for (const [sessionId, failures] of sessionFailures.entries()) {
-    const uniqueFailures = new Set(failures).size;
-    result.set(sessionId, uniqueFailures);
-  }
-  return result;
+export function getPiActivePanels(piSessionId: string): ResearchPanelState[] {
+  const state = piSessions.get(piSessionId);
+  if (!state) return [];
+  // Return in reverse order (newest first) for top-to-bottom stacking in a single widget
+  return [...state.order].reverse().map(id => state.panels.get(id)!).filter(Boolean);
 }
 
+/**
+ * Get ordered list of active research runs in a Pi session
+ */
+export function getPiActiveSessionOrder(piSessionId: string): string[] {
+  const state = piSessions.get(piSessionId);
+  return state ? [...state.order] : [];
+}
+
+/**
+ * Reset all state (for testing only)
+ */
+export function resetAllPiSessions(): void {
+  for (const state of piSessions.values()) {
+    if (state.refreshTimeout) {
+      clearTimeout(state.refreshTimeout);
+    }
+  }
+  piSessions.clear();
+}

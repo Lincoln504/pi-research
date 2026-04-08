@@ -26,7 +26,7 @@ describe('TUI Research Panel', () => {
 
   describe('createInitialPanelState', () => {
     it('should create initial state with correct properties', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       expect(state.searxngStatus).toEqual(searxngStatus);
       expect(state.totalTokens).toBe(0);
       expect(state.modelName).toBe('test-model');
@@ -36,14 +36,14 @@ describe('TUI Research Panel', () => {
 
   describe('addSlice', () => {
     it('should add a slice to the state', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1:1');
       expect(state.slices.has('slice1')).toBe(true);
       expect(state.slices.get('slice1')?.label).toBe('1:1');
     });
 
     it('should add a queued slice', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1:1', true);
       expect(state.slices.get('slice1')?.queued).toBe(true);
     });
@@ -51,7 +51,7 @@ describe('TUI Research Panel', () => {
 
   describe('activateSlice', () => {
     it('should unqueue a slice', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1:1', true);
       activateSlice(state, 'slice1');
       expect(state.slices.get('slice1')?.queued).toBe(false);
@@ -60,7 +60,7 @@ describe('TUI Research Panel', () => {
 
   describe('completeSlice', () => {
     it('should mark a slice as completed', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1:1');
       completeSlice(state, 'slice1');
       expect(state.slices.get('slice1')?.completed).toBe(true);
@@ -70,7 +70,7 @@ describe('TUI Research Panel', () => {
   describe('flashSlice', () => {
     it('should set flash on a slice', () => {
       vi.useFakeTimers();
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1:1');
       
       flashSlice(state, 'slice1', 'green', 1000);
@@ -84,7 +84,7 @@ describe('TUI Research Panel', () => {
 
   describe('render', () => {
     it('should output exactly 4 lines when empty', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       const componentCreator = createResearchPanel(state);
       const component = componentCreator({}, mockTheme as any);
       
@@ -93,7 +93,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should output exactly 4 lines with a researcher slice', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       addSlice(state, 'slice1', '1');
       updateSliceTokens(state, 'slice1', 12000, 0.05);
       
@@ -110,7 +110,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should output exactly 4 lines when SearXNG is hidden', () => {
-      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       state.hideSearxng = true;
       addSlice(state, 'slice1', '1');
       

@@ -7,75 +7,72 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { 
   startResearchSession, 
-  registerSessionUpdate, 
+  registerSessionPanel,
+  registerMasterUpdate,
   endResearchSession,
-  isBottomMostSession,
-  refreshAllSessions
+  refreshAllSessions,
+  getPiActivePanels,
+  resetAllPiSessions
 } from '../../../src/utils/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
 describe('Multi-Session TUI Coordination', () => {
   const searxngStatus = {
     state: 'active' as const,
-    connectionCount: 1,
     url: 'http://localhost:8080',
     isFunctional: false,
   };
 
-
   beforeEach(() => {
-    // Clear global state if possible (session-state.ts uses globals)
-    // We can't easily clear the globals without exporting them or restarting the process
-    // But we can at least try to end sessions we know about
+    resetAllPiSessions();
   });
 
-  it('should correctly toggle hideSearxng based on session seniority', async () => {
+  it('should correctly maintain session seniority and ordering in Master Widget', async () => {
     vi.useFakeTimers();
+    const piSessionId = 'test-pi-session';
+    const masterUpdate = vi.fn();
+    registerMasterUpdate(piSessionId, masterUpdate);
 
     // 1. Start Session 1 (Bottom-most)
-    const s1 = startResearchSession();
-    const panelState1 = createInitialPanelState(s1, searxngStatus, 'model1');
-    const update1 = vi.fn(() => {
-      panelState1.hideSearxng = !isBottomMostSession(s1);
-    });
-    registerSessionUpdate(s1, update1);
+    const s1 = startResearchSession(piSessionId);
+    const panelState1 = createInitialPanelState(s1, 'query1', searxngStatus, 'model1');
+    registerSessionPanel(piSessionId, s1, panelState1);
 
     // Initial refresh
-    refreshAllSessions();
+    refreshAllSessions(piSessionId);
     vi.advanceTimersByTime(10);
-    expect(update1).toHaveBeenCalled();
-    expect(panelState1.hideSearxng).toBe(false); // Should show SearXNG
+    expect(masterUpdate).toHaveBeenCalledTimes(1);
+    
+    let activePanels = getPiActivePanels(piSessionId);
+    expect(activePanels).toHaveLength(1);
+    expect(activePanels[0]).toBe(panelState1);
 
     // 2. Start Session 2 (Top-most)
-    const s2 = startResearchSession();
-    const panelState2 = createInitialPanelState(s2, searxngStatus, 'model2');
-    const update2 = vi.fn(() => {
-      panelState2.hideSearxng = !isBottomMostSession(s2);
-    });
-    registerSessionUpdate(s2, update2);
+    const s2 = startResearchSession(piSessionId);
+    const panelState2 = createInitialPanelState(s2, 'query2', searxngStatus, 'model2');
+    registerSessionPanel(piSessionId, s2, panelState2);
 
     // Refresh after adding s2
-    refreshAllSessions();
+    refreshAllSessions(piSessionId);
     vi.advanceTimersByTime(10);
     
-    expect(update1).toHaveBeenCalled();
-    expect(update2).toHaveBeenCalled();
-    expect(panelState1.hideSearxng).toBe(false); // Still shows
-    expect(panelState2.hideSearxng).toBe(true);  // Hidden
+    expect(masterUpdate).toHaveBeenCalledTimes(2);
+    
+    activePanels = getPiActivePanels(piSessionId);
+    expect(activePanels).toHaveLength(2);
+    // getPiActivePanels returns newest first (reverse chronological)
+    expect(activePanels[0]).toBe(panelState2); // Newest
+    expect(activePanels[1]).toBe(panelState1); // Oldest
 
-    // 3. End Session 1 -> Session 2 becomes bottom-most
-    endResearchSession(s1);
+    // 3. End Session 1 -> Session 2 becomes only active session
+    endResearchSession(piSessionId, s1);
     
-    // refreshAllSessions is called inside endResearchSession in some implementations?
-    // Looking at tool.ts: cleanup calls refreshAllSessions()
-    // Looking at session-state.ts: endResearchSession calls notifyOrderChange()
-    // notifyOrderChange() calls subscribers. In tool.ts, unsubOrder is onSessionOrderChange(() => refreshAllSessions())
-    
-    // So we need to simulate the subscriber in tool.ts
-    refreshAllSessions();
+    refreshAllSessions(piSessionId);
     vi.advanceTimersByTime(10);
 
-    expect(panelState2.hideSearxng).toBe(false); // Now shows!
+    activePanels = getPiActivePanels(piSessionId);
+    expect(activePanels).toHaveLength(1);
+    expect(activePanels[0]).toBe(panelState2);
 
     vi.useRealTimers();
   });
