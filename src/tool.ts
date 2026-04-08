@@ -16,7 +16,7 @@ import type {
 import { Type } from '@sinclair/typebox';
 import { complete } from '@mariozechner/pi-ai';
 import { createResearcherSession } from "./orchestration/researcher.ts";
-import { validateConfig, getConfig } from './config.ts';
+import { validateConfig } from './config.ts';
 import {
   createResearchPanel,
   addSlice,
@@ -38,7 +38,7 @@ import {
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
 import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
-import { suppressConsole } from './logger.ts';
+import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
 import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
@@ -84,6 +84,15 @@ async function ensureFunctionalHealth(
   }
 }
 
+function getPiSessionMetadata(ctx: ExtensionContext) {
+  const sessionManager = (ctx as any).sessionManager;
+  return {
+    sessionId: typeof sessionManager?.getSessionId === 'function' ? String(sessionManager.getSessionId()) : undefined,
+    sessionFile: typeof sessionManager?.getSessionFile === 'function' ? String(sessionManager.getSessionFile()) : undefined,
+    cwd: ctx.cwd,
+  };
+}
+
 export function createResearchTool(): ToolDefinition {
   return {
     name: 'research',
@@ -117,164 +126,177 @@ export function createResearchTool(): ToolDefinition {
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
       const { query, model: modelId, quick: isQuick = false } = params as { query: string; quick?: boolean; model?: string };
-      const restoreConsole = suppressConsole();
 
       if (!query || !ctx.model) {
-        restoreConsole();
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
 
-      let aborted = false;
-      let cleanup: (() => void) | null = null;
+      const baseModel = ctx.model;
+      const researchRunId = createResearchRunId();
+      return runWithLogContext({
+        ...getPiSessionMetadata(ctx),
+        researchRunId,
+        toolName: 'research',
+      }, async () => {
+        let aborted = false;
+        let cleanup: (() => void) | null = null;
 
-      try {
-        validateConfig();
-        await initLifecycle(ctx);
-        const searxngUrl = await ensureRunning();
-        const manager = getManager();
-        if (manager) {
-          const { setSearxngManager } = await import('./web-research/utils.ts');
-          setSearxngManager(manager);
-        }
+        try {
+          logger.info('[research] run started', { quick: isQuick, modelId });
+          validateConfig();
+          await initLifecycle(ctx);
+          const searxngUrl = await ensureRunning();
+          const manager = getManager();
+          if (manager) {
+            const { setSearxngManager } = await import('./web-research/utils.ts');
+            setSearxngManager(manager);
+          }
 
-        let selectedModel = ctx.model;
-        if (modelId) {
-          selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || ctx.model;
-        }
+          let selectedModel = baseModel;
+          if (modelId) {
+            selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
+          }
 
-        const sessionId = startResearchSession();
-        const widgetId = `pi-research-panel-${sessionId}`;
-        const panelState = createInitialPanelState(sessionId, getStatus(), (selectedModel as any)?.id || 'unknown');
-
-        const updateWidget = () => {
-          panelState.hideSearxng = !isBottomMostSession(sessionId);
-          ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
-        };
-        registerSessionUpdate(sessionId, updateWidget);
-
-        // Robust functional health check before research starts
-        await ensureFunctionalHealth(panelState, updateWidget);
-
-        const onTokens = (n: number) => {
-          panelState.totalTokens += n;
-          refreshAllSessions();
-        };
-
-        cleanup = () => {
-          endResearchSession(sessionId);
-          cleanupSharedLinks(sessionId);
-          // Clear all flash timeouts for this session to prevent lingering updates
-          clearAllFlashTimeouts(sessionId);
-          // Clear all slices from panel state so widget has no content to render
-          panelState.slices.clear();
-          // Now unset the widget
-          ctx.ui.setWidget(widgetId, undefined);
-          refreshAllSessions();
-          setTimeout(restoreConsole, getConfig().CONSOLE_RESTORE_DELAY_MS).unref?.();
-        };
-        signal?.addEventListener('abort', () => {
-          aborted = true;
-          cleanup?.();
-        }, { once: true });
-
-        if (isQuick) {
-          const sliceLabel = 'researching ...';
-          addSlice(panelState, sliceLabel, sliceLabel, false);
-          activateSlice(panelState, sliceLabel);
-          updateWidget();
-
-          const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
-          const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
-          const session = await createResearcherSession({
-            cwd: ctx.cwd,
-            ctxModel: selectedModel,
-            modelRegistry: ctx.modelRegistry,
-            settingsManager: (ctx as any).settingsManager,
-            systemPrompt: researcherPrompt,
-            searxngUrl,
-            extensionCtx: ctx,
+          const sessionId = startResearchSession();
+          const widgetId = `pi-research-panel-${sessionId}`;
+          const panelState = createInitialPanelState(sessionId, getStatus(), (selectedModel as any)?.id || 'unknown');
+          logger.info('[research] session initialized', {
+            mode: isQuick ? 'quick' : 'swarm',
+            uiSessionId: sessionId,
+            selectedModelId: (selectedModel as any)?.id || 'unknown',
           });
-          
-          const calculateUsageCost = (usage: any): number => {
-            if (!usage || !selectedModel?.cost) return 0;
-            const modelCost = selectedModel.cost;
-            const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
-            const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
-            const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
-            const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
-            return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+
+          const updateWidget = () => {
+            panelState.hideSearxng = !isBottomMostSession(sessionId);
+            ctx.ui.setWidget(widgetId, createResearchPanel(panelState), { placement: 'aboveEditor' });
+          };
+          registerSessionUpdate(sessionId, updateWidget);
+
+          // Robust functional health check before research starts
+          await ensureFunctionalHealth(panelState, updateWidget);
+
+          const onTokens = (n: number) => {
+            panelState.totalTokens += n;
+            refreshAllSessions();
           };
 
-          const subscription = session.subscribe(event => {
-            if (event.type === 'message_end' && event.message.role === 'assistant') {
-              const usage = (event.message as any).usage;
-              if (usage) {
-                const cost = calculateUsageCost(usage);
-                const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-                if (tokens > 0) {
-                  onTokens(tokens);
-                  updateSliceTokens(panelState, sliceLabel, tokens, cost);
-                  refreshAllSessions();
+          cleanup = () => {
+            endResearchSession(sessionId);
+            cleanupSharedLinks(sessionId);
+            // Clear all flash timeouts for this session to prevent lingering updates
+            clearAllFlashTimeouts(sessionId);
+            // Clear all slices from panel state so widget has no content to render
+            panelState.slices.clear();
+            // Now unset the widget
+            ctx.ui.setWidget(widgetId, undefined);
+            refreshAllSessions();
+            logger.info('[research] cleanup completed', { uiSessionId: sessionId });
+          };
+          signal?.addEventListener('abort', () => {
+            aborted = true;
+            logger.warn('[research] run aborted', { uiSessionId: sessionId });
+            cleanup?.();
+          }, { once: true });
+
+          if (isQuick) {
+            const sliceLabel = 'researching ...';
+            addSlice(panelState, sliceLabel, sliceLabel, false);
+            activateSlice(panelState, sliceLabel);
+            updateWidget();
+
+            const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+            const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
+            const session = await createResearcherSession({
+              cwd: ctx.cwd,
+              ctxModel: selectedModel,
+              modelRegistry: ctx.modelRegistry,
+              settingsManager: (ctx as any).settingsManager,
+              systemPrompt: researcherPrompt,
+              searxngUrl,
+              extensionCtx: ctx,
+            });
+            
+            const calculateUsageCost = (usage: any): number => {
+              if (!usage || !selectedModel?.cost) return 0;
+              const modelCost = selectedModel.cost;
+              const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
+              const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
+              const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
+              const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+              return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+            };
+
+            const subscription = session.subscribe(event => {
+              if (event.type === 'message_end' && event.message.role === 'assistant') {
+                const usage = (event.message as any).usage;
+                if (usage) {
+                  const cost = calculateUsageCost(usage);
+                  const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+                  if (tokens > 0) {
+                    onTokens(tokens);
+                    updateSliceTokens(panelState, sliceLabel, tokens, cost);
+                    refreshAllSessions();
+                  }
                 }
+              } else if (event.type === 'tool_execution_end') {
+                const color = (event as any).isError ? 'red' : 'green';
+                const duration = (event as any).isError ? 400 : 60;
+                flashSlice(panelState, sliceLabel, color, duration, updateWidget);
               }
-            } else if (event.type === 'tool_execution_end') {
-              const color = (event as any).isError ? 'red' : 'green';
-              const duration = (event as any).isError ? 400 : 60;
-              flashSlice(panelState, sliceLabel, color, duration, updateWidget);
-            }
-          });
+            });
 
-          await session.prompt(query);
-          const result = ensureAssistantResponse(session, 'Quick');
-          
-          // Cleanup subscription
-          subscription();
+            await session.prompt(query);
+            const result = ensureAssistantResponse(session, 'Quick');
+            
+            // Cleanup subscription
+            subscription();
 
-          completeSlice(panelState, sliceLabel);
-          cleanup();
-          return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
-        } else {
-          // SWARM MODE: Start with complexity assessment
-          const complexityPrompt = `Analyze the research query: "${query}"
+            completeSlice(panelState, sliceLabel);
+            cleanup();
+            return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
+          } else {
+            // SWARM MODE: Start with complexity assessment
+            const complexityPrompt = `Analyze the research query: "${query}"
 Rate complexity from 1 to 3:
 1: Simple fact (1 researcher)
 2: Standard topic (3 researchers)
 3: Deep/Nuanced topic (3 researchers, more rounds)
 Output ONLY the number 1, 2, or 3.`;
 
-          const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
-          if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
-          const compResp = await complete(selectedModel, {
-            messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
-          }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
-          
-          const complexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10) || 2;
+            const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
+            if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
+            const compResp = await complete(selectedModel, {
+              messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
+            }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
+            
+            const complexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10) || 2;
 
-          const orchestrator = new SwarmOrchestrator({
-            ctx,
-            model: selectedModel as any,
-            query,
-            complexity: complexity as 1 | 2 | 3,
-            onTokens,
-            onUpdate: updateWidget,
-            searxngUrl,
-            panelState,
-          });
+            const orchestrator = new SwarmOrchestrator({
+              ctx,
+              model: selectedModel as any,
+              query,
+              complexity: complexity as 1 | 2 | 3,
+              onTokens,
+              onUpdate: updateWidget,
+              searxngUrl,
+              panelState,
+            });
 
-          const result = await orchestrator.run(signal);
-          cleanup();
-          return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
+            const result = await orchestrator.run(signal);
+            cleanup();
+            return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
+          }
+        } catch (error) {
+          // If aborted, don't treat as error - just return gracefully
+          if (aborted) {
+            return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
+          }
+          cleanup?.();
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logger.error('[research] run failed', error);
+          return { content: [{ type: 'text', text: `Research failed: ${errorMsg}` }], details: {} };
         }
-      } catch (error) {
-        // If aborted, don't treat as error - just return gracefully
-        if (aborted) {
-          return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
-        }
-        cleanup?.();
-        restoreConsole();
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: 'text', text: `Research failed: ${errorMsg}` }], details: {} };
-      }
+      });
     },
   };
 }

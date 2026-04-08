@@ -2,14 +2,22 @@
  * Logger Module Unit Tests
  *
  * Tests the refactored logger that writes to file (verbose) or is silent (default).
- * Tests also verify suppressConsole() patches console methods correctly.
+ * Tests also verify logging stays scoped and never patches console methods.
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { Logger, createLogger, getLogger, setLogger, resetLogger, isVerboseFromEnv, suppressConsole } from '../../src/logger';
+import {
+  Logger,
+  createLogger,
+  getLogger,
+  setLogger,
+  resetLogger,
+  isVerboseFromEnv,
+  runWithLogContext,
+} from '../../src/logger';
 
 const TEST_LOG_PATH = path.join(os.tmpdir(), 'pi-research-test.log');
 
@@ -17,11 +25,13 @@ describe('logger', () => {
   beforeEach(() => {
     // Clear verbose flag for each test
     process.argv = process.argv.filter(arg => arg !== '--verbose');
+    delete process.env['PI_RESEARCH_VERBOSE'];
   });
 
   afterEach(() => {
     resetLogger();
     process.argv = process.argv.filter(arg => arg !== '--verbose');
+    delete process.env['PI_RESEARCH_VERBOSE'];
 
     // Clean up test log files
     const testLogPaths = [TEST_LOG_PATH];
@@ -79,6 +89,56 @@ describe('logger', () => {
       }).not.toThrow();
     });
 
+    it('should write structured JSONL with scoped context when verbose', () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+
+      runWithLogContext({
+        sessionId: 'session-1',
+        sessionFile: '/tmp/session.json',
+        cwd: '/work',
+        researchRunId: 'run-1234',
+        toolName: 'research',
+      }, () => {
+        logger.warn('context test', { phase: 'startup' });
+      });
+
+      const [line] = readFileSync(TEST_LOG_PATH, 'utf-8').trim().split('\n');
+      const entry = JSON.parse(line!);
+
+      expect(entry).toEqual(expect.objectContaining({
+        level: 'WARN',
+        sessionId: 'session-1',
+        sessionFile: '/tmp/session.json',
+        cwd: '/work',
+        researchRunId: 'run-1234',
+        toolName: 'research',
+      }));
+      expect(entry.message).toContain('context test');
+    });
+
+    it('should not mutate console methods when logging', () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      const originalConsole = {
+        log: console.log,
+        info: console.info,
+        error: console.error,
+        warn: console.warn,
+        debug: console.debug,
+      };
+
+      logger.log('test');
+      logger.info('info');
+      logger.warn('warn');
+      logger.error('error');
+      logger.debug('debug');
+
+      expect(console.log).toBe(originalConsole.log);
+      expect(console.info).toBe(originalConsole.info);
+      expect(console.error).toBe(originalConsole.error);
+      expect(console.warn).toBe(originalConsole.warn);
+      expect(console.debug).toBe(originalConsole.debug);
+    });
+
     it('should return log file path', () => {
       const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
       expect(logger.getLogFilePath()).toBe(TEST_LOG_PATH);
@@ -109,6 +169,11 @@ describe('logger', () => {
   describe('isVerboseFromEnv', () => {
     it('should detect --verbose in process.argv', () => {
       process.argv.push('--verbose');
+      expect(isVerboseFromEnv()).toBe(true);
+    });
+
+    it('should detect PI_RESEARCH_VERBOSE=1', () => {
+      process.env['PI_RESEARCH_VERBOSE'] = '1';
       expect(isVerboseFromEnv()).toBe(true);
     });
 
@@ -155,126 +220,6 @@ describe('logger', () => {
     it('should respect verbose option in factory', () => {
       const logger = createLogger({ verbose: true });
       expect(logger.isVerbose()).toBe(true);
-    });
-  });
-
-  describe('suppressConsole', () => {
-    it('should suppress console when not verbose', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: false, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalLog = console.log;
-      const restore = suppressConsole();
-
-      // After suppression, console.log should be a noop
-      expect(console.log).not.toBe(originalLog);
-
-      // Call console.log — should not throw
-      expect(() => {
-        console.log('test');
-      }).not.toThrow();
-
-      // Restore
-      restore();
-      expect(console.log).toBe(originalLog);
-    });
-
-    it('should patch console when verbose', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalLog = console.log;
-      const restore = suppressConsole();
-
-      // After suppression, console.log should be different
-      expect(console.log).not.toBe(originalLog);
-
-      // Call console.log — should not throw
-      expect(() => {
-        console.log('test message');
-      }).not.toThrow();
-
-      // Restore
-      restore();
-      expect(console.log).toBe(originalLog);
-    });
-
-    it('should handle console.error', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalError = console.error;
-      const restore = suppressConsole();
-
-      expect(console.error).not.toBe(originalError);
-
-      expect(() => {
-        console.error('error message');
-      }).not.toThrow();
-
-      restore();
-      expect(console.error).toBe(originalError);
-    });
-
-    it('should handle console.warn', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalWarn = console.warn;
-      const restore = suppressConsole();
-
-      expect(console.warn).not.toBe(originalWarn);
-
-      expect(() => {
-        console.warn('warn message');
-      }).not.toThrow();
-
-      restore();
-      expect(console.warn).toBe(originalWarn);
-    });
-
-    it('should handle console.debug', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalDebug = (console as any).debug;
-      const restore = suppressConsole();
-
-      expect((console as any).debug).not.toBe(originalDebug);
-
-      expect(() => {
-        (console as any).debug('debug message');
-      }).not.toThrow();
-
-      restore();
-      expect((console as any).debug).toBe(originalDebug);
-    });
-
-    it('should restore original console methods', () => {
-      resetLogger();
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      setLogger(logger);
-
-      const originalLog = console.log;
-      const originalError = console.error;
-
-      const restore = suppressConsole();
-
-      // Should be different
-      expect(console.log).not.toBe(originalLog);
-      expect(console.error).not.toBe(originalError);
-
-      // Restore
-      restore();
-
-      // Should be restored
-      expect(console.log).toBe(originalLog);
-      expect(console.error).toBe(originalError);
     });
   });
 

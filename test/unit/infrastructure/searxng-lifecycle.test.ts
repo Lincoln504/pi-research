@@ -14,6 +14,12 @@ import {
   setLifecycleManager,
   resetLifecycleManager,
   getStatus,
+  onStatusChange,
+  shutdownLifecycle,
+  isInitialized,
+  getManager,
+  rewriteLocalhostProxyForContainer,
+  createSearxngLifecycleManager,
 } from '../../../src/infrastructure/searxng-lifecycle';
 
 // Mock DockerSearxngManager
@@ -183,6 +189,85 @@ describe('SearxngLifecycleManager', () => {
       expect(mockManager.isAcquired('test-session')).toBe(false);
       expect(mockManager.isHeartbeatRunning()).toBe(false);
     });
+
+    it('should handle shutdown when not initialized', async () => {
+      const lifecycleManager = new SearxngLifecycleManager();
+
+      await expect(lifecycleManager.shutdown()).resolves.not.toThrow();
+      expect(lifecycleManager.isInitialized()).toBe(false);
+    });
+  });
+
+  describe('isInitialized', () => {
+    it('should return false initially', () => {
+      const lifecycleManager = new SearxngLifecycleManager();
+
+      expect(lifecycleManager.isInitialized()).toBe(false);
+    });
+
+    it('should return true after init', async () => {
+      const mockManager = new MockDockerSearxngManager();
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
+
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
+      await lifecycleManager.init(ctx);
+
+      expect(lifecycleManager.isInitialized()).toBe(true);
+    });
+
+    it('should return false after shutdown', async () => {
+      const mockManager = new MockDockerSearxngManager();
+      const lifecycleManager = new SearxngLifecycleManager({ manager: mockManager as unknown as DockerSearxngManager });
+
+      const ctx = { sessionId: 'test-session' } as unknown as ExtensionContext;
+      await lifecycleManager.init(ctx);
+      await lifecycleManager.shutdown();
+
+      expect(lifecycleManager.isInitialized()).toBe(false);
+    });
+  });
+});
+
+describe('rewriteLocalhostProxyForContainer', () => {
+  it('rewrites localhost proxy hosts to Docker host alias', () => {
+    expect(rewriteLocalhostProxyForContainer('socks5://localhost:9050'))
+      .toBe('socks5://host.docker.internal:9050');
+    expect(rewriteLocalhostProxyForContainer('socks5://127.0.0.1:9050'))
+      .toBe('socks5://host.docker.internal:9050');
+  });
+
+  it('preserves credentials and non-local proxy hosts', () => {
+    expect(rewriteLocalhostProxyForContainer('socks5://user:pass@127.0.0.1:9050'))
+      .toBe('socks5://user:pass@host.docker.internal:9050');
+    expect(rewriteLocalhostProxyForContainer('socks5://proxy.example.com:9050'))
+      .toBe('socks5://proxy.example.com:9050');
+  });
+});
+
+describe('createSearxngLifecycleManager', () => {
+  afterEach(() => {
+    resetLifecycleManager();
+  });
+
+  it('should create manager with default config', () => {
+    const manager = createSearxngLifecycleManager();
+
+    expect(manager).toBeDefined();
+    expect(manager.isInitialized()).toBe(false);
+  });
+
+  it('should create manager with custom config', () => {
+    const customLogger = { log: vi.fn(), info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const manager = createSearxngLifecycleManager({ logger: customLogger as any });
+
+    expect(manager).toBeDefined();
+  });
+
+  it('should create manager with injected manager', () => {
+    const injectedManager = new MockDockerSearxngManager();
+    const manager = createSearxngLifecycleManager({ manager: injectedManager as unknown as DockerSearxngManager });
+
+    expect(manager.getManager()).toBe(injectedManager as any);
   });
 });
 
@@ -227,7 +312,7 @@ describe('integration scenarios', () => {
     const mockManager = new MockDockerSearxngManager();
     const lifecycleManager = new SearxngLifecycleManager({
       manager: mockManager as unknown as DockerSearxngManager,
-      logger: mockLogger,
+      logger: mockLogger as any,
     });
 
     // Initial state
