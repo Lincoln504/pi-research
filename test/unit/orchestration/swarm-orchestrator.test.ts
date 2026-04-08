@@ -29,7 +29,7 @@ vi.mock('../../../src/orchestration/state-manager', () => ({
 
 vi.mock('../../../src/orchestration/researcher', () => ({
   createResearcherSession: vi.fn(async () => ({
-    subscribe: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
     prompt: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
     appendMessage: vi.fn(),
@@ -148,5 +148,61 @@ describe('SwarmOrchestrator', () => {
     expect(finalState.aspects['1.1'].status).toBe('completed');
     expect(finalState.status).toBe('completed');
     expect(finalState.finalSynthesis).toContain('final synthesis');
+  });
+
+  it('should fail the task if all siblings fail in the first round', async () => {
+    const options = createMockOptions();
+    const orchestrator = new SwarmOrchestrator(options);
+
+    // Setup orchestrator state with two siblings
+    (orchestrator as any).state.status = 'researching';
+    (orchestrator as any).state.aspects['1.1'] = { id: '1.1', query: 'q1', status: 'pending' };
+    (orchestrator as any).state.aspects['1.2'] = { id: '1.2', query: 'q2', status: 'pending' };
+
+    // Mock researcher to fail
+    const { createResearcherSession } = await import('../../../src/orchestration/researcher');
+    vi.mocked(createResearcherSession).mockImplementation(async () => {
+      throw new Error('Provider error');
+    });
+
+    // Run first sibling - it should fail but NOT trigger total failure yet
+    await (orchestrator as any).executeSibling((orchestrator as any).state.aspects['1.1']);
+    expect((orchestrator as any).state.aspects['1.1'].status).toBe('failed');
+    
+    // Total failure shouldn't have happened yet
+    let rejectedError: any;
+    (orchestrator as any).run().catch((e: any) => rejectedError = e);
+
+    // Run second sibling - it should fail and trigger total failure
+    await (orchestrator as any).executeSibling((orchestrator as any).state.aspects['1.2']);
+    
+    // Wait for the run promise to reject
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    expect(rejectedError).toBeDefined();
+    expect(rejectedError.message).toContain('Research failed');
+    expect(rejectedError.message).toContain('• Researcher 1: Error: Provider error');
+    expect(rejectedError.message).toContain('• Researcher 2: Error: Provider error');
+  });
+
+  it('should fail the task on resumption if all siblings in the current round have failed', async () => {
+    const options = createMockOptions();
+    const orchestrator = new SwarmOrchestrator(options);
+
+    // Setup state as if it just resumed with two failed siblings
+    (orchestrator as any).state.status = 'researching';
+    (orchestrator as any).state.currentRound = 1;
+    (orchestrator as any).state.aspects['1.1'] = { id: '1.1', query: 'q1', status: 'failed', error: 'Network error' };
+    (orchestrator as any).state.aspects['1.2'] = { id: '1.2', query: 'q2', status: 'failed', error: 'Timeout' };
+
+    let rejectedError: any;
+    (orchestrator as any).rejectCompletion = vi.fn((e) => rejectedError = e);
+
+    await (orchestrator as any).startRound();
+
+    expect(rejectedError).toBeDefined();
+    expect(rejectedError.message).toContain('Research failed on resumption');
+    expect(rejectedError.message).toContain('Researcher 1: Network error');
+    expect(rejectedError.message).toContain('Researcher 2: Timeout');
   });
 });

@@ -38,12 +38,19 @@ vi.mock('../../src/orchestration/researcher.ts', () => ({
 vi.mock('../../src/infrastructure/searxng-lifecycle.ts', () => ({
   initLifecycle: vi.fn(async () => undefined),
   ensureRunning: vi.fn(async () => 'http://localhost:8888'),
-  getStatus: vi.fn(() => 'active'),
+  getStatus: vi.fn(() => ({ state: 'active', connectionCount: 0, url: '', isFunctional: true })),
   onStatusChange: vi.fn(() => vi.fn()),
   getConnectionCount: vi.fn(() => 0),
   getManager: vi.fn(() => ({})),
+  isFunctional: vi.fn().mockReturnValue(true), // Skip health check by default
+  setFunctional: vi.fn(),
 }));
 
+vi.mock('../../src/healthcheck/index.ts', () => ({
+  runHealthCheck: vi.fn(async () => ({ success: true, details: {} })),
+}));
+
+// Mock the panel module
 vi.mock('../../src/tui/research-panel.ts', () => ({
   createResearchPanel: vi.fn(() => ({})),
   clearAllFlashTimeouts: vi.fn(),
@@ -52,8 +59,9 @@ vi.mock('../../src/tui/research-panel.ts', () => ({
   completeSlice: vi.fn(),
   removeSlice: vi.fn(),
   flashSlice: vi.fn(),
+  updateSliceTokens: vi.fn(),
   createInitialPanelState: vi.fn(() => ({
-    searxngStatus: { state: 'active', connectionCount: 0, url: '' },
+    searxngStatus: { state: 'active', connectionCount: 0, url: '', isFunctional: true },
     totalTokens: 0,
     activeConnections: 0,
     slices: new Map(),
@@ -101,9 +109,9 @@ vi.mock('@mariozechner/pi-ai', () => ({
   })),
 }));
 
-// Import mocks
+// Import mocked modules
+import * as panel from '../../src/tui/research-panel.ts';
 import { createResearcherSession } from '../../src/orchestration/researcher.ts';
-import { addSlice, activateSlice, completeSlice } from '../../src/tui/research-panel.ts';
 
 // ============================================================================
 // HELPERS
@@ -175,9 +183,9 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
 
-      expect(vi.mocked(addSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...', 'researching ...', false);
-      expect(vi.mocked(activateSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
-      expect(vi.mocked(completeSlice)).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
+      expect(panel.addSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...', 'researching ...', false);
+      expect(panel.activateSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
+      expect(panel.completeSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
     });
   });
 

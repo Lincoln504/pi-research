@@ -9,13 +9,19 @@ import {
   activateSlice,
   completeSlice,
   flashSlice,
+  updateSliceTokens,
+  createResearchPanel,
 } from '../../../src/tui/research-panel.ts';
+
+const mockTheme = {
+  fg: (_color: string, text: string) => `\u001b[31m${text}\u001b[0m`,
+};
 
 describe('TUI Research Panel', () => {
   const searxngStatus = {
     state: 'active' as const,
-    connectionCount: 0,
     url: 'http://localhost:8080',
+    isFunctional: false,
   };
 
   describe('createInitialPanelState', () => {
@@ -73,6 +79,46 @@ describe('TUI Research Panel', () => {
       vi.advanceTimersByTime(1000);
       expect(state.slices.get('slice1')?.flash).toBe(null);
       vi.useRealTimers();
+    });
+  });
+
+  describe('render', () => {
+    it('should output exactly 4 lines when empty', () => {
+      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      const componentCreator = createResearchPanel(state);
+      const component = componentCreator({}, mockTheme as any);
+      
+      const lines = component.render(80);
+      expect(lines.length).toBe(4);
+    });
+
+    it('should output exactly 4 lines with a researcher slice', () => {
+      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      addSlice(state, 'slice1', '1');
+      updateSliceTokens(state, 'slice1', 12000, 0.05);
+      
+      const componentCreator = createResearchPanel(state);
+      const component = componentCreator({}, mockTheme as any);
+      
+      const lines = component.render(80);
+      expect(lines.length).toBe(4);
+      
+      // Check if tokens and cost are present in the output
+      const output = lines.join('\n');
+      expect(output).toContain('12k');
+      expect(output).toContain('$0.0500');
+    });
+
+    it('should output exactly 4 lines when SearXNG is hidden', () => {
+      const state = createInitialPanelState('test-session-id', searxngStatus, 'test-model');
+      state.hideSearxng = true;
+      addSlice(state, 'slice1', '1');
+      
+      const componentCreator = createResearchPanel(state);
+      const component = componentCreator({}, mockTheme as any);
+      
+      const lines = component.render(80);
+      expect(lines.length).toBe(4);
     });
   });
 });

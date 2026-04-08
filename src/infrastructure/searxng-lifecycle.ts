@@ -20,7 +20,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { PROXY_URL } from '../config.ts';
-import { getActiveConnectionCount } from '../web-research/utils.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
 
 /**
@@ -68,8 +67,8 @@ const EXTENSION_DIR = resolveExtensionDir();
  */
 export type SearxngLifecycleStatus = {
   state: 'starting_up' | 'active' | 'inactive' | 'error';
-  connectionCount: number;
   url: string;
+  isFunctional: boolean;
 };
 
 /**
@@ -85,7 +84,6 @@ export interface SearxngLifecycleConfig {
   logger?: ILogger;
   manager?: DockerSearxngManager | null;
   proxyUrl?: string;
-  getActiveConnectionCount?: () => number;
 }
 
 type ResolvedConfig = {
@@ -93,7 +91,6 @@ type ResolvedConfig = {
   logger: ILogger;
   manager: DockerSearxngManager | null;
   proxyUrl: string | undefined;
-  getActiveConnectionCount: (() => number) | undefined;
 };
 
 /**
@@ -103,8 +100,9 @@ export interface ISearxngLifecycleManager {
   init(ctx: ExtensionContext): Promise<void>;
   ensureRunning(): Promise<string>;
   getManager(): DockerSearxngManager | null;
-  getConnectionCount(): number;
   getStatus(): SearxngLifecycleStatus;
+  setFunctional(ok: boolean): void;
+  isFunctional(): boolean;
   onStatusChange(callback: StatusCallback): () => void;
   shutdown(): Promise<void>;
   isInitialized(): boolean;
@@ -118,7 +116,6 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   logger,
   manager: null,
   proxyUrl: PROXY_URL,
-  getActiveConnectionCount: undefined,
 };
 
 /**
@@ -133,8 +130,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   private initialized = false;
   private currentStatus: SearxngLifecycleStatus = {
     state: 'inactive',
-    connectionCount: 0,
     url: '',
+    isFunctional: false,
   };
   private statusCallbacks: StatusCallback[] = [];
   private readonly config: ResolvedConfig;
@@ -152,6 +149,15 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
    */
   getManager(): DockerSearxngManager | null {
     return this.manager;
+  }
+
+  setFunctional(ok: boolean): void {
+    this.currentStatus.isFunctional = ok;
+    this.notifyStatusChange();
+  }
+
+  isFunctional(): boolean {
+    return this.currentStatus.isFunctional;
   }
 
   /**
@@ -207,10 +213,12 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       'config',
       'default-settings.yml'
     );
+    // Use unique filename to avoid race conditions between parallel sessions
+    const uniqueId = this.sessionId?.substring(0, 8) || Math.random().toString(36).substring(2, 8);
     const proxySettingsPath = path.join(
       this.config.extensionDir,
       'config',
-      'proxy-settings-generated.yml'
+      `proxy-settings-${uniqueId}.yml`
     );
 
     try {
@@ -261,8 +269,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       if (!dockerCheck.running) {
         this.currentStatus = {
           state: 'error',
-          connectionCount: 0,
           url: '',
+          isFunctional: false,
         };
         this.notifyStatusChange();
         const errorMsg = `Docker health check failed: ${dockerCheck.error}`;
@@ -274,8 +282,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
     // Set state to starting_up
     this.currentStatus = {
       state: 'starting_up',
-      connectionCount: 0,
       url: '',
+      isFunctional: false,
     };
     this.notifyStatusChange();
 
@@ -344,8 +352,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       // Update internal status
       this.currentStatus = {
         state: 'active',
-        connectionCount: 1, // Singleton always has 1 connection
         url: searxngStatus.url || '',
+        isFunctional: false, // Reset on every re-init, must re-verify
       };
 
       this.initialized = true;
@@ -360,8 +368,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
       this.currentStatus = {
         state: 'error',
-        connectionCount: 0,
         url: '',
+        isFunctional: false,
       };
 
       this.initialized = true;
@@ -380,23 +388,6 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
     await this.manager.ensureReady();
 
     return this.manager.getSearxngUrl();
-  }
-
-  getConnectionCount(): number {
-    // Use injected callback or fallback to web-research module
-    if (this.config.getActiveConnectionCount) {
-      return this.config.getActiveConnectionCount();
-    }
-
-    // Get actual active connection count from web-research module
-    try {
-      const count = getActiveConnectionCount();
-      // Maintain baseline of 1 if active, 0 if not
-      return Math.max(this.currentStatus.state === 'active' ? 1 : 0, count);
-    } catch {
-      // Fallback: return 1 if active, 0 if not (singleton pattern)
-      return this.currentStatus.state === 'active' ? 1 : 0;
-    }
   }
 
   getStatus(): SearxngLifecycleStatus {
@@ -418,8 +409,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
       this.currentStatus = {
         state: 'inactive',
-        connectionCount: 0,
         url: '',
+        isFunctional: false,
       };
 
       this.initialized = false;
@@ -507,17 +498,24 @@ export async function ensureRunning(): Promise<string> {
 }
 
 /**
- * Backward compatible: Get connection count
- */
-export function getConnectionCount(): number {
-  return getLifecycleManager().getConnectionCount();
-}
-
-/**
  * Backward compatible: Get status (renamed type to avoid conflict)
  */
 export function getStatus(): SearxngLifecycleStatus {
   return getLifecycleManager().getStatus();
+}
+
+/**
+ * Backward compatible: Set functional state
+ */
+export function setFunctional(ok: boolean): void {
+  getLifecycleManager().setFunctional(ok);
+}
+
+/**
+ * Backward compatible: Get functional state
+ */
+export function isFunctional(): boolean {
+  return getLifecycleManager().isFunctional();
 }
 
 /**

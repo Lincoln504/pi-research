@@ -17,9 +17,11 @@ import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 describe('Multi-Session TUI Coordination', () => {
   const searxngStatus = {
     state: 'active' as const,
-    connectionCount: 0,
+    connectionCount: 1,
     url: 'http://localhost:8080',
+    isFunctional: false,
   };
+
 
   beforeEach(() => {
     // Clear global state if possible (session-state.ts uses globals)

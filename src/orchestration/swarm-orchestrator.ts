@@ -24,7 +24,7 @@ import { formatParentContext } from './session-context.ts';
 import { formatSharedLinksFromState } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
-import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice } from '../tui/research-panel.ts';
+import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice, updateSliceTokens } from '../tui/research-panel.ts';
 import { getDisplayNumber, getResearcherRoleContext } from './id-utils.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -158,13 +158,30 @@ export class SwarmOrchestrator {
 
     if (pendingAspects.length > 0) {
       logger.log(`[swarm] Round ${currentRound}: Launching ${pendingAspects.length} siblings.`);
-      pendingAspects.forEach(aspect => this.executeSibling(aspect, signal));
+      
+      // Stagger launches to avoid simultaneous provider rate limits and tool resource contention
+      for (let i = 0; i < pendingAspects.length; i++) {
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+        if (signal?.aborted) break;
+        this.executeSibling(pendingAspects[i]!, signal);
+      }
       return;
     }
 
     // Perfection/Resumption: If no pending aspects but round isn't empty, check if it's complete
     if (roundAspects.length > 0 && isRoundComplete(this.state, currentRound)) {
        if (!this.state.promotedId && !this.state.finalSynthesis) {
+          // ROBUSTNESS: Check if we have ANY findings at all before promoting
+          const allCompletedWithReports = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
+          if (allCompletedWithReports.length === 0) {
+            const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
+            const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
+            const error = new Error(`Research failed on resumption. All researchers in round ${currentRound} encountered errors and no usable information was found:\n\n${errors}`);
+            logger.error(`[swarm] Total failure on resumption - no researchers succeeded in round ${currentRound}`);
+            this.rejectCompletion(error);
+            return;
+          }
+
           logger.log(`[swarm] Round ${currentRound} complete on kickoff, but no promotion found. Promoting first available sibling.`);
           const firstSibling = roundAspects.find(a => a.status === 'completed' || a.status === 'failed');
           if (firstSibling) {
@@ -202,54 +219,98 @@ export class SwarmOrchestrator {
       + '\n\n' + allFindingsMarkdown
       + '\n\n' + sharedLinksMarkdown;
 
-    const session = await createResearcherSession({
-      cwd: this.options.ctx.cwd,
-      ctxModel: this.options.model,
-      modelRegistry: this.options.ctx.modelRegistry,
-      settingsManager: (this.options.ctx as any).settingsManager,
-      systemPrompt: researcherPrompt,
-      searxngUrl: this.options.searxngUrl,
-      extensionCtx: this.options.ctx,
-      // Pass real closures for global state management
-      // Tools now created with proper access to orchestrator state
-      getGlobalState: () => this.state,
-      updateGlobalLinks: (links: string[]) => {
-        logger.log(`[swarm] Adding ${links.length} links to global pool (total: ${this.state.allScrapedLinks.length})`);
-        this.updateState({ type: 'LINKS_SCRAPED', links });
-        logger.log(`[swarm] Global link pool now: ${this.state.allScrapedLinks.length}`);
-      }
-    });
-
-    this.activeSessions.set(aspect.id, session);
-
-    session.subscribe((event: AgentSessionEvent) => {
-      if (event.type === 'message_end' && event.message.role === 'assistant') {
-        const tokens = (event.message as any).usage?.totalTokens;
-        if (tokens) this.options.onTokens(tokens);
-      } else if (event.type === 'tool_execution_end') {
-        const color = (event as any).isError ? 'red' : 'green';
-        flashSlice(this.options.panelState, aspect.id, color, 1000, this.options.onUpdate);
-      }
-    });
-
+    let session: AgentSession | undefined;
     try {
+      session = await createResearcherSession({
+        cwd: this.options.ctx.cwd,
+        ctxModel: this.options.model,
+        modelRegistry: this.options.ctx.modelRegistry,
+        settingsManager: (this.options.ctx as any).settingsManager,
+        systemPrompt: researcherPrompt,
+        searxngUrl: this.options.searxngUrl,
+        extensionCtx: this.options.ctx,
+        // Pass real closures for global state management
+        // Tools now created with proper access to orchestrator state
+        getGlobalState: () => this.state,
+        updateGlobalLinks: (links: string[]) => {
+          logger.log(`[swarm] Adding ${links.length} links to global pool (total: ${this.state.allScrapedLinks.length})`);
+          this.updateState({ type: 'LINKS_SCRAPED', links });
+          logger.log(`[swarm] Global link pool now: ${this.state.allScrapedLinks.length}`);
+        }
+      });
+
+      this.activeSessions.set(aspect.id, session);
+
+      // Helper to calculate cost from usage
+      const calculateUsageCost = (usage: any): number => {
+        if (!usage || !this.options.model?.cost) return 0;
+        const modelCost = this.options.model.cost;
+        const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
+        const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
+        const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
+        const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+        return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+      };
+
+      const subscription = session.subscribe((event: AgentSessionEvent) => {
+        if (event.type === 'message_end' && event.message.role === 'assistant') {
+          const usage = (event.message as any).usage;
+          if (usage) {
+            // Calculate and update per-agent cost
+            const cost = calculateUsageCost(usage);
+            
+            // Use totalTokens from usage if available, else sum components
+            const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+            
+            if (tokens > 0) {
+              // Update global total
+              this.options.onTokens(tokens);
+              
+              // Update panel state for UI
+              updateSliceTokens(this.options.panelState, aspect.id, tokens, cost);
+              
+              // Update system state for persistence
+              this.updateState({ type: 'SIBLING_TOKENS', id: aspect.id, tokens, cost });
+
+              // Trigger UI update
+              this.options.onUpdate();
+            }
+          }
+        } else if (event.type === 'tool_execution_end') {
+          const color = (event as any).isError ? 'red' : 'green';
+          const duration = (event as any).isError ? 400 : 60; // Very fast flashes
+          flashSlice(this.options.panelState, aspect.id, color, duration, this.options.onUpdate);
+        }
+      });
+
       await session.prompt(aspect.query);
       const report = ensureAssistantResponse(session, aspect.id);
+      
+      // Cleanup subscription before continuing to promotion
+      subscription();
+
       this.updateState({ type: 'SIBLING_COMPLETED', id: aspect.id, report });
       completeSlice(this.options.panelState, aspect.id);
       this.options.onUpdate();
 
       await this.handleSiblingCompletion(aspect, session, signal);
     } catch (err) {
+      const errorMsg = String(err);
       logger.error(`[swarm] Sibling ${aspect.id} failed:`, err);
-      this.updateState({ type: 'SIBLING_FAILED', id: aspect.id, error: String(err) });
+      this.updateState({ type: 'SIBLING_FAILED', id: aspect.id, error: errorMsg });
+      flashSlice(this.options.panelState, aspect.id, 'red', 400, this.options.onUpdate);
       completeSlice(this.options.panelState, aspect.id);
       this.options.onUpdate();
+      
+      // If we have a session, we can still call handleSiblingCompletion (it won't have a report)
+      // If session failed to create, we still need to call it to trigger last-man-standing logic
       await this.handleSiblingCompletion(aspect, session, signal);
+    } finally {
+      this.activeSessions.delete(aspect.id);
     }
   }
 
-  private async handleSiblingCompletion(finished: ResearchSibling, _session: AgentSession, signal?: AbortSignal) {
+  private async handleSiblingCompletion(finished: ResearchSibling, _session?: AgentSession, signal?: AbortSignal) {
     const currentRound = this.state.currentRound;
     const allInRound = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
     const runningSiblings = allInRound.filter(s => s.status === 'running' && s.id !== finished.id);
@@ -285,6 +346,22 @@ export class SwarmOrchestrator {
       }
 
       if (this.isLastAliveResearcher(finished)) {
+        // ROBUSTNESS: Check if we have ANY findings at all before promoting to Lead Evaluator
+        // If everyone in Round 1 failed and we have no findings, fail the task
+        const allCompleted = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
+        if (allCompleted.length === 0) {
+          const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
+          const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
+          const error = new Error(`Research failed. All researchers encountered errors and no usable information was found:\n\n${errors}`);
+          logger.error('[swarm] Total failure - no researchers succeeded across all rounds');
+          this.rejectCompletion(error);
+          return;
+        }
+
+        // Delay promotion slightly to ensure UI settles and researcher 'breathes' between tasks
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (signal?.aborted) return;
+
         logger.log(`[swarm] ${finished.id} is last alive. Promoting to Lead Evaluator.`);
         this.updateState({ type: 'PROMOTION_STARTED', id: finished.id });
         await this.promoteToLead(finished, signal);

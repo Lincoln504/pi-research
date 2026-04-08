@@ -13,6 +13,7 @@ import { search } from '../web-research/search.ts';
 import { scrapeSingle } from '../web-research/scrapers.ts';
 import { setSearxngManager } from '../web-research/utils.ts';
 import { getActiveSearxngEngines } from '../utils/searxng-config.ts';
+import { withTimeout } from '../web-research/retry-utils.ts';
 import type { SearXNGResult } from '../web-research/types.ts';
 
 // Get timeout from config or use defaults
@@ -34,19 +35,6 @@ export interface HealthCheckResult {
     scrapedDurationMs?: number;
   };
 }
-
-/**
- * Wrap operation with timeout enforcement
- */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs)
-    ),
-  ]);
-}
-
 
 /**
  * QUICK scrape validation: just check content exists and is readable

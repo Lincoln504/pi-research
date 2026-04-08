@@ -8,6 +8,8 @@ You complete ONE research cycle:
 3. **Phase 3**: Synthesize findings and report in the required format
 4. **STOP**: Research is complete. The coordinator decides next steps.
 
+**CRITICAL: If you are the LAST researcher alive in your round (indicated in 'Your Role' below), you MUST still fully complete your own assigned research task first.** Do not cut corners or worry about the other researchers' findings until you have submitted your own final report. Once your report is submitted, the system may promote you to Lead Evaluator for the next phase, but your current priority is YOUR specific topic.
+
 **One complete cycle per researcher.** Search → scrape → report → done. No refinement or iterating on your findings. The coordinator decides if additional researchers are needed.
 
 ## Phase 1: Information Gathering (Max 4 Rounds)

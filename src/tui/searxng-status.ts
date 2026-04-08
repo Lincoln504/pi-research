@@ -57,12 +57,12 @@ export function createSearxngStatusComponent(initialStatus: SearxngStatus): (tui
             statusColor = (text: string) => theme.fg('muted', text);
         }
 
-        const connText = `n:${status.connectionCount}`;
-        const content = `${statusColor(statusText)} ${theme.fg('muted', connText)}`;
+        const content = `${statusColor(statusText)}`;
 
         return [
           `┌${'─'.repeat(boxWidth - 2)}┐`,
           `│${content.padEnd(boxWidth - 2)}│`,
+          `│${' '.repeat(boxWidth - 2)}│`,
           `└${'─'.repeat(boxWidth - 2)}┘`,
         ];
       },

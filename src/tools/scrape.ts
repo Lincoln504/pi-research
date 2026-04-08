@@ -112,12 +112,12 @@ export function createScrapeTool(options: {
         const excludeLinks = (paramsRecord['excludeLinks'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
-        if (urls.length > MAX_BATCH_SIZE) {
-          return { content: [{ type: 'text', text: `Error: Batch size limit exceeded. You can scrape at most ${MAX_BATCH_SIZE} URLs per batch, but provided ${urls.length}. Please prioritize the most important URLs.` }], details: { blocked: true } };
+        if (!Array.isArray(urls) || urls.length === 0 || !urls.every(u => typeof u === 'string')) {
+          throw new Error('At least one valid URL string is required for scraping.');
         }
 
-        if (urls.length === 0 || !urls.every(u => typeof u === 'string')) {
-          throw new Error('At least one valid URL string is required for scraping.');
+        if (urls.length > MAX_BATCH_SIZE) {
+          return { content: [{ type: 'text', text: `Error: Batch size limit exceeded. You can scrape at most ${MAX_BATCH_SIZE} URLs per batch, but provided ${urls.length}. Please prioritize the most important URLs.` }], details: { blocked: true } };
         }
 
         // Validate excludeLinks
@@ -182,12 +182,12 @@ export function createScrapeTool(options: {
         const urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
-        if (urls.length > MAX_BATCH_SIZE) {
-          return { content: [{ type: 'text', text: `Error: Batch size limit exceeded. You can scrape at most ${MAX_BATCH_SIZE} URLs per batch, but provided ${urls.length}. Please prioritize the most important URLs.` }], details: { blocked: true } };
+        if (!Array.isArray(urls) || urls.length === 0 || !urls.every(u => typeof u === 'string')) {
+          throw new Error('At least one valid URL string is required for scraping.');
         }
 
-        if (urls.length === 0 || !urls.every(u => typeof u === 'string')) {
-          throw new Error('At least one valid URL string is required for scraping.');
+        if (urls.length > MAX_BATCH_SIZE) {
+          return { content: [{ type: 'text', text: `Error: Batch size limit exceeded. You can scrape at most ${MAX_BATCH_SIZE} URLs per batch, but provided ${urls.length}. Please prioritize the most important URLs.` }], details: { blocked: true } };
         }
 
         // Update global link pool with new scraped URLs

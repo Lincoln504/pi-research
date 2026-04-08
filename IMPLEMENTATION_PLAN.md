@@ -1,91 +1,43 @@
-# Implementation Plan: Per-Agent Token Count and Cost Display
+# Implementation Complete: Per-Agent Token Count and Cost Display
 
-## Current State
+## Status: ✅ COMPLETE
 
-The TUI currently shows:
-1. A big title bar across the top of the right box with: `Research | {model} {totalTokens}`
-2. Individual slice boxes below showing just the label (e.g., "1", "2", "3")
+All changes have been implemented and tested.
 
-## Desired State
-
-Each slice box should have its own header showing:
-1. Token count for **that specific** research agent
-2. Cost for **that specific** research agent
-
-## Architecture Analysis
-
-### Data Flow
-1. **SwarmOrchestrator** creates researcher sessions
-2. Each session emits `message_end` events with token usage
-3. `onTokens(n)` callback accumulates tokens globally
-4. `SliceState` tracks individual agent state (id, label, completed, queued, flash)
-
-### Key Data Types
-- `Model.cost`: `{ input, output, cacheRead, cacheWrite }` - per-million rates
-- `Usage`: `{ input, output, cacheRead, cacheWrite, totalTokens, cost }`
-- `calculateCost(model, usage)`: Calculates actual cost from tokens
-
-## Changes Required
+## Summary of Changes
 
 ### 1. `src/orchestration/swarm-types.ts`
-- Expand `ResearchSibling` to include `tokens?: number` and `cost?: number`
-- Add new event types for per-agent token updates if needed
+- Added `cost?: number` to `ResearchSibling` interface
+- Added `SIBLING_TOKENS` event type to `SwarmEvent` for tracking per-agent usage
 
 ### 2. `src/tui/research-panel.ts`
-- Expand `SliceState` interface to include:
-  - `tokens?: number` - tokens for this specific agent
-  - `cost?: number` - calculated cost for this agent
-- Add helper functions:
-  - `updateSliceTokens(state, id, tokens, cost)` - update per-agent stats
-- Modify `createResearchPanel` render logic:
-  - Remove big title across top
-  - Add per-box headers with token count and cost
+- Expanded `SliceState` interface with `tokens?: number` and `cost?: number`
+- Added `updateSliceTokens()` helper function
+- Added `formatCost()` function for currency formatting
+- Added `truncateMiddle()` helper for fitting long text in boxes
+- Complete rewrite of `createResearchPanel` render function:
+  - Removed big title bar across top
+  - Each agent box now shows its own header with:
+    - Token count (formatted: 1000 → "1k", 15000 → "15k")
+    - Cost (formatted: "$0.0012" to "$12.00")
+    - Agent label (bottom, e.g., "1", "2", "✓3")
+  - Fallback to compact mode (just labels) when boxes are too narrow
 
 ### 3. `src/orchestration/swarm-orchestrator.ts`
-- Pass model to orchestrator so costs can be calculated
-- Track per-agent tokens (need to sum from message_end events)
-- Calculate cost using `calculateCost()` from pi-ai
-- Update both:
-  - `panelState.totalTokens` (aggregate)
-  - `sliceState.tokens` and `sliceState.cost` (per-agent)
+- Added import for `updateSliceTokens`
+- Added `calculateUsageCost()` helper function using model.cost rates
+- Modified session subscription to:
+  - Extract usage data from message_end events
+  - Calculate cost from input/output/cache tokens
+  - Update panel state per-agent via `updateSliceTokens()`
+  - Update system state via `SIBLING_TOKENS` event
 
 ### 4. `src/orchestration/swarm-reducer.ts`
-- Add event types for token/cost updates per sibling
+- Added handler for `SIBLING_TOKENS` event that accumulates tokens/cost per sibling
 
-### 5. `src/tool.ts`
-- Pass model reference to orchestrator
-- Ensure onTokens callback signature supports per-agent tracking
+## TUI Output
 
-## Technical Approach
-
-### Per-Agent Token Tracking
-Each researcher session already subscribes to `message_end` events:
-```typescript
-session.subscribe((event: AgentSessionEvent) => {
-  if (event.type === 'message_end' && event.message.role === 'assistant') {
-    const tokens = (event.message as any).usage?.totalTokens;
-    if (tokens) this.options.onTokens(tokens);
-  }
-});
-```
-
-We need to:
-1. Capture the `aspect.id` in the closure
-2. Call a per-agent callback instead of just the global one
-3. Calculate cost from the usage breakdown
-
-### Cost Calculation
-```typescript
-import { calculateCost } from '@mariozechner/pi-ai';
-
-function calculateAgentCost(model: Model, usage: Usage): number {
-  const cost = calculateCost(model, usage);
-  return cost.total;
-}
-```
-
-### TUI Render Changes
-Instead of:
+**Before:**
 ```
 ┌─ Research | gpt-4o  125k ─────────────────────────────────┐
 │  ┌───┐  ┌───┐  ┌───┐                                    │
@@ -94,26 +46,33 @@ Instead of:
 └──────────────────────────────────────────────────────────┘
 ```
 
-Show:
+**After:**
 ```
-┌──────────────────────────────────────────────────────────┐
-│ ┌──────┐  ┌──────┐  ┌──────┐                           │
-│ │ 12k  │  │ 15k  │  │ 18k  │                           │
-│ │ $0.12│  │ $0.15│  │ $0.18│                           │
-│ │  1   │  │  2   │  │  3   │                           │
-│ └──────┘  └──────┘  └──────┘                           │
+│ ┌──────┐  ┌──────┐  ┌──────┐                            │
+│ │ 12k  │  │ 15k  │  │ 18k  │                            │
+│ │$0.12 │  │$0.15 │  │$0.18 │                            │
+│ │  1   │  │  2   │  │  ✓3  │                            │
+│ └──────┘  └──────┘  └──────┘                            │
 └──────────────────────────────────────────────────────────┘
 ```
 
-Each box shows:
-- Token count (top)
-- Cost (below tokens)
-- Agent label (bottom)
+## Technical Details
 
-## Implementation Notes
+### Cost Calculation
+```typescript
+const cost = (modelCost.input / 1_000_000) * usage.input +
+             (modelCost.output / 1_000_000) * usage.output +
+             (modelCost.cacheRead / 1_000_000) * usage.cacheRead +
+             (modelCost.cacheWrite / 1_000_000) * usage.cacheWrite;
+```
 
-1. **Backward Compatibility**: Keep totalTokens for aggregate stats
-2. **Zero State**: Handle boxes with 0 tokens/cost gracefully
-3. **Currency Formatting**: Format costs to 4 decimal places
-4. **Token Formatting**: Use same formatTokens() helper
-5. **Tight Spaces**: The right box may have limited width; need to fit token+cost+label in each column
+### Token Accumulation
+- Each `message_end` event accumulates to the agent's running total
+- Both panel state (for UI) and system state (for persistence) are updated
+- Completed agents show muted colors; active agents show normal text
+
+## Verification
+
+- ✅ TypeScript type-check passes
+- ✅ All 597 unit tests pass
+- ✅ No breaking changes to existing functionality

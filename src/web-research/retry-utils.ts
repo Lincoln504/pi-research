@@ -37,33 +37,15 @@ export interface RetryOptions {
 // ============================================================================
 
 /**
- * Helper function to create timeout signal with Node.js compatibility
- * AbortSignal.timeout() requires Node.js 14.17+, use fallback for older versions
+ * Helper function to create timeout signal.
+ * Requires Node.js 20+ for AbortSignal.any()
  */
 export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-  if ('timeout' in AbortSignal) {
-    // Node.js 14.17+
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    if (signal) {
-      return AbortSignal.any([signal, timeoutSignal]);
-    }
-    return timeoutSignal;
-  } else {
-    // Fallback for older Node.js versions
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
-    // Ensure timeout is cleared if signal is aborted externally
-    if (signal) {
-      signal.addEventListener('abort', () => {
-        clearTimeout(timeoutId);
-      }, { once: true });
-    }
-    // Unref so it doesn't keep the process alive
-    (timeoutId as TimeoutHandle).unref?.();
-    return controller.signal;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (signal) {
+    return AbortSignal.any([signal, timeoutSignal]);
   }
+  return timeoutSignal;
 }
 
 /**

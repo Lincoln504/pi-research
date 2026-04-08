@@ -22,7 +22,6 @@ export interface ResearchPanelState {
   sessionId: string;
   searxngStatus: SearxngStatus;
   totalTokens: number;
-  activeConnections: number;
   slices: Map<string, SliceState>;
   modelName: string;
   hideSearxng?: boolean;
@@ -30,11 +29,13 @@ export interface ResearchPanelState {
 
 // Store timeouts per session ID to prevent cross-session conflicts
 const sessionTimeouts = new Map<string, Set<NodeJS.Timeout>>();
+// Store active flash timeouts per researcher ID within each session
+const sessionResearcherTimeouts = new Map<string, Map<string, NodeJS.Timeout>>();
 
 /**
  * Default duration for researcher cell flash indicators
  */
-export const DEFAULT_FLASH_DURATION_MS = 1000;
+export const DEFAULT_FLASH_DURATION_MS = 80;
 
 /**
  * Clear all active flash timeouts for a specific session
@@ -48,8 +49,11 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
         clearTimeout(timeout);
       }
       timeouts.clear();
-      sessionTimeouts.delete(sessionId);
     }
+    sessionTimeouts.delete(sessionId);
+    
+    // Clear researcher mapping for this session
+    sessionResearcherTimeouts.delete(sessionId);
   } else {
     // Clear all timeouts across all sessions
     for (const timeouts of sessionTimeouts.values()) {
@@ -59,6 +63,7 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
       timeouts.clear();
     }
     sessionTimeouts.clear();
+    sessionResearcherTimeouts.clear();
   }
 }
 
@@ -103,6 +108,23 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
   if (slice) {
     slice.completed = true;
     slice.queued = false;
+    
+    // Explicitly clear any active flash when completing
+    const researcherTimeouts = sessionResearcherTimeouts.get(state.sessionId);
+    if (researcherTimeouts) {
+      const timeout = researcherTimeouts.get(id);
+      if (timeout) {
+        clearTimeout(timeout);
+        researcherTimeouts.delete(id);
+        
+        // Also remove from session set
+        const timeouts = sessionTimeouts.get(state.sessionId);
+        if (timeouts) {
+          timeouts.delete(timeout);
+        }
+      }
+    }
+    slice.flash = null;
   }
 }
 
@@ -119,20 +141,42 @@ export function flashSlice(
   const slice = state.slices.get(researcherId);
   if (!slice || slice.completed || slice.queued) return;
   
+  // Ensure session map exists
+  if (!sessionResearcherTimeouts.has(state.sessionId)) {
+    sessionResearcherTimeouts.set(state.sessionId, new Map());
+  }
+  const researcherTimeouts = sessionResearcherTimeouts.get(state.sessionId)!;
+
+  // Clear any existing timeout for THIS researcher in THIS session to prevent overlapping resets
+  const existingTimeout = researcherTimeouts.get(researcherId);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+    researcherTimeouts.delete(researcherId);
+    
+    // Also remove from session set
+    const timeouts = sessionTimeouts.get(state.sessionId);
+    if (timeouts) {
+      timeouts.delete(existingTimeout);
+    }
+  }
+
   slice.flash = color;
   onUpdate?.();
 
   const timeout = setTimeout(() => {
     slice.flash = null;
     onUpdate?.();
-    // Remove timeout from session-specific set
+    
+    // Cleanup
+    researcherTimeouts.delete(researcherId);
     const timeouts = sessionTimeouts.get(state.sessionId);
     if (timeouts) {
       timeouts.delete(timeout);
     }
   }, durationMs);
 
-  // Add timeout to session-specific set
+  // Track the new timeout
+  researcherTimeouts.set(researcherId, timeout);
   if (!sessionTimeouts.has(state.sessionId)) {
     sessionTimeouts.set(state.sessionId, new Set());
   }
@@ -147,7 +191,6 @@ export function createInitialPanelState(sessionId: string, searxngStatus: Searxn
     sessionId,
     searxngStatus,
     totalTokens: 0,
-    activeConnections: 0,
     slices: new Map(),
     modelName,
   };
@@ -168,13 +211,6 @@ function formatCost(cost: number): string {
   if (cost < 1) return `$${cost.toFixed(4)}`;
   if (cost < 100) return `$${cost.toFixed(2)}`;
   return `$${cost.toFixed(0)}`;
-}
-
-function truncateMiddle(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  if (maxLen <= 3) return str.slice(0, maxLen);
-  const keep = maxLen - 1;
-  return str.slice(0, Math.floor(keep / 2)) + '…' + str.slice(-Math.ceil(keep / 2));
 }
 
 function getStatusText(state: string): string {
@@ -204,7 +240,7 @@ export function createResearchPanel(
     // Store tui reference locally for this component instance only
     const localTui = tui as { requestRender?(): void };
 
-    const component: Component = {
+    const component: any = {
       render(width: number): string[] {
         const LEFT_INNER = 7;
         const LEFT_BOX_W = LEFT_INNER + 2;
@@ -215,32 +251,36 @@ export function createResearchPanel(
         const totalLeftOffset = LEFT_BOX_W + GAP;
 
         // Ensure we never exceed terminal width
+        // availableForRight is the space remaining after left section
         const availableForRight = Math.max(1, width - totalLeftOffset);
-        const rightInner = Math.max(1, availableForRight - 2);
+        const rightBoxWidth = availableForRight;
+        const rightInner = Math.max(1, rightBoxWidth - 2);
 
-        // Prep left box lines if not hidden
-        let leftLines: string[];
-        if (!state.hideSearxng && width >= totalLeftOffset + 10) {
-          const status = state.searxngStatus;
-          const statusText = getStatusText(status.state);
-          const portStr = extractPort(status.url);
-          const statusColor = status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted';
-
-          const leftRow1 = theme.fg('accent', '│') + theme.fg(statusColor, statusText) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - statusText.length)) + '│');
-          const leftRow2 = theme.fg('accent', '│') + theme.fg('accent', portStr) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - portStr.length)) + '│');
-          const connStr = state.activeConnections.toString();
-          const connColor = state.activeConnections > 0 ? 'text' : 'muted';
-          const leftRow3 = theme.fg('accent', '│') + theme.fg(connColor, connStr) + theme.fg('accent', ' '.repeat(Math.max(0, LEFT_INNER - connStr.length)) + '│');
-
-          const leftBorder = theme.fg('accent', '┌' + '─'.repeat(LEFT_INNER) + '┐');
-          const leftBottom = theme.fg('accent', '└' + '─'.repeat(LEFT_INNER) + '┘');
-          leftLines = [leftBorder, leftRow1, leftRow2, leftRow3, leftBottom];
-        } else {
-          // If SearXNG is hidden OR terminal is too narrow, just indent
-          leftLines = Array(5).fill(' '.repeat(totalLeftOffset));
+        // Prep left box raw parts (no colors yet)
+        interface RawLeftBox {
+          top: string;
+          row1: string;
+          row2: string;
+          bottom: string;
+          statusColor: 'success' | 'error' | 'muted';
         }
 
-        // Get visible slices (non-queued)
+        let leftRaw: RawLeftBox | null = null;
+
+        if (!state.hideSearxng && width >= totalLeftOffset + 10) {
+          const status = state.searxngStatus;
+          const statusText = getStatusText(status.state).padEnd(LEFT_INNER);
+          const portStr = extractPort(status.url).padEnd(LEFT_INNER);
+          
+          leftRaw = {
+            top: '┌' + '─'.repeat(LEFT_INNER),
+            row1: '│' + statusText,
+            row2: '│' + portStr,
+            bottom: '└' + '─'.repeat(LEFT_INNER),
+            statusColor: status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted',
+          };
+        }
+
         const sliceIds = Array.from(state.slices.keys()).filter(id => !state.slices.get(id)!.queued);
         const numSlices = sliceIds.length;
         const MAX_VISIBLE_SLICES = 6;
@@ -262,231 +302,147 @@ export function createResearchPanel(
         const extra = contentTotal % totalCols;
         const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
 
-        // Minimum width needed per box: 3 (token) + 1 newline + 3 (cost) + 1 newline + 1 (label) = 8
-        // But we need at least 1 char for content
-        const MIN_BOX_WIDTH = 5;
-
-        // Check if boxes are wide enough for the new layout
-        const minColW = Math.min(...Array.from({ length: totalCols }, (_, i) => colW(i)));
-        const canShowDetails = minColW >= MIN_BOX_WIDTH && numVisible > 0;
+        // Build right box raw parts
+        const rightRawRows: string[][] = [[], [], [], []]; // top, tokens, cost, bottom
+        const rightColors: Array<Array<'success' | 'error' | 'muted' | 'text' | 'accent'>> = [[], [], [], []];
 
         if (numVisible === 0) {
-          // Empty state - show placeholder
-          const rTop = theme.fg('accent', '┌' + '─'.repeat(Math.max(1, rightInner)) + '┐');
-          const rEmpty = theme.fg('accent', '│') + ' '.repeat(Math.max(1, rightInner)) + theme.fg('accent', '│');
-          const rBottom = theme.fg('accent', '└' + '─'.repeat(Math.max(1, rightInner)) + '┘');
-          
-          return [
-            leftLines[0] + ' ' + rTop,
-            leftLines[1] + ' ' + rEmpty,
-            leftLines[2] + ' ' + rEmpty,
-            leftLines[3] + ' ' + rEmpty,
-            leftLines[4] + ' ' + rBottom,
-          ];
-        }
-
-        // Build each box with its own header (token count + cost) and label
-        const buildBox = (sliceId: string | null, index: number): string[] => {
-          const w = colW(index);
-          const lines: string[] = [];
-
-          if (sliceId === null) {
-            // Indicator box for hidden slices
-            const cell = `+${hiddenCount}`.padEnd(w);
-            return [
-              theme.fg('accent', '┌' + '─'.repeat(w) + '┐'),
-              theme.fg('muted', '│' + cell + '│'),
-              theme.fg('accent', '└' + '─'.repeat(w) + '┘'),
-            ];
-          }
-
-          const slice = state.slices.get(sliceId)!;
-          const tokens = slice.tokens || 0;
-          const cost = slice.cost || 0;
-          const tokenStr = formatTokens(tokens);
-          const costStr = formatCost(cost);
-          const labelStr = slice.completed ? `✓${slice.label}` : slice.label;
-
-          // Determine colors based on state
-          const getCellColor = () => {
-            if (slice.flash === 'green') return 'success';
-            if (slice.flash === 'red') return 'error';
-            if (slice.completed) return 'muted';
-            return 'text';
-          };
-
-          if (canShowDetails) {
-            // Show full details: token count, cost, and label
-            // Format: [token count] on top line, [cost] on second line, [label] on third line
-            
-            const tokenDisplay = truncateMiddle(tokenStr, Math.max(1, w - 2));
-            const tokenPadded = tokenDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            
-            const costDisplay = truncateMiddle(costStr, Math.max(1, w - 2));
-            const costPadded = costDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            
-            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
-            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            
-            const color = getCellColor();
-            
-            lines.push(theme.fg('accent', '┌' + '─'.repeat(w) + '┐'));
-            lines.push(theme.fg(color, '│' + tokenPadded + '│'));
-            lines.push(theme.fg(color, '│' + costPadded + '│'));
-            lines.push(theme.fg(color, '│' + labelPadded + '│'));
-            lines.push(theme.fg('accent', '└' + '─'.repeat(w) + '┘'));
-          } else {
-            // Not enough space - just show label
-            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
-            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            const color = getCellColor();
-            
-            lines.push(theme.fg('accent', '┌' + '─'.repeat(w) + '┐'));
-            lines.push(theme.fg(color, '│' + labelPadded + '│'));
-            lines.push(theme.fg('accent', '└' + '─'.repeat(w) + '┘'));
-          }
-
-          return lines;
-        };
-
-        // Build the right section - each slice is its own box with headers
-        const rightLines: string[] = [];
-        
-        if (canShowDetails) {
-          // With details: 5 lines per slice box (top, token, cost, label, bottom)
-          // Top border
-          const topParts: string[] = [];
-          for (let i = 0; i < totalCols; i++) {
-            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
-            const w = colW(i);
-            if (i === 0) {
-              topParts.push(theme.fg('accent', '┌' + '─'.repeat(w)));
-            } else {
-              topParts.push(theme.fg('accent', '┬' + '─'.repeat(w)));
-            }
-          }
-          rightLines.push(theme.fg('accent', '│') + topParts.join('') + theme.fg('accent', '┐'));
-
-          // Token rows
-          const tokenRows: string[] = [];
-          for (let i = 0; i < totalCols; i++) {
-            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
-            const slice = sliceId ? state.slices.get(sliceId) : null;
-            const tokens = slice?.tokens || 0;
-            const tokenStr = formatTokens(tokens);
-            const w = colW(i);
-            const tokenDisplay = truncateMiddle(tokenStr, Math.max(1, w - 2));
-            const tokenPadded = tokenDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            const color = sliceId ? (slice.completed ? 'muted' : 'text') : 'muted';
-            
-            if (i === 0) {
-              tokenRows.push(theme.fg(color, '│' + tokenPadded));
-            } else {
-              tokenRows.push(theme.fg('accent', '│') + theme.fg(color, tokenPadded));
-            }
-          }
-          rightLines.push(tokenRows.join('') + theme.fg('accent', '│'));
-
-          // Cost rows
-          const costRows: string[] = [];
-          for (let i = 0; i < totalCols; i++) {
-            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
-            const slice = sliceId ? state.slices.get(sliceId) : null;
-            const cost = slice?.cost || 0;
-            const costStr = formatCost(cost);
-            const w = colW(i);
-            const costDisplay = truncateMiddle(costStr, Math.max(1, w - 2));
-            const costPadded = costDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            const color = sliceId ? (slice.completed ? 'muted' : 'text') : 'muted';
-            
-            if (i === 0) {
-              costRows.push(theme.fg(color, '│' + costPadded));
-            } else {
-              costRows.push(theme.fg('accent', '│') + theme.fg(color, costPadded));
-            }
-          }
-          rightLines.push(costRows.join('') + theme.fg('accent', '│'));
-
-          // Label rows
-          const labelRows: string[] = [];
-          for (let i = 0; i < totalCols; i++) {
-            const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
-            const slice = sliceId ? state.slices.get(sliceId) : null;
-            const labelStr = slice ? (slice.completed ? `✓${slice.label}` : slice.label) : `+${hiddenCount}`;
-            const w = colW(i);
-            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
-            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            const color = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : (slice?.completed ? 'muted' : 'text');
-            
-            if (i === 0) {
-              labelRows.push(theme.fg(color, '│' + labelPadded));
-            } else {
-              labelRows.push(theme.fg('accent', '│') + theme.fg(color, labelPadded));
-            }
-          }
-          rightLines.push(labelRows.join('') + theme.fg('accent', '│'));
-
-          // Bottom border
-          const bottomParts: string[] = [];
-          for (let i = 0; i < totalCols; i++) {
-            const w = colW(i);
-            if (i === 0) {
-              bottomParts.push(theme.fg('accent', '└' + '─'.repeat(w)));
-            } else {
-              bottomParts.push(theme.fg('accent', '┴' + '─'.repeat(w)));
-            }
-          }
-          rightLines.push(bottomParts.join('') + theme.fg('accent', '┘'));
-
+          const w = Math.max(1, rightInner);
+          rightRawRows[0]!.push('─'.repeat(w) + '┐');
+          rightRawRows[1]!.push(' '.repeat(w) + '│');
+          rightRawRows[2]!.push(' '.repeat(w) + '│');
+          rightRawRows[3]!.push('─'.repeat(w) + '┘');
+          for(let i=0; i<4; i++) rightColors[i]!.push('accent');
         } else {
-          // Compact mode - just labels in boxes
-          const topParts: string[] = [];
-          const contentParts: string[] = [];
-          const bottomParts: string[] = [];
-          
           for (let i = 0; i < totalCols; i++) {
             const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
             const slice = sliceId ? state.slices.get(sliceId) : null;
             const w = colW(i);
-            const labelStr = slice ? (slice.completed ? `✓${slice.label}` : slice.label) : `+${hiddenCount}`;
-            const labelDisplay = truncateMiddle(labelStr, Math.max(1, w - 2));
-            const labelPadded = labelDisplay.padStart(Math.ceil((w) / 2)).padEnd(w);
-            const color = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : (slice?.completed ? 'muted' : 'text');
+            const isLast = i === totalCols - 1;
             
-            if (i === 0) {
-              topParts.push(theme.fg('accent', '┌' + '─'.repeat(w)));
-              contentParts.push(theme.fg(color, '│' + labelPadded));
-              bottomParts.push(theme.fg('accent', '└' + '─'.repeat(w)));
+            // Top Border with Label
+            const labelStr = slice ? slice.label : `+${hiddenCount}`;
+            // We need space for "┐ " and " ┌" (4 chars) plus label length
+            // Using standard box drawing characters U+2510 (┐) and U+250C (┌) for perfect roof line alignment
+            const cornerLabel = `┐ ${labelStr} ┌`;
+            const canShowCornerLabel = w >= cornerLabel.length;
+            const canShowBasicLabel = w >= labelStr.length + 2;
+            
+            let topPart;
+            if (canShowCornerLabel) {
+              const sideWidth = w - cornerLabel.length;
+              const leftPad = Math.floor(sideWidth / 2);
+              const rightPad = sideWidth - leftPad;
+              topPart = '─'.repeat(leftPad) + cornerLabel + '─'.repeat(rightPad);
+            } else if (canShowBasicLabel) {
+              const sideWidth = w - labelStr.length;
+              const leftPad = Math.floor(sideWidth / 2);
+              const rightPad = sideWidth - leftPad;
+              topPart = '─'.repeat(leftPad) + labelStr + '─'.repeat(rightPad);
             } else {
-              topParts.push(theme.fg('accent', '┬' + '─'.repeat(w)));
-              contentParts.push(theme.fg('accent', '│') + theme.fg(color, labelPadded));
-              bottomParts.push(theme.fg('accent', '┴' + '─'.repeat(w)));
+              topPart = '─'.repeat(w);
             }
+            rightRawRows[0]!.push(topPart + (isLast ? '┐' : '┬'));
+            rightColors[0]!.push('accent'); // Partition/Border is accent
+
+            // Token Row
+            const isPlanning = labelStr.includes('planning');
+            const tokens = slice?.tokens || 0;
+            const tokenStr = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+            const tokenDisplay = tokenStr.length > w ? tokenStr.slice(0, w) : tokenStr;
+            const tokenPadded = tokenDisplay.padStart(Math.floor((w + tokenDisplay.length) / 2)).padEnd(w);
+            rightRawRows[1]!.push(tokenPadded + '│');
+            const flashColor = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
+            rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
+
+            // Cost Row
+            const cost = slice?.cost || 0;
+            const costStr = (isPlanning || cost === 0) ? '' : formatCost(cost);
+            const costDisplay = costStr.length > w ? costStr.slice(0, w) : costStr;
+            const costPadded = costDisplay.padStart(Math.floor((w + costDisplay.length) / 2)).padEnd(w);
+            rightRawRows[2]!.push(costPadded + '│');
+            rightColors[2]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
+
+            // Bottom Border
+            rightRawRows[3]!.push('─'.repeat(w) + (isLast ? '┘' : '┴'));
+            rightColors[3]!.push('accent');
+          }
+        }
+
+        // Final Assembly
+        const result: string[] = [];
+        const jointChars = ['┬', '│', '│', '┴'];
+        
+        for (let rowIdx = 0; rowIdx < 4; rowIdx++) {
+          let line = '';
+          
+          if (leftRaw) {
+            // Left Box: Accent walls, colored content
+            const leftBorderColor = 'accent';
+            let leftContent: string;
+            let leftContentColor: 'success' | 'error' | 'muted' | 'text' | 'accent';
+            
+            switch(rowIdx) {
+              case 0: leftContent = leftRaw.top; leftContentColor = leftBorderColor; break;
+              case 1: leftContent = leftRaw.row1; leftContentColor = leftRaw.statusColor; break;
+              case 2: leftContent = leftRaw.row2; leftContentColor = leftBorderColor; break;
+              case 3: leftContent = leftRaw.bottom; leftContentColor = leftBorderColor; break;
+              default: leftContent = ''; leftContentColor = 'text';
+            }
+            
+            // Color the leftmost wall character as accent, and the rest as content color
+            line += theme.fg(leftBorderColor, leftContent.slice(0, 1));
+            line += theme.fg(leftContentColor, leftContent.slice(1));
+            
+            // Add joint (always accent)
+            line += theme.fg('accent', jointChars[rowIdx]!);
+          } else {
+            // Indent instead of left box
+            line += ' '.repeat(totalLeftOffset);
           }
           
-          rightLines.push(theme.fg('accent', '│') + topParts.join('') + theme.fg('accent', '┐'));
-          rightLines.push(contentParts.join('') + theme.fg('accent', '│'));
-          rightLines.push(bottomParts.join('') + theme.fg('accent', '┘'));
-        }
-
-        // Ensure we have 5 lines total for alignment with left box
-        while (rightLines.length < 5) {
-          if (canShowDetails && rightLines.length < 5) {
-            rightLines.unshift('');
-          } else if (!canShowDetails && rightLines.length < 3) {
-            rightLines.unshift('');
+          // Right Box segments: Accent walls, colored content
+          const rightRowParts = rightRawRows[rowIdx]!;
+          const rightRowColors = rightColors[rowIdx]!;
+          
+          for (let colIdx = 0; colIdx < rightRowParts.length; colIdx++) {
+            const part = rightRowParts[colIdx]!;
+            const content = part.slice(0, -1);
+            const wall = part.slice(-1);
+            
+            if (rowIdx === 0) {
+              // Special handling for top border: Accent lines, Muted framed label text, Accent corners
+              // Using standard box drawing characters U+2510 (┐) and U+250C (┌)
+              const cornerStart = content.indexOf('┐');
+              if (cornerStart !== -1) {
+                const cornerEnd = content.lastIndexOf('┌') + 1;
+                const before = content.slice(0, cornerStart);
+                const cornerOpen = content.slice(cornerStart, cornerStart + 1);
+                const labelText = content.slice(cornerStart + 1, cornerEnd - 1);
+                const cornerClose = content.slice(cornerEnd - 1, cornerEnd);
+                const after = content.slice(cornerEnd);
+                
+                line += theme.fg('accent', before);
+                line += theme.fg('accent', cornerOpen);
+                line += theme.fg('muted', labelText);
+                line += theme.fg('accent', cornerClose);
+                line += theme.fg('accent', after);
+              } else {
+                line += theme.fg('accent', content);
+              }
+            } else {
+              // Standard row: Content color for inner part, Accent for wall
+              // If researcher is completed, use muted color for all inner content
+              const color = rightRowColors[colIdx]!;
+              line += theme.fg(color, content);
+            }
+            
+            // Trailing wall/partition character is always accent
+            line += theme.fg('accent', wall);
           }
+          
+          result.push(line);
         }
-        // If we have more than 5 lines, trim (shouldn't happen)
-        const trimmedRightLines = rightLines.slice(0, 5);
-
-        const result = [
-          leftLines[0] + ' ' + trimmedRightLines[0],
-          leftLines[1] + ' ' + trimmedRightLines[1],
-          leftLines[2] + ' ' + trimmedRightLines[2],
-          leftLines[3] + ' ' + trimmedRightLines[3],
-          leftLines[4] + ' ' + trimmedRightLines[4],
-        ];
 
         // Safety: truncate any line that exceeds terminal width
         return result.map(line => {
@@ -500,6 +456,9 @@ export function createResearchPanel(
       invalidate(): void {
         localTui?.requestRender?.();
       },
+      dispose(): void {
+        clearAllFlashTimeouts(state.sessionId);
+      }
     };
     return component;
   };

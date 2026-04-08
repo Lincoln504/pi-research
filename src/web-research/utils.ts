@@ -57,80 +57,10 @@ export function getSearxngUrl(): string {
 // Active browser contexts tracking - keyed by ID for O(1) lookup
 const activeContexts = new Map<string, TrackedContext>();
 
-// Active connection counter (for TUI display)
-let activeConnections = 0;
-let maxConnections = 0;
-// Callback system for connection count changes
-type ConnectionCountCallback = (count: number) => void;
-const connectionCallbacks: ConnectionCountCallback[] = [];
-
 /**
- * Subscribe to connection count changes
- * @returns Unsubscribe function
+ * Reset connection counters (Legacy stub for compatibility)
  */
-export function onConnectionCountChange(callback: ConnectionCountCallback): () => void {
-  connectionCallbacks.push(callback);
-  // Immediately call with current count
-  callback(activeConnections);
-  // Return unsubscribe function
-  return () => {
-    const index = connectionCallbacks.indexOf(callback);
-    if (index !== -1) {
-      connectionCallbacks.splice(index, 1);
-    }
-  };
-}
-
-/** Notify all callbacks when connection count changes */
-function notifyConnectionCountChange(): void {
-  for (const callback of connectionCallbacks) {
-    callback(activeConnections);
-  }
-}
-
-/**
- * Increment active connection count
- */
-export function incrementConnectionCount(): void {
-  activeConnections++;
-  if (activeConnections > maxConnections) {
-    maxConnections = activeConnections;
-  }
-  notifyConnectionCountChange();
-}
-
-/**
- * Decrement active connection count
- */
-export function decrementConnectionCount(): void {
-  if (activeConnections > 0) {
-    activeConnections--;
-  }
-  notifyConnectionCountChange();
-}
-
-/**
- * Get current active connection count
- */
-export function getActiveConnectionCount(): number {
-  return activeConnections;
-}
-
-/**
- * Get max connection count seen this session
- */
-export function getMaxConnectionCount(): number {
-  return maxConnections;
-}
-
-/**
- * Reset connection counters
- */
-export function resetConnectionCounters(): void {
-  activeConnections = 0;
-  maxConnections = 0;
-  notifyConnectionCountChange();
-}
+export function resetConnectionCounters(): void {}
 
 /**
  * Clear all tracked contexts without closing them
@@ -220,3 +150,9 @@ export function validateMaxConcurrency(value?: number): number {
   }
   return Math.min(Math.max(1, Math.floor(value)), 20); // Clamp between 1 and 20
 }
+
+// Legacy compatibility stubs
+export function incrementConnectionCount(): void {}
+export function decrementConnectionCount(): void {}
+export function onConnectionCountChange(_callback: any): () => void { return () => {}; }
+export function getActiveConnectionCount(): number { return 0; }

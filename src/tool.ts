@@ -22,14 +22,19 @@ import {
   addSlice,
   activateSlice,
   completeSlice,
+  removeSlice,
+  updateSliceTokens,
   createInitialPanelState,
   clearAllFlashTimeouts,
+  flashSlice,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
 import {
   initLifecycle,
   ensureRunning,
   getStatus,
+  isFunctional,
+  setFunctional,
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
 import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
@@ -46,6 +51,38 @@ import { cleanupSharedLinks } from './utils/shared-links.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Functional Health Check for Tool Start
+ * 
+ * Ensures SearXNG is not just running, but actually returning results.
+ * Shows status in TUI while running.
+ */
+async function ensureFunctionalHealth(
+  panelState: any, 
+  updateWidget: () => void
+): Promise<void> {
+  if (isFunctional()) return;
+
+  const sliceLabel = 'health check ...';
+  addSlice(panelState, sliceLabel, sliceLabel, false);
+  activateSlice(panelState, sliceLabel);
+  updateWidget();
+
+  try {
+    const { runHealthCheck } = await import('./healthcheck/index.ts');
+    const health = await runHealthCheck();
+    
+    if (!health.success) {
+      throw new Error(`Functional health check failed: ${health.error || 'Unknown error'}. Your network or search engines may be blocked.`);
+    }
+    
+    setFunctional(true);
+  } finally {
+    removeSlice(panelState, sliceLabel);
+    updateWidget();
+  }
+}
 
 export function createResearchTool(): ToolDefinition {
   return {
@@ -115,6 +152,9 @@ export function createResearchTool(): ToolDefinition {
         };
         registerSessionUpdate(sessionId, updateWidget);
 
+        // Robust functional health check before research starts
+        await ensureFunctionalHealth(panelState, updateWidget);
+
         const onTokens = (n: number) => {
           panelState.totalTokens += n;
           refreshAllSessions();
@@ -155,14 +195,41 @@ export function createResearchTool(): ToolDefinition {
             extensionCtx: ctx,
           });
           
-          session.subscribe(event => {
+          const calculateUsageCost = (usage: any): number => {
+            if (!usage || !selectedModel?.cost) return 0;
+            const modelCost = selectedModel.cost;
+            const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
+            const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
+            const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
+            const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+            return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+          };
+
+          const subscription = session.subscribe(event => {
             if (event.type === 'message_end' && event.message.role === 'assistant') {
-              onTokens((event.message as any).usage?.totalTokens || 0);
+              const usage = (event.message as any).usage;
+              if (usage) {
+                const cost = calculateUsageCost(usage);
+                const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+                if (tokens > 0) {
+                  onTokens(tokens);
+                  updateSliceTokens(panelState, sliceLabel, tokens, cost);
+                  refreshAllSessions();
+                }
+              }
+            } else if (event.type === 'tool_execution_end') {
+              const color = (event as any).isError ? 'red' : 'green';
+              const duration = (event as any).isError ? 400 : 60;
+              flashSlice(panelState, sliceLabel, color, duration, updateWidget);
             }
           });
 
           await session.prompt(query);
           const result = ensureAssistantResponse(session, 'Quick');
+          
+          // Cleanup subscription
+          subscription();
+
           completeSlice(panelState, sliceLabel);
           cleanup();
           return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };

@@ -24,6 +24,9 @@ import {
 } from './utils.ts';
 import { logger } from '../logger.ts';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 
 // ============================================================================
 // Type Definitions

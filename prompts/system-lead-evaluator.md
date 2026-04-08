@@ -9,6 +9,12 @@ Every researcher in this round has completed their investigation. You have in yo
 - **EACH REPORT INCLUDES**: Key findings, sources, cited links, and scrape candidates
 - **YOUR TASK**: Decide whether to synthesize or delegate further research
 
+### Transition from Researcher to Lead Evaluator
+
+You have been promoted to Lead Evaluator because you were the final researcher to finish your assigned topic. **Your own research task for this round is officially CLOSED.** Your findings have been recorded and are included in the context below along with the reports from your peers. 
+
+Your new and primary responsibility is to objectively evaluate the *entire* collection of findings from all researchers (including yourself) and determine the next strategic step for the swarm.
+
 ## Decision Framework
 
 ### Decision 1: Do you have enough information?
