@@ -26,16 +26,18 @@ describe('SwarmStateManager', () => {
       expect(manager.load()).toBeNull();
     });
 
-    it('should load the latest research state', () => {
-      const state1 = { status: 'planning', currentRound: 1 };
-      const state2 = { status: 'researching', currentRound: 1 };
+    it('should load the latest research state matching the query', () => {
+      const state1 = { rootQuery: 'query1', status: 'planning', currentRound: 1 };
+      const state2 = { rootQuery: 'query2', status: 'researching', currentRound: 1 };
       const ctx = createMockCtx([
         { type: 'custom', customType: 'pi-research-state', data: state1 },
         { type: 'message' },
         { type: 'custom', customType: 'pi-research-state', data: state2 },
       ]);
       const manager = new SwarmStateManager(ctx);
-      expect(manager.load()).toEqual(state2);
+      expect(manager.load('query1')).toEqual(state1);
+      expect(manager.load('query2')).toEqual(state2);
+      expect(manager.load()).toEqual(state2); // Should still return the VERY last one if no query
     });
   });
 

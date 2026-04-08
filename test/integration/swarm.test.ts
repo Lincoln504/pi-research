@@ -21,7 +21,7 @@ vi.mock('@mariozechner/pi-ai', () => ({
 
 vi.mock('../../src/orchestration/researcher', () => ({
   createResearcherSession: vi.fn(async () => ({
-    subscribe: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
     prompt: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
     appendMessage: vi.fn(),

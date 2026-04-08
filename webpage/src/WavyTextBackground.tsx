@@ -11,8 +11,12 @@ const WavyTextBackground = () => {
   const mouse = { x: 0, y: 0, targetX: 0, targetY: 0 };
 
   const onMouseMove = (e: MouseEvent) => {
-    mouse.targetX = e.clientX / window.innerWidth;
-    mouse.targetY = 1.0 - (e.clientY / window.innerHeight);
+    // Only update if mouse is within window boundaries
+    if (e.clientX >= 0 && e.clientX <= window.innerWidth && 
+        e.clientY >= 0 && e.clientY <= window.innerHeight) {
+      mouse.targetX = e.clientX / window.innerWidth;
+      mouse.targetY = 1.0 - (e.clientY / window.innerHeight);
+    }
   };
 
   onMount(() => {
@@ -63,45 +67,115 @@ const WavyTextBackground = () => {
       void main() {
         vec2 uv = vUv;
         vec2 pixelPos = (uv - 0.5) * uResolution;
-        vec2 boxHalfSize = vec2(225.0, 125.0);
-        float d = sdRect(pixelPos, boxHalfSize);
-        float x = clamp((d - 5.0) / 105.0, 0.0, 1.0);
-        float stability = pow(x * x * (3.0 - 2.0 * x), 1.2);
+        // Use normalized distance units (0.0 - 1.0) anchored to the center
+        // This works consistently across different resolution monitors
+        vec2 fromCenter = uv - 0.5;
+        
+        // Correct X by aspect ratio to keep distance units "square" (based on height)
+        float aspect = uResolution.x / uResolution.y;
+        vec2 distPos = fromCenter;
+        distPos.x *= aspect;
+        
+        // Offset in normalized distance units relative to center
+        // Closer to center (from -0.15, -0.08)
+        vec2 maskOffset = vec2(-0.1, -0.05); 
+        vec2 interferencePos = distPos - maskOffset;
+        
+        // Relative size units
+        vec2 boxHalfSize = vec2(0.18, 0.12);
+        
+        // 1. Main Dictionary Box Mask (centered)
+        vec2 mainBoxHalfSize = vec2(0.2, 0.12);
+        float d1 = sdRect(distPos, mainBoxHalfSize);
+        
+        // 2. Skewed Shadow Mask (offset and angled)
+        vec2 q = interferencePos + boxHalfSize; 
+        q.y -= q.x * 0.25; 
+        q.x -= q.y * 0.35; 
+        float d2 = sdRect(q - boxHalfSize, boxHalfSize);
+        
+        // Combine them (Union of both shapes)
+        float d = min(d1, d2);
+        
+        float x = clamp(d / 0.15, 0.0, 1.0);
+        
+        // --- Oval Gradient (in distance units) ---
+        // Anchored at bottom-left corner
+        vec2 relPosDist = interferencePos + boxHalfSize;
+        // Softer power (2.5) and slightly larger divisors for a gentler transition
+        float distFromBL = length(relPosDist / vec2(0.5, 0.35)); 
+        float fadeOut = 1.0 - pow(smoothstep(0.0, 1.0, distFromBL), 2.5); 
+        
+        // Adjusted overall strength: base 0.4 (meaning it masks 60% at peak)
+        float maskStrength = mix(0.4, 1.0, pow(x * x * (3.0 - 2.0 * x), 1.2));
+        float stability = mix(1.0, maskStrength, fadeOut);
+        
+        // Base constant flow
+        float flowSpeed = 0.015;
+        vec2 flow = vec2(uTime * flowSpeed, uTime * flowSpeed);
         
         // Mouse interaction
         vec2 mousePixel = (uMouse - 0.5) * uResolution;
         vec2 diffPixels = pixelPos - mousePixel;
         float distMouse = length(diffPixels);
-        float mouseEffect = smoothstep(700.0, 0.0, distMouse) * 8.0 * stability;
-        mouseEffect *= smoothstep(0.0, 80.0, distMouse);
+        
+        // Much stronger: 35.0 max push
+        float mouseEffect = smoothstep(800.0, 0.0, distMouse) * 35.0 * stability;
+        mouseEffect *= smoothstep(0.0, 100.0, distMouse);
         vec2 mouseDistortion = normalize(diffPixels + 0.0001) * mouseEffect;
+
+        // 1. Mouse wave warp: The mouse physically "dents" the wave timing
+        // Stronger warp: 1.5 phase shift
+        float mouseWaveWarp = smoothstep(1000.0, 0.0, distMouse) * 1.5 * stability;
         
-        // --- Distorted Modulo Gradient Surge ---
-        // 1. High-frequency, low-strength noise for "micro-jitter" in the waves
-        float jitter = noise((uv + flow) * 15.0 + uTime * 0.8) * 0.05;
+        // 2. High-frequency noise
+        float waveJitter = noise((uv + flow) * 8.0 + uTime * 0.5) * 0.15;
         
-        // 2. The Modulo Gradient (the main wave structure)
-        // We distort the input to fract with the jitter
-        float waveInput = (uv.x + uv.y) * 2.5 - uTime * 0.2 + jitter;
+        // 3. Wave Input
+        float waveInput = (uv.x + uv.y) * 4.0 - uTime * 0.25 + waveJitter - mouseWaveWarp;
         float phase = fract(waveInput);
-        
-        // 3. Asymmetrical profile (Quick surge 0.15, slow release 0.85)
-        float surgeProfile = phase < 0.15 
-            ? smoothstep(0.0, 1.0, phase / 0.15) 
-            : pow(1.0 - (phase - 0.15) / 0.85, 2.8);
+
+        // Organic Falloff
+        float surgeProfile = phase < 0.95 
+            ? pow(phase / 0.95, 6.0) 
+            : 1.0 - (phase - 0.95) / 0.05;
             
-        // 4. Modulate the surge intensity with another slow noise layer for patches
-        float intensity = noise(uv * 1.5 - uTime * 0.05) * 0.6 + 0.4;
+        float crestMask = 1.0 - smoothstep(0.9, 1.0, surgeProfile);
         
-        float totalPush = surgeProfile * 40.0 * intensity;
+        float nPatches = noise(uv * 1.8 - uTime * 0.06);
+        float intensity = mix(0.4, 1.2, nPatches * 0.5 + 0.5);
+        
+        // --- Localized Mouse Boost ---
+        // Reduced mouse boost (+60.0 instead of +150.0)
+        float mouseBoost = smoothstep(800.0, 0.0, distMouse) * 60.0 * stability;
+        float totalPush = surgeProfile * (35.0 + mouseBoost) * intensity * crestMask;
         vec2 noiseDistortion = vec2(totalPush, totalPush);
         
-        // Final UV lookup with continuous flow + surge
-        // Use fract() for seamless tiling
+        // Final UV lookup
         vec2 finalUv = fract(uv + flow + (noiseDistortion - mouseDistortion) / uResolution);
         
+        // --- Drastic Crest Blur (9-tap, 15px radius) ---
+        float bScale = smoothstep(0.8, 1.0, surgeProfile) * 15.0;
+        vec2 bDir = vec2(1.0, 1.0) / uResolution;
+        
         vec4 color = texture2D(uTexture, finalUv);
-        gl_FragColor = vec4(color.rgb, color.a * 0.45);
+        color += texture2D(uTexture, finalUv + bDir * bScale);
+        color += texture2D(uTexture, finalUv - bDir * bScale);
+        color += texture2D(uTexture, finalUv + bDir * 2.0 * bScale);
+        color += texture2D(uTexture, finalUv - bDir * 2.0 * bScale);
+        color += texture2D(uTexture, finalUv + bDir * 3.0 * bScale);
+        color += texture2D(uTexture, finalUv - bDir * 3.0 * bScale);
+        color += texture2D(uTexture, finalUv + bDir * 4.0 * bScale);
+        color += texture2D(uTexture, finalUv - bDir * 4.0 * bScale);
+        color /= 9.0;
+        
+        // Dynamic opacity: 
+        // Much darker: base 0.25, max 0.85, broader reach (pow 0.5)
+        float dynamicOpacity = mix(0.25, 0.85, pow(surgeProfile, 0.5));
+        
+        // Sharpening contrast boost
+        vec3 finalColor = color.rgb * 0.8; // Darken the color itself
+        gl_FragColor = vec4(finalColor, color.a * dynamicOpacity);
       }
     `;
 
@@ -137,41 +211,48 @@ const WavyTextBackground = () => {
     const oCtx = offscreen.getContext('2d')!;
     
     const updateTexture = () => {
-      const w = 2048; // Large enough for high quality
-      const h = 2048;
+      const w = 2048; 
+      const h = 2048; 
+      
       offscreen.width = w;
       offscreen.height = h;
-      
-      oCtx.fillStyle = '#fcfbf7'; // Background color same as page
       oCtx.clearRect(0, 0, w, h);
       
       const content = `
         research researcher analysis engine pretext library solid signal noise dictionary
         performance metrics layout reflow typography glyph weight variable smoke fluid
         interaction design developer prototype interface system context flow abstract
-      `.repeat(30).trim();
+      `.repeat(60).trim();
       
-      const fontSize = 48; // Restored larger text size
+      const fontSize = 48;
       const lineHeight = 64;
       const prepared = prepareWithSegments(content, `${fontSize}px Georgia`, {});
       const { lines } = layoutWithLines(prepared, w - 100, lineHeight);
       
       oCtx.font = `${fontSize}px Georgia`;
-      oCtx.fillStyle = '#444'; // Base text color
+      oCtx.fillStyle = '#111';
+      oCtx.textBaseline = 'top'; 
       lines.forEach((line, i) => {
-        oCtx.fillText(line.text, 50, i * lineHeight + fontSize);
+        oCtx.fillText(line.text, 50, i * lineHeight);
       });
 
       const tex = gl!.createTexture();
       gl!.bindTexture(gl!.TEXTURE_2D, tex);
-      gl!.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // Fix upside down orientation
+      gl!.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, offscreen);
-      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
+      gl!.generateMipmap(gl!.TEXTURE_2D);
+      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR_MIPMAP_LINEAR);
+      gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
       gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.REPEAT);
       gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.REPEAT);
     };
 
     updateTexture();
+
+    const onResize = () => {
+      updateTexture();
+    };
+    window.addEventListener('resize', onResize);
 
     // Enable proper alpha blending
     gl.enable(gl.BLEND);
@@ -209,6 +290,7 @@ const WavyTextBackground = () => {
     onCleanup(() => {
       cancelAnimationFrame(animationFrame);
       window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('resize', onResize);
     });
   });
 

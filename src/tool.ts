@@ -269,7 +269,9 @@ export function createResearchTool(): ToolDefinition {
             const result = ensureAssistantResponse(session, 'Quick');
             
             // Cleanup subscription
-            subscription();
+            if (typeof subscription === 'function') {
+              subscription();
+            }
 
             completeSlice(panelState, sliceLabel);
             cleanup();

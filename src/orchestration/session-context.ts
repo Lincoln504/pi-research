@@ -25,12 +25,18 @@ export async function formatParentContext(ctx: ExtensionContext): Promise<string
     return 'No previous context available.';
   }
 
-  const llmMessages = convertToLlm(allMessages);
+  // Limit context to prevent overflow for the initial coordinator
+  const MAX_CONTEXT_MESSAGES = 15;
+  const recentMessages = allMessages.length > MAX_CONTEXT_MESSAGES 
+    ? allMessages.slice(-MAX_CONTEXT_MESSAGES) 
+    : allMessages;
+
+  const llmMessages = convertToLlm(recentMessages);
   const serialized = serializeConversation(llmMessages);
     
   return [
     '## Parent Conversation History',
-    'The following is the full history of the current conversation branch for your reference:',
+    'The following is the recent history of the conversation branch for your reference:',
     '',
     serialized
   ].join('\n');

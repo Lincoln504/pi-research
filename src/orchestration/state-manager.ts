@@ -30,8 +30,9 @@ export class SwarmStateManager {
 
   /**
    * Loads the most recent research state from the session history.
+   * If a query is provided, scans backwards for the latest state matching that query.
    */
-  load(): SystemResearchState | null {
+  load(query?: string): SystemResearchState | null {
     if (!this.hasSessionManagerAPI()) {
       logger.debug('[swarm-state] SessionManager API not available, cannot load state');
       return null;
@@ -42,11 +43,14 @@ export class SwarmStateManager {
       const entries = sessionManager.getEntries?.();
       if (!entries || !Array.isArray(entries)) return null;
 
-      // Scan backwards for the latest state entry
+      // Scan backwards for the latest state entry (optionally matching query)
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
         if (entry?.type === 'custom' && entry.customType === ENTRY_TYPE) {
-          return (entry as CustomEntry<SystemResearchState>).data ?? null;
+          const state = (entry as CustomEntry<SystemResearchState>).data;
+          if (state && (!query || state.rootQuery === query)) {
+            return state;
+          }
         }
       }
     } catch (err) {
@@ -78,8 +82,8 @@ export class SwarmStateManager {
    * Utility: Reconstruct state or initialize a new one.
    */
   initialize(query: string, complexity: 1 | 2 | 3): SystemResearchState {
-    const existing = this.load();
-    if (existing && existing.rootQuery === query) {
+    const existing = this.load(query);
+    if (existing) {
       logger.log('[swarm-state] Resuming existing research system.');
       
       // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again

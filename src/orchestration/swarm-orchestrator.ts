@@ -287,7 +287,9 @@ export class SwarmOrchestrator {
       const report = ensureAssistantResponse(session, aspect.id);
       
       // Cleanup subscription before continuing to promotion
-      subscription();
+      if (typeof subscription === 'function') {
+        subscription();
+      }
 
       this.updateState({ type: 'SIBLING_COMPLETED', id: aspect.id, report });
       completeSlice(this.options.panelState, aspect.id);
