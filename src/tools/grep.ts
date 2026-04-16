@@ -22,22 +22,19 @@ interface RgGrepParams {
 function truncateHead(content: string, maxBytes: number, maxLines: number): string {
   const lines = content.split('\n');
 
-  if (lines.length <= maxLines && new Blob([content]).size <= maxBytes) {
+  if (lines.length <= maxLines && Buffer.byteLength(content, 'utf-8') <= maxBytes) {
     return content;
   }
 
-  // Truncate by lines first
   const truncatedLines = lines.slice(0, maxLines);
   let result = truncatedLines.join('\n');
 
-  // Then check bytes
-  const blob = new Blob([result]);
-  if (blob.size > maxBytes) {
+  if (Buffer.byteLength(result, 'utf-8') > maxBytes) {
     let byteCount = 0;
     const charArray: string[] = [];
 
     for (const char of result) {
-      byteCount += new Blob([char]).size;
+      byteCount += Buffer.byteLength(char, 'utf-8');
       if (byteCount > maxBytes) break;
       charArray.push(char);
     }

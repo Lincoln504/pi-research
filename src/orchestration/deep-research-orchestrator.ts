@@ -28,10 +28,6 @@ import {
   MAX_ROUNDS_LEVEL_2,
   MAX_ROUNDS_LEVEL_3,
   MAX_ROUNDS_LEVEL_4,
-  MAX_SIBLINGS_ROUND_1,
-  MAX_SIBLINGS_ROUND_2,
-  MAX_SIBLINGS_ROUND_3,
-  MAX_SIBLINGS_ROUND_4,
   MAX_CONCURRENT_RESEARCHERS,
   MAX_REPORT_LENGTH,
   DEFAULT_MODEL_CONTEXT_WINDOW,
@@ -42,7 +38,7 @@ import { formatParentContext } from './session-context.ts';
 import { formatSharedLinksFromState } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
-import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice, updateSliceTokens } from '../tui/research-panel.ts';
+import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice, updateSliceTokens, type ResearchPanelState } from '../tui/research-panel.ts';
 import { getDisplayNumber, getResearcherRoleContext } from './id-utils.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,7 +52,7 @@ export interface DeepResearchOrchestratorOptions {
   onTokens: (n: number) => void;
   onUpdate: () => void;
   searxngUrl: string;
-  panelState: any;
+  panelState: ResearchPanelState;
 }
 
 export class DeepResearchOrchestrator {
@@ -72,6 +68,9 @@ export class DeepResearchOrchestrator {
   private progressCredits = new Map<string, number>();
   /** Resolved context window size for the selected model. */
   private contextWindowSize: number;
+
+  private static readonly UNITS_PER_RESEARCHER = 10;
+  private static readonly LEAD_EVAL_UNITS = 5;
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.stateManager = new DeepResearchStateManager(options.ctx);
@@ -139,15 +138,6 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private getMaxSiblingsPerRound(complexity: 1 | 2 | 3 | 4): number {
-    switch(complexity) {
-      case 1: return MAX_SIBLINGS_ROUND_1;
-      case 2: return MAX_SIBLINGS_ROUND_2;
-      case 3: return MAX_SIBLINGS_ROUND_3;
-      case 4: return MAX_SIBLINGS_ROUND_4;
-    }
-  }
-
   private async doPlanning(signal?: AbortSignal) {
     this.options.panelState.statusMessage = 'planning...';
     this.options.onUpdate();
@@ -197,20 +187,13 @@ export class DeepResearchOrchestrator {
         initialCount
       });
 
-      // Initialise progress budget
-      const UNITS_PER_RESEARCHER = 10;
-      const LEAD_EVAL_UNITS = 5;
-      const maxRounds = this.getMaxRounds(this.state.complexity);
-      const maxSibsPerRound = this.getMaxSiblingsPerRound(this.state.complexity);
-
+      // Initialise progress budget — start with only round 1 + one lead-eval; expand dynamically
+      // when the lead evaluator spawns additional rounds in promoteToLead.
       const round1Count = Math.min(initialCount, agenda.length);
-      let fullScopeExpected = round1Count * UNITS_PER_RESEARCHER;
-      for (let r = 2; r <= maxRounds; r++) {
-        fullScopeExpected += LEAD_EVAL_UNITS + maxSibsPerRound * UNITS_PER_RESEARCHER;
-      }
-      fullScopeExpected += LEAD_EVAL_UNITS;
+      const initialExpected = round1Count * DeepResearchOrchestrator.UNITS_PER_RESEARCHER
+        + DeepResearchOrchestrator.LEAD_EVAL_UNITS;
 
-      this.options.panelState.progress = { expected: fullScopeExpected, made: 0, extended: false };
+      this.options.panelState.progress = { expected: initialExpected, made: 0, extended: false };
       this.options.onUpdate();
 
     } catch (err) {
@@ -235,8 +218,9 @@ export class DeepResearchOrchestrator {
       const isFirstGenOfRound = roundAspects.length === pendingAspects.length;
       if (isFirstGenOfRound && currentRound > 1) {
         const prevRoundPrefix = `${currentRound - 1}.`;
+        const prevCoordId = `coord.${currentRound - 1}`;
         const toRemove = Array.from(this.options.panelState.slices.keys())
-          .filter(id => id.startsWith(prevRoundPrefix));
+          .filter(id => id.startsWith(prevRoundPrefix) || id === prevCoordId);
         for (const id of toRemove) {
           removeSlice(this.options.panelState, id);
         }
@@ -263,23 +247,19 @@ export class DeepResearchOrchestrator {
     }
 
     if (roundAspects.length > 0 && isRoundComplete(this.state, currentRound)) {
-       if (!this.state.promotedId && !this.state.finalSynthesis) {
-          const allCompletedWithReports = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
-          if (allCompletedWithReports.length === 0) {
-            const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
-            const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
-            this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
-            return;
-          }
-
-          const firstSibling = roundAspects.find(a => a.status === 'completed' || a.status === 'failed');
-          if (firstSibling) {
-             this.promoteToLead(firstSibling, undefined, signal);
-             return;
-          }
-       } else if (this.state.promotedId) {
-         return;
-       }
+      if (!this.state.promotedId && !this.state.finalSynthesis) {
+        const allCompletedWithReports = roundAspects.filter(a => a.status === 'completed' && a.report);
+        if (allCompletedWithReports.length === 0) {
+          const allFailed = roundAspects.filter(a => a.status === 'failed');
+          const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
+          this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
+          return;
+        }
+        this.runCoordinatorEval(signal);
+        return;
+      } else if (this.state.promotedId) {
+        return;
+      }
     }
 
     if (this.state.status !== 'completed') {
@@ -385,26 +365,24 @@ export class DeepResearchOrchestrator {
       if (typeof subscription === 'function') subscription();
 
       this.updateState({ type: 'SIBLING_COMPLETED', id: aspect.id, report });
-      
+
       const currentRound = this.state.currentRound;
       const isLastStanding = isRoundComplete(this.state, currentRound);
-      
-      if (!isLastStanding) {
-        completeSlice(this.options.panelState, aspect.id);
-      }
+
+      completeSlice(this.options.panelState, aspect.id);
 
       if (this.options.panelState.progress) {
         const alreadyCredited = this.progressCredits.get(aspect.id) ?? 0;
-        const topUp = 10 - alreadyCredited;
+        const topUp = DeepResearchOrchestrator.UNITS_PER_RESEARCHER - alreadyCredited;
         if (topUp > 0) {
           this.options.panelState.progress.made += topUp;
-          this.progressCredits.set(aspect.id, 10);
+          this.progressCredits.set(aspect.id, DeepResearchOrchestrator.UNITS_PER_RESEARCHER);
         }
       }
       this.options.onUpdate();
 
       if (isLastStanding) {
-        await this.handleSiblingCompletion(aspect, session, signal);
+        await this.handleSiblingCompletion(aspect, signal);
       } else {
         await this.injectFindingsIntoRunningSiblings(aspect);
       }
@@ -416,20 +394,20 @@ export class DeepResearchOrchestrator {
       this.updateState({ type: 'SIBLING_FAILED', id: aspect.id, error: errorMsg });
       flashSlice(this.options.panelState, aspect.id, 'red', 1000, this.options.onUpdate);
       completeSlice(this.options.panelState, aspect.id);
-      
+
       if (this.options.panelState.progress) {
         const alreadyCredited = this.progressCredits.get(aspect.id) ?? 0;
-        const topUp = 10 - alreadyCredited;
+        const topUp = DeepResearchOrchestrator.UNITS_PER_RESEARCHER - alreadyCredited;
         if (topUp > 0) {
           this.options.panelState.progress.made += topUp;
-          this.progressCredits.set(aspect.id, 10);
+          this.progressCredits.set(aspect.id, DeepResearchOrchestrator.UNITS_PER_RESEARCHER);
         }
       }
       this.options.onUpdate();
 
       const currentRound = this.state.currentRound;
       if (isRoundComplete(this.state, currentRound)) {
-        await this.handleSiblingCompletion(aspect, session, signal);
+        await this.handleSiblingCompletion(aspect, signal);
       }
     } finally {
       this.activeSessions.delete(aspect.id);
@@ -455,41 +433,47 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private async handleSiblingCompletion(finished: ResearchSibling, session?: AgentSession, signal?: AbortSignal) {
+  private async handleSiblingCompletion(_finished: ResearchSibling, signal?: AbortSignal) {
     if (signal?.aborted) return;
+    if (this.state.promotedId || this.state.finalSynthesis) return;
 
-    if (!this.state.promotedId && !this.state.finalSynthesis) {
-      const allCompletedWithReports = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
-      
-      if (allCompletedWithReports.length === 0) {
-        const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
-        const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
-        this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
-        return;
-      }
+    const currentRound = this.state.currentRound;
+    const roundAspects = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
+    const allCompletedWithReports = roundAspects.filter(a => a.status === 'completed' && a.report);
 
-      logger.log(`[deep-research] Promoting ${finished.id} (last survivor) to Lead Evaluator.`);
-      this.options.onUpdate();
-
-      await this.promoteToLead(finished, session, signal);
+    if (allCompletedWithReports.length === 0) {
+      const allFailed = roundAspects.filter(a => a.status === 'failed');
+      const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
+      this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
+      return;
     }
+
+    await this.runCoordinatorEval(signal);
   }
 
-  private async promoteToLead(lead: ResearchSibling, session?: AgentSession, signal?: AbortSignal) {
+  private async runCoordinatorEval(signal?: AbortSignal) {
+    const evaluatedRound = this.state.currentRound;
+    const coordId = `coord.${evaluatedRound}`;
+
+    addSlice(this.options.panelState, coordId, 'E', false);
+    activateSlice(this.options.panelState, coordId);
+    this.options.onUpdate();
+
     const completedAspectQueries = Object.values(this.state.aspects).map(a => a.query);
     const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));
     const targetRounds = this.getMaxRounds(this.state.complexity);
-    const hardLimit = targetRounds + 1;
     const isAtTarget = this.state.currentRound >= targetRounds;
-    const isAtHardLimit = this.state.currentRound >= hardLimit;
+    const isAtHardLimit = this.state.currentRound > targetRounds;
 
-    const otherCompleted = Object.values(this.state.aspects).filter(a => a.id !== lead.id && a.status === 'completed' && a.report);
-    const otherReportsContext = otherCompleted.length > 0 
-      ? `## Findings from Other Researchers in this Initiative:\n\n` + 
-        otherCompleted.map(a => {
+    // Provide ALL completed findings (including the lead's own) — fresh context via complete()
+    const allCompleted = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
+    const allReportsContext = allCompleted.length > 0
+      ? `## All Research Findings:\n\n` +
+        allCompleted.map(a => {
           const report = a.report || '';
           const truncated = report.length > 8000 ? report.slice(0, 8000) + '\n... (truncated) ...' : report;
-          return `### Researcher ${getDisplayNumber(this.state, a.id)}\n${truncated}`;
+          const roundNum = a.id.split('.')[0] ?? '?';
+          return `### Researcher ${getDisplayNumber(this.state, a.id)} (Round ${roundNum}): ${a.query}\n${truncated}`;
         }).join('\n\n---\n\n')
       : '';
 
@@ -511,56 +495,32 @@ export class DeepResearchOrchestrator {
       ? `\n### Unfulfilled Agenda Items\n${remainingAgenda.map(q => `- ${q}`).join('\n')}`
       : '\n### All Agenda Items Covered\nAll initial research agenda items have been addressed.';
 
-    const promotionPrompt = leadPrompt + '\n\n' + otherReportsContext + agendaSection;
+    const promotionPrompt = leadPrompt + '\n\n' + allReportsContext + agendaSection;
 
     try {
-      this.updateState({ type: 'PROMOTION_STARTED', id: lead.id });
-      
-      let decision: string;
-      let usage: any;
+      this.updateState({ type: 'PROMOTION_STARTED', id: coordId });
 
-      if (session) {
-        // HEARTBEAT: Prompt can take a while; ensure TUI stays alive
-        const heartbeat = setInterval(() => {
-          this.options.onUpdate();
-        }, 2000);
+      const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
+      if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
 
-        const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
-          if (event.type === 'message_end') {
-            usage = event.message?.usage;
-            if (usage && event.message?.role === 'assistant') {
-              const cost = this.calculateUsageCost(usage);
-              const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-              if (tokens > 0) {
-                this.siblingTokens.set(lead.id, tokens);
-                this.options.onTokens(tokens);
-                updateSliceTokens(this.options.panelState, lead.id, tokens, cost);
-                this.updateState({ type: 'SIBLING_TOKENS', id: lead.id, tokens, cost });
-                this.options.onUpdate();
-              }
-            }
-          }
-        });
-
-        try {
-          await session.prompt(promotionPrompt);
-          decision = ensureAssistantResponse(session, 'Lead Evaluator');
-        } finally {
-          clearInterval(heartbeat);
-          subscription();
-        }
-      } else {
-        const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
-        if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
-        const response = await complete(this.options.model, {
+      const heartbeat = setInterval(() => this.options.onUpdate(), 2000);
+      let response: Awaited<ReturnType<typeof complete>>;
+      try {
+        response = await complete(this.options.model, {
           messages: [{ role: 'user', content: [{ type: 'text', text: promotionPrompt }], timestamp: Date.now() }]
         }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
-        decision = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
-        usage = response.usage;
-        if (usage) {
-           const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-           const cost = this.calculateUsageCost(usage);
-           updateSliceTokens(this.options.panelState, lead.id, tokens, cost);
+      } finally {
+        clearInterval(heartbeat);
+      }
+
+      const decision = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+      const usage = response.usage;
+      if (usage) {
+        const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+        const cost = this.calculateUsageCost(usage);
+        if (tokens > 0) {
+          this.options.onTokens(tokens);
+          updateSliceTokens(this.options.panelState, coordId, tokens, cost);
         }
       }
 
@@ -570,10 +530,19 @@ export class DeepResearchOrchestrator {
         try {
           const lastOpen = decision.lastIndexOf('[');
           const lastClose = decision.lastIndexOf(']');
-          if (lastOpen !== -1 && lastClose !== -1) {
-            nextQueries = JSON.parse(decision.slice(lastOpen, lastClose + 1));
+          if (lastOpen !== -1 && lastClose !== -1 && lastClose > lastOpen) {
+            const parsed = JSON.parse(decision.slice(lastOpen, lastClose + 1));
+            if (Array.isArray(parsed)) {
+              nextQueries = parsed;
+            } else {
+              logger.warn('[deep-research] Promotion JSON parsed but is not an array; treating as synthesis.');
+            }
+          } else {
+            logger.warn('[deep-research] Promotion response contained no valid JSON array; treating as synthesis.');
           }
-        } catch { /* ignore */ }
+        } catch (err) {
+          logger.warn('[deep-research] Failed to parse promotion JSON:', err);
+        }
       }
 
       this.updateState({
@@ -583,34 +552,40 @@ export class DeepResearchOrchestrator {
         maxRounds: targetRounds
       });
 
+      // Credit the evaluator work using the round number captured BEFORE the state transition
       if (this.options.panelState.progress) {
-        const evalKey = `eval.${this.state.currentRound}`;
+        const evalKey = `eval.${evaluatedRound}`;
         if (!this.progressCredits.has(evalKey)) {
-          this.options.panelState.progress.made += 5;
-          this.progressCredits.set(evalKey, 5);
+          this.options.panelState.progress.made += DeepResearchOrchestrator.LEAD_EVAL_UNITS;
+          this.progressCredits.set(evalKey, DeepResearchOrchestrator.LEAD_EVAL_UNITS);
+        }
+        // Extend the progress budget if the evaluator spawned a new round
+        if (!isSynthesis && nextQueries.length > 0) {
+          this.options.panelState.progress.expected +=
+            nextQueries.length * DeepResearchOrchestrator.UNITS_PER_RESEARCHER
+            + DeepResearchOrchestrator.LEAD_EVAL_UNITS;
         }
       }
-      
-      completeSlice(this.options.panelState, lead.id);
+
+      completeSlice(this.options.panelState, coordId);
       this.options.onUpdate();
 
       await this.startRound(signal);
 
     } catch (err) {
-      logger.error(`[deep-research] Lead evaluation failed for ${lead.id}:`, err);
+      logger.error(`[deep-research] Coordinator evaluation failed for round ${evaluatedRound}:`, err);
       this.rejectCompletion(err);
     }
   }
 
   private buildRoleContext(aspect: ResearchSibling, roleContext: ReturnType<typeof getResearcherRoleContext>): string {
-    const { displayNumber, roundNumber, totalInRound, isLastInRound } = roleContext;
+    const { displayNumber, roundNumber, totalInRound } = roleContext;
     const siblingNumInRound = parseInt(aspect.id.split('.')[1] ?? '1');
     return `## Your Role
 
 You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound} in Round ${roundNumber}).
 - **Topic**: ${aspect.query}
-- **Round**: ${roundNumber} of 3
-${isLastInRound ? '\n⚠️ **You are the LAST researcher in this round.** After you report, you may be promoted to Lead Evaluator.' : ''}
+- **Round**: ${roundNumber} of ${this.getMaxRounds(this.state.complexity)}
 - **Tool Usage**: 4 gathering calls + up to 3 context-gated scrape batches (Batch 1 ≤3 URLs, Batch 2 ≤2 URLs, Batch 3 ≤3 URLs if context < 40%)`;
   }
 

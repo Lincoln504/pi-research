@@ -21,16 +21,15 @@ export class DeepResearchStateManager {
   /**
    * Load state for a given query from session history
    */
-  load(query: string): SystemResearchState | null {
+  load(query?: string): SystemResearchState | null {
     const sm = (this.ctx as any).sessionManager;
     if (!sm || typeof sm.getEntries !== 'function') return null;
 
     const entries = sm.getEntries();
-    // Find latest state entry for this specific root query
-    const stateEntry = [...entries].reverse().find((e: any) => 
-      e.type === STATE_TYPE && 
-      e.customType === CUSTOM_TYPE && 
-      e.data?.rootQuery === query
+    const stateEntry = [...entries].reverse().find((e: any) =>
+      e.type === STATE_TYPE &&
+      e.customType === CUSTOM_TYPE &&
+      (query === undefined || e.data?.rootQuery === query)
     );
 
     return stateEntry ? (stateEntry.data as SystemResearchState) : null;

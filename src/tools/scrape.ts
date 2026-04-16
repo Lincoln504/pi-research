@@ -29,6 +29,7 @@ import {
   MAX_CONTEXT_FRACTION_FOR_SCRAPING,
   MAX_CONTEXT_FRACTION_FOR_BATCH3,
   DEFAULT_MODEL_CONTEXT_WINDOW,
+  AVG_TOKENS_PER_SCRAPE,
 } from '../constants.ts';
 
 export function createScrapeTool(options: {

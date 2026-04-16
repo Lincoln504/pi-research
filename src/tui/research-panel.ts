@@ -146,6 +146,17 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
+ * Re-mark a researcher as active (used when promoting a completed researcher to lead evaluator)
+ */
+export function reactivateSlice(state: ResearchPanelState, id: string): void {
+  const slice = state.slices.get(id);
+  if (slice) {
+    slice.completed = false;
+    slice.flash = null;
+  }
+}
+
+/**
  * Flash a researcher green or red
  */
 export function flashSlice(
@@ -374,7 +385,7 @@ function renderPanelBlock(
       rightColors[0]!.push('accent');
 
       // Token Row (always row 1)
-      let tokenStr = '';
+      let tokenStr: string;
       if (isIndicator) {
         tokenStr = '...';
       } else {
@@ -389,7 +400,7 @@ function renderPanelBlock(
       rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
       // Cost Row (row 2)
-      let costStr = '';
+      let costStr: string;
       if (isIndicator) {
         costStr = '...';
       } else {

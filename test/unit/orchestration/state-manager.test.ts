@@ -9,8 +9,8 @@ describe('DeepResearchStateManager', () => {
   const createMockCtx = (entries: any[] = []) => ({
     sessionManager: {
       getEntries: vi.fn(() => entries),
-      appendCustomEntry: vi.fn((customType: string, data: unknown) => {
-        entries.push({ type: 'custom', customType, data });
+      addEntry: vi.fn((entry: any) => {
+        entries.push(entry);
       }),
     },
   } as any);
@@ -49,9 +49,11 @@ describe('DeepResearchStateManager', () => {
 
       manager.save(state);
 
-      expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith('pi-research-state', expect.objectContaining({
-        status: 'completed',
-        lastUpdated: expect.any(Number),
+      expect(ctx.sessionManager.addEntry).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'custom',
+        customType: 'pi-research-state',
+        data: expect.objectContaining({ status: 'completed' }),
+        timestamp: expect.any(Number),
       }));
     });
   });

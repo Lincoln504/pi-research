@@ -58,7 +58,14 @@ describe('Deep Research Integration', () => {
       onTokens: vi.fn(),
       onUpdate: vi.fn(),
       searxngUrl: 'http://localhost:8888',
-      panelState: { slices: new Map() },
+      panelState: {
+        sessionId: 'test-session',
+        query: 'how to build a deep research system',
+        searxngStatus: { state: 'inactive', url: '', isFunctional: false },
+        totalTokens: 0,
+        slices: new Map(),
+        modelName: 'test-model',
+      } as any,
     });
 
     const result = await orchestrator.run();

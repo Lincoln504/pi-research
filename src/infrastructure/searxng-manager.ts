@@ -17,7 +17,7 @@ import Docker from 'dockerode';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
-import { StateManager } from './state-manager';
+import { StateManager } from './state-manager.ts';
 import { logger } from '../logger.ts';
 
 // Docker type definitions

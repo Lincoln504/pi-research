@@ -3,7 +3,7 @@
  * Handles API requests with rate limiting, quota tracking, and backoff handling
  */
 
-import type { StackExchangeWrapper } from './types';
+import type { StackExchangeWrapper } from './types.ts';
 import { logger } from '../logger.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';

@@ -66,6 +66,7 @@ vi.mock('../../../src/tui/research-panel', () => ({
   completeSlice: vi.fn(),
   removeSlice: vi.fn(),
   flashSlice: vi.fn(),
+  updateSliceTokens: vi.fn(),
 }));
 
 vi.mock('../../../src/orchestration/deep-research-reducer', async (importOriginal) => {
@@ -90,7 +91,14 @@ describe('DeepResearchOrchestrator', () => {
     onTokens: vi.fn(),
     onUpdate: vi.fn(),
     searxngUrl: 'http://localhost:8888',
-    panelState: {},
+    panelState: {
+      sessionId: 'test-session',
+      query: 'test query',
+      searxngStatus: { state: 'inactive', url: '', isFunctional: false },
+      totalTokens: 0,
+      slices: new Map(),
+      modelName: 'test-model',
+    } as any,
   });
 
   beforeEach(() => {
@@ -201,7 +209,7 @@ describe('DeepResearchOrchestrator', () => {
     await (orchestrator as any).startRound();
 
     expect(rejectedError).toBeDefined();
-    expect(rejectedError.message).toContain('Research failed on resumption');
+    expect(rejectedError.message).toContain('Research failed. All researchers encountered errors:');
     expect(rejectedError.message).toContain('Researcher 1: Network error');
     expect(rejectedError.message).toContain('Researcher 2: Timeout');
   });

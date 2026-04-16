@@ -99,5 +99,5 @@ export function validateAndSanitizeQuery(query: string): string {
  * @returns True if valid, false otherwise
  */
 export function validateComplexity(complexity: number): boolean {
-  return complexity === 1 || complexity === 2 || complexity === 3;
+  return complexity === 1 || complexity === 2 || complexity === 3 || complexity === 4;
 }

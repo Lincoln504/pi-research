@@ -106,7 +106,7 @@ describe('TUI Research Panel', () => {
       // Check if tokens and cost are present in the output
       const output = lines.join('\n');
       expect(output).toContain('12k');
-      expect(output).toContain('$0.0500');
+      expect(output).toContain('$0.05');
     });
 
     it('should output exactly 4 lines when SearXNG is hidden', () => {

@@ -3,26 +3,26 @@
  * Main command handler
  */
 
-import type { Question, Answer, User, Site, StackExchangeConfig } from './types';
-import { StackExchangeClient } from './rest-client';
+import type { Question, Answer, User, Site, StackExchangeConfig } from './types.ts';
+import { StackExchangeClient } from './rest-client.ts';
 import {
   buildSearchQuery,
   buildQuestionsQuery,
   buildUserQuery,
   buildSitesQuery,
   Filters,
-} from './queries';
+} from './queries.ts';
 import {
   formatQuestionsTable,
   formatAnswersTable,
   formatUsersTable,
   formatSitesTable,
   formatCompactQuestions,
-} from './output';
+} from './output/index.ts';
 import {
   formatUsersCompact,
   formatSitesCompact,
-} from './output/compact';
+} from './output/compact.ts';
 import type { ExtensionContext, AgentToolResult } from '@mariozechner/pi-coding-agent';
 
 function notify(

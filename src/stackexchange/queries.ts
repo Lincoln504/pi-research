@@ -2,7 +2,7 @@
  * Stack Exchange API Query Builders
  */
 
-import type { SortOrder, SortActivity, SortReputation } from './types';
+import type { SortOrder, SortActivity, SortReputation } from './types.ts';
 
 export interface SearchParams {
   query?: string;
