@@ -21,6 +21,8 @@ export interface Config {
   TUI_REFRESH_DEBOUNCE_MS: number;
   /** Console restore delay after research in milliseconds (default: 15000) */
   CONSOLE_RESTORE_DELAY_MS: number;
+  /** BCP 47 language tag sent to SearXNG to filter search results (default: 'en-US') */
+  SEARCH_LANGUAGE: string;
 }
 
 /**
@@ -32,6 +34,7 @@ const DEFAULTS: Config = {
   HEALTH_CHECK_TIMEOUT_MS: 15000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
+  SEARCH_LANGUAGE: 'en-US',
 };
 
 /**
@@ -94,6 +97,7 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS',
       DEFAULTS.CONSOLE_RESTORE_DELAY_MS
     ),
+    SEARCH_LANGUAGE: parseEnvString(env, 'PI_RESEARCH_SEARCH_LANGUAGE') ?? DEFAULTS.SEARCH_LANGUAGE,
   };
 }
 

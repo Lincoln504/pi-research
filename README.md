@@ -282,14 +282,14 @@ The grep tool tries `rg` first and falls back to `grep`. For best performance, i
 **Available Internal Tools**
 - `search` - Web search through SearXNG.
 - `scrape` - URL scraping through fetch and Playwright/Chromium fallback.
-- `security_search` - NVD, CISA KEV, GitHub Advisories, and OSV.
-- `stackexchange` - Stack Exchange REST API.
+- `security_search` - Search security vulnerability databases (NVD, CISA KEV, GitHub Advisories, OSV). Filter by severity, CVE ID, package name, ecosystem, and actively exploited vulnerabilities.
+- `stackexchange` - Stack Exchange REST API for technical Q&A (Stack Overflow, SuperUser, AskUbuntu, etc.). Use tags to filter by programming topics.
 - `grep` - Local code search through `rg` or `grep` fallback.
 
 Complexity assessment determines researcher count:
 
 - Level 1 (brief) - 1 researcher for simple factual queries.
-- Level 2 (normal) - 3 researchers for technical or multi-faceted topics.
+- Level 2 (normal) - 2 researchers for technical or multi-faceted topics.
 - Level 3 (deep) - 3 researchers and potentially more rounds for nuanced analysis.
 
 ### Project Structure

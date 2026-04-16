@@ -87,8 +87,8 @@ describe('utils/session-state', () => {
       
       // Sessions are only added to the order when they register a panel
       const p1 = createInitialPanelState(s1, 'query', searxngStatus, 'm');
-      const p2 = createInitialPanelState(s2, searxngStatus, 'm');
-      const p3 = createInitialPanelState(s3, searxngStatus, 'm');
+      const p2 = createInitialPanelState(s2, 'query', searxngStatus, 'm');
+      const p3 = createInitialPanelState(s3, 'query', searxngStatus, 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -104,7 +104,7 @@ describe('utils/session-state', () => {
       const s2 = startResearchSession(psid);
       
       const p1 = createInitialPanelState(s1, 'query', searxngStatus, 'm');
-      const p2 = createInitialPanelState(s2, searxngStatus, 'm');
+      const p2 = createInitialPanelState(s2, 'query', searxngStatus, 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -119,7 +119,7 @@ describe('utils/session-state', () => {
       const s2 = startResearchSession(psid);
       
       const p1 = createInitialPanelState(s1, 'query', searxngStatus, 'm');
-      const p2 = createInitialPanelState(s2, searxngStatus, 'm');
+      const p2 = createInitialPanelState(s2, 'query', searxngStatus, 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -140,7 +140,7 @@ describe('utils/session-state', () => {
       onSessionOrderChange(psid, callback);
       
       const p1 = createInitialPanelState(s1, 'query', searxngStatus, 'm');
-      const p2 = createInitialPanelState(s2, searxngStatus, 'm');
+      const p2 = createInitialPanelState(s2, 'query', searxngStatus, 'm');
       
       registerSessionPanel(psid, s1, p1);
       expect(callback).toHaveBeenCalledTimes(1);
@@ -189,7 +189,7 @@ describe('utils/session-state', () => {
       registerMasterUpdate(ps2, masterUpdate2);
       
       const p1 = createInitialPanelState(s1, 'query', searxngStatus, 'm');
-      const p2 = createInitialPanelState(s2, searxngStatus, 'm');
+      const p2 = createInitialPanelState(s2, 'query', searxngStatus, 'm');
       
       registerSessionPanel(ps1, s1, p1);
       registerSessionPanel(ps2, s2, p2);

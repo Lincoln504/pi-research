@@ -1,7 +1,7 @@
 /**
  * Research Tool Unit Tests
  *
- * Meaningful, robust tests for quick vs swarm mode branching and core behaviors.
+ * Meaningful, robust tests for quick vs deep mode branching and core behaviors.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -24,10 +24,10 @@ vi.mock('../../src/logger.ts', () => ({
   isVerboseFromEnv: vi.fn(() => false),
 }));
 
-// Mock SwarmOrchestrator as a class
-const mockRun = vi.fn(async () => 'swarm result');
-vi.mock('../../src/orchestration/swarm-orchestrator.ts', () => ({
-  SwarmOrchestrator: class {
+// Mock DeepResearchOrchestrator as a class
+const mockRun = vi.fn(async () => 'deep research result');
+vi.mock('../../src/orchestration/deep-research-orchestrator.ts', () => ({
+  DeepResearchOrchestrator: class {
     run = mockRun;
   },
 }));
@@ -212,13 +212,13 @@ describe('createResearchTool', () => {
     });
   });
 
-  describe('Swarm Mode Branching (quick: false or omitted)', () => {
-    it('initializes SwarmOrchestrator and runs it', async () => {
+  describe('Deep Mode Branching (quick: false or omitted)', () => {
+    it('initializes DeepResearchOrchestrator and runs it', async () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test' }, undefined, undefined, createMockContext());
 
       expect(mockRun).toHaveBeenCalled();
-      expect(result.content[0]).toEqual(expect.objectContaining({ text: 'swarm result' }));
+      expect(result.content[0]).toEqual(expect.objectContaining({ text: 'deep research result' }));
     });
   });
 

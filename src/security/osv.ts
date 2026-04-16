@@ -7,8 +7,9 @@
  */
 
 import type { Vulnerability, OSVResult } from './types.ts';
-import { createTimeoutSignal } from '../web-research/retry-utils.ts';
+import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { logger } from '../logger.ts';
+import { OSV_TIMEOUT_MS, DEFAULT_MAX_RETRIES, DEFAULT_INITIAL_DELAY_MS, DEFAULT_MAX_DELAY_MS } from '../constants.ts';
 
 const OSV_BASE_URL = 'https://api.osv.dev/v1';
 const DEFAULT_MAX_RESULTS = 20;
@@ -149,6 +150,42 @@ function isOsvQueryResponse(value: unknown): value is OsvQueryResponse {
 // ==================== API Functions ====================
 
 /**
+ * Fetch with retry for resilience
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+): Promise<Response> {
+  return retryWithBackoff(
+    async () => {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
+      return response;
+    },
+    {
+      maxRetries: DEFAULT_MAX_RETRIES,
+      initialDelay: DEFAULT_INITIAL_DELAY_MS,
+      maxDelay: DEFAULT_MAX_DELAY_MS,
+      label: `OSV API: ${url}`,
+      isTransientError: (error) => {
+        // Check if error has status property
+        const status = (error as Error & { status?: number })?.status;
+        if (typeof status === 'number') {
+          // Retry on 429 (rate limit), 403 (forbidden), 5xx (server errors)
+          return status === 429 || status === 403 || status >= 500;
+        }
+        // For other errors, use default transient error check
+        return isTransientError(error);
+      },
+    },
+  );
+}
+
+/**
  * Search OSV for vulnerabilities
  *
  * @param terms - Package names, CVE IDs, or keywords
@@ -184,9 +221,9 @@ export async function searchOSV(
           ? `GHSA-${term.slice(term.indexOf('-') + 1).toLowerCase()}`
           : termUpper;
         const url: string = `${OSV_BASE_URL}/vulns/${encodeURIComponent(normalizedId)}`;
-        response = await fetch(url, {
+        response = await fetchWithRetry(url, {
           headers: { 'User-Agent': 'pi-research/2.0', 'Accept': 'application/json' },
-          signal: createTimeoutSignal(30000),
+          signal: createTimeoutSignal(OSV_TIMEOUT_MS),
         });
       } else {
         // POST /query requires package.name + package.ecosystem.
@@ -196,7 +233,7 @@ export async function searchOSV(
           continue;
         }
         const body: OsvQueryRequest = { package: { name: term, ecosystem: options.ecosystem } };
-        response = await fetch(`${OSV_BASE_URL}/query`, {
+        response = await fetchWithRetry(`${OSV_BASE_URL}/query`, {
           method: 'POST',
           headers: {
             'User-Agent': 'pi-research/2.0',
@@ -204,7 +241,7 @@ export async function searchOSV(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
-          signal: createTimeoutSignal(30000),
+          signal: createTimeoutSignal(OSV_TIMEOUT_MS),
         });
       }
 
@@ -276,17 +313,13 @@ export async function searchOSV(
 export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
   try {
     const url: string = `${OSV_BASE_URL}/vulns/${osvId}`;
-    const response: Response = await fetch(url, {
+    const response: Response = await fetchWithRetry(url, {
       headers: {
         'User-Agent': 'pi-research/2.0',
         'Accept': 'application/json',
       },
-      signal: createTimeoutSignal(30000),
+      signal: createTimeoutSignal(OSV_TIMEOUT_MS),
     });
-
-    if (!response.ok) {
-      return null;
-    }
 
     const data: unknown = await response.json();
 

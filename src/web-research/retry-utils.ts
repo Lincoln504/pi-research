@@ -38,14 +38,43 @@ export interface RetryOptions {
 
 /**
  * Helper function to create timeout signal.
- * Requires Node.js 20+ for AbortSignal.any()
+ * Handles Node.js version compatibility for AbortSignal.any() and AbortSignal.timeout()
  */
 export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  if (signal) {
-    return AbortSignal.any([signal, timeoutSignal]);
+  // Check if modern AbortSignal methods are available (Node.js 20+)
+  if (typeof AbortSignal.timeout === 'function') {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    if (signal && typeof AbortSignal.any === 'function') {
+      return AbortSignal.any([signal, timeoutSignal]);
+    }
+    return timeoutSignal;
   }
-  return timeoutSignal;
+  
+  // Fallback for older Node.js versions
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  
+  // Unref so it doesn't keep the process alive
+  if (typeof timeoutId.unref === 'function') {
+    timeoutId.unref();
+  }
+  
+  if (signal) {
+    // Combine signals manually for older versions
+    const combinedController = new AbortController();
+    const abortHandler = () => {
+      clearTimeout(timeoutId);
+      combinedController.abort();
+    };
+    
+    signal.addEventListener('abort', abortHandler, { once: true });
+    
+    return combinedController.signal;
+  }
+  
+  return controller.signal;
 }
 
 /**
@@ -60,7 +89,7 @@ export function withTimeout<T>(
   const timeoutController = new AbortController();
   const timeoutSignal = timeoutController.signal;
   const combinedSignal = signal
-    ? AbortSignal.any([timeoutSignal, signal])
+    ? createTimeoutSignal(timeoutMs, signal)
     : timeoutSignal;
     
   logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);

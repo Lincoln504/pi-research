@@ -1,7 +1,7 @@
 /**
  * pi-research Extension
  *
- * Orchestrates multi-agent research using a state-driven swarm architecture.
+ * Orchestrates multi-agent research using a state-driven deep mode architecture.
  * Manages SearXNG as singleton (shared across all agents).
  * SearXNG is initialized on first research() call, NOT on session_start.
  * Extension-owned cleanup is delegated to pi's session lifecycle.
@@ -41,8 +41,24 @@ export default function (pi: ExtensionAPI) {
 
   // Append a usage message to the system prompt for the main chat
   pi.on('before_agent_start', async (event) => {
-    const researchMessage =
-      '\n\n### RESEARCH TOOL USAGE\nThe `research` tool (from pi-research) is for web/internet research ONLY. It is NOT for local code/file research.\n\n**CRITICAL INSTRUCTION: DEFAULT TO QUICK MODE.**\nYou MUST set `quick: true` for almost all research tasks. Only omit `quick: true` (entering deep swarm research) if you explicitly see words like "deep", "exhaustive", "comprehensive", "swarm", or "multi-agent", or if the situation\'s context warrants deep research. For all other general informative queries, ALWAYS use `quick: true`.';
+    const researchMessage = [
+      '',
+      '',
+      '### RESEARCH TOOL USAGE',
+      'The `research` tool (from pi-research) is for web/internet research ONLY. It is NOT for local code/file research.',
+      '',
+      '**DEPTH PARAMETER — use this to control research intensity:**',
+      '- `depth: "brief"`  — single researcher, fastest. Use for quick lookups.',
+      '- `depth: "normal"` — 1-2 researchers, up to 2 rounds. Use for standard queries.',
+      '- `depth: "deep"`   — 2-3 researchers, up to 3 rounds. Use for thorough investigation.',
+      '- `depth: "ultra"`  — 3 researchers, up to 3 rounds (maximum). Use for exhaustive search.',
+      '- (omit depth)      — auto-assess; defaults to quick for simple queries, deep for complex ones.',
+      '',
+      '**CRITICAL INSTRUCTION: DEFAULT TO BRIEF.**',
+      'When depth is not specified by the user, set `depth: "brief"` for most queries.',
+      'Only use deep/ultra when the user explicitly requests thoroughness.',
+      'When the user asks to research multiple topics at different depths in one message, call `research` once per topic with the appropriate `depth` value.',
+    ].join('\n');
     return { systemPrompt: event.systemPrompt + researchMessage };
   });
 

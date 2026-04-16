@@ -7,7 +7,7 @@
 
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
-import type { SystemResearchState } from '../orchestration/swarm-types.ts';
+import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
 import { createSecuritySearchTool } from './security.ts';
@@ -20,6 +20,10 @@ interface CreateToolsOptions {
   tracker: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
+  /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
+  getTokensUsed?: () => number;
+  /** Model context window size in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
+  contextWindowSize?: number;
 }
 
 /**
@@ -47,7 +51,11 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
 
   return [
     createSearchTool(resolvedOptions),
-    createScrapeTool(resolvedOptions),
+    createScrapeTool({
+      ...resolvedOptions,
+      getTokensUsed: options.getTokensUsed,
+      contextWindowSize: options.contextWindowSize,
+    }),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
     createGrepTool(resolvedOptions),

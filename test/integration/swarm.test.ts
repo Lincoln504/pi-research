@@ -1,11 +1,11 @@
 /**
- * Swarm Integration Tests
- * 
- * Tests the full swarm research lifecycle with mocked models.
+ * Deep Research Integration Tests
+ *
+ * Tests the full deep research lifecycle with mocked models.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SwarmOrchestrator } from '../../src/orchestration/swarm-orchestrator';
+import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-orchestrator';
 import { SessionManager } from '@mariozechner/pi-coding-agent';
 
 // Mock dependencies
@@ -35,7 +35,7 @@ vi.mock('../../src/infrastructure/searxng-lifecycle', () => ({
   getManager: vi.fn(() => ({})),
 }));
 
-describe('Swarm Integration', () => {
+describe('Deep Research Integration', () => {
   const mockCtx = {
     model: { id: 'test-model' },
     modelRegistry: {
@@ -49,11 +49,11 @@ describe('Swarm Integration', () => {
     vi.clearAllMocks();
   });
 
-  it('should run a full research swarm from planning to synthesis', async () => {
-    const orchestrator = new SwarmOrchestrator({
+  it('should run a full deep research session from planning to synthesis', async () => {
+    const orchestrator = new DeepResearchOrchestrator({
       ctx: mockCtx,
       model: mockCtx.model,
-      query: 'how to build a swarm',
+      query: 'how to build a deep research system',
       complexity: 2,
       onTokens: vi.fn(),
       onUpdate: vi.fn(),

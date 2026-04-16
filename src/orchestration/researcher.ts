@@ -11,7 +11,7 @@ import type { Model } from '@mariozechner/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
-import type { SystemResearchState } from './swarm-types.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -24,6 +24,10 @@ export interface CreateResearcherSessionOptions {
   // Optional: real closures for global state management
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
+  /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
+  getTokensUsed?: () => number;
+  /** Model context window size in tokens. */
+  contextWindowSize?: number;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
@@ -36,7 +40,9 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     searxngUrl,
     extensionCtx,
     getGlobalState,
-    updateGlobalLinks
+    updateGlobalLinks,
+    getTokensUsed,
+    contextWindowSize,
   } = options;
 
   // Validate required parameters
@@ -68,7 +74,9 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
         ctx: extensionCtx,
         tracker,
         getGlobalState: globalState,
-        updateGlobalLinks: globalLinks
+        updateGlobalLinks: globalLinks,
+        getTokensUsed,
+        contextWindowSize,
       }),
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,

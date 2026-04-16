@@ -1,11 +1,11 @@
 /**
- * Swarm State Manager Unit Tests
+ * Deep Research State Manager Unit Tests
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SwarmStateManager } from '../../../src/orchestration/state-manager';
+import { DeepResearchStateManager } from '../../../src/orchestration/state-manager';
 
-describe('SwarmStateManager', () => {
+describe('DeepResearchStateManager', () => {
   const createMockCtx = (entries: any[] = []) => ({
     sessionManager: {
       getEntries: vi.fn(() => entries),
@@ -22,7 +22,7 @@ describe('SwarmStateManager', () => {
   describe('load', () => {
     it('should return null if no research state exists', () => {
       const ctx = createMockCtx([{ type: 'message' }]);
-      const manager = new SwarmStateManager(ctx);
+      const manager = new DeepResearchStateManager(ctx);
       expect(manager.load()).toBeNull();
     });
 
@@ -34,7 +34,7 @@ describe('SwarmStateManager', () => {
         { type: 'message' },
         { type: 'custom', customType: 'pi-research-state', data: state2 },
       ]);
-      const manager = new SwarmStateManager(ctx);
+      const manager = new DeepResearchStateManager(ctx);
       expect(manager.load('query1')).toEqual(state1);
       expect(manager.load('query2')).toEqual(state2);
       expect(manager.load()).toEqual(state2); // Should still return the VERY last one if no query
@@ -44,11 +44,11 @@ describe('SwarmStateManager', () => {
   describe('save', () => {
     it('should append a new research state entry', () => {
       const ctx = createMockCtx();
-      const manager = new SwarmStateManager(ctx);
+      const manager = new DeepResearchStateManager(ctx);
       const state: any = { status: 'completed' };
-      
+
       manager.save(state);
-      
+
       expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith('pi-research-state', expect.objectContaining({
         status: 'completed',
         lastUpdated: expect.any(Number),
@@ -58,9 +58,9 @@ describe('SwarmStateManager', () => {
 
   describe('initialize', () => {
     it('should resume existing state if query matches and reset running siblings', () => {
-      const existingState = { 
-        rootQuery: 'test query', 
-        complexity: 2, 
+      const existingState = {
+        rootQuery: 'test query',
+        complexity: 2,
         status: 'researching',
         aspects: {
           '1.1': { id: '1.1', query: 'q1', status: 'completed' },
@@ -68,8 +68,8 @@ describe('SwarmStateManager', () => {
         }
       };
       const ctx = createMockCtx([{ type: 'custom', customType: 'pi-research-state', data: existingState }]);
-      const manager = new SwarmStateManager(ctx);
-      
+      const manager = new DeepResearchStateManager(ctx);
+
       const state = manager.initialize('test query', 2);
       expect(state.rootQuery).toBe('test query');
       expect(state.aspects['1.1']?.status).toBe('completed');
@@ -78,8 +78,8 @@ describe('SwarmStateManager', () => {
 
     it('should return fresh state if no existing state matches', () => {
       const ctx = createMockCtx();
-      const manager = new SwarmStateManager(ctx);
-      
+      const manager = new DeepResearchStateManager(ctx);
+
       const state = manager.initialize('new query', 3);
       expect(state.rootQuery).toBe('new query');
       expect(state.complexity).toBe(3);

@@ -101,6 +101,7 @@ engines:
   - name: wikipedia
     engine: wikipedia
     shortcut: wp
+    categories: [general]
     weight: 1.5
 
   # Images (only when category=images is requested)

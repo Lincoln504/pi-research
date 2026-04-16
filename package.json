@@ -84,5 +84,8 @@
     "testcontainers": "^11.13.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "basic-ftp": "^5.2.1"
   }
 }

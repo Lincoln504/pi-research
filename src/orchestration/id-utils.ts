@@ -1,18 +1,18 @@
 /**
  * Researcher ID Utilities
  *
- * Abstracts hierarchical IDs (1.1, 1.2, 2.1) to sequential display numbers (1, 2, 3, 4)
+ * Abstracts hierarchical IDs (1.1, 1.2, 2.1) to sequential display numbers (1, 2, 3)
  * for cleaner UI while maintaining internal structure.
  */
 
-import type { SystemResearchState } from './swarm-types.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
 
 /**
  * Get sequential display number for a researcher ID
  *
  * Maps internal hierarchical IDs to sequential display numbers:
  * - Round 1: 1.1 → 1, 1.2 → 2, 1.3 → 3
- * - Round 2: 2.1 → 4, 2.2 → 5, etc.
+ * - Round 2: 2.1 → 4, 2.2 → 5, 2.3 → 6
  * - Continue sequentially across all rounds
  */
 export function getDisplayNumber(state: SystemResearchState, internalId: string): string {

@@ -1,23 +1,23 @@
 /**
- * Swarm State Manager
- * 
+ * Deep Research State Manager
+ *
  * Handles reading and writing the SystemResearchState to the Pi Session Tree.
- * 
+ *
  * DEPENDENCY: Requires pi-coding-agent sessionManager API:
  * - ctx.sessionManager.getEntries?() - returns session entries array
  * - ctx.sessionManager.appendCustomEntry(type, data) - adds custom entry
- * 
+ *
  * These APIs may change in future pi versions. The code uses optional chaining
  * and try-catch blocks to gracefully degrade if the API is unavailable.
  */
 
 import type { ExtensionContext, CustomEntry } from '@mariozechner/pi-coding-agent';
-import type { SystemResearchState } from './swarm-types.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
 import { logger } from '../logger.ts';
 
 const ENTRY_TYPE = 'pi-research-state';
 
-export class SwarmStateManager {
+export class DeepResearchStateManager {
   constructor(private ctx: ExtensionContext) {}
 
   /**
@@ -34,7 +34,7 @@ export class SwarmStateManager {
    */
   load(query?: string): SystemResearchState | null {
     if (!this.hasSessionManagerAPI()) {
-      logger.debug('[swarm-state] SessionManager API not available, cannot load state');
+      logger.debug('[deep-research-state] SessionManager API not available, cannot load state');
       return null;
     }
 
@@ -54,7 +54,7 @@ export class SwarmStateManager {
         }
       }
     } catch (err) {
-      logger.error('[swarm-state] Failed to load state from session history:', err);
+      logger.error('[deep-research-state] Failed to load state from session history:', err);
     }
     return null;
   }
@@ -66,15 +66,15 @@ export class SwarmStateManager {
     state.lastUpdated = Date.now();
 
     if (!this.hasSessionManagerAPI()) {
-      logger.debug('[swarm-state] SessionManager API not available, cannot save state');
+      logger.debug('[deep-research-state] SessionManager API not available, cannot save state');
       return;
     }
 
     try {
       (this.ctx.sessionManager as any).appendCustomEntry(ENTRY_TYPE, state);
-      logger.debug(`[swarm-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
+      logger.debug(`[deep-research-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
     } catch (err) {
-      logger.error('[swarm-state] Failed to save state to session history:', err);
+      logger.error('[deep-research-state] Failed to save state to session history:', err);
     }
   }
 
@@ -84,7 +84,7 @@ export class SwarmStateManager {
   initialize(query: string, complexity: 1 | 2 | 3): SystemResearchState {
     const existing = this.load(query);
     if (existing) {
-      logger.log('[swarm-state] Resuming existing research system.');
+      logger.log('[deep-research-state] Resuming existing research system.');
       
       // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again
       // This handles cases where the agent was stopped mid-research.

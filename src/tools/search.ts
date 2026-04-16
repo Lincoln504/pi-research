@@ -7,11 +7,14 @@
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { search } from '../web-research/search.ts';
+import type { SearxngSearchOptions } from '../web-research/types.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 interface SearchParams {
   queries: string[];
   maxResults?: number;
+  freshness?: SearxngSearchOptions['freshness'];
+  sourceType?: SearxngSearchOptions['sourceType'];
   [key: string]: unknown;
 }
 
@@ -30,6 +33,9 @@ export function createSearchTool(options: {
       'This returns search results with snippets. Use scrape to get full content from specific URLs.',
       'For security research, use security_search to query vulnerability databases.',
       'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
+      'Use sourceType "news" when researching current events, recent releases, or changelogs.',
+      'Use sourceType "github" when looking for repositories, packages, or open-source libraries.',
+      'Combine sourceType "news" with a freshness window (e.g. "week" or "month") for recent developments.',
     ],
     parameters: Type.Object({
       queries: Type.Array(Type.String({
@@ -41,8 +47,24 @@ export function createSearchTool(options: {
         minimum: 1,
         maximum: 30,
       })),
+      freshness: Type.Optional(Type.Union([
+        Type.Literal('any'),
+        Type.Literal('day'),
+        Type.Literal('week'),
+        Type.Literal('month'),
+        Type.Literal('year'),
+      ], {
+        description: 'Restrict results to a time window. "any" (default) applies no filter. Use "week" or "month" for recent news or changelogs.',
+      })),
+      sourceType: Type.Optional(Type.Union([
+        Type.Literal('general'),
+        Type.Literal('news'),
+        Type.Literal('github'),
+      ], {
+        description: 'Preferred source category. "general" (default) is broad web. "news" targets news sources. "github" searches the tech/code index (best for repos, packages, open-source).',
+      })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _extensionCtx): Promise<AgentToolResult<unknown>> {
+    async execute(_toolCallId, params, signal, _onUpdate, _extensionCtx): Promise<AgentToolResult<unknown>> {
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('search');
       if (!allowed) {
@@ -65,12 +87,18 @@ export function createSearchTool(options: {
       }
 
       const maxResults = (paramsRecord['maxResults'] as number | undefined) ?? 20;
+      const freshness = paramsRecord['freshness'] as SearxngSearchOptions['freshness'] | undefined;
+      const sourceType = paramsRecord['sourceType'] as SearxngSearchOptions['sourceType'] | undefined;
+      const searchOptions: SearxngSearchOptions = {
+        ...(freshness && freshness !== 'any' ? { freshness } : {}),
+        ...(sourceType ? { sourceType } : {}),
+      };
 
       const queriesText = queries.length === 1 ? 'query' : 'queries';
 
       let queryResults;
       try {
-        queryResults = await search(queries);
+        queryResults = await search(queries, searchOptions, signal);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         const elapsed = Date.now() - startTime;
@@ -93,7 +121,10 @@ export function createSearchTool(options: {
 
       let markdown = '# Web Search Results\n\n';
       markdown += `**Searched:** ${queries.length} ${queriesText}\n`;
-      markdown += `**Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
+      markdown += `**Duration:** ${(elapsed / 1000).toFixed(2)}s\n`;
+      if (sourceType && sourceType !== 'general') markdown += `**Source type:** ${sourceType}\n`;
+      if (freshness && freshness !== 'any') markdown += `**Freshness filter:** ${freshness}\n`;
+      markdown += '\n';
 
       for (const qr of queryResults) {
         markdown += `## Query: ${qr.query}\n\n`;
@@ -138,12 +169,22 @@ export function createSearchTool(options: {
   };
 }
 
+const VALID_FRESHNESS = new Set(['any', 'day', 'week', 'month', 'year']);
+const VALID_SOURCE_TYPE = new Set(['general', 'news', 'github']);
+
 function isSearchParams(params: Record<string, unknown>): params is SearchParams {
-  return (
-    typeof params === 'object' &&
-    params !== null &&
-    'queries' in params &&
-    Array.isArray(params['queries']) &&
-    (params['queries'] as unknown[]).every((q: unknown) => typeof q === 'string')
-  );
+  if (
+    typeof params !== 'object' ||
+    params === null ||
+    !('queries' in params) ||
+    !Array.isArray(params['queries']) ||
+    !(params['queries'] as unknown[]).every((q: unknown) => typeof q === 'string')
+  ) {
+    return false;
+  }
+  const freshness = params['freshness'];
+  if (freshness !== undefined && !VALID_FRESHNESS.has(freshness as string)) return false;
+  const sourceType = params['sourceType'];
+  if (sourceType !== undefined && !VALID_SOURCE_TYPE.has(sourceType as string)) return false;
+  return true;
 }

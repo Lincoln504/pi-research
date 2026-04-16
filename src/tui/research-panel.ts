@@ -8,6 +8,7 @@ import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-
 import type { Theme } from '@mariozechner/pi-coding-agent';
 import type { SearxngStatus } from '../infrastructure/searxng-lifecycle.ts';
 import { getPiActivePanels } from '../utils/session-state.ts';
+import { FLASH_DURATION_MS } from '../constants.ts';
 
 export interface SliceState {
   id: string;
@@ -19,6 +20,15 @@ export interface SliceState {
   cost?: number;   // Cost for this specific agent
 }
 
+export interface ResearchProgress {
+  /** Total tool calls expected across all researchers in the initial plan. */
+  expected: number;
+  /** Actual tool calls completed so far. */
+  made: number;
+  /** True when research has expanded beyond the initial planned researchers. */
+  extended: boolean;
+}
+
 export interface ResearchPanelState {
   sessionId: string;
   query: string;
@@ -27,6 +37,8 @@ export interface ResearchPanelState {
   slices: Map<string, SliceState>;
   modelName: string;
   hideSearxng?: boolean;
+  /** Optional progress bar data. Set after planning completes. */
+  progress?: ResearchProgress;
 }
 
 // Store timeouts per session ID to prevent cross-session conflicts
@@ -37,7 +49,7 @@ const sessionResearcherTimeouts = new Map<string, Map<string, NodeJS.Timeout>>()
 /**
  * Default duration for researcher cell flash indicators
  */
-export const DEFAULT_FLASH_DURATION_MS = 80;
+export const DEFAULT_FLASH_DURATION_MS = FLASH_DURATION_MS;
 
 /**
  * Clear all active flash timeouts for a specific session
@@ -204,6 +216,19 @@ function formatTokens(tokens: number): string {
   if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
   if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
   return `${(tokens / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * Render a percentage string for the header (no bar, no brackets).
+ * Returns empty string when progress data is absent or not yet initialised.
+ * The percentage is global: it reflects all researchers' tool calls combined,
+ * with the final report step weighted at 2× a regular tool call.
+ */
+function renderProgressPct(progress: ResearchProgress | undefined): string {
+  if (!progress || progress.expected <= 0) return '';
+  if (progress.extended) return 'exploring';
+  const pct = Math.round(Math.min(1, progress.made / progress.expected) * 100);
+  return `${pct}%`;
 }
 
 function formatCost(cost: number): string {
@@ -381,7 +406,11 @@ function renderPanelBlock(
       line += theme.fg(leftContentColor, leftContent.slice(1));
       line += theme.fg('accent', jointChars[rowIdx]!);
     } else {
-      line += ' '.repeat(totalLeftOffset);
+      // No SearXNG box: fill the left space then place the box border char at the
+      // joint position so the right box has a proper left edge on every row.
+      const noBorderChars = ['┌', '│', '│', '└'] as const;
+      line += ' '.repeat(totalLeftOffset - 1);
+      line += theme.fg('accent', noBorderChars[rowIdx]!);
     }
     
     const rightRowParts = rightRawRows[rowIdx]!;
@@ -439,8 +468,8 @@ export function createMasterResearchPanel(
           const panel = panels[i]!;
           
           // Header line for each block
-          const tokensStr = formatTokens(panel.totalTokens);
-          const headerText = ` Research: ${panel.query} (${tokensStr}) `;
+          const pctStr = renderProgressPct(panel.progress);
+          const headerText = pctStr ? ` Research: ${pctStr} ` : ` Research `;
           const headerLine = theme.fg('accent', '─'.repeat(2)) + theme.fg('muted', headerText) + theme.fg('accent', '─'.repeat(Math.max(0, width - 2 - headerText.length)));
           allLines.push(headerLine);
 

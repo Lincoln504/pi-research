@@ -22,6 +22,7 @@ import type {
   GitHubResult,
   OSVResult,
 } from './types.ts';
+import { REQUEST_DELAY_MS } from '../constants.ts';
 import { searchNVD } from './nvd.ts';
 import { searchCisaKev } from './cisa-kev.ts';
 import { searchGitHubAdvisories } from './github-advisories.ts';
@@ -99,7 +100,7 @@ const DEFAULT_CONFIG: Required<SecuritySearcherConfig> = {
   cisaKevClient: null as unknown as ICisaKevClient,
   githubAdvisoriesClient: null as unknown as IGitHubAdvisoriesClient,
   osvClient: null as unknown as IOSVClient,
-  requestDelay: 6500,
+  requestDelay: REQUEST_DELAY_MS,
 };
 
 /**

@@ -32,12 +32,7 @@ const require = createRequire(import.meta.url);
 // Type Definitions
 // ============================================================================
 
-// DOM types - using type aliases to extend built-in globals with optional methods
-// AbortSignal.any() and AbortSignal.timeout() are Node.js 16+ features
-type AbortSignalWithExtras = typeof AbortSignal & {
-  any(_signals: AbortSignal[]): AbortSignal;
-  timeout(_ms: number): AbortSignal;
-};
+// AbortSignal.any() and AbortSignal.timeout() are Node.js 20+ features
 
 // Playwright types (since module is optional/dynamically loaded)
 interface LaunchOptions {
@@ -439,10 +434,9 @@ function validateContent(html: string, markdown: string, url: string): void {
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   // Helper function to create timeout signal with Node.js compatibility
   const createTimeoutSignal = (timeoutMs: number): AbortSignal => {
-    const signalWithExtras = AbortSignal as unknown as AbortSignalWithExtras;
-    if (typeof signalWithExtras.timeout === 'function') {
-      // Node.js 16+
-      return signalWithExtras.timeout(timeoutMs);
+    if (typeof AbortSignal.timeout === 'function') {
+      // Node.js 20+
+      return AbortSignal.timeout(timeoutMs);
     } else {
       // Fallback for older Node.js versions
       const controller = new AbortController();
@@ -464,9 +458,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   };
 
   const timeoutSignal = createTimeoutSignal(PRIMARY_SCRAPER_TIMEOUT);
-  const signalWithExtras = AbortSignal as unknown as AbortSignalWithExtras;
-  const fetchSignal = signal !== undefined && typeof signalWithExtras.any === 'function'
-    ? signalWithExtras.any([signal, timeoutSignal])
+  const fetchSignal = signal !== undefined && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
 
   let response: Response;
@@ -618,6 +611,74 @@ interface ScrapeUrlResult {
   layer?: string;
   markdown: string;
   error?: string;
+  sourceCategory?: string;
+}
+
+/**
+ * Classify a URL into a human-readable source category.
+ *
+ * Categories (in priority order):
+ *   github-pr, github-issue, github-discussion, github-repo
+ *   official-docs  — docs.* hostnames or /docs/ /reference/ /api/ /guide/ /manual/ paths
+ *   release-notes  — changelog / release paths or hostnames
+ *   forum-community — Reddit, Stack Overflow, HN, community.* subdomains, /forum/ /questions/ paths
+ *   vendor-blog    — blog.* hostnames or /blog/ paths
+ *   web            — fallback
+ */
+export function classifySourceCategory(url: string): string {
+  try {
+    const parsed = new globalThis.URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+
+    // GitHub — check specific path patterns before the generic repo catch-all
+    if (hostname === 'github.com' || hostname.endsWith('.github.com')) {
+      if (/\/pull\/\d+/.test(path))         return 'github-pr';
+      if (/\/issues\/\d+/.test(path))       return 'github-issue';
+      if (/\/discussions\/\d+/.test(path))  return 'github-discussion';
+      return 'github-repo';
+    }
+
+    // Official documentation — hostname prefix or well-known path segments
+    if (
+      hostname.startsWith('docs.') ||
+      hostname.startsWith('developer.') ||
+      /\/(docs|reference|api|guide|guides|manual|documentation)(\/|$)/.test(path)
+    ) {
+      return 'official-docs';
+    }
+
+    // Release notes / changelogs
+    if (
+      /\/(releases?|changelog|changelogs|release-notes|whatsnew|what-s-new)(\/|$)/.test(path) ||
+      /changelog|release-notes/.test(hostname)
+    ) {
+      return 'release-notes';
+    }
+
+    // Forum / community sources
+    if (
+      hostname === 'reddit.com' || hostname.endsWith('.reddit.com') ||
+      hostname === 'stackoverflow.com' || hostname.endsWith('.stackoverflow.com') ||
+      hostname === 'stackexchange.com' || hostname.endsWith('.stackexchange.com') ||
+      hostname === 'news.ycombinator.com' ||
+      hostname === 'lobste.rs' ||
+      hostname.startsWith('community.') ||
+      hostname.startsWith('forum.') ||
+      /\/(forum|forums|questions|q\/|community)(\/|$)/.test(path)
+    ) {
+      return 'forum-community';
+    }
+
+    // Vendor / personal blogs
+    if (hostname.startsWith('blog.') || /\/blog(\/|$)/.test(path)) {
+      return 'vendor-blog';
+    }
+
+    return 'web';
+  } catch {
+    return 'web';
+  }
 }
 
 /**
@@ -627,10 +688,12 @@ interface ScrapeUrlResult {
 export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<ScrapeUrlResult> {
   const errors: Array<{ layer: string; error: string; errorType: string }> = [];
 
+  const sourceCategory = classifySourceCategory(url);
+
   // Layer 1: fetch (fast, no browser overhead)
   try {
     const result = await scrapeWithFetch(url, signal);
-    return { url, source: result.source, layer: result.layer, markdown: result.markdown };
+    return { url, source: result.source, layer: result.layer, markdown: result.markdown, sourceCategory };
   } catch (error1) {
     const errorInfo = extractErrorInfo(error1);
     errors.push({ layer: 'fetch', error: errorInfo.message, errorType: errorInfo.type });
@@ -638,12 +701,12 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<S
 
   // Layer 2: Playwright + Chromium (shared singleton browser)
   if (signal?.aborted) {
-    return { url, source: 'cancelled', markdown: '', error: 'Cancelled before Layer 2' };
+    return { url, source: 'cancelled', markdown: '', error: 'Cancelled before Layer 2', sourceCategory };
   }
   if (playwrightAvailable) {
     try {
       const result = await scrapeWithChromium(url, signal);
-      return { url, source: result.source, layer: result.layer, markdown: result.markdown };
+      return { url, source: result.source, layer: result.layer, markdown: result.markdown, sourceCategory };
     } catch (error2) {
       const errorInfo = extractErrorInfo(error2);
       errors.push({ layer: 'Playwright+Chromium', error: errorInfo.message, errorType: errorInfo.type });
@@ -655,6 +718,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<S
     source: 'failed',
     markdown: '',
     error: `All layers failed: ${errors.map(e => `${e.layer}: ${e.error} [${e.errorType}]`).join('; ')}`,
+    sourceCategory,
   };
 
 }
@@ -761,6 +825,7 @@ export async function scrape(urls: string[], maxConcurrency = 10, signal?: Abort
         source: result.source ?? 'fetch',
         layer: result.layer,
         markdown: result.markdown ?? '',
+        sourceCategory: classifySourceCategory(result.url),
       });
     } else if (!result.success) {
       const urlErrors = errors.get(result.url) ?? [];
@@ -785,6 +850,7 @@ export async function scrape(urls: string[], maxConcurrency = 10, signal?: Abort
           source: result.source ?? 'playwright',
           layer: result.layer,
           markdown: result.markdown ?? '',
+          sourceCategory: classifySourceCategory(result.url),
         });
       } else if (!result.success) {
         const urlErrors = errors.get(result.url) ?? [];

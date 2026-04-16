@@ -1,9 +1,9 @@
 /**
- * Swarm Orchestrator Unit Tests
+ * Deep Research Orchestrator Unit Tests
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SwarmOrchestrator } from '../../../src/orchestration/swarm-orchestrator';
+import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator';
 
 // Mock dependencies
 const mockInitialize = vi.fn((q, c) => ({
@@ -20,7 +20,7 @@ const mockSave = vi.fn();
 const mockLoad = vi.fn();
 
 vi.mock('../../../src/orchestration/state-manager', () => ({
-  SwarmStateManager: class {
+  DeepResearchStateManager: class {
     initialize = mockInitialize;
     save = mockSave;
     load = mockLoad;
@@ -68,15 +68,15 @@ vi.mock('../../../src/tui/research-panel', () => ({
   flashSlice: vi.fn(),
 }));
 
-vi.mock('../../../src/orchestration/swarm-reducer', async (importOriginal) => {
+vi.mock('../../../src/orchestration/deep-research-reducer', async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
     ...actual,
-    swarmReducer: vi.fn(actual.swarmReducer),
+    deepResearchReducer: vi.fn(actual.deepResearchReducer),
   };
 });
 
-describe('SwarmOrchestrator', () => {
+describe('DeepResearchOrchestrator', () => {
   const createMockOptions = () => ({
     ctx: {
       modelRegistry: {
@@ -99,8 +99,8 @@ describe('SwarmOrchestrator', () => {
 
   it('should initialize and run planning phase', async () => {
     const options = createMockOptions();
-    const orchestrator = new SwarmOrchestrator(options);
-    
+    const orchestrator = new DeepResearchOrchestrator(options);
+
     // Mock the run loop to complete after planning
     vi.spyOn(orchestrator as any, 'doPlanning').mockImplementation(async () => {
       (orchestrator as any).state.status = 'completed';
@@ -114,7 +114,7 @@ describe('SwarmOrchestrator', () => {
 
   it('should transition from planning to researching', async () => {
     const options = createMockOptions();
-    const orchestrator = new SwarmOrchestrator(options);
+    const orchestrator = new DeepResearchOrchestrator(options);
 
     // Run planning
     await (orchestrator as any).doPlanning();
@@ -127,7 +127,7 @@ describe('SwarmOrchestrator', () => {
 
   it('should handle sibling execution and promotion', async () => {
     const options = createMockOptions();
-    const orchestrator = new SwarmOrchestrator(options);
+    const orchestrator = new DeepResearchOrchestrator(options);
 
     // Setup orchestrator state
     (orchestrator as any).state.status = 'researching';
@@ -152,7 +152,7 @@ describe('SwarmOrchestrator', () => {
 
   it('should fail the task if all siblings fail in the first round', async () => {
     const options = createMockOptions();
-    const orchestrator = new SwarmOrchestrator(options);
+    const orchestrator = new DeepResearchOrchestrator(options);
 
     // Setup orchestrator state with two siblings
     (orchestrator as any).state.status = 'researching';
@@ -168,17 +168,17 @@ describe('SwarmOrchestrator', () => {
     // Run first sibling - it should fail but NOT trigger total failure yet
     await (orchestrator as any).executeSibling((orchestrator as any).state.aspects['1.1']);
     expect((orchestrator as any).state.aspects['1.1'].status).toBe('failed');
-    
+
     // Total failure shouldn't have happened yet
     let rejectedError: any;
     (orchestrator as any).run().catch((e: any) => rejectedError = e);
 
     // Run second sibling - it should fail and trigger total failure
     await (orchestrator as any).executeSibling((orchestrator as any).state.aspects['1.2']);
-    
+
     // Wait for the run promise to reject
     await new Promise(resolve => setTimeout(resolve, 10));
-    
+
     expect(rejectedError).toBeDefined();
     expect(rejectedError.message).toContain('Research failed');
     expect(rejectedError.message).toContain('• Researcher 1: Error: Provider error');
@@ -187,7 +187,7 @@ describe('SwarmOrchestrator', () => {
 
   it('should fail the task on resumption if all siblings in the current round have failed', async () => {
     const options = createMockOptions();
-    const orchestrator = new SwarmOrchestrator(options);
+    const orchestrator = new DeepResearchOrchestrator(options);
 
     // Setup state as if it just resumed with two failed siblings
     (orchestrator as any).state.status = 'researching';

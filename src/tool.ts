@@ -2,7 +2,7 @@
  * Research Tool
  *
  * Main orchestration logic for research tool.
- * Orchestrates a state-driven swarm of researcher agents.
+ * Orchestrates deep mode research with multiple parallel agents.
  */
 
 import { readFileSync } from 'node:fs';
@@ -13,6 +13,14 @@ import type {
   AgentToolResult,
   ExtensionContext,
 } from '@mariozechner/pi-coding-agent';
+import type {
+  ExtendedExtensionContext,
+  SessionManager,
+  ModelWithId,
+  ExtendedAgentSessionEvent,
+} from './types/extension-context.ts';
+import type { SettingsManager } from '@mariozechner/pi-coding-agent';
+import type { Model } from '@mariozechner/pi-ai';
 import { Type } from '@sinclair/typebox';
 import { complete } from '@mariozechner/pi-ai';
 import { createResearcherSession } from "./orchestration/researcher.ts";
@@ -37,8 +45,10 @@ import {
   setFunctional,
 } from './infrastructure/searxng-lifecycle.ts';
 import { getManager } from './infrastructure/searxng-lifecycle.ts';
-import { SwarmOrchestrator } from './orchestration/swarm-orchestrator.ts';
+import { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
 import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
+import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
+import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import { injectCurrentDate } from './utils/inject-date.ts';
 import {
   startResearchSession,
@@ -87,7 +97,8 @@ async function ensureFunctionalHealth(
 }
 
 function getPiSessionMetadata(ctx: ExtensionContext) {
-  const sessionManager = (ctx as any).sessionManager;
+  const extendedCtx = ctx as ExtendedExtensionContext;
+  const sessionManager: SessionManager | undefined = extendedCtx.sessionManager;
   const piSessionId = typeof sessionManager?.getSessionId === 'function' ? String(sessionManager.getSessionId()) : 'default';
   return {
     piSessionId,
@@ -101,20 +112,36 @@ export function createResearchTool(): ToolDefinition {
     name: 'research',
     label: 'Research',
     description:
-      'Perform deep web/internet research using a state-driven swarm of agents. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
+      'Perform deep web/internet research using a coordinated team of agents. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
     promptSnippet: 'Conduct multi-agent web/internet research',
     promptGuidelines: [
       'Specifically for web research, not local project exploration.',
       'Research is organized into Rounds. Each round contains multiple parallel siblings.',
-      'SCRAPE PROTOCOL: Call the `scrape` tool TWICE per agent. First call retrieves links already scraped globally; second call performs your filtered scrape.',
+      'SCRAPE PROTOCOL: Call the `scrape` tool up to FOUR times per agent: (1) handshake returns globally scraped links, (2) Batch 1 broad scrape ≤3 URLs, (3) Batch 2 targeted ≤2 URLs, (4) optional Batch 3 deep-dive ≤3 URLs if context < 40%. Batches skip automatically when context > 50%.',
       'The last sibling in each round evaluates progress and decides whether to continue or synthesize.',
+      'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
+      'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
     ],
     parameters: Type.Object({
       query: Type.String({
         description: 'Research query or topic to investigate',
       }),
+      depth: Type.Optional(Type.Union([
+        Type.Literal('brief'),
+        Type.Literal('normal'),
+        Type.Literal('deep'),
+        Type.Literal('ultra'),
+      ], {
+        description: [
+          'Research depth. Overrides quick flag and LLM complexity assessment.',
+          '"brief"  — single researcher, fast (equivalent to quick mode).',
+          '"normal" — 2 initial researchers, up to 3 rounds.',
+          '"deep"   — 3 initial researchers, up to 3 rounds (default when omitted and topic is complex).',
+          '"ultra"  — 5 initial researchers, up to 5 rounds; use for exhaustive investigation.',
+        ].join(' '),
+      })),
       quick: Type.Optional(Type.Boolean({
-        description: 'Enable quick mode: fast investigation using a single researcher session.',
+        description: 'Enable quick mode: fast investigation using a single researcher session. Ignored when depth is specified.',
         default: false,
       })),
       model: Type.Optional(Type.String({
@@ -128,11 +155,27 @@ export function createResearchTool(): ToolDefinition {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, model: modelId, quick: isQuick = false } = params as { query: string; quick?: boolean; model?: string };
+      const { query, model: modelId, quick: isQuickParam = false, depth } = params as {
+        query: string;
+        quick?: boolean;
+        depth?: 'brief' | 'normal' | 'deep' | 'ultra';
+        model?: string;
+      };
+
+      // depth overrides the quick flag entirely.
+      // brief  → quick mode (single researcher)
+      // normal → complexity 2, skip LLM assessment
+      // deep   → complexity 3, skip LLM assessment
+      // ultra  → complexity 4, skip LLM assessment
+      // (none) → respect quick flag; if not quick, LLM assesses 1–3 as before
+      const isQuick = depth === 'brief' ? true : depth ? false : isQuickParam;
 
       if (!query || !ctx.model) {
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
+
+      // Validate and sanitize query
+      const sanitizedQuery = validateAndSanitizeQuery(query);
 
       const baseModel = ctx.model;
       const researchRunId = createResearchRunId();
@@ -163,15 +206,18 @@ export function createResearchTool(): ToolDefinition {
             selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
           }
 
+          const typedModel = selectedModel as ModelWithId;
+          const modelIdStr = typedModel?.id || 'unknown';
+
           const researchId = startResearchSession(piSessionId);
           const masterWidgetId = `pi-research-master-${piSessionId}`;
-          const panelState = createInitialPanelState(researchId, query, getStatus(), (selectedModel as any)?.id || 'unknown');
+          const panelState = createInitialPanelState(researchId, sanitizedQuery, getStatus(), modelIdStr);
           
           logger.info('[research] run initialized', {
-            mode: isQuick ? 'quick' : 'swarm',
+            mode: isQuick ? 'quick' : 'deep',
             piSessionId,
             researchId,
-            selectedModelId: (selectedModel as any)?.id || 'unknown',
+            selectedModelId: modelIdStr,
           });
 
           // Single master update function for this Pi session
@@ -223,17 +269,27 @@ export function createResearchTool(): ToolDefinition {
             const sliceLabel = 'researching ...';
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
+            // Quick mode: 1 researcher × 10 units (8 tool calls + 2-unit final-report step)
+            panelState.progress = { expected: 10, made: 0, extended: false };
             refreshAllSessions(piSessionId);
             const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
             const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
+            const extendedCtx = ctx as ExtendedExtensionContext;
+
+            // Per-session token accumulator for context-aware scrape gating
+            let quickSessionTokens = 0;
+            const quickContextWindowSize = (selectedModel as any)?.contextWindow ?? 200000;
+
             const session = await createResearcherSession({
               cwd: ctx.cwd,
               ctxModel: selectedModel,
               modelRegistry: ctx.modelRegistry,
-              settingsManager: (ctx as any).settingsManager,
+              settingsManager: extendedCtx.settingsManager || (ctx as unknown as { settingsManager: SettingsManager }).settingsManager!,
               systemPrompt: researcherPrompt,
               searxngUrl,
               extensionCtx: ctx,
+              getTokensUsed: () => quickSessionTokens,
+              contextWindowSize: quickContextWindowSize,
             });
             
             const calculateUsageCost = (usage: any): number => {
@@ -246,28 +302,59 @@ export function createResearchTool(): ToolDefinition {
               return inputCost + outputCost + cacheReadCost + cacheWriteCost;
             };
 
-            const subscription = session.subscribe(event => {
-              if (event.type === 'message_end' && event.message.role === 'assistant') {
-                const usage = (event.message as any).usage;
+            const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
+              if (event.type === 'message_end' && event.message?.role === 'assistant') {
+                const usage = event.message?.usage;
                 if (usage) {
                   const cost = calculateUsageCost(usage);
                   const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
                   if (tokens > 0) {
+                    quickSessionTokens += tokens; // drives context-aware scrape gating
                     onTokens(tokens);
                     updateSliceTokens(panelState, sliceLabel, tokens, cost);
                     refreshAllSessions(piSessionId);
                   }
                 }
               } else if (event.type === 'tool_execution_end') {
-                const color = (event as any).isError ? 'red' : 'green';
-                const duration = (event as any).isError ? 400 : 60;
+                const isError = event.isError ?? false;
+                const color = isError ? 'red' : 'green';
+                const duration = isError ? 400 : 60;
                 flashSlice(panelState, sliceLabel, color, duration, () => refreshAllSessions(piSessionId));
+                // Advance progress bar
+                if (panelState.progress) {
+                  panelState.progress.made += 1;
+                  refreshAllSessions(piSessionId);
+                }
               }
             });
 
-            await session.prompt(query);
+            // Race the session prompt against the abort signal so the tool returns
+            // immediately on Ctrl+C rather than waiting for the session to finish.
+            // The session itself continues running in the background (pi SDK limitation),
+            // but the tool call resolves and the user gets a responsive cancel.
+            if (signal) {
+              await Promise.race([
+                session.prompt(sanitizedQuery),
+                new Promise<never>((_, reject) => {
+                  if (signal.aborted) { reject(new Error('Research aborted')); return; }
+                  signal.addEventListener('abort', () => reject(new Error('Research aborted')), { once: true });
+                }),
+              ]);
+            } else {
+              await session.prompt(sanitizedQuery);
+            }
             const result = ensureAssistantResponse(session, 'Quick');
-            
+
+            // Snap to 100%
+            if (panelState.progress) {
+              panelState.progress.made = panelState.progress.expected;
+              refreshAllSessions(piSessionId);
+            }
+
+            // Export research report
+            const exportPath = await exportResearchReport(sanitizedQuery, result, 'quick');
+            const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
+
             // Cleanup subscription
             if (typeof subscription === 'function') {
               subscription();
@@ -275,37 +362,67 @@ export function createResearchTool(): ToolDefinition {
 
             completeSlice(panelState, sliceLabel);
             cleanup();
-            return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
+            return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
           } else {
-            // SWARM MODE: Start with complexity assessment
-            const complexityPrompt = `Analyze the research query: "${query}"
+            // SWARM MODE: resolve complexity from explicit depth or LLM assessment.
+            let complexity: 1 | 2 | 3;
+
+            if (depth && depth !== 'brief') {
+              // Explicit depth bypasses LLM assessment entirely.
+              // brief=0 (Quick session, non-orchestrated)
+              // normal=1 (1 round, 1-2 researchers)
+              // deep=2   (2 rounds, 2-3 researchers)
+              // ultra=3  (3 rounds, 3 researchers)
+              const depthMap: Record<string, 1 | 2 | 3> = {
+                normal: 1,
+                deep:   2,
+                ultra:  3,
+              };
+              complexity = depthMap[depth] ?? 2;
+              logger.info('[research] depth override — skipping LLM complexity assessment', { depth, complexity });
+            } else {
+              // Auto-assess complexity via LLM (original behaviour).
+              const complexityPrompt = `Analyze the research query: "${query}"
 Rate complexity from 1 to 3:
 1: Simple fact (1 researcher)
-2: Standard topic (3 researchers)
+2: Standard topic (2 researchers)
 3: Deep/Nuanced topic (3 researchers, more rounds)
 Output ONLY the number 1, 2, or 3.`;
 
-            const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
-            if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
-            const compResp = await complete(selectedModel, {
-              messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
-            }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
-            
-            const complexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10) || 2;
+              const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
+              if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
+              const compResp = await complete(selectedModel, {
+                messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
+              }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
 
-            const orchestrator = new SwarmOrchestrator({
+              const rawComplexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10);
+              complexity = (Number.isFinite(rawComplexity) ? Math.max(1, Math.min(3, rawComplexity)) : 2) as 1 | 2 | 3;
+            }
+
+            const orchestrator = new DeepResearchOrchestrator({
               ctx,
-              model: selectedModel as any,
-              query,
-              complexity: complexity as 1 | 2 | 3,
+              model: selectedModel as Model<any>,
+              query: sanitizedQuery,
+              complexity,
               onTokens,
               onUpdate: () => refreshAllSessions(piSessionId),
               searxngUrl,
               panelState,
-              });
+            });
             const result = await orchestrator.run(signal);
+
+            // Snap to 100%
+            if (panelState.progress) {
+              panelState.progress.made = panelState.progress.expected;
+              refreshAllSessions(piSessionId);
+            }
+
+            // Export research report
+            const exportPath = await exportResearchReport(sanitizedQuery, result, 'deep');
+            const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
+
             cleanup();
-            return { content: [{ type: 'text', text: result }], details: { totalTokens: panelState.totalTokens } };
+            return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
           }
         } catch (error) {
           // If aborted, don't treat as error - just return gracefully

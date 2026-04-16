@@ -1,14 +1,14 @@
 /**
- * Swarm Reducer Unit Tests
- * 
+ * Deep Research Reducer Unit Tests
+ *
  * Tests the core orchestration logic with ZERO mocks.
  */
 
 import { describe, it, expect } from 'vitest';
-import { swarmReducer, isRoundComplete } from '../../../src/orchestration/swarm-reducer';
-import type { SystemResearchState } from '../../../src/orchestration/swarm-types';
+import { deepResearchReducer, isRoundComplete } from '../../../src/orchestration/deep-research-reducer';
+import type { SystemResearchState } from '../../../src/orchestration/deep-research-types';
 
-describe('swarmReducer', () => {
+describe('deepResearchReducer', () => {
   const initialState: SystemResearchState = {
     version: 1,
     rootQuery: 'test query',
@@ -23,10 +23,10 @@ describe('swarmReducer', () => {
 
   it('should handle PLANNING_COMPLETE', () => {
     const agenda = ['aspect 1', 'aspect 2', 'aspect 3', 'aspect 4'];
-    const nextState = swarmReducer(initialState, { 
-      type: 'PLANNING_COMPLETE', 
-      agenda, 
-      initialCount: 3 
+    const nextState = deepResearchReducer(initialState, {
+      type: 'PLANNING_COMPLETE',
+      agenda,
+      initialCount: 3
     });
 
     expect(nextState.status).toBe('researching');
@@ -37,7 +37,7 @@ describe('swarmReducer', () => {
 
   it('should track sibling completion', () => {
     let state = { ...initialState, aspects: { '1.1': { id: '1.1', query: 'q', status: 'pending' } } } as any;
-    state = swarmReducer(state, { type: 'SIBLING_COMPLETED', id: '1.1', report: 'findings' });
+    state = deepResearchReducer(state, { type: 'SIBLING_COMPLETED', id: '1.1', report: 'findings' });
 
     expect(state.aspects['1.1'].status).toBe('completed');
     expect(state.aspects['1.1'].report).toBe('findings');
@@ -58,7 +58,7 @@ describe('swarmReducer', () => {
 
   it('should handle PROMOTION_DECISION to next round', () => {
     const state = { ...initialState, currentRound: 1 as const, status: 'researching' as const };
-    const nextState = swarmReducer(state, {
+    const nextState = deepResearchReducer(state, {
       type: 'PROMOTION_DECISION',
       nextQueries: ['new q1'],
       maxRounds: 3
@@ -71,7 +71,7 @@ describe('swarmReducer', () => {
 
   it('should handle final synthesis in PROMOTION_DECISION', () => {
     const state = { ...initialState, status: 'researching' as const };
-    const nextState = swarmReducer(state, {
+    const nextState = deepResearchReducer(state, {
       type: 'PROMOTION_DECISION',
       nextQueries: [],
       finalSynthesis: 'the end',

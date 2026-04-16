@@ -1,13 +1,13 @@
 /**
- * Swarm Research Types
- * 
+ * Deep Research Types
+ *
  * Defines the schema for the monolithic ResearchState persisted in the session tree.
  */
 
 export type ResearchStatus = 'planning' | 'researching' | 'evaluating' | 'synthesizing' | 'completed' | 'failed';
 export type SiblingStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-export type SwarmEvent =
+export type DeepResearchEvent =
   | { type: 'PLANNING_COMPLETE'; agenda: string[]; initialCount: number }
   | { type: 'SIBLING_STARTED'; id: string }
   | { type: 'SIBLING_COMPLETED'; id: string; report: string }

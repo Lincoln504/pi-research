@@ -128,7 +128,7 @@ export class ToolUsageTracker {
 export function createDefaultToolLimits(): ToolLimits {
   return {
     gathering: 4, // 4 rounds of information gathering total
-    scrape: 3,    // THREE scrape calls: 1 handshake + 2 execution batches
+    scrape: 4,    // Up to FOUR scrape calls: 1 handshake + up to 3 execution batches (Batch 3 is context-gated)
     read: undefined,
   };
 }

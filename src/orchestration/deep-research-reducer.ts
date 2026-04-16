@@ -1,13 +1,13 @@
 /**
- * Research Swarm Reducer
- * 
- * PURE FUNCTION logic for state transitions. 
+ * Deep Research Reducer
+ *
+ * PURE FUNCTION logic for state transitions.
  * Contains 0 side effects. 100% testable without mocks.
  */
 
-import type { SystemResearchState, SwarmEvent } from './swarm-types.ts';
+import type { SystemResearchState, DeepResearchEvent } from './deep-research-types.ts';
 
-export function swarmReducer(state: SystemResearchState, event: SwarmEvent): SystemResearchState {
+export function deepResearchReducer(state: SystemResearchState, event: DeepResearchEvent): SystemResearchState {
   // Deep clone state to ensure true purity
   const newState: SystemResearchState = {
     ...state,

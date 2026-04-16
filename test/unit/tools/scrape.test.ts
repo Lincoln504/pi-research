@@ -16,7 +16,7 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 
 describe('tools/scrape', () => {
   const createMockContext = () => ({} as any);
-  const createMockTracker = () => new ToolUsageTracker({ scrape: 3 });
+  const createMockTracker = () => new ToolUsageTracker({ scrape: 4 });
   const createMockOptions = (tracker = createMockTracker()) => ({
     searxngUrl: 'http://localhost:8888',
     ctx: createMockContext(),
@@ -65,7 +65,7 @@ describe('tools/scrape', () => {
       expect(scrapeSingle).toHaveBeenCalled();
       expect(options.updateGlobalLinks).toHaveBeenCalledWith(['http://test.com']);
       expect((result.content[0] as any).text).toContain('URL Scrape Results');
-      expect((result.content[0] as any).text).toContain('Batch 1 of 2');
+      expect((result.content[0] as any).text).toContain('Batch 1 of up to 3');
     });
 
     it('should perform scrape on third call (Batch 2)', async () => {
@@ -80,20 +80,39 @@ describe('tools/scrape', () => {
       const result = await tool.execute('test-id', { urls: ['http://test2.com'] }, undefined, undefined, undefined as any); // 3: batch 2
 
       expect(scrapeSingle).toHaveBeenCalled();
-      expect((result.content[0] as any).text).toContain('Batch 2 of 2');
-      expect((result.content[0] as any).text).toContain('All scrape batches complete');
+      expect((result.content[0] as any).text).toContain('URL Scrape Results (Batch 2)');
     });
 
-    it('should lock out on fourth call', async () => {
-      const options = createMockOptions();
+    it('should lock out on fifth call (after all 4 calls used)', async () => {
+      const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
+      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://t.com', source: 'fetch', markdown: 'ok' });
+
+      const options = createMockOptions(); // tracker limit = 4
       const tool = createScrapeTool(options);
-      
-      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 1: handshake
-      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 2: batch 1
-      await tool.execute('3', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 3: batch 2
-      const result = await tool.execute('4', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 4: locked
+
+      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 1: handshake
+      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 2: batch 1
+      await tool.execute('3', { urls: ['http://t2.com'] }, undefined, undefined, undefined as any);         // 3: batch 2
+      await tool.execute('4', { urls: ['http://t3.com'] }, undefined, undefined, undefined as any);         // 4: batch 3
+      const result = await tool.execute('5', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 5: locked
 
       expect((result.details as any).locked).toBe(true);
+    });
+
+    it('should lock out on fourth call when tracker limit is 3', async () => {
+      const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
+      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://t.com', source: 'fetch', markdown: 'ok' });
+
+      const options = createMockOptions(new ToolUsageTracker({ scrape: 3 }));
+      const tool = createScrapeTool(options);
+
+      await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 1: handshake
+      await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 2: batch 1
+      await tool.execute('3', { urls: ['http://t2.com'] }, undefined, undefined, undefined as any);         // 3: batch 2
+      const result = await tool.execute('4', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 4: tracker blocks
+
+      // Tracker limit of 3 means batch 3 is blocked before executing
+      expect((result.details as any).blocked).toBe(true);
     });
   });
 });
