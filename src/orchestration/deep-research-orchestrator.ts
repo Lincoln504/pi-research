@@ -461,14 +461,23 @@ export class DeepResearchOrchestrator {
     activateSlice(this.options.panelState, coordId);
     this.options.onUpdate();
 
-    const completedAspectQueries = Object.values(this.state.aspects).map(a => a.query);
+    // Track ONLY completed aspect queries to determine remaining agenda items
+    // This ensures pending aspects (new round not started yet) don't falsely
+    // appear as completed when filtering the initial agenda
+    const completedAspectQueries = Object.values(this.state.aspects)
+      .filter(a => a.status === 'completed')
+      .map(a => a.query);
     const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));
     const targetRounds = this.getMaxRounds(this.state.complexity);
     const isAtTarget = this.state.currentRound >= targetRounds;
     const isAtHardLimit = this.state.currentRound > targetRounds;
 
     // Provide ALL completed findings (including the lead's own) — fresh context via complete()
+    // This includes ALL researchers from ALL rounds that have completed with reports
     const allCompleted = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
+    
+    logger.log(`[deep-research] Evaluator Round ${evaluatedRound}: Analyzing ${allCompleted.length} completed researchers from all rounds`);
+    
     const allReportsContext = allCompleted.length > 0
       ? `## All Research Findings:\n\n` +
         allCompleted.map(a => {
@@ -546,6 +555,10 @@ export class DeepResearchOrchestrator {
           logger.warn('[deep-research] Failed to parse promotion JSON:', err);
         }
       }
+      
+      logger.log(`[deep-research] Evaluator decision for Round ${evaluatedRound}: ${
+        isSynthesis ? 'SYNTHESIS - completing research' : `DELEGATION - spawning ${nextQueries.length} new researchers in Round ${evaluatedRound + 1}`
+      }`);
 
       this.updateState({
         type: 'PROMOTION_DECISION',
