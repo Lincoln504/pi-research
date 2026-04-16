@@ -28,10 +28,10 @@ export interface ResearchSibling {
 }
 
 export interface SystemResearchState {
-  version: 1;
+  version: number;
   rootQuery: string;
-  complexity: 1 | 2 | 3;
-  currentRound: 1 | 2 | 3;
+  complexity: 1 | 2 | 3 | 4;
+  currentRound: number;
   status: ResearchStatus;
   lastUpdated: number;
   

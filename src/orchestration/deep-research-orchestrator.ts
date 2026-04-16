@@ -23,12 +23,16 @@ import {
   INITIAL_RESEARCHERS_LEVEL_1,
   INITIAL_RESEARCHERS_LEVEL_2,
   INITIAL_RESEARCHERS_LEVEL_3,
+  INITIAL_RESEARCHERS_LEVEL_4,
   MAX_ROUNDS_LEVEL_1,
   MAX_ROUNDS_LEVEL_2,
   MAX_ROUNDS_LEVEL_3,
+  MAX_ROUNDS_LEVEL_4,
   MAX_SIBLINGS_ROUND_1,
   MAX_SIBLINGS_ROUND_2,
   MAX_SIBLINGS_ROUND_3,
+  MAX_SIBLINGS_ROUND_4,
+  MAX_CONCURRENT_RESEARCHERS,
   MAX_REPORT_LENGTH,
   DEFAULT_MODEL_CONTEXT_WINDOW,
 } from '../constants.ts';
@@ -48,7 +52,7 @@ export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
   model: Model<any>;
   query: string;
-  complexity: 1 | 2 | 3;
+  complexity: 1 | 2 | 3 | 4;
   onTokens: (n: number) => void;
   onUpdate: () => void;
   searxngUrl: string;
@@ -62,7 +66,7 @@ export class DeepResearchOrchestrator {
   private resolveCompletion: (result: string) => void = () => {};
   private rejectCompletion: (err: any) => void = () => {};
 
-  /** Per-sibling cumulative token counter (updated on every message_end). */
+  /** Per-sibling current context occupation (overwritten on every message_end). */
   private siblingTokens = new Map<string, number>();
   /** Tracks progress units already credited per sibling/evaluator to ensure full budget is met. */
   private progressCredits = new Map<string, number>();
@@ -78,7 +82,6 @@ export class DeepResearchOrchestrator {
   private resolveResult(result: string) {
     if (this.options.panelState.progress) {
       this.options.panelState.progress.made = this.options.panelState.progress.expected;
-      logger.log(`[deep-research] Progress: Snapped to 100% (${this.options.panelState.progress.made}/${this.options.panelState.progress.expected})`);
       this.options.onUpdate();
     }
     const final = result.length > MAX_REPORT_LENGTH
@@ -102,40 +105,51 @@ export class DeepResearchOrchestrator {
     this.stateManager.save(this.state);
   }
 
+  private calculateUsageCost(usage: any): number {
+    if (!usage || !this.options.model?.cost) return 0;
+    const modelCost = this.options.model.cost;
+    const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
+    const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
+    const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
+    const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+    return inputCost + outputCost + cacheReadCost + cacheWriteCost;
+  }
+
   private async kickoff(signal?: AbortSignal) {
     if (this.state.status === 'planning') await this.doPlanning(signal);
     if (this.state.status === 'researching') await this.startRound(signal);
     if (this.state.status === 'completed') this.resolveResult(this.state.finalSynthesis || '');
   }
 
-  private getInitialSiblingCount(complexity: 1 | 2 | 3): number {
+  private getInitialSiblingCount(complexity: 1 | 2 | 3 | 4): number {
     switch(complexity) {
       case 1: return INITIAL_RESEARCHERS_LEVEL_1;
       case 2: return INITIAL_RESEARCHERS_LEVEL_2;
       case 3: return INITIAL_RESEARCHERS_LEVEL_3;
+      case 4: return INITIAL_RESEARCHERS_LEVEL_4;
     }
   }
 
-  private getMaxRounds(complexity: 1 | 2 | 3): number {
+  private getMaxRounds(complexity: 1 | 2 | 3 | 4): number {
     switch(complexity) {
       case 1: return MAX_ROUNDS_LEVEL_1;
       case 2: return MAX_ROUNDS_LEVEL_2;
       case 3: return MAX_ROUNDS_LEVEL_3;
+      case 4: return MAX_ROUNDS_LEVEL_4;
     }
   }
 
-  private getMaxSiblingsPerRound(complexity: 1 | 2 | 3): number {
+  private getMaxSiblingsPerRound(complexity: 1 | 2 | 3 | 4): number {
     switch(complexity) {
       case 1: return MAX_SIBLINGS_ROUND_1;
       case 2: return MAX_SIBLINGS_ROUND_2;
       case 3: return MAX_SIBLINGS_ROUND_3;
+      case 4: return MAX_SIBLINGS_ROUND_4;
     }
   }
 
   private async doPlanning(signal?: AbortSignal) {
-    const sliceLabel = 'planning ...';
-    addSlice(this.options.panelState, sliceLabel, sliceLabel, false);
-    activateSlice(this.options.panelState, sliceLabel);
+    this.options.panelState.statusMessage = 'planning...';
     this.options.onUpdate();
 
     try {
@@ -145,9 +159,19 @@ export class DeepResearchOrchestrator {
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
+      
       const response = await complete(this.options.model, {
         messages: [{ role: 'user', content: [{ type: 'text', text: plannerPrompt }], timestamp: Date.now() }]
       }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
+
+      const usage = response.usage;
+      if (usage) {
+        const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+        if (tokens > 0) {
+          this.options.onTokens(tokens);
+          this.options.onUpdate();
+        }
+      }
 
       const text = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
       let agenda: string[] = [];
@@ -161,11 +185,11 @@ export class DeepResearchOrchestrator {
       }
 
       if (agenda.length === 0) {
-        // Fallback: use root query as sole agenda item
         agenda = [this.state.rootQuery];
       }
 
       const initialCount = this.getInitialSiblingCount(this.state.complexity);
+      logger.log(`[deep-research] Planning complete: ${agenda.length} agenda items. Initial count: ${initialCount}`);
 
       this.updateState({
         type: 'PLANNING_COMPLETE',
@@ -173,33 +197,28 @@ export class DeepResearchOrchestrator {
         initialCount
       });
 
-      // Initialise progress tracking.
-      // Budget for the full potential scope of research up-front so the percentage
-      // represents "how far through the total possible work" rather than just round 1.
-      //   • 10 units per researcher (8 tool calls + 2-unit final-report weight)
-      //   • 5 units per lead-evaluator call (one per round boundary + final synthesis)
+      // Initialise progress budget
       const UNITS_PER_RESEARCHER = 10;
       const LEAD_EVAL_UNITS = 5;
       const maxRounds = this.getMaxRounds(this.state.complexity);
       const maxSibsPerRound = this.getMaxSiblingsPerRound(this.state.complexity);
 
-      // BUDGET FIX: Round 1 might have fewer researchers launched than the complexity's initialCount
-      // if the agenda is small. Budget for what we actually launch.
       const round1Count = Math.min(initialCount, agenda.length);
-      let fullScopeExpected = round1Count * UNITS_PER_RESEARCHER; // Round 1
+      let fullScopeExpected = round1Count * UNITS_PER_RESEARCHER;
       for (let r = 2; r <= maxRounds; r++) {
         fullScopeExpected += LEAD_EVAL_UNITS + maxSibsPerRound * UNITS_PER_RESEARCHER;
       }
-      fullScopeExpected += LEAD_EVAL_UNITS; // Final synthesis call
+      fullScopeExpected += LEAD_EVAL_UNITS;
 
-      this.options.panelState.progress = {
-        expected: fullScopeExpected,
-        made: 0,
-        extended: false,
-      };
-      logger.log(`[deep-research] Progress initialised: expected=${fullScopeExpected}, initialCount=${initialCount}, round1Count=${round1Count}, complexity=${this.state.complexity}`);
+      this.options.panelState.progress = { expected: fullScopeExpected, made: 0, extended: false };
+      this.options.onUpdate();
+
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error('[deep-research] Planning failed:', err);
+      this.rejectCompletion(new Error(`Research planning failed: ${errorMsg}`));
     } finally {
-      removeSlice(this.options.panelState, sliceLabel);
+      this.options.panelState.statusMessage = undefined;
       this.options.onUpdate();
     }
   }
@@ -207,48 +226,70 @@ export class DeepResearchOrchestrator {
   private async startRound(signal?: AbortSignal) {
     const currentRound = this.state.currentRound;
     const roundAspects = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
+    const runningAspects = roundAspects.filter(a => a.status === 'running');
     const pendingAspects = roundAspects.filter(a => a.status === 'pending');
 
     if (pendingAspects.length > 0) {
-      logger.log(`[deep-research] Round ${currentRound}: Launching ${pendingAspects.length} siblings.`);
+      // TUI Optimization: If we are starting a fresh round (generation 1),
+      // remove slices from previous rounds to prevent horizontal crowding.
+      const isFirstGenOfRound = roundAspects.length === pendingAspects.length;
+      if (isFirstGenOfRound && currentRound > 1) {
+        const prevRoundPrefix = `${currentRound - 1}.`;
+        const toRemove = Array.from(this.options.panelState.slices.keys())
+          .filter(id => id.startsWith(prevRoundPrefix));
+        for (const id of toRemove) {
+          removeSlice(this.options.panelState, id);
+        }
+        this.options.onUpdate();
+      }
 
-      // Stagger launches to avoid simultaneous provider rate limits and tool resource contention
-      for (let i = 0; i < pendingAspects.length; i++) {
-        if (i > 0) await new Promise(resolve => setTimeout(resolve, 2000));
-        if (signal?.aborted) break;
-        this.executeSibling(pendingAspects[i]!, signal);
+      const allowedToLaunch = Math.max(0, MAX_CONCURRENT_RESEARCHERS - runningAspects.length);
+      
+      if (allowedToLaunch > 0) {
+        const toLaunch = pendingAspects.slice(0, allowedToLaunch);
+        logger.log(`[deep-research] Round ${currentRound}: Launching ${toLaunch.length} siblings (Concurrency limit: ${MAX_CONCURRENT_RESEARCHERS}).`);
+
+        for (let i = 0; i < toLaunch.length; i++) {
+          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1500));
+          if (signal?.aborted) break;
+          this.executeSibling(toLaunch[i]!, signal);
+        }
       }
       return;
     }
 
-    // Perfection/Resumption: If no pending aspects but round isn't empty, check if it's complete
+    if (runningAspects.length > 0) {
+      return;
+    }
+
     if (roundAspects.length > 0 && isRoundComplete(this.state, currentRound)) {
        if (!this.state.promotedId && !this.state.finalSynthesis) {
-          // ROBUSTNESS: Check if we have ANY findings at all before promoting
           const allCompletedWithReports = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
           if (allCompletedWithReports.length === 0) {
             const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
             const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
-            const error = new Error(`Research failed on resumption. All researchers in round ${currentRound} encountered errors and no usable information was found:\n\n${errors}`);
-            logger.error(`[deep-research] Total failure on resumption - no researchers succeeded in round ${currentRound}`);
-            this.rejectCompletion(error);
+            this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
             return;
           }
 
-          logger.log(`[deep-research] Round ${currentRound} complete on kickoff, but no promotion found. Promoting first available sibling.`);
           const firstSibling = roundAspects.find(a => a.status === 'completed' || a.status === 'failed');
           if (firstSibling) {
-             // We don't have an active session in a new process, so we must recreate one
-             this.executeSibling(firstSibling, signal);
+             this.promoteToLead(firstSibling, undefined, signal);
              return;
           }
+       } else if (this.state.promotedId) {
+         return;
        }
     }
 
     if (this.state.status !== 'completed') {
-      this.state.status = 'completed';
-      this.stateManager.save(this.state);
-      this.resolveResult(this.state.finalSynthesis || 'Research ended.');
+      if (this.state.finalSynthesis) {
+        this.resolveResult(this.state.finalSynthesis);
+      } else {
+        this.state.status = 'completed';
+        this.stateManager.save(this.state);
+        this.resolveResult('Research ended.');
+      }
     }
   }
 
@@ -258,8 +299,7 @@ export class DeepResearchOrchestrator {
     const displayNum = getDisplayNumber(this.state, aspect.id);
     const roleContext = getResearcherRoleContext(this.state, aspect.id);
 
-    // Use display number for UI, internal ID for tracking
-    addSlice(this.options.panelState, aspect.id, displayNum, true);
+    addSlice(this.options.panelState, aspect.id, displayNum, false);
     activateSlice(this.options.panelState, aspect.id);
     this.options.onUpdate();
 
@@ -272,9 +312,12 @@ export class DeepResearchOrchestrator {
       + '\n\n' + allFindingsMarkdown
       + '\n\n' + sharedLinksMarkdown;
 
-    // Initialise per-sibling token counter for context-aware scrape gating
-    this.siblingTokens.set(aspect.id, 0);
+    const initialPromptEstimate = Math.ceil(researcherPrompt.length / 4);
+    this.siblingTokens.set(aspect.id, initialPromptEstimate);
     const getTokensUsed = () => this.siblingTokens.get(aspect.id) ?? 0;
+
+    updateSliceTokens(this.options.panelState, aspect.id, initialPromptEstimate, 0);
+    this.options.onUpdate();
 
     let session: AgentSession | undefined;
     try {
@@ -288,9 +331,7 @@ export class DeepResearchOrchestrator {
         extensionCtx: this.options.ctx,
         getGlobalState: () => this.state,
         updateGlobalLinks: (links: string[]) => {
-          logger.log(`[deep-research] Adding ${links.length} links to global pool (total: ${this.state.allScrapedLinks.length})`);
           this.updateState({ type: 'LINKS_SCRAPED', links });
-          logger.log(`[deep-research] Global link pool now: ${this.state.allScrapedLinks.length}`);
         },
         getTokensUsed,
         contextWindowSize: this.contextWindowSize,
@@ -298,48 +339,35 @@ export class DeepResearchOrchestrator {
 
       this.activeSessions.set(aspect.id, session);
 
-      // Helper to calculate cost from usage
-      const calculateUsageCost = (usage: any): number => {
-        if (!usage || !this.options.model?.cost) return 0;
-        const modelCost = this.options.model.cost;
-        const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
-        const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
-        const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
-        const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
-        return inputCost + outputCost + cacheReadCost + cacheWriteCost;
-      };
-
       const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
-        if (event.type === 'message_end' && event.message?.role === 'assistant') {
+        if (event.type === 'message_end') {
           const usage = event.message?.usage;
           if (usage) {
-            const cost = calculateUsageCost(usage);
+            const cost = this.calculateUsageCost(usage);
             const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
 
             if (tokens > 0) {
-              // Update per-sibling token counter (drives context-aware scrape gating)
-              this.siblingTokens.set(aspect.id, (this.siblingTokens.get(aspect.id) ?? 0) + tokens);
-
-              this.options.onTokens(tokens);
-              updateSliceTokens(this.options.panelState, aspect.id, tokens, cost);
-              this.updateState({ type: 'SIBLING_TOKENS', id: aspect.id, tokens, cost });
-              this.options.onUpdate();
+              if (event.message?.role === 'assistant') {
+                this.siblingTokens.set(aspect.id, tokens);
+                this.options.onTokens(tokens);
+                updateSliceTokens(this.options.panelState, aspect.id, tokens, cost);
+                this.updateState({ type: 'SIBLING_TOKENS', id: aspect.id, tokens, cost });
+                this.options.onUpdate();
+              }
             }
           }
         } else if (event.type === 'tool_execution_end') {
           const isError = event.isError ?? false;
           const color = isError ? 'red' : 'green';
-          const duration = isError ? 400 : 60;
+          const duration = isError ? 1000 : 500;
           flashSlice(this.options.panelState, aspect.id, color, duration, this.options.onUpdate);
 
-          // Advance progress bar (up to 8 tool calls credited per researcher)
           if (this.options.panelState.progress) {
             const current = this.progressCredits.get(aspect.id) ?? 0;
             if (current < 8) {
-              const newVal = (this.progressCredits.get(aspect.id) ?? 0) + 1;
+              const newVal = current + 1;
               this.progressCredits.set(aspect.id, newVal);
               this.options.panelState.progress.made += 1;
-              logger.log(`[deep-research] Progress: Sibling ${aspect.id} tool call credited. made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
               this.options.onUpdate();
             }
           }
@@ -348,127 +376,229 @@ export class DeepResearchOrchestrator {
 
       await session.prompt(aspect.query);
 
-      // If the run was aborted while the session was executing, skip state updates
-      // and promotion — the orchestrator's promise already rejected.
       if (signal?.aborted) {
         if (typeof subscription === 'function') subscription();
-        logger.log(`[deep-research] Sibling ${aspect.id} finished after abort — skipping state update`);
         return;
       }
 
       const report = ensureAssistantResponse(session, aspect.id);
-
-      // Cleanup subscription before continuing to promotion
-      if (typeof subscription === 'function') {
-        subscription();
-      }
+      if (typeof subscription === 'function') subscription();
 
       this.updateState({ type: 'SIBLING_COMPLETED', id: aspect.id, report });
-      completeSlice(this.options.panelState, aspect.id);
-      // Top up to the full 10-unit budget for this researcher now that they've finished.
+      
+      const currentRound = this.state.currentRound;
+      const isLastStanding = isRoundComplete(this.state, currentRound);
+      
+      if (!isLastStanding) {
+        completeSlice(this.options.panelState, aspect.id);
+      }
+
       if (this.options.panelState.progress) {
         const alreadyCredited = this.progressCredits.get(aspect.id) ?? 0;
         const topUp = 10 - alreadyCredited;
         if (topUp > 0) {
           this.options.panelState.progress.made += topUp;
           this.progressCredits.set(aspect.id, 10);
-          logger.log(`[deep-research] Progress: Sibling ${aspect.id} completed (top-up ${topUp}). made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
         }
       }
       this.options.onUpdate();
 
-      await this.handleSiblingCompletion(aspect, session, signal);
-    } catch (err) {
-      // If aborted, the orchestrator's promise already rejected cleanly — just log and exit.
-      if (signal?.aborted) {
-        logger.log(`[deep-research] Sibling ${aspect.id} caught error after abort — suppressing`);
-        return;
+      if (isLastStanding) {
+        await this.handleSiblingCompletion(aspect, session, signal);
+      } else {
+        await this.injectFindingsIntoRunningSiblings(aspect);
       }
+
+    } catch (err) {
+      if (signal?.aborted) return;
       const errorMsg = String(err);
       logger.error(`[deep-research] Sibling ${aspect.id} failed:`, err);
       this.updateState({ type: 'SIBLING_FAILED', id: aspect.id, error: errorMsg });
-      flashSlice(this.options.panelState, aspect.id, 'red', 400, this.options.onUpdate);
+      flashSlice(this.options.panelState, aspect.id, 'red', 1000, this.options.onUpdate);
       completeSlice(this.options.panelState, aspect.id);
       
-      // Still top up to the full 10-unit budget for this researcher if they fail.
       if (this.options.panelState.progress) {
         const alreadyCredited = this.progressCredits.get(aspect.id) ?? 0;
         const topUp = 10 - alreadyCredited;
         if (topUp > 0) {
           this.options.panelState.progress.made += topUp;
           this.progressCredits.set(aspect.id, 10);
-          logger.log(`[deep-research] Progress: Sibling ${aspect.id} failed (top-up ${topUp}). made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
         }
       }
       this.options.onUpdate();
 
-      // If we have a session, we can still call handleSiblingCompletion (it won't have a report)
-      // If session failed to create, we still need to call it to trigger last-man-standing logic
-      await this.handleSiblingCompletion(aspect, session, signal);
+      const currentRound = this.state.currentRound;
+      if (isRoundComplete(this.state, currentRound)) {
+        await this.handleSiblingCompletion(aspect, session, signal);
+      }
     } finally {
       this.activeSessions.delete(aspect.id);
+      this.startRound(signal).catch(() => {});
     }
   }
 
-  private async handleSiblingCompletion(finished: ResearchSibling, _session?: AgentSession, signal?: AbortSignal) {
-    // If the run was aborted, skip injection and promotion entirely.
-    if (signal?.aborted) return;
-
+  private async injectFindingsIntoRunningSiblings(finished: ResearchSibling) {
+    if (!finished.report) return;
     const currentRound = this.state.currentRound;
     const allInRound = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
     const runningSiblings = allInRound.filter(s => s.status === 'running' && s.id !== finished.id);
 
-    // 1. Injection Chain: Queue sibling reports to running researchers
-    // Uses steer() to interrupt current operation with new findings
-    if (finished.report) {
-      for (const target of runningSiblings) {
-        const targetSession = this.activeSessions.get(target.id);
-        if (targetSession) {
-          const finishedDisplayNum = getDisplayNumber(this.state, finished.id);
-          const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${finished.report}`;
-
-          try {
-            logger.log(`[deep-research] Injecting report from ${finished.id} into ${target.id}`);
-            // Queue message to interrupt after current tool calls complete
-            await targetSession.steer(injectionMessage);
-            logger.log(`[deep-research] Report successfully queued for ${target.id}`);
-          } catch (err) {
-            logger.error(`[deep-research] Failed to inject report into ${target.id}:`, err);
-          }
-        }
+    for (const target of runningSiblings) {
+      const targetSession = this.activeSessions.get(target.id);
+      if (targetSession) {
+        const finishedDisplayNum = getDisplayNumber(this.state, finished.id);
+        const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${finished.report}`;
+        try {
+          await targetSession.steer(injectionMessage);
+        } catch { /* suppress */ }
       }
     }
+  }
 
-    // 2. Last-Alive Detection & Promotion
-    // Check if this is the last sibling to finish (all others completed or this is the only one)
-    if (isRoundComplete(this.state, currentRound)) {
-      // Check if a promotion is already in progress to avoid double-evaluation
-      if (this.state.promotedId) {
-        logger.log(`[deep-research] Round ${currentRound} complete, but promotion already started for ${this.state.promotedId}`);
+  private async handleSiblingCompletion(finished: ResearchSibling, session?: AgentSession, signal?: AbortSignal) {
+    if (signal?.aborted) return;
+
+    if (!this.state.promotedId && !this.state.finalSynthesis) {
+      const allCompletedWithReports = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
+      
+      if (allCompletedWithReports.length === 0) {
+        const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
+        const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
+        this.rejectCompletion(new Error(`Research failed. All researchers encountered errors:\n\n${errors}`));
         return;
       }
 
-      if (this.isLastAliveResearcher(finished)) {
-        // ROBUSTNESS: Check if we have ANY findings at all before promoting to Lead Evaluator
-        // If everyone in Round 1 failed and we have no findings, fail the task
-        const allCompleted = Object.values(this.state.aspects).filter(a => a.status === 'completed' && a.report);
-        if (allCompleted.length === 0) {
-          const allFailed = Object.values(this.state.aspects).filter(a => a.status === 'failed');
-          const errors = allFailed.map(a => `• Researcher ${getDisplayNumber(this.state, a.id)}: ${a.error}`).join('\n');
-          const error = new Error(`Research failed. All researchers encountered errors and no usable information was found:\n\n${errors}`);
-          logger.error('[deep-research] Total failure - no researchers succeeded across all rounds');
-          this.rejectCompletion(error);
-          return;
+      logger.log(`[deep-research] Promoting ${finished.id} (last survivor) to Lead Evaluator.`);
+      this.options.onUpdate();
+
+      await this.promoteToLead(finished, session, signal);
+    }
+  }
+
+  private async promoteToLead(lead: ResearchSibling, session?: AgentSession, signal?: AbortSignal) {
+    const completedAspectQueries = Object.values(this.state.aspects).map(a => a.query);
+    const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));
+    const targetRounds = this.getMaxRounds(this.state.complexity);
+    const hardLimit = targetRounds + 1;
+    const isAtTarget = this.state.currentRound >= targetRounds;
+    const isAtHardLimit = this.state.currentRound >= hardLimit;
+
+    const otherCompleted = Object.values(this.state.aspects).filter(a => a.id !== lead.id && a.status === 'completed' && a.report);
+    const otherReportsContext = otherCompleted.length > 0 
+      ? `## Findings from Other Researchers in this Initiative:\n\n` + 
+        otherCompleted.map(a => {
+          const report = a.report || '';
+          const truncated = report.length > 8000 ? report.slice(0, 8000) + '\n... (truncated) ...' : report;
+          return `### Researcher ${getDisplayNumber(this.state, a.id)}\n${truncated}`;
+        }).join('\n\n---\n\n')
+      : '';
+
+    const leadPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'system-lead-evaluator.md'), 'utf-8');
+    const originalAgendaStr = this.state.initialAgenda.map(q => `• ${q}`).join('\n');
+    let leadPrompt = leadPromptRaw
+      .replace('{ROOT_QUERY}', this.state.rootQuery)
+      .replace('{ORIGINAL_AGENDA}', originalAgendaStr)
+      .replace('{ROUND_NUMBER}', this.state.currentRound.toString())
+      .replace('{MAX_ROUNDS}', targetRounds.toString());
+
+    if (isAtHardLimit) {
+      leadPrompt += '\n\n⚠️ **CRITICAL: ABSOLUTE MAXIMUM LIMIT REACHED.** You MUST provide a FINAL SYNTHESIS in Markdown format.';
+    } else if (isAtTarget) {
+      leadPrompt += '\n\n⚠️ **NOTICE: TARGET DEPTH REACHED.** You should ideally synthesize now.';
+    }
+
+    const agendaSection = remainingAgenda.length > 0
+      ? `\n### Unfulfilled Agenda Items\n${remainingAgenda.map(q => `- ${q}`).join('\n')}`
+      : '\n### All Agenda Items Covered\nAll initial research agenda items have been addressed.';
+
+    const promotionPrompt = leadPrompt + '\n\n' + otherReportsContext + agendaSection;
+
+    try {
+      this.updateState({ type: 'PROMOTION_STARTED', id: lead.id });
+      
+      let decision: string;
+      let usage: any;
+
+      if (session) {
+        // HEARTBEAT: Prompt can take a while; ensure TUI stays alive
+        const heartbeat = setInterval(() => {
+          this.options.onUpdate();
+        }, 2000);
+
+        const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
+          if (event.type === 'message_end') {
+            usage = event.message?.usage;
+            if (usage && event.message?.role === 'assistant') {
+              const cost = this.calculateUsageCost(usage);
+              const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+              if (tokens > 0) {
+                this.siblingTokens.set(lead.id, tokens);
+                this.options.onTokens(tokens);
+                updateSliceTokens(this.options.panelState, lead.id, tokens, cost);
+                this.updateState({ type: 'SIBLING_TOKENS', id: lead.id, tokens, cost });
+                this.options.onUpdate();
+              }
+            }
+          }
+        });
+
+        try {
+          await session.prompt(promotionPrompt);
+          decision = ensureAssistantResponse(session, 'Lead Evaluator');
+        } finally {
+          clearInterval(heartbeat);
+          subscription();
         }
-
-        // Delay promotion slightly to ensure UI settles and researcher 'breathes' between tasks
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        if (signal?.aborted) return;
-
-        logger.log(`[deep-research] ${finished.id} is last alive. Promoting to Lead Evaluator.`);
-        this.updateState({ type: 'PROMOTION_STARTED', id: finished.id });
-        await this.promoteToLead(finished, signal);
+      } else {
+        const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
+        if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
+        const response = await complete(this.options.model, {
+          messages: [{ role: 'user', content: [{ type: 'text', text: promotionPrompt }], timestamp: Date.now() }]
+        }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
+        decision = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+        usage = response.usage;
+        if (usage) {
+           const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+           const cost = this.calculateUsageCost(usage);
+           updateSliceTokens(this.options.panelState, lead.id, tokens, cost);
+        }
       }
+
+      const isSynthesis = decision.trim().startsWith('#');
+      let nextQueries: string[] = [];
+      if (!isSynthesis) {
+        try {
+          const lastOpen = decision.lastIndexOf('[');
+          const lastClose = decision.lastIndexOf(']');
+          if (lastOpen !== -1 && lastClose !== -1) {
+            nextQueries = JSON.parse(decision.slice(lastOpen, lastClose + 1));
+          }
+        } catch { /* ignore */ }
+      }
+
+      this.updateState({
+        type: 'PROMOTION_DECISION',
+        finalSynthesis: isSynthesis ? decision : undefined,
+        nextQueries,
+        maxRounds: targetRounds
+      });
+
+      if (this.options.panelState.progress) {
+        const evalKey = `eval.${this.state.currentRound}`;
+        if (!this.progressCredits.has(evalKey)) {
+          this.options.panelState.progress.made += 5;
+          this.progressCredits.set(evalKey, 5);
+        }
+      }
+      
+      completeSlice(this.options.panelState, lead.id);
+      this.options.onUpdate();
+
+      await this.startRound(signal);
+
+    } catch (err) {
+      logger.error(`[deep-research] Lead evaluation failed for ${lead.id}:`, err);
+      this.rejectCompletion(err);
     }
   }
 
@@ -501,17 +631,15 @@ ${isLastInRound ? '\n⚠️ **You are the LAST researcher in this round.** After
     }
 
     let output = '## Research Findings So Far\n\n';
-    let currentRound = 0;
+    let currentRoundNum = 0;
 
     for (const completed of allCompleted) {
       const round = parseInt(completed.id.split('.')[0] ?? '0');
-      if (round !== currentRound) {
-        currentRound = round;
+      if (round !== currentRoundNum) {
+        currentRoundNum = round;
         output += `\n### Round ${round}\n\n`;
       }
       const displayNum = getDisplayNumber(this.state, completed.id);
-      
-      // Truncate extremely long reports to prevent context overflow in Lead Evaluator
       const report = completed.report || '';
       const truncatedReport = report.length > 12000
         ? report.slice(0, 12000) + '\n\n... (report truncated for length) ...'
@@ -521,168 +649,5 @@ ${isLastInRound ? '\n⚠️ **You are the LAST researcher in this round.** After
     }
 
     return output;
-  }
-
-  private isLastAliveResearcher(aspect: ResearchSibling): boolean {
-    const currentRound = this.state.currentRound;
-    const allInRound = Object.values(this.state.aspects)
-      .filter(a => a.id.startsWith(`${currentRound}.`));
-
-    // We are the last one if NO other sibling in this round is pending or running
-    const othersStillWorking = allInRound.some(a => a.id !== aspect.id && (a.status === 'pending' || a.status === 'running'));
-    return !othersStillWorking;
-  }
-
-  private async promoteToLead(_lead: ResearchSibling, signal?: AbortSignal) {
-    const completedAspectQueries = Object.values(this.state.aspects).map(a => a.query);
-    const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));
-    const targetRounds = this.getMaxRounds(this.state.complexity);
-    // Allow an emergency extension round if the evaluator really insists, but cap it at target + 1.
-    const hardLimit = targetRounds + 1;
-    const isAtTarget = this.state.currentRound >= targetRounds;
-    const isAtHardLimit = this.state.currentRound >= hardLimit;
-
-    // Build ALL previous reports from all rounds
-    const allReportsContext = this.buildAllFindingsContext();
-
-    const leadPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'system-lead-evaluator.md'), 'utf-8');
-    const originalAgendaStr = this.state.initialAgenda.map(q => `• ${q}`).join('\n');
-    let leadPrompt = leadPromptRaw
-      .replace('{ROOT_QUERY}', this.state.rootQuery)
-      .replace('{ORIGINAL_AGENDA}', originalAgendaStr)
-      .replace('{ROUND_NUMBER}', this.state.currentRound.toString())
-      .replace('{MAX_ROUNDS}', targetRounds.toString());
-
-    // If it's the hard limit, strictly force synthesis
-    if (isAtHardLimit) {
-      leadPrompt += '\n\n⚠️ **CRITICAL: ABSOLUTE MAXIMUM LIMIT REACHED.** You MUST provide a FINAL SYNTHESIS in Markdown format. The system will NOT accept a JSON array of next queries.';
-    } else if (isAtTarget) {
-      leadPrompt += '\n\n⚠️ **NOTICE: TARGET DEPTH REACHED.** You should ideally synthesize now. Only delegate further if the ORIGINAL AGENDA has critical, unfulfilled gaps.';
-    }
-
-    const agendaSection = remainingAgenda.length > 0
-      ? `\n### Unfulfilled Agenda Items\n${remainingAgenda.map(q => `- ${q}`).join('\n')}`
-      : '\n### All Agenda Items Covered\nAll initial research agenda items have been addressed.';
-
-    const promotionPrompt = leadPrompt + '\n\n' + allReportsContext + agendaSection;
-
-    try {
-      logger.log(`[deep-research] Promoting ${_lead.id} to Lead Evaluator for Round ${this.state.currentRound}`);
-      
-      const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
-      if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
-      
-      const response = await complete(this.options.model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: promotionPrompt }], timestamp: Date.now() }]
-      }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
-
-      const decision = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
-      if (response.usage?.totalTokens) {
-        this.options.onTokens(response.usage.totalTokens);
-      }
-      // Credit the lead evaluator call (5 units) against the pre-budgeted scope.
-      // Use a unique key per round to ensure we don't double-credit if resumed.
-      if (this.options.panelState.progress) {
-        const evalKey = `eval.${this.state.currentRound}`;
-        if (!this.progressCredits.has(evalKey)) {
-          this.options.panelState.progress.made += 5;
-          this.progressCredits.set(evalKey, 5);
-          logger.log(`[deep-research] Progress: Lead Evaluator R${this.state.currentRound} credited. made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
-          this.options.onUpdate();
-        }
-      }
-
-      try {
-        // More robust JSON extraction: find the LAST [ and ] that encapsulate an array
-        const lastOpen = decision.lastIndexOf('[');
-        const lastClose = decision.lastIndexOf(']');
-        let nextQueries: string[] = [];
-        
-        if (lastOpen !== -1 && lastClose !== -1 && lastClose > lastOpen) {
-           const jsonStr = decision.substring(lastOpen, lastClose + 1);
-           try {
-             nextQueries = JSON.parse(jsonStr);
-           } catch {
-             // Fallback to simpler match if complex one fails
-             const simpleMatch = decision.match(/\[\s*".*"\s*\]/s);
-             if (simpleMatch) nextQueries = JSON.parse(simpleMatch[0]);
-           }
-        }
-        
-        const willSynthesize = !Array.isArray(nextQueries) || nextQueries.length === 0 || isAtHardLimit;
-
-        // BUDGET ADJUSTMENT: If we take a shortcut, credit the "unused" budget immediately.
-        if (this.options.panelState.progress) {
-          const maxSibs = this.getMaxSiblingsPerRound(this.state.complexity);
-          if (willSynthesize) {
-            // If we are synthesizing, credit ALL potential future work.
-            const currentRound = this.state.currentRound;
-            const remainingRounds = targetRounds - currentRound;
-            // 1. Credit unused siblings of the round that WOULD have been next.
-            if (currentRound < targetRounds) {
-               this.options.panelState.progress.made += (maxSibs * 10);
-            }
-            // 2. Credit all rounds BEYOND the next one (lead eval + max sibs).
-            if (remainingRounds > 1) {
-              const unitsPerFutureRound = 5 + (maxSibs * 10);
-              this.options.panelState.progress.made += ((remainingRounds - 1) * unitsPerFutureRound);
-            }
-            logger.log(`[deep-research] Progress: Synthesizing early. Adjusted made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
-          } else {
-            // If we are delegating, only credit the difference between max and actual siblings for the NEXT round.
-            const actualSibs = nextQueries.length;
-            const unusedSibs = maxSibs - actualSibs;
-            if (unusedSibs > 0) {
-              const credit = unusedSibs * 10;
-              this.options.panelState.progress.made += credit;
-              logger.log(`[deep-research] Progress: Delegating ${actualSibs}/${maxSibs} siblings. Credited ${credit} for unused. made=${this.options.panelState.progress.made}/${this.options.panelState.progress.expected}`);
-            }
-          }
-          this.options.onUpdate();
-        }
-
-        this.updateState({
-          type: 'PROMOTION_DECISION',
-          nextQueries: willSynthesize ? [] : nextQueries.slice(0, this.getMaxSiblingsPerRound(this.state.complexity)),
-          finalSynthesis: (willSynthesize || isAtHardLimit) ? decision : undefined,
-          maxRounds: targetRounds
-        });
-
-        if (willSynthesize) {
-          // CRITICAL: System must exit cleanly after synthesis
-          logger.log(`[deep-research] Lead evaluator synthesizing (Round ${this.state.currentRound}/${targetRounds})`);
-          
-          let finalOutput = this.state.finalSynthesis || decision;
-          if (isAtHardLimit && Array.isArray(nextQueries) && nextQueries.length > 0 && !finalOutput.includes('#')) {
-             finalOutput = `## Research Summary (Hard Limit Reached)\n\nThe absolute research limit of ${hardLimit} rounds was reached. The agents proposed further research directions but we must synthesize now:\n\n### Proposed Next Steps (Not Executed)\n${nextQueries.map(q => `- ${q}`).join('\n')}\n\n### Current Findings\n${allReportsContext}`;
-             // Save the fallback to state too
-             this.updateState({ 
-               type: 'PROMOTION_DECISION', 
-               nextQueries: [], 
-               finalSynthesis: finalOutput, 
-               maxRounds: targetRounds 
-             });
-          }
-
-          this.resolveResult(finalOutput);
-          return;
-        } else {
-          // Continue to next round
-          logger.log(`[deep-research] Lead evaluator delegating to Round ${this.state.currentRound + 1}`);
-          if (this.state.status === 'researching') await this.startRound(signal);
-          return;
-        }
-      } catch (err) {
-        // Synthesis fallback
-        logger.log(`[deep-research] Lead evaluator decision parsing failed or forced synthesis: ${err}`);
-        this.updateState({ type: 'PROMOTION_DECISION', nextQueries: [], finalSynthesis: decision, maxRounds });
-        this.resolveResult(decision);
-        return;
-      }
-    } catch (err) {
-      logger.error(`[deep-research] Lead evaluation failed:`, err);
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      this.rejectCompletion(new Error(`Lead evaluation failed: ${errorMsg}`));
-    }
   }
 }

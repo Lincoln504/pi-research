@@ -126,22 +126,20 @@ export function createResearchTool(): ToolDefinition {
       query: Type.String({
         description: 'Research query or topic to investigate',
       }),
-      depth: Type.Optional(Type.Union([
-        Type.Literal('brief'),
-        Type.Literal('normal'),
-        Type.Literal('deep'),
-        Type.Literal('ultra'),
-      ], {
+      depth: Type.Optional(Type.Integer({
+        minimum: 0,
+        maximum: 3,
         description: [
-          'Research depth. Overrides quick flag and LLM complexity assessment.',
-          '"brief"  — single researcher, fast (equivalent to quick mode).',
-          '"normal" — 2 initial researchers, up to 3 rounds.',
-          '"deep"   — 3 initial researchers, up to 3 rounds (default when omitted and topic is complex).',
-          '"ultra"  — 5 initial researchers, up to 5 rounds; use for exhaustive investigation.',
+          'Research depth level (0-3). Overrides quick flag.',
+          '0: Quick/Brief — 1 researcher, 1 round. Direct session; no coordinator/orchestrator (Default).',
+          '1: Normal — 2 researchers, 2 rounds. AI-orchestrated.',
+          '2: Deep — 3 researchers, 3 rounds. AI-orchestrated.',
+          '3: Ultra — 5 researchers, 5 rounds (Exhaustive). AI-orchestrated.',
         ].join(' '),
+        default: 0,
       })),
       quick: Type.Optional(Type.Boolean({
-        description: 'Enable quick mode: fast investigation using a single researcher session. Ignored when depth is specified.',
+        description: 'Deprecated: use depth: 0 instead. Enable quick mode: fast investigation using a single researcher session.',
         default: false,
       })),
       model: Type.Optional(Type.String({
@@ -158,18 +156,17 @@ export function createResearchTool(): ToolDefinition {
       const { query, model: modelId, quick: isQuickParam = false, depth } = params as {
         query: string;
         quick?: boolean;
-        depth?: 'brief' | 'normal' | 'deep' | 'ultra';
+        depth?: number;
         model?: string;
       };
 
       // depth overrides the quick flag entirely.
-      // brief  → quick mode (single researcher)
-      // normal → complexity 2, skip LLM assessment
-      // deep   → complexity 3, skip LLM assessment
-      // ultra  → complexity 4, skip LLM assessment
-      // (none) → respect quick flag; if not quick, LLM assesses 1–3 as before
-      const isQuick = depth === 'brief' ? true : depth ? false : isQuickParam;
-
+      // depth 0 → quick mode (single researcher)
+      // depth 1 → complexity 2, skip LLM assessment
+      // depth 2 → complexity 3, skip LLM assessment
+      // depth 3 → complexity 4, skip LLM assessment
+      // (none)  → respect quick flag; if not quick, LLM assesses 1–3 as before
+      const isQuick = depth === 0 ? true : (depth !== undefined) ? false : isQuickParam;
       if (!query || !ctx.model) {
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
@@ -318,7 +315,7 @@ export function createResearchTool(): ToolDefinition {
               } else if (event.type === 'tool_execution_end') {
                 const isError = event.isError ?? false;
                 const color = isError ? 'red' : 'green';
-                const duration = isError ? 400 : 60;
+                const duration = isError ? 1000 : 500;
                 flashSlice(panelState, sliceLabel, color, duration, () => refreshAllSessions(piSessionId));
                 // Advance progress bar
                 if (panelState.progress) {
@@ -364,21 +361,16 @@ export function createResearchTool(): ToolDefinition {
             cleanup();
             return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
           } else {
-            // SWARM MODE: resolve complexity from explicit depth or LLM assessment.
-            let complexity: 1 | 2 | 3;
+            // DEEP MODE: resolve complexity from explicit depth or LLM assessment.
+            let complexity: 1 | 2 | 3 | 4;
 
-            if (depth && depth !== 'brief') {
-              // Explicit depth bypasses LLM assessment entirely.
-              // brief=0 (Quick session, non-orchestrated)
-              // normal=1 (1 round, 1-2 researchers)
-              // deep=2   (2 rounds, 2-3 researchers)
-              // ultra=3  (3 rounds, 3 researchers)
-              const depthMap: Record<string, 1 | 2 | 3> = {
-                normal: 1,
-                deep:   2,
-                ultra:  3,
-              };
-              complexity = depthMap[depth] ?? 2;
+            if (depth !== undefined) {
+              // Explicit depth mapping:
+              // 0 -> 1 (Brief)
+              // 1 -> 2 (Normal)
+              // 2 -> 3 (Deep)
+              // 3 -> 4 (Ultra)
+              complexity = (Math.max(1, Math.min(4, depth + 1))) as 1 | 2 | 3 | 4;
               logger.info('[research] depth override — skipping LLM complexity assessment', { depth, complexity });
             } else {
               // Auto-assess complexity via LLM (original behaviour).
@@ -389,14 +381,28 @@ Rate complexity from 1 to 3:
 3: Deep/Nuanced topic (3 researchers, more rounds)
 Output ONLY the number 1, 2, or 3.`;
 
+              panelState.statusMessage = 'assessing complexity...';
+              refreshAllSessions(piSessionId);
+
               const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
               if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
               const compResp = await complete(selectedModel, {
                 messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
               }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
 
+              const usage = compResp.usage;
+              if (usage) {
+                const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+                if (tokens > 0) {
+                   onTokens(tokens);
+                   refreshAllSessions(piSessionId);
+                }
+              }
+
               const rawComplexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10);
-              complexity = (Number.isFinite(rawComplexity) ? Math.max(1, Math.min(3, rawComplexity)) : 2) as 1 | 2 | 3;
+              complexity = (Number.isFinite(rawComplexity) ? Math.max(1, Math.min(3, rawComplexity)) : 2) as 1 | 2 | 3 | 4;
+              panelState.statusMessage = undefined;
+              refreshAllSessions(piSessionId);
             }
 
             const orchestrator = new DeepResearchOrchestrator({

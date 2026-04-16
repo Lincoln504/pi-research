@@ -39,6 +39,8 @@ export interface ResearchPanelState {
   hideSearxng?: boolean;
   /** Optional progress bar data. Set after planning completes. */
   progress?: ResearchProgress;
+  /** Temporary status message displayed in the header (e.g. 'planning...') */
+  statusMessage?: string;
 }
 
 // Store timeouts per session ID to prevent cross-session conflicts
@@ -104,12 +106,13 @@ export function activateSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
- * Update researcher tokens and cost (accumulates)
+ * Update researcher tokens and cost.
+ * Tokens are treated as current context size (latest value), while cost is accumulated.
  */
 export function updateSliceTokens(state: ResearchPanelState, id: string, tokens: number, cost: number): void {
   const slice = state.slices.get(id);
   if (slice) {
-    slice.tokens = (slice.tokens || 0) + tokens;
+    slice.tokens = tokens;
     slice.cost = (slice.cost || 0) + cost;
   }
 }
@@ -232,10 +235,15 @@ function renderProgressPct(progress: ResearchProgress | undefined): string {
 }
 
 function formatCost(cost: number): string {
-  if (cost < 0.0001) return '$0.00';
-  if (cost < 1) return `$${cost.toFixed(4)}`;
+  if (cost === 0) return '$0.00';
+  if (cost < 0.0001) return '<$0.01';
+  if (cost < 1) {
+    // Show up to 4 decimal places for sub-dollar amounts, but strip trailing zeros
+    const s = cost.toFixed(4);
+    return `$${parseFloat(s)}`;
+  }
   if (cost < 100) return `$${cost.toFixed(2)}`;
-  return `$${cost.toFixed(0)}`;
+  return `$${Math.round(cost)}`;
 }
 
 function getStatusText(state: string): string {
@@ -256,7 +264,7 @@ function extractPort(url: string): string {
 
 /**
  * Internal rendering logic for a single research panel block.
- * Returns 4 lines of TUI content.
+ * Returns 3 or 4 lines of TUI content depending on whether costs are present.
  */
 function renderPanelBlock(
   state: ResearchPanelState,
@@ -271,11 +279,12 @@ function renderPanelBlock(
   const availableForRight = Math.max(1, width - totalLeftOffset);
   const rightInner = Math.max(1, availableForRight - 2);
 
+  const numRows = 4;
+
   // Prep left box raw parts (no colors yet)
   interface RawLeftBox {
     top: string;
-    row1: string;
-    row2: string;
+    rows: string[];
     bottom: string;
     statusColor: 'success' | 'error' | 'muted';
   }
@@ -284,13 +293,18 @@ function renderPanelBlock(
 
   if (showSearxng && width >= totalLeftOffset + 10) {
     const status = state.searxngStatus;
-    const statusText = getStatusText(status.state).padEnd(LEFT_INNER);
-    const portStr = extractPort(status.url).padEnd(LEFT_INNER);
+    const statusText = getStatusText(status.state).trim();
+    const portStr = extractPort(status.url).trim();
     
+    // 4 rows: row 1 is status, row 2 is port
+    const rows = [
+      '│' + statusText.padEnd(LEFT_INNER),
+      '│' + portStr.padEnd(LEFT_INNER)
+    ];
+
     leftRaw = {
       top: '┌' + '─'.repeat(LEFT_INNER),
-      row1: '│' + statusText,
-      row2: '│' + portStr,
+      rows,
       bottom: '└' + '─'.repeat(LEFT_INNER),
       statusColor: status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted',
     };
@@ -318,8 +332,8 @@ function renderPanelBlock(
   const colW = (i: number) => Math.max(0, colBase + (i < extra ? 1 : 0));
 
   // Build right box raw parts
-  const rightRawRows: string[][] = [[], [], [], []]; // top, tokens, cost, bottom
-  const rightColors: Array<Array<'success' | 'error' | 'muted' | 'text' | 'accent'>> = [[], [], [], []];
+  const rightRawRows: string[][] = Array.from({ length: numRows }, () => []);
+  const rightColors: Array<Array<'success' | 'error' | 'muted' | 'text' | 'accent'>> = Array.from({ length: numRows }, () => []);
 
   if (numVisible === 0) {
     const w = Math.max(1, rightInner);
@@ -327,7 +341,7 @@ function renderPanelBlock(
     rightRawRows[1]!.push(' '.repeat(w) + '│');
     rightRawRows[2]!.push(' '.repeat(w) + '│');
     rightRawRows[3]!.push('─'.repeat(w) + '┘');
-    for(let i=0; i<4; i++) rightColors[i]!.push('accent');
+    for(let i=0; i<numRows; i++) rightColors[i]!.push('accent');
   } else {
     for (let i = 0; i < totalCols; i++) {
       const sliceId = showIndicator && i === 0 ? null : (showIndicator ? visibleSliceIds[i - 1] : visibleSliceIds[i]);
@@ -336,6 +350,7 @@ function renderPanelBlock(
       const isLast = i === totalCols - 1;
       
       // Top Border with Label
+      const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
       const cornerLabel = `┐ ${labelStr} ┌`;
       const canShowCornerLabel = w >= cornerLabel.length;
@@ -358,19 +373,30 @@ function renderPanelBlock(
       rightRawRows[0]!.push(topPart + (isLast ? '┐' : '┬'));
       rightColors[0]!.push('accent');
 
-      // Token Row
-      const isPlanning = labelStr.includes('planning');
-      const tokens = slice?.tokens || 0;
-      const tokenStr = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+      // Token Row (always row 1)
+      let tokenStr = '';
+      if (isIndicator) {
+        tokenStr = '...';
+      } else {
+        const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
+        const tokens = slice?.tokens || 0;
+        tokenStr = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+      }
       const tokenDisplay = tokenStr.length > w ? tokenStr.slice(0, w) : tokenStr;
       const tokenPadded = tokenDisplay.padStart(Math.floor((w + tokenDisplay.length) / 2)).padEnd(w);
       rightRawRows[1]!.push(tokenPadded + '│');
       const flashColor = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
       rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
-      // Cost Row
-      const cost = slice?.cost || 0;
-      const costStr = (isPlanning || cost === 0) ? '' : formatCost(cost);
+      // Cost Row (row 2)
+      let costStr = '';
+      if (isIndicator) {
+        costStr = '...';
+      } else {
+        const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
+        const cost = slice?.cost || 0;
+        costStr = (isPlanning || cost === 0) ? '' : formatCost(cost);
+      }
       const costDisplay = costStr.length > w ? costStr.slice(0, w) : costStr;
       const costPadded = costDisplay.padStart(Math.floor((w + costDisplay.length) / 2)).padEnd(w);
       rightRawRows[2]!.push(costPadded + '│');
@@ -391,24 +417,28 @@ function renderPanelBlock(
     
     if (leftRaw) {
       const leftBorderColor = 'accent';
-      let leftContent: string;
-      let leftContentColor: 'success' | 'error' | 'muted' | 'text' | 'accent';
+      let leftPartContent: string;
+      let leftPartColor: 'success' | 'error' | 'muted' | 'text' | 'accent';
       
-      switch(rowIdx) {
-        case 0: leftContent = leftRaw.top; leftContentColor = leftBorderColor; break;
-        case 1: leftContent = leftRaw.row1; leftContentColor = leftRaw.statusColor; break;
-        case 2: leftContent = leftRaw.row2; leftContentColor = leftBorderColor; break;
-        case 3: leftContent = leftRaw.bottom; leftContentColor = leftBorderColor; break;
-        default: leftContent = ''; leftContentColor = 'text';
+      if (rowIdx === 0) {
+        leftPartContent = leftRaw.top;
+        leftPartColor = leftBorderColor;
+      } else if (rowIdx === 3) {
+        leftPartContent = leftRaw.bottom;
+        leftPartColor = leftBorderColor;
+      } else {
+        // Middle rows (1 and 2)
+        leftPartContent = leftRaw.rows[rowIdx - 1] || '│' + ' '.repeat(LEFT_INNER);
+        // Only the status row (row 1) gets the status color
+        leftPartColor = rowIdx === 1 ? leftRaw.statusColor : leftBorderColor;
       }
       
-      line += theme.fg(leftBorderColor, leftContent.slice(0, 1));
-      line += theme.fg(leftContentColor, leftContent.slice(1));
+      line += theme.fg(leftBorderColor, leftPartContent.slice(0, 1));
+      line += theme.fg(leftPartColor, leftPartContent.slice(1));
       line += theme.fg('accent', jointChars[rowIdx]!);
     } else {
-      // No SearXNG box: fill the left space then place the box border char at the
-      // joint position so the right box has a proper left edge on every row.
-      const noBorderChars = ['┌', '│', '│', '└'] as const;
+      // No SearXNG box
+      const noBorderChars = ['┌', '│', '│', '└'];
       line += ' '.repeat(totalLeftOffset - 1);
       line += theme.fg('accent', noBorderChars[rowIdx]!);
     }
@@ -469,7 +499,8 @@ export function createMasterResearchPanel(
           
           // Header line for each block
           const pctStr = renderProgressPct(panel.progress);
-          const headerText = pctStr ? ` Research: ${pctStr} ` : ` Research `;
+          const status = panel.statusMessage ? ` [${panel.statusMessage}] ` : '';
+          const headerText = pctStr ? ` Research: ${pctStr}${status} ` : (status ? ` Research: ${status} ` : ` Research `);
           const headerLine = theme.fg('accent', '─'.repeat(2)) + theme.fg('muted', headerText) + theme.fg('accent', '─'.repeat(Math.max(0, width - 2 - headerText.length)));
           allLines.push(headerLine);
 

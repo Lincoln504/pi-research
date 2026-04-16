@@ -123,79 +123,92 @@ export class SecuritySearcher {
     const errors: string[] = [];
     let totalVulnerabilities = 0;
 
-    // Search each requested database
+    const searchPromises: Promise<void>[] = [];
+
+    // Search each requested database in parallel
     if (params.databases.includes('nvd')) {
-      try {
-        const severity = getSeverityParam(params);
-        const nvdResult = await this.searchNVD(
-          params.terms,
-          {
-            severity: severity,
-            maxResults: params.maxResults,
-            includeExploited: params.includeExploited,
-          },
-        );
-        results.nvd = nvdResult;
-        totalVulnerabilities += nvdResult.count;
-        if (nvdResult.error !== undefined) {
-          errors.push(`NVD: ${nvdResult.error}`);
+      searchPromises.push((async () => {
+        try {
+          const severity = getSeverityParam(params);
+          const nvdResult = await this.searchNVD(
+            params.terms,
+            {
+              severity: severity,
+              maxResults: params.maxResults,
+              includeExploited: params.includeExploited,
+            },
+          );
+          results.nvd = nvdResult;
+          totalVulnerabilities += nvdResult.count;
+          if (nvdResult.error !== undefined) {
+            errors.push(`NVD: ${nvdResult.error}`);
+          }
+        } catch (err: unknown) {
+          errors.push(`NVD: ${getErrorMessage(err)}`);
         }
-      } catch (err: unknown) {
-        errors.push(`NVD: ${getErrorMessage(err)}`);
-      }
+      })());
     }
 
     if (params.databases.includes('cisa_kev')) {
-      try {
-        const cisaResult = await this.searchCisaKev(params.terms, {
-          maxResults: params.maxResults,
-        });
-        results.cisa_kev = cisaResult;
-        totalVulnerabilities += cisaResult.count;
-        if (cisaResult.error !== undefined) {
-          errors.push(`CISA KEV: ${cisaResult.error}`);
+      searchPromises.push((async () => {
+        try {
+          const cisaResult = await this.searchCisaKev(params.terms, {
+            maxResults: params.maxResults,
+          });
+          results.cisa_kev = cisaResult;
+          totalVulnerabilities += cisaResult.count;
+          if (cisaResult.error !== undefined) {
+            errors.push(`CISA KEV: ${cisaResult.error}`);
+          }
+        } catch (err: unknown) {
+          errors.push(`CISA KEV: ${getErrorMessage(err)}`);
         }
-      } catch (err: unknown) {
-        errors.push(`CISA KEV: ${getErrorMessage(err)}`);
-      }
+      })());
     }
 
     if (params.databases.includes('github')) {
-      try {
-        const githubResult = await this.searchGitHub(params.terms, {
-          ecosystem: params.ecosystem,
-          severity: params.severity,
-          maxResults: params.maxResults,
-          repo: params.githubRepo,
-        });
-        results.github = githubResult;
-        totalVulnerabilities += githubResult.count;
-        if (githubResult.error !== undefined) {
-          errors.push(`GitHub: ${githubResult.error}`);
+      searchPromises.push((async () => {
+        try {
+          const githubResult = await this.searchGitHub(params.terms, {
+            ecosystem: params.ecosystem,
+            severity: params.severity,
+            maxResults: params.maxResults,
+            repo: params.githubRepo,
+          });
+          results.github = githubResult;
+          totalVulnerabilities += githubResult.count;
+          if (githubResult.error !== undefined) {
+            errors.push(`GitHub: ${githubResult.error}`);
+          }
+        } catch (err: unknown) {
+          errors.push(`GitHub: ${getErrorMessage(err)}`);
         }
-      } catch (err: unknown) {
-        errors.push(`GitHub: ${getErrorMessage(err)}`);
-      }
+      })());
     }
 
     if (params.databases.includes('osv')) {
-      try {
-        const osvResult = await this.searchOSV(params.terms, {
-          ecosystem: params.ecosystem,
-          severity: params.severity,
-          maxResults: params.maxResults,
-        });
-        results.osv = osvResult;
-        totalVulnerabilities += osvResult.count;
-        if (osvResult.error !== undefined) {
-          errors.push(`OSV: ${osvResult.error}`);
+      searchPromises.push((async () => {
+        try {
+          const osvResult = await this.searchOSV(params.terms, {
+            ecosystem: params.ecosystem,
+            severity: params.severity,
+            maxResults: params.maxResults,
+          });
+          results.osv = osvResult;
+          totalVulnerabilities += osvResult.count;
+          if (osvResult.error !== undefined) {
+            errors.push(`OSV: ${osvResult.error}`);
+          }
+        } catch (err: unknown) {
+          errors.push(`OSV: ${getErrorMessage(err)}`);
         }
-      } catch (err: unknown) {
-        errors.push(`OSV: ${getErrorMessage(err)}`);
-      }
+      })());
     }
 
-    // Apply delay to avoid rate limiting
+    // Wait for all searches to complete
+    await Promise.all(searchPromises);
+
+    // Apply delay to avoid rate limiting for subsequent calls
     if (this.config.requestDelay > 0) {
       await new Promise<void>((resolve) => {
         const timeoutId = setTimeout(resolve, this.config.requestDelay);

@@ -148,6 +148,7 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   };
   private statusCallbacks: StatusCallback[] = [];
   private readonly config: ResolvedConfig;
+  private proxySettingsPath: string | null = null;
 
   constructor(config: Partial<SearxngLifecycleConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config } as ResolvedConfig;
@@ -256,6 +257,7 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
       // Write generated settings
       await fs.promises.writeFile(proxySettingsPath, yaml.dump(settings), 'utf-8');
+      this.proxySettingsPath = proxySettingsPath;
 
       logger.log(`[pi-research] Generated proxy settings for container: ${containerProxyUrl}`);
 
@@ -414,6 +416,17 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
       if (this.sessionId !== null) {
         await this.manager.release(this.sessionId);
+      }
+
+      // Cleanup temporary proxy settings file if it exists
+      if (this.proxySettingsPath && fs.existsSync(this.proxySettingsPath)) {
+        try {
+          await fs.promises.unlink(this.proxySettingsPath);
+          logger.log(`[pi-research] Deleted temporary proxy settings: ${this.proxySettingsPath}`);
+        } catch (error) {
+          logger.warn('[pi-research] Failed to delete temporary proxy settings:', error);
+        }
+        this.proxySettingsPath = null;
       }
 
       this.currentStatus = {

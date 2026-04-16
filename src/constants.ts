@@ -7,13 +7,10 @@
 // ==================== Time Constants ====================
 
 /** Flash duration for UI slice animations in milliseconds */
-export const FLASH_DURATION_MS = 80;
+export const FLASH_DURATION_MS = 500;
 
 /** Delay between API requests in milliseconds (e.g., NVD rate limit) */
 export const REQUEST_DELAY_MS = 6500;
-
-/** Maximum rounds for deep research (complexity level 2 and 3) */
-export const MAX_ROUNDS = 3;
 
 // ==================== Research Constraints ====================
 
@@ -23,36 +20,48 @@ export const MAX_GATHERING_CALLS = 4;
 /** Maximum URLs to scrape per batch */
 export const MAX_SCRAPE_URLS = 3;
 
-/** Maximum siblings (researchers) per round for complexity level 1 */
-export const MAX_SIBLINGS_ROUND_1 = 2;
+/** Maximum siblings (researchers) per round for complexity level 1 (Brief) */
+export const MAX_SIBLINGS_ROUND_1 = 1;
 
-/** Maximum siblings (researchers) per round for complexity level 2 */
-export const MAX_SIBLINGS_ROUND_2 = 3;
+/** Maximum siblings (researchers) per round for complexity level 2 (Normal) */
+export const MAX_SIBLINGS_ROUND_2 = 2;
 
-/** Maximum siblings (researchers) per round for complexity level 3 */
+/** Maximum siblings (researchers) per round for complexity level 3 (Deep) */
 export const MAX_SIBLINGS_ROUND_3 = 3;
+
+/** Maximum siblings (researchers) per round for complexity level 4 (Ultra) */
+export const MAX_SIBLINGS_ROUND_4 = 5;
+
+/** Maximum researchers allowed to run simultaneously across all rounds */
+export const MAX_CONCURRENT_RESEARCHERS = 3;
 
 
 // ==================== Complexity Levels ====================
 
-/** Initial researcher count for complexity level 1 */
+/** Initial researcher count for complexity level 1 (Brief) */
 export const INITIAL_RESEARCHERS_LEVEL_1 = 1;
 
-/** Initial researcher count for complexity level 2 */
+/** Initial researcher count for complexity level 2 (Normal) */
 export const INITIAL_RESEARCHERS_LEVEL_2 = 2;
 
-/** Initial researcher count for complexity level 3 */
+/** Initial researcher count for complexity level 3 (Deep) */
 export const INITIAL_RESEARCHERS_LEVEL_3 = 3;
 
+/** Initial researcher count for complexity level 4 (Ultra) */
+export const INITIAL_RESEARCHERS_LEVEL_4 = 5;
 
-/** Maximum rounds for complexity level 1 */
-export const MAX_ROUNDS_LEVEL_1 = 2;
 
-/** Maximum rounds for complexity level 2 */
-export const MAX_ROUNDS_LEVEL_2 = 3;
+/** Maximum rounds for complexity level 1 (Brief) */
+export const MAX_ROUNDS_LEVEL_1 = 1;
 
-/** Maximum rounds for complexity level 3 */
+/** Maximum rounds for complexity level 2 (Normal) */
+export const MAX_ROUNDS_LEVEL_2 = 2;
+
+/** Maximum rounds for complexity level 3 (Deep) */
 export const MAX_ROUNDS_LEVEL_3 = 3;
+
+/** Maximum rounds for complexity level 4 (Ultra) */
+export const MAX_ROUNDS_LEVEL_4 = 5;
 
 
 // ==================== Timeout Constants ====================

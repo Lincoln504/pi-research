@@ -4,97 +4,69 @@
  * Handles reading and writing the SystemResearchState to the Pi Session Tree.
  *
  * DEPENDENCY: Requires pi-coding-agent sessionManager API:
- * - ctx.sessionManager.getEntries?() - returns session entries array
- * - ctx.sessionManager.appendCustomEntry(type, data) - adds custom entry
- *
- * These APIs may change in future pi versions. The code uses optional chaining
- * and try-catch blocks to gracefully degrade if the API is unavailable.
+ * - ctx.sessionManager.getEntries?() - returns state history
+ * - ctx.sessionManager.addEntry?() - adds new state entry
  */
 
-import type { ExtensionContext, CustomEntry } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { SystemResearchState } from './deep-research-types.ts';
 import { logger } from '../logger.ts';
 
-const ENTRY_TYPE = 'pi-research-state';
+const STATE_TYPE = 'custom';
+const CUSTOM_TYPE = 'pi-research-state';
 
 export class DeepResearchStateManager {
   constructor(private ctx: ExtensionContext) {}
 
   /**
-   * Checks if the required sessionManager API is available.
+   * Load state for a given query from session history
    */
-  private hasSessionManagerAPI(): boolean {
-    const sessionManager = (this.ctx as any).sessionManager;
-    return sessionManager !== null && sessionManager !== undefined;
+  load(query: string): SystemResearchState | null {
+    const sm = (this.ctx as any).sessionManager;
+    if (!sm || typeof sm.getEntries !== 'function') return null;
+
+    const entries = sm.getEntries();
+    // Find latest state entry for this specific root query
+    const stateEntry = [...entries].reverse().find((e: any) => 
+      e.type === STATE_TYPE && 
+      e.customType === CUSTOM_TYPE && 
+      e.data?.rootQuery === query
+    );
+
+    return stateEntry ? (stateEntry.data as SystemResearchState) : null;
   }
 
   /**
-   * Loads the most recent research state from the session history.
-   * If a query is provided, scans backwards for the latest state matching that query.
-   */
-  load(query?: string): SystemResearchState | null {
-    if (!this.hasSessionManagerAPI()) {
-      logger.debug('[deep-research-state] SessionManager API not available, cannot load state');
-      return null;
-    }
-
-    try {
-      const sessionManager = (this.ctx as any).sessionManager;
-      const entries = sessionManager.getEntries?.();
-      if (!entries || !Array.isArray(entries)) return null;
-
-      // Scan backwards for the latest state entry (optionally matching query)
-      for (let i = entries.length - 1; i >= 0; i--) {
-        const entry = entries[i];
-        if (entry?.type === 'custom' && entry.customType === ENTRY_TYPE) {
-          const state = (entry as CustomEntry<SystemResearchState>).data;
-          if (state && (!query || state.rootQuery === query)) {
-            return state;
-          }
-        }
-      }
-    } catch (err) {
-      logger.error('[deep-research-state] Failed to load state from session history:', err);
-    }
-    return null;
-  }
-
-  /**
-   * Persists the current state to the session history.
+   * Persist state to session history
    */
   save(state: SystemResearchState): void {
-    state.lastUpdated = Date.now();
+    const sm = (this.ctx as any).sessionManager;
+    if (!sm || typeof sm.addEntry !== 'function') return;
 
-    if (!this.hasSessionManagerAPI()) {
-      logger.debug('[deep-research-state] SessionManager API not available, cannot save state');
-      return;
-    }
-
-    try {
-      (this.ctx.sessionManager as any).appendCustomEntry(ENTRY_TYPE, state);
-      logger.debug(`[deep-research-state] Checkpoint saved: ${state.status} (Round ${state.currentRound})`);
-    } catch (err) {
-      logger.error('[deep-research-state] Failed to save state to session history:', err);
-    }
+    sm.addEntry({
+      type: STATE_TYPE,
+      customType: CUSTOM_TYPE,
+      data: state,
+      timestamp: Date.now()
+    });
   }
 
   /**
    * Utility: Reconstruct state or initialize a new one.
    */
-  initialize(query: string, complexity: 1 | 2 | 3): SystemResearchState {
+  initialize(query: string, complexity: 1 | 2 | 3 | 4): SystemResearchState {
     const existing = this.load(query);
     if (existing) {
       logger.log('[deep-research-state] Resuming existing research system.');
       
-      // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again
-      // This handles cases where the agent was stopped mid-research.
-      for (const id in existing.aspects) {
-        const aspect = existing.aspects[id];
-        if (aspect?.status === 'running') {
-          aspect.status = 'pending';
+      // Perfection: Reset any 'running' siblings to 'pending' so they are picked up again.
+      // Crucial for robustness after a crash or manual interrupt.
+      Object.values(existing.aspects).forEach(a => {
+        if (a.status === 'running') {
+          a.status = 'pending';
         }
-      }
-      
+      });
+      existing.status = 'researching'; 
       return existing;
     }
 

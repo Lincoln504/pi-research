@@ -187,18 +187,18 @@ class NVDRateLimiter {
 
   async acquire(): Promise<void> {
     const now = Date.now();
-    const elapsed = now - this.lastRequest;
+    const waitTime = Math.max(0, this.minInterval - (now - this.lastRequest));
+    
+    // Update lastRequest IMMEDIATELY to block subsequent parallel callers
+    this.lastRequest = now + waitTime;
 
-    if (elapsed < this.minInterval) {
-      const waitTime = this.minInterval - elapsed;
+    if (waitTime > 0) {
       // Unref the timeout so it doesn't prevent process exit
       await new Promise<void>(resolve => {
         const timeoutId = setTimeout(resolve, waitTime);
         timeoutId.unref();
       });
     }
-
-    this.lastRequest = Date.now();
   }
 }
 

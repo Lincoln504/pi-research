@@ -48,17 +48,19 @@ export function createScrapeTool(options: {
   let batch2Urls: string[] = [];
 
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
-  const getContextFraction = (): number => {
+  const getContextFraction = (additionalTokens: number = 0): number => {
     if (!options.getTokensUsed) return 0;
-    return options.getTokensUsed() / ctxWindow;
+    return (options.getTokensUsed() + additionalTokens) / ctxWindow;
   };
 
-  const contextLimitMessage = (fraction: number, batchLabel: string): string => [
-    `# Scrape Skipped — Context Budget Reached (${batchLabel})`,
+  const contextLimitMessage = (fraction: number, batchLabel: string, projected: boolean = false): string => [
+    `# Scrape Skipped — Context Budget ${projected ? 'Projection' : 'Reached'} (${batchLabel})`,
     '',
-    `Your context window is approximately **${Math.round(fraction * 100)}% full** ` +
-      `(threshold: ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%).`,
-    'Scraping at this point would risk truncating your findings during synthesis.',
+    `Your context window is currently **${Math.round((options.getTokensUsed?.() || 0) / ctxWindow * 100)}% full**.`,
+    projected ? `Adding this scrape batch would push it to approximately **${Math.round(fraction * 100)}% full** ` +
+      `(threshold: ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%).` : 
+      `This is at or above the threshold of **${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%**.`,
+    'Scraping beyond this point risks truncating your findings during synthesis.',
     '',
     '**Action**: Proceed directly to **Phase 3 — Synthesis**.',
     'Compile your findings from Phase 1 (search results) and any earlier scrape batches,',
@@ -110,13 +112,14 @@ export function createScrapeTool(options: {
         options.tracker.recordCall('scrape');
 
         const ctxFraction = getContextFraction();
+        const nextBatchProjection = getContextFraction(MAX_SCRAPE_URLS * AVG_TOKENS_PER_SCRAPE);
         const ctxPct = Math.round(ctxFraction * 100);
 
         // Tell the researcher how many batches are realistically available
-        const batch3Note = ctxFraction < MAX_CONTEXT_FRACTION_FOR_BATCH3
+        const batch3Note = nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_BATCH3
           ? `A **Batch 3** (optional deep-dive) is available — context is only ${ctxPct}% full.`
-          : ctxFraction < MAX_CONTEXT_FRACTION_FOR_SCRAPING
-            ? `Batch 3 is **not available** — context is ${ctxPct}% full (threshold: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`
+          : nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_SCRAPING
+            ? `Batch 3 is **not available** — projected context after Batch 1/2 would be ~${Math.round(nextBatchProjection * 100)}% (threshold: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`
             : `⚠️ Context is ${ctxPct}% full. **Batches 1–3 may be skipped** — consider proceeding directly to synthesis.`;
 
         return {
@@ -157,18 +160,19 @@ export function createScrapeTool(options: {
           return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
         }
 
-        // Context gate
-        const ctxFraction = getContextFraction();
-        if (ctxFraction >= MAX_CONTEXT_FRACTION_FOR_SCRAPING) {
+        const paramsRecord = params as Record<string, unknown>;
+        const urls = (paramsRecord['urls'] as string[] | undefined) || [];
+
+        // Context gate (with projection)
+        const projectedFraction = getContextFraction(urls.length * AVG_TOKENS_PER_SCRAPE);
+        if (projectedFraction >= MAX_CONTEXT_FRACTION_FOR_SCRAPING) {
           return {
-            content: [{ type: 'text', text: contextLimitMessage(ctxFraction, 'Batch 1') }],
-            details: { skipped: true, reason: 'context_limit', contextFraction: ctxFraction },
+            content: [{ type: 'text', text: contextLimitMessage(projectedFraction, 'Batch 1', true) }],
+            details: { skipped: true, reason: 'context_limit_projection', contextFraction: projectedFraction },
           };
         }
 
         const startTime = Date.now();
-        const paramsRecord = params as Record<string, unknown>;
-        const urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const excludeLinks = (paramsRecord['excludeLinks'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 
@@ -252,17 +256,19 @@ export function createScrapeTool(options: {
           return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
         }
 
-        const ctxFraction = getContextFraction();
-        if (ctxFraction >= MAX_CONTEXT_FRACTION_FOR_SCRAPING) {
+        const paramsRecord = params as Record<string, unknown>;
+        let urls = (paramsRecord['urls'] as string[] | undefined) || [];
+
+        // Context gate (with projection)
+        const projectedFraction = getContextFraction(urls.length * AVG_TOKENS_PER_SCRAPE);
+        if (projectedFraction >= MAX_CONTEXT_FRACTION_FOR_SCRAPING) {
           return {
-            content: [{ type: 'text', text: contextLimitMessage(ctxFraction, 'Batch 2') }],
-            details: { skipped: true, reason: 'context_limit', contextFraction: ctxFraction },
+            content: [{ type: 'text', text: contextLimitMessage(projectedFraction, 'Batch 2', true) }],
+            details: { skipped: true, reason: 'context_limit_projection', contextFraction: projectedFraction },
           };
         }
 
         const startTime = Date.now();
-        const paramsRecord = params as Record<string, unknown>;
-        let urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const rawExclude = (paramsRecord['excludeLinks'] as string[] | undefined) || [];
         // Batch 2 uses higher default concurrency
         const maxConcurrency = validateMaxConcurrency(
@@ -350,26 +356,30 @@ export function createScrapeTool(options: {
           return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
         }
 
-        const ctxFraction = getContextFraction();
-        if (ctxFraction >= MAX_CONTEXT_FRACTION_FOR_BATCH3) {
+        const paramsRecord = params as Record<string, unknown>;
+        let urls = (paramsRecord['urls'] as string[] | undefined) || [];
+
+        // Context gate (with projection)
+        const projectedFraction = getContextFraction(urls.length * AVG_TOKENS_PER_SCRAPE);
+        if (projectedFraction >= MAX_CONTEXT_FRACTION_FOR_BATCH3) {
           return {
             content: [{
               type: 'text',
               text: [
-                `# Batch 3 Unavailable — Context Budget Reached`,
+                `# Batch 3 Unavailable — Context Budget Projection Reached`,
                 '',
-                `Context is **${Math.round(ctxFraction * 100)}% full** (threshold for Batch 3: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`,
+                `Your context is currently **${Math.round((options.getTokensUsed?.() || 0) / ctxWindow * 100)}% full**.`,
+                `Adding this deep-dive batch would push it to approximately **${Math.round(projectedFraction * 100)}% full** ` +
+                `(threshold for Batch 3: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`,
                 '',
                 '**Action**: Proceed directly to **Phase 3 — Synthesis** with findings from Batches 1 and 2.',
               ].join('\n'),
             }],
-            details: { skipped: true, reason: 'context_limit_batch3', contextFraction: ctxFraction },
+            details: { skipped: true, reason: 'context_limit_projection_batch3', contextFraction: projectedFraction },
           };
         }
 
         const startTime = Date.now();
-        const paramsRecord = params as Record<string, unknown>;
-        let urls = (paramsRecord['urls'] as string[] | undefined) || [];
         const rawExclude = (paramsRecord['excludeLinks'] as string[] | undefined) || [];
         const maxConcurrency = validateMaxConcurrency(paramsRecord['maxConcurrency'] as number | undefined);
 

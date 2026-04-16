@@ -271,8 +271,8 @@ The grep tool tries `rg` first and falls back to `grep`. For best performance, i
 - Runs one researcher session without a coordinator.
 - Best for focused questions and normal web lookups.
 
-**Deep Mode (Multi-Agent)**
-- Swarm Orchestrator (`src/orchestration/swarm-orchestrator.ts`) uses an AI coordinator to decompose the query into a research agenda.
+Deep Mode (Multi-Agent)
+- Orchestrator (`src/orchestration/deep-research-orchestrator.ts`) uses an AI coordinator to decompose the query into a research agenda.
 - Researchers (`src/orchestration/researcher.ts`) run gathering, scraping, and reporting phases.
 - Gathering is limited to four calls across search, security search, Stack Exchange, and grep per researcher.
 - Scraping uses a two-call protocol: first handshake for already-scraped links, second execution for filtered URLs.
