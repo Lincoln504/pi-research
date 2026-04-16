@@ -61,6 +61,7 @@ export class DeepResearchOrchestrator {
   private activeSessions = new Map<string, AgentSession>();
   private resolveCompletion: (result: string) => void = () => {};
   private rejectCompletion: (err: any) => void = () => {};
+  private completionResolved = false; // Track if we've already resolved to prevent duplicate resolutions
 
   /** Per-sibling current context occupation (overwritten on every message_end). */
   private siblingTokens = new Map<string, number>();
@@ -79,20 +80,36 @@ export class DeepResearchOrchestrator {
   }
 
   private resolveResult(result: string) {
+    // Prevent duplicate resolutions
+    if (this.completionResolved) {
+      logger.warn('[deep-research] Attempting to resolve already completed research, ignoring');
+      return;
+    }
+    this.completionResolved = true;
+    
     if (this.options.panelState.progress) {
+      // Snap progress to 100% to ensure clean completion
       this.options.panelState.progress.made = this.options.panelState.progress.expected;
       this.options.onUpdate();
     }
     const final = result.length > MAX_REPORT_LENGTH
       ? result.slice(0, MAX_REPORT_LENGTH) + '\n\n... (final report truncated for length) ...'
       : result;
+    logger.log('[deep-research] Research resolved with result of length:', final.length);
     this.resolveCompletion(final);
   }
 
   async run(signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
       this.resolveCompletion = resolve;
-      this.rejectCompletion = reject;
+      this.rejectCompletion = (err: any) => {
+        if (this.completionResolved) {
+          logger.warn('[deep-research] Attempting to reject already completed research, ignoring');
+          return;
+        }
+        this.completionResolved = true;
+        reject(err);
+      };
       if (signal?.aborted) return reject(new Error('Research aborted'));
       signal?.addEventListener('abort', () => reject(new Error('Research aborted')));
       this.kickoff(signal).catch(reject);
@@ -115,9 +132,13 @@ export class DeepResearchOrchestrator {
   }
 
   private async kickoff(signal?: AbortSignal) {
+    logger.log(`[deep-research] Kickoff: status=${this.state.status}`);
     if (this.state.status === 'planning') await this.doPlanning(signal);
     if (this.state.status === 'researching') await this.startRound(signal);
-    if (this.state.status === 'completed') this.resolveResult(this.state.finalSynthesis || '');
+    if (this.state.status === 'completed') {
+      logger.log('[deep-research] Already in completed state, resolving with synthesis');
+      this.resolveResult(this.state.finalSynthesis || '');
+    }
   }
 
   private getInitialSiblingCount(complexity: 1 | 2 | 3 | 4): number {
@@ -585,10 +606,34 @@ export class DeepResearchOrchestrator {
       completeSlice(this.options.panelState, coordId);
       this.options.onUpdate();
 
-      // Note: We do NOT call startRound() here because:
-      // 1. The finally block of executeSibling will call it
-      // 2. This ensures all aspects from the previous round are marked complete
-      //    before the new round starts, preventing visual overlap
+      // CRITICAL: Must trigger next step after evaluator completes
+      // The evaluator does NOT run through executeSibling(), so there's no
+      // finally block to call startRound(). We must call it explicitly.
+      
+      // Give state a moment to propagate the update
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      if (isSynthesis) {
+        // Evaluator chose to synthesize - resolve the research
+        logger.log('[deep-research] Evaluator chose SYNTHESIS - resolving research');
+        if (this.state.finalSynthesis) {
+          this.resolveResult(this.state.finalSynthesis);
+        } else {
+          // If finalSynthesis not in state yet, wait and check again
+          setTimeout(() => {
+            if (this.state.finalSynthesis) {
+              this.resolveResult(this.state.finalSynthesis);
+            } else {
+              logger.error('[deep-research] Final synthesis not found in state after evaluator completed');
+              this.rejectCompletion(new Error('Evaluator chose synthesis but no final synthesis in state'));
+            }
+          }, 100);
+        }
+      } else {
+        // Evaluator delegated more researchers - start next round
+        logger.log(`[deep-research] Evaluator chose DELEGATION - starting Round ${evaluatedRound + 1}`);
+        await this.startRound(signal);
+      }
 
     } catch (err) {
       logger.error(`[deep-research] Coordinator evaluation failed for round ${evaluatedRound}:`, err);
