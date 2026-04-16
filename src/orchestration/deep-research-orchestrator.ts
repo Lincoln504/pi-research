@@ -455,7 +455,9 @@ export class DeepResearchOrchestrator {
     const evaluatedRound = this.state.currentRound;
     const coordId = `coord.${evaluatedRound}`;
 
-    addSlice(this.options.panelState, coordId, 'E', false);
+    // Add evaluator slice AFTER all previous round slices are complete (grey)
+    // The evaluator does not count toward the 3 max concurrent researchers limit
+    addSlice(this.options.panelState, coordId, 'Eval', false);
     activateSlice(this.options.panelState, coordId);
     this.options.onUpdate();
 
@@ -570,7 +572,10 @@ export class DeepResearchOrchestrator {
       completeSlice(this.options.panelState, coordId);
       this.options.onUpdate();
 
-      await this.startRound(signal);
+      // Note: We do NOT call startRound() here because:
+      // 1. The finally block of executeSibling will call it
+      // 2. This ensures all aspects from the previous round are marked complete
+      //    before the new round starts, preventing visual overlap
 
     } catch (err) {
       logger.error(`[deep-research] Coordinator evaluation failed for round ${evaluatedRound}:`, err);
