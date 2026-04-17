@@ -1,5 +1,5 @@
 {
-  "name": "pi-research",
+  "name": "@lincolndeen/pi-research",
   "version": "0.1.0",
   "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
@@ -18,11 +18,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/lincoln504/pi-research.git"
+    "url": "https://github.com/lincolndeen/pi-research.git"
   },
-  "homepage": "https://github.com/lincoln504/pi-research#readme",
+  "homepage": "https://github.com/lincolndeen/pi-research#readme",
   "bugs": {
-    "url": "https://github.com/lincoln504/pi-research/issues"
+    "url": "https://github.com/lincolndeen/pi-research/issues"
   },
   "keywords": [
     "pi",
@@ -35,7 +35,7 @@
     "security",
     "stack-exchange"
   ],
-  "author": "Lincoln504",
+  "author": "Lincolndeen",
   "contributors": [
     "MuratAitov"
   ],

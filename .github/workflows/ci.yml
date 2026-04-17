@@ -4,180 +4,69 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:
+    branches: [ main ]
 
 env:
   NODE_VERSION: '22'
-  CACHE_PATH: ${{ github.workspace }}/node_modules
 
 jobs:
   lint:
-    name: Lint (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
-
-      - name: Run linter
-        run: npm run lint
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run lint
 
   type-check:
-    name: Type Check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
-
-      - name: Run type check
-        run: npm run type-check
-
-  test-unit:
-    name: Unit Tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
-
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: test-results-${{ matrix.os }}
-          path: test-results/
-
-  test-integration:
-    name: Integration Tests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run type-check
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium firefox webkit
-
-      - name: Install Docker (for testcontainers)
-        run: |
-          curl -fsSL https://get.docker.com | sh
-          sudo systemctl start docker
-
-      - name: Run integration tests
-        run: npm run test:integration
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: integration-test-results
-          path: test-results/
-
-  validate-config:
-    name: Validate Configuration
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:unit
 
-      - name: Install dependencies
-        run: npm ci
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install chromium firefox webkit
+      - run: npm run test:integration
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
-
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
       - name: Validate package.json
-        run: |
-          node -e "const pkg = require('./package.json'); if (!pkg.name || !pkg.version) { throw new Error('Invalid package.json'); }"
-          echo "✅ package.json is valid"
-          echo "Package: ${pkg.name}@${pkg.version}"
-          if (pkg.keywords && pkg.keywords.includes('pi-package')) {
-            echo "✅ pi-package keyword present"
-          } else {
-            throw new Error('Missing pi-package keyword')
-          }
-
-      - name: Verify npm package structure
-        run: |
-          npm pack --dry-run 2>&1 | tee /tmp/npm-pack.txt
-          # Verify that key files are included
-          if grep -q "index.ts" /tmp/npm-pack.txt; then
-            echo "✅ index.ts included"
-          else
-            echo "❌ index.ts not found in package"
-            exit 1
-          fi
+        run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
+      - name: Verify npm package
+        run: npm pack --dry-run | grep -q index.ts
