@@ -30,7 +30,9 @@ interface CreateToolsOptions {
  * Create all research tools
  */
 export function createResearchTools(options: CreateToolsOptions): ToolDefinition[] {
-  const fallbackState: SystemResearchState = {
+  // Create a fresh fallback state per tool instance to avoid state leakage between research runs
+  // This is only used when getGlobalState is not provided (e.g., quick mode with single researcher)
+  const createFallbackState = (): SystemResearchState => ({
     version: 1,
     rootQuery: '',
     complexity: 1,
@@ -40,7 +42,10 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     initialAgenda: [],
     allScrapedLinks: [],
     aspects: {},
-  };
+  });
+  
+  const fallbackState = createFallbackState();
+  
   const resolvedOptions = {
     ...options,
     getGlobalState: options.getGlobalState ?? (() => fallbackState),

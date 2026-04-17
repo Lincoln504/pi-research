@@ -22,6 +22,7 @@ import { scrape, scrapeSingle } from '../web-research/scrapers.ts';
 import { validateMaxConcurrency } from '../web-research/utils.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
+import { deduplicateUrls } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_MAX_SCRAPE_URLS,
@@ -44,9 +45,8 @@ export function createScrapeTool(options: {
   contextWindowSize?: number;
 }): ToolDefinition {
 
-  // Per-instance state: track what was scraped in batch 1 so batch 2/3 can deduplicate
-  let batch1Urls: string[] = [];
-  let batch2Urls: string[] = [];
+  // Helper to get globally scraped URLs for deduplication
+  const getScrapedState = () => options.getGlobalState().allScrapedLinks || [];
 
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
   const getContextFraction = (additionalTokens: number = 0): number => {
@@ -190,10 +190,9 @@ export function createScrapeTool(options: {
           throw new Error('excludeLinks must be an array of strings if provided.');
         }
 
-        // Record for cross-batch deduplication
-        batch1Urls = [...urls];
-
         // Immediately update global link pool (signals intent to other researchers)
+        // This ensures other researchers see these URLs as being scraped, even if
+        // the fetch hasn't completed yet. Prevents duplicate scraping in concurrent scenarios.
         options.updateGlobalLinks(urls);
 
         let scrapeResults: any[];
@@ -280,15 +279,20 @@ export function createScrapeTool(options: {
           throw new Error('At least one valid URL string is required for scraping.');
         }
 
-        // Cross-batch deduplication: remove URLs already scraped in Batch 1
-        const batch1Set = new Set(batch1Urls);
-        const dedupedUrls = urls.filter(u => !batch1Set.has(u));
-        const deduped = urls.length - dedupedUrls.length;
+        // Deduplicate against globally scraped URLs (includes all previous batches)
+        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, getScrapedState());
+        
+        // Report duplicates to the AI
+        let dedupNote = '';
+        const deduped = globalDuplicates.length;
+        if (deduped > 0) {
+          dedupNote = `**Global Deduplication**: ${deduped} URL(s) were already in the global scraped pool.\n\n`;
+        }
         urls = dedupedUrls;
 
         if (urls.length === 0) {
           return {
-            content: [{ type: 'text', text: `# Batch 2 Skipped\n\nAll ${deduped} URL(s) were already scraped in Batch 1. Proceed to synthesis.` }],
+            content: [{ type: 'text', text: `# Batch 2 Skipped\n\nAll URLs were already scraped in previous batches or globally. Proceed to synthesis.` }],
             details: { skipped: true, reason: 'all_duplicates' },
           };
         }
@@ -297,8 +301,9 @@ export function createScrapeTool(options: {
           urls = urls.slice(0, BATCH_2_MAX_SCRAPE_URLS);
         }
 
-        // Record for batch 3 deduplication
-        batch2Urls = [...urls];
+        // Immediately update global link pool (signals intent to other researchers)
+        // This ensures other researchers see these URLs as being scraped, even if
+        // the fetch hasn't completed yet. Prevents duplicate scraping in concurrent scenarios.
         options.updateGlobalLinks(urls);
 
         let scrapeResults: any[];
@@ -322,9 +327,9 @@ export function createScrapeTool(options: {
         const batch3Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_BATCH3;
 
         let markdown = `# URL Scrape Results (Batch 2)\n\n`;
+        if (dedupNote) markdown += dedupNote;
         markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s`;
-        if (deduped > 0) markdown += `, **Deduplicated (already in Batch 1):** ${deduped}`;
-        markdown += '\n\n';
+
 
         if (rawExclude.length > 0) {
           markdown += `**Links considered but not scraped:**\n${rawExclude.map(l => `- ${l}`).join('\n')}\n\n`;
@@ -346,7 +351,7 @@ export function createScrapeTool(options: {
 
         return {
           content: [{ type: 'text', text: markdown }],
-          details: { urls, excludeLinks: rawExclude, successfulCount: successful.length, duration: elapsed, batch: 2, deduped },
+          details: { urls, excludeLinks: rawExclude, successfulCount: successful.length, duration: elapsed, batch: 2 },
         };
       }
 
@@ -388,15 +393,19 @@ export function createScrapeTool(options: {
           throw new Error('At least one valid URL string is required for scraping.');
         }
 
-        // Deduplicate against Batch 1 and Batch 2
-        const prevScraped = new Set([...batch1Urls, ...batch2Urls]);
-        const dedupedUrls = urls.filter(u => !prevScraped.has(u));
-        const deduped = urls.length - dedupedUrls.length;
+        // Deduplicate against globally scraped URLs (includes all previous batches)
+        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, getScrapedState());
+        
+        // Report duplicates to the AI
+        let dedupNote = '';
+        if (globalDuplicates.length > 0) {
+          dedupNote = `**Global Deduplication**: ${globalDuplicates.length} URL(s) were already in the global scraped pool.\n\n`;
+        }
         urls = dedupedUrls;
 
         if (urls.length === 0) {
           return {
-            content: [{ type: 'text', text: `# Batch 3 Skipped\n\nAll ${deduped} URL(s) were already scraped in previous batches. Proceed to synthesis.` }],
+            content: [{ type: 'text', text: `# Batch 3 Skipped\n\nAll URLs were already scraped in previous batches or globally. Proceed to synthesis.` }],
             details: { skipped: true, reason: 'all_duplicates' },
           };
         }
@@ -405,6 +414,9 @@ export function createScrapeTool(options: {
           urls = urls.slice(0, MAX_SCRAPE_URLS);
         }
 
+        // Immediately update global link pool (signals intent to other researchers)
+        // This ensures other researchers see these URLs as being scraped, even if
+        // the fetch hasn't completed yet. Prevents duplicate scraping in concurrent scenarios.
         options.updateGlobalLinks(urls);
 
         let scrapeResults: any[];
@@ -425,9 +437,8 @@ export function createScrapeTool(options: {
         const elapsed = Date.now() - startTime;
 
         let markdown = `# URL Scrape Results (Batch 3 — Deep-Dive)\n\n`;
-        markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s`;
-        if (deduped > 0) markdown += `, **Deduplicated:** ${deduped}`;
-        markdown += '\n\n';
+        if (dedupNote) markdown += dedupNote;
+        markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
         markdown += `**All scrape batches complete.** Proceed to Phase 3 — Synthesis.\n\n`;
 
         if (rawExclude.length > 0) {
@@ -444,7 +455,7 @@ export function createScrapeTool(options: {
 
         return {
           content: [{ type: 'text', text: markdown }],
-          details: { urls, excludeLinks: rawExclude, successfulCount: successful.length, duration: elapsed, batch: 3, deduped },
+          details: { urls, excludeLinks: rawExclude, successfulCount: successful.length, duration: elapsed, batch: 3 },
         };
       }
 

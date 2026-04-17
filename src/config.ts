@@ -13,6 +13,8 @@ import { logger } from './logger.ts';
 export interface Config {
   /** Per-researcher timeout in milliseconds (default: 240000) */
   RESEARCHER_TIMEOUT_MS: number;
+  /** Maximum researchers allowed to run simultaneously (default: 3) */
+  MAX_CONCURRENT_RESEARCHERS: number;
   /** Proxy URL for SearXNG searches (optional) */
   PROXY_URL?: string;
   /** Health check timeout in milliseconds (default: 15000) */
@@ -30,6 +32,7 @@ export interface Config {
  */
 const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 240000,
+  MAX_CONCURRENT_RESEARCHERS: 3,
   PROXY_URL: undefined,
   HEALTH_CHECK_TIMEOUT_MS: 15000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
@@ -80,6 +83,11 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       env,
       'PI_RESEARCH_RESEARCHER_TIMEOUT_MS',
       DEFAULTS.RESEARCHER_TIMEOUT_MS
+    ),
+    MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(
+      env,
+      'PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS',
+      DEFAULTS.MAX_CONCURRENT_RESEARCHERS
     ),
     PROXY_URL: parseEnvString(env, 'PROXY_URL'),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(
@@ -140,6 +148,12 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.RESEARCHER_TIMEOUT_MS < 30000 || config.RESEARCHER_TIMEOUT_MS > 600000) {
     throw new Error(
       `PI_RESEARCH_RESEARCHER_TIMEOUT_MS must be between 30000ms (30s) and 600000ms (10m), got ${config.RESEARCHER_TIMEOUT_MS}ms`
+    );
+  }
+
+  if (config.MAX_CONCURRENT_RESEARCHERS < 1 || config.MAX_CONCURRENT_RESEARCHERS > 10) {
+    throw new Error(
+      `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS must be between 1 and 10, got ${config.MAX_CONCURRENT_RESEARCHERS}`
     );
   }
 

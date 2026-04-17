@@ -30,6 +30,8 @@ export interface HealthCheckResult {
     searchQuery?: string;
     searchResultCount?: number;
     searchDurationMs?: number;
+    workingEngines?: string[];
+    workingEngineCount?: number;
     scrapedUrl?: string;
     scrapedContentLength?: number;
     scrapedDurationMs?: number;
@@ -124,7 +126,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       return result;
     }
 
-    // Check for at least one result from a GENERAL WEB search engine (not Wikipedia)
+    // Check for at least 2 working general search engines (not Wikipedia)
     // Wikipedia is an encyclopedic engine, not suitable for general web research
     // Load the list of active engines from the actual SearXNG config (not hardcoded)
     const generalEngines = getActiveSearxngEngines();
@@ -139,21 +141,26 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       generalEngines.includes((r.engine || '').toLowerCase())
     );
 
-    if (generalResults.length === 0) {
-      // No results from general web engines — report which engines responded vs which didn't
-      const engineCounts = new Map<string, number>();
-      generalEngines.forEach(e => engineCounts.set(e, 0));
-      qr.results.forEach((r: SearXNGResult) => {
-        const engine = (r.engine || '').toLowerCase();
-        if (engineCounts.has(engine)) {
-          engineCounts.set(engine, (engineCounts.get(engine) || 0) + 1);
-        }
-      });
+    // Count how many engines returned at least one result
+    const engineCounts = new Map<string, number>();
+    generalEngines.forEach(e => engineCounts.set(e, 0));
+    generalResults.forEach((r: SearXNGResult) => {
+      const engine = (r.engine || '').toLowerCase();
+      if (engineCounts.has(engine)) {
+        engineCounts.set(engine, (engineCounts.get(engine) || 0) + 1);
+      }
+    });
+
+    const workingEngines = Array.from(engineCounts.entries()).filter(([_, count]) => count > 0);
+    const workingEngineCount = workingEngines.length;
+
+    // Require at least 2 engines to return results
+    if (workingEngineCount < 2) {
       const engineReport = Array.from(engineCounts.entries())
         .map(([e, c]) => `${e}: ${c}`)
         .join(', ');
-      const allEngines = qr.results.map((r: SearXNGResult) => r.engine || 'unknown').join(', ');
-      result.error = `All general web search engines failed (${engineReport}). Only these engines responded: ${allEngines}. Real web research will fail.`;
+      const workingList = workingEngines.map(([e, _]) => e).join(', ');
+      result.error = `Insufficient working engines: ${workingEngineCount}/${generalEngines.length} returned results (${workingList || 'none'}). Need at least 2 engines working. Engine results: ${engineReport}.`;
       logger.error('[healthcheck] Search validation failed:', result.error);
       return result;
     }
@@ -162,7 +169,10 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     result.details.searchQuery = searchQuery;
     result.details.searchResultCount = generalResults.length;
     result.details.searchDurationMs = searchDurationMs;
-    logger.log(`[healthcheck] ✓ Search OK: ${generalResults.length} results from general web engines in ${searchDurationMs}ms`);
+    result.details.workingEngines = workingEngines.map(([e, _]) => e);
+    result.details.workingEngineCount = workingEngineCount;
+    const workingEnginesList = workingEngines.map(([e, _]) => e).join(', ');
+    logger.log(`[healthcheck] ✓ Search OK: ${generalResults.length} results from ${workingEngineCount} engines [${workingEnginesList}] in ${searchDurationMs}ms`);
 
     // PHASE 2: Test scrape with timeout enforcement
     logger.log('[healthcheck] Phase 2: Testing scrape tool (timeout: ' + SCRAPE_TIMEOUT_MS + 'ms)...');

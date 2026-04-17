@@ -133,7 +133,21 @@ async function searchSearxng(query: string, options?: SearxngSearchOptions, sign
   const data = await response.json() as SearxngApiResponse;
 
   // Return results or empty array using nullish coalescing
-  return data.results ?? [];
+  const results = data.results ?? [];
+  
+  // Diagnostics: Log if we got no results or suspiciously few results
+  if (results.length === 0) {
+    if (logger.debug) {
+      logger.debug(`[Web Research] No results for query: ${query}`);
+    }
+  } else if (results.length < 3 && query.length > 10) {
+    // Very few results for a long query might indicate search quality issues
+    if (logger.debug) {
+      logger.debug(`[Web Research] Low result count (${results.length}) for query: ${query}`);
+    }
+  }
+  
+  return results;
 }
 
 // ============================================================================

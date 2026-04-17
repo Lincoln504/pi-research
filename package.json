@@ -10,17 +10,19 @@
     "src/",
     "prompts/",
     "config/",
+    "scripts/",
     "assets/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "tsconfig.json"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Lincoln504/pi-research-dev.git"
+    "url": "https://github.com/lincoln504/pi-research.git"
   },
-  "homepage": "https://github.com/Lincoln504/pi-research-dev#readme",
+  "homepage": "https://github.com/lincoln504/pi-research#readme",
   "bugs": {
-    "url": "https://github.com/Lincoln504/pi-research-dev/issues"
+    "url": "https://github.com/lincoln504/pi-research/issues"
   },
   "keywords": [
     "pi",
@@ -49,11 +51,16 @@
     "test:unit": "vitest run --config configs/vitest.config.unit.ts",
     "test:integration": "vitest run --config configs/vitest.config.integration.ts",
     "test:watch": "vitest --config configs/vitest.config.unit.ts",
-    "test:coverage": "vitest run --config configs/vitest.config.ts --coverage"
+    "test:coverage": "vitest run --config configs/vitest.config.ts --coverage",
+    "postinstall": "node scripts/setup.js",
+    "install:browsers": "npx playwright install chromium",
+    "install:deps": "npx playwright install-deps",
+    "setup": "npm install && npm run install:browsers"
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "index.ts",
+      "src/"
     ]
   },
   "dependencies": {

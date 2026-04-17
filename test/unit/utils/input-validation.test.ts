@@ -132,14 +132,14 @@ describe('validateAndSanitizeQuery', () => {
 
 describe('validateComplexity', () => {
   it('should accept valid complexity levels', () => {
+    expect(validateComplexity(0)).toBe(true);
     expect(validateComplexity(1)).toBe(true);
     expect(validateComplexity(2)).toBe(true);
     expect(validateComplexity(3)).toBe(true);
-    expect(validateComplexity(4)).toBe(true);
   });
 
   it('should reject invalid complexity levels', () => {
-    expect(validateComplexity(0)).toBe(false);
+    expect(validateComplexity(4)).toBe(false);
     expect(validateComplexity(5)).toBe(false);
     expect(validateComplexity(-1)).toBe(false);
     expect(validateComplexity(100)).toBe(false);

@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ExtensionContext, AgentSession } from '@mariozechner/pi-coding-agent';
+import { convertToLlm } from '@mariozechner/pi-coding-agent';
 import type { ExtendedAgentSessionEvent } from '../types/extension-context.ts';
 import { complete, type Model } from '@mariozechner/pi-ai';
 import { DeepResearchStateManager } from './state-manager.ts';
@@ -23,18 +24,16 @@ import {
   INITIAL_RESEARCHERS_LEVEL_1,
   INITIAL_RESEARCHERS_LEVEL_2,
   INITIAL_RESEARCHERS_LEVEL_3,
-  INITIAL_RESEARCHERS_LEVEL_4,
   MAX_ROUNDS_LEVEL_1,
   MAX_ROUNDS_LEVEL_2,
   MAX_ROUNDS_LEVEL_3,
-  MAX_ROUNDS_LEVEL_4,
   MAX_CONCURRENT_RESEARCHERS,
   MAX_REPORT_LENGTH,
   DEFAULT_MODEL_CONTEXT_WINDOW,
 } from '../constants.ts';
 import { createResearcherSession } from './researcher.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
-import { formatParentContext } from './session-context.ts';
+import { buildSessionContext } from '@mariozechner/pi-coding-agent';
 import { formatSharedLinksFromState } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
@@ -48,7 +47,7 @@ export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
   model: Model<any>;
   query: string;
-  complexity: 1 | 2 | 3 | 4;
+  complexity: 1 | 2 | 3;
   onTokens: (n: number) => void;
   onUpdate: () => void;
   searxngUrl: string;
@@ -141,21 +140,19 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private getInitialSiblingCount(complexity: 1 | 2 | 3 | 4): number {
+  private getInitialSiblingCount(complexity: 1 | 2 | 3): number {
     switch(complexity) {
       case 1: return INITIAL_RESEARCHERS_LEVEL_1;
       case 2: return INITIAL_RESEARCHERS_LEVEL_2;
       case 3: return INITIAL_RESEARCHERS_LEVEL_3;
-      case 4: return INITIAL_RESEARCHERS_LEVEL_4;
     }
   }
 
-  private getMaxRounds(complexity: 1 | 2 | 3 | 4): number {
+  private getMaxRounds(complexity: 1 | 2 | 3): number {
     switch(complexity) {
       case 1: return MAX_ROUNDS_LEVEL_1;
       case 2: return MAX_ROUNDS_LEVEL_2;
       case 3: return MAX_ROUNDS_LEVEL_3;
-      case 4: return MAX_ROUNDS_LEVEL_4;
     }
   }
 
@@ -164,15 +161,28 @@ export class DeepResearchOrchestrator {
     this.options.onUpdate();
 
     try {
-      const parentConvo = await formatParentContext(this.options.ctx);
+      // Get full parent conversation context for's coordinator (emulates fork mode)
+      const branch = this.options.ctx.sessionManager.getBranch();
+      const sessionContext = buildSessionContext(branch);
+      const parentMessages = sessionContext.messages;
+
+      logger.log(`[deep-research] Planning with ${parentMessages.length} parent messages (fork mode emulation)`);
+
       const coordinatorPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'system-coordinator.md'), 'utf-8');
-      const plannerPrompt = coordinatorPromptRaw + `\n\nHISTORY:\n${parentConvo}\n\nQUERY: ${this.state.rootQuery}`;
+      const plannerPrompt = coordinatorPromptRaw + `\n\nQUERY: ${this.state.rootQuery}`;
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
       
+      // Convert AgentMessages to LLM-compatible Messages
+      const llmMessages = await convertToLlm(parentMessages);
+      
       const response = await complete(this.options.model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: plannerPrompt }], timestamp: Date.now() }]
+        messages: [
+          // Include full parent conversation history (converted) + current query
+          ...llmMessages,
+          { role: 'user', content: [{ type: 'text', text: plannerPrompt }], timestamp: Date.now() }
+        ]
       }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
 
       const usage = response.usage;

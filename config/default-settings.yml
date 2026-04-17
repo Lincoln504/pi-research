@@ -98,6 +98,15 @@ engines:
     shortcut: brv
     brave_category: search
 
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: true
+
+  - name: startpage
+    engine: startpage
+    shortcut: sp
+
   - name: wikipedia
     engine: wikipedia
     shortcut: wp

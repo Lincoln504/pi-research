@@ -30,9 +30,10 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" != "v$VERSION" ]; then
-            echo "Tag $TAG does not match package.json version v$VERSION"
+            echo "❌ Tag $TAG does not match package.json version v$VERSION"
             exit 1
           fi
+          echo "✅ Tag $TAG matches package version v$VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -49,7 +50,44 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run
 
-      - name: Publish package
+      - name: Publish package to npm
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish-npm
+    if: success()
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## ${{ github.ref_name }}
+            
+            Automated release published to npm.
+            
+            **Package**: [`@lincoln504/pi-research@${{ github.ref_name }}`](https://www.npmjs.com/package/@lincoln504/pi-research)
+            
+            ### Changes
+            See [CHANGELOG.md](./CHANGELOG.md) for details.
+
+      - name: Extract changelog entry
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Release $TAG" >> $GITHUB_STEP_SUMMARY
+          echo "Published to npm: https://www.npmjs.com/package/@lincoln504/pi-research" >> $GITHUB_STEP_SUMMARY

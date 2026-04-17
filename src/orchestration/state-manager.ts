@@ -32,7 +32,10 @@ export class DeepResearchStateManager {
       (query === undefined || e.data?.rootQuery === query)
     );
 
-    return stateEntry ? (stateEntry.data as SystemResearchState) : null;
+    if (!stateEntry) return null;
+    
+    const loadedState = stateEntry.data as SystemResearchState;
+    return loadedState;
   }
 
   /**
@@ -53,7 +56,8 @@ export class DeepResearchStateManager {
   /**
    * Utility: Reconstruct state or initialize a new one.
    */
-  initialize(query: string, complexity: 1 | 2 | 3 | 4): SystemResearchState {
+  initialize(query: string, complexity: 1 | 2 | 3): SystemResearchState {
+    
     const existing = this.load(query);
     if (existing) {
       logger.log('[deep-research-state] Resuming existing research system.');

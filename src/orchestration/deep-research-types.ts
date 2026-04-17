@@ -30,7 +30,7 @@ export interface ResearchSibling {
 export interface SystemResearchState {
   version: number;
   rootQuery: string;
-  complexity: 1 | 2 | 3 | 4;
+  complexity: 1 | 2 | 3; // 1: Normal, 2: Deep, 3: Ultra
   currentRound: number;
   status: ResearchStatus;
   lastUpdated: number;

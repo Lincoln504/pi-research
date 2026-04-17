@@ -164,7 +164,7 @@ describe('config (refactored)', () => {
           PROXY_URL: 'http://custom-proxy.com',
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         setConfig(customConfig);
@@ -183,7 +183,7 @@ describe('config (refactored)', () => {
           PROXY_URL: config1.PROXY_URL,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         setConfig(customConfig);
@@ -198,7 +198,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 12345,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         setConfig(customConfig);
@@ -219,7 +219,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: -1, // Invalid
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => setConfig(customConfig)).not.toThrow();
@@ -237,7 +237,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 12345,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         setConfig(customConfig);
@@ -258,7 +258,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 99999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         });
         resetConfig();
 
@@ -266,7 +266,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 55555,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
         setConfig(newConfig);
 
@@ -282,7 +282,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 240000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -293,7 +293,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 30000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -304,7 +304,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 600000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -315,7 +315,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 180000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -326,7 +326,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 240000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         });
 
         expect(() => validateConfig()).not.toThrow();
@@ -339,7 +339,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 29999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -350,7 +350,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 600001,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -361,7 +361,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: -1,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -372,7 +372,7 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 0,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
@@ -385,13 +385,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 30000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
         const config2: Config = {
           RESEARCHER_TIMEOUT_MS: 600000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config1)).not.toThrow();
@@ -403,13 +403,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 29999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
         const config2: Config = {
           RESEARCHER_TIMEOUT_MS: 600001,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config1)).toThrow();
@@ -422,7 +422,7 @@ describe('config (refactored)', () => {
           PROXY_URL: 'http://proxy.example.com:8080',
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -442,7 +442,7 @@ describe('config (refactored)', () => {
         PROXY_URL: 'http://proxy.com',
         TUI_REFRESH_DEBOUNCE_MS: 10,
         CONSOLE_RESTORE_DELAY_MS: 15000,
-        SEARCH_LANGUAGE: 'en-US',
+        MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
       };
       setConfig(customConfig);
 

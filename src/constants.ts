@@ -20,48 +20,37 @@ export const MAX_GATHERING_CALLS = 4;
 /** Maximum URLs to scrape per batch */
 export const MAX_SCRAPE_URLS = 3;
 
-/** Maximum siblings (researchers) per round for complexity level 1 (Brief) */
-export const MAX_SIBLINGS_ROUND_1 = 1;
-
-/** Maximum siblings (researchers) per round for complexity level 2 (Normal) */
-export const MAX_SIBLINGS_ROUND_2 = 2;
-
-/** Maximum siblings (researchers) per round for complexity level 3 (Deep) */
-export const MAX_SIBLINGS_ROUND_3 = 3;
-
-/** Maximum siblings (researchers) per round for complexity level 4 (Ultra) */
-export const MAX_SIBLINGS_ROUND_4 = 5;
-
-/** Maximum researchers allowed to run simultaneously across all rounds */
+/** Maximum siblings (researchers) allowed to run simultaneously across all rounds */
 export const MAX_CONCURRENT_RESEARCHERS = 3;
 
 
 // ==================== Complexity Levels ====================
 
-/** Initial researcher count for complexity level 1 (Brief) */
-export const INITIAL_RESEARCHERS_LEVEL_1 = 1;
+/**
+ * Complexity 0: Quick mode (no orchestrator, 1 researcher, 1 round)
+ * Complexity 1: Normal (2 researchers, 2 rounds)
+ * Complexity 2: Deep (3 researchers, 3 rounds)
+ * Complexity 3: Ultra (5 researchers, 5 rounds)
+ */
 
-/** Initial researcher count for complexity level 2 (Normal) */
-export const INITIAL_RESEARCHERS_LEVEL_2 = 2;
+/** Initial researcher count for complexity 1 (Normal) */
+export const INITIAL_RESEARCHERS_LEVEL_1 = 2;
 
-/** Initial researcher count for complexity level 3 (Deep) */
-export const INITIAL_RESEARCHERS_LEVEL_3 = 3;
+/** Initial researcher count for complexity 2 (Deep) */
+export const INITIAL_RESEARCHERS_LEVEL_2 = 3;
 
-/** Initial researcher count for complexity level 4 (Ultra) */
-export const INITIAL_RESEARCHERS_LEVEL_4 = 5;
+/** Initial researcher count for complexity 3 (Ultra) */
+export const INITIAL_RESEARCHERS_LEVEL_3 = 5;
 
 
-/** Maximum rounds for complexity level 1 (Brief) */
-export const MAX_ROUNDS_LEVEL_1 = 1;
+/** Maximum rounds for complexity 1 (Normal) */
+export const MAX_ROUNDS_LEVEL_1 = 2;
 
-/** Maximum rounds for complexity level 2 (Normal) */
-export const MAX_ROUNDS_LEVEL_2 = 2;
+/** Maximum rounds for complexity 2 (Deep) */
+export const MAX_ROUNDS_LEVEL_2 = 3;
 
-/** Maximum rounds for complexity level 3 (Deep) */
-export const MAX_ROUNDS_LEVEL_3 = 3;
-
-/** Maximum rounds for complexity level 4 (Ultra) */
-export const MAX_ROUNDS_LEVEL_4 = 5;
+/** Maximum rounds for complexity 3 (Ultra) */
+export const MAX_ROUNDS_LEVEL_3 = 5;
 
 
 // ==================== Timeout Constants ====================

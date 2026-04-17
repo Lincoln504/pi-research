@@ -1,8 +1,11 @@
 /**
- * Research Tool
+ * pi-research: Multi-Agent Research Orchestration Tool
  *
- * Main orchestration logic for research tool.
- * Orchestrates deep mode research with multiple parallel agents.
+ * This is the primary entry point for the pi-research extension. It handles:
+ * 1. Configuration validation and SearXNG infrastructure lifecycle.
+ * 2. TUI (Terminal UI) initialization and real-time progress tracking.
+ * 3. Branching between "Quick" (single-agent) and "Deep" (multi-agent/multi-round) research modes.
+ * 4. Error handling, session cleanup, and result synthesis.
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,7 +25,6 @@ import type {
 import type { SettingsManager } from '@mariozechner/pi-coding-agent';
 import type { Model } from '@mariozechner/pi-ai';
 import { Type } from '@sinclair/typebox';
-import { complete } from '@mariozechner/pi-ai';
 import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig } from './config.ts';
 import {
@@ -130,17 +132,13 @@ export function createResearchTool(): ToolDefinition {
         minimum: 0,
         maximum: 3,
         description: [
-          'Research depth level (0-3). Overrides quick flag.',
-          '0: Quick/Brief — 1 researcher, 1 round. Direct session; no coordinator/orchestrator (Default).',
+          'Research complexity level (0-3).',
+          '0: Quick/Brief — 1 researcher, 1 round. Direct session; no coordinator/orchestrator.',
           '1: Normal — 2 researchers, 2 rounds. AI-orchestrated.',
           '2: Deep — 3 researchers, 3 rounds. AI-orchestrated.',
           '3: Ultra — 5 researchers, 5 rounds (Exhaustive). AI-orchestrated.',
+          'Omit to use default complexity 0 (Quick mode).',
         ].join(' '),
-        default: 0,
-      })),
-      quick: Type.Optional(Type.Boolean({
-        description: 'Deprecated: use depth: 0 instead. Enable quick mode: fast investigation using a single researcher session.',
-        default: false,
       })),
       model: Type.Optional(Type.String({
         description: 'Model ID to use for all research agents (defaults to current active model)',
@@ -153,20 +151,12 @@ export function createResearchTool(): ToolDefinition {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, model: modelId, quick: isQuickParam = false, depth } = params as {
+      const { query, model: modelId, depth } = params as {
         query: string;
-        quick?: boolean;
         depth?: number;
         model?: string;
       };
 
-      // depth overrides the quick flag entirely.
-      // depth 0 → quick mode (single researcher)
-      // depth 1 → complexity 2, skip LLM assessment
-      // depth 2 → complexity 3, skip LLM assessment
-      // depth 3 → complexity 4, skip LLM assessment
-      // (none)  → respect quick flag; if not quick, LLM assesses 1–3 as before
-      const isQuick = depth === 0 ? true : (depth !== undefined) ? false : isQuickParam;
       if (!query || !ctx.model) {
         return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
       }
@@ -186,9 +176,9 @@ export function createResearchTool(): ToolDefinition {
       }, async () => {
         let aborted = false;
         let cleanup: (() => void) | null = null;
+        let unsubOrder: (() => void) | null = null;
 
         try {
-          logger.info('[research] run started', { quick: isQuick, modelId });
           validateConfig();
           await initLifecycle(ctx);
           const searxngUrl = await ensureRunning();
@@ -208,38 +198,9 @@ export function createResearchTool(): ToolDefinition {
 
           const researchId = startResearchSession(piSessionId);
           const masterWidgetId = `pi-research-master-${piSessionId}`;
-          const panelState = createInitialPanelState(researchId, sanitizedQuery, getStatus(), modelIdStr);
-          
-          logger.info('[research] run initialized', {
-            mode: isQuick ? 'quick' : 'deep',
-            piSessionId,
-            researchId,
-            selectedModelId: modelIdStr,
-          });
-
-          // Single master update function for this Pi session
-          const updateMasterWidget = () => {
-            const masterPanelCreator = createMasterResearchPanel(piSessionId);
-            ctx.ui.setWidget(masterWidgetId, masterPanelCreator, { placement: 'aboveEditor' });
-          };
-
-          // Register this research run's state and the master update function
-          registerSessionPanel(piSessionId, researchId, panelState);
-          registerMasterUpdate(piSessionId, updateMasterWidget);
-          
-          // Subscribe to order changes to ensure refresh when ANY run starts/ends
-          const unsubOrder = onSessionOrderChange(piSessionId, () => refreshAllSessions(piSessionId));
-
-          // Robust functional health check before research starts
-          await ensureFunctionalHealth(panelState, () => refreshAllSessions(piSessionId));
-
-          const onTokens = (n: number) => {
-            panelState.totalTokens += n;
-            refreshAllSessions(piSessionId);
-          };
 
           cleanup = () => {
-            unsubOrder();
+            if (unsubOrder) unsubOrder();
             endResearchSession(piSessionId, researchId);
             cleanupSharedLinks(researchId);
             // Clear all flash timeouts for this specific run
@@ -256,6 +217,46 @@ export function createResearchTool(): ToolDefinition {
             
             logger.info('[research] cleanup completed', { piSessionId, researchId });
           };
+
+          const panelState = createInitialPanelState(researchId, sanitizedQuery, getStatus(), modelIdStr);
+          
+          // Register this research run's state and the master update function
+          registerSessionPanel(piSessionId, researchId, panelState);
+          const updateMasterWidget = () => {
+            const masterPanelCreator = createMasterResearchPanel(piSessionId);
+            ctx.ui.setWidget(masterWidgetId, masterPanelCreator, { placement: 'aboveEditor' });
+          };
+          registerMasterUpdate(piSessionId, updateMasterWidget);
+          
+          // Subscribe to order changes to ensure refresh when ANY run starts/ends
+          unsubOrder = onSessionOrderChange(piSessionId, () => refreshAllSessions(piSessionId));
+
+          // Robust functional health check before research starts
+          await ensureFunctionalHealth(panelState, () => refreshAllSessions(piSessionId));
+
+          const onTokens = (n: number) => {
+            panelState.totalTokens += n;
+            refreshAllSessions(piSessionId);
+          };
+
+          // Default complexity to 0 (quick mode) if not provided
+          const researchComplexity = depth ?? 0;
+          const isQuick = researchComplexity === 0;
+
+          // For deep mode, complexity (1-3) is passed directly to orchestrator
+          // complexity 1 → Normal (2 researchers, 2 rounds)
+          // complexity 2 → Deep (3 researchers, 3 rounds)
+          // complexity 3 → Ultra (5 researchers, 5 rounds)
+          const orchestratorComplexity = researchComplexity as 1 | 2 | 3;
+
+          logger.info('[research] run initialized', {
+            mode: isQuick ? 'quick' : 'deep',
+            complexity: researchComplexity,
+            piSessionId,
+            researchId,
+            selectedModelId: modelIdStr,
+          });
+
           signal?.addEventListener('abort', () => {
             aborted = true;
             logger.warn('[research] run aborted', { piSessionId, researchId });
@@ -263,11 +264,13 @@ export function createResearchTool(): ToolDefinition {
           }, { once: true });
 
           if (isQuick) {
-            const sliceLabel = 'researching ...';
+            const truncatedQuery = sanitizedQuery.length > 20 ? sanitizedQuery.slice(0, 20) + '...' : sanitizedQuery;
+            const sliceLabel = `researching: ${truncatedQuery}`;
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
             // Quick mode: 1 researcher × 10 units (8 tool calls + 2-unit final-report step)
             panelState.progress = { expected: 10, made: 0, extended: false };
+            logger.info('[research] quick mode started', { query: sanitizedQuery });
             refreshAllSessions(piSessionId);
             const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
             const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
@@ -349,7 +352,7 @@ export function createResearchTool(): ToolDefinition {
             }
 
             // Export research report
-            const exportPath = await exportResearchReport(sanitizedQuery, result, 'quick');
+            const exportPath = await exportResearchReport(sanitizedQuery, result, 'quick', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
 
             // Cleanup subscription
@@ -361,70 +364,22 @@ export function createResearchTool(): ToolDefinition {
             cleanup();
             return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
           } else {
-            // DEEP MODE: resolve complexity from explicit depth or LLM assessment.
-            let complexity: 1 | 2 | 3 | 4;
-
-            if (depth !== undefined) {
-              // Explicit depth mapping:
-              // 0 -> 1 (Brief)
-              // 1 -> 2 (Normal)
-              // 2 -> 3 (Deep)
-              // 3 -> 4 (Ultra)
-              complexity = (Math.max(1, Math.min(4, depth + 1))) as 1 | 2 | 3 | 4;
-              logger.info('[research] depth override — skipping LLM complexity assessment', { depth, complexity });
-            } else {
-              // Auto-assess complexity via LLM (original behaviour).
-              const complexityPrompt = `Analyze the research query: "${query}"
-Rate complexity from 1 to 3:
-1: Simple fact (1 researcher)
-2: Standard topic (2 researchers)
-3: Deep/Nuanced topic (3 researchers, more rounds)
-Output ONLY the number 1, 2, or 3.`;
-
-              panelState.statusMessage = 'assessing complexity...';
-              refreshAllSessions(piSessionId);
-
-              const auth = await ctx.modelRegistry.getApiKeyAndHeaders(selectedModel);
-              if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
-              const compResp = await complete(selectedModel, {
-                messages: [{ role: 'user', content: [{ type: 'text', text: complexityPrompt }], timestamp: Date.now() }]
-              }, { apiKey: auth.apiKey!, headers: auth.headers, signal });
-
-              const usage = compResp.usage;
-              if (usage) {
-                const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-                if (tokens > 0) {
-                   onTokens(tokens);
-                   refreshAllSessions(piSessionId);
-                }
-              }
-
-              const rawComplexity = parseInt(compResp.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('').trim(), 10);
-              complexity = (Number.isFinite(rawComplexity) ? Math.max(1, Math.min(3, rawComplexity)) : 2) as 1 | 2 | 3 | 4;
-              panelState.statusMessage = undefined;
-              refreshAllSessions(piSessionId);
-            }
-
+            // DEEP MODE: orchestrator complexity has already been determined above.
             const orchestrator = new DeepResearchOrchestrator({
               ctx,
               model: selectedModel as Model<any>,
               query: sanitizedQuery,
-              complexity,
+              complexity: orchestratorComplexity,
               onTokens,
               onUpdate: () => refreshAllSessions(piSessionId),
               searxngUrl,
               panelState,
             });
+
             const result = await orchestrator.run(signal);
-
-            // Snap to 100%
-            if (panelState.progress) {
-              panelState.progress.made = panelState.progress.expected;
-              refreshAllSessions(piSessionId);
-            }
-
+            
             // Export research report
-            const exportPath = await exportResearchReport(sanitizedQuery, result, 'deep');
+            const exportPath = await exportResearchReport(sanitizedQuery, result, 'deep', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
 
             cleanup();

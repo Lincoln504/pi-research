@@ -1,8 +1,13 @@
 /**
- * Researcher Agents
+ * Researcher Session Factory
  *
- * Creates researcher agent sessions.
- * Researchers use web search, scraping, security databases, and code search tools.
+ * Responsible for instantiating individual researcher agent sessions. 
+ * Each researcher is an autonomous agent equipped with a suite of specialized tools:
+ * - Web search via SearXNG
+ * - Context-aware URL scraping via Playwright
+ * - Security vulnerability database queries (NVD, CISA, OSV)
+ * - Technical Q&A retrieval from Stack Exchange
+ * - Local code search via Ripgrep
  */
 
 import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@mariozechner/pi-coding-agent';

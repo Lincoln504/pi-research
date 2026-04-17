@@ -43,7 +43,7 @@ export function getActiveSearxngEngines(): string[] {
     const allEngines = parseYamlEngines(content);
 
     // List of general purpose search engines (whitelist approach is safer)
-    const knownGeneralEngines = ['google', 'bing', 'brave', 'startpage', 'mojeek', 'qwant'];
+    const knownGeneralEngines = ['google', 'bing', 'brave', 'duckduckgo', 'startpage', 'mojeek', 'qwant'];
 
     // Filter for general search engines only
     const activeGeneralEngines = allEngines

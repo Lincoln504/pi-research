@@ -49,16 +49,18 @@ function generateHash(): string {
 export async function exportResearchReport(
   query: string,
   result: string,
-  _mode: 'quick' | 'deep'
+  _mode: 'quick' | 'deep',
+  baseDir?: string
 ): Promise<string | null> {
   const sanitizedQuery = sanitizeQuery(query);
   const baseFilename = `pi-research-${sanitizedQuery}`;
+  const targetDir = baseDir ?? tmpdir();
 
   // Try up to MAX_EXPORT_RETRIES times with different hashes
   for (let attempt = 0; attempt < MAX_EXPORT_RETRIES; attempt++) {
     const hash = generateHash();
     const filename = `${baseFilename}-${hash}.md`;
-    const filepath = join(tmpdir(), filename);
+    const filepath = join(targetDir, filename);
 
     try {
       // Use 'wx' flag to fail if file exists (avoid collisions)

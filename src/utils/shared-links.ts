@@ -1,24 +1,28 @@
 /**
  * Shared Links Pool Management
  *
- * Maintains a shared pool of links across researchers to prevent
- * redundant scraping.
+ * Centralized deterministic link state management system.
+ * Single source of truth: global allScrapedLinks array.
+ * No per-session state - everything flows through global state.
  */
 
-import * as crypto from 'crypto';
-
-/**
- * Regex patterns for parsing link sections
- */
-const CITED_SECTION_REGEX = /###?\s*CITED\s*LINKS?\s*\n([\s\S]*?)(?=\n###|$)/i;
-const CANDIDATES_SECTION_REGEX = /###?\s*SCRAPE\s*CANDIDATES?\s*\n([\s\S]*?)(?=\n###|$)/i;
+import * as crypto from 'node:crypto';
 
 /**
  * Generate a 4-character alphanumeric hash
  */
 function generate4CharHash(): string {
-  const bytes = crypto.randomBytes(2);
-  const hash = bytes.toString('hex').substring(0, 4);
+  // Use randomBytes for Node.js environments, fallback to Math.random for test environments
+  let hash: string;
+  try {
+    const bytes = crypto.randomBytes(2);
+    hash = bytes.toString('hex').substring(0, 4);
+  } catch {
+    // Fallback for test environments where crypto.randomBytes might not be available
+    // Generate a valid 4-character hex string
+    const randomHex = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0');
+    hash = randomHex;
+  }
   return hash;
 }
 
@@ -33,7 +37,55 @@ export function generateSessionId(baseId: string): string {
 }
 
 /**
+ * Normalize a URL for comparison (lowercase, remove trailing slash)
+ */
+export function normalizeUrl(url: string): string {
+  try {
+    const normalized = url.toLowerCase().trim();
+    // Remove trailing slash except for root
+    if (normalized.length > 1 && normalized.endsWith('/')) {
+      return normalized.slice(0, -1);
+    }
+    return normalized;
+  } catch {
+    return url.toLowerCase().trim();
+  }
+}
+
+/**
+ * Deduplicate a list of URLs against already-scraped URLs.
+ * Uses normalized comparison for accuracy.
+ * 
+ * @param urls - URLs to check
+ * @param alreadyScraped - Array of already-scraped URLs
+ * @returns Object with kept URLs and removed duplicates
+ */
+export function deduplicateUrls(urls: string[], alreadyScraped: string[]): {
+  kept: string[];
+  duplicates: string[];
+} {
+  const normalizedAlreadyScraped = new Set(
+    alreadyScraped.map(normalizeUrl)
+  );
+
+  const kept: string[] = [];
+  const duplicates: string[] = [];
+
+  for (const url of urls) {
+    const normalized = normalizeUrl(url);
+    if (normalizedAlreadyScraped.has(normalized)) {
+      duplicates.push(url);
+    } else {
+      kept.push(url);
+    }
+  }
+
+  return { kept, duplicates };
+}
+
+/**
  * Format all completed reports into a shared links section for researcher prompts.
+ * Extracts links from CITED LINKS and SCRAPE CANDIDATES sections.
  */
 export function formatSharedLinksFromState(aspects: Record<string, { id: string; query: string; report?: string }>): string {
   const completed = Object.values(aspects).filter(a => a.report);
@@ -47,14 +99,14 @@ export function formatSharedLinksFromState(aspects: Record<string, { id: string;
     output += `### Aspect: ${aspect.query} (ID: ${aspect.id})\n\n`;
 
     // Extract CITED LINKS
-    const citedMatch = response.match(CITED_SECTION_REGEX);
+    const citedMatch = response.match(/###?\s*CITED\s*LINKS?\s*\n([\s\S]*?)(?=\n###|$)/i);
     if (citedMatch) {
       output += '#### CITED LINKS\n';
       output += citedMatch[1]!.trim() + '\n\n';
     }
 
     // Extract SCRAPE CANDIDATES
-    const candidatesMatch = response.match(CANDIDATES_SECTION_REGEX);
+    const candidatesMatch = response.match(/###?\s*SCRAPE\s*CANDIDATES?\s*\n([\s\S]*?)(?=\n###|$)/i);
     if (candidatesMatch) {
       output += '#### SCRAPE CANDIDATES\n';
       output += candidatesMatch[1]!.trim() + '\n\n';
@@ -66,6 +118,6 @@ export function formatSharedLinksFromState(aspects: Record<string, { id: string;
 }
 
 /**
- * Legacy stubs for compatibility (no-ops)
+ * Legacy stub for compatibility
  */
 export function cleanupSharedLinks(_sessionId: string): void {}

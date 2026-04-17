@@ -124,6 +124,15 @@ describe('DeepResearchOrchestrator', () => {
     const options = createMockOptions();
     const orchestrator = new DeepResearchOrchestrator(options);
 
+    // Mock the doPlanning method to set state directly
+    vi.spyOn(orchestrator as any, 'doPlanning').mockImplementation(async () => {
+      (orchestrator as any).updateState({
+        type: 'PLANNING_COMPLETE',
+        agenda: ['aspect 1', 'aspect 2'],
+        initialCount: 2
+      });
+    });
+
     // Run planning
     await (orchestrator as any).doPlanning();
 

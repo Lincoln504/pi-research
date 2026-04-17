@@ -53,6 +53,7 @@ vi.mock('../../src/healthcheck/index.ts', () => ({
 // Mock the panel module
 vi.mock('../../src/tui/research-panel.ts', () => ({
   createResearchPanel: vi.fn(() => ({})),
+  createMasterResearchPanel: vi.fn(() => () => ({ render: () => [] })),
   clearAllFlashTimeouts: vi.fn(),
   addSlice: vi.fn(),
   activateSlice: vi.fn(),
@@ -65,6 +66,7 @@ vi.mock('../../src/tui/research-panel.ts', () => ({
     totalTokens: 0,
     slices: new Map(),
     modelName: 'test-model',
+    progress: undefined as any,
   })),
 }));
 
@@ -106,13 +108,15 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
 
 vi.mock('@mariozechner/pi-ai', () => ({
   complete: vi.fn(async () => ({
-    content: [{ type: 'text', text: '2' }], // Complexity 2
+    content: [{ type: 'text', text: '2' }],
+    usage: { totalTokens: 10 },
   })),
 }));
 
 // Import mocked modules
 import * as panel from '../../src/tui/research-panel.ts';
 import { createResearcherSession } from '../../src/orchestration/researcher.ts';
+import { complete } from '@mariozechner/pi-ai';
 
 // ============================================================================
 // HELPERS
@@ -170,14 +174,21 @@ describe('createResearchTool', () => {
     vi.clearAllMocks();
   });
 
-  describe('Quick Mode Branching (quick: true)', () => {
-    it('calls createResearcherSession when quick=true', async () => {
+  describe('Quick Mode Branching (depth: 0) vs Deep Mode (depth: 1-3)', () => {
+    it('calls createResearcherSession when depth=0', async () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
 
       expect(vi.mocked(createResearcherSession)).toHaveBeenCalled();
+    });
+
+    it('calls createResearcherSession when depth=1 (goes to orchestrator, not quick mode)', async () => {
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
+
+      expect(mockRun).toHaveBeenCalled();
     });
 
     it('does not mutate console methods on successful quick research', async () => {
@@ -191,7 +202,7 @@ describe('createResearchTool', () => {
       };
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
 
       expect(console.log).toBe(originalConsole.log);
       expect(console.info).toBe(originalConsole.info);
@@ -200,22 +211,52 @@ describe('createResearchTool', () => {
       expect(console.debug).toBe(originalConsole.debug);
     });
 
-    it('creates and completes TUI slice "researching ..."', async () => {
+    it('creates and completes TUI slice with query name', async () => {
       vi.mocked(createResearcherSession).mockResolvedValue(createMockSession());
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', quick: true }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
 
-      expect(panel.addSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...', 'researching ...', false);
-      expect(panel.activateSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
-      expect(panel.completeSlice).toHaveBeenCalledWith(expect.any(Object), 'researching ...');
+      // The slice label now includes the query (truncated if long)
+      expect(panel.addSlice).toHaveBeenCalledWith(expect.any(Object), expect.stringContaining('researching:'), expect.stringContaining('researching:'), false);
+      expect(panel.activateSlice).toHaveBeenCalledWith(expect.any(Object), expect.stringContaining('researching:'));
+      expect(panel.completeSlice).toHaveBeenCalledWith(expect.any(Object), expect.stringContaining('researching:'));
     });
   });
 
-  describe('Deep Mode Branching (quick: false or omitted)', () => {
-    it('initializes DeepResearchOrchestrator and runs it', async () => {
+  describe('Deep Mode Branching (complexity 2, 3, or 4)', () => {
+    it('initializes DeepResearchOrchestrator when depth=1', async () => {
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test' }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
+
+      expect(mockRun).toHaveBeenCalled();
+      expect(result.content[0]).toEqual(expect.objectContaining({ text: 'deep research result' }));
+    });
+    
+    it('initializes DeepResearchOrchestrator when depth=2', async () => {
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 2 }, undefined, undefined, createMockContext());
+
+      expect(mockRun).toHaveBeenCalled();
+      expect(result.content[0]).toEqual(expect.objectContaining({ text: 'deep research result' }));
+    });
+    
+    it('initializes DeepResearchOrchestrator when depth=3', async () => {
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 3 }, undefined, undefined, createMockContext());
+
+      expect(mockRun).toHaveBeenCalled();
+      expect(result.content[0]).toEqual(expect.objectContaining({ text: 'deep research result' }));
+    });
+
+    it('initializes DeepResearchOrchestrator when auto-assessed as 2', async () => {
+      vi.mocked(complete).mockResolvedValue({
+        content: [{ type: 'text', text: '2' }],
+        usage: { totalTokens: 10 },
+      } as any);
+
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 2 }, undefined, undefined, createMockContext());
 
       expect(mockRun).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'deep research result' }));

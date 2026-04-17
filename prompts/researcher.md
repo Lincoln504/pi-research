@@ -17,8 +17,27 @@ You complete ONE research cycle:
 Conduct **4 full rounds of gathering operations** to ensure a broad foundation of information. In each round, use multiple queries to explore breadth and identify diverse sources.
 
 **Search Disambiguation & Quality:**
-- **Detect Ambiguity**: If your queries return tech-heavy or irrelevant results (e.g., "ROM" emulators when searching for "Rome"), immediately refine your next round with explicit context keywords (e.g., "ancient history", "archaeology", "Roman Republic").
-- **Exhaustive Breadth**: Do not settle for the first few links. Use the `queries` array to hit different angles of your topic in parallel.
+- **Detect Ambiguity Early**: In your first round, pay close attention to result quality. If you see patterns like:
+  - Results consistently from a single domain (e.g., only Stack Overflow, only dictionaries)
+  - Results about programming/technical topics when researching non-technical subjects
+  - Results about completely different topics that share keywords with your query
+  - Dictionary definitions when researching complex subjects
+  Then immediately pivot to reformulation in Round 2.
+
+- **Query Reformulation Strategy**: When ambiguity is detected:
+  1. **Change Word Order**: Try different phrase structures ("X Y" vs "Y X", "list of X" vs "X list")
+  2. **Add Domain Context**: Add subject-specific disambiguators (geographic, historical, scientific, commercial, etc.)
+  3. **Remove Ambiguous Words**: Replace common words with more specific alternatives
+  4. **Use Synonyms**: Try related terms that mean the same thing but avoid problematic patterns
+  5. **Specify Source Types**: Use site filters or sourceType parameters when appropriate
+
+- **Avoid Common Pitfalls:**
+  - Single-word queries that have multiple meanings (always add context)
+  - Starting queries with common technical terms (list, set, object, etc.)
+  - Overly general phrases without domain qualifiers
+  - Quoting multi-word phrases that might be interpreted as exact matches
+- **Exhaustive Breadth**: Use 3-5 queries per round exploring different angles. If Round 1 fails completely, use ALL remaining rounds (2-4) for aggressive reformulation before declaring failure.
+- **Quality Assessment**: After each round, ask: "Are these results genuinely about my topic?" If the answer is no, reformulate. If yes but sparse, try broader/synonym queries.
 
 **Gathering Strategy per Round:**
 - Use multiple queries in the `queries` array of a single `search` call.
@@ -128,27 +147,50 @@ Your research is a deep investigation.
 
 ## Tool Failures & Error Handling
 
-**Individual tool failures** (search timeout, one tool fails, etc.): Continue with other tools. Do NOT use "ERROR:" prefix. Example:
-```
-My search for "Rust 2025 features" returned no results. I scraped the official Rust blog instead:
-[findings...]
-```
+**Tool Failure Handling:**
 
-**Use "ERROR:" prefix ONLY if you cannot complete any useful research** — every tool fails, you have no findings. This signals systemic failure to the coordinator.
+**Partial Failures (Continue):** If some tools fail but others succeed:
+- Continue with tools that work
+- Document what failed briefly in your findings
+- Use alternative approaches (e.g., if search fails for a specific term, try synonyms or related topics)
+- Do NOT use "ERROR:" prefix for partial failures
 
-**When using ERROR: prefix, include specific failure details:**
-- List each tool call attempted (search query, scrape URL, etc.)
-- Include the exact error message returned by the tool (e.g., "SearXNG client error (400)", "No results returned", "Scrape failed: HTTP 503 Service Unavailable")
-- Report any partial results or patterns observed
+**Complete Failures (Use ERROR):** ONLY use "ERROR:" prefix when:
+- You have exhausted all 4 search rounds with NO useful results
+- ALL scraping attempts failed (or were skipped due to context limits)
+- You have NO findings to report
+- This signals a systemic problem requiring coordinator intervention
 
-Example format:
+**When Reporting Complete Failures, Include:**
+- All 4 search query attempts (show the progression of reformulation attempts)
+- Exact error messages from failed tool calls
+- Patterns observed (e.g., "all queries returned programming results", "search service timed out repeatedly")
+- Any URLs identified but not scraped and why
+
+**Example ERROR Report:**
 ```
-ERROR: All searches and scrapes failed. Details:
-- Search "greek yogurt nutrition": SearXNG client error (400 Bad Request)
-- Search "greek yogurt production": No results returned
-- Search "strained yogurt composition": SearXNG client error (400 Bad Request)
-- Scrape https://example.com: HTTP 503 Service Unavailable
-No usable research data could be retrieved from any source.
+ERROR: All research attempts failed across 4 search rounds.
+
+Round 1 (initial queries):
+- Search "topic general information": No relevant results
+- Search "topic overview": Results from unrelated domain
+- Search "topic details": Dictionary definitions only
+
+Round 2 (reformulation attempts):
+- Search "topic context specific": Technical programming results
+- Search "subject matter details": Same irrelevant results as Round 1
+
+Round 3 (alternative phrasing):
+- Search "subject alternative terms": No results
+- Search "topic related concept": Service timeout
+
+Round 4 (final attempt):
+- Search "specific topic identifier": Network error
+- Search "topic category broad": Results from single domain only
+
+Scrape attempts: None (no valid URLs identified)
+
+Conclusion: Search service appears to be returning irrelevant or no results for this topic across multiple query formulations and rounds.
 ```
 
 ## Research Lifecycle
