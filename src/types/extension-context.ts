@@ -54,4 +54,7 @@ export interface ExtendedAgentSessionEvent {
     };
   };
   isError?: boolean;
+  details?: {
+    blocked?: boolean;
+  };
 }

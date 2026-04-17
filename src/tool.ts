@@ -268,8 +268,11 @@ export function createResearchTool(): ToolDefinition {
             const sliceLabel = `researching: ${truncatedQuery}`;
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
-            // Quick mode: 1 researcher × 10 units (8 tool calls + 2-unit final-report step)
-            panelState.progress = { expected: 10, made: 0, extended: false };
+            // Quick mode: deterministic tool limits
+            // - 4 gathering calls (search/security/stackexchange/grep combined)
+            // - 4 scrape calls (handshake + 3 batches)
+            // Total: 8 tool calls, then STOP
+            panelState.progress = { expected: 8, made: 0, extended: false };
             logger.info('[research] quick mode started', { query: sanitizedQuery });
             refreshAllSessions(piSessionId);
             const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
@@ -317,12 +320,17 @@ export function createResearchTool(): ToolDefinition {
                 }
               } else if (event.type === 'tool_execution_end') {
                 const isError = event.isError ?? false;
-                const color = isError ? 'red' : 'green';
-                const duration = isError ? 1000 : 500;
+                const isBlocked = event.details?.blocked === true;
+                const color = isError || isBlocked ? 'red' : 'green';
+                const duration = isError || isBlocked ? 1000 : 500;
                 flashSlice(panelState, sliceLabel, color, duration, () => refreshAllSessions(piSessionId));
-                // Advance progress bar
-                if (panelState.progress) {
+                // Advance progress bar ONLY for non-blocked tool calls
+                if (panelState.progress && !isBlocked) {
                   panelState.progress.made += 1;
+                  // Snap to 100% when all tool calls are used
+                  if (panelState.progress.made >= panelState.progress.expected) {
+                    panelState.progress.made = panelState.progress.expected;
+                  }
                   refreshAllSessions(piSessionId);
                 }
               }
