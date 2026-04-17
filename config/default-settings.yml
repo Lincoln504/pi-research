@@ -101,10 +101,12 @@ engines:
   - name: duckduckgo
     engine: duckduckgo
     shortcut: ddg
+    weight: 0.5
 
   - name: startpage
     engine: startpage
     shortcut: sp
+    weight: 0.5
 
   - name: wikipedia
     engine: wikipedia
