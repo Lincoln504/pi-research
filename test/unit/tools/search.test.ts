@@ -163,22 +163,21 @@ describe('tools/search', () => {
       expect(spy).toHaveBeenCalledWith('search');
     });
 
-    it('should return blocked response if limit exceeded', async () => {
+    it('should throw error if limit exceeded', async () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('search'); // Limit reached
 
       const tool = createSearchTool({ ctx: createMockContext(), tracker });
 
-      const result = await tool.execute(
-        'test-id',
-        { queries: ['test query'] },
-        undefined,
-        undefined,
-        undefined as any
-      );
-
-      expect((result.details as any).blocked).toBe(true);
-      expect((result.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
+      await expect(
+        tool.execute(
+          'test-id',
+          { queries: ['test query'] },
+          undefined,
+          undefined,
+          undefined as any
+        )
+      ).rejects.toThrow('GATHERING LIMIT REACHED');
     });
   });
 });

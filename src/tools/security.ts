@@ -75,10 +75,8 @@ export function createSecuritySearchTool(options: {
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('security_search');
       if (!allowed) {
-        return {
-          content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
-          details: { blocked: true },
-        };
+        // THROW to prevent researcher from calling again
+        throw new Error(options.tracker.getLimitMessage('security_search'));
       }
 
       const startTime = Date.now();

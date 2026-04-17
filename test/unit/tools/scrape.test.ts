@@ -99,7 +99,7 @@ describe('tools/scrape', () => {
       expect((result.details as any).locked).toBe(true);
     });
 
-    it('should lock out on fourth call when tracker limit is 3', async () => {
+    it('should throw error on fourth call when tracker limit is 3', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
       vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://t.com', source: 'fetch', markdown: 'ok' });
 
@@ -109,10 +109,11 @@ describe('tools/scrape', () => {
       await tool.execute('1', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 1: handshake
       await tool.execute('2', { urls: ['http://t.com'] }, undefined, undefined, undefined as any);          // 2: batch 1
       await tool.execute('3', { urls: ['http://t2.com'] }, undefined, undefined, undefined as any);         // 3: batch 2
-      const result = await tool.execute('4', { urls: ['http://t.com'] }, undefined, undefined, undefined as any); // 4: tracker blocks
-
-      // Tracker limit of 3 means batch 3 is blocked before executing
-      expect((result.details as any).blocked).toBe(true);
+      
+      // 4th call should throw error (limit reached)
+      await expect(
+        tool.execute('4', { urls: ['http://t.com'] }, undefined, undefined, undefined as any)
+      ).rejects.toThrow('Scrape limit reached');
     });
   });
 });

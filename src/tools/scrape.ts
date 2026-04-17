@@ -158,7 +158,8 @@ export function createScrapeTool(options: {
       if (callCount === 1) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
-          return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
+          // THROW to prevent researcher from calling again
+          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;
@@ -253,7 +254,8 @@ export function createScrapeTool(options: {
       if (callCount === 2) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
-          return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
+          // THROW to prevent researcher from calling again
+          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;
@@ -359,7 +361,8 @@ export function createScrapeTool(options: {
       if (callCount === 3) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
-          return { content: [{ type: 'text', text: 'Error: Scrape limit reached.' }], details: { blocked: true } };
+          // THROW to prevent researcher from calling again
+          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;

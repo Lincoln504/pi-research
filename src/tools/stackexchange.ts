@@ -63,10 +63,8 @@ export function createStackexchangeTool(options: {
       // Record call in tracker - returns false if limit reached
       const allowed = tracker.recordCall('stackexchange');
       if (!allowed) {
-        return {
-          content: [{ type: 'text', text: tracker.getLimitMessage('stackexchange') }],
-          details: { blocked: true },
-        };
+        // THROW to prevent researcher from calling again
+        throw new Error(tracker.getLimitMessage('stackexchange'));
       }
 
       const paramsRecord = params as Record<string, unknown>;
