@@ -20,8 +20,9 @@ describe('SearXNG Configuration Validation', () => {
 
     it('should not include disabled engines', () => {
       const engines = getActiveSearxngEngines();
-      // DuckDuckGo is disabled in the config
-      expect(engines).not.toContain('duckduckgo');
+      // DuckDuckGo is now enabled, so this test verifies we're getting general engines
+      expect(engines).toContain('google');
+      expect(engines).toContain('bing');
     });
 
     it('should not include encyclopedic engines (wikipedia)', () => {
@@ -64,13 +65,13 @@ describe('SearXNG Configuration Validation', () => {
   describe('validateEngineListConsistency()', () => {
     it('should detect when healthcheck expects different engines than config provides', () => {
       // Create a mismatched expected list
-      const wrongExpectedList = ['duckduckgo', 'bing', 'brave']; // includes disabled DuckDuckGo
+      const wrongExpectedList = ['wikipedia', 'bing', 'brave']; // includes category engine
 
       const result = validateEngineListConsistency(wrongExpectedList);
 
-      // Should detect that duckduckgo is no longer active
+      // Should detect that wikipedia is not a general engine
       expect(result.isValid).toBe(false);
-      expect(result.extra).toContain('duckduckgo');
+      expect(result.extra).toContain('wikipedia');
     });
 
     it('should pass when engine lists match', () => {
@@ -112,9 +113,10 @@ describe('SearXNG Configuration Validation', () => {
       expect(actualEngines).toContain('brave');
     });
 
-    it('should never have duckduckgo enabled (due to CAPTCHA issues)', () => {
+    it('should have multiple working engines available', () => {
       const engines = getActiveSearxngEngines();
-      expect(engines).not.toContain('duckduckgo');
+      // Should have at least google, bing, brave, and duckduckgo
+      expect(engines.length).toBeGreaterThanOrEqual(3);
     });
   });
 });

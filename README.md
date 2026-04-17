@@ -195,6 +195,7 @@ Note: Use `.envrc` for direnv (not `.env`). Direnv automatically loads variables
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `15000` | SearXNG health check timeout |
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `10` | Terminal UI refresh debounce (ms) |
 | `PI_RESEARCH_VERBOSE` | - | Enable diagnostic JSONL logging |
+| `PI_RESEARCH_SKIP_HEALTHCHECK` | - | Skip startup health check (set to `1` if search engines are blocked) |
 | `DOCKER_SOCKET` | platform default | Docker socket path override |
 | `DOCKER_HOST` | - | Docker host URL override |
 | `STACKEXCHANGE_API_KEY` | - | Stack Exchange API key for higher rate limits |
@@ -202,6 +203,24 @@ Note: Use `.envrc` for direnv (not `.env`). Direnv automatically loads variables
 **Verbose diagnostics**
 
 Set `PI_RESEARCH_VERBOSE=1` to enable JSONL logs in your temp directory. Without this, no log files are created.
+
+**Search Engines**
+
+The extension uses the following general search engines (configured in `config/default-settings.yml`):
+- `google`, `bing`, `brave`, `duckduckgo`, `startpage`
+
+The health check requires at least 1 engine to return results. If all engines fail, you can:
+1. Set `PI_RESEARCH_SKIP_HEALTHCHECK=1` to bypass the check
+2. Check your network/firewall settings
+3. Verify Docker is running properly
+
+**Skipping Health Check**
+
+```bash
+# Skip health check entirely
+export PI_RESEARCH_SKIP_HEALTHCHECK=1
+pi
+```
 
 ### Terminal UI
 

@@ -89,6 +89,15 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
   };
 
   try {
+    // Skip health check if explicitly requested via env
+    if (process.env['PI_RESEARCH_SKIP_HEALTHCHECK'] === '1') {
+      logger.log('[healthcheck] Skipping health check (PI_RESEARCH_SKIP_HEALTHCHECK=1)');
+      result.success = true;
+      result.searchOk = true;
+      result.scrapeOk = true;
+      return result;
+    }
+
     ensureHealthcheckManager();
 
     // PHASE 1: Test general web search engines (Bing, DuckDuckGo, Brave — NOT Wikipedia)
@@ -154,13 +163,12 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     const workingEngines = Array.from(engineCounts.entries()).filter(([_, count]) => count > 0);
     const workingEngineCount = workingEngines.length;
 
-    // Require at least 2 engines to return results
-    if (workingEngineCount < 2) {
+    // Require at least 1 engine to return results (local use may have rate limits)
+    if (workingEngineCount < 1) {
       const engineReport = Array.from(engineCounts.entries())
         .map(([e, c]) => `${e}: ${c}`)
         .join(', ');
-      const workingList = workingEngines.map(([e, _]) => e).join(', ');
-      result.error = `Insufficient working engines: ${workingEngineCount}/${generalEngines.length} returned results (${workingList || 'none'}). Need at least 2 engines working. Engine results: ${engineReport}.`;
+      result.error = `No working engines found: 0/${generalEngines.length} returned results. Need at least 1 engine. Engine results: ${engineReport}. Your network or search engines may be blocked.`;
       logger.error('[healthcheck] Search validation failed:', result.error);
       return result;
     }
