@@ -46,9 +46,9 @@ export default function (pi: ExtensionAPI) {
       '',
       '### 🔍 RESEARCH TOOL USAGE',
       '',
-      '**CRITICAL: For any web/internet research questions, use the `research` tool ONLY.**',
+      '**For any web/internet research questions, use the `research` tool.**',
       '',
-      'The `research` tool (from pi-research extension) is your ONLY tool for web/internet research.',
+      'The `research` tool (from pi-research extension) is your tool for web/internet research.',
       '',
       '**What counts as web research?**',
       '- Questions requiring current information (news, trends, latest developments)',
@@ -75,7 +75,7 @@ export default function (pi: ExtensionAPI) {
       '- `depth: 2` — Deep: 3 researchers, up to 3 rounds',
       '- `depth: 3` — Ultra: 5 researchers, up to 5 rounds',
       '',
-      '**Key rule: Default to depth 0. Use higher depths ONLY when user explicitly asks for "exhaustive", "deep-dive", "ultra", or "comprehensive" research.**',
+      '**Key rule: Default to depth 0. Use higher depths when user explicitly asks for "exhaustive", "deep-dive", "ultra", or "comprehensive" research.**',
     ].join('\n');
     return { systemPrompt: event.systemPrompt + researchMessage };
   });
