@@ -16,6 +16,16 @@ import { getActiveSearxngEngines } from '../utils/searxng-config.ts';
 import { withTimeout } from '../web-research/retry-utils.ts';
 import type { SearXNGResult } from '../web-research/types.ts';
 
+// Health check cache to avoid running multiple health checks concurrently
+interface CachedHealthCheck {
+  result: HealthCheckResult;
+  timestamp: number;
+}
+
+let cachedHealthCheck: CachedHealthCheck | null = null;
+const HEALTH_CHECK_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let healthCheckPromise: Promise<HealthCheckResult> | null = null;
+
 // Get timeout from config or use defaults
 const config = getConfig();
 const SEARCH_TIMEOUT_MS = config.HEALTH_CHECK_TIMEOUT_MS || 15000;  // 15s max for search
@@ -74,10 +84,10 @@ function ensureHealthcheckManager(): void {
 }
 
 /**
- * Run health check: test search and scrape functionality with deterministic URLs
- * Uses hardcoded queries and URLs to ensure reproducible results
+ * Internal health check implementation
+ * Runs the actual health check tests
  */
-export async function runHealthCheck(): Promise<HealthCheckResult> {
+async function performHealthCheck(): Promise<HealthCheckResult> {
   logger.log('[healthcheck] Starting network connectivity health check...');
 
   const result: HealthCheckResult = {
@@ -240,4 +250,60 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     logger.error('[healthcheck] Unexpected error:', err);
     return result;
   }
+}
+
+/**
+ * Run health check with caching to avoid concurrent executions
+ * If a health check is already in progress, returns the same promise
+ * If a recent successful health check is cached, returns the cached result
+ */
+export async function runHealthCheck(): Promise<HealthCheckResult> {
+  const now = Date.now();
+
+  // Check if we have a recent cached result
+  if (cachedHealthCheck) {
+    const age = now - cachedHealthCheck.timestamp;
+    if (age < HEALTH_CHECK_CACHE_TTL_MS) {
+      logger.log(`[healthcheck] Using cached health check result (${Math.round(age / 1000)}s old)`);
+      return cachedHealthCheck.result;
+    } else {
+      logger.log(`[healthcheck] Cached health check result expired (${Math.round(age / 1000)}s old)`);
+      cachedHealthCheck = null;
+    }
+  }
+
+  // If a health check is already running, return the existing promise
+  if (healthCheckPromise) {
+    logger.log('[healthcheck] Health check already in progress, reusing existing promise');
+    return healthCheckPromise;
+  }
+
+  // Start a new health check
+  healthCheckPromise = (async () => {
+    try {
+      const result = await performHealthCheck();
+      // Cache successful results
+      if (result.success) {
+        cachedHealthCheck = {
+          result,
+          timestamp: now,
+        };
+      }
+      return result;
+    } finally {
+      // Clear the promise so a new health check can be started
+      healthCheckPromise = null;
+    }
+  })();
+
+  return healthCheckPromise;
+}
+
+/**
+ * Clear the health check cache
+ * Useful for testing or forcing a recheck
+ */
+export function clearHealthCheckCache(): void {
+  cachedHealthCheck = null;
+  logger.log('[healthcheck] Health check cache cleared');
 }

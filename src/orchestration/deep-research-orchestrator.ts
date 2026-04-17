@@ -197,9 +197,33 @@ export class DeepResearchOrchestrator {
       const text = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
       let agenda: string[] = [];
       try {
-        const match = text.match(/\[.*\]/s);
-        if (match) {
-           agenda = JSON.parse(match[0]);
+        // Try to extract JSON from markdown code blocks first
+        const codeBlockRegex = /```(?:json|javascript)?\s*([\s\S]*?)```/gi;
+        let match;
+        while ((match = codeBlockRegex.exec(text)) !== null) {
+          try {
+            const codeContent = match[1];
+            if (codeContent) {
+              const parsed = JSON.parse(codeContent.trim());
+              if (Array.isArray(parsed)) {
+                agenda = parsed;
+                break;
+              }
+            }
+          } catch {
+            // Try the next code block
+          }
+        }
+
+        // If no code block found, try raw JSON array
+        if (agenda.length === 0) {
+          const rawMatch = text.match(/\[.*\]/s);
+          if (rawMatch) {
+            const parsed = JSON.parse(rawMatch[0]);
+            if (Array.isArray(parsed)) {
+              agenda = parsed;
+            }
+          }
         }
       } catch (err) {
         logger.error('[deep-research] Failed to parse planning agenda JSON:', err);
@@ -566,27 +590,56 @@ export class DeepResearchOrchestrator {
         }
       }
 
-      const isSynthesis = decision.trim().startsWith('#');
-      let nextQueries: string[] = [];
-      if (!isSynthesis) {
-        try {
-          const lastOpen = decision.lastIndexOf('[');
-          const lastClose = decision.lastIndexOf(']');
-          if (lastOpen !== -1 && lastClose !== -1 && lastClose > lastOpen) {
-            const parsed = JSON.parse(decision.slice(lastOpen, lastClose + 1));
-            if (Array.isArray(parsed)) {
-              nextQueries = parsed;
-            } else {
-              logger.warn('[deep-research] Promotion JSON parsed but is not an array; treating as synthesis.');
+      // Robust JSON extraction: handle markdown code blocks and raw JSON
+      const extractJsonArray = (text: string): string[] | null => {
+        // Try to extract JSON from markdown code blocks first
+        const codeBlockRegex = /```(?:json|javascript)?\s*([\s\S]*?)```/gi;
+        let match;
+        while ((match = codeBlockRegex.exec(text)) !== null) {
+          try {
+            const codeContent = match[1];
+            if (codeContent) {
+              const parsed = JSON.parse(codeContent.trim());
+              if (Array.isArray(parsed)) {
+                return parsed;
+              }
             }
-          } else {
-            logger.warn('[deep-research] Promotion response contained no valid JSON array; treating as synthesis.');
+          } catch {
+            // Try the next code block
           }
-        } catch (err) {
-          logger.warn('[deep-research] Failed to parse promotion JSON:', err);
         }
+
+        // Try to find raw JSON array in the text
+        try {
+          const lastOpen = text.lastIndexOf('[');
+          const lastClose = text.lastIndexOf(']');
+          if (lastOpen !== -1 && lastClose !== -1 && lastClose > lastOpen) {
+            const jsonStr = text.slice(lastOpen, lastClose + 1);
+            // Validate it looks like an array
+            if (jsonStr.trim().startsWith('[') && jsonStr.trim().endsWith(']')) {
+              const parsed = JSON.parse(jsonStr);
+              if (Array.isArray(parsed)) {
+                return parsed;
+              }
+            }
+          }
+        } catch {
+          // Not valid JSON
+        }
+
+        // No valid JSON array found
+        return null;
+      };
+
+      const nextQueries = extractJsonArray(decision);
+      const isSynthesis = nextQueries === null;
+
+      if (isSynthesis) {
+        logger.log('[deep-research] No valid JSON found - treating as synthesis');
+      } else {
+        logger.log(`[deep-research] Extracted ${nextQueries.length} delegation queries`);
       }
-      
+
       logger.log(`[deep-research] Evaluator decision for Round ${evaluatedRound}: ${
         isSynthesis ? 'SYNTHESIS - completing research' : `DELEGATION - spawning ${nextQueries.length} new researchers in Round ${evaluatedRound + 1}`
       }`);
@@ -594,7 +647,7 @@ export class DeepResearchOrchestrator {
       this.updateState({
         type: 'PROMOTION_DECISION',
         finalSynthesis: isSynthesis ? decision : undefined,
-        nextQueries,
+        nextQueries: nextQueries ?? [],
         maxRounds: targetRounds
       });
 
