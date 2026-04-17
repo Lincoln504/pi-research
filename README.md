@@ -6,14 +6,14 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Capabilities
 
-- Multi-agent web research - Coordinate parallel researchers with real-time progress tracking
-- Single-agent quick mode - Fast, focused queries showing progress in TUI
+- Multi-agent web research - Coordinate parallel researchers for deep analysis
+- Quick mode - Single researcher for fast queries
 - Web search - SearXNG running in a Docker container
 - URL scraping - Fetch first, then Playwright/Chromium for JavaScript-heavy pages
 - Security databases - NVD, CISA KEV, GitHub Advisories, OSV
 - Stack Exchange - Query Stack Overflow and the Stack Exchange network
 - Code search - ripgrep (`rg`) with `grep` fallback for local queries
-- Real-time TUI - Shows SearXNG status, researcher progress, tokens, and costs
+- Real-time TUI - Tracks research progress in the terminal
 - Proxy support - Optional SearXNG proxy configuration for controlled routing
 
 ### Requirements
@@ -205,20 +205,15 @@ Set `PI_RESEARCH_VERBOSE=1` to enable JSONL logs in your temp directory. Without
 
 ### Terminal UI
 
-Real-time progress tracking displays SearXNG status and researcher progress:
+Real-time progress tracking shows SearXNG status and researcher progress:
 
 ```
-── Research: 60% [planning...] ─────────────────────────
+── Research ───────────────────────────────────────────
 ┌────────┬───────────────────────────────────────────┬┐
-│SearXNG │┐ 1.1 ┐ ┌ 1.2 ┐ ┌ 1.3 ┐ ┌ 1.4 ┐ ┌ 1.5 ┐ +2│
-│active  │ 2.3k  │  3.1k  │  0.8k  │  1.2k  │  0.5k  │
-│:55732  │$0.02  │$0.01  │$0.00  │$0.01  │$0.00  │  │
+│active  │ 1 ───  2 ───  3 ───  4 ───  5 ───  6 ───+1│
+│:55732  │ 2.3k  │ 3.1k  │ 0.8k  │ 1.2k  │ 0.5k  │   │
 └────────┴───────────────────────────────────────────┴┘
 ```
-
-**Left Panel:** SearXNG status (active/offline/error) and port number
-**Researcher Columns:** ID label, token count, and estimated cost
-**Rightmost:** `+N` indicator when researchers exceed visible columns (max 6 shown)
 
 ### Architecture
 
