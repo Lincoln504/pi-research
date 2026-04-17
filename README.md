@@ -6,14 +6,14 @@ Multi-agent web research for pi. Coordinate parallel researchers or run a single
 
 ### Capabilities
 
-- Multi-agent web research - Coordinate parallel researchers for deep or comprehensive topics
-- Single-agent quick mode - Fast, focused queries with one researcher (depth: 0)
+- Multi-agent web research - Coordinate parallel researchers with real-time progress tracking
+- Single-agent quick mode - Fast, focused queries showing progress in TUI
 - Web search - SearXNG running in a Docker container
 - URL scraping - Fetch first, then Playwright/Chromium for JavaScript-heavy pages
 - Security databases - NVD, CISA KEV, GitHub Advisories, OSV
 - Stack Exchange - Query Stack Overflow and the Stack Exchange network
 - Code search - ripgrep (`rg`) with `grep` fallback for local queries
-- Terminal UI - Real-time SearXNG status and researcher progress
+- Real-time TUI - Shows SearXNG status, researcher progress, tokens, and costs
 - Proxy support - Optional SearXNG proxy configuration for controlled routing
 
 ### Requirements
@@ -205,14 +205,20 @@ Set `PI_RESEARCH_VERBOSE=1` to enable JSONL logs in your temp directory. Without
 
 ### Terminal UI
 
-Real-time progress tracking uses two panels. The left panel shows SearXNG status, port, and active connections. The right panel shows research progress with the active model, cumulative token usage, researcher columns, completion status, and tool results.
+Real-time progress tracking displays SearXNG status and researcher progress:
 
-```text
-+-------+ +-- Research | qwen/qwen3.5-35b-a3b  40.5k --+
-|SearXNG| |            |                 |             |
-|:55732 | |      1     |         2       |      3      |
-+-------+ +------------+-----------------+-------------+
 ```
+── Research: 60% [planning...] ─────────────────────────
+┌────────┬───────────────────────────────────────────┬┐
+│SearXNG │┐ 1.1 ┐ ┌ 1.2 ┐ ┌ 1.3 ┐ ┌ 1.4 ┐ ┌ 1.5 ┐ +2│
+│active  │ 2.3k  │  3.1k  │  0.8k  │  1.2k  │  0.5k  │
+│:55732  │$0.02  │$0.01  │$0.00  │$0.01  │$0.00  │  │
+└────────┴───────────────────────────────────────────┴┘
+```
+
+**Left Panel:** SearXNG status (active/offline/error) and port number
+**Researcher Columns:** ID label, token count, and estimated cost
+**Rightmost:** `+N` indicator when researchers exceed visible columns (max 6 shown)
 
 ### Architecture
 
