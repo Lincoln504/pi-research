@@ -90,7 +90,7 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
     }
 
     case 'PROMOTION_DECISION': {
-      if (event.finalSynthesis) {
+      if (event.finalSynthesis !== undefined) {
         // Case 1: Lead Evaluator chose to synthesize - complete with synthesis
         newState.finalSynthesis = event.finalSynthesis;
         newState.status = 'completed';

@@ -363,12 +363,15 @@ function renderPanelBlock(
       // Top Border with Label
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
+      const isEval = labelStr === 'Eval';
       const cornerLabel = `┐ ${labelStr} ┌`;
       const canShowCornerLabel = w >= cornerLabel.length;
       const canShowBasicLabel = w >= labelStr.length + 2;
-      
+
       let topPart;
-      if (canShowCornerLabel) {
+      if (isEval) {
+        topPart = '─'.repeat(w);
+      } else if (canShowCornerLabel) {
         const sideWidth = w - cornerLabel.length;
         const leftPad = Math.floor(sideWidth / 2);
         const rightPad = sideWidth - leftPad;
@@ -386,31 +389,37 @@ function renderPanelBlock(
 
       // Token Row (always row 1)
       let tokenStr: string;
-      if (isIndicator) {
-        tokenStr = '...';
+      if (isEval) {
+        const evalDisplay = 'Eval'.length > w ? 'Eval'.slice(0, w) : 'Eval';
+        tokenStr = evalDisplay.padStart(Math.floor((w + evalDisplay.length) / 2)).padEnd(w);
+      } else if (isIndicator) {
+        tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const tokens = slice?.tokens || 0;
-        tokenStr = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+        const raw = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+        const display = raw.length > w ? raw.slice(0, w) : raw;
+        tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      const tokenDisplay = tokenStr.length > w ? tokenStr.slice(0, w) : tokenStr;
-      const tokenPadded = tokenDisplay.padStart(Math.floor((w + tokenDisplay.length) / 2)).padEnd(w);
-      rightRawRows[1]!.push(tokenPadded + '│');
+      rightRawRows[1]!.push(tokenStr + '│');
       const flashColor = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
       rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
       // Cost Row (row 2)
       let costStr: string;
-      if (isIndicator) {
-        costStr = '...';
+      if (isEval) {
+        costStr = ' '.repeat(w);
+      } else if (isIndicator) {
+        const display = '...'.length > w ? '...'.slice(0, w) : '...';
+        costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const cost = slice?.cost || 0;
-        costStr = (isPlanning || cost === 0) ? '' : formatCost(cost);
+        const raw = (isPlanning || cost === 0) ? '' : formatCost(cost);
+        const display = raw.length > w ? raw.slice(0, w) : raw;
+        costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      const costDisplay = costStr.length > w ? costStr.slice(0, w) : costStr;
-      const costPadded = costDisplay.padStart(Math.floor((w + costDisplay.length) / 2)).padEnd(w);
-      rightRawRows[2]!.push(costPadded + '│');
+      rightRawRows[2]!.push(costStr + '│');
       rightColors[2]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
       // Bottom Border

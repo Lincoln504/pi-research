@@ -127,7 +127,7 @@ export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 // ==================== UI Constants ====================
 
 /** Maximum characters for final report before truncation */
-export const MAX_REPORT_LENGTH = 20000;
+export const MAX_REPORT_LENGTH = 200000;
 
 /** Visual width of the ====------ progress bar in the TUI header */
 export const PROGRESS_BAR_WIDTH = 18;

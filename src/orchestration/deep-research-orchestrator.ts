@@ -43,6 +43,22 @@ import { getDisplayNumber, getResearcherRoleContext } from './id-utils.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/**
+ * Truncate a researcher report body to maxChars while preserving the CITED LINKS
+ * and SCRAPE CANDIDATES sections that appear at the end of the document.
+ * Without this, a naive slice cuts off the very URLs the evaluator needs to see.
+ */
+function truncatePreservingLinks(report: string, maxChars: number): string {
+  if (report.length <= maxChars) return report;
+  const linkSectionMatch = report.match(/\n###\s*CITED\s*LINKS[\s\S]*/i);
+  const linkSection = linkSectionMatch ? linkSectionMatch[0] : '';
+  const availableForBody = maxChars - linkSection.length - 40;
+  if (availableForBody <= 0) {
+    return report.slice(0, maxChars) + '\n... (truncated) ...';
+  }
+  return report.slice(0, availableForBody) + '\n\n... (body truncated for length) ...' + linkSection;
+}
+
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
   model: Model<any>;
@@ -537,7 +553,7 @@ export class DeepResearchOrchestrator {
       ? `## All Research Findings:\n\n` +
         allCompleted.map(a => {
           const report = a.report || '';
-          const truncated = report.length > 8000 ? report.slice(0, 8000) + '\n... (truncated) ...' : report;
+          const truncated = truncatePreservingLinks(report, 50000);
           const roundNum = a.id.split('.')[0] ?? '?';
           return `### Researcher ${getDisplayNumber(this.state, a.id)} (Round ${roundNum}): ${a.query}\n${truncated}`;
         }).join('\n\n---\n\n')
@@ -677,20 +693,15 @@ export class DeepResearchOrchestrator {
       await new Promise(resolve => setTimeout(resolve, 50));
       
       if (isSynthesis) {
-        // Evaluator chose to synthesize - resolve the research
+        // Evaluator chose to synthesize - resolve the research.
+        // Use `decision` directly: reading back from this.state.finalSynthesis is
+        // fragile because an empty string is falsy and would not have been stored.
         logger.log('[deep-research] Evaluator chose SYNTHESIS - resolving research');
-        if (this.state.finalSynthesis) {
-          this.resolveResult(this.state.finalSynthesis);
+        if (decision) {
+          this.resolveResult(decision);
         } else {
-          // If finalSynthesis not in state yet, wait and check again
-          setTimeout(() => {
-            if (this.state.finalSynthesis) {
-              this.resolveResult(this.state.finalSynthesis);
-            } else {
-              logger.error('[deep-research] Final synthesis not found in state after evaluator completed');
-              this.rejectCompletion(new Error('Evaluator chose synthesis but no final synthesis in state'));
-            }
-          }, 100);
+          logger.error('[deep-research] Evaluator synthesis was empty - falling back to historical findings');
+          this.resolveResult(this.buildAllFindingsContext());
         }
       } else {
         // Evaluator delegated more researchers - start next round
@@ -742,9 +753,7 @@ You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound}
       }
       const displayNum = getDisplayNumber(this.state, completed.id);
       const report = completed.report || '';
-      const truncatedReport = report.length > 12000
-        ? report.slice(0, 12000) + '\n\n... (report truncated for length) ...'
-        : report;
+      const truncatedReport = truncatePreservingLinks(report, 50000);
         
       output += `#### Researcher ${displayNum}: ${completed.query}\n\n${truncatedReport}\n\n`;
     }
