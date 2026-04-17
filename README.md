@@ -213,8 +213,7 @@ Real-time progress tracking uses two panels. The left panel shows SearXNG status
 ```text
 +-------+ +-- Research | qwen/qwen3.5-35b-a3b  40.5k --+
 |SearXNG| |            |                 |             |
-|:55732 | |    OK1     |       OK2       |      3      |
-|1      | |            |                 |             |
+|:55732 | |      1     |         2       |      3      |
 +-------+ +------------+-----------------+-------------+
 ```
 
