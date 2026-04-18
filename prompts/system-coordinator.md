@@ -16,4 +16,9 @@ Return ONLY a JSON array of strings:
 ["task 1", "task 2", "task 3"]
 ```
 
-Do not include explanation or preamble.
+**CRITICAL REQUIREMENTS**:
+- Output must be a valid JSON array of strings
+- Each task must be a plain string (not an object like `{"query": "text"}`)
+- Each task string must be non-empty after trimming
+- Do not include any explanation, preamble, or markdown formatting
+- No code blocks — just the raw JSON array

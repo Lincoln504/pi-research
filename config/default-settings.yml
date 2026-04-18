@@ -1,11 +1,12 @@
 # SearXNG Default Configuration for pi-search-scrape Extension
+# IMPROVED: Better timeouts, removed problematic engines, added real user agent
 
 general:
   instance_name: "pi SearXNG"
   debug: false
   privacypolicy_url: false
   contact_url: false
-  enable_metrics: false
+  enable_metrics: true  # ENABLED for debugging engine issues
   open_metrics: ''
 
 brand:
@@ -23,16 +24,21 @@ server:
   limiter: false
   public_instance: false
   image_proxy: false
-  http_protocol_version: "1.0"
-  method: "POST"
+  http_protocol_version: "1.1"
+  method: "GET"
   default_http_headers:
+    # REAL BROWSER USER AGENT - prevents bot detection
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    Accept-Language: "en-US,en;q=0.9"
+    Accept-Encoding: "gzip, deflate, br"
     X-Content-Type-Options: nosniff
     X-Download-Options: noopen
     X-Robots-Tag: noindex, nofollow
     Referrer-Policy: no-referrer
 
 search:
-  safe_search: 0
+  safe_search: 1
   autocomplete: ""
   autocomplete_min: 4
   favicon_resolver: ""
@@ -45,9 +51,10 @@ search:
     - csv
     - rss
   suspended_times:
-    SearxEngineAccessDenied: 180
-    SearxEngineCaptcha: 3600
-    SearxEngineTooManyRequests: 180
+    # Long backoff prevents hammering blocked engines — re-check after 24h
+    SearxEngineAccessDenied: 86400
+    SearxEngineCaptcha: 86400
+    SearxEngineTooManyRequests: 3600
     cf_SearxEngineCaptcha: 1296000
     cf_SearxEngineAccessDenied: 86400
     recaptcha_SearxEngineCaptcha: 604800
@@ -67,15 +74,15 @@ ui:
   url_formatting: pretty
 
 outgoing:
-  request_timeout: 10.0
-  max_request_timeout: 30.0
+  request_timeout: 20.0        # INCREASED from 10.0
+  max_request_timeout: 60.0      # INCREASED from 30.0
   useragent_suffix: ""
-  pool_connections: 150
-  pool_maxsize: 20
-  enable_http2: false
-  retries: 2
+  pool_connections: 200            # INCREASED from 150
+  pool_maxsize: 30                # INCREASED from 20
+  enable_http2: true              # ENABLED (was false)
+  retries: 3                      # INCREASED from 2
   using_tor_proxy: false
-  extra_proxy_timeout: 10
+  extra_proxy_timeout: 15
 
 doi_resolvers:
   oadoi.org: 'https://oadoi.org/'
@@ -83,36 +90,62 @@ doi_resolvers:
 default_doi_resolver: 'oadoi.org'
 
 # Search engines configuration
-engines:
-  # General web engines (run for all unqualified queries)
-  - name: google
-    engine: google
-    shortcut: g
+#
+# Engine reliability for a private low-volume self-hosted instance (2026):
+#   Bing       — most consistently available; scrapes bing.com directly; weak on ambiguous queries
+#   Brave      — independent index; moderate bot detection; occasional suspension at burst rates
+#   Yahoo      — different backend from Bing; low blocking rate; lower result quality
+#   Qwant      — EU-based independent index; low-volume private use is generally fine
+#   DuckDuckGo — ddg-lite endpoint (no vqd); intermittent IP blocks (issue #4824, open)
+#   StartPage  — DISABLED: broken in current SearXNG due to missing sgt param (issue #4549, open)
+#   Google     — DISABLED: IP-blocks any nontrivial automated use
+#
+# If BRAVE_SEARCH_API_KEY is set, searxng-lifecycle.ts injects a braveapi engine at weight 1.2
+# which uses the official REST API and is not subject to bot detection.
 
+engines:
+  # Bing: most reliable free general-web engine for private instances at low volume
   - name: bing
     engine: bing
     shortcut: bi
+    weight: 1.5
 
+  # Brave (scraping): independent index, different coverage from Bing
+  # Can enter suspension after bursts; max_page 10 respected by SearXNG
   - name: brave
     engine: brave
-    shortcut: brv
-    brave_category: search
+    shortcut: bv
+    weight: 0.8
 
+  # Yahoo: distinct backend, low blocking rate, fills gaps when others are suspended
+  - name: yahoo
+    engine: yahoo
+    shortcut: yh
+    weight: 0.8
+
+  # Qwant: EU-based independent index, low-volume private use stable
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    weight: 0.7
+
+  # DuckDuckGo: ddg-lite endpoint (no vqd); intermittent IP blocks (issue #4824 open)
   - name: duckduckgo
     engine: duckduckgo
     shortcut: ddg
-    weight: 0.5
+    weight: 0.6
 
-  - name: startpage
-    engine: startpage
-    shortcut: sp
-    weight: 0.5
+  # DISABLED: startpage — sgt parameter missing in SearXNG parser (issue #4549, open)
+  # DISABLED: google — IP-blocks automated access within minutes
 
+  # Wikipedia: Encyclopedic reference
+  # - Reliability: HIGH (uses REST API)
+  # - Note: Keep weight low to prioritize search engines
   - name: wikipedia
     engine: wikipedia
     shortcut: wp
     categories: [general]
-    weight: 1.5
+    weight: 0.3  # LOWER - reference only, not primary search
 
   # Images (only when category=images is requested)
   - name: bing images
@@ -126,6 +159,8 @@ engines:
     categories: [news]
     shortcut: bin
 
+  # REMOVED: brave_news (engine not available in SearXNG container)
+
   # Videos (only when category=videos is requested)
   - name: bing videos
     engine: bing_videos
@@ -133,20 +168,22 @@ engines:
     shortcut: biv
 
   # Technical/IT (only when category=it is requested)
-  - name: stackoverflow
-    engine: stackoverflow
+  # REMOVED: stackoverflow (engine not available in SearXNG container)
+  - name: github
+    engine: github
     categories: [it]
-    shortcut: so
+    shortcut: gh
+    weight: 1.0
 
   # Science/Academic (only when category=science is requested)
   - name: arxiv
     engine: arxiv
     categories: [science]
-    weight: 1.5
+    weight: 1.5  # INCREASED
     shortcut: arx
 
   - name: semantic scholar
     engine: semantic_scholar
     categories: [science]
-    weight: 1.5
+    weight: 1.5  # INCREASED
     shortcut: sem

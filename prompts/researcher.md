@@ -27,17 +27,19 @@ You have **4 tool calls total** for gathering across ALL tools (search, security
 
 **Search Disambiguation**:
 - **Detect Ambiguity Early**: Watch for patterns like:
-  - Results from single domain (e.g., only Stack Overflow, only dictionaries)
+  - Results from single domain (e.g., only the official website, only Stack Overflow, only dictionaries)
   - Programming results when researching non-technical subjects
   - Dictionary definitions for complex topics
   - Results about different topics with shared keywords
 
-- **Query Reformulation**: When ambiguity detected:
+- **Query Reformulation**: When ambiguity or single-domain domination detected:
   1. Change word order ("X Y" vs "Y X")
   2. Add domain context (geographic, historical, scientific, commercial)
   3. Remove ambiguous words, use specific alternatives
   4. Use synonyms
   5. Specify source types
+  6. **Target Wikipedia explicitly**: use `site:en.wikipedia.org [topic]` when official sources dominate or when general encyclopedic context is needed
+  7. **Target news/third-party sources**: use `sourceType: "news"` to bypass official site content
 
 - **Avoid**:
   - Single-word queries with multiple meanings
@@ -45,6 +47,7 @@ You have **4 tool calls total** for gathering across ALL tools (search, security
   - Overly general phrases without qualifiers
 
 - **Exhaustive Breadth**: Use 3-5 queries per gathering call. If Tool Call 1 fails, use ALL remaining for reformulation.
+- **Technical Sources**: For technical topics, prioritize official documentation and the latest version; avoid outdated tutorials or unofficial summaries.
 
 **Available Tools**:
 - `search`: General web search (Bing, Google, etc. via SearXNG)
@@ -75,14 +78,14 @@ ONLY after Phase 1 is complete:
 1. **Handshake** (Call 1): Call `scrape` with intended URLs. Tool returns already-scraped links and available batches.
 2. **Batch 1** (Call 2): Filtered list (max 3 URLs). Primary broad scraping. Provide `excludeLinks` for deprioritized URLs.
 3. **Batch 2** (Call 3): Targeted follow-up (max 2 URLs). Use for gaps, retries, or second angle. Auto-deduplicated.
-4. **Batch 3** (Call 4, optional): Deep-dive sub-topic (max 3 URLs). Only when context < 40% full.
+4. **Batch 3** (Call 4): Deep-dive sub-topic (max 3 URLs).
 
 **Rules**:
 - Must call `scrape` at least twice (Handshake + Batch 1)
 - If tool responds with "Context Budget Reached", skip batch and move to Phase 3
 - Batch 1: max 3 URLs — wide net
 - Batch 2: max 2 URLs — targeted
-- Batch 3: max 3 URLs — only if context < 40%
+- Batch 3: max 3 URLs — deep-dive
 - Provide `excludeLinks` in Batch 1 for considered but deprioritized links
 - Synthesize findings from all batches before reporting
 

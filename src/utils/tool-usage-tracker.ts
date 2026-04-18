@@ -7,6 +7,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { MAX_GATHERING_CALLS, MAX_SCRAPE_CALLS } from '../constants.ts';
 
 export interface ToolLimits {
   // Combined gathering limit (search, security_search, stackexchange, grep)
@@ -127,8 +128,8 @@ export class ToolUsageTracker {
  */
 export function createDefaultToolLimits(): ToolLimits {
   return {
-    gathering: 4, // 4 rounds of information gathering total
-    scrape: 4,    // Up to FOUR scrape calls: 1 handshake + up to 3 execution batches (Batch 3 is context-gated)
+    gathering: MAX_GATHERING_CALLS,
+    scrape: MAX_SCRAPE_CALLS,
     read: undefined,
   };
 }

@@ -17,6 +17,9 @@ export const REQUEST_DELAY_MS = 6500;
 /** Maximum gathering (tool) calls per researcher */
 export const MAX_GATHERING_CALLS = 4;
 
+/** Maximum scrape tool calls per researcher (1 handshake + up to 3 execution batches) */
+export const MAX_SCRAPE_CALLS = 4;
+
 /** Maximum URLs to scrape per batch */
 export const MAX_SCRAPE_URLS = 3;
 
@@ -52,6 +55,13 @@ export const MAX_ROUNDS_LEVEL_2 = 3;
 /** Maximum rounds for complexity 3 (Ultra) */
 export const MAX_ROUNDS_LEVEL_3 = 5;
 
+/**
+ * Extra rounds the lead evaluator may earn beyond targetRounds when it judges
+ * critical gaps still exist. Rounds targetRounds+1 through targetRounds+MAX_EXTRA_ROUNDS
+ * are "bonus" territory; round targetRounds+MAX_EXTRA_ROUNDS+1 is unreachable (hard limit).
+ */
+export const MAX_EXTRA_ROUNDS = 2;
+
 
 // ==================== Timeout Constants ====================
 
@@ -68,9 +78,6 @@ export const NVD_TIMEOUT_MS = 30000;
 
 /** Maximum query length for filename sanitization */
 export const MAX_QUERY_LENGTH = 50;
-
-/** Hash character length for export filenames */
-export const HASH_LENGTH = 2;
 
 /** Maximum retry attempts for export file collision */
 export const MAX_EXPORT_RETRIES = 3;
@@ -92,13 +99,7 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
  * Fraction of context window consumed beyond which all scraping is blocked.
  * At or above this threshold, researchers skip batches and move to synthesis.
  */
-export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.50;
-
-/**
- * Stricter threshold for the optional third scrape batch.
- * Batch 3 only runs if context usage is below this fraction.
- */
-export const MAX_CONTEXT_FRACTION_FOR_BATCH3 = 0.40;
+export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.55;
 
 /**
  * Estimated tokens consumed per scrape call (handshake + content).
@@ -131,3 +132,17 @@ export const MAX_REPORT_LENGTH = 200000;
 
 /** Visual width of the ====------ progress bar in the TUI header */
 export const PROGRESS_BAR_WIDTH = 18;
+
+// ==================== Orchestrator Constants ====================
+
+/** Maximum characters per researcher report when sent to lead evaluator (truncated with link preservation) */
+export const MAX_EVALUATOR_REPORT_LENGTH = 50000;
+
+/** Delay in milliseconds between launching concurrent researchers to stagger startup */
+export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
+
+/** Delay in milliseconds after state update to ensure propagation before next action */
+export const STATE_PROPAGATION_DELAY_MS = 50;
+
+/** Minimum streaming text length before updating UI with estimated tokens */
+export const STREAMING_UPDATE_THRESHOLD_CHARS = 200;

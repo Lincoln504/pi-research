@@ -20,6 +20,7 @@ import { complete, type Model } from '@mariozechner/pi-ai';
 import { DeepResearchStateManager } from './state-manager.ts';
 import { deepResearchReducer, isRoundComplete } from './deep-research-reducer.ts';
 import type { SystemResearchState, ResearchSibling } from './deep-research-types.ts';
+import { TextContentBlock, isTextContentBlock, parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import {
   INITIAL_RESEARCHERS_LEVEL_1,
   INITIAL_RESEARCHERS_LEVEL_2,
@@ -30,7 +31,13 @@ import {
   MAX_CONCURRENT_RESEARCHERS,
   MAX_REPORT_LENGTH,
   DEFAULT_MODEL_CONTEXT_WINDOW,
+  MAX_EXTRA_ROUNDS,
+  MAX_EVALUATOR_REPORT_LENGTH,
+  RESEARCHER_LAUNCH_DELAY_MS,
+  STATE_PROPAGATION_DELAY_MS,
+  STREAMING_UPDATE_THRESHOLD_CHARS,
 } from '../constants.ts';
+import { extractJson, extractJsonFromCodeBlocks, extractJsonObject, normalizeStringArrayDetailed } from '../utils/json-utils.ts';
 import { createResearcherSession } from './researcher.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { buildSessionContext } from '@mariozechner/pi-coding-agent';
@@ -42,6 +49,97 @@ import { getDisplayNumber, getResearcherRoleContext } from './id-utils.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Strict schema for evaluator delegation response
+ */
+interface EvaluatorDelegateDecision {
+  action: 'delegate';
+  queries: string[];
+}
+
+/**
+ * Strict schema for evaluator synthesis decision (implicit)
+ * Synthesis is any non-delegation response, so no explicit schema needed.
+ */
+
+type EvalDecision =
+  | { action: 'delegate'; queries: string[] }
+  | { action: 'synthesize'; content: string };
+
+/**
+ * Parse the lead evaluator's response into a typed decision.
+ *
+ * Delegation format (the response IS the JSON, nothing else):
+ *   {"action": "delegate", "queries": ["q1", "q2"]}
+ *
+ * Synthesis format: any markdown text.
+ * Synthesis is the safe fallback — ambiguous or unparseable output is treated
+ * as synthesis to avoid prematurely extending research.
+ *
+ * Extraction order (most → least reliable):
+ *   1. Direct JSON.parse of the trimmed response (clean model output)
+ *   2. Fenced ```json code block (model wrapped it)
+ *   3. Raw brace extraction — only when '{' appears within the first 200 chars,
+ *      meaning the JSON is at the start of the response. JSON buried deep in a
+ *      long document is almost certainly a synthesis with an inline example and
+ *      must not be extracted as delegation.
+ */
+function parseEvaluatorResponse(text: string): EvalDecision {
+  const trimmed = text.trim();
+
+  const tryDelegate = (parsed: unknown): EvalDecision | null => {
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      (parsed as EvaluatorDelegateDecision).action === 'delegate' &&
+      Array.isArray((parsed as EvaluatorDelegateDecision).queries) &&
+      (parsed as EvaluatorDelegateDecision).queries.length > 0
+    ) {
+      const normalized = normalizeStringArrayDetailed((parsed as EvaluatorDelegateDecision).queries);
+      if (normalized.warnings.length > 0) {
+        logger.debug('[deep-research] Evaluator query normalization warnings:', normalized.warnings.join('; '));
+      }
+      if (normalized.strings.length > 0) {
+        return { action: 'delegate', queries: normalized.strings };
+      }
+      logger.warn('[deep-research] Evaluator delegation had no valid queries after normalization');
+    }
+    return null;
+  };
+
+  // 1. Fast path: response IS the JSON object
+  if (trimmed.startsWith('{')) {
+    try {
+      const decision = tryDelegate(JSON.parse(trimmed));
+      if (decision) return decision;
+    } catch { /* not pure JSON */ }
+  }
+
+  // 2. Fenced code block (```json ... ```)
+  const codeBlockResult = extractJsonFromCodeBlocks<EvaluatorDelegateDecision>(trimmed);
+  if (codeBlockResult.success && codeBlockResult.value) {
+    const decision = tryDelegate(codeBlockResult.value);
+    if (decision) return decision;
+  }
+
+  // 3. Raw brace extraction — only if '{' is near the start (model added prose prefix
+  //    but still intended to delegate). JSON buried deep in a long synthesis is ignored.
+  const bracePos = trimmed.indexOf('{');
+  if (bracePos !== -1 && bracePos < 200) {
+    const objectResult = extractJsonObject<EvaluatorDelegateDecision>(trimmed);
+    if (objectResult.success && objectResult.value) {
+      const decision = tryDelegate(objectResult.value);
+      if (decision) {
+        logger.debug('[deep-research] Extracted delegation from prose-wrapped response (brace at pos', bracePos, ')');
+        return decision;
+      }
+    }
+  }
+
+  logger.debug('[deep-research] No valid delegation found — treating response as synthesis');
+  return { action: 'synthesize', content: text };
+}
 
 /**
  * Truncate a researcher report body to maxChars while preserving the CITED LINKS
@@ -75,7 +173,7 @@ export class DeepResearchOrchestrator {
   private state: SystemResearchState;
   private activeSessions = new Map<string, AgentSession>();
   private resolveCompletion: (result: string) => void = () => {};
-  private rejectCompletion: (err: any) => void = () => {};
+  private rejectCompletion: (err: Error) => void = () => {};
   private completionResolved = false; // Track if we've already resolved to prevent duplicate resolutions
 
   /** Per-sibling current context occupation (overwritten on every message_end). */
@@ -117,7 +215,7 @@ export class DeepResearchOrchestrator {
   async run(signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
       this.resolveCompletion = resolve;
-      this.rejectCompletion = (err: any) => {
+      this.rejectCompletion = (err: Error) => {
         if (this.completionResolved) {
           logger.warn('[deep-research] Attempting to reject already completed research, ignoring');
           return;
@@ -136,13 +234,13 @@ export class DeepResearchOrchestrator {
     this.stateManager.save(this.state);
   }
 
-  private calculateUsageCost(usage: any): number {
+  private calculateUsageCost(usage: Partial<import('../types/llm').TokenUsage>): number {
     if (!usage || !this.options.model?.cost) return 0;
     const modelCost = this.options.model.cost;
-    const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
-    const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
-    const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
-    const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+    const inputCost = (modelCost.input / 1_000_000) * (usage.input ?? 0);
+    const outputCost = (modelCost.output / 1_000_000) * (usage.output ?? 0);
+    const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead ?? 0);
+    const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite ?? 0);
     return inputCost + outputCost + cacheReadCost + cacheWriteCost;
   }
 
@@ -210,36 +308,31 @@ export class DeepResearchOrchestrator {
         }
       }
 
-      const text = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+      const text = response.content
+        .filter((c): c is TextContentBlock => isTextContentBlock(c))
+        .map(c => c.text)
+        .join('');
       let agenda: string[] = [];
       try {
-        // Try to extract JSON from markdown code blocks first
-        const codeBlockRegex = /```(?:json|javascript)?\s*([\s\S]*?)```/gi;
-        let match;
-        while ((match = codeBlockRegex.exec(text)) !== null) {
-          try {
-            const codeContent = match[1];
-            if (codeContent) {
-              const parsed = JSON.parse(codeContent.trim());
-              if (Array.isArray(parsed)) {
-                agenda = parsed;
-                break;
-              }
-            }
-          } catch {
-            // Try the next code block
-          }
-        }
+        // Extract JSON array from coordinator response
+        const result = extractJson<string[]>(text, 'array');
 
-        // If no code block found, try raw JSON array
-        if (agenda.length === 0) {
-          const rawMatch = text.match(/\[.*\]/s);
-          if (rawMatch) {
-            const parsed = JSON.parse(rawMatch[0]);
-            if (Array.isArray(parsed)) {
-              agenda = parsed;
+        if (result.success && result.value && result.value.length > 0) {
+          // Normalize queries with detailed feedback
+          const normalized = normalizeStringArrayDetailed(result.value);
+
+          if (normalized.strings.length > 0) {
+            agenda = normalized.strings;
+            logger.debug(`[deep-research] Parsed ${agenda.length} agenda items from coordinator response`);
+
+            // Log any warnings
+            if (normalized.warnings.length > 0) {
+              logger.debug('[deep-research] Coordinator query normalization warnings:',
+                normalized.warnings.join('; '));
             }
           }
+        } else {
+          logger.debug('[deep-research] Could not parse agenda JSON:', result.error ?? 'unknown error');
         }
       } catch (err) {
         logger.error('[deep-research] Failed to parse planning agenda JSON:', err);
@@ -247,6 +340,7 @@ export class DeepResearchOrchestrator {
 
       if (agenda.length === 0) {
         agenda = [this.state.rootQuery];
+        logger.warn('[deep-research] No valid agenda items found, using root query as fallback');
       }
 
       const initialCount = this.getInitialSiblingCount(this.state.complexity);
@@ -305,7 +399,7 @@ export class DeepResearchOrchestrator {
         logger.log(`[deep-research] Round ${currentRound}: Launching ${toLaunch.length} siblings (Concurrency limit: ${MAX_CONCURRENT_RESEARCHERS}).`);
 
         for (let i = 0; i < toLaunch.length; i++) {
-          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1500));
+          if (i > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
           if (signal?.aborted) break;
           this.executeSibling(toLaunch[i]!, signal);
         }
@@ -392,17 +486,34 @@ export class DeepResearchOrchestrator {
 
       const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
         if (event.type === 'message_end') {
-          const usage = event.message?.usage;
-          if (usage) {
-            const cost = this.calculateUsageCost(usage);
-            const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+          const usage = parseTokenUsage(event.message?.usage);
+          const tokens = calculateTotalTokens(usage);
+          const cost = this.calculateUsageCost(usage);
 
-            if (tokens > 0) {
-              if (event.message?.role === 'assistant') {
-                this.siblingTokens.set(aspect.id, tokens);
-                this.options.onTokens(tokens);
-                updateSliceTokens(this.options.panelState, aspect.id, tokens, cost);
-                this.updateState({ type: 'SIBLING_TOKENS', id: aspect.id, tokens, cost });
+          if (tokens > 0) {
+            if (event.message?.role === 'assistant') {
+              this.siblingTokens.set(aspect.id, tokens);
+              this.options.onTokens(tokens);
+              updateSliceTokens(this.options.panelState, aspect.id, tokens, cost);
+              this.updateState({ type: 'SIBLING_TOKENS', id: aspect.id, tokens, cost });
+              this.options.onUpdate();
+            }
+          }
+        } else if (event.type === 'message_update') {
+          // Estimate context growth from streaming text length during model generation.
+          // Cost is NOT updated here (requires exact usage from message_end).
+          // Tokens are SET (not accumulated), so we pass cost=0 to leave cost unchanged.
+          const updateMsg = event.message;
+          if (updateMsg?.role === 'assistant') {
+            // Content may be in the message object but not typed in ExtendedAgentSessionEvent
+            const content = (updateMsg as any).content;
+            if (Array.isArray(content)) {
+              const textLen = content
+                .filter(isTextContentBlock)
+                .reduce((sum, b) => sum + b.text.length, 0);
+              if (textLen > STREAMING_UPDATE_THRESHOLD_CHARS) {
+                const base = this.siblingTokens.get(aspect.id) ?? initialPromptEstimate;
+                updateSliceTokens(this.options.panelState, aspect.id, base + Math.ceil(textLen / 4), 0);
                 this.options.onUpdate();
               }
             }
@@ -425,7 +536,8 @@ export class DeepResearchOrchestrator {
         }
       });
 
-      await session.prompt(aspect.query);
+      const queryText = typeof aspect.query === 'string' ? aspect.query : String(aspect.query);
+      await session.prompt(queryText);
 
       if (signal?.aborted) {
         if (typeof subscription === 'function') subscription();
@@ -496,7 +608,8 @@ export class DeepResearchOrchestrator {
       const targetSession = this.activeSessions.get(target.id);
       if (targetSession) {
         const finishedDisplayNum = getDisplayNumber(this.state, finished.id);
-        const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${finished.report}`;
+        const truncatedReport = truncatePreservingLinks(finished.report, MAX_EVALUATOR_REPORT_LENGTH);
+        const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${truncatedReport}`;
         try {
           await targetSession.steer(injectionMessage);
         } catch { /* suppress */ }
@@ -532,16 +645,22 @@ export class DeepResearchOrchestrator {
     activateSlice(this.options.panelState, coordId);
     this.options.onUpdate();
 
-    // Track ONLY completed aspect queries to determine remaining agenda items
-    // This ensures pending aspects (new round not started yet) don't falsely
-    // appear as completed when filtering the initial agenda
-    const completedAspectQueries = Object.values(this.state.aspects)
-      .filter(a => a.status === 'completed')
-      .map(a => a.query);
-    const remainingAgenda = this.state.initialAgenda.filter(q => !completedAspectQueries.includes(q));
+    // An agenda item leaves remainingAgenda once assigned to a non-failed aspect.
+    // - pending/running/completed: considered in-progress or done — drop from list
+    // - failed: NOT excluded — evaluator must be able to re-delegate failed topics
+    // This also fixes orphaned items (beyond initialCount): they remain visible until
+    // the evaluator delegates them as exact-string queries, at which point they become
+    // pending aspects and drop off.
+    const assignedAspectQueries = new Set(
+      Object.values(this.state.aspects)
+        .filter(a => a.status !== 'failed')
+        .map(a => a.query)
+    );
+    const remainingAgenda = this.state.initialAgenda.filter(q => !assignedAspectQueries.has(q));
     const targetRounds = this.getMaxRounds(this.state.complexity);
+    const hardLimit = targetRounds + MAX_EXTRA_ROUNDS;
     const isAtTarget = this.state.currentRound >= targetRounds;
-    const isAtHardLimit = this.state.currentRound > targetRounds;
+    const isAtHardLimit = this.state.currentRound >= hardLimit;
 
     // Provide ALL completed findings (including the lead's own) — fresh context via complete()
     // This includes ALL researchers from ALL rounds that have completed with reports
@@ -553,7 +672,7 @@ export class DeepResearchOrchestrator {
       ? `## All Research Findings:\n\n` +
         allCompleted.map(a => {
           const report = a.report || '';
-          const truncated = truncatePreservingLinks(report, 50000);
+          const truncated = truncatePreservingLinks(report, MAX_EVALUATOR_REPORT_LENGTH);
           const roundNum = a.id.split('.')[0] ?? '?';
           return `### Researcher ${getDisplayNumber(this.state, a.id)} (Round ${roundNum}): ${a.query}\n${truncated}`;
         }).join('\n\n---\n\n')
@@ -568,9 +687,9 @@ export class DeepResearchOrchestrator {
       .replace('{MAX_ROUNDS}', targetRounds.toString());
 
     if (isAtHardLimit) {
-      leadPrompt += '\n\n⚠️ **CRITICAL: ABSOLUTE MAXIMUM LIMIT REACHED.** You MUST provide a FINAL SYNTHESIS in Markdown format.';
+      leadPrompt += '\n\n⚠️ **CRITICAL: ABSOLUTE MAXIMUM REACHED.** You MUST provide a FINAL SYNTHESIS in Markdown format. Do NOT return a JSON delegation object.';
     } else if (isAtTarget) {
-      leadPrompt += '\n\n⚠️ **NOTICE: TARGET DEPTH REACHED.** You should ideally synthesize now.';
+      leadPrompt += '\n\n⚠️ **NOTICE: TARGET DEPTH REACHED.** Synthesize if the agenda is substantially covered. Only delegate if CRITICAL GAPS remain unexplored.';
     }
 
     const agendaSection = remainingAgenda.length > 0
@@ -585,7 +704,7 @@ export class DeepResearchOrchestrator {
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Failed to get API credentials: ${auth.error}`);
 
-      const heartbeat = setInterval(() => this.options.onUpdate(), 2000);
+      const heartbeat = setInterval(() => this.options.onUpdate(), 500);
       let response: Awaited<ReturnType<typeof complete>>;
       try {
         response = await complete(this.options.model, {
@@ -595,76 +714,31 @@ export class DeepResearchOrchestrator {
         clearInterval(heartbeat);
       }
 
-      const decision = response.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
-      const usage = response.usage;
-      if (usage) {
-        const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-        const cost = this.calculateUsageCost(usage);
-        if (tokens > 0) {
-          this.options.onTokens(tokens);
-          updateSliceTokens(this.options.panelState, coordId, tokens, cost);
-        }
+      const decision = response.content
+        .filter((c): c is TextContentBlock => isTextContentBlock(c))
+        .map(c => c.text)
+        .join('');
+      const usage = parseTokenUsage(response.usage);
+      const tokens = calculateTotalTokens(usage);
+      const cost = this.calculateUsageCost(usage);
+      if (tokens > 0) {
+        this.options.onTokens(tokens);
+        updateSliceTokens(this.options.panelState, coordId, tokens, cost);
       }
 
-      // Robust JSON extraction: handle markdown code blocks and raw JSON
-      const extractJsonArray = (text: string): string[] | null => {
-        // Try to extract JSON from markdown code blocks first
-        const codeBlockRegex = /```(?:json|javascript)?\s*([\s\S]*?)```/gi;
-        let match;
-        while ((match = codeBlockRegex.exec(text)) !== null) {
-          try {
-            const codeContent = match[1];
-            if (codeContent) {
-              const parsed = JSON.parse(codeContent.trim());
-              if (Array.isArray(parsed)) {
-                return parsed;
-              }
-            }
-          } catch {
-            // Try the next code block
-          }
-        }
-
-        // Try to find raw JSON array in the text
-        try {
-          const lastOpen = text.lastIndexOf('[');
-          const lastClose = text.lastIndexOf(']');
-          if (lastOpen !== -1 && lastClose !== -1 && lastClose > lastOpen) {
-            const jsonStr = text.slice(lastOpen, lastClose + 1);
-            // Validate it looks like an array
-            if (jsonStr.trim().startsWith('[') && jsonStr.trim().endsWith(']')) {
-              const parsed = JSON.parse(jsonStr);
-              if (Array.isArray(parsed)) {
-                return parsed;
-              }
-            }
-          }
-        } catch {
-          // Not valid JSON
-        }
-
-        // No valid JSON array found
-        return null;
-      };
-
-      const nextQueries = extractJsonArray(decision);
-      const isSynthesis = nextQueries === null;
-
-      if (isSynthesis) {
-        logger.log('[deep-research] No valid JSON found - treating as synthesis');
-      } else {
-        logger.log(`[deep-research] Extracted ${nextQueries.length} delegation queries`);
-      }
+      const evalDecision = parseEvaluatorResponse(decision);
 
       logger.log(`[deep-research] Evaluator decision for Round ${evaluatedRound}: ${
-        isSynthesis ? 'SYNTHESIS - completing research' : `DELEGATION - spawning ${nextQueries.length} new researchers in Round ${evaluatedRound + 1}`
+        evalDecision.action === 'synthesize'
+          ? 'SYNTHESIS - completing research'
+          : `DELEGATION - spawning ${evalDecision.queries.length} new researchers in Round ${evaluatedRound + 1}`
       }`);
 
       this.updateState({
         type: 'PROMOTION_DECISION',
-        finalSynthesis: isSynthesis ? decision : undefined,
-        nextQueries: nextQueries ?? [],
-        maxRounds: targetRounds
+        finalSynthesis: evalDecision.action === 'synthesize' ? evalDecision.content : undefined,
+        nextQueries: evalDecision.action === 'delegate' ? evalDecision.queries : [],
+        maxRounds: hardLimit
       });
 
       // Credit the evaluator work using the round number captured BEFORE the state transition
@@ -675,9 +749,9 @@ export class DeepResearchOrchestrator {
           this.progressCredits.set(evalKey, DeepResearchOrchestrator.LEAD_EVAL_UNITS);
         }
         // Extend the progress budget if the evaluator spawned a new round
-        if (!isSynthesis && nextQueries.length > 0) {
+        if (evalDecision.action === 'delegate' && evalDecision.queries.length > 0) {
           this.options.panelState.progress.expected +=
-            nextQueries.length * DeepResearchOrchestrator.UNITS_PER_RESEARCHER
+            evalDecision.queries.length * DeepResearchOrchestrator.UNITS_PER_RESEARCHER
             + DeepResearchOrchestrator.LEAD_EVAL_UNITS;
         }
       }
@@ -690,19 +764,21 @@ export class DeepResearchOrchestrator {
       // finally block to call startRound(). We must call it explicitly.
       
       // Give state a moment to propagate the update
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, STATE_PROPAGATION_DELAY_MS));
       
-      if (isSynthesis) {
-        // Evaluator chose to synthesize - resolve the research.
-        // Use `decision` directly: reading back from this.state.finalSynthesis is
-        // fragile because an empty string is falsy and would not have been stored.
+      if (evalDecision.action === 'synthesize') {
         logger.log('[deep-research] Evaluator chose SYNTHESIS - resolving research');
-        if (decision) {
-          this.resolveResult(decision);
+        if (evalDecision.content) {
+          this.resolveResult(evalDecision.content);
         } else {
           logger.error('[deep-research] Evaluator synthesis was empty - falling back to historical findings');
           this.resolveResult(this.buildAllFindingsContext());
         }
+      } else if (isAtHardLimit) {
+        // Evaluator returned delegation despite the mandatory synthesis instruction.
+        // Enforce completion by falling back to concatenated researcher findings.
+        logger.warn('[deep-research] Evaluator returned delegation at hard limit — forcing synthesis from findings');
+        this.resolveResult(this.buildAllFindingsContext());
       } else {
         // Evaluator delegated more researchers - start next round
         logger.log(`[deep-research] Evaluator chose DELEGATION - starting Round ${evaluatedRound + 1}`);
@@ -710,8 +786,9 @@ export class DeepResearchOrchestrator {
       }
 
     } catch (err) {
-      logger.error(`[deep-research] Coordinator evaluation failed for round ${evaluatedRound}:`, err);
-      this.rejectCompletion(err);
+      const error = err instanceof Error ? err : new Error(String(err));
+      logger.error(`[deep-research] Coordinator evaluation failed for round ${evaluatedRound}:`, error);
+      this.rejectCompletion(error);
     }
   }
 
@@ -723,7 +800,7 @@ export class DeepResearchOrchestrator {
 You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound} in Round ${roundNumber}).
 - **Topic**: ${aspect.query}
 - **Round**: ${roundNumber} of ${this.getMaxRounds(this.state.complexity)}
-- **Tool Usage**: 4 gathering calls + up to 3 context-gated scrape batches (Batch 1 ≤3 URLs, Batch 2 ≤2 URLs, Batch 3 ≤3 URLs if context < 40%)`;
+- **Tool Usage**: 4 gathering calls + up to 3 context-gated scrape batches (Batch 1 ≤3 URLs, Batch 2 ≤2 URLs, Batch 3 ≤3 URLs)`;
   }
 
   private buildAllFindingsContext(): string {
@@ -753,7 +830,7 @@ You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound}
       }
       const displayNum = getDisplayNumber(this.state, completed.id);
       const report = completed.report || '';
-      const truncatedReport = truncatePreservingLinks(report, 50000);
+      const truncatedReport = truncatePreservingLinks(report, MAX_EVALUATOR_REPORT_LENGTH);
         
       output += `#### Researcher ${displayNum}: ${completed.query}\n\n${truncatedReport}\n\n`;
     }

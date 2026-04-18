@@ -1,6 +1,6 @@
 {
   "name": "@lincolndeen/pi-research",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
   "private": false,
@@ -61,7 +61,7 @@
     "main": "index.ts"
   },
   "dependencies": {
-    "@kreuzberg/html-to-markdown-node": "^2.28.2",
+    "@kreuzberg/html-to-markdown-node": "^2.30.0",
     "dockerode": "^4.0.10",
     "js-yaml": "^4.1.1",
     "node-html-markdown": "^2.0.0",
@@ -73,8 +73,8 @@
     "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "@mariozechner/pi-coding-agent": ">=0.65.0",
+    "@sinclair/typebox": ">=0.34.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -88,8 +88,5 @@
     "testcontainers": "^11.13.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
-  },
-  "overrides": {
-    "basic-ftp": "^5.2.1"
   }
 }

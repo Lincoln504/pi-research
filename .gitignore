@@ -15,7 +15,11 @@ yarn-error.log*
 # Generated files
 config/tor-settings-generated.yml
 config/proxy-settings-generated.yml
+config/runtime-settings-*.yml
 /tmp/
+
+# Research output files
+pi-research-*.md
 
 # TypeScript
 *.tsbuildinfo

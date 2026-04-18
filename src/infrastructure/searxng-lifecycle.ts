@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { PROXY_URL } from '../config.ts';
+import { PROXY_URL, BRAVE_SEARCH_API_KEY } from '../config.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
 
 /**
@@ -47,7 +47,7 @@ function resolveExtensionDir(): string {
   }
 
   const installedDir = path.join(
-    process.env['HOME'] ?? os.homedir(),
+    os.homedir(),
     '.pi',
     'agent',
     'extensions',
@@ -97,6 +97,7 @@ export interface SearxngLifecycleConfig {
   logger?: ILogger;
   manager?: DockerSearxngManager | null;
   proxyUrl?: string;
+  braveApiKey?: string;
 }
 
 type ResolvedConfig = {
@@ -104,6 +105,7 @@ type ResolvedConfig = {
   logger: ILogger;
   manager: DockerSearxngManager | null;
   proxyUrl: string | undefined;
+  braveApiKey: string | undefined;
 };
 
 /**
@@ -129,6 +131,7 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   logger,
   manager: null,
   proxyUrl: PROXY_URL,
+  braveApiKey: BRAVE_SEARCH_API_KEY,
 };
 
 /**
@@ -215,55 +218,57 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   /**
-   * Generate proxy-enabled SearXNG settings file dynamically
-   * Uses configured PROXY_URL from config
-   *
-   * Automatically converts localhost (127.0.0.1) to Docker's portable host alias
-   * because containers cannot access host loopback directly.
+   * Generate a runtime settings file with optional proxy and/or Brave Search API key injected.
+   * Localhost proxy addresses are rewritten to Docker's host alias automatically.
    */
-  private async generateProxySettings(proxyUrl: string): Promise<string> {
+  private async generateRuntimeSettings(proxyUrl?: string, braveApiKey?: string): Promise<string> {
     const defaultSettingsPath = path.join(
       this.config.extensionDir,
       'config',
       'default-settings.yml'
     );
-    // Use unique filename to avoid race conditions between parallel sessions
     const uniqueId = this.sessionId?.substring(0, 8) || Math.random().toString(36).substring(2, 8);
-    const proxySettingsPath = path.join(
+    const runtimeSettingsPath = path.join(
       this.config.extensionDir,
       'config',
-      `proxy-settings-${uniqueId}.yml`
+      `runtime-settings-${uniqueId}.yml`
     );
 
     try {
-      // Read default settings
       const defaultSettings = await fs.promises.readFile(defaultSettingsPath, 'utf-8');
-
-      // Parse YAML to modify it
       const yaml = await import('js-yaml');
       const settings = yaml.load(defaultSettings) as any;
 
-      const containerProxyUrl = rewriteLocalhostProxyForContainer(proxyUrl);
-      if (containerProxyUrl !== proxyUrl) {
-        logger.log(`[pi-research] Converting localhost proxy to Docker host alias: ${proxyUrl} -> ${containerProxyUrl}`);
+      if (proxyUrl) {
+        const containerProxyUrl = rewriteLocalhostProxyForContainer(proxyUrl);
+        if (containerProxyUrl !== proxyUrl) {
+          logger.log(`[pi-research] Converting localhost proxy to Docker host alias: ${proxyUrl} -> ${containerProxyUrl}`);
+        }
+        settings.outgoing = settings.outgoing || {};
+        settings.outgoing.proxies = { 'all://': [containerProxyUrl] };
+        settings.outgoing.extra_proxy_timeout = 10;
+        logger.log(`[pi-research] Runtime settings: proxy configured (${containerProxyUrl})`);
       }
 
-      // Add proxy configuration
-      settings.outgoing = settings.outgoing || {};
-      settings.outgoing.proxies = {
-        'all://': [containerProxyUrl]
-      };
-      settings.outgoing.extra_proxy_timeout = 10;
+      if (braveApiKey) {
+        settings.engines = settings.engines || [];
+        settings.engines.push({
+          name: 'braveapi',
+          engine: 'braveapi',
+          api_key: braveApiKey,
+          shortcut: 'bapi',
+          weight: 1.2,
+          inactive: false,
+        });
+        logger.log('[pi-research] Runtime settings: braveapi engine enabled');
+      }
 
-      // Write generated settings
-      await fs.promises.writeFile(proxySettingsPath, yaml.dump(settings), 'utf-8');
-      this.proxySettingsPath = proxySettingsPath;
+      await fs.promises.writeFile(runtimeSettingsPath, yaml.dump(settings), 'utf-8');
+      this.proxySettingsPath = runtimeSettingsPath;
 
-      logger.log(`[pi-research] Generated proxy settings for container: ${containerProxyUrl}`);
-
-      return proxySettingsPath;
+      return runtimeSettingsPath;
     } catch (error) {
-      logger.error('[pi-research] Failed to generate proxy settings:', error);
+      logger.error('[pi-research] Failed to generate runtime settings:', error);
       throw error;
     }
   }
@@ -314,28 +319,27 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
         }
       }
 
-      // Configure proxy if PROXY_URL is set
+      // Generate runtime settings if proxy or Brave API key is configured
       let settingsPath: string;
-      if (this.config.proxyUrl) {
+      if (this.config.proxyUrl || this.config.braveApiKey) {
         try {
-          logger.log('[pi-research] Proxy configured, generating proxy settings...');
-          settingsPath = await this.generateProxySettings(this.config.proxyUrl);
+          if (this.config.proxyUrl) logger.log('[pi-research] Proxy configured, generating runtime settings...');
+          if (this.config.braveApiKey) logger.log('[pi-research] BRAVE_SEARCH_API_KEY set, enabling braveapi engine...');
+          settingsPath = await this.generateRuntimeSettings(this.config.proxyUrl, this.config.braveApiKey);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          logger.error('[pi-research] Failed to configure proxy:', errorMsg);
-          // Continue without proxy - user gets an error that explains the issue
-          const proxyError = new Error(
-            `Proxy configuration failed: ${errorMsg}\n\n` +
+          logger.error('[pi-research] Failed to generate runtime settings:', errorMsg);
+          const configError = new Error(
+            `Runtime settings generation failed: ${errorMsg}\n\n` +
             `To fix:\n` +
-            `1. Check that your proxy is running and accessible\n` +
-            `2. Verify PROXY_URL format: socks5://host:port or http://host:port\n` +
-            `3. Unset PROXY_URL to disable proxy`
+            `1. Check PROXY_URL format: socks5://host:port or http://host:port\n` +
+            `2. Check BRAVE_SEARCH_API_KEY is a valid key\n` +
+            `3. Unset these env vars to use default settings`
           );
-          proxyError.cause = error;
-          throw proxyError;
+          configError.cause = error;
+          throw configError;
         }
       } else {
-        // Use default settings
         settingsPath = path.join(
           this.config.extensionDir,
           'config',

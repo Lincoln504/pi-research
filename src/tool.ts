@@ -39,6 +39,7 @@ import {
   flashSlice,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
+import { isTextContentBlock, parseTokenUsage, calculateTotalTokens } from './types/llm.ts';
 import {
   initLifecycle,
   ensureRunning,
@@ -119,7 +120,7 @@ export function createResearchTool(): ToolDefinition {
     promptGuidelines: [
       'Specifically for web research, not local project exploration.',
       'Research is organized into Rounds. Each round contains multiple parallel siblings.',
-      'SCRAPE PROTOCOL: Call the `scrape` tool up to FOUR times per agent: (1) handshake returns globally scraped links, (2) Batch 1 broad scrape ≤3 URLs, (3) Batch 2 targeted ≤2 URLs, (4) optional Batch 3 deep-dive ≤3 URLs if context < 40%. Batches skip automatically when context > 50%.',
+      'SCRAPE PROTOCOL: Call the `scrape` tool up to FOUR times per agent: (1) handshake returns globally scraped links, (2) Batch 1 broad scrape ≤3 URLs, (3) Batch 2 targeted ≤2 URLs, (4) Batch 3 deep-dive ≤3 URLs. Batches skip automatically when context > 55%.',
       'The last sibling in each round evaluates progress and decides whether to continue or synthesize.',
       'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
       'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
@@ -295,26 +296,40 @@ export function createResearchTool(): ToolDefinition {
               contextWindowSize: quickContextWindowSize,
             });
             
-            const calculateUsageCost = (usage: any): number => {
+            const calculateUsageCost = (usage: Partial<import('./types/llm').TokenUsage>): number => {
               if (!usage || !selectedModel?.cost) return 0;
               const modelCost = selectedModel.cost;
-              const inputCost = (modelCost.input / 1_000_000) * (usage.input || 0);
-              const outputCost = (modelCost.output / 1_000_000) * (usage.output || 0);
-              const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead || 0);
-              const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite || 0);
+              const inputCost = (modelCost.input / 1_000_000) * (usage.input ?? 0);
+              const outputCost = (modelCost.output / 1_000_000) * (usage.output ?? 0);
+              const cacheReadCost = (modelCost.cacheRead / 1_000_000) * (usage.cacheRead ?? 0);
+              const cacheWriteCost = (modelCost.cacheWrite / 1_000_000) * (usage.cacheWrite ?? 0);
               return inputCost + outputCost + cacheReadCost + cacheWriteCost;
             };
 
             const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
               if (event.type === 'message_end' && event.message?.role === 'assistant') {
-                const usage = event.message?.usage;
-                if (usage) {
-                  const cost = calculateUsageCost(usage);
-                  const tokens = usage.totalTokens || (usage.input || 0) + (usage.output || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
-                  if (tokens > 0) {
-                    quickSessionTokens += tokens; // drives context-aware scrape gating
-                    onTokens(tokens);
-                    updateSliceTokens(panelState, sliceLabel, tokens, cost);
+                const usage = parseTokenUsage(event.message?.usage);
+                const tokens = calculateTotalTokens(usage);
+                const cost = calculateUsageCost(usage);
+                if (tokens > 0) {
+                  quickSessionTokens += tokens; // drives context-aware scrape gating
+                  onTokens(tokens);
+                  updateSliceTokens(panelState, sliceLabel, tokens, cost);
+                  refreshAllSessions(piSessionId);
+                }
+              } else if (event.type === 'message_update') {
+                // Estimate context growth from streaming text during model generation.
+                // Cost is left unchanged (only updated with exact values on message_end).
+                const updateMsg = event.message;
+                // Content may be in the message object but not typed in ExtendedAgentSessionEvent
+                const content = updateMsg?.role === 'assistant' ? (updateMsg as any).content : undefined;
+                if (Array.isArray(content)) {
+                  const textLen = content
+                    .filter(isTextContentBlock)
+                    .reduce((sum, b) => sum + b.text.length, 0);
+                  if (textLen > 200) {
+                    const estimated = quickSessionTokens + Math.ceil(textLen / 4);
+                    updateSliceTokens(panelState, sliceLabel, estimated, 0);
                     refreshAllSessions(piSessionId);
                   }
                 }

@@ -17,6 +17,8 @@ export interface Config {
   MAX_CONCURRENT_RESEARCHERS: number;
   /** Proxy URL for SearXNG searches (optional) */
   PROXY_URL?: string;
+  /** Brave Search API key — enables the braveapi engine in SearXNG when set (optional) */
+  BRAVE_SEARCH_API_KEY?: string;
   /** Health check timeout in milliseconds (default: 15000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
   /** Global TUI refresh debounce in milliseconds (default: 10) */
@@ -34,6 +36,7 @@ const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 240000,
   MAX_CONCURRENT_RESEARCHERS: 3,
   PROXY_URL: undefined,
+  BRAVE_SEARCH_API_KEY: undefined,
   HEALTH_CHECK_TIMEOUT_MS: 15000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
@@ -90,6 +93,7 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       DEFAULTS.MAX_CONCURRENT_RESEARCHERS
     ),
     PROXY_URL: parseEnvString(env, 'PROXY_URL'),
+    BRAVE_SEARCH_API_KEY: parseEnvString(env, 'BRAVE_SEARCH_API_KEY'),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(
       env,
       'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
@@ -189,6 +193,14 @@ export function getProxyUrl(): string | undefined {
   return getConfig().PROXY_URL;
 }
 
+/**
+ * @deprecated Use getConfig().BRAVE_SEARCH_API_KEY instead
+ */
+export function getBraveSearchApiKey(): string | undefined {
+  return getConfig().BRAVE_SEARCH_API_KEY;
+}
+
 // Legacy variable exports (for backward compatibility, but reflect module load time values)
 export const RESEARCHER_TIMEOUT_MS = getResearcherTimeoutMs();
 export const PROXY_URL = getProxyUrl();
+export const BRAVE_SEARCH_API_KEY = getBraveSearchApiKey();

@@ -106,12 +106,20 @@ try {
   // Verify installation
   console.log('\n📋 Verifying browser installation...');
   const browsers = ['chromium']; // Only Chromium is required for scraping
-  const cacheDir = join(homedir(), '.cache', 'ms-playwright');
+  const cacheDir = process.env['PLAYWRIGHT_BROWSERS_PATH'] ||
+    (process.platform === 'win32'
+      ? join(process.env['LOCALAPPDATA'] || join(homedir(), 'AppData', 'Local'), 'ms-playwright')
+      : join(homedir(), '.cache', 'ms-playwright'));
 
   browsers.forEach(browser => {
-    const browserDirs = readdirSync(cacheDir).filter(f =>
-      f.startsWith(browser) && statSync(join(cacheDir, f)).isDirectory()
-    );
+    let browserDirs = [];
+    try {
+      browserDirs = readdirSync(cacheDir).filter(f =>
+        f.startsWith(browser) && statSync(join(cacheDir, f)).isDirectory()
+      );
+    } catch {
+      // cache dir may not exist yet or may be at a different path
+    }
 
     if (browserDirs.length > 0) {
       console.log(`   ✅ ${browser}: ${browserDirs.sort().join(', ')}`);

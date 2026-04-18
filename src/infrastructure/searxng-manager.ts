@@ -92,6 +92,10 @@ interface EnvConfig {
 
 type DockerConnectionOptions = ConstructorParameters<typeof Docker>[0];
 
+function toDockerBindPath(p: string): string {
+  return process.platform === 'win32' ? p.replace(/\\/g, '/') : p;
+}
+
 function normalizeSocketPath(socketPath: string): string {
   const trimmed = socketPath.trim();
   if (trimmed.startsWith('\\\\.\\pipe\\')) {
@@ -845,8 +849,8 @@ export class DockerSearxngManager {
           '8080/tcp': [{ HostPort: hostPort }],
         },
         Binds: [
-          `${settingsPath}:/etc/searxng/settings.yml:ro`,
-          `${limiterConfigPath}:/etc/searxng/limiter.toml:ro`,
+          `${toDockerBindPath(settingsPath)}:/etc/searxng/settings.yml:ro`,
+          `${toDockerBindPath(limiterConfigPath)}:/etc/searxng/limiter.toml:ro`,
         ],
         AutoRemove: false,
         ExtraHosts: getDockerHostGatewayExtraHosts(),

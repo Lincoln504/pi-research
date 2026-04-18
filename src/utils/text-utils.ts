@@ -72,7 +72,11 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
 
   // Check for explicit error stop reason or error message
   if (last.stopReason === 'error' || (last.errorMessage && last.stopReason !== 'aborted')) {
-    throw new Error(`${label}: Provider error - ${last.errorMessage || 'Unknown error'}`);
+    const msg = last.errorMessage || 'Unknown error';
+    if (msg.includes('429')) {
+      throw new Error(`Model API rate limit (429) — wait a moment and retry. Details: ${msg}`);
+    }
+    throw new Error(`${label}: Provider error - ${msg}`);
   }
 
   return extractText(last);

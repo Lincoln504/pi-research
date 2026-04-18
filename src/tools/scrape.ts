@@ -4,11 +4,10 @@
  * Scrape full content from URLs using a context-aware, up-to-4-call protocol:
  *
  *   Call 1  (Handshake)  – Return already-scraped links; no network activity.
- *   Call 2  (Batch 1)    – Scrape up to MAX_SCRAPE_URLS URLs; requires context < 50 %.
+ *   Call 2  (Batch 1)    – Scrape up to MAX_SCRAPE_URLS URLs; requires context < 55%.
  *   Call 3  (Batch 2)    – Scrape up to BATCH_2_MAX_SCRAPE_URLS URLs (targeted follow-up);
- *                          requires context < 50 %; deduplicates against Batch 1.
- *   Call 4  (Batch 3)    – Optional deep-dive; only runs when context < 40 %.
- *                          Scrape up to MAX_SCRAPE_URLS additional URLs.
+ *                          requires context < 55%; deduplicates against Batch 1.
+ *   Call 4  (Batch 3)    – Scrape up to MAX_SCRAPE_URLS additional URLs; requires context < 55%.
  *   Call 5+ (Locked)     – All batches exhausted; move to synthesis.
  *
  * Context is measured as tokens_used / model_context_window.  When the threshold
@@ -28,7 +27,6 @@ import {
   BATCH_2_MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
   MAX_CONTEXT_FRACTION_FOR_SCRAPING,
-  MAX_CONTEXT_FRACTION_FOR_BATCH3,
   DEFAULT_MODEL_CONTEXT_WINDOW,
   AVG_TOKENS_PER_SCRAPE,
 } from '../constants.ts';
@@ -71,15 +69,15 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Context-aware 4-call protocol: handshake → batch 1 → batch 2 (targeted) → optional batch 3 (if context < 40%).',
+    description: 'Scrape content from URLs. Context-aware 4-call protocol: handshake → batch 1 → batch 2 (targeted) → batch 3 (deep-dive).',
     promptSnippet: 'Scrape full content from URLs (context-aware protocol)',
     promptGuidelines: [
       'PROTOCOL: This tool uses up to FOUR calls per researcher session.',
       'CALL 1 (Handshake): Provide your intended URLs. Returns links already scraped globally.',
       'CALL 2 (Batch 1): Provide your filtered list (max 3 URLs). Primary broad scraping.',
       'CALL 3 (Batch 2): Targeted follow-up (max 2 URLs). Deduplicated against Batch 1 automatically.',
-      'CALL 4 (Batch 3 — optional): Deep-dive; only available when context window is < 40 % full.',
-      'CONTEXT LIMIT: All batches are skipped automatically if context exceeds 50 %. Move to synthesis when this happens.',
+      'CALL 4 (Batch 3): Deep-dive scrape up to 3 more URLs.',
+      `CONTEXT LIMIT: All batches are skipped automatically if context exceeds ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%. Move to synthesis when this happens.`,
       `BATCH 1 LIMIT: max ${MAX_SCRAPE_URLS} URLs. BATCH 2 LIMIT: max ${BATCH_2_MAX_SCRAPE_URLS} URLs (higher concurrency). BATCH 3 LIMIT: max ${MAX_SCRAPE_URLS} URLs.`,
       'USE CASES FOR BATCH 2: Targeted follow-up on Batch 1 findings, retry failed scrapes.',
       'USE CASES FOR BATCH 3 (if available): Deep-dive on a narrow sub-topic identified in Batch 1/2.',
@@ -117,11 +115,9 @@ export function createScrapeTool(options: {
         const ctxPct = Math.round(ctxFraction * 100);
 
         // Tell the researcher how many batches are realistically available
-        const batch3Note = nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_BATCH3
-          ? `A **Batch 3** (optional deep-dive) is available — context is only ${ctxPct}% full.`
-          : nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_SCRAPING
-            ? `Batch 3 is **not available** — projected context after Batch 1/2 would be ~${Math.round(nextBatchProjection * 100)}% (threshold: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`
-            : `⚠️ Context is ${ctxPct}% full. **Batches 1–3 may be skipped** — consider proceeding directly to synthesis.`;
+        const batch3Note = nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_SCRAPING
+          ? `**Batches 1–3 available** — context is only ${ctxPct}% full.`
+          : `⚠️ Context is ${ctxPct}% full. **Batches 1–3 may be skipped** — consider proceeding directly to synthesis.`;
 
         return {
           content: [{
@@ -137,7 +133,7 @@ export function createScrapeTool(options: {
               '**Protocol Overview:**',
               `- **Batch 1** (Call 2): Up to ${MAX_SCRAPE_URLS} URLs — primary broad scraping.`,
               `- **Batch 2** (Call 3): Up to ${BATCH_2_MAX_SCRAPE_URLS} URLs — targeted follow-up (auto-deduped against Batch 1).`,
-              `- **Batch 3** (Call 4): Up to ${MAX_SCRAPE_URLS} URLs — deep-dive, context-gated (< ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}% full).`,
+              `- **Batch 3** (Call 4): Up to ${MAX_SCRAPE_URLS} URLs — deep-dive.`,
               '',
               batch3Note,
               '',
@@ -215,7 +211,6 @@ export function createScrapeTool(options: {
 
         const ctxAfter = getContextFraction();
         const batch2Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_SCRAPING;
-        const batch3Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_BATCH3;
 
         let markdown = `# URL Scrape Results (Batch 1 of up to 3)\n\n`;
         markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
@@ -225,12 +220,7 @@ export function createScrapeTool(options: {
         }
 
         if (batch2Available) {
-          markdown += `**Batch 2 available** (max ${BATCH_2_MAX_SCRAPE_URLS} URLs, targeted follow-up).\n`;
-          if (batch3Available) {
-            markdown += `**Batch 3 available** (max ${MAX_SCRAPE_URLS} URLs, context ${Math.round(ctxAfter * 100)}% full — below ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}% threshold).\n`;
-          } else {
-            markdown += `**Batch 3 not available** (context ${Math.round(ctxAfter * 100)}% full — above ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}% threshold).\n`;
-          }
+          markdown += `**Batch 2 available** (max ${BATCH_2_MAX_SCRAPE_URLS} URLs, targeted follow-up). **Batch 3 available** (max ${MAX_SCRAPE_URLS} URLs, deep-dive). Context ${Math.round(ctxAfter * 100)}% full.\n`;
         } else {
           markdown += `⚠️ **Context ${Math.round(ctxAfter * 100)}% full** — Batch 2 will be skipped. Proceed to synthesis after reviewing these results.\n`;
         }
@@ -326,7 +316,7 @@ export function createScrapeTool(options: {
         const elapsed = Date.now() - startTime;
 
         const ctxAfter = getContextFraction();
-        const batch3Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_BATCH3;
+        const batch3Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_SCRAPING;
 
         let markdown = `# URL Scrape Results (Batch 2)\n\n`;
         if (dedupNote) markdown += dedupNote;
@@ -338,7 +328,7 @@ export function createScrapeTool(options: {
         }
 
         if (batch3Available) {
-          markdown += `**Batch 3 available** (context ${Math.round(ctxAfter * 100)}% full — below ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}% threshold). Up to ${MAX_SCRAPE_URLS} more URLs for deep-dive.\n\n`;
+          markdown += `**Batch 3 available** (context ${Math.round(ctxAfter * 100)}% full). Up to ${MAX_SCRAPE_URLS} more URLs for deep-dive.\n\n`;
         } else {
           markdown += `**All standard batches complete** (context ${Math.round(ctxAfter * 100)}% full). Proceed to Phase 3 — Synthesis.\n\n`;
         }
@@ -357,7 +347,7 @@ export function createScrapeTool(options: {
         };
       }
 
-      // ─── CALL 4: Batch 3 (context-gated optional deep-dive) ───────────────
+      // ─── CALL 4: Batch 3 (context-gated deep-dive) ───────────────────────
       if (callCount === 3) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
@@ -370,21 +360,10 @@ export function createScrapeTool(options: {
 
         // Context gate (with projection)
         const projectedFraction = getContextFraction(urls.length * AVG_TOKENS_PER_SCRAPE);
-        if (projectedFraction >= MAX_CONTEXT_FRACTION_FOR_BATCH3) {
+        if (projectedFraction >= MAX_CONTEXT_FRACTION_FOR_SCRAPING) {
           return {
-            content: [{
-              type: 'text',
-              text: [
-                `# Batch 3 Unavailable — Context Budget Projection Reached`,
-                '',
-                `Your context is currently **${Math.round((options.getTokensUsed?.() || 0) / ctxWindow * 100)}% full**.`,
-                `Adding this deep-dive batch would push it to approximately **${Math.round(projectedFraction * 100)}% full** ` +
-                `(threshold for Batch 3: ${Math.round(MAX_CONTEXT_FRACTION_FOR_BATCH3 * 100)}%).`,
-                '',
-                '**Action**: Proceed directly to **Phase 3 — Synthesis** with findings from Batches 1 and 2.',
-              ].join('\n'),
-            }],
-            details: { skipped: true, reason: 'context_limit_projection_batch3', contextFraction: projectedFraction },
+            content: [{ type: 'text', text: contextLimitMessage(projectedFraction, 'Batch 3', true) }],
+            details: { skipped: true, reason: 'context_limit_projection', contextFraction: projectedFraction },
           };
         }
 
