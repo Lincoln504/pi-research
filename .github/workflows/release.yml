@@ -47,4 +47,4 @@ jobs:
           release_name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          body_path: CHANGELOG.md
+          body: "New release ${{ github.ref_name }}"
