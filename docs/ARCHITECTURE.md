@@ -47,7 +47,7 @@ To avoid exceeding LLM context windows, the `scrape` tool follows a four-step ha
 Scraping is automatically suspended if the current session token count exceeds 55% of the model's context window.
 
 ### Shared Link Deduplication
-Researchers share a URL pool within a single research operation (one `pi-research` call). This prevents redundant network requests and ensures that if Sibling A scrapes a page, Sibling B can access the findings without re-scraping. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
+Researchers share a URL pool within a single research operation (one `pi-research` call). This prevents redundant network requests by signaling which links are currently being or have already been scraped by siblings. When a researcher completes their task, their full report (including findings from these links) is injected into the context of other siblings to ensure collective knowledge without redundant scraping. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
 
 ### SearXNG Lifecycle Management
 SearXNG runs as a Docker container (`searxng/searxng:latest`).
