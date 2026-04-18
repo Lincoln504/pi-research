@@ -139,10 +139,9 @@ describe('Extended Tools Integration', () => {
       // Call 3
       await searchTool.execute('t3', { terms: ['test'], databases: ['osv'] }, undefined, undefined, {} as any);
 
-      // Call 4 should be blocked gracefully
-      const blocked = await grepTool.execute('t4', { pattern: 'test' }, undefined, undefined, {} as any);
-      expect((blocked.details as any).blocked).toBe(true);
-      expect((blocked.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
+      // Call 4 should throw an error because limit is reached
+      await expect(grepTool.execute('t4', { pattern: 'test' }, undefined, undefined, {} as any))
+        .rejects.toThrow('GATHERING LIMIT REACHED');
     });
   });
 });

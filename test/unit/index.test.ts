@@ -32,7 +32,7 @@ vi.mock('../../src/utils/shutdown-manager.ts', () => ({
   },
 }));
 
-import registerExtension from '../../index.ts';
+import registerExtension from '../../src/index.ts';
 
 type SessionHandler = (...args: any[]) => any;
 

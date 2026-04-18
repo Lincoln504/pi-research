@@ -314,7 +314,7 @@ export class DockerSearxngManager {
       ...config,
     } as Required<SearxngManagerConfig>;
     this._extensionDir = _extensionDir;
-    this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'default-settings.yml');
+    this._settingsPath = config.settingsPath || path.join(_extensionDir, 'config', 'searxng', 'default-settings.yml');
     // Initialize Docker client
     try {
       this.docker = options?.docker || new Docker(getDockerConnectionCandidates()[0]);

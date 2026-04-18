@@ -541,6 +541,7 @@ export class DeepResearchOrchestrator {
 
       if (signal?.aborted) {
         if (typeof subscription === 'function') subscription();
+        this.updateState({ type: 'SIBLING_FAILED', id: aspect.id, error: 'Aborted' });
         return;
       }
 
@@ -612,7 +613,9 @@ export class DeepResearchOrchestrator {
         const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${truncatedReport}`;
         try {
           await targetSession.steer(injectionMessage);
-        } catch { /* suppress */ }
+        } catch (err) {
+          logger.warn(`[deep-research] Failed to inject findings from ${finished.id} into ${target.id}:`, err);
+        }
       }
     }
   }

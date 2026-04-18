@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
@@ -21,6 +21,19 @@ describe('DockerSearxngManager Integration', () => {
     }
 
     await fs.mkdir(testStateDir, { recursive: true });
+    
+    // Clean up any existing test container before running tests
+    try {
+      const cleanupManager = new DockerSearxngManager(extensionDir, {
+        containerName: testContainerName,
+        port: 55733,
+        healthTimeout: 180000,
+        stateDir: testStateDir,
+      });
+      await cleanupManager.stop();
+    } catch (e) {
+      // Ignore cleanup errors
+    }
     
     manager = new DockerSearxngManager(extensionDir, {
       containerName: testContainerName,

@@ -343,6 +343,7 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
         settingsPath = path.join(
           this.config.extensionDir,
           'config',
+          'searxng',
           'default-settings.yml'
         );
       }
