@@ -36,7 +36,9 @@ Each researcher session is constrained by a `ToolUsageTracker` to prevent infini
 ### Context-Aware Scraping Protocol
 To avoid exceeding LLM context windows, the `scrape` tool follows a four-step handshake:
 1.  **Handshake**: The researcher identifies target URLs. The tool returns a list of URLs already scraped by siblings.
-2.  **Batch 1-3**: Sequential scraping of new URLs. 
+2.  **Batch 1**: Up to 3 URLs — primary broad scraping.
+3.  **Batch 2**: Up to 2 URLs — targeted follow-up (deduplicated against Batch 1).
+4.  **Batch 3**: Up to 3 URLs — deep-dive scraping.
 Scraping is automatically suspended if the current session token count exceeds 55% of the model's context window.
 
 ### Shared Link Deduplication
@@ -54,7 +56,7 @@ The Lead Evaluator follows a strict priority list:
 1.  Check for fatal errors across all researchers.
 2.  Assess coverage against the initial agenda.
 3.  Check the round budget (`targetRounds + MAX_EXTRA_ROUNDS`).
-Delegation is performed via a structured JSON response; any other output is treated as a final synthesis to prevent stuck states.
+The hard limit is `targetRounds + 2` bonus rounds. Delegation is performed via a structured JSON response; any other output is treated as a final synthesis to prevent stuck states.
 
 ---
 

@@ -86,9 +86,14 @@ Do a deep dive on CVE-2024-3094 at depth 2
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BRAVE_SEARCH_API_KEY` | — | Enables `braveapi` engine (official REST API) |
-| `PI_RESEARCH_VERBOSE` | — | Write diagnostic logs to temp directory |
-| `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check |
-| `PROXY_URL` | — | Proxy for SearXNG outgoing requests |
+| `PI_RESEARCH_VERBOSE` | — | Write diagnostic JSONL logs to OS temp directory |
+| `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (set to `1` if engines are blocked) |
+| `PROXY_URL` | — | Proxy for SearXNG outgoing requests (e.g. `socks5://127.0.0.1:9050`) |
+| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases limit from 300 to 10,000/day) |
+| `PI_RESEARCH_SEARCH_LANGUAGE` | `en-US` | BCP 47 language tag for search result filtering |
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (30s to 10m) |
+| `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Maximum researchers running simultaneously (1 to 10) |
+| `PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS` | `15000` | Delay before TUI clears after research ends |
 
 ---
 
