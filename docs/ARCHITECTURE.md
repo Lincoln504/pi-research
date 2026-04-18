@@ -12,12 +12,17 @@ Directly routes research tasks to a single researcher session. This mode avoids 
 - **4 Scrape calls**: Dedicated to full-page content extraction.
 
 ### Deep Mode
-Uses a state machine to manage a multi-phase research lifecycle:
+Uses a state machine to manage a three-status research lifecycle:
 
-1.  **Planning Phase**: The AI coordinator analyzes the conversation context and generates a JSON-formatted research agenda—an exhaustive list of tasks required to answer the query.
-2.  **Research Phase**: Researchers run in parallel (up to 3 concurrent). Each researcher is assigned a task from the agenda. Findings from completed researchers are injected into the context of researchers starting later in the same round to ensure continuity.
-3.  **Evaluation Phase**: The last researcher to complete a round is promoted to **Lead Evaluator**. It compares all gathered findings against the original agenda.
-4.  **Synthesis Phase**: If the evaluator determines the research is complete, it synthesizes a final Markdown report. If gaps remain and the round budget allows, it delegates new, targeted queries for a subsequent research round.
+1.  **Planning Status**: The AI coordinator analyzes the conversation context and generates a JSON-formatted research agenda—a list of high-level research tasks.
+2.  **Researching Status**: 
+    - **Parallel Execution**: Researchers run in parallel (up to 3 concurrent). Each researcher handles one agenda task per round.
+    - **Report Injection**: Findings from completed researchers are injected into the context of researchers starting later in the same round, or "steered" into already running ones, to ensure continuity.
+    - **Lead Evaluation**: When a round is complete, a **Lead Evaluator** agent call is triggered. It reviews all accumulated findings against the original agenda.
+    - **Decision Outcome**: The evaluator makes a binary choice:
+        - **Synthesize**: Generate a final, exhaustive Markdown report (transition to **Completed**).
+        - **Delegate**: Formulate new, targeted queries for a subsequent round (remain in **Researching**).
+3.  **Completed Status**: The final synthesis is returned as the tool result.
 
 State transitions are managed by a pure reducer (`src/orchestration/deep-research-reducer.ts`), ensuring predictable behavior and allowing research sessions to be persisted and resumed.
 
@@ -53,10 +58,11 @@ SearXNG runs as a Docker container (`searxng/searxng:latest`).
 
 ### Evaluator Decision Framework
 The Lead Evaluator follows a strict priority list:
-1.  Check for fatal errors across all researchers.
-2.  Assess coverage against the initial agenda.
-3.  Check the round budget (`targetRounds + MAX_EXTRA_ROUNDS`).
-The hard limit is `targetRounds + 2` bonus rounds. Delegation is performed via a structured JSON response; any other output is treated as a final synthesis to prevent stuck states.
+1.  **Error Check**: If all researchers in a round failed, it reports a critical failure and stops.
+2.  **Coverage Check**: It compares cumulative findings against the initial agenda items.
+3.  **Round Budget**: It checks the round budget (`targetRounds + MAX_EXTRA_ROUNDS`). The hard limit is `targetRounds + 2` bonus rounds.
+4.  **Action Selection**: It produces either a Markdown synthesis (Final Result) or a JSON delegation object (`{"action": "delegate", "queries": [...]}`).
+Any non-JSON response from the model is treated as a final synthesis to prevent research from becoming "stuck."
 
 ---
 
