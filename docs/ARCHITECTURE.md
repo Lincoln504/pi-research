@@ -2,21 +2,19 @@
 
 This document describes the technical design, orchestration logic, and infrastructure of `pi-research`.
 
-## Orchestration Overview
+## Orchestration Modes
 
-The project uses a decentralized multi-agent architecture to perform deep web research. It operates in two primary modes: **Quick Mode** and **Deep Mode**.
+The project operates in two primary modes: **Quick Mode** and **Deep Mode**. Both modes utilize one or more **Agent Researchers** to perform the actual work.
 
 ### Quick Mode
-Directly routes research tasks to a single researcher session. This mode avoids the overhead of coordination and evaluation, making it suitable for focused queries. A single researcher has a fixed budget of:
-- **4 Gathering calls**: Shared across `search`, `security_search`, `stackexchange`, and `grep`.
-- **4 Scrape calls**: Dedicated to full-page content extraction.
+Directly routes research tasks to a single **Agent Researcher** session. This mode avoids the overhead of coordination and evaluation, making it suitable for focused queries. It completes in a single pass.
 
 ### Deep Mode
 Uses a state machine to manage a three-status research lifecycle:
 
 1.  **Planning Status**: The AI coordinator analyzes the conversation context and generates a JSON-formatted research agenda—a list of high-level research tasks.
 2.  **Researching Status**: 
-    - **Parallel Execution**: Researchers run in parallel (up to 3 concurrent). Each researcher handles one agenda task per round.
+    - **Parallel Execution**: **Agent Researchers** run in parallel (up to 3 concurrent). Each researcher handles one agenda task per round.
     - **Report Injection**: Findings from completed researchers are injected into the context of researchers starting later in the same round, or "steered" into already running ones, to ensure continuity.
     - **Lead Evaluation**: When a round is complete, a **Lead Evaluator** agent call is triggered. It reviews all accumulated findings against the original agenda.
     - **Decision Outcome**: The evaluator makes a binary choice:
@@ -25,6 +23,28 @@ Uses a state machine to manage a three-status research lifecycle:
 3.  **Completed Status**: The final synthesis is returned as the tool result.
 
 State transitions are managed by a pure reducer (`src/orchestration/deep-research-reducer.ts`), ensuring predictable behavior and allowing research sessions to be persisted and resumed.
+
+---
+
+## The Agent Researcher
+
+An **Agent Researcher** is the fundamental building block of `pi-research`. Regardless of the orchestration mode, every researcher follows a structured three-phase internal lifecycle:
+
+### Phase 1: Gathering
+The researcher uses broad tools to identify relevant information and identify high-quality URLs for further investigation.
+- **Budget**: 4 Gathering calls (shared across `search`, `security_search`, `stackexchange`, and `grep`).
+- **Goal**: Breadth-first exploration and URL discovery.
+
+### Phase 2: Scraping
+The researcher deep-dives into the URLs identified during the Gathering phase to extract detailed content.
+- **Budget**: 4 Scrape calls (1 handshake + 3 execution batches).
+- **Goal**: Depth-first extraction of specific data and evidence.
+- **Deduplication**: Researchers check a shared URL pool to avoid re-scraping links already handled by siblings in the same operation.
+
+### Phase 3: Reporting
+The researcher synthesizes its individual findings into a structured Markdown report.
+- **Structure**: Includes an executive summary, key findings, and a list of cited links.
+- **Signaling**: Once finished, the report is submitted to the orchestrator for injection into siblings (Deep Mode) or final return (Quick Mode).
 
 ---
 
@@ -73,5 +93,5 @@ Any non-JSON response from the model is treated as a final synthesis to prevent 
 - `src/tools/`: Implementations for search, scraping, and specialized database queries.
 - `src/tui/`: Real-time terminal UI components using `pi`'s display capabilities.
 - `src/utils/`: Shared utilities for token tracking, JSON extraction, and link deduplication.
-- `prompts/`: Markdown-based system instructions for the Coordinator, Researcher, and Evaluator.
+- `src/prompts/`: Markdown-based system instructions for the Coordinator, Researcher, and Evaluator.
 - `config/`: Default SearXNG engine and rate-limiter configurations.
