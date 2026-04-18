@@ -15,7 +15,7 @@ Uses a state machine to manage a three-status research lifecycle:
 1.  **Planning Status**: The AI coordinator analyzes the conversation context and generates a JSON-formatted research agenda—a list of high-level research tasks.
 2.  **Researching Status**: 
     - **Parallel Execution**: **Agent Researchers** run in parallel (up to 3 concurrent). Each researcher handles one agenda task per round.
-    - **Report Injection**: Findings from completed researchers are injected into the context of researchers starting later in the same round, or "steered" into already running ones, to ensure continuity.
+    - **Report Injection**: Collective knowledge is managed by the orchestrator. When a researcher completes its task, its full report (up to 50k chars) is **injected** into the context of siblings starting later, or **steered** into already running ones. This ensures researchers don't just know *what* was scraped, but also *what was found*.
     - **Lead Evaluation**: When a round is complete, a **Lead Evaluator** agent call is triggered. It reviews all accumulated findings against the original agenda.
     - **Decision Outcome**: The evaluator makes a binary choice:
         - **Synthesize**: Generate a final, exhaustive Markdown report (transition to **Completed**).
@@ -67,7 +67,9 @@ To avoid exceeding LLM context windows, the `scrape` tool follows a four-step ha
 Scraping is automatically suspended if the current session token count exceeds 55% of the model's context window.
 
 ### Shared Link Deduplication
-Researchers share a URL pool within a single research operation (one `pi-research` call). This prevents redundant network requests by signaling which links are currently being or have already been scraped by siblings. When a researcher completes their task, their full report (including findings from these links) is injected into the context of other siblings to ensure collective knowledge without redundant scraping. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
+Researchers share a URL pool within a single research operation (one `pi-research` call). This is a lightweight signaling mechanism used by the `scrape` tool handshake to prevent redundant network requests. It tracks which links are currently being or have already been scraped. 
+
+**Note**: The pool itself only tracks URLs. The actual *findings* from these links are shared separately via the **Report Injection** mechanism described in the Researching Status section. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
 
 ### SearXNG Lifecycle Management
 SearXNG runs as a Docker container (`searxng/searxng:latest`).
