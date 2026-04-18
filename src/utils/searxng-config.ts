@@ -38,7 +38,7 @@ function parseYamlEngines(content: string): Array<{ name: string; disabled?: boo
  */
 export function getActiveSearxngEngines(): string[] {
   try {
-    const configPath = join(__dirname, '../../config/default-settings.yml');
+    const configPath = join(__dirname, '../../config/searxng/default-settings.yml');
     const content = readFileSync(configPath, 'utf-8');
     const allEngines = parseYamlEngines(content);
 

@@ -827,7 +827,7 @@ export class DockerSearxngManager {
 
     // Mount both settings.yml and limiter.toml for complete bot detection disable
     const settingsPath = this._settingsPath;
-    const limiterConfigPath = path.join(this._extensionDir, 'config', 'limiter.toml');
+    const limiterConfigPath = path.join(this._extensionDir, 'config', 'searxng', 'limiter.toml');
 
     // Verify configuration files exist
     if (!fs.existsSync(settingsPath)) {

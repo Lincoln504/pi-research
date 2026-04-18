@@ -8,10 +8,10 @@
  */
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
-import { createResearchTool } from './src/tool.ts';
-import { logger, isVerboseFromEnv, getDefaultDebugLogPathTemplate } from './src/logger.ts';
-import { checkDockerAvailability } from './src/infrastructure/searxng-lifecycle.ts';
-import { shutdownManager } from './src/utils/shutdown-manager.ts';
+import { createResearchTool } from './tool.ts';
+import { logger, isVerboseFromEnv, getDefaultDebugLogPathTemplate } from './logger.ts';
+import { checkDockerAvailability } from './infrastructure/searxng-lifecycle.ts';
+import { shutdownManager } from './utils/shutdown-manager.ts';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

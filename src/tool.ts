@@ -276,7 +276,7 @@ export function createResearchTool(): ToolDefinition {
             panelState.progress = { expected: 8, made: 0, extended: false };
             logger.info('[research] quick mode started', { query: sanitizedQuery });
             refreshAllSessions(piSessionId);
-            const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+            const researcherPromptRaw = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
             const researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
             const extendedCtx = ctx as ExtendedExtensionContext;
 

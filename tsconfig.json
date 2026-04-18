@@ -31,7 +31,7 @@
     "paths": {}
   },
   "include": [
-    "**/*.ts"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

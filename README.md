@@ -1,4 +1,4 @@
-![pi-research banner](assets/README-banner.jpg)
+![pi-research banner](docs/assets/README-banner.jpg)
 
 [![npm version](https://img.shields.io/npm/v/@lincolndeen/pi-research.svg)](https://www.npmjs.com/package/@lincolndeen/pi-research)
 
@@ -16,7 +16,7 @@ Multi-agent web research extension for [pi](https://github.com/mariozechner/pi).
 - [Research Depth](#research-depth)
 - [Configuration](#configuration)
 - [Development & Release](#development--release)
-- [Architecture & Design](ARCHITECTURE.md)
+- [Architecture & Design](docs/ARCHITECTURE.md)
 
 ---
 
@@ -114,4 +114,4 @@ The GitHub Action will automatically publish to npm and create a release.
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design information.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design information.

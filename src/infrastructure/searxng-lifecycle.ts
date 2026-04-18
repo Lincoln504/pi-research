@@ -35,8 +35,8 @@ const __dirname = path.dirname(__filename);
 
 function hasExtensionAssets(dir: string): boolean {
   return (
-    fs.existsSync(path.join(dir, 'config', 'default-settings.yml')) &&
-    fs.existsSync(path.join(dir, 'config', 'limiter.toml'))
+    fs.existsSync(path.join(dir, 'config', 'searxng', 'default-settings.yml')) &&
+    fs.existsSync(path.join(dir, 'config', 'searxng', 'limiter.toml'))
   );
 }
 

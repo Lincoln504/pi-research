@@ -4,14 +4,12 @@
   "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
   "private": false,
-  "main": "index.ts",
+  "main": "src/index.ts",
   "files": [
-    "index.ts",
     "src/",
-    "prompts/",
     "config/",
+    "docs/",
     "scripts/",
-    "assets/",
     "LICENSE",
     "README.md",
     "tsconfig.json"
@@ -44,21 +42,21 @@
     "node": "^22.13.0 || >=24.0.0"
   },
   "scripts": {
-    "lint": "npx eslint --config configs/eslint.config.js src/",
-    "lint:fix": "npx eslint --config configs/eslint.config.js src/ --fix",
+    "lint": "npx eslint --config config/tooling/eslint.config.js src/",
+    "lint:fix": "npx eslint --config config/tooling/eslint.config.js src/ --fix",
     "type-check": "tsc --noEmit",
-    "test": "vitest run --config configs/vitest.config.unit.ts",
-    "test:unit": "vitest run --config configs/vitest.config.unit.ts",
-    "test:integration": "vitest run --config configs/vitest.config.integration.ts",
-    "test:watch": "vitest --config configs/vitest.config.unit.ts",
-    "test:coverage": "vitest run --config configs/vitest.config.ts --coverage",
+    "test": "vitest run --config config/tooling/vitest.config.unit.ts",
+    "test:unit": "vitest run --config config/tooling/vitest.config.unit.ts",
+    "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
+    "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
+    "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
     "postinstall": "node scripts/setup.js",
     "install:browsers": "npx playwright install chromium",
     "install:deps": "npx playwright install-deps",
     "setup": "npm install && npm run install:browsers"
   },
   "pi": {
-    "main": "index.ts"
+    "main": "src/index.ts"
   },
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.30.0",

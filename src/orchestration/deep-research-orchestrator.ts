@@ -678,7 +678,7 @@ export class DeepResearchOrchestrator {
         }).join('\n\n---\n\n')
       : '';
 
-    const leadPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'system-lead-evaluator.md'), 'utf-8');
+    const leadPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'system-lead-evaluator.md'), 'utf-8');
     const originalAgendaStr = this.state.initialAgenda.map(q => `• ${q}`).join('\n');
     let leadPrompt = leadPromptRaw
       .replace('{ROOT_QUERY}', this.state.rootQuery)
