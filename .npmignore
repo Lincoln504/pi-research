@@ -43,7 +43,6 @@ yarn-error.log*
 # Misc
 Makefile
 .nvmrc
-*.md
 
 # Playwright
 test-results/
