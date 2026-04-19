@@ -38,6 +38,7 @@ Multi-agent web research extension for [pi](https://github.com/mariozechner/pi).
 └───────┴──────────────┴─────────────┴─────────────┘
 ```
 
+
 ---
 
 ## Requirements

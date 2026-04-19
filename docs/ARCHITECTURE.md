@@ -84,6 +84,10 @@ When research completes, the report is written to a `.md` file named `pi-researc
 
 The two-character hash suffix (`{letter}{digit}`, e.g. `b7`) is a collision guard — the file is opened with an exclusive-create flag and the hash is regenerated on `EEXIST`. The full saved path is appended as a footer in the report and returned to the pi UI.
 
+### TUI Progress Percentage
+
+The header percentage (`Research: 70%`) tracks tool-call units completed against a budget established after planning. The budget is set from the number of agenda items the coordinator produces — which scales with query complexity (complexity 1 → 2 initial researchers, 2 → 3, 3 → 5), each researcher allocated 10 units. The budget expands dynamically when the evaluator delegates additional rounds. If research goes beyond the planned rounds the display switches to `exploring` instead of a percentage.
+
 ### Evaluator Decision Framework
 The Lead Evaluator follows a strict priority list:
 1.  **Error Check**: If all researchers in a round failed, it reports a critical failure and stops.
