@@ -41,11 +41,9 @@ describe('DockerSearxngManager Integration', () => {
 
     await fs.mkdir(testStateDir, { recursive: true });
     
-    // Clean up any existing test containers before running tests
-    // Don't wait for cleanup - proceed immediately
-    cleanupAllTestContainers().catch(err => {
-      console.warn('[test] Cleanup failed (continuing anyway):', err);
-    });
+    // Clean up any leftover test containers from previous runs before starting.
+    // Must be awaited — fire-and-forget races with container acquisition in tests.
+    await cleanupAllTestContainers();
   }, 120000);
 
   afterAll(async () => {
