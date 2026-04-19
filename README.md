@@ -47,7 +47,7 @@ Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono)
 - The `pi` CLI installed and configured
 - Docker daemon running (required for SearXNG)
 - Internet access
-- LLM in pi with minimum 50k context window (optimized for 100k+)  
+- LLM in pi with minimum 100k context window (optimized for 100k+)  
 
 ---
 
