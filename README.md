@@ -1,6 +1,6 @@
 ![pi-research banner](docs/assets/README-banner.jpg)
 
-<a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincolndeen/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincolndeen/pi-research.svg?style=flat-square" /></a>
+<a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
 Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono). Runs parallel AI researchers against a self-hosted SearXNG search container, scrapes pages, queries security databases, and tracks everything in a real-time terminal UI.
 
@@ -53,7 +53,7 @@ Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono)
 ## Install
 
 ```bash
-pi install npm:@lincolndeen/pi-research
+pi install npm:@lincoln504/pi-research
 ```
 
 **From a checkout**
