@@ -279,12 +279,10 @@ export function createResearchTool(): ToolDefinition {
             const researcherPromptRaw = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
             let researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
             
-            // QUICK MODE EFFICIENCY: Encourage premature exit if the answer is definitively found.
-            researcherPrompt += '\n\n## Quick Mode: Excellence & Efficiency\n' +
-              'You are running in **Quick Mode**. Your goal is to find the answer as fast as possible. ' +
-              'If you find a definitive, up-to-date fact from a highly reliable source that fully answers the user\'s query, ' +
-              'you SHOULD stop gathering and scraping immediately. Do not exhaust your tool budget if the "smoking gun" ' +
-              'evidence has already been found. Proceed directly to synthesis and provide a concise, high-signal report.';
+            // QUICK MODE EFFICIENCY: Encourage early exit ONLY for definitive fact-finding.
+            researcherPrompt += '\n\n## Quick Mode Efficiency\n' +
+              'For specific fact-seeking queries: if you find a definitive, up-to-date answer from a highly reliable source ' +
+              'that fully resolves the request, stop gathering/scraping immediately and provide a concise, high-signal report.';
             
             const extendedCtx = ctx as ExtendedExtensionContext;
 
