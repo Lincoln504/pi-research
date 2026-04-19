@@ -122,7 +122,7 @@ Set `PI_RESEARCH_VERBOSE=1` (or pass `--verbose`) to enable diagnostic output. L
 **Release**
 1. `npm version patch` (or minor/major)
 2. `git push origin main --tags`
-The GitHub Action will automatically publish to npm and create a release.
+The GitHub Action will automatically publish to npm.
 
 ---
 
