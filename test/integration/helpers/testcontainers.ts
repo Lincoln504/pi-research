@@ -51,7 +51,7 @@ export interface HealthCheckOptions {
 
 const DEFAULT_CONFIG: Required<SearxngContainerConfig> = {
   image: 'searxng/searxng',
-  tag: 'latest',
+  tag: process.env['SEARXNG_IMAGE_TAG']?.trim() || 'latest',
   port: 8080,
   startupTimeout: 60000, // 1 minute (reduced from 2)
   healthCheckTimeout: 5000, // 5 seconds per check (reduced from 10)

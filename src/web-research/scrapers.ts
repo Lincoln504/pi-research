@@ -681,11 +681,59 @@ export function classifySourceCategory(url: string): string {
   }
 }
 
+function assertSafeUrl(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Blocked non-HTTP(S) URL: ${rawUrl}`);
+  }
+
+  const host = parsed.hostname.toLowerCase();
+
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('127.')) {
+    throw new Error(`Blocked loopback URL: ${rawUrl}`);
+  }
+
+  if (host === '169.254.169.254' || host === 'metadata.google.internal' || host === 'metadata.internal') {
+    throw new Error(`Blocked cloud metadata URL: ${rawUrl}`);
+  }
+
+  if (host.endsWith('.local')) {
+    throw new Error(`Blocked .local hostname: ${rawUrl}`);
+  }
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = parseInt(ipv4[1]!, 10);
+    const b = parseInt(ipv4[2]!, 10);
+    if (
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    ) {
+      throw new Error(`Blocked private/link-local URL: ${rawUrl}`);
+    }
+  }
+}
+
 /**
  * Single URL scraping with 2-layer sequential fallback
  */
 
 export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<ScrapeUrlResult> {
+  try {
+    assertSafeUrl(url);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { url, source: 'failed', markdown: '', error: msg, sourceCategory: 'web' };
+  }
+
   const errors: Array<{ layer: string; error: string; errorType: string }> = [];
 
   const sourceCategory = classifySourceCategory(url);

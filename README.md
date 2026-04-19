@@ -86,7 +86,7 @@ Do a deep dive on CVE-2024-3094 at depth 2
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BRAVE_SEARCH_API_KEY` | — | Enables `braveapi` engine (official REST API) |
-| `PI_RESEARCH_VERBOSE` | — | Write diagnostic JSONL logs to OS temp directory |
+| `PI_RESEARCH_VERBOSE` | — | Set to `1` to write diagnostic JSONL logs to a temp file (see below) |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (set to `1` if engines are blocked) |
 | `PROXY_URL` | — | Proxy for SearXNG outgoing requests (e.g. `socks5://127.0.0.1:9050`) |
 | `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases limit from 300 to 10,000/day) |
@@ -94,6 +94,11 @@ Do a deep dive on CVE-2024-3094 at depth 2
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (30s to 10m) |
 | `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Maximum researchers running simultaneously (1 to 10) |
 | `PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS` | `15000` | Delay before TUI clears after research ends |
+| `SEARXNG_IMAGE_TAG` | `latest` | SearXNG Docker image tag — pin to a specific release for reproducibility (e.g. `2024.12.23`) |
+
+**Verbose logging**
+
+Set `PI_RESEARCH_VERBOSE=1` (or pass `--verbose`) to enable diagnostic output. Logs are written as JSONL to `{os.tmpdir()}/pi-research-debug-{hash}.log` — one file per session, never written to stdout. Each log line includes a session correlation ID so multiple concurrent sessions are distinguishable. The log path is printed to stderr on startup when verbose mode is active.
 
 ---
 

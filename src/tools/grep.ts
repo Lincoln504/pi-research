@@ -5,6 +5,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import * as nodePath from 'node:path';
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
@@ -81,6 +82,15 @@ async function execCommand(
   });
 }
 
+function resolveWorkspacePath(input: string): string {
+  const root = process.cwd();
+  const resolved = nodePath.resolve(root, input);
+  if (resolved !== root && !resolved.startsWith(root + nodePath.sep)) {
+    throw new Error(`Path outside workspace: ${input}`);
+  }
+  return resolved;
+}
+
 function sanitizeInput(input: string): string[] {
   // Simple sanitization: split on whitespace, preserve quoted strings
   const result: string[] = [];
@@ -146,7 +156,7 @@ export function createGrepTool(options: {
 
       const record = params as RgGrepParams;
       const { pattern } = record;
-      const path = record.path ?? '.';
+      const path = resolveWorkspacePath(record.path ?? '.');
       const flags = record.flags ?? '';
 
       if (!pattern) {
@@ -257,17 +267,17 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     throw new Error('Pattern is required');
   }
 
-  // Sanitize inputs to prevent shell injection
+  const resolvedPath = resolveWorkspacePath(path);
   const flagParts = flags ? sanitizeInput(flags) : [];
 
   // Try rg first
   try {
-    const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, path];
+    const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, resolvedPath];
     const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
     let markdown = '# Search Results (rg)\n\n';
     markdown += `**Pattern:** \`${pattern}\`\n`;
-    markdown += `**Path:** \`${path}\`\n`;
+    markdown += `**Path:** \`${resolvedPath}\`\n`;
     if (flags) markdown += `**Flags:** \`${flags}\`\n`;
     markdown += `**Exit Code:** ${exitCode}\n\n`;
 
@@ -291,12 +301,12 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
   } catch (rgError) {
     // rg not found, try grep
     try {
-      const grepArgs = ['-rn', ...flagParts, pattern, path];
+      const grepArgs = ['-rn', ...flagParts, pattern, resolvedPath];
       const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
       let markdown = '# Search Results (grep)\n\n';
       markdown += `**Pattern:** \`${pattern}\`\n`;
-      markdown += `**Path:** \`${path}\`\n`;
+      markdown += `**Path:** \`${resolvedPath}\`\n`;
       if (flags) markdown += `**Flags:** \`${flags}\`\n`;
       markdown += `**Exit Code:** ${exitCode}\n\n`;
       markdown += '*Note: Using grep fallback (rg not available)*\n\n';

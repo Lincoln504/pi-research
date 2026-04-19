@@ -179,6 +179,11 @@ function loadConfigFromEnv(): EnvConfig {
     }
   }
 
+  const imageTagEnv = process.env['SEARXNG_IMAGE_TAG']?.trim();
+  if (imageTagEnv) {
+    config.imageTag = imageTagEnv;
+  }
+
   return config;
 }
 
