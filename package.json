@@ -1,7 +1,7 @@
 {
   "name": "@lincoln504/pi-research",
   "version": "0.1.9",
-  "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
+  "description": "A set of web research tools (search, scrape, and others) and research agent system that uses them safely and efficiently.",
   "type": "module",
   "private": false,
   "main": "src/index.ts",
@@ -24,10 +24,9 @@
   },
   "keywords": [
     "pi",
-    "pi-package",
+    "pi-extension",
     "research",
     "agent",
-    "orchestration",
     "web-search",
     "scraping",
     "security",
