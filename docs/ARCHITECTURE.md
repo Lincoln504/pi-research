@@ -1,13 +1,11 @@
 # Architecture
 
-This document describes the technical design, orchestration logic, and infrastructure of `pi-research`.
-
 ## Orchestration Modes
 
-The project operates in two primary modes: **Quick Mode** and **Deep Mode**. Both modes utilize one or more **Agent Researchers** to perform the actual work.
+Two primary modes: **Quick Mode** and **Deep Mode**.
 
 ### Quick Mode
-Directly routes research tasks to a single **Agent Researcher** session. This mode avoids the overhead of coordination and evaluation, making it suitable for focused queries. It completes in a single pass.
+Routes research tasks to a single **Agent Researcher** session. No coordination or evaluation overhead — suitable for focused queries.
 
 ### Deep Mode
 Uses a state machine to manage a three-status research lifecycle:
@@ -31,7 +29,7 @@ State transitions are managed by a pure reducer (`src/orchestration/deep-researc
 An **Agent Researcher** is the fundamental building block of `pi-research`. Regardless of the orchestration mode, every researcher follows a structured three-phase internal lifecycle:
 
 ### Phase 1: Gathering
-The researcher uses broad tools to identify relevant information and identify high-quality URLs for further investigation.
+The researcher uses broad tools to discover relevant information and identify high-quality URLs for further investigation.
 - **Budget**: 4 Gathering calls (shared across `search`, `security_search`, `stackexchange`, and `grep`).
 - **Goal**: Breadth-first exploration and URL discovery.
 
@@ -67,9 +65,7 @@ To avoid exceeding LLM context windows, the `scrape` tool follows a four-step ha
 4. **Batch 3**: Up to 3 URLs — deep-dive scraping.
 
 ### Shared Link Deduplication
-Researchers share a URL pool within a single research operation (one `pi-research` call). This is a lightweight signaling mechanism used by the `scrape` tool handshake to prevent redundant network requests. It tracks which links are currently being or have already been scraped. 
-
-**Note**: The pool itself only tracks URLs. The actual *findings* from these links are shared separately via the **Report Injection** mechanism described in the Researching Status section. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
+Researchers share a URL pool per research operation, used by the `scrape` handshake to avoid redundant network requests. The pool tracks URLs only — findings are shared separately via Report Injection. It resets for each new query.
 
 ### SearXNG Lifecycle Management
 SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXNG_IMAGE_TAG`, default `latest`).
@@ -93,8 +89,7 @@ The Lead Evaluator follows a strict priority list:
 1.  **Error Check**: If all researchers in a round failed, it reports a critical failure and stops.
 2.  **Coverage Check**: It compares cumulative findings against the initial agenda items.
 3.  **Round Budget**: It checks the round budget (`targetRounds + MAX_EXTRA_ROUNDS`). The hard limit is `targetRounds + 2` bonus rounds.
-4.  **Action Selection**: It produces either a Markdown synthesis (Final Result) or a JSON delegation object (`{"action": "delegate", "queries": [...]}`).
-Any non-JSON response from the model is treated as a final synthesis to prevent research from becoming "stuck."
+4.  **Action Selection**: Produces either a Markdown synthesis (final result) or a JSON delegation object (`{"action": "delegate", "queries": [...]}`). Any non-JSON response is treated as a final synthesis to prevent the research from getting stuck.
 
 ---
 
