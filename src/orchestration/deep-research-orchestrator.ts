@@ -17,7 +17,6 @@ import type { ExtensionContext, AgentSession } from '@mariozechner/pi-coding-age
 import { convertToLlm } from '@mariozechner/pi-coding-agent';
 import type { ExtendedAgentSessionEvent } from '../types/extension-context.ts';
 import { complete, type Model } from '@mariozechner/pi-ai';
-import { DeepResearchStateManager } from './state-manager.ts';
 import { deepResearchReducer, isRoundComplete } from './deep-research-reducer.ts';
 import type { SystemResearchState, ResearchSibling } from './deep-research-types.ts';
 import { TextContentBlock, isTextContentBlock, parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
@@ -169,7 +168,6 @@ export interface DeepResearchOrchestratorOptions {
 }
 
 export class DeepResearchOrchestrator {
-  private stateManager: DeepResearchStateManager;
   private state: SystemResearchState;
   private activeSessions = new Map<string, AgentSession>();
   private resolveCompletion: (result: string) => void = () => {};
@@ -187,8 +185,17 @@ export class DeepResearchOrchestrator {
   private static readonly LEAD_EVAL_UNITS = 5;
 
   constructor(private options: DeepResearchOrchestratorOptions) {
-    this.stateManager = new DeepResearchStateManager(options.ctx);
-    this.state = this.stateManager.initialize(options.query, options.complexity);
+    this.state = {
+      version: 1,
+      rootQuery: options.query,
+      complexity: options.complexity,
+      currentRound: 1,
+      status: 'planning',
+      lastUpdated: Date.now(),
+      initialAgenda: [],
+      allScrapedLinks: [],
+      aspects: {},
+    };
     this.contextWindowSize = (options.model as any)?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
   }
 
@@ -231,7 +238,6 @@ export class DeepResearchOrchestrator {
 
   private updateState(event: Parameters<typeof deepResearchReducer>[1]) {
     this.state = deepResearchReducer(this.state, event);
-    this.stateManager.save(this.state);
   }
 
   private calculateUsageCost(usage: Partial<import('../types/llm').TokenUsage>): number {
@@ -432,7 +438,6 @@ export class DeepResearchOrchestrator {
         this.resolveResult(this.state.finalSynthesis);
       } else {
         this.state.status = 'completed';
-        this.stateManager.save(this.state);
         this.resolveResult('Research ended.');
       }
     }
