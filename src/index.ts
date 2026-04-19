@@ -47,7 +47,7 @@ export default function (pi: ExtensionAPI) {
   pi.on('session_start', async (_event, ctx) => {
     // Skip Docker check during install to avoid errors on fresh systems
     // Docker will be checked when research tool is first used
-    if (!process.env.PI_INSTALL_MODE) {
+    if (!process.env['PI_INSTALL_MODE']) {
       const dockerCheck = await checkDockerAvailability();
       if (!dockerCheck.running) {
         ctx.ui.notify(`pi-research: ${dockerCheck.error}`, 'warning');
