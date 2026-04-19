@@ -35,3 +35,13 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 - `depth: 3` — Ultra: 5 researchers, up to 5 rounds
 
 **Key rule:** Default to depth 0. Use higher depths when user explicitly asks for "exhaustive", "deep-dive", "ultra", or "comprehensive" research.
+
+---
+
+#### MULTIPLE RESEARCH REQUESTS — Parallel vs. merged
+
+**Different scopes** (unrelated topics): call `research` multiple times simultaneously in a single response. Each distinct topic gets its own tool call, run in parallel.
+- Example: "research React 19 and also look up the Rust 2024 edition" → two simultaneous `research` calls
+
+**Similar or overlapping scope**: merge into a single `research` call, and consider raising the depth one level to capture the additional breadth.
+- Example: "research React 19 features and React 19 migration guide" → one `research` call, potentially at `depth: 1`
