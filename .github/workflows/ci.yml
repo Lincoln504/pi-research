@@ -44,6 +44,21 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
 
+  integration:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:integration
+
   validate:
     runs-on: ubuntu-latest
     steps:
