@@ -5,7 +5,7 @@
  *
  *   1. cwd is the user's home directory or a system directory → os.tmpdir()
  *   2. cwd has a recognised first-level subdirectory            → that subdir
- *      (research, docs, doc, ref, references, notes, output, outputs, results)
+ *      (research, docs, doc, ref, references, notes)
  *   3. Otherwise                                               → cwd
  *
  * Cross-platform: works on Linux, macOS, and Windows.
@@ -30,9 +30,6 @@ const PREFERRED_SUBDIRS = [
   'ref',
   'references',
   'notes',
-  'output',
-  'outputs',
-  'results',
 ];
 
 // Unix/macOS paths that are never appropriate output destinations.
