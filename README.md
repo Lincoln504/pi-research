@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@lincolndeen/pi-research.svg)](https://www.npmjs.com/package/@lincolndeen/pi-research)
 
-Multi-agent web research extension for [pi](https://github.com/mariozechner/pi). Runs parallel AI researchers against a self-hosted SearXNG search container, scrapes pages, queries security databases, and tracks everything in a real-time terminal UI.
+Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono). Runs parallel AI researchers against a self-hosted SearXNG search container, scrapes pages, queries security databases, and tracks everything in a real-time terminal UI.
 
 ---
 
