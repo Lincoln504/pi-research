@@ -59,12 +59,12 @@ Each researcher session is constrained by a `ToolUsageTracker` to prevent infini
 - **grep**: Local codebase search using `ripgrep` (fallback to `grep`).
 
 ### Context-Aware Scraping Protocol
-To avoid exceeding LLM context windows, the `scrape` tool follows a four-step handshake:
-1.  **Handshake**: The researcher identifies target URLs. The tool returns a list of URLs already scraped by siblings.
-2.  **Batch 1**: Up to 3 URLs — primary broad scraping.
-3.  **Batch 2**: Up to 2 URLs — targeted follow-up (deduplicated against Batch 1).
-4.  **Batch 3**: Up to 3 URLs — deep-dive scraping.
-Scraping is automatically suspended if the current session token count exceeds 55% of the model's context window.
+To avoid exceeding LLM context windows, the `scrape` tool follows a four-step handshake. **Each batch step is gated by a 55% context check** — if the session token count already exceeds 55% of the model's context window, that batch is skipped entirely and the tool returns early.
+
+1. **Handshake**: The researcher identifies target URLs. The tool returns a list of URLs already scraped by siblings. No network activity; no context check.
+2. **Batch 1** *(context < 55% required)*: Up to 3 URLs — primary broad scraping.
+3. **Batch 2** *(context < 55% required)*: Up to 2 URLs — targeted follow-up, deduplicated against Batch 1.
+4. **Batch 3** *(context < 55% required)*: Up to 3 URLs — deep-dive scraping.
 
 ### Shared Link Deduplication
 Researchers share a URL pool within a single research operation (one `pi-research` call). This is a lightweight signaling mechanism used by the `scrape` tool handshake to prevent redundant network requests. It tracks which links are currently being or have already been scraped. 
