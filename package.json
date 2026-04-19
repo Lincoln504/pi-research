@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
   "private": false,
