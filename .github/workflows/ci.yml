@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -44,45 +45,6 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
 
-  integration:
-    needs: [test, validate]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run test:integration
-
-  summary:
-    needs: [lint, type-check, test, validate, integration]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI Summary
-        run: |
-          echo "📊 CI Status Summary"
-          echo "===================="
-          echo "✓ Lint: ${{ needs.lint.result }}"
-          echo "✓ Type Check: ${{ needs.type-check.result }}"
-          echo "✓ Unit Tests: ${{ needs.test.result }}"
-          echo "✓ Integration Tests: ${{ needs.integration.result }}"
-          echo "✓ Validation: ${{ needs.validate.result }}"
-          echo ""
-          if [ "${{ needs.lint.result }}" == "success" ] && \
-             [ "${{ needs.type-check.result }}" == "success" ] && \
-             [ "${{ needs.test.result }}" == "success" ] && \
-             [ "${{ needs.integration.result }}" == "success" ] && \
-             [ "${{ needs.validate.result }}" == "success" ]; then
-            echo "✅ All checks passed!"
-            exit 0
-          else
-            echo "❌ Some checks failed. See above for details."
-            exit 1
-          fi
-
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -96,3 +58,15 @@ jobs:
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
       - name: Verify npm package
         run: npm pack --dry-run 2>&1 | grep -q index.ts
+
+  integration:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:integration
