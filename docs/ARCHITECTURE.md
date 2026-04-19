@@ -72,6 +72,7 @@ SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXN
 - **Lazy Initialization**: The container starts only upon the first research request.
 - **Singleton Pattern**: A single container is shared across all pi processes on the machine. State is persisted to `~/.pi/state/searxng-singleton.json`; each pi process registers a session by PID and the container stays alive until all registered processes have exited.
 - **Configuration**: Runtime settings (proxies, API keys) are generated dynamically and volume-mounted into the container.
+- **Engine configuration**: Active search engines are defined in `config/searxng/default-settings.yml`. Engines can be enabled or disabled by editing that file before starting the container.
 - **Cross-Session Persistence**: Container state and locking are managed via `~/.pi/state/searxng-singleton.json` to handle multiple concurrent pi processes.
 
 ### Output File Location

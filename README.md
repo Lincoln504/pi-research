@@ -24,7 +24,7 @@ Multi-agent web research extension for [pi](https://github.com/mariozechner/pi).
 
 - **Multi-agent deep research** — AI coordinator decomposes a query into parallel research tracks; an AI lead evaluator synthesizes or delegates further rounds
 - **Quick mode** — single researcher for fast, focused queries with no coordinator overhead
-- **Web search** — SearXNG running in Docker, aggregating Bing, Brave, Yahoo, Qwant, DuckDuckGo, Wikipedia, GitHub, arXiv, and Semantic Scholar
+- **Web search** — SearXNG running in Docker, aggregating Bing, Brave, Yahoo, Qwant, DuckDuckGo, Wikipedia, GitHub, arXiv, and Semantic Scholar (engines can be enabled or disabled via [config](docs/ARCHITECTURE.md#searxng-lifecycle-management))
 - **URL scraping** — fetch-first with Playwright/Chromium fallback for JavaScript-heavy pages
 - **Security databases** — NVD, CISA KEV, GitHub Advisories, OSV
 - **Stack Exchange** — full network search and filtering
