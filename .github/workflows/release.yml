@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   publish:
@@ -14,37 +18,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
-      
+
       - name: Verify tag matches version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           TAG="${GITHUB_REF_NAME#v}"
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
-      
+
       - run: npm ci
       - run: npm run lint
       - run: npm run type-check
       - run: npm run test:unit
-      - run: npm pack --dry-run
-      
+      - run: npm pack --dry-run 2>&1 | grep -q index.ts
+
       - name: Publish to npm
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      
+
       - name: Create GitHub Release
-        uses: actions/create-release@v1
+        run: gh release create ${{ github.ref_name }} --title "Release ${{ github.ref_name }}" --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          body: "New release ${{ github.ref_name }}"

@@ -1,6 +1,6 @@
 {
   "name": "@lincolndeen/pi-research",
-  "version": "0.2.1",
+  "version": "0.1.0",
   "description": "Multi-agent research Deep Mode orchestration for pi. State-driven parallel researchers with web search, scraping, security databases, and Stack Exchange integration.",
   "type": "module",
   "private": false,
@@ -56,7 +56,9 @@
     "setup": "npm install && npm run install:browsers"
   },
   "pi": {
-    "extensions": ["src/index.ts"]
+    "extensions": [
+      "src/index.ts"
+    ]
   },
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.30.0",
