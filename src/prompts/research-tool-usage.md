@@ -40,8 +40,6 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 
 #### MULTIPLE RESEARCH REQUESTS — Parallel vs. merged
 
-**Different scopes** (unrelated topics): call `research` multiple times simultaneously in a single response. Each distinct topic gets its own tool call, run in parallel.
-- Example: "research React 19 and also look up the Rust 2024 edition" → two simultaneous `research` calls
+**Different scopes** (unrelated topics): call `research` multiple times simultaneously in a single response — one tool call per distinct topic, run in parallel.
 
-**Similar or overlapping scope**: merge into a single `research` call, and consider raising the depth one level to capture the additional breadth.
-- Example: "research React 19 features and React 19 migration guide" → one `research` call, potentially at `depth: 1`
+**Similar or overlapping scope**: merge into a single `research` call and consider raising depth one level to capture the additional breadth.
