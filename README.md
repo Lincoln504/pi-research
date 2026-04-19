@@ -107,8 +107,8 @@ Set `PI_RESEARCH_VERBOSE=1` (or pass `--verbose`) to enable diagnostic output. L
 **Commands**
 - `npm run lint` / `npm run lint:fix`: Code quality
 - `npm run type-check`: TypeScript verification
-- `npm run test:unit`: Unit tests (no Docker required)
-- `npm run test:integration`: Full tests (requires Docker)
+- `npm run test:unit`: Unit tests — no dependencies, runs in CI
+- `npm run test:integration`: Integration tests — runs locally only; requires Docker (uses Testcontainers to spin up a real SearXNG instance)
 
 **Release**
 1. `npm version patch` (or minor/major)
