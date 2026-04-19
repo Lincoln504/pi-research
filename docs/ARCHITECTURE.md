@@ -20,7 +20,7 @@ Uses a state machine to manage a three-status research lifecycle:
         - **Delegate**: Formulate new, targeted queries for a subsequent round (remain in **Researching**).
 3.  **Completed Status**: The final synthesis is returned as the tool result.
 
-State transitions are managed by a pure reducer (`src/orchestration/deep-research-reducer.ts`), ensuring predictable behavior and allowing research sessions to be persisted and resumed.
+State transitions are managed by a pure reducer (`src/orchestration/deep-research-reducer.ts`), ensuring predictable behavior. State is persisted to the pi session tree after each transition; if the same query is re-invoked after a crash or interrupt, the session resumes automatically from the last saved state with any in-flight researchers reset to pending.
 
 ---
 
