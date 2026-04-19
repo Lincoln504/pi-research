@@ -37,10 +37,11 @@ jobs:
       - run: npm run test:unit
       - run: npm pack --dry-run 2>&1 | grep -q index.ts
 
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         run: gh release create ${{ github.ref_name }} --title "Release ${{ github.ref_name }}" --generate-notes
