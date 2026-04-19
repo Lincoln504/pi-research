@@ -282,7 +282,7 @@ export class DeepResearchOrchestrator {
 
       logger.log(`[deep-research] Planning with ${parentMessages.length} parent messages (fork mode emulation)`);
 
-      const coordinatorPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'system-coordinator.md'), 'utf-8');
+      const coordinatorPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'system-coordinator.md'), 'utf-8');
       const plannerPrompt = coordinatorPromptRaw + `\n\nQUERY: ${this.state.rootQuery}`;
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
@@ -448,7 +448,7 @@ export class DeepResearchOrchestrator {
     activateSlice(this.options.panelState, aspect.id);
     this.options.onUpdate();
 
-    const researcherPromptRaw = readFileSync(join(__dirname, '..', '..', 'prompts', 'researcher.md'), 'utf-8');
+    const researcherPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
     const sharedLinksMarkdown = formatSharedLinksFromState(this.state.aspects);
     const allFindingsMarkdown = this.buildAllFindingsContext();
     const roleContextMarkdown = this.buildRoleContext(aspect, roleContext);

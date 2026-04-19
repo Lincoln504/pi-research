@@ -32,6 +32,10 @@ vi.mock('../../src/utils/shutdown-manager.ts', () => ({
   },
 }));
 
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(() => 'MOCK_USAGE_PROMPT'),
+}));
+
 import registerExtension from '../../src/index.ts';
 
 type SessionHandler = (...args: any[]) => any;
@@ -98,5 +102,16 @@ describe('extension entrypoint', () => {
 
     expect(mocks.checkDockerAvailability).toHaveBeenCalledTimes(1);
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('augments system prompt during before_agent_start', async () => {
+    const { pi, handlers } = createPiMock();
+    registerExtension(pi as any);
+
+    const event = { systemPrompt: 'ORIGINAL' };
+    const result = await handlers.get('before_agent_start')?.(event);
+
+    expect(result.systemPrompt).toContain('ORIGINAL');
+    expect(result.systemPrompt).toContain('MOCK_USAGE_PROMPT');
   });
 });

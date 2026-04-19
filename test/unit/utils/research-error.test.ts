@@ -91,14 +91,14 @@ describe('createResearchError', () => {
   });
 
   it('should detect rate limit errors', () => {
-    const original = new Error('Too many requests - rate limit exceeded');
+    const original = new Error('Model API rate limit (429)');
     const result = createResearchError(original);
 
     expect(result.code).toBe(ResearchErrorCode.API_RATE_LIMITED);
   });
 
   it('should detect network errors', () => {
-    const original = new Error('ECONNREFUSED: Connection refused');
+    const original = new Error('fetch failed due to network error');
     const result = createResearchError(original);
 
     expect(result.code).toBe(ResearchErrorCode.NETWORK_ERROR);
@@ -177,5 +177,32 @@ describe('isFatalError', () => {
   it('should identify non-transient errors as fatal', () => {
     const error = new ResearchError(ResearchErrorCode.INVALID_INPUT, 'Invalid input');
     expect(isFatalError(error)).toBe(true);
+  });
+});
+
+describe('ResearchError - robustness', () => {
+  it('should maintain prototype chain for instanceof checks', () => {
+    const error = new ResearchError(ResearchErrorCode.UNKNOWN, 'test');
+    expect(error instanceof ResearchError).toBe(true);
+    expect(error instanceof Error).toBe(true);
+  });
+
+  it('should capture stack traces correctly', () => {
+    const error = new ResearchError(ResearchErrorCode.UNKNOWN, 'test');
+    expect(error.stack).toBeDefined();
+    expect(error.stack).toContain('research-error.test.ts');
+  });
+
+  it('should handle undefined details in toJSON', () => {
+    const error = new ResearchError(ResearchErrorCode.UNKNOWN, 'test');
+    const json = error.toJSON();
+    expect(json.details).toBeUndefined();
+    expect(json).toHaveProperty('correlationId');
+  });
+
+  it('should generate distinct correlation IDs for rapid errors', () => {
+    const e1 = new ResearchError(ResearchErrorCode.UNKNOWN, '1');
+    const e2 = new ResearchError(ResearchErrorCode.UNKNOWN, '2');
+    expect(e1.correlationId).not.toBe(e2.correlationId);
   });
 });

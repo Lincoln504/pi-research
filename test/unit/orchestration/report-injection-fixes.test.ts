@@ -21,6 +21,16 @@ vi.mock('../../../src/logger', () => ({
   },
 }));
 
+// Mock researcher session creation
+vi.mock('../../../src/orchestration/researcher', () => ({
+  createResearcherSession: vi.fn(),
+}));
+
+// Mock filesystem
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(() => 'mock prompt content'),
+}));
+
 describe('Report Injection Robustness Fixes', () => {
   const createMockOptions = () => ({
     ctx: {
@@ -50,24 +60,69 @@ describe('Report Injection Robustness Fixes', () => {
   });
 
   describe('Abort Signal Handling', () => {
-    it('should have code path for updating state on abort', () => {
-      // This test verifies the fix exists in the codebase.
-      // The actual abort behavior is tested in integration tests.
-      // We verify the code path by checking the source.
-      const fs = require('fs');
-      const path = require('path');
-      const source = fs.readFileSync(
-        path.join(__dirname, '../../../src/orchestration/deep-research-orchestrator.ts'),
-        'utf-8'
-      );
+    it('should update state to SIBLING_FAILED on abort after prompt', async () => {
+      const options = createMockOptions();
+      const orchestrator = new DeepResearchOrchestrator(options);
+      
+      const controller = new AbortController();
+      const aspect = { id: '1.1', query: 'test query' };
+      
+      const mockSession = {
+        prompt: vi.fn(async () => {
+          // Simulate abort happening DURING or JUST AFTER prompt
+          controller.abort();
+        }),
+        getMessages: vi.fn(() => [{ role: 'assistant', content: 'findings' }]),
+        on: vi.fn(),
+        subscribe: vi.fn(() => () => {}),
+      };
 
-      // Verify the abort state update exists
-      expect(source).toContain('SIBLING_FAILED\', id: aspect.id, error: \'Aborted\'');
-      expect(source).toContain('signal?.aborted');
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher');
+      vi.mocked(createResearcherSession).mockResolvedValue(mockSession as any);
 
-      // Verify it's in the correct location (after session.prompt())
-      const promptMatch = source.match(/await session\.prompt\([^)]+\);/s);
-      expect(promptMatch).toBeTruthy();
+      // We need to mock the updateState to see what events are fired
+      const updateStateSpy = vi.spyOn(orchestrator as any, 'updateState');
+
+      // Execute the private executeSibling method
+      await (orchestrator as any).executeSibling(aspect, controller.signal);
+
+      // Verify SIBLING_FAILED with 'Aborted' error was sent
+      expect(updateStateSpy).toHaveBeenCalledWith({
+        type: 'SIBLING_FAILED',
+        id: '1.1',
+        error: 'Aborted'
+      });
+    });
+
+    it('should return early on catch if already aborted', async () => {
+      const options = createMockOptions();
+      const orchestrator = new DeepResearchOrchestrator(options);
+      
+      const controller = new AbortController();
+      controller.abort();
+      
+      const aspect = { id: '1.1', query: 'test query' };
+      
+      const mockSession = {
+        prompt: vi.fn(async () => {
+          throw new Error('Should be ignored');
+        }),
+        on: vi.fn(),
+        subscribe: vi.fn(() => () => {}),
+      };
+
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher');
+      vi.mocked(createResearcherSession).mockResolvedValue(mockSession as any);
+
+      const updateStateSpy = vi.spyOn(orchestrator as any, 'updateState');
+
+      await (orchestrator as any).executeSibling(aspect, controller.signal);
+
+      // Should NOT have called updateState in the catch block because it was an abort
+      expect(updateStateSpy).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'SIBLING_FAILED',
+        error: 'Should be ignored'
+      }));
     });
   });
 

@@ -43,6 +43,14 @@ describe('deepResearchReducer', () => {
     expect(state.aspects['1.1'].report).toBe('findings');
   });
 
+  it('should track sibling failure', () => {
+    let state = { ...initialState, aspects: { '1.1': { id: '1.1', query: 'q', status: 'pending' } } } as any;
+    state = deepResearchReducer(state, { type: 'SIBLING_FAILED', id: '1.1', error: 'some error' });
+
+    expect(state.aspects['1.1'].status).toBe('failed');
+    expect(state.aspects['1.1'].error).toBe('some error');
+  });
+
   it('should correctly identify when a round is complete', () => {
     const state: any = {
       aspects: {

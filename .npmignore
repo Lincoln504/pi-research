@@ -4,11 +4,6 @@
 .github/
 .gitattributes
 
-# Documentation
-CONTRIBUTING.md
-README.md
-CHANGELOG.md
-
 # Test files
 test/
 *.test.ts
@@ -49,8 +44,6 @@ yarn-error.log*
 Makefile
 .nvmrc
 *.md
-!.npmignore
-!.LICENSE
 
 # Playwright
 test-results/

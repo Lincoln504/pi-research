@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractText } from '../../../src/utils/text-utils';
+import { extractText, ensureAssistantResponse } from '../../../src/utils/text-utils';
 
 describe('text-utils', () => {
   describe('extractText', () => {
@@ -50,6 +50,54 @@ describe('text-utils', () => {
         ],
       };
       expect(extractText(message)).toBe('');
+    });
+  });
+
+  describe('ensureAssistantResponse', () => {
+    it('should extract text from the last assistant message', () => {
+      const session = {
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', content: 'response 1' },
+          { role: 'user', content: 'next' },
+          { role: 'assistant', content: 'response 2' },
+        ],
+      } as any;
+      expect(ensureAssistantResponse(session, 'Test')).toBe('response 2');
+    });
+
+    it('should throw if no assistant message is found', () => {
+      const session = {
+        messages: [{ role: 'user', content: 'hello' }],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test')).toThrow('Test: No assistant response found');
+    });
+
+    it('should throw if last assistant message has error stop reason', () => {
+      const session = {
+        messages: [
+          { role: 'assistant', content: 'partial', stopReason: 'error', errorMessage: 'provider failure' },
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test')).toThrow('Test: Provider error - provider failure');
+    });
+
+    it('should handle 429 rate limit specifically', () => {
+      const session = {
+        messages: [
+          { role: 'assistant', content: '', stopReason: 'error', errorMessage: 'Rate limit 429' },
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test')).toThrow('Model API rate limit (429)');
+    });
+
+    it('should ignore errorMessage if stopReason is aborted', () => {
+      const session = {
+        messages: [
+          { role: 'assistant', content: 'aborted findings', stopReason: 'aborted', errorMessage: 'Cancelled' },
+        ],
+      } as any;
+      expect(ensureAssistantResponse(session, 'Test')).toBe('aborted findings');
     });
   });
 });

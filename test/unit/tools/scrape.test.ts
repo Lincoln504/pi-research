@@ -51,7 +51,8 @@ describe('tools/scrape', () => {
 
     it('should perform scrape on second call (Batch 1)', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
-      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://test.com', source: 'fetch', markdown: 'content' });
+      vi.mocked(scrapeSingle).mockResolvedValue([{ url: 'http://test.com', source: 'fetch', markdown: 'content' }] as any);
+
 
       const options = createMockOptions();
       const tool = createScrapeTool(options);
@@ -68,9 +69,30 @@ describe('tools/scrape', () => {
       expect((result.content[0] as any).text).toContain('Batch 1 of up to 3');
     });
 
+    it('should update global state with provided URLs', async () => {
+      const { scrape } = await import('../../../src/web-research/scrapers.ts');
+      vi.mocked(scrape).mockResolvedValue([
+        { url: 'http://t1.com', source: 'fetch', markdown: 'content' },
+        { url: 'http://already.com', source: 'fetch', markdown: 'content' }
+      ] as any);
+
+      const options = createMockOptions();
+      const tool = createScrapeTool(options);
+
+      // Call 1: Handshake
+      await tool.execute('1', { urls: ['http://t1.com', 'http://already.com'] }, undefined, undefined, undefined as any);
+      
+      // Call 2: Batch 1
+      await tool.execute('2', { urls: ['http://t1.com', 'http://already.com'] }, undefined, undefined, undefined as any);
+
+      expect(scrape).toHaveBeenCalled();
+      expect(options.updateGlobalLinks).toHaveBeenCalledWith(['http://t1.com', 'http://already.com']);
+    });
+
     it('should perform scrape on third call (Batch 2)', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
-      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://test2.com', source: 'fetch', markdown: 'content' });
+      vi.mocked(scrapeSingle).mockResolvedValue([{ url: 'http://test.com', source: 'fetch', markdown: 'content' }] as any);
+
 
       const options = createMockOptions();
       const tool = createScrapeTool(options);
@@ -85,7 +107,8 @@ describe('tools/scrape', () => {
 
     it('should lock out on fifth call (after all 4 calls used)', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
-      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://t.com', source: 'fetch', markdown: 'ok' });
+      vi.mocked(scrapeSingle).mockResolvedValue([{ url: 'http://test.com', source: 'fetch', markdown: 'content' }] as any);
+
 
       const options = createMockOptions(); // tracker limit = 4
       const tool = createScrapeTool(options);
@@ -101,7 +124,8 @@ describe('tools/scrape', () => {
 
     it('should throw error on fourth call when tracker limit is 3', async () => {
       const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
-      vi.mocked(scrapeSingle).mockResolvedValue({ url: 'http://t.com', source: 'fetch', markdown: 'ok' });
+      vi.mocked(scrapeSingle).mockResolvedValue([{ url: 'http://test.com', source: 'fetch', markdown: 'content' }] as any);
+
 
       const options = createMockOptions(new ToolUsageTracker({ scrape: 3 }));
       const tool = createScrapeTool(options);

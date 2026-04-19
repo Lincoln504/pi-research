@@ -56,7 +56,7 @@
     "setup": "npm install && npm run install:browsers"
   },
   "pi": {
-    "main": "src/index.ts"
+    "extensions": ["src/index.ts"]
   },
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.30.0",
