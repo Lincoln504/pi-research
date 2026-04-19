@@ -30,6 +30,14 @@ Multi-agent web research extension for [pi](https://github.com/mariozechner/pi).
 - **Stack Exchange** — full network search and filtering
 - **Real-time TUI** — per-researcher token and cost tracking
 
+```
+── Research: 70% ─────────────────────────────────────
+┌───────┬────┐ 1 ┌─────┬────┐ 2 ┌────┬────┐ 3 ┌────┐
+│SearXNG│     18k      │     36k     │     50k     │
+│:55732 │   $0.0056    │   $0.0055   │   $0.0071   │
+└───────┴──────────────┴─────────────┴─────────────┘
+```
+
 ---
 
 ## Requirements
