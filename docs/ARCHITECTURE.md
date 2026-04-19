@@ -72,11 +72,21 @@ Researchers share a URL pool within a single research operation (one `pi-researc
 **Note**: The pool itself only tracks URLs. The actual *findings* from these links are shared separately via the **Report Injection** mechanism described in the Researching Status section. The pool is reset for each new, unique research query to maintain context relevance and avoid window bloat.
 
 ### SearXNG Lifecycle Management
-SearXNG runs as a Docker container (`searxng/searxng:latest`).
+SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXNG_IMAGE_TAG`, default `latest`).
 - **Lazy Initialization**: The container starts only upon the first research request.
 - **Singleton Pattern**: A single container is shared across all research sessions in a pi process.
 - **Configuration**: Runtime settings (proxies, API keys) are generated dynamically and volume-mounted into the container.
 - **Cross-Session Persistence**: Container state and locking are managed via `~/.pi/state/searxng-singleton.json` to handle multiple concurrent pi processes.
+
+### Output File Location
+
+When research completes, the report is written to a `.md` file named `pi-research-{sanitized-query}-{hash}.md` (e.g. `pi-research-rust-async-runtimes-a3.md`). The destination directory is resolved from the pi session's working directory (`cwd`) using a three-tier priority:
+
+1. **cwd is home or a system directory** → `os.tmpdir()`. Prevents cluttering `~`, drive roots, or system paths like `/usr`.
+2. **cwd contains a recognised subdirectory** → that subdirectory. Probed in priority order: `research`, `docs`, `doc`, `ref`, `references`, `notes`, `output`, `outputs`, `results`. Matching is case-insensitive so it works on macOS APFS and Windows NTFS.
+3. **Otherwise** → cwd itself.
+
+The two-character hash suffix (`{letter}{digit}`, e.g. `b7`) is a collision guard — the file is opened with an exclusive-create flag and the hash is regenerated on `EEXIST`. The full saved path is appended as a footer in the report and returned to the pi UI.
 
 ### Evaluator Decision Framework
 The Lead Evaluator follows a strict priority list:
