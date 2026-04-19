@@ -67,8 +67,24 @@ pi install .
 
 ## Platform Setup
 
-**macOS/Linux** — Install and start Docker. Ensure your user is in the `docker` group on Linux.
+**macOS** — Install Docker Desktop and start it from Applications.
+
+**Linux** — Install Docker and add your user to the docker group:
+```bash
+# Install Docker
+sudo apt-get update && sudo apt-get install -y docker.io
+
+# Start Docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add your user to docker group (then log out and back in)
+sudo usermod -aG docker $USER
+```
+
 **Windows** — Install Docker Desktop (Linux containers). Detecting named pipes is automatic.
+
+> **Note**: The first time you use `pi install` on a fresh system, Docker may not be running yet. The extension will check Docker when you actually use the research tool, not during install.
 
 ---
 
