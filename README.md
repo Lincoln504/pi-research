@@ -56,10 +56,9 @@ Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono)
 pi install npm:@lincoln504/pi-research
 ```
 
-**From a checkout**
+**From git clone**
 
 ```bash
-npm install
 pi install .
 ```
 
