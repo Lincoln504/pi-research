@@ -70,7 +70,7 @@ Researchers share a URL pool per research operation, used by the `scrape` handsh
 ### SearXNG Lifecycle Management
 SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXNG_IMAGE_TAG`, default `latest`).
 - **Lazy Initialization**: The container starts only upon the first research request.
-- **Singleton Pattern**: A single container is shared across all research sessions in a pi process.
+- **Singleton Pattern**: A single container is shared across all pi processes on the machine. State is persisted to `~/.pi/state/searxng-singleton.json`; each pi process registers a session by PID and the container stays alive until all registered processes have exited.
 - **Configuration**: Runtime settings (proxies, API keys) are generated dynamically and volume-mounted into the container.
 - **Cross-Session Persistence**: Container state and locking are managed via `~/.pi/state/searxng-singleton.json` to handle multiple concurrent pi processes.
 
