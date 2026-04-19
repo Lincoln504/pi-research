@@ -45,10 +45,13 @@ export default function (pi: ExtensionAPI) {
 
   // Notify user of Docker status and log file location when starting a new session
   pi.on('session_start', async (_event, ctx) => {
-    // Check Docker availability on startup
-    const dockerCheck = await checkDockerAvailability();
-    if (!dockerCheck.running) {
-      ctx.ui.notify(`pi-research: ${dockerCheck.error}`, 'warning');
+    // Skip Docker check during install to avoid errors on fresh systems
+    // Docker will be checked when research tool is first used
+    if (!process.env.PI_INSTALL_MODE) {
+      const dockerCheck = await checkDockerAvailability();
+      if (!dockerCheck.running) {
+        ctx.ui.notify(`pi-research: ${dockerCheck.error}`, 'warning');
+      }
     }
 
     if (isVerboseFromEnv()) {

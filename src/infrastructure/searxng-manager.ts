@@ -285,9 +285,19 @@ export async function verifyDockerInstalled(): Promise<{ installed: boolean; run
   if (
     lastError.includes('ENOENT') ||
     lastError.includes('ECONNREFUSED') ||
-    lastError.includes('The system cannot find the file specified')
+    lastError.includes('The system cannot find the file specified') ||
+    lastError.includes('EACCES') ||
+    lastError.includes('permission')
   ) {
-    return { installed: true, running: false, error: 'Docker daemon is not running. Please start Docker.' };
+    let errorMsg = 'Docker daemon is not running or inaccessible.';
+    if (process.platform === 'linux') {
+      errorMsg += ' On Linux, run: sudo systemctl start docker && sudo usermod -aG docker $USER. Then log out and back in.';
+    } else if (process.platform === 'darwin') {
+      errorMsg += ' Start Docker Desktop from Applications.';
+    } else if (process.platform === 'win32') {
+      errorMsg += ' Start Docker Desktop from the Start menu.';
+    }
+    return { installed: true, running: false, error: errorMsg };
   }
 
   return { installed: false, running: false, error: `Docker not found or inaccessible: ${lastError}` };
