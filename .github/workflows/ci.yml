@@ -16,7 +16,6 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install chromium
       - run: npm run lint
 
   type-check:
@@ -31,6 +30,7 @@ jobs:
       - run: npm run type-check
 
   test:
+    needs: [lint, type-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,10 +39,10 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install chromium
       - run: npm run test:unit
 
   integration:
+    needs: [test, validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,8 +51,34 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
-      - run: npx playwright install chromium firefox webkit
       - run: npm run test:integration
+
+  summary:
+    needs: [lint, type-check, test, validate, integration]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI Summary
+        run: |
+          echo "📊 CI Status Summary"
+          echo "===================="
+          echo "✓ Lint: ${{ needs.lint.result }}"
+          echo "✓ Type Check: ${{ needs.type-check.result }}"
+          echo "✓ Unit Tests: ${{ needs.test.result }}"
+          echo "✓ Integration Tests: ${{ needs.integration.result }}"
+          echo "✓ Validation: ${{ needs.validate.result }}"
+          echo ""
+          if [ "${{ needs.lint.result }}" == "success" ] && \
+             [ "${{ needs.type-check.result }}" == "success" ] && \
+             [ "${{ needs.test.result }}" == "success" ] && \
+             [ "${{ needs.integration.result }}" == "success" ] && \
+             [ "${{ needs.validate.result }}" == "success" ]; then
+            echo "✅ All checks passed!"
+            exit 0
+          else
+            echo "❌ Some checks failed. See above for details."
+            exit 1
+          fi
 
   validate:
     runs-on: ubuntu-latest
