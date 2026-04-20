@@ -27,6 +27,8 @@ export interface Config {
   CONSOLE_RESTORE_DELAY_MS: number;
   /** BCP 47 language tag sent to SearXNG to filter search results (default: 'en-US') */
   SEARCH_LANGUAGE: string;
+  /** External SearXNG base URL — bypasses Docker container management entirely when set */
+  SEARXNG_URL?: string;
 }
 
 /**
@@ -41,6 +43,7 @@ const DEFAULTS: Config = {
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
   SEARCH_LANGUAGE: 'en-US',
+  SEARXNG_URL: undefined,
 };
 
 /**
@@ -110,6 +113,7 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       DEFAULTS.CONSOLE_RESTORE_DELAY_MS
     ),
     SEARCH_LANGUAGE: parseEnvString(env, 'PI_RESEARCH_SEARCH_LANGUAGE') ?? DEFAULTS.SEARCH_LANGUAGE,
+    SEARXNG_URL: parseEnvString(env, 'SEARXNG_URL'),
   };
 }
 
@@ -200,7 +204,15 @@ export function getBraveSearchApiKey(): string | undefined {
   return getConfig().BRAVE_SEARCH_API_KEY;
 }
 
+/**
+ * @deprecated Use getConfig().SEARXNG_URL instead
+ */
+export function getExternalSearxngUrl(): string | undefined {
+  return getConfig().SEARXNG_URL;
+}
+
 // Legacy variable exports (for backward compatibility, but reflect module load time values)
 export const RESEARCHER_TIMEOUT_MS = getResearcherTimeoutMs();
 export const PROXY_URL = getProxyUrl();
 export const BRAVE_SEARCH_API_KEY = getBraveSearchApiKey();
+export const SEARXNG_URL = getExternalSearxngUrl();

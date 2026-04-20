@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { PROXY_URL, BRAVE_SEARCH_API_KEY } from '../config.ts';
+import { PROXY_URL, BRAVE_SEARCH_API_KEY, SEARXNG_URL } from '../config.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
 
 /**
@@ -98,6 +98,8 @@ export interface SearxngLifecycleConfig {
   manager?: DockerSearxngManager | null;
   proxyUrl?: string;
   braveApiKey?: string;
+  /** External SearXNG base URL. When set, Docker container management is skipped entirely. */
+  searxngUrl?: string;
 }
 
 type ResolvedConfig = {
@@ -106,6 +108,7 @@ type ResolvedConfig = {
   manager: DockerSearxngManager | null;
   proxyUrl: string | undefined;
   braveApiKey: string | undefined;
+  searxngUrl: string | undefined;
 };
 
 /**
@@ -132,6 +135,7 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   manager: null,
   proxyUrl: PROXY_URL,
   braveApiKey: BRAVE_SEARCH_API_KEY,
+  searxngUrl: SEARXNG_URL,
 };
 
 /**
@@ -154,6 +158,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   private proxySettingsPath: string | null = null;
   /** Coalesces concurrent init() calls onto a single in-flight promise. */
   private initializationPromise: Promise<void> | null = null;
+  /** Set when SEARXNG_URL is configured; signals that Docker management is bypassed. */
+  private externalSearxngUrl: string | null = null;
 
   constructor(config: Partial<SearxngLifecycleConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config } as ResolvedConfig;
@@ -164,9 +170,15 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   /**
-   * Get manager instance (for passing to web-research module)
+   * Get manager instance (for passing to web-research module).
+   * In external URL mode, returns a minimal shim that satisfies the getSearxngUrl()
+   * interface used by web-research tools and the health check.
    */
   getManager(): DockerSearxngManager | null {
+    if (this.externalSearxngUrl) {
+      const url = this.externalSearxngUrl;
+      return { getSearxngUrl: () => url } as unknown as DockerSearxngManager;
+    }
     return this.manager;
   }
 
@@ -311,6 +323,16 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   private async _performInit(ctx: ExtensionContext): Promise<void> {
+    // External SearXNG URL: skip all Docker management and use the URL directly.
+    if (this.config.searxngUrl) {
+      this.externalSearxngUrl = this.config.searxngUrl;
+      this.currentStatus = { state: 'active', url: this.config.searxngUrl, isFunctional: false };
+      this.initialized = true;
+      logger.log('[pi-research] External SEARXNG_URL configured — Docker management skipped:', this.config.searxngUrl);
+      this.notifyStatusChange();
+      return;
+    }
+
     // Skip real Docker verification when a test/dummy manager is injected.
     if (!this.config.manager) {
       const dockerCheck = await verifyDockerInstalled();
@@ -428,6 +450,10 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   async ensureRunning(): Promise<string> {
+    if (this.externalSearxngUrl) {
+      return this.externalSearxngUrl;
+    }
+
     if (!this.manager) {
       throw new Error('SearXNG not initialized. Call initLifecycle() first.');
     }
@@ -443,6 +469,15 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   async shutdown(): Promise<void> {
+    if (this.externalSearxngUrl) {
+      // External URL mode — no container to tear down
+      this.externalSearxngUrl = null;
+      this.currentStatus = { state: 'inactive', url: '', isFunctional: false };
+      this.initialized = false;
+      this.notifyStatusChange();
+      return;
+    }
+
     if (!this.manager || !this.initialized) {
       logger.log('[pi-research] SearXNG not active, skipping shutdown');
       return;
@@ -486,7 +521,7 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   }
 
   isInitialized(): boolean {
-    return this.initialized && this.manager !== null;
+    return this.initialized && (this.manager !== null || this.externalSearxngUrl !== null);
   }
 }
 
