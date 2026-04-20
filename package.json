@@ -50,10 +50,10 @@
     "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
-    "postinstall": "node scripts/setup.js",
+    "postinstall": "node scripts/setup.js || exit 0",
     "install:browsers": "npx playwright install chromium",
-    "install:deps": "npx playwright install-deps",
-    "setup": "npm install && npm run install:browsers"
+    "install:deps": "npx playwright install-deps chromium",
+    "setup": "npm run install:browsers"
   },
   "pi": {
     "extensions": [

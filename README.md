@@ -63,6 +63,18 @@ There are other ways to connect a `pi` session to the internet. Here is why this
 pi install npm:@lincoln504/pi-research
 ```
 
+The installation will automatically download and install:
+- Node.js dependencies
+- Playwright browser binaries (Chromium)
+
+This process may take a few minutes on first install. If browser installation fails during postinstall, chromium will be installed automatically when you first use the research tool.
+
+**Manual browser installation (if needed)**
+
+```bash
+npm run install:browsers
+```
+
 **From a checkout**
 
 ```bash
