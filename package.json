@@ -1,6 +1,6 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "A set of web research tools (search, scrape, and others) and research agent system that uses them safely and efficiently.",
   "type": "module",
   "private": false,
