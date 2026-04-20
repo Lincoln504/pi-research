@@ -4,6 +4,13 @@
 
 Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono). Runs parallel AI researchers against a self-hosted SearXNG search container, scrapes pages, queries security databases, and tracks everything in a real-time terminal UI.
 
+There are other ways to connect a `pi` session to the internet. Here is why this one is designed the way it is:
+
+- **SearXNG-based** — free, no API keys required by default. A single Docker container is shared across all concurrent research calls on the same machine; no duplicate instances, no per-session overhead. Point `SEARXNG_URL` at an existing instance to skip container management entirely.
+- **Unified subagent system** — web access, scraping, and synthesis are handled by isolated researcher agents. Research context stays out of the main chat session while still enabling thorough multi-source exploration.
+- **Safety** — researcher agents have no access to file writes, file edits, or shell commands. All web tools are scoped to the subagent system and executed in a structured, tool-limited sequence to keep agents focused and prevent runaway use.
+- **Minimal integration** — a system prompt hook provides light guidance to the host LLM on when and how to invoke the tool. No manual prompt engineering required. The extension does not conflict with other subagent or tool systems, and the unified toolset means no need to wire up or tune multiple separate tools.
+
 ---
 
 ## Contents
@@ -57,7 +64,19 @@ Multi-agent web research extension for [pi](https://github.com/badlogic/pi-mono)
 pi install npm:@lincoln504/pi-research
 ```
 
-**From git clone**
+The installation will automatically download and install:
+- Node.js dependencies
+- Playwright browser binaries (Chromium)
+
+This process may take a few minutes on first install. If browser installation fails during postinstall, chromium will be installed automatically when you first use the research tool.
+
+**Manual browser installation (if needed)**
+
+```bash
+npm run install:browsers
+```
+
+**From a checkout**
 
 ```bash
 pi install .
@@ -69,11 +88,8 @@ pi install .
 
 **macOS** — Install Docker Desktop and start it from Applications.
 
-**Linux** — Install Docker and add your user to the docker group:
+**Linux** — Install Docker for your distribution ([docs.docker.com/engine/install](https://docs.docker.com/engine/install)), then:
 ```bash
-# Install Docker
-sudo apt-get update && sudo apt-get install -y docker.io
-
 # Start Docker
 sudo systemctl start docker
 sudo systemctl enable docker
@@ -110,6 +126,7 @@ Do a deep dive on CVE-2024-3094 at depth 2
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SEARXNG_URL` | — | External SearXNG base URL (e.g. `http://localhost:8080`). When set, Docker container management is skipped entirely and this URL is used directly |
 | `BRAVE_SEARCH_API_KEY` | — | Enables `braveapi` engine (official REST API) |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` to write diagnostic JSONL logs to a temp file (see below) |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (set to `1` if engines are blocked) |
