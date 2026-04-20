@@ -152,6 +152,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   private statusCallbacks: StatusCallback[] = [];
   private readonly config: ResolvedConfig;
   private proxySettingsPath: string | null = null;
+  /** Coalesces concurrent init() calls onto a single in-flight promise. */
+  private initializationPromise: Promise<void> | null = null;
 
   constructor(config: Partial<SearxngLifecycleConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config } as ResolvedConfig;
@@ -279,6 +281,36 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
       return;
     }
 
+    // Coalesce concurrent init() calls: only the first proceeds; latecomers
+    // await the in-flight promise and return once it resolves.
+    // This assignment and check are both synchronous (no await between them),
+    // so JavaScript's single-threaded event loop guarantees only one caller
+    // can set initializationPromise before any other caller checks it.
+    if (this.initializationPromise) {
+      logger.log('[pi-research] SearXNG init already in progress, awaiting');
+      await this.initializationPromise;
+      return;
+    }
+
+    let resolveInit!: () => void;
+    let rejectInit!: (err: unknown) => void;
+    this.initializationPromise = new Promise<void>((resolve, reject) => {
+      resolveInit = resolve;
+      rejectInit = reject;
+    });
+
+    try {
+      await this._performInit(ctx);
+      resolveInit();
+    } catch (err) {
+      rejectInit(err);
+      throw err;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+
+  private async _performInit(ctx: ExtensionContext): Promise<void> {
     // Skip real Docker verification when a test/dummy manager is injected.
     if (!this.config.manager) {
       const dockerCheck = await verifyDockerInstalled();

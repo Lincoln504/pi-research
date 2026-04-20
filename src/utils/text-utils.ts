@@ -79,5 +79,15 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
     throw new Error(`${label}: Provider error - ${msg}`);
   }
 
-  return extractText(last);
+  const text = extractText(last);
+  if (!text.trim()) {
+    // No text content blocks in the final assistant message. This typically means
+    // all tool calls failed (e.g. SearXNG unreachable) and the model produced only
+    // thinking blocks, or the session ended without a visible response.
+    throw new Error(
+      `${label}: Researcher produced no text output. ` +
+      `This usually means SearXNG was unavailable during the run — check Docker status and retry.`
+    );
+  }
+  return text;
 }
