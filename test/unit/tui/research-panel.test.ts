@@ -125,9 +125,11 @@ describe('TUI Research Panel', () => {
       expect(lines.length).toBe(4);
       
       const output = lines.join('\n');
-      // Check for rounded corners (╭ and ╰)
+      // Check for rounded corners on both sides (╭, ╮, ╰, ╯)
       expect(output).toContain('╭');
+      expect(output).toContain('╮');
       expect(output).toContain('╰');
+      expect(output).toContain('╯');
       // Check for double borders (││)
       expect(output).toContain('││');
       // Check for eval label
