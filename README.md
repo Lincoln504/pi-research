@@ -2,27 +2,39 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses SearXNG for search, scrapes pages, queries security databases, and tracks everything in real-time.
-
-## Why This Extension
-
-**Self-hosted SearXNG** — Free, no API keys. Docker container shared across all research sessions.
-
-**Safe by default** — Researcher agents cannot write files, edit files, or run shell commands. Web tools are isolated and rate-limited.
-
-**Multi-agent orchestration** — AI coordinator runs parallel researchers, then synthesizes or delegates to deeper rounds.
-
-**Minimal setup** — Just install. System prompt integrates automatically. Works alongside other tools without conflicts.
+Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a self-hosted SearXNG container to search the web, scrape pages, check security databases, and shows everything in real-time.
 
 ---
 
-## Capabilities
+## Why This Extension
 
-- **Web search** — SearXNG (Bing, Brave, Yahoo, DuckDuckGo, Wikipedia, GitHub, arXiv, Semantic Scholar)
-- **URL scraping** — Fetch-first with Playwright/Chromium fallback for JavaScript-heavy pages
-- **Security databases** — NVD, CISA KEV, GitHub Advisories, OSV
+Other ways to connect pi to the internet exist. This one is designed differently.
+
+**Self-hosted search** — Uses SearXNG running in Docker. Free, no API keys. One container serves all research sessions — no duplicate instances, no overhead. Point `SEARXNG_URL` at an existing instance to skip container management.
+
+**Multi-agent research** — AI coordinator breaks your question into parallel research tracks. Each track runs in a separate subagent. An AI evaluator combines results or launches deeper rounds.
+
+**Safe by design** — Researcher agents cannot write files, edit files, or run shell commands. Web tools are isolated and rate-limited to keep agents focused.
+
+**Minimal setup** — Just install. A system prompt guides pi on when and how to use the tool. No prompt engineering. Works with other tools without conflicts.
+
+---
+
+## What It Does
+
+- **Web search** — SearXNG aggregates Bing, Brave, Yahoo, DuckDuckGo, Wikipedia, GitHub, arXiv, and Semantic Scholar. Engines can be enabled or disabled in config.
+- **URL scraping** — Fast HTML fetching with Playwright/Chromium for JavaScript-heavy pages
+- **Security databases** — NVD, CISA KEV, GitHub Advisories, and OSV
 - **Stack Exchange** — Full network search and filtering
 - **Real-time TUI** — Per-researcher token and cost tracking
+
+```
+── Research: 70% ─────────────────────────────────────
+┌───────┬────┐ 1 ┌─────┬────┐ 2 ┌────┬────┐ 3 ┌────┐
+│ SearXNG│     18k    │     36k     │     50k     │
+│ :55732 │   $0.0056  │   $0.0055   │   $0.0071   │
+└───────┴──────────────┴─────────────┴─────────────┘
+```
 
 ---
 
@@ -32,7 +44,7 @@ Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses Sea
 - pi CLI installed and configured
 - Docker running (required for SearXNG)
 - Internet access
-- LLM with 100k+ context window
+- LLM in pi with 100k+ context window
 
 ---
 
@@ -42,7 +54,7 @@ Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses Sea
 pi install npm:@lincoln504/pi-research
 ```
 
-This installs dependencies and Playwright browsers.
+This installs dependencies and Playwright browsers. Takes a few minutes on first install.
 
 **Manual browser setup** (if needed):
 
@@ -60,16 +72,16 @@ pi install .
 
 ## Platform Setup
 
-**macOS**: Install Docker Desktop and start it.
+**macOS** — Install Docker Desktop and start it from Applications.
 
-**Linux**: [Install Docker](https://docs.docker.com/engine/install), then:
+**Linux** — Install Docker for your distribution:
 ```bash
 sudo systemctl start docker
 sudo systemctl enable docker
 sudo usermod -aG docker $USER  # Log out and back in
 ```
 
-**Windows**: Install Docker Desktop (Linux containers).
+**Windows** — Install Docker Desktop (Linux containers).
 
 ---
 
@@ -78,7 +90,7 @@ sudo usermod -aG docker $USER  # Log out and back in
 Just ask pi for research. The `research` tool is registered automatically.
 
 ```
-Research "binary search tree"
+Research "What is a binary search tree?"
 Do a deep dive on CVE-2024-3094 at depth 2
 ```
 
@@ -97,8 +109,8 @@ Do a deep dive on CVE-2024-3094 at depth 2
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SEARXNG_URL` | — | External SearXNG URL. Set this to skip Docker management. |
-| `BRAVE_SEARCH_API_KEY` | — | Enables Brave Search API. |
+| `SEARXNG_URL` | — | External SearXNG URL (e.g., `http://localhost:8080`). Set this to skip Docker management. |
+| `BRAVE_SEARCH_API_KEY` | — | Enables `braveapi` engine (official REST API). |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (`1`). |
 | `PROXY_URL` | — | Proxy for outgoing requests (e.g., `socks5://127.0.0.1:9050`). |
@@ -131,4 +143,4 @@ Do a deep dive on CVE-2024-3094 at depth 2
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design information.
