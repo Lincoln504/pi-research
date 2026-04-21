@@ -360,17 +360,20 @@ function renderPanelBlock(
       const w = colW(i);
       const isLast = i === totalCols - 1;
       
-      // Top Border with Label
+      // Check if this is an eval column (has rounded left border)
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
       const isEval = labelStr === 'Eval';
+      
+      // Top Border with Label
       const cornerLabel = `┐ ${labelStr} ┌`;
       const canShowCornerLabel = w >= cornerLabel.length;
       const canShowBasicLabel = w >= labelStr.length + 2;
 
       let topPart;
       if (isEval) {
-        topPart = '─'.repeat(w);
+        // Prepend double vertical border, clip horizontal line if needed
+        topPart = '││' + '─'.repeat(w - 1);
       } else if (canShowCornerLabel) {
         const sideWidth = w - cornerLabel.length;
         const leftPad = Math.floor(sideWidth / 2);
@@ -384,14 +387,25 @@ function renderPanelBlock(
       } else {
         topPart = '─'.repeat(w);
       }
-      rightRawRows[0]!.push(topPart + (isLast ? '┐' : '┬'));
+      
+      // Determine right border character based on if next column is eval
+      const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
+      const nextSlice = nextSliceId ? state.slices.get(nextSliceId) : null;
+      const nextIsEval = nextSlice?.label === 'Eval';
+      const topRightCorner = nextIsEval ? '╭' : (isLast ? '┐' : '┬');
+      
+      rightRawRows[0]!.push(topPart + topRightCorner);
       rightColors[0]!.push('accent');
 
       // Token Row (always row 1)
       let tokenStr: string;
       if (isEval) {
         const evalDisplay = 'Eval'.length > w ? 'Eval'.slice(0, w) : 'Eval';
-        tokenStr = evalDisplay.padStart(Math.floor((w + evalDisplay.length) / 2)).padEnd(w);
+        // Prepend double vertical border, clip content if needed
+        const contentWidth = w - 1; // Reserve 1 char for the double border
+        const centered = evalDisplay.length > contentWidth ? evalDisplay.slice(0, contentWidth) : 
+          evalDisplay.padStart(Math.floor((contentWidth + evalDisplay.length) / 2)).padEnd(contentWidth);
+        tokenStr = '││' + centered;
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
@@ -408,7 +422,9 @@ function renderPanelBlock(
       // Cost Row (row 2)
       let costStr: string;
       if (isEval) {
-        costStr = ' '.repeat(w);
+        // Prepend double vertical border, clip content if needed
+        const contentWidth = w - 1; // Reserve 1 char for the double border
+        costStr = '││' + ' '.repeat(contentWidth);
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -422,8 +438,10 @@ function renderPanelBlock(
       rightRawRows[2]!.push(costStr + '│');
       rightColors[2]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
-      // Bottom Border
-      rightRawRows[3]!.push('─'.repeat(w) + (isLast ? '┘' : '┴'));
+      // Bottom Border - determine border based on if next column is eval
+      const bottomRightCorner = nextIsEval ? '╰' : (isLast ? '┘' : '┴');
+      const bottomContent = isEval ? '││' + '─'.repeat(w - 1) : '─'.repeat(w);
+      rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
     }
   }

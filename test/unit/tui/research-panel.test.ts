@@ -109,6 +109,31 @@ describe('TUI Research Panel', () => {
       expect(output).toContain('$0.05');
     });
 
+    it('should render eval box with rounded corners and double borders', () => {
+      const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
+      addSlice(state, 'slice1', '1');
+      updateSliceTokens(state, 'slice1', 18000, 0.0056);
+      addSlice(state, 'slice2', '2');
+      updateSliceTokens(state, 'slice2', 36000, 0.0055);
+      addSlice(state, 'eval1', 'Eval');
+      activateSlice(state, 'eval1');
+      
+      const componentCreator = createResearchPanel(state);
+      const component = componentCreator({}, mockTheme as any);
+      
+      const lines = component.render(80);
+      expect(lines.length).toBe(4);
+      
+      const output = lines.join('\n');
+      // Check for rounded corners (╭ and ╰)
+      expect(output).toContain('╭');
+      expect(output).toContain('╰');
+      // Check for double borders (││)
+      expect(output).toContain('││');
+      // Check for eval label
+      expect(output).toContain('Eval');
+    });
+
     it('should output exactly 4 lines when SearXNG is hidden', () => {
       const state = createInitialPanelState('test-session-id', 'test-query', searxngStatus, 'test-model');
       state.hideSearxng = true;
