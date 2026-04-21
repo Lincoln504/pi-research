@@ -96,6 +96,7 @@ export function withTimeout<T>(
 
   let raceWon = false;
   let timeoutId: NodeJS.Timeout | undefined;
+  let aborted = false;
 
   const wrappedPromise = promise.then((val) => {
     raceWon = true;
@@ -104,29 +105,34 @@ export function withTimeout<T>(
   });
 
   const rejectPromise = new Promise<T>((_, reject) => {
+    // Handle external abort signal (user cancellation, Ctrl+C)
+    if (combinedSignal.aborted) {
+      logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
+      aborted = true;
+      reject(new Error(`${label} cancelled`));
+      return;
+    }
+
+    combinedSignal.addEventListener('abort', () => {
+      if (!raceWon) {
+        logger.error(`[withTimeout] ${label} EXTERNAL ABORT SIGNAL FIRED`);
+        aborted = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        reject(new Error(`${label} cancelled`));
+      }
+    }, { once: true });
+
     // Timeout handler
     timeoutId = setTimeout(() => {
-      logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
-      timeoutController.abort();
-      reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+      if (!raceWon && !aborted) {
+        logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
+        timeoutController.abort();
+        reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+      }
     }, timeoutMs);
 
     // Unref so it doesn't keep the process alive
     (timeoutId as TimeoutHandle).unref?.();
-
-    if (combinedSignal.aborted) {
-      logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
-      if (timeoutId) clearTimeout(timeoutId);
-      reject(new Error(`${label} cancelled`));
-    } else {
-      combinedSignal.addEventListener('abort', () => {
-        if (!raceWon) {
-          logger.error(`[withTimeout] ${label} ABORT SIGNAL FIRED`);
-          if (timeoutId) clearTimeout(timeoutId);
-          reject(new Error(`${label} cancelled`));
-        }
-      }, { once: true });
-    }
   });
 
   return Promise.race([wrappedPromise, rejectPromise]).finally(() => {

@@ -223,6 +223,33 @@ function isPortListening(port: number, host: string = '127.0.0.1'): Promise<bool
 }
 
 /**
+ * Check if SearXNG HTTP endpoint is responding (not just TCP port open)
+ * This ensures the Python/Flask server is actually ready to serve requests.
+ */
+async function isSearxngHttpReady(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+    const response = await fetch(`http://${host}:${port}/search?q=test&format=json`, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    clearTimeout(timeoutId);
+    
+    // Any 2xx response means the server is ready (even if no results)
+    return response.ok || response.status < 500;
+  } catch {
+    // Connection refused, timeout, or any network error means not ready yet
+    return false;
+  }
+}
+
+/**
  * SearxngManagerConfig type
  */
 export interface SearxngManagerConfig {
@@ -1007,18 +1034,30 @@ export class DockerSearxngManager {
           }
         }
 
-        // Enhanced health check: container running AND port is listening
-        // SearXNG bot detection blocks HTTP requests, so we use TCP check instead
+        // Enhanced health check: container running AND HTTP endpoint is responding
+        // First do a fast TCP check, then verify HTTP server is actually ready
         const portListening = await isPortListening(this.config.port);
         if (portListening) {
-          consecutiveHealthyChecks++;
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-          if (consecutiveHealthyChecks >= HEALTHY_CHECKS_NEEDED) {
-            this.notify(`SearXNG container is ready! (${elapsed}s elapsed)`, 'success');
-            return;
-          } else if (lastElapsedTime !== elapsed) {
-            this.notify(`SearXNG container starting up... (${elapsed}s elapsed)`, 'info');
-            lastElapsedTime = elapsed;
+          // Port is open, check if HTTP server is ready
+          const httpReady = await isSearxngHttpReady(this.config.port);
+          if (httpReady) {
+            consecutiveHealthyChecks++;
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+            if (consecutiveHealthyChecks >= HEALTHY_CHECKS_NEEDED) {
+              this.notify(`SearXNG container is ready! (${elapsed}s elapsed)`, 'success');
+              return;
+            } else if (lastElapsedTime !== elapsed) {
+              this.notify(`SearXNG container starting up... (${elapsed}s elapsed)`, 'info');
+              lastElapsedTime = elapsed;
+            }
+          } else {
+            // Port is listening but HTTP not ready yet (Python/Flask still initializing)
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+            if (lastElapsedTime !== elapsed) {
+              this.notify(`SearXNG container running, HTTP server initializing... (${elapsed}s elapsed)`, 'info');
+              lastElapsedTime = elapsed;
+            }
+            consecutiveHealthyChecks = 0; // Reset counter since HTTP failed
           }
         } else {
           // Container is running but port not listening yet
@@ -1027,6 +1066,7 @@ export class DockerSearxngManager {
             this.notify(`SearXNG container running, waiting for port ${this.config.port} to be ready... (${elapsed}s elapsed)`, 'info');
             lastElapsedTime = elapsed;
           }
+          consecutiveHealthyChecks = 0; // Reset counter since port failed
         }
 
         await sleep(checkInterval);
