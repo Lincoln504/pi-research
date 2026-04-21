@@ -9,7 +9,7 @@ There are other ways to connect a `pi` session to the internet. Here is why this
 - **SearXNG-based** — free, no API keys required by default. A single Docker container is shared across all concurrent research calls on the same machine; no duplicate instances, no per-session overhead. Point `SEARXNG_URL` at an existing instance to skip container management entirely.
 - **Unified subagent system** — web access, scraping, and synthesis are handled by isolated researcher agents. Research context stays out of the main chat session while still enabling thorough multi-source exploration.
 - **Safety** — researcher agents have no access to file writes, file edits, or shell commands. All web tools are scoped to the subagent system and executed in a structured, tool-limited sequence to keep agents focused and prevent runaway use.
-- **Minimal integration** — a system prompt hook provides light guidance to the host LLM on when and how to invoke the tool. No manual prompt engineering required. The extension does not conflict with other subagent or tool systems, and the unified toolset means no need to wire up or tune multiple separate tools.
+- **Minimal integration** — a system prompt hook provides light guidance to the host LLM on when and how to invoke the tool. No manual prompt engineering required. The extension does not conflict with other subagent or tool systems, and the unified toolset means no need to wire up multiple separate tools.
 
 ---
 
