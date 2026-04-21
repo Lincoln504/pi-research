@@ -556,7 +556,7 @@ export function createMasterResearchPanel(
         for (let i = 0; i < panels.length; i++) {
           const panel = panels[i]!;
           
-          // Header line for each block (constant-width design with rounded corners)
+          // Header line for each block (fixed width, rounded corners)
           const pctStr = renderProgressPct(panel.progress);
           const status = panel.statusMessage ? `[${panel.statusMessage}]` : '';
           let headerText: string;
@@ -566,40 +566,31 @@ export function createMasterResearchPanel(
             headerText = status ? ` Research (${status})` : ` Research`;
           }
 
-          // Calculate header width with intelligent shrinking
-          const minWidth = 16; // Minimum width for " Research: 100% "
-          const maxHeaderWidth = Math.min(width - 4, 40); // Leave padding, max 40 chars
-          let headerWidth = Math.max(minWidth, maxHeaderWidth);
-
-          // Shrink if too narrow
-          if (headerText.length > headerWidth) {
+          // Only shrink text if terminal is too narrow (no growing padding)
+          const maxWidth = Math.max(20, width - 4);
+          if (headerText.length > maxWidth) {
+            // Priority: keep percentage, shorten/trim status
             if (pctStr) {
-              headerText = status ? ` ${pctStr}% (${status})` : ` ${pctStr}%`;
-            } else {
-              headerText = status ? ` (${status})` : '';
-            }
-            if (headerText.length > headerWidth) {
-              // Shorten status message
-              const maxStatusLen = headerWidth - (pctStr ? 6 : 2);
-              if (status && maxStatusLen > 3) {
-                headerText = pctStr ? ` ${pctStr}% (${status.slice(0, maxStatusLen)}..)` : ` (${status.slice(0, maxStatusLen)}..)`;
+              const remainingLen = maxWidth - ` Research: ${pctStr} `.length;
+              if (remainingLen > 6) {
+                headerText = ` Research: ${pctStr} ${status.slice(0, remainingLen - 4)}..`;
               } else {
-                headerText = pctStr ? ` ${pctStr}%` : '';
+                headerText = ` Research: ${pctStr}`;
+              }
+            } else {
+              const remainingLen = maxWidth - ` Research `.length;
+              if (remainingLen > 6) {
+                headerText = ` Research ${status.slice(0, remainingLen - 4)}..`;
+              } else {
+                headerText = ` Research`;
               }
             }
-            if (headerText.length > headerWidth) {
-              // Truncate percentage if needed
-              headerText = pctStr ? ` ${Math.round(parseFloat(pctStr))}%` : '';
-            }
-            // Recalculate width to fit content
-            headerWidth = Math.max(minWidth, headerText.length + 2);
           }
 
-          // Render header with rounded corners: ╰─ text ─╮
+          // Render header with rounded corners: ╰─ text ─╮ (fixed width)
           const leftDecor = theme.fg('accent', '╰─');
           const rightDecor = theme.fg('accent', '─╮');
-          const paddedText = headerText.padEnd(headerWidth);
-          const headerLine = leftDecor + theme.fg('muted', paddedText) + rightDecor;
+          const headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
           allLines.push(headerLine);
 
           // Show SearXNG box only for the bottom-most panel in the Master Widget stack
