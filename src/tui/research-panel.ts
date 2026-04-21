@@ -587,9 +587,9 @@ export function createMasterResearchPanel(
             }
           }
 
-          // Render header with rounded corners: ╰─ text ─╮ (fixed width)
-          const leftDecor = theme.fg('accent', '╰─');
-          const rightDecor = theme.fg('accent', '─╮');
+          // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
+          const leftDecor = theme.fg('accent', '──');
+          const rightDecor = theme.fg('accent', ' ─╮');
           const headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
           allLines.push(headerLine);
 
