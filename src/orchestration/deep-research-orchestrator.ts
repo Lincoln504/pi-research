@@ -28,6 +28,12 @@ import {
   MAX_ROUNDS_LEVEL_2,
   MAX_ROUNDS_LEVEL_3,
   MAX_CONCURRENT_RESEARCHERS,
+  MAX_CONCURRENT_LEVEL_1_INITIAL,
+  MAX_CONCURRENT_LEVEL_1_FOLLOWUP,
+  MAX_CONCURRENT_LEVEL_2_INITIAL,
+  MAX_CONCURRENT_LEVEL_2_FOLLOWUP,
+  MAX_CONCURRENT_LEVEL_3_INITIAL,
+  MAX_CONCURRENT_LEVEL_3_FOLLOWUP,
   MAX_REPORT_LENGTH,
   DEFAULT_MODEL_CONTEXT_WINDOW,
   MAX_EXTRA_ROUNDS,
@@ -197,6 +203,43 @@ export class DeepResearchOrchestrator {
       aspects: {},
     };
     this.contextWindowSize = (options.model as any)?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+  }
+
+  /**
+   * Get concurrency limit for a specific round based on complexity and whether it's the first round.
+   * Level 1: 2 initial, 1 follow-up at a time
+   * Level 2: 3 initial, 2 follow-up at a time
+   * Level 3: 3 initial (5 total), 3 follow-up at a time
+   */
+  private getConcurrencyLimit(round: number): number {
+    const isFirstRound = round === 1;
+    switch (this.state.complexity) {
+      case 1:
+        return isFirstRound ? MAX_CONCURRENT_LEVEL_1_INITIAL : MAX_CONCURRENT_LEVEL_1_FOLLOWUP;
+      case 2:
+        return isFirstRound ? MAX_CONCURRENT_LEVEL_2_INITIAL : MAX_CONCURRENT_LEVEL_2_FOLLOWUP;
+      case 3:
+        return isFirstRound ? MAX_CONCURRENT_LEVEL_3_INITIAL : MAX_CONCURRENT_LEVEL_3_FOLLOWUP;
+      default:
+        return MAX_CONCURRENT_RESEARCHERS;
+    }
+  }
+
+  /**
+   * Get delegation limits string for the lead evaluator prompt.
+   * Describes how many researchers the evaluator should delegate based on complexity.
+   */
+  private getDelegationLimits(): string {
+    switch (this.state.complexity) {
+      case 1:
+        return 'Round 1: max 2 queries; follow-ups: max 1 query at a time';
+      case 2:
+        return 'Round 1: max 3 queries; follow-ups: max 2 queries at a time';
+      case 3:
+        return 'Round 1: max 5 total (3 at once); follow-ups: max 3 queries at a time';
+      default:
+        return 'Max 3 queries per round';
+    }
   }
 
   private resolveResult(result: string) {
@@ -398,11 +441,12 @@ export class DeepResearchOrchestrator {
         this.options.onUpdate();
       }
 
-      const allowedToLaunch = Math.max(0, MAX_CONCURRENT_RESEARCHERS - runningAspects.length);
+      const concurrencyLimit = this.getConcurrencyLimit(currentRound);
+      const allowedToLaunch = Math.max(0, concurrencyLimit - runningAspects.length);
       
       if (allowedToLaunch > 0) {
         const toLaunch = pendingAspects.slice(0, allowedToLaunch);
-        logger.log(`[deep-research] Round ${currentRound}: Launching ${toLaunch.length} siblings (Concurrency limit: ${MAX_CONCURRENT_RESEARCHERS}).`);
+        logger.log(`[deep-research] Round ${currentRound}: Launching ${toLaunch.length} siblings (Concurrency limit: ${concurrencyLimit}, Complexity: ${this.state.complexity}).`);
 
         for (let i = 0; i < toLaunch.length; i++) {
           if (i > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
@@ -615,7 +659,7 @@ export class DeepResearchOrchestrator {
       if (targetSession) {
         const finishedDisplayNum = getDisplayNumber(this.state, finished.id);
         const truncatedReport = truncatePreservingLinks(finished.report, MAX_EVALUATOR_REPORT_LENGTH);
-        const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${truncatedReport}`;
+        const injectionMessage = `## UPDATE: Sibling ${finishedDisplayNum} Completed Research\n\n${truncatedReport}\n\n> Note: Use this information to inform your research direction and avoid duplicating effort, but do not repeat or re-cover this information in your own report.`;
         try {
           await targetSession.steer(injectionMessage);
         } catch (err) {
@@ -688,11 +732,13 @@ export class DeepResearchOrchestrator {
 
     const leadPromptRaw = readFileSync(join(__dirname, '..', 'prompts', 'system-lead-evaluator.md'), 'utf-8');
     const originalAgendaStr = this.state.initialAgenda.map(q => `• ${q}`).join('\n');
+    const delegationLimits = this.getDelegationLimits();
     let leadPrompt = leadPromptRaw
       .replace('{ROOT_QUERY}', this.state.rootQuery)
       .replace('{ORIGINAL_AGENDA}', originalAgendaStr)
       .replace('{ROUND_NUMBER}', this.state.currentRound.toString())
-      .replace('{MAX_ROUNDS}', targetRounds.toString());
+      .replace('{MAX_ROUNDS}', targetRounds.toString())
+      .replace('{DELEGATION_LIMITS}', delegationLimits);
 
     if (isAtHardLimit) {
       leadPrompt += '\n\n⚠️ **CRITICAL: ABSOLUTE MAXIMUM REACHED.** You MUST provide a FINAL SYNTHESIS in Markdown format. Do NOT return a JSON delegation object.';

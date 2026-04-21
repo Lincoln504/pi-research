@@ -91,6 +91,8 @@ Do this:
 - ✅ **Report Scrape Candidates**: What you found but didn't scrape, with reasons
 - ✅ **STOP IMMEDIATELY**: Submit report and wait
 
+**Note on Sibling Reports**: When injected sibling reports are present, use their findings to inform your research direction and avoid duplicating effort. Build upon their insights and explore new territory, rather than repeating information they have already covered.
+
 The last researcher to finish inherits **Lead Evaluator** role.
 
 ## Response Format

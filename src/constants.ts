@@ -55,6 +55,24 @@ export const MAX_ROUNDS_LEVEL_2 = 3;
 /** Maximum rounds for complexity 3 (Ultra) */
 export const MAX_ROUNDS_LEVEL_3 = 5;
 
+/** Follow-up concurrent researchers for complexity 1 (Normal) - 1 at a time */
+export const MAX_CONCURRENT_LEVEL_1_FOLLOWUP = 1;
+
+/** Follow-up concurrent researchers for complexity 2 (Deep) - 2 at a time */
+export const MAX_CONCURRENT_LEVEL_2_FOLLOWUP = 2;
+
+/** Follow-up concurrent researchers for complexity 3 (Ultra) - 3 at a time */
+export const MAX_CONCURRENT_LEVEL_3_FOLLOWUP = 3;
+
+/** Maximum concurrent researchers for complexity 1 initial round */
+export const MAX_CONCURRENT_LEVEL_1_INITIAL = 2;
+
+/** Maximum concurrent researchers for complexity 2 initial round */
+export const MAX_CONCURRENT_LEVEL_2_INITIAL = 3;
+
+/** Maximum concurrent researchers for complexity 3 initial round */
+export const MAX_CONCURRENT_LEVEL_3_INITIAL = 3;
+
 /**
  * Extra rounds the lead evaluator may earn beyond targetRounds when it judges
  * critical gaps still exist. Rounds targetRounds+1 through targetRounds+MAX_EXTRA_ROUNDS

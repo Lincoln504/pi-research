@@ -8,6 +8,7 @@ You orchestrate the next phase of research.
 - **ORIGINAL AGENDA**: {ORIGINAL_AGENDA}
 - **Current round**: {ROUND_NUMBER}
 - **Target rounds**: {MAX_ROUNDS}
+- **Delegation limits**: {DELEGATION_LIMITS}
 
 You have reports from all researchers in this round. Some reports may contain errors (see Step 0).
 
@@ -206,6 +207,7 @@ Provide a JSON object with `action` and `queries` fields:
 - Consider what information would most transform understanding
 - Avoid duplicating already-researched topics
 - Ensure queries specific enough to yield actionable results
+- **Respect delegation limits specified above** — do not exceed the maximum number of queries for the current depth setting
 
 ---
 
