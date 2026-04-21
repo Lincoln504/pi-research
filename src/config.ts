@@ -39,7 +39,7 @@ const DEFAULTS: Config = {
   MAX_CONCURRENT_RESEARCHERS: 3,
   PROXY_URL: undefined,
   BRAVE_SEARCH_API_KEY: undefined,
-  HEALTH_CHECK_TIMEOUT_MS: 15000,
+  HEALTH_CHECK_TIMEOUT_MS: 25000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
   SEARCH_LANGUAGE: 'en-US',
@@ -162,6 +162,12 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.MAX_CONCURRENT_RESEARCHERS < 1 || config.MAX_CONCURRENT_RESEARCHERS > 10) {
     throw new Error(
       `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS must be between 1 and 10, got ${config.MAX_CONCURRENT_RESEARCHERS}`
+    );
+  }
+
+  if (config.HEALTH_CHECK_TIMEOUT_MS !== undefined && (config.HEALTH_CHECK_TIMEOUT_MS < 20000 || config.HEALTH_CHECK_TIMEOUT_MS > 60000)) {
+    throw new Error(
+      `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS must be between 20000ms (20s) and 60000ms (60s), got ${config.HEALTH_CHECK_TIMEOUT_MS}ms`
     );
   }
 
