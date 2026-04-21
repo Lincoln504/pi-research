@@ -11,7 +11,7 @@
  */
 
 import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { createAgentSession, createReadTool, SessionManager } from '@mariozechner/pi-coding-agent';
+import { createAgentSession, SessionManager } from '@mariozechner/pi-coding-agent';
 import type { Model } from '@mariozechner/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
@@ -73,7 +73,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   try {
     const result = await createAgentSession({
       cwd,
-      tools: [createReadTool(cwd)],
       customTools: createResearchTools({
         searxngUrl,
         ctx: extensionCtx,
