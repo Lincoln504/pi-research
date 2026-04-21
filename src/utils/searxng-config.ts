@@ -42,8 +42,9 @@ export function getActiveSearxngEngines(): string[] {
     const content = readFileSync(configPath, 'utf-8');
     const allEngines = parseYamlEngines(content);
 
-    // List of general purpose search engines (whitelist approach is safer)
-    const knownGeneralEngines = ['google', 'bing', 'brave', 'duckduckgo', 'startpage', 'mojeek', 'qwant'];
+    // List of general purpose search engines (whitelist approach is safer).
+    // Keep in sync with enabled engines in config/searxng/default-settings.yml.
+    const knownGeneralEngines = ['google', 'bing', 'brave', 'duckduckgo', 'startpage', 'mojeek', 'qwant', 'yahoo'];
 
     // Filter for general search engines only
     const activeGeneralEngines = allEngines

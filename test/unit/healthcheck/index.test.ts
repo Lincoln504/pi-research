@@ -98,7 +98,7 @@ describe('healthcheck', () => {
     expect(result.error).toContain('No working engines found');
   });
 
-  it('should fail when scrape validation fails (empty content)', async () => {
+  it('should fail when all scrape canaries return empty content', async () => {
     const { search } = await import('../../../src/web-research/search.ts');
     const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
 
@@ -109,6 +109,7 @@ describe('healthcheck', () => {
       },
     ]);
 
+    // All canaries return empty content
     vi.mocked(scrapeSingle).mockResolvedValue({
       url: 'https://en.wikipedia.org/wiki/Python',
       markdown: '   ', // Empty/whitespace
@@ -119,7 +120,28 @@ describe('healthcheck', () => {
 
     expect(result.success).toBe(false);
     expect(result.scrapeOk).toBe(false);
-    expect(result.error).toContain('Scrape validation failed');
+    expect(result.error).toContain('Scrape failed on all canary URLs');
+  });
+
+  it('should pass when first canary fails but second succeeds', async () => {
+    const { search } = await import('../../../src/web-research/search.ts');
+    const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
+
+    vi.mocked(search).mockResolvedValue([
+      {
+        query: 'open source software',
+        results: [{ engine: 'google', title: 't1', url: 'u1', content: 'c1' }],
+      },
+    ]);
+
+    vi.mocked(scrapeSingle)
+      .mockResolvedValueOnce({ url: 'c1', markdown: '', source: 'failed' } as any) // first canary fails
+      .mockResolvedValue({ url: 'c2', markdown: 'Substantial readable content here', source: 'searxng' } as any);
+
+    const result = await runHealthCheck();
+
+    expect(result.success).toBe(true);
+    expect(result.scrapeOk).toBe(true);
   });
 
   it('should skip health check if PI_RESEARCH_SKIP_HEALTHCHECK is set', async () => {
