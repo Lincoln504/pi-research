@@ -145,7 +145,7 @@ async function performHealthCheck(): Promise<HealthCheckResult> {
       return result;
     }
 
-    // Check for at least 2 working general search engines (not Wikipedia)
+    // Check for at least 1 working general search engine (not Wikipedia)
     // Wikipedia is an encyclopedic engine, not suitable for general web research
     // Load the list of active engines from the actual SearXNG config (not hardcoded)
     const generalEngines = getActiveSearxngEngines();
@@ -192,53 +192,59 @@ async function performHealthCheck(): Promise<HealthCheckResult> {
     const workingEnginesList = workingEngines.map(([e, _]) => e).join(', ');
     logger.log(`[healthcheck] ✓ Search OK: ${generalResults.length} results from ${workingEngineCount} engines [${workingEnginesList}] in ${searchDurationMs}ms`);
 
-    // PHASE 2: Test scrape with timeout enforcement
+    // PHASE 2: Test scrape with timeout enforcement (first-success across canary URLs)
+    const scrapeCanaries = [
+      'https://en.wikipedia.org/wiki/Python_(programming_language)',
+      'https://example.com',
+      'https://developer.mozilla.org/en-US/docs/Web/HTTP',
+    ];
     logger.log('[healthcheck] Phase 2: Testing scrape tool (timeout: ' + SCRAPE_TIMEOUT_MS + 'ms)...');
-    const scrapeUrl = 'https://en.wikipedia.org/wiki/Python_(programming_language)';
     const scrapeStartTime = Date.now();
 
     let scrapeResult;
-    try {
-      scrapeResult = await withTimeout(
-        scrapeSingle(scrapeUrl),
-        SCRAPE_TIMEOUT_MS,
-        'Scrape'
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.error = `Scrape request failed: ${msg}. Network timeout or target unreachable.`;
-      logger.error('[healthcheck]', result.error);
-      return result;
+    let scrapeUrl = '';
+    let lastScrapeError = '';
+    for (const canary of scrapeCanaries) {
+      try {
+        const candidate = await withTimeout(
+          scrapeSingle(canary),
+          SCRAPE_TIMEOUT_MS,
+          'Scrape'
+        );
+        if (!candidate || candidate.source === 'failed') {
+          lastScrapeError = candidate?.error || 'scraper returned failed';
+          logger.log(`[healthcheck] Scrape canary ${canary} failed (${lastScrapeError}), trying next...`);
+          continue;
+        }
+        const validation = validateScrapeOutput(candidate.markdown || '');
+        if (!validation.valid) {
+          lastScrapeError = validation.error || 'content invalid';
+          logger.log(`[healthcheck] Scrape canary ${canary} content invalid (${lastScrapeError}), trying next...`);
+          continue;
+        }
+        scrapeResult = candidate;
+        scrapeUrl = canary;
+        break;
+      } catch (err) {
+        lastScrapeError = err instanceof Error ? err.message : String(err);
+        logger.log(`[healthcheck] Scrape canary ${canary} threw (${lastScrapeError}), trying next...`);
+      }
     }
 
     const scrapeDurationMs = Date.now() - scrapeStartTime;
 
     if (!scrapeResult) {
-      result.error = 'Scrape returned null result (scraper crashed?)';
+      result.error = `Scrape failed on all canary URLs: ${lastScrapeError}`;
       logger.error('[healthcheck]', result.error);
       return result;
     }
 
-    if (scrapeResult.source === 'failed') {
-      result.error = `Scrape failed: ${scrapeResult.error || 'unknown error'}. Check if target URL is accessible.`;
-      logger.error('[healthcheck]', result.error);
-      return result;
-    }
-
-    // ROBUST validation of scraped content
     const markdown = scrapeResult.markdown || '';
-    const scrapeValidation = validateScrapeOutput(markdown);
-    if (!scrapeValidation.valid) {
-      result.error = `Scrape validation failed: ${scrapeValidation.error}`;
-      logger.error('[healthcheck]', result.error);
-      return result;
-    }
-
     result.scrapeOk = true;
     result.details.scrapedUrl = scrapeUrl;
     result.details.scrapedContentLength = markdown.length;
     result.details.scrapedDurationMs = scrapeDurationMs;
-    logger.log(`[healthcheck] ✓ Scrape OK: ${markdown.length} bytes in ${scrapeDurationMs}ms`);
+    logger.log(`[healthcheck] ✓ Scrape OK: ${markdown.length} bytes from ${scrapeUrl} in ${scrapeDurationMs}ms`);
 
     // All checks passed
     result.success = true;
