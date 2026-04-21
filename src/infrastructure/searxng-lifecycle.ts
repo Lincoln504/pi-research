@@ -239,12 +239,14 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
     const defaultSettingsPath = path.join(
       this.config.extensionDir,
       'config',
+      'searxng',
       'default-settings.yml'
     );
     const uniqueId = this.sessionId?.substring(0, 8) || Math.random().toString(36).substring(2, 8);
     const runtimeSettingsPath = path.join(
       this.config.extensionDir,
       'config',
+      'searxng',
       `runtime-settings-${uniqueId}.yml`
     );
 

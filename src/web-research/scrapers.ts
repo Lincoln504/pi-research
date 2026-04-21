@@ -137,6 +137,7 @@ initScraperDependencies();
 
 let sharedBrowser: Browser | null = null;
 let sharedBrowserLaunchPromise: Promise<Browser> | null = null;
+let chromiumInstallAttempted = false;
 
 function getBrowser(): Promise<Browser> {
   // Return existing connected browser
@@ -166,6 +167,46 @@ function getBrowser(): Promise<Browser> {
       });
       logger.log('[Scrapers] Chromium launched');
       return sharedBrowser;
+    } catch (error) {
+      // Check if this is a missing executable error and we haven't tried installing yet
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const isMissingExecutableError =
+        errorMsg.includes('Executable') ||
+        errorMsg.includes('executable') ||
+        errorMsg.includes('not found') ||
+        errorMsg.includes('ENOENT') ||
+        errorMsg.includes('doesn\'t exist');
+
+      if (isMissingExecutableError && !chromiumInstallAttempted) {
+        chromiumInstallAttempted = true;
+        logger.log('[Scrapers] Chromium executable not found, installing...');
+
+        try {
+          // Dynamically import execSync to avoid top-level import
+          const { execSync } = await import('child_process');
+          execSync('npx playwright install chromium', {
+            stdio: 'inherit',
+            env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' },
+          });
+          logger.log('[Scrapers] Chromium installed, retrying launch...');
+
+          // Retry launch after installation
+          const playwright = require('playwright') as PlaywrightModule;
+          sharedBrowser = await playwright.chromium.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+          });
+          logger.log('[Scrapers] Chromium launched');
+          return sharedBrowser;
+        } catch (installError) {
+          // Log installation failure but let the original error propagate
+          logger.error('[Scrapers] Failed to install Chromium:', installError);
+          throw error; // Re-throw the original launch error
+        }
+      }
+
+      // Re-throw non-executable errors or if installation was already attempted
+      throw error;
     } finally {
       // Always clear the promise — success or failure — so the next call
       // retries the launch rather than returning a permanently cached rejection.

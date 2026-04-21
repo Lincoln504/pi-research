@@ -486,6 +486,14 @@ export class StateManager {
   /**
    * Get process start time from /proc/{pid}/stat (Linux only)
    * This is field 22 (starting after field 22, which starts after 21 spaces)
+   *
+   * Platform limitation: PID reuse detection is only available on Linux.
+   * On macOS and Windows, the /proc filesystem does not exist, so we cannot
+   * detect when a PID has been reused. This means a stale session with a
+   * reused PID could incorrectly appear as still alive. The impact is low:
+   * - On Linux: PIDs are uniquely identified by (pid, startTime) pair
+   * - On macOS/Windows: Only pid is used, so reuse detection is not possible
+   *
    * @param pid Process ID
    * @returns Process start time in jiffies (clock ticks since boot) or undefined
    */

@@ -70,7 +70,11 @@
   "optionalDependencies": {
     "@kreuzberg/html-to-markdown-node-darwin-arm64": "^2.30.0",
     "@kreuzberg/html-to-markdown-node-darwin-x64": "^2.30.0",
-    "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
+    "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-x64-gnu": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-arm64-gnu": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-x64-musl": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-arm64-musl": "^2.30.0"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.65.0",

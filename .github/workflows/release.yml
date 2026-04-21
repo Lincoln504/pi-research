@@ -13,9 +13,62 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  test-install:
+    name: Test packed tarball install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Verify tag matches version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
+
+      - name: Build and pack
+        run: |
+          npm ci
+          npm pack
+          TAR_FILE="$(ls *.tgz)"
+          echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
+
+      - name: Test install from tarball in clean environment
+        run: |
+          # Create a temporary directory for a clean install test
+          cd /tmp
+          mkdir pi-test-install
+          cd pi-test-install
+
+          # Initialize a fresh package.json
+          npm init -y
+
+          # Install the packed tarball with postinstall enabled
+          npm install "${{ github.workspace }}/${TAR_FILE}" --ignore-scripts=false
+
+          # Verify key files exist
+          test -d node_modules/@lincoln504/pi-research/src || { echo "❌ src/ not found in installed package"; exit 1; }
+          test -d node_modules/@lincoln504/pi-research/config || { echo "❌ config/ not found in installed package"; exit 1; }
+          test -d node_modules/@lincoln504/pi-research/scripts || { echo "❌ scripts/ not found in installed package"; exit 1; }
+          test -f node_modules/@lincoln504/pi-research/package.json || { echo "❌ package.json not found in installed package"; exit 1; }
+
+          # Verify setup.js exists and is executable
+          test -f node_modules/@lincoln504/pi-research/scripts/setup.js || { echo "❌ scripts/setup.js not found in installed package"; exit 1; }
+
+          # Verify key config files are included
+          test -f node_modules/@lincoln504/pi-research/config/searxng/default-settings.yml || { echo "❌ default-settings.yml not found in installed package"; exit 1; }
+          test -f node_modules/@lincoln504/pi-research/config/searxng/limiter.toml || { echo "❌ limiter.toml not found in installed package"; exit 1; }
+
+          echo "✅ Install smoke-test passed"
+
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    needs: test-install
     steps:
       - uses: actions/checkout@v4
 

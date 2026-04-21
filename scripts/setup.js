@@ -64,7 +64,6 @@ const isWindows = platform() === 'win32';
 console.log(`\n📦 Detected platform: ${platform()}`);
 
 // Track installation success
-let playwrightInstalled = false;
 let browsersInstalled = false;
 let systemDepsInstalled = false;
 
@@ -171,13 +170,12 @@ console.log('\n🔍 Browser versions:');
 try {
   const playwrightVersion = execSync('npx playwright --version', { encoding: 'utf8' }).trim();
   console.log(`   Playwright: ${playwrightVersion}`);
-  playwrightInstalled = true;
 } catch (error) {
   console.warn('   Could not determine Playwright version');
 }
 
 // Final status message
-const setupComplete = browsersInstalled && playwrightInstalled;
+const setupComplete = browsersInstalled;
 
 console.log('\n' + '='.repeat(60));
 if (setupComplete) {
