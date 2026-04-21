@@ -114,7 +114,7 @@ export function withTimeout<T>(
     }
 
     combinedSignal.addEventListener('abort', () => {
-      if (!raceWon) {
+      if (!raceWon && !aborted) {
         logger.error(`[withTimeout] ${label} EXTERNAL ABORT SIGNAL FIRED`);
         aborted = true;
         if (timeoutId) clearTimeout(timeoutId);
@@ -125,6 +125,7 @@ export function withTimeout<T>(
     // Timeout handler
     timeoutId = setTimeout(() => {
       if (!raceWon && !aborted) {
+        aborted = true;
         logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
         timeoutController.abort();
         reject(new Error(`${label} timeout after ${timeoutMs}ms`));
