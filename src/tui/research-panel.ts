@@ -406,11 +406,14 @@ function renderPanelBlock(
       // Token Row (always row 1)
       let tokenStr: string;
       if (isEval) {
-        const evalDisplay = 'Eval'.length > w ? 'Eval'.slice(0, w) : 'Eval';
-        // Eval box: double borders on BOTH sides
-        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
-        const centered = evalDisplay.length > contentWidth ? evalDisplay.slice(0, contentWidth) : 
-          evalDisplay.padStart(Math.floor((contentWidth + evalDisplay.length) / 2)).padEnd(contentWidth);
+        // Eval box: double borders on BOTH sides (││ on left, ││ on right = 4 chars total)
+        const borderChars = 4; // Both left and right double borders
+        const contentWidth = Math.max(1, w - borderChars);
+        const evalDisplay = 'Eval'.length > contentWidth ? 'Eval'.slice(0, contentWidth) : 'Eval';
+        const padding = contentWidth - evalDisplay.length;
+        const leftPad = Math.floor(padding / 2);
+        const rightPad = padding - leftPad;
+        const centered = ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad);
         tokenStr = '││' + centered;
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
@@ -429,8 +432,9 @@ function renderPanelBlock(
       // Cost Row (row 2)
       let costStr: string;
       if (isEval) {
-        // Eval box: double borders on BOTH sides
-        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
+        // Eval box: double borders on BOTH sides (same as token row)
+        const borderChars = 4; // Both left and right double borders
+        const contentWidth = Math.max(1, w - borderChars);
         costStr = '││' + ' '.repeat(contentWidth);
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
@@ -552,11 +556,50 @@ export function createMasterResearchPanel(
         for (let i = 0; i < panels.length; i++) {
           const panel = panels[i]!;
           
-          // Header line for each block
+          // Header line for each block (constant-width design with rounded corners)
           const pctStr = renderProgressPct(panel.progress);
-          const status = panel.statusMessage ? ` [${panel.statusMessage}] ` : '';
-          const headerText = pctStr ? ` Research: ${pctStr}${status} ` : (status ? ` Research: ${status} ` : ` Research `);
-          const headerLine = theme.fg('accent', '─'.repeat(2)) + theme.fg('muted', headerText) + theme.fg('accent', '─'.repeat(Math.max(0, width - 2 - headerText.length)));
+          const status = panel.statusMessage ? `[${panel.statusMessage}]` : '';
+          let headerText: string;
+          if (pctStr) {
+            headerText = status ? ` Research: ${pctStr} (${status})` : ` Research: ${pctStr}`;
+          } else {
+            headerText = status ? ` Research (${status})` : ` Research`;
+          }
+
+          // Calculate header width with intelligent shrinking
+          const minWidth = 16; // Minimum width for " Research: 100% "
+          const maxHeaderWidth = Math.min(width - 4, 40); // Leave padding, max 40 chars
+          let headerWidth = Math.max(minWidth, maxHeaderWidth);
+
+          // Shrink if too narrow
+          if (headerText.length > headerWidth) {
+            if (pctStr) {
+              headerText = status ? ` ${pctStr}% (${status})` : ` ${pctStr}%`;
+            } else {
+              headerText = status ? ` (${status})` : '';
+            }
+            if (headerText.length > headerWidth) {
+              // Shorten status message
+              const maxStatusLen = headerWidth - (pctStr ? 6 : 2);
+              if (status && maxStatusLen > 3) {
+                headerText = pctStr ? ` ${pctStr}% (${status.slice(0, maxStatusLen)}..)` : ` (${status.slice(0, maxStatusLen)}..)`;
+              } else {
+                headerText = pctStr ? ` ${pctStr}%` : '';
+              }
+            }
+            if (headerText.length > headerWidth) {
+              // Truncate percentage if needed
+              headerText = pctStr ? ` ${Math.round(parseFloat(pctStr))}%` : '';
+            }
+            // Recalculate width to fit content
+            headerWidth = Math.max(minWidth, headerText.length + 2);
+          }
+
+          // Render header with rounded corners: ╰─ text ─╮
+          const leftDecor = theme.fg('accent', '╰─');
+          const rightDecor = theme.fg('accent', '─╮');
+          const paddedText = headerText.padEnd(headerWidth);
+          const headerLine = leftDecor + theme.fg('muted', paddedText) + rightDecor;
           allLines.push(headerLine);
 
           // Show SearXNG box only for the bottom-most panel in the Master Widget stack
