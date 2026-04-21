@@ -360,17 +360,26 @@ function renderPanelBlock(
       const w = colW(i);
       const isLast = i === totalCols - 1;
       
-      // Top Border with Label
+      // Check if this is an eval column (has rounded borders on BOTH sides)
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
       const isEval = labelStr === 'Eval';
+      
+      // Top Border with Label
       const cornerLabel = `┐ ${labelStr} ┌`;
       const canShowCornerLabel = w >= cornerLabel.length;
       const canShowBasicLabel = w >= labelStr.length + 2;
 
       let topPart;
       if (isEval) {
-        topPart = '─'.repeat(w);
+        // Eval box: rounded top corners on both sides
+        // Reserve space for corners on both sides
+        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
+        if (contentWidth > 0) {
+          topPart = '╭' + '─'.repeat(contentWidth);
+        } else {
+          topPart = '╭';
+        }
       } else if (canShowCornerLabel) {
         const sideWidth = w - cornerLabel.length;
         const leftPad = Math.floor(sideWidth / 2);
@@ -384,14 +393,25 @@ function renderPanelBlock(
       } else {
         topPart = '─'.repeat(w);
       }
-      rightRawRows[0]!.push(topPart + (isLast ? '┐' : '┬'));
+      
+      // Determine right border character based on if next column is eval
+      const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
+      const nextSlice = nextSliceId ? state.slices.get(nextSliceId) : null;
+      const nextIsEval = nextSlice?.label === 'Eval';
+      const topRightCorner = nextIsEval ? '╮' : (isLast ? '┐' : '┬');
+      
+      rightRawRows[0]!.push(topPart + topRightCorner);
       rightColors[0]!.push('accent');
 
       // Token Row (always row 1)
       let tokenStr: string;
       if (isEval) {
         const evalDisplay = 'Eval'.length > w ? 'Eval'.slice(0, w) : 'Eval';
-        tokenStr = evalDisplay.padStart(Math.floor((w + evalDisplay.length) / 2)).padEnd(w);
+        // Eval box: double borders on BOTH sides
+        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
+        const centered = evalDisplay.length > contentWidth ? evalDisplay.slice(0, contentWidth) : 
+          evalDisplay.padStart(Math.floor((contentWidth + evalDisplay.length) / 2)).padEnd(contentWidth);
+        tokenStr = '││' + centered;
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
@@ -401,14 +421,17 @@ function renderPanelBlock(
         const display = raw.length > w ? raw.slice(0, w) : raw;
         tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      rightRawRows[1]!.push(tokenStr + '│');
+      const vBorder = isEval ? '││' : '│';
+      rightRawRows[1]!.push(tokenStr + vBorder);
       const flashColor = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
       rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
       // Cost Row (row 2)
       let costStr: string;
       if (isEval) {
-        costStr = ' '.repeat(w);
+        // Eval box: double borders on BOTH sides
+        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
+        costStr = '││' + ' '.repeat(contentWidth);
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -419,11 +442,23 @@ function renderPanelBlock(
         const display = raw.length > w ? raw.slice(0, w) : raw;
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      rightRawRows[2]!.push(costStr + '│');
+      rightRawRows[2]!.push(costStr + vBorder);
       rightColors[2]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
-      // Bottom Border
-      rightRawRows[3]!.push('─'.repeat(w) + (isLast ? '┘' : '┴'));
+      // Bottom Border - rounded corners for eval on both sides
+      let bottomContent;
+      if (isEval) {
+        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
+        if (contentWidth > 0) {
+          bottomContent = '╰' + '─'.repeat(contentWidth);
+        } else {
+          bottomContent = '╰';
+        }
+      } else {
+        bottomContent = '─'.repeat(w);
+      }
+      const bottomRightCorner = nextIsEval ? '╯' : (isLast ? '┘' : '┴');
+      rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
     }
   }
