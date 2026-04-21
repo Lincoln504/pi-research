@@ -444,7 +444,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
         isFunctional: false,
       };
 
-      this.initialized = true;
+      // Don't set initialized=true on error path — this would prevent retries
+      // The initializationPromise will be cleared by the finally block, allowing future attempts
       this.notifyStatusChange();
 
       throw error;

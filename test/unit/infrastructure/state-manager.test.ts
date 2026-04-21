@@ -44,18 +44,22 @@ describe('StateManager Integration-style Tests', () => {
   });
 
   it('should update heartbeat', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    
     await manager.addSession('session-1', 'container-1');
     const state1 = await manager.readState();
     const lastSeen1 = state1.sessions['session-1']?.lastSeen ?? 0;
 
     // Small delay to ensure timestamp changes
-    await new Promise(r => setTimeout(r, 10));
+    vi.advanceTimersByTime(10);
     
     await manager.updateHeartbeat('session-1');
     const state2 = await manager.readState();
     const lastSeen2 = state2.sessions['session-1']?.lastSeen ?? 0;
     
     expect(lastSeen2).toBeGreaterThan(lastSeen1);
+    vi.useRealTimers();
   });
 
   it('should remove session', async () => {
@@ -67,6 +71,8 @@ describe('StateManager Integration-style Tests', () => {
   });
 
   it('should handle file locking', async () => {
+    // Use real timers for this test since file locking uses actual async operations
+    // that are compatible with real locks
     // Start a long-running update
     const p1 = manager.updateState(async (state) => {
       await new Promise(r => setTimeout(r, 100)); // Hold lock for 100ms

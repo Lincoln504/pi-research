@@ -57,7 +57,8 @@ describe('retry-utils', () => {
 
   describe('createTimeoutSignal', () => {
     it('should create a signal that aborts after timeout', async () => {
-      // Use short real timer for this one
+      // Use real timers for this test since AbortSignal.timeout() is native
+      // and can't be controlled by Vitest's fake timers
       const signal = createTimeoutSignal(50);
       expect(signal.aborted).toBe(false);
       

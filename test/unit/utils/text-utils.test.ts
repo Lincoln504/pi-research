@@ -99,5 +99,30 @@ describe('text-utils', () => {
       } as any;
       expect(ensureAssistantResponse(session, 'Test')).toBe('aborted findings');
     });
+
+    it('should throw if last assistant message has zero text blocks', () => {
+      const session = {
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', content: [] }, // Empty array = zero text blocks
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test'))
+        .toThrow('Test: Researcher produced no text output');
+    });
+
+    it('should throw if last assistant message has only non-text blocks', () => {
+      const session = {
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', content: [
+            { type: 'thinking', content: 'Internal reasoning...' },
+            { type: 'tool_call', tool: 'search', args: { query: 'test' } },
+          ] },
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test'))
+        .toThrow('Test: Researcher produced no text output');
+    });
   });
 });

@@ -7,12 +7,11 @@
   "main": "./src/index.ts",
   "files": [
     "src/",
-    "config/",
+    "config/searxng/",
     "docs/",
     "scripts/",
     "LICENSE",
-    "README.md",
-    "tsconfig.json"
+    "README.md"
   ],
   "repository": {
     "type": "git",
@@ -50,7 +49,7 @@
     "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
-    "postinstall": "node scripts/setup.js || exit 0",
+    "postinstall": "node scripts/setup.js",
     "install:browsers": "npx playwright install chromium",
     "install:deps": "npx playwright install-deps chromium",
     "setup": "npm run install:browsers"
