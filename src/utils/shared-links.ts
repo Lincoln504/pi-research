@@ -17,6 +17,22 @@ export function generateSessionId(piSessionId: string): string {
 }
 
 /**
+ * Format a lightweight update message for real-time link sharing.
+ */
+export function formatLightweightLinkUpdate(
+  newlyScrapedUrls: string[],
+  sourceResearcherId: string,
+  sourceResearcherName: string
+): string {
+  if (newlyScrapedUrls.length === 0) return '';
+
+  return `## Link Update: Sibling ${sourceResearcherId} (${sourceResearcherName}) Just Scraped\n\n` +
+    `**${newlyScrapedUrls.length} link(s) added to shared pool:**\n` +
+    newlyScrapedUrls.map(url => `- ${url}`).join('\n') +
+    '\n\n> These links are now in the global pool — avoid re-scraping them.';
+}
+
+/**
  * Register links as scraped for a specific session.
  */
 export function registerScrapedLinks(researchId: string, links: string[]) {

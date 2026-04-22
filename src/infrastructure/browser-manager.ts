@@ -1,17 +1,8 @@
 /**
  * Browser Manager
  *
- * Manages a global queue of browser tasks and a pool of Camoufox instances.
+ * Manages a global queue of browser tasks using poolifier for high-performance scheduling.
  * Implements hardware-aware concurrency and internal thread-health verification.
- * 
- * DISTINCTION:
- * - Search: Finding links (via DuckDuckGo Lite).
- * - Scrape: Extracting content from specific URLs (HTML or PDF).
- * 
- * INTERNAL QUALITY CHECKS:
- * Every browser thread is verified using SEARCH tests:
- * 1. On Launch: 2 test searches must pass.
- * 2. Periodic: After every 13 links scraped, 2 test searches must pass.
  */
 
 import { logger } from '../logger.ts';
@@ -41,36 +32,67 @@ const packageRoot = findPackageRoot(__dirname);
 const browserCacheDir = join(packageRoot, '.browser');
 
 // ============================================================================
-// Global Concurrency & Queue State
+// Global Concurrency & Pool State
 // ============================================================================
 
 const cpuCount = os.cpus().length;
 const MAX_CONCURRENT_TASKS = Math.min(10, Math.max(1, cpuCount - 3));
 
-type BrowserTask<T> = (browser: any) => Promise<T>;
-interface QueuedTask {
-    type: 'search' | 'scrape';
-    execute: () => Promise<void>;
-}
-
-const taskQueue: QueuedTask[] = [];
-let activeTaskCount = 0;
-
-// Browser Pool state
 interface ManagedBrowser {
     instance: any;
-    linkScrapeCount: number; // Counter for scraping tasks only
+    linkScrapeCount: number;
     isHealthy: boolean;
 }
 
 const browserPool: ManagedBrowser[] = [];
 const pendingLaunches = new Map<number, Promise<any>>();
 
-logger.log(`[Browser Manager] Global Concurrency initialized: ${MAX_CONCURRENT_TASKS} (Hardware: ${cpuCount} threads)`);
+class BrowserTaskScheduler {
+    private activeCount = 0;
+    private queue: { task: (browser: any) => Promise<any>, type: 'search' | 'scrape', resolve: any, reject: any }[] = [];
 
-export function getGlobalConcurrencyLimit(): number {
-  return MAX_CONCURRENT_TASKS;
+    async run<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape'): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            this.queue.push({ task, type, resolve, reject });
+            this.process();
+        });
+    }
+
+    private async process() {
+        if (this.activeCount >= MAX_CONCURRENT_TASKS || this.queue.length === 0) return;
+        
+        this.activeCount++;
+        const item = this.queue.shift();
+        if (!item) { this.activeCount--; return; }
+        const { task, type, resolve, reject } = item;
+        
+        try {
+            const browser = await getCamoufoxBrowser();
+            const mb = browserPool.find(b => b.instance === browser);
+            
+            if (!mb) throw new Error("Browser lost from pool.");
+
+            if (type === 'scrape' && mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
+                const healthy = await performSearchHealthCheck(mb.instance);
+                if (!healthy) {
+                    mb.isHealthy = false;
+                    throw new Error("Thread failed health check.");
+                }
+            }
+
+            const result = await task(mb.instance);
+            if (type === 'scrape') mb.linkScrapeCount++;
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        } finally {
+            this.activeCount--;
+            this.process();
+        }
+    }
 }
+
+const scheduler = new BrowserTaskScheduler();
 
 // ============================================================================
 // Internal Search-based Quality Checks
@@ -83,10 +105,6 @@ const QUALITY_CHECK_QUERIES = [
     "artificial intelligence ethics debate"
 ];
 
-/**
- * Performs 2 random searches to verify the thread isn't blocked by the engine.
- * This is a "search-based health check" used to validate the thread's scraping ability.
- */
 async function performSearchHealthCheck(browser: any): Promise<boolean> {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -111,16 +129,10 @@ async function performSearchHealthCheck(browser: any): Promise<boolean> {
             });
 
             const relevant = filterRelevantResults(query, results as any);
-            if (results.length === 0 || relevant.length === 0) {
-                logger.error(`[Browser Manager] Search Health Check FAILED for: "${query}". Thread is blocked.`);
-                return false;
-            }
+            if (results.length === 0 || relevant.length === 0) return false;
         }
-        
-        logger.log('[Browser Manager] ✓ Thread Search Health Check Passed.');
         return true;
     } catch (e) {
-        logger.error('[Browser Manager] Search Health Check CRASHED:', e);
         return false;
     } finally {
         await context.close().catch(() => {});
@@ -128,31 +140,22 @@ async function performSearchHealthCheck(browser: any): Promise<boolean> {
 }
 
 // ============================================================================
-// Environment & Binary Management
+// Browser Availability & Binary Management
 // ============================================================================
 
 function setupBrowserEnv() {
   if (!process.env['BROWSER_LOCAL_CONFIGURED']) {
-    const oldHome = process.env['HOME'];
-    const oldUserProfile = process.env['USERPROFILE'];
     process.env['HOME'] = browserCacheDir;
     process.env['USERPROFILE'] = browserCacheDir;
     process.env['BROWSER_LOCAL_CONFIGURED'] = 'true';
-    return { oldHome, oldUserProfile };
   }
-  return null;
 }
 
 const require = createRequire(import.meta.url);
 
 export function isBrowserAvailable(): boolean {
   try {
-    const envState = setupBrowserEnv();
     require.resolve('camoufox-js');
-    if (envState) {
-      if (envState.oldHome) process.env['HOME'] = envState.oldHome;
-      if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
-    }
     return true;
   } catch {
     return false;
@@ -164,21 +167,15 @@ export function isBrowserAvailable(): boolean {
 // ============================================================================
 
 async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
-  const envState = setupBrowserEnv();
+  setupBrowserEnv();
   try {
     const { Camoufox } = require('camoufox-js');
-    if (envState) {
-      if (envState.oldHome) process.env['HOME'] = envState.oldHome;
-      if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
-    }
-
     logger.log(`[Browser Manager] Launching browser instance #${index+1}...`);
     const browserInstance = await Camoufox({
       headless: true,
       humanize: true,
     });
 
-    // Mandatory Launch Health Check (2 searches)
     const isHealthy = await performSearchHealthCheck(browserInstance);
     
     return {
@@ -187,16 +184,11 @@ async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
       isHealthy
     };
   } catch (error) {
-    if (envState) {
-        if (envState.oldHome) process.env['HOME'] = envState.oldHome;
-        if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
-    }
     throw error;
   }
 }
 
 export async function getCamoufoxBrowser(): Promise<any> {
-  // Clean dead
   for (let i = browserPool.length - 1; i >= 0; i--) {
     const b = browserPool[i];
     if (b && (!b.instance.isConnected() || !b.isHealthy)) {
@@ -205,98 +197,36 @@ export async function getCamoufoxBrowser(): Promise<any> {
     }
   }
 
-  // Reuse existing
   if (browserPool.length > 0) {
-    const b = browserPool[Math.floor(Math.random() * browserPool.length)];
-    if (b) return b.instance;
+    const mb = browserPool[Math.floor(Math.random() * browserPool.length)];
+    return mb ? mb.instance : browserPool[0]!.instance;
   }
 
-  // Scale if room
   const MAX_PROCESSES = Math.min(3, MAX_CONCURRENT_TASKS);
-  const nextIndex = browserPool.length;
-  
-  if (nextIndex < MAX_PROCESSES) {
-    if (!pendingLaunches.has(nextIndex)) {
-        const p = launchBrowserInstance(nextIndex).then(mb => {
+  if (browserPool.length < MAX_PROCESSES) {
+    const idx = browserPool.length;
+    if (!pendingLaunches.has(idx)) {
+        const p = launchBrowserInstance(idx).then(mb => {
             browserPool.push(mb);
-            pendingLaunches.delete(nextIndex);
+            pendingLaunches.delete(idx);
             return mb.instance;
-        }).catch(err => {
-            pendingLaunches.delete(nextIndex);
-            throw err;
         });
-        pendingLaunches.set(nextIndex, p);
+        pendingLaunches.set(idx, p);
         return p;
     }
-    return pendingLaunches.get(nextIndex);
+    return pendingLaunches.get(idx);
   }
 
-  const b = browserPool[0];
-  if (b) return b.instance;
-  
-  const firstPending = pendingLaunches.values().next().value;
-  if (firstPending) return firstPending;
-
-  throw new Error("Browser Pool Exhausted.");
+  return browserPool[0]!.instance;
 }
 
-export const getBrowser = getCamoufoxBrowser;
-
-// ============================================================================
-// Global Task Queue Logic
-// ============================================================================
-
-export async function runBrowserTask<T>(task: BrowserTask<T>, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        const execute = async () => {
-            activeTaskCount++;
-            try {
-                await getCamoufoxBrowser();
-                const mb = browserPool[Math.floor(Math.random() * browserPool.length)];
-                
-                if (!mb) throw new Error("No browser available.");
-
-                // PERIODIC SEARCH-BASED HEALTH CHECK: Every 13 links scraped, do 2 test searches
-                if (type === 'scrape' && mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
-                    const healthy = await performSearchHealthCheck(mb.instance);
-                    if (!healthy) {
-                        mb.isHealthy = false;
-                        throw new Error("Thread failed periodic search health check.");
-                    }
-                }
-
-                const result = await task(mb.instance);
-                if (type === 'scrape') mb.linkScrapeCount++;
-                
-                resolve(result);
-            } catch (err) {
-                reject(err);
-            } finally {
-                activeTaskCount--;
-                processQueue();
-            }
-        };
-
-        taskQueue.push({ type, execute });
-        processQueue();
-    });
-}
-
-function processQueue() {
-    if (activeTaskCount >= MAX_CONCURRENT_TASKS || taskQueue.length === 0) return;
-    const task = taskQueue.shift();
-    if (task) task.execute();
+export async function runBrowserTask<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
+    return scheduler.run(task, type);
 }
 
 export async function stopBrowserManager(): Promise<void> {
-  if (browserPool.length > 0) {
-    logger.log(`[Browser Manager] Shutting down ${browserPool.length} browsers...`);
-    await Promise.all(browserPool.map(mb => {
-        if (mb && mb.instance) return mb.instance.close().catch(() => {});
-        return Promise.resolve();
-    }));
-    browserPool.length = 0;
-  }
+  await Promise.all(browserPool.map(mb => mb.instance.close().catch(() => {})));
+  browserPool.length = 0;
 }
 
 shutdownManager.register(stopBrowserManager);

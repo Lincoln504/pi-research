@@ -325,8 +325,8 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('scrape');
-      expect(tool.promptGuidelines).toContainEqual(
-        expect.stringContaining('Up to 3 calls')
+      expect(tool.promptGuidelines).toContain(
+        'PROTOCOL: Batch 1 (3 URLs) → Batch 2 (2 URLs) → Batch 3 (3 URLs).'
       );
     });
 

@@ -9,8 +9,10 @@
 /** Flash duration for UI slice animations in milliseconds */
 export const FLASH_DURATION_MS = 500;
 
-/** Delay between API requests in milliseconds (e.g., NVD rate limit) */
-export const REQUEST_DELAY_MS = 6500;
+/** Delay between API requests in milliseconds */
+export const REQUEST_DELAY_MS_NVD = 6000;
+export const REQUEST_DELAY_MS_OTHER = 1000;
+export const REQUEST_DELAY_MS = 1000;
 
 // ==================== Research Constraints ====================
 
@@ -29,67 +31,29 @@ export const MAX_CONCURRENT_RESEARCHERS = 3;
 
 // ==================== Complexity Levels ====================
 
-/**
- * Complexity 0: Quick mode (no orchestrator, 1 researcher, 1 round)
- * Complexity 1: Normal (2 researchers, 2 rounds)
- * Complexity 2: Deep (3 researchers, 3 rounds)
- * Complexity 3: Ultra (5 researchers, 5 rounds)
- */
-
-/** Initial researcher count for complexity 1 (Normal) */
 export const INITIAL_RESEARCHERS_LEVEL_1 = 2;
-
-/** Initial researcher count for complexity 2 (Deep) */
 export const INITIAL_RESEARCHERS_LEVEL_2 = 3;
-
-/** Initial researcher count for complexity 3 (Ultra) */
 export const INITIAL_RESEARCHERS_LEVEL_3 = 5;
 
-
-/** Maximum rounds for complexity 1 (Normal) */
 export const MAX_ROUNDS_LEVEL_1 = 2;
-
-/** Maximum rounds for complexity 2 (Deep) */
 export const MAX_ROUNDS_LEVEL_2 = 3;
-
-/** Maximum rounds for complexity 3 (Ultra) */
 export const MAX_ROUNDS_LEVEL_3 = 5;
 
-/** Follow-up concurrent researchers for complexity 1 (Normal) - 1 at a time */
 export const MAX_CONCURRENT_LEVEL_1_FOLLOWUP = 1;
-
-/** Follow-up concurrent researchers for complexity 2 (Deep) - 2 at a time */
 export const MAX_CONCURRENT_LEVEL_2_FOLLOWUP = 2;
-
-/** Follow-up concurrent researchers for complexity 3 (Ultra) - 3 at a time */
 export const MAX_CONCURRENT_LEVEL_3_FOLLOWUP = 3;
 
-/** Maximum concurrent researchers for complexity 1 initial round */
 export const MAX_CONCURRENT_LEVEL_1_INITIAL = 2;
-
-/** Maximum concurrent researchers for complexity 2 initial round */
 export const MAX_CONCURRENT_LEVEL_2_INITIAL = 3;
-
-/** Maximum concurrent researchers for complexity 3 initial round */
 export const MAX_CONCURRENT_LEVEL_3_INITIAL = 3;
 
-/**
- * Extra rounds the lead evaluator may earn beyond targetRounds when it judges
- * critical gaps still exist. Rounds targetRounds+1 through targetRounds+MAX_EXTRA_ROUNDS
- * are "bonus" territory; round targetRounds+MAX_EXTRA_ROUNDS+1 is unreachable (hard limit).
- */
 export const MAX_EXTRA_ROUNDS = 2;
 
 
 // ==================== Timeout Constants ====================
 
-/** Default timeout for SearXNG requests in milliseconds */
 export const SEARXNG_TIMEOUT_MS = 30000;
-
-/** Default timeout for OSV API requests in milliseconds */
 export const OSV_TIMEOUT_MS = 30000;
-
-/** Default timeout for NVD API requests in milliseconds */
 export const NVD_TIMEOUT_MS = 30000;
 
 // ==================== Export Constants ====================
@@ -116,54 +80,36 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
 
 // ==================== Context-Aware Scraping Constants ====================
 
-/**
- * Fraction of context window consumed beyond which all scraping is blocked.
- * At or above this threshold, researchers skip batches and move to synthesis.
- */
+/** Fraction of context window consumed beyond which all scraping is blocked. */
 export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.55;
 
-/**
- * Estimated tokens consumed per scrape call (handshake + content).
- * Used to project whether another batch is feasible given remaining context.
+/** 
+ * Fraction of SCRAPE-SOURCED tokens beyond which scraping is blocked.
  */
+export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.45;
+
+/** Estimated tokens consumed per scrape call */
 export const AVG_TOKENS_PER_SCRAPE = 15000;
 
-/**
- * Fallback context window size (tokens) when the model does not advertise one.
- * Corresponds to typical large-context models (Sonnet, Gemini 1.5 Pro, etc.).
- */
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
-/**
- * Maximum URLs per second-scrape batch (more targeted than batch 1).
- * Kept lower to preserve context for synthesis after focused follow-up.
- */
+/** Maximum URLs per second-scrape batch (more targeted than batch 1). */
 export const BATCH_2_MAX_SCRAPE_URLS = 2;
 
-/**
- * Default maxConcurrency for the second scrape batch.
- * Higher than batch 1 because batch 2 URLs are already prioritized.
- */
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
 // ==================== UI Constants ====================
 
-/** Maximum characters for final report before truncation */
 export const MAX_REPORT_LENGTH = 200000;
-
-/** Visual width of the ====------ progress bar in the TUI header */
 export const PROGRESS_BAR_WIDTH = 18;
 
 // ==================== Orchestrator Constants ====================
 
-/** Maximum characters per researcher report when sent to lead evaluator (truncated with link preservation) */
+/** Maximum characters per researcher report when sent to lead evaluator */
 export const MAX_EVALUATOR_REPORT_LENGTH = 50000;
 
 /** Delay in milliseconds between launching concurrent researchers to stagger startup */
-export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
+export const RESEARCHER_LAUNCH_DELAY_MS = 300;
 
-/** Delay in milliseconds after state update to ensure propagation before next action */
 export const STATE_PROPAGATION_DELAY_MS = 50;
-
-/** Minimum streaming text length before updating UI with estimated tokens */
 export const STREAMING_UPDATE_THRESHOLD_CHARS = 200;
