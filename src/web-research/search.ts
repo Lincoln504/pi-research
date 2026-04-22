@@ -9,7 +9,7 @@ import { createTimeoutSignal } from './retry-utils.ts';
 import type { SearXNGResult, QueryResultWithError, SearxngSearchOptions } from './types.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
-import { performFallbackSearch } from './fallback-search.ts';
+import { performStealthSearch } from './stealth-search.ts';
 
 // ============================================================================
 // Type Definitions
@@ -216,12 +216,12 @@ function classifyError(error: unknown): QueryResultWithError['error'] {
 export async function search(queries: string[], options?: SearxngSearchOptions, signal?: AbortSignal): Promise<QueryResultWithError[]> {
   // If fallback is already enabled, skip SearXNG entirely
   if (isFallbackSearchEnabled()) {
-    logger.log(`[Web Research] Using fallback search mode (DDG Lite Stealth) for ${queries.length} queries`);
-    const fallbackResults = await performFallbackSearch(queries, signal);
+    logger.log(`[Web Research] Using Stealth Browser Queue for ${queries.length} queries`);
+    const stealthResults = await performStealthSearch(queries, signal);
     return queries.map(q => ({
       query: q,
-      results: fallbackResults.get(q) || [],
-      error: (fallbackResults.get(q)?.length || 0) === 0 ? { type: 'empty_results', message: 'Fallback search returned no results' } : undefined
+      results: stealthResults.get(q) || [],
+      error: (stealthResults.get(q)?.length || 0) === 0 ? { type: 'empty_results', message: 'Stealth search returned no results' } : undefined
     }));
   }
 
@@ -253,34 +253,37 @@ export async function search(queries: string[], options?: SearxngSearchOptions, 
 
   const primaryResults = await Promise.all(searchPromises);
 
-  // 2. Identify queries that failed or returned no results (likely due to blocking or junk filtering)
-  const failedQueries = primaryResults
-    .filter(r => r.results.length === 0)
-    .map(r => r.query);
+  // 2. High-Fidelity Stealth Path: If primary failed or returned junk, use the Stealth Browser Queue
+  const needsStealth = primaryResults.some(r => r.results.length === 0) || isFallbackSearchEnabled();
 
-  if (failedQueries.length > 0 && !signal?.aborted) {
-    logger.warn(`[Web Research] ${failedQueries.length}/${queries.length} queries returned no results from SearXNG. Switching to fallback search mode.`);
-    
-    // Enable fallback for subsequent calls in this session
-    setFallbackSearchEnabled(true);
-    
-    try {
-      const fallbackResultsMap = await performFallbackSearch(failedQueries, signal);
+  if (needsStealth && !signal?.aborted) {
+    const failedQueries = primaryResults
+      .filter(r => r.results.length === 0)
+      .map(r => r.query);
+
+    if (failedQueries.length > 0) {
+      logger.log(`[Web Research] Primary search failed for ${failedQueries.length} queries. Activating Stealth Browser Queue...`);
       
-      // 3. Merge fallback results back into the set
-      return primaryResults.map(r => {
-        const fallback = fallbackResultsMap.get(r.query);
-        if (fallback && fallback.length > 0) {
-          return {
-            query: r.query,
-            results: fallback,
-          };
-        }
-        return r;
-      });
-    } catch (fallbackError) {
-      logger.error(`[Web Research] Headless fallback search failed:`, fallbackError);
-      return primaryResults;
+      try {
+        const stealthResultMap = await performStealthSearch(failedQueries, signal);
+        
+        // Merge results back
+        return primaryResults.map(r => {
+          const stealthResults = stealthResultMap.get(r.query);
+          if (stealthResults && stealthResults.length > 0) {
+            // Found high-quality data!
+            setFallbackSearchEnabled(true);
+            return {
+              query: r.query,
+              results: stealthResults
+            };
+          }
+          return r;
+        });
+      } catch (stealthError) {
+        logger.error(`[Web Research] Stealth browser search failed:`, stealthError);
+        return primaryResults;
+      }
     }
   }
 

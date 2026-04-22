@@ -42,7 +42,7 @@ interface Page {
   close(): Promise<void>;
 }
 
-import { getCamoufoxBrowser } from '../infrastructure/camoufox-lifecycle.ts';
+import { getCamoufoxBrowser } from '../infrastructure/stealth-browser-manager.ts';
 
 // ============================================================================
 // Module State

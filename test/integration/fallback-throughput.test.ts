@@ -1,44 +1,61 @@
 
 import { describe, it, expect } from 'vitest';
-import { performFallbackSearch } from '../../src/web-research/fallback-search.ts';
+import { performStealthSearch } from '../../src/web-research/stealth-search.ts';
+import { getGlobalConcurrencyLimit } from '../../src/infrastructure/stealth-browser-manager.ts';
 
 /**
- * Advanced Throughput Validation (10 Simultaneous Searches)
+ * Robust Queue & Concurrency Validation
  * 
- * Verifies that the new Browser Pool and Parallel Fallback logic
- * can handle 10 concurrent 2-page searches with high fidelity.
+ * Verifies:
+ * 1. Hardware detection works (Global Concurrency > 0).
+ * 2. The Global Task Queue handles parallel searches correctly.
+ * 3. Results are high-fidelity (2-page pagination active).
+ * 4. System stays unblocked during massive parallel burst.
  */
-describe('DuckDuckGo Lite High-Capacity Throughput', () => {
+describe('Robust Stealth Browser Queue Throughput', () => {
   
-  it('should sustain high-fidelity searches with multi-process capacity', async () => {
+  it('should sustain high-volume parallel searches using the global queue', async () => {
+    const concurrency = getGlobalConcurrencyLimit();
+    console.log(`[Validation] System Global Concurrency: ${concurrency}`);
+    expect(concurrency).toBeGreaterThan(0);
+
+    // We'll run a burst of 10 queries. 
+    // The queue will ensure only 'concurrency' number of them run at once.
     const queries = [
+      "quantum gravity theories",
+      "bioplastic production methods",
+      "risks of artificial general intelligence",
+      "deep sea hydrothermal vents life",
+      "graph neural network applications",
       "latest advances in fusion energy 2026",
-      "rust programming language concurrency patterns",
-      "history of ancient mesoamerican civilizations",
-      "impact of climate change on arctic ecosystems",
-      "machine learning model compression techniques",
-      "evolution of digital cryptography"
+      "ancient mesoamerican agriculture",
+      "sustainable urban planning 2030",
+      "machine learning model pruning",
+      "digital cryptography evolution"
     ];
 
-    console.log(`[Throughput Test] Starting parallel searches...`);
+    console.log(`[Validation] Queuing burst of ${queries.length} queries...`);
     const startTime = Date.now();
     
-    // performFallbackSearch uses internal concurrency of 5 and the Browser Pool
-    const resultMap = await performFallbackSearch(queries);
+    // This will trigger the global queue
+    const resultMap = await performStealthSearch(queries);
     
     const duration = (Date.now() - startTime) / 1000;
-    console.log(`[Throughput Test] Completed ${queries.length} complex searches in ${duration.toFixed(2)}s`);
+    console.log(`[Validation] Completed burst in ${duration.toFixed(2)}s`);
 
+    let totalResults = 0;
     queries.forEach((q) => {
       const results = resultMap.get(q) || [];
-      console.log(`Query "${q}": ${results.length} relevant results`);
-      expect(results.length).toBeGreaterThan(0);
+      console.log(`  - "${q}": ${results.length} items`);
+      
+      // Verify pagination: if it's working, we should usually get >10 results
       expect(results.length).toBeGreaterThanOrEqual(10);
+      totalResults += results.length;
     });
 
-    const totalResults = Array.from(resultMap.values()).reduce((acc, res) => acc + res.length, 0);
-    console.log(`[Throughput Test] Total results retrieved: ${totalResults}`);
+    console.log(`[Validation] Total High-Fidelity Results: ${totalResults}`);
+    // With 10 queries and 2 pages each, we expect ~200 results
     expect(totalResults).toBeGreaterThanOrEqual(100);
 
-  }, 180000); // 3 minute timeout
+  }, 300000); // 5 minute timeout for the full burst
 });

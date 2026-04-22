@@ -204,35 +204,26 @@ async function performHealthCheck(): Promise<HealthCheckResult> {
         ? 'No SearXNG engines enabled'
         : `SearXNG found no working engines (${workingEngineCount}/${generalEngines.length})`;
       
-      logger.warn(`[healthcheck] ${searxngSummary}. Enabling fallback search mode (Playwright/DDG Lite)...`);
+      logger.warn(`[healthcheck] ${searxngSummary}. Activating Stealth Browser Queue...`);
       
       try {
         const { setFallbackSearchEnabled } = await import('../web-research/utils.ts');
         
-        // Check if camoufox is available without doing a real search
-        let camoufoxInstalled = false;
-        try {
-          // Dynamic check for dependency
-          const { createRequire } = await import('module');
-          const requireMod = createRequire(import.meta.url);
-          requireMod.resolve('camoufox-js');
-          camoufoxInstalled = true;
-        } catch {
-          camoufoxInstalled = false;
-        }
+        // Use the manager directly for dependency check
+        const { isCamoufoxAvailable } = await import('../infrastructure/stealth-browser-manager.ts');
 
-        if (camoufoxInstalled) {
-          logger.log('[healthcheck] ✓ Fallback dependencies verified. Enabling fallback mode for research.');
+        if (isCamoufoxAvailable()) {
+          logger.log('[healthcheck] ✓ Stealth Browser Queue verified. Enabling high-fidelity mode.');
           setFallbackSearchEnabled(true);
           result.searchOk = true;
           // Continue to scrape test
         } else {
-          result.error = `${searxngSummary}. Fallback search is not available because camoufox-js is not installed.`;
+          result.error = `${searxngSummary}. Stealth Browser is not available.`;
           logger.error('[healthcheck] Search validation failed:', result.error);
           return result;
         }
-      } catch (fallbackErr) {
-        result.error = `${searxngSummary}. Error enabling fallback mode: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`;
+      } catch (stealthErr) {
+        result.error = `${searxngSummary}. Error activating stealth mode: ${stealthErr instanceof Error ? stealthErr.message : String(stealthErr)}`;
         logger.error('[healthcheck] Search validation failed:', result.error);
         return result;
       }
