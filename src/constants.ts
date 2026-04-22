@@ -17,8 +17,8 @@ export const REQUEST_DELAY_MS = 6500;
 /** Maximum gathering (tool) calls per researcher */
 export const MAX_GATHERING_CALLS = 4;
 
-/** Maximum scrape tool calls per researcher (1 handshake + up to 3 execution batches) */
-export const MAX_SCRAPE_CALLS = 4;
+/** Maximum scrape tool calls per researcher (3 batches: Batch 1, Batch 2, Batch 3) */
+export const MAX_SCRAPE_CALLS = 3;
 
 /** Maximum URLs to scrape per batch */
 export const MAX_SCRAPE_URLS = 3;
@@ -95,7 +95,10 @@ export const NVD_TIMEOUT_MS = 30000;
 // ==================== Export Constants ====================
 
 /** Maximum query length for filename sanitization */
-export const MAX_QUERY_LENGTH = 50;
+export const MAX_QUERY_LENGTH = 12000;
+
+/** Minimum query length */
+export const MIN_QUERY_LENGTH = 3;
 
 /** Maximum retry attempts for export file collision */
 export const MAX_EXPORT_RETRIES = 3;

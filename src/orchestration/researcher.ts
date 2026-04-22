@@ -29,6 +29,8 @@ export interface CreateResearcherSessionOptions {
   // Optional: real closures for global state management
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
+  /** Callback invoked when links are scraped (for real-time coordination) */
+  onLinksScraped?: (links: string[]) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
   /** Model context window size in tokens. */
@@ -46,6 +48,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     extensionCtx,
     getGlobalState,
     updateGlobalLinks,
+    onLinksScraped,
     getTokensUsed,
     contextWindowSize,
   } = options;
@@ -79,6 +82,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
         tracker,
         getGlobalState: globalState,
         updateGlobalLinks: globalLinks,
+        onLinksScraped: onLinksScraped,
         getTokensUsed,
         contextWindowSize,
       }),

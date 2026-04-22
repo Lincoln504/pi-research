@@ -28,8 +28,8 @@ let healthCheckPromise: Promise<HealthCheckResult> | null = null;
 
 // Get timeout from config or use defaults
 const config = getConfig();
-const SEARCH_TIMEOUT_MS = config.HEALTH_CHECK_TIMEOUT_MS || 15000;  // 15s max for search
-const SCRAPE_TIMEOUT_MS = config.HEALTH_CHECK_TIMEOUT_MS ? config.HEALTH_CHECK_TIMEOUT_MS + 5000 : 20000; // 5s longer than search
+const SEARCH_TIMEOUT_MS = config.HEALTH_CHECK_TIMEOUT_MS!;
+const SCRAPE_TIMEOUT_MS = config.HEALTH_CHECK_TIMEOUT_MS! + 5000;
 
 export interface HealthCheckResult {
   success: boolean;
@@ -145,52 +145,98 @@ async function performHealthCheck(): Promise<HealthCheckResult> {
       return result;
     }
 
-    // Check for at least 1 working general search engine (not Wikipedia)
-    // Wikipedia is an encyclopedic engine, not suitable for general web research
-    // Load the list of active engines from the actual SearXNG config (not hardcoded)
+    // Load the list of active engines from the actual SearXNG config
     const generalEngines = getActiveSearxngEngines();
-    if (generalEngines.length === 0) {
-      result.error = 'No active general search engines found in SearXNG configuration';
-      logger.error('[healthcheck]', result.error);
-      return result;
-    }
-    logger.log(`[healthcheck] Checking for results from engines: [${generalEngines.join(', ')}]`);
-
-    const generalResults = qr.results.filter((r: SearXNGResult) =>
-      generalEngines.includes((r.engine || '').toLowerCase())
-    );
-
-    // Count how many engines returned at least one result
+    let workingEngineCount = 0;
+    let generalResults: SearXNGResult[] = [];
     const engineCounts = new Map<string, number>();
-    generalEngines.forEach(e => engineCounts.set(e, 0));
-    generalResults.forEach((r: SearXNGResult) => {
-      const engine = (r.engine || '').toLowerCase();
-      if (engineCounts.has(engine)) {
-        engineCounts.set(engine, (engineCounts.get(engine) || 0) + 1);
+
+    if (generalEngines.length > 0) {
+      logger.log(`[healthcheck] Checking for results from engines: [${generalEngines.join(', ')}]`);
+
+      generalResults = qr.results.filter((r: SearXNGResult) =>
+        generalEngines.includes((r.engine || '').toLowerCase())
+      );
+
+      // RELEVANCE GUARD: Verify top results are actually relevant to "open source software"
+      // This catches "junk results" returned by engines (like Bing) when they detect bots.
+      const { filterRelevantResults } = await import('../web-research/utils.ts');
+      const relevantResults = filterRelevantResults(searchQuery, generalResults);
+
+      if (generalResults.length > 0 && relevantResults.length === 0) {
+        logger.warn('[healthcheck] Junk results detected from SearXNG. These will be ignored.');
+        // Don't return error yet, let fallback search try
+        generalResults = [];
+      } else {
+        // Use the relevant ones
+        generalResults = relevantResults;
       }
-    });
 
-    const workingEngines = Array.from(engineCounts.entries()).filter(([_, count]) => count > 0);
-    const workingEngineCount = workingEngines.length;
+      // Count how many engines returned at least one result
+      generalEngines.forEach(e => engineCounts.set(e, 0));
+      generalResults.forEach((r: SearXNGResult) => {
+        const engine = (r.engine || '').toLowerCase();
+        if (engineCounts.has(engine)) {
+          engineCounts.set(engine, (engineCounts.get(engine) || 0) + 1);
+        }
+      });
 
-    // Require at least 1 engine to return results (local use may have rate limits)
-    if (workingEngineCount < 1) {
-      const engineReport = Array.from(engineCounts.entries())
-        .map(([e, c]) => `${e}: ${c}`)
-        .join(', ');
-      result.error = `No working engines found: 0/${generalEngines.length} returned results. Need at least 1 engine. Engine results: ${engineReport}. Your network or search engines may be blocked.`;
-      logger.error('[healthcheck] Search validation failed:', result.error);
-      return result;
+      const workingEngines = Array.from(engineCounts.entries()).filter(([_, count]) => count > 0);
+      workingEngineCount = workingEngines.length;
+
+      if (workingEngineCount > 0) {
+        result.searchOk = true;
+        result.details.searchQuery = searchQuery;
+        result.details.searchResultCount = generalResults.length;
+        result.details.searchDurationMs = searchDurationMs;
+        result.details.workingEngines = workingEngines.map(([e, _]) => e);
+        result.details.workingEngineCount = workingEngineCount;
+        const workingEnginesList = workingEngines.map(([e, _]) => e).join(', ');
+        logger.log(`[healthcheck] ✓ Search OK: ${generalResults.length} results from ${workingEngineCount} engines [${workingEnginesList}] in ${searchDurationMs}ms`);
+      }
+    } else {
+      logger.warn('[healthcheck] No active general search engines found in SearXNG configuration. Skipping primary search phase.');
     }
 
-    result.searchOk = true;
-    result.details.searchQuery = searchQuery;
-    result.details.searchResultCount = generalResults.length;
-    result.details.searchDurationMs = searchDurationMs;
-    result.details.workingEngines = workingEngines.map(([e, _]) => e);
-    result.details.workingEngineCount = workingEngineCount;
-    const workingEnginesList = workingEngines.map(([e, _]) => e).join(', ');
-    logger.log(`[healthcheck] ✓ Search OK: ${generalResults.length} results from ${workingEngineCount} engines [${workingEnginesList}] in ${searchDurationMs}ms`);
+    // FALLBACK SEARCH: Try if primary search didn't yield results
+    if (!result.searchOk) {
+      const searxngSummary = generalEngines.length === 0 
+        ? 'No SearXNG engines enabled'
+        : `SearXNG found no working engines (${workingEngineCount}/${generalEngines.length})`;
+      
+      logger.warn(`[healthcheck] ${searxngSummary}. Enabling fallback search mode (Playwright/DDG Lite)...`);
+      
+      try {
+        const { setFallbackSearchEnabled } = await import('../web-research/utils.ts');
+        
+        // Check if camoufox is available without doing a real search
+        let camoufoxInstalled = false;
+        try {
+          // Dynamic check for dependency
+          const { createRequire } = await import('module');
+          const requireMod = createRequire(import.meta.url);
+          requireMod.resolve('camoufox-js');
+          camoufoxInstalled = true;
+        } catch {
+          camoufoxInstalled = false;
+        }
+
+        if (camoufoxInstalled) {
+          logger.log('[healthcheck] ✓ Fallback dependencies verified. Enabling fallback mode for research.');
+          setFallbackSearchEnabled(true);
+          result.searchOk = true;
+          // Continue to scrape test
+        } else {
+          result.error = `${searxngSummary}. Fallback search is not available because camoufox-js is not installed.`;
+          logger.error('[healthcheck] Search validation failed:', result.error);
+          return result;
+        }
+      } catch (fallbackErr) {
+        result.error = `${searxngSummary}. Error enabling fallback mode: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`;
+        logger.error('[healthcheck] Search validation failed:', result.error);
+        return result;
+      }
+    }
 
     // PHASE 2: Test scrape with timeout enforcement (first-success across canary URLs)
     const scrapeCanaries = [
@@ -266,7 +312,8 @@ async function performHealthCheck(): Promise<HealthCheckResult> {
 export async function runHealthCheck(): Promise<HealthCheckResult> {
   const now = Date.now();
 
-  // Check if we have a recent cached result
+  // Check cache FIRST before checking for in-progress promise
+  // This ensures we use cached results even if a promise exists
   if (cachedHealthCheck) {
     const age = now - cachedHealthCheck.timestamp;
     if (age < HEALTH_CHECK_CACHE_TTL_MS) {
@@ -274,21 +321,22 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
       return cachedHealthCheck.result;
     } else {
       logger.log(`[healthcheck] Cached health check result expired (${Math.round(age / 1000)}s old)`);
-      cachedHealthCheck = null;
+      cachedHealthCheck = null; // Clear expired cache
     }
   }
 
-  // If a health check is already running, return the existing promise
+  // NOW check if a health check is already running
+  // This check must happen AFTER the cache check to avoid race conditions
   if (healthCheckPromise) {
     logger.log('[healthcheck] Health check already in progress, reusing existing promise');
     return healthCheckPromise;
   }
 
-  // Start a new health check
+  // Only now set the promise and start a new health check
   healthCheckPromise = (async () => {
     try {
       const result = await performHealthCheck();
-      // Cache successful results
+      // Cache only successful results
       if (result.success) {
         cachedHealthCheck = {
           result,

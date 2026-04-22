@@ -21,7 +21,7 @@ export function createStackexchangeTool(options: {
     description: 'Search and retrieve data from Stack Exchange network via REST API v2.3 (anonymous: 300 requests/day, with key: 10,000 requests/day)',
     promptSnippet: 'Search Stack Overflow and other Stack Exchange sites for questions, answers, and user information',
     promptGuidelines: [
-      'Use stackexchange to find technical answers on Stack Overflow',
+      'Available for finding technical answers on Stack Overflow',
       'Great for finding code solutions, debugging help, and best practices',
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',

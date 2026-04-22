@@ -26,6 +26,7 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { PROXY_URL, BRAVE_SEARCH_API_KEY, SEARXNG_URL } from '../config.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
+import { clearHealthCheckCache } from '../healthcheck/index.ts';
 
 /**
  * Extension directory for pi-research
@@ -184,6 +185,10 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
 
   setFunctional(ok: boolean): void {
     this.currentStatus.isFunctional = ok;
+    // Clear health check cache when functional state changes to false
+    if (!ok) {
+      clearHealthCheckCache();
+    }
     this.notifyStatusChange();
   }
 
@@ -292,6 +297,8 @@ export class SearxngLifecycleManager implements ISearxngLifecycleManager {
   async init(ctx: ExtensionContext): Promise<void> {
     if (this.initialized) {
       logger.log('[pi-research] SearXNG already initialized, skipping');
+      // Always reset functional flag on re-init to ensure health check runs
+      this.currentStatus.isFunctional = false;
       return;
     }
 

@@ -30,9 +30,9 @@ You were the final researcher to finish. **Your research task is CLOSED.** Your 
 
 **If ALL researchers failed with errors:**
 
-You MUST quit and report the errors. Do not attempt synthesis or delegation.
+Quit and report the errors. Do not attempt synthesis or delegation.
 
-Output the errors in this format:
+Output format:
 
 ```markdown
 # Research Failed: Critical Errors
@@ -43,18 +43,18 @@ Research cannot proceed. All researchers encountered errors.
 ## Individual Researcher Failures
 
 ### Researcher 1
-[Report the exact error from Researcher 1's report]
+[Exact error from report]
 
 ### Researcher 2
-[Report the exact error from Researcher 2's report]
+[Exact error from report]
 
 [Continue for all failed researchers...]
 
 ## Systemic Issue Analysis
-[Analyze if errors indicate a pattern: search service unavailable, network timeout, all engines blocked, etc.]
+[Pattern analysis: search service down, network timeout, blocked engines, etc.]
 
 ## Recommended Actions
-[Suggest what user should do: check network, try again later, use different query, etc.]
+[Check network, try again later, use different query, etc.]
 ```
 
 **If SOME researchers succeeded but others failed:**
@@ -109,18 +109,12 @@ Evaluate cumulative findings against ROOT QUERY and ORIGINAL AGENDA.
 
 ## Researcher Scrape Protocol
 
-Each researcher followed a context-aware up-to-4-call scrape protocol:
-1. **Handshake**: Check for already-scraped links (no network)
-2. **Batch 1**: Up to 3 URLs — primary broad scraping
-3. **Batch 2**: Up to 2 URLs — targeted follow-up (auto-deduplicated)
-4. **Batch 3**: Up to 3 URLs — deep-dive
+Each researcher used up to 3 scrape batches (3 + 2 + 3 URLs). Shared links were injected at session creation and updated in real-time. Batches skipped automatically when context exceeded 55%.
 
-Batches automatically skipped when researcher's context exceeds 55%. Fewer sources than maximum is expected and not a failure.
-
-**When evaluating findings**:
-- **Corroborating**: Multiple researchers found similar information — strong confidence
-- **Complementary**: Different researchers covered different aspects — integrate both
-- **Conflicting**: Sources disagree — identify conflict, explain evidence, suggest resolution or acknowledge uncertainty
+**Finding assessment**:
+- **Corroborating**: Multiple researchers found similar information → strong confidence
+- **Complementary**: Different researchers covered different aspects → integrate both
+- **Conflicting**: Sources disagree → identify conflict, explain evidence, suggest resolution
 
 ---
 
@@ -132,55 +126,57 @@ Provide **full breadth, depth, nuance** of information from all sources. This is
 # Research Synthesis: [Comprehensive Topic Title]
 
 ## Executive Summary
-[High-level analytical overview. Identify most critical insights, patterns, conclusions. Comprehensive summary that stands alone.]
+[High-level analytical overview. Most critical insights, patterns, conclusions. Comprehensive summary that stands alone.]
 
 ## Detailed Key Findings
 
 ### [Major Theme/Category 1]
-- **In-Depth Analysis**: [Exhaustive explanation. Incorporate multiple sources and perspectives. Cite researchers where relevant. Provide context.]
+- **In-Depth Analysis**: [Exhaustive explanation. Multiple sources and perspectives. Cite researchers. Provide context.]
 - **Sub-Finding 1**: [Specific detail with citations]
 - **Sub-Finding 2**: [Specific detail with citations]
-- **Context & Implications**: [What do findings mean? Why significant? How relate to broader topic?]
+- **Context & Implications**: [What findings mean? Why significant? Relate to broader topic?]
 
 ### [Major Theme/Category 2]
 - **In-Depth Analysis**: [Continue for all major themes...]
 
 ## Critical Nuance and Conflicting Perspectives
 
-[Identify areas where:
-- Sources provided different or contradictory information
-- Topic inherently complex or ambiguous
-- Findings require interpretation or multiple perspectives
-- Uncertainty or lack of consensus
-
-For each: describe conflicting information, explain evidence, provide synthesis or acknowledge ambiguity, suggest resolution or additional research needs]
+[Identify areas with contradictory information, complexity, ambiguity, or lack of consensus. For each: describe conflict, explain evidence, provide synthesis or acknowledge uncertainty.]
 
 ## Coverage & Agenda Assessment
 
-[Address specifically:
 - Which initial agenda items fully resolved
 - Which items partially explored or unaddressed
 - Why certain areas incomplete (sources unavailable, complexity, etc.)
-- Overall comprehensiveness relative to original query]
+- Overall comprehensiveness relative to original query
 
 ## Final Conclusions & Strategic Recommendations
 
-[Synthesize key takeaways:
 - Most important conclusions
 - Practical implications
 - Actions/decisions informed by findings
 - Research limitations
-- Most valuable additional information if further research conducted]
+- Most valuable additional information if further research conducted
+
+## Research Process
+
+[Only include if process notes section was provided. Omit if none.]
+
+### Tool Issues Encountered
+[Aggregate tool failure or unexpected behavior from researcher reports. Note patterns.]
+
+### Coordination & Successes
+[Shared links or cross-validation mentions from researchers.]
 
 ## CITED LINKS
 
-[List every URL cited in synthesis, deduplicated. For each:]
-* [URL] — Brief description of contribution and significance
+[List every URL cited in synthesis, deduplicated.]
+* [URL] — Description of contribution and significance
 
 ## Research Limitations
 
-[Only include if there are material gaps that significantly constrain the findings — omit if coverage is adequate. Do NOT list scrape candidates as raw URLs. Instead describe what remains unknown and why it matters:]
-- [Topic/area] — What is unknown and its relevance to the root query
+[Only include if material gaps significantly constrain findings. Do NOT list scrape candidates as URLs. Describe what remains unknown and why it matters:]
+- [Topic/area] — Unknown aspect and relevance to root query
 ```
 
 ---
@@ -193,21 +189,11 @@ Provide a JSON object with `action` and `queries` fields:
 {"action": "delegate", "queries": ["Targeted research question addressing critical gap", "Another specific research direction for remaining gaps"]}
 ```
 
-**CRITICAL REQUIREMENTS FOR DELEGATION**:
-- `action` must be exactly the string `"delegate"` (not `delegate` without quotes)
-- `queries` must be an array of strings (not objects, not numbers)
-- Each query string must be non-empty after trimming
-- Do not include nested objects like `{"query": "text"}` — use plain strings only
-
-**Delegation Guidance**:
-- Each query addresses specific, high-impact gap
-- Queries distinct and complementary, not overlapping
-- **For unfulfilled agenda items: copy the exact query string from the "Unfulfilled Agenda Items" list** — do not rephrase. This ensures the system can track coverage.
-- For new gaps not in the original agenda, formulate targeted queries
-- Consider what information would most transform understanding
-- Avoid duplicating already-researched topics
-- Ensure queries specific enough to yield actionable results
-- **Respect delegation limits specified above** — do not exceed the maximum number of queries for the current depth setting
+**Requirements**:
+- `action`: exactly `"delegate"`
+- `queries`: array of strings (non-empty, trimmed)
+- For unfulfilled agenda items: copy exact query string from list (do not rephrase)
+- Respect delegation limits specified above
 
 ---
 
@@ -220,8 +206,8 @@ Provide a JSON object with `action` and `queries` fields:
   - Any other output (markdown, prose) → Treated as final synthesis
   - **IMPORTANT**: The JSON must be valid, properly formatted, with string values in the `queries` array
 - **NO DECISION MEMOS**: Never output text explaining decision (e.g., "# Decision: NO"). Provide ONLY synthesis, error report, or JSON array.
-- **BE EXHAUSTIVE IN SYNTHESIS**: Provide full depth and breadth. Do not truncate excessively.
-- **NO SCRAPE CANDIDATE LISTS**: Do not enumerate URLs from researcher SCRAPE CANDIDATES sections — these are internal scaffolding. Mention material gaps in prose under Research Limitations only if they affect the findings.
+- **BE EXHAUSTIVE IN SYNTHESIS**: Provide full depth and breadth. Do not truncate.
+- **NO SCRAPE CANDIDATE LISTS**: Do not enumerate URLs from researcher SCRAPE CANDIDATES sections. Mention material gaps in prose under Research Limitations only if they affect findings.
 - **BE TARGETED IN DELEGATION**: Provide specific, high-impact queries addressing genuine gaps.
-- **USE PLAIN STRINGS IN QUERIES**: Do not use objects like `{"query": "text"}` in the queries array — use plain strings only.
+- **USE PLAIN STRINGS IN QUERIES**: No objects like `{"query": "text"}` — use plain strings only.
 - **SUBMIT AND STOP**: After providing decision, stop. System handles next steps.

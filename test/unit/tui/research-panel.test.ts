@@ -125,13 +125,13 @@ describe('TUI Research Panel', () => {
       expect(lines.length).toBe(4);
       
       const output = lines.join('\n');
-      // Check for rounded corners on both sides (╭, ╮, ╰, ╯)
+      // Eval box uses shared-border design: ╭ from prev col, ╮/╯/╰ on eval's own corners
       expect(output).toContain('╭');
       expect(output).toContain('╮');
       expect(output).toContain('╰');
       expect(output).toContain('╯');
-      // Check for double borders (││)
-      expect(output).toContain('││');
+      // Single-border design: no double ││ on eval sides
+      expect(output).not.toContain('││');
       // Check for eval label
       expect(output).toContain('Eval');
     });

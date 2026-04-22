@@ -20,6 +20,8 @@ interface CreateToolsOptions {
   tracker: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
+  /** Callback invoked when links are scraped (for real-time coordination) */
+  onLinksScraped?: (links: string[]) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
   /** Model context window size in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
@@ -58,6 +60,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createSearchTool(resolvedOptions),
     createScrapeTool({
       ...resolvedOptions,
+      onLinksScraped: options.onLinksScraped,
       getTokensUsed: options.getTokensUsed,
       contextWindowSize: options.contextWindowSize,
     }),

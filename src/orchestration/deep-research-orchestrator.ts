@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { extractProcessNotes } from '../utils/process-notes.ts';
 import type { ExtensionContext, AgentSession } from '@mariozechner/pi-coding-agent';
 import { convertToLlm } from '@mariozechner/pi-coding-agent';
 import type { ExtendedAgentSessionEvent } from '../types/extension-context.ts';
@@ -46,7 +47,7 @@ import { extractJson, extractJsonFromCodeBlocks, extractJsonObject, normalizeStr
 import { createResearcherSession } from './researcher.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { buildSessionContext } from '@mariozechner/pi-coding-agent';
-import { formatSharedLinksFromState } from '../utils/shared-links.ts';
+import { formatSharedLinksFromState, formatLightweightLinkUpdate } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
 import { addSlice, activateSlice, completeSlice, removeSlice, flashSlice, updateSliceTokens, type ResearchPanelState } from '../tui/research-panel.ts';
@@ -113,10 +114,21 @@ function parseEvaluatorResponse(text: string): EvalDecision {
     return null;
   };
 
+  // Returns { action: 'synthesize', content: '' } if parsed JSON is a synthesize action.
+  // Empty content triggers the buildAllFindingsContext() fallback at the call site.
+  const trySynthesizeJson = (parsed: unknown): EvalDecision | null => {
+    if (parsed !== null && typeof parsed === 'object' && (parsed as Record<string, unknown>)['action'] === 'synthesize') {
+      logger.debug('[deep-research] Model returned synthesize JSON — using findings fallback');
+      return { action: 'synthesize', content: '' };
+    }
+    return null;
+  };
+
   // 1. Fast path: response IS the JSON object
   if (trimmed.startsWith('{')) {
     try {
-      const decision = tryDelegate(JSON.parse(trimmed));
+      const parsed = JSON.parse(trimmed);
+      const decision = tryDelegate(parsed) ?? trySynthesizeJson(parsed);
       if (decision) return decision;
     } catch { /* not pure JSON */ }
   }
@@ -124,7 +136,7 @@ function parseEvaluatorResponse(text: string): EvalDecision {
   // 2. Fenced code block (```json ... ```)
   const codeBlockResult = extractJsonFromCodeBlocks<EvaluatorDelegateDecision>(trimmed);
   if (codeBlockResult.success && codeBlockResult.value) {
-    const decision = tryDelegate(codeBlockResult.value);
+    const decision = tryDelegate(codeBlockResult.value) ?? trySynthesizeJson(codeBlockResult.value);
     if (decision) return decision;
   }
 
@@ -134,9 +146,9 @@ function parseEvaluatorResponse(text: string): EvalDecision {
   if (bracePos !== -1 && bracePos < 200) {
     const objectResult = extractJsonObject<EvaluatorDelegateDecision>(trimmed);
     if (objectResult.success && objectResult.value) {
-      const decision = tryDelegate(objectResult.value);
+      const decision = tryDelegate(objectResult.value) ?? trySynthesizeJson(objectResult.value);
       if (decision) {
-        logger.debug('[deep-research] Extracted delegation from prose-wrapped response (brace at pos', bracePos, ')');
+        logger.debug('[deep-research] Extracted decision from prose-wrapped response (brace at pos', bracePos, ')');
         return decision;
       }
     }
@@ -527,6 +539,11 @@ export class DeepResearchOrchestrator {
         updateGlobalLinks: (links: string[]) => {
           this.updateState({ type: 'LINKS_SCRAPED', links });
         },
+        onLinksScraped: (links: string[]) => {
+          // Real-time lightweight link injection to other running siblings
+          // Captures 'aspect' from closure - this is the source researcher
+          this.injectLinkUpdatesToRunningSiblings(aspect, links);
+        },
         getTokensUsed,
         contextWindowSize: this.contextWindowSize,
       });
@@ -648,6 +665,39 @@ export class DeepResearchOrchestrator {
     }
   }
 
+  /**
+   * Inject real-time lightweight link updates to other running siblings when a researcher
+   * scrapes new URLs. This provides immediate coordination without waiting for completion.
+   */
+  private async injectLinkUpdatesToRunningSiblings(sourceResearcher: ResearchSibling, scrapedUrls: string[]) {
+    if (!scrapedUrls || scrapedUrls.length === 0) return;
+
+    const currentRound = this.state.currentRound;
+    const allInRound = Object.values(this.state.aspects).filter(a => a.id.startsWith(`${currentRound}.`));
+    const runningSiblings = allInRound.filter(s => s.status === 'running' && s.id !== sourceResearcher.id);
+
+    if (runningSiblings.length === 0) return;
+
+    // Format lightweight update message
+    const updateMessage = formatLightweightLinkUpdate(
+      scrapedUrls,
+      sourceResearcher.id,
+      sourceResearcher.query
+    );
+
+    // Inject into all running siblings
+    for (const target of runningSiblings) {
+      const targetSession = this.activeSessions.get(target.id);
+      if (targetSession) {
+        try {
+          await targetSession.steer(updateMessage);
+        } catch (err) {
+          logger.warn(`[deep-research] Failed to inject link update from ${sourceResearcher.id} into ${target.id}:`, err);
+        }
+      }
+    }
+  }
+
   private async injectFindingsIntoRunningSiblings(finished: ResearchSibling) {
     if (!finished.report) return;
     const currentRound = this.state.currentRound;
@@ -750,7 +800,10 @@ export class DeepResearchOrchestrator {
       ? `\n### Unfulfilled Agenda Items\n${remainingAgenda.map(q => `- ${q}`).join('\n')}`
       : '\n### All Agenda Items Covered\nAll initial research agenda items have been addressed.';
 
-    const promotionPrompt = leadPrompt + '\n\n' + allReportsContext + agendaSection;
+    // Extract process notes from researcher reports
+    const processNotes = extractProcessNotes(allCompleted);
+
+    const promotionPrompt = leadPrompt + '\n\n' + processNotes + '\n\n' + allReportsContext + agendaSection;
 
     try {
       this.updateState({ type: 'PROMOTION_STARTED', id: coordId });
@@ -854,7 +907,8 @@ export class DeepResearchOrchestrator {
 You are **Researcher ${displayNumber}** (${siblingNumInRound} of ${totalInRound} in Round ${roundNumber}).
 - **Topic**: ${aspect.query}
 - **Round**: ${roundNumber} of ${this.getMaxRounds(this.state.complexity)}
-- **Tool Usage**: 4 gathering calls + up to 3 context-gated scrape batches (Batch 1 ≤3 URLs, Batch 2 ≤2 URLs, Batch 3 ≤3 URLs)`;
+- **Tool Usage**: 4 gathering calls + up to 3 context-gated scrape batches (Batch 1 ≤3 URLs, Batch 2 ≤2 URLs, Batch 3 ≤3 URLs)
+- **Shared Links**: Global scraped links are in your system prompt — review before scraping`;
   }
 
   private buildAllFindingsContext(): string {

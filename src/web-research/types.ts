@@ -24,7 +24,7 @@ export interface QueryResultWithError {
 }
 
 // Scraper types
-export type Layer = 'fetch' | 'playwright+chromium';
+export type Layer = 'fetch' | 'playwright+camoufox';
 
 export interface ScrapeLayerResult {
   markdown: string;
@@ -43,5 +43,5 @@ export interface SearXNGResult {
 
 // Timeouts
 export const PRIMARY_SCRAPER_TIMEOUT = 15000;  // fetch layer
-export const FALLBACK_SCRAPER_TIMEOUT = 20000; // Chromium layer
+export const FALLBACK_SCRAPER_TIMEOUT = 30000; // Camoufox layer (increased for stealth rendering)
 

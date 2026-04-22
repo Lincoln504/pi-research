@@ -29,6 +29,8 @@
     "agent",
     "web-search",
     "scraping",
+    "stealth-browser",
+    "camoufox",
     "security",
     "stack-exchange"
   ],
@@ -50,9 +52,7 @@
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
     "postinstall": "node scripts/setup.js",
-    "install:browsers": "npx playwright install chromium",
-    "install:deps": "npx playwright install-deps chromium",
-    "setup": "npm run install:browsers"
+    "setup": "node scripts/setup.js"
   },
   "pi": {
     "extensions": [
@@ -61,29 +61,31 @@
   },
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.30.0",
+    "camoufox-js": "^0.10.2",
     "dockerode": "^4.0.10",
     "js-yaml": "^4.1.1",
     "node-html-markdown": "^2.0.0",
-    "playwright": "^1.52.0"
+    "pdf-oxide-wasm": "^0.3.37",
+    "playwright-core": "^1.59.1"
   },
   "optionalDependencies": {
     "@kreuzberg/html-to-markdown-node-darwin-arm64": "^2.30.0",
     "@kreuzberg/html-to-markdown-node-darwin-x64": "^2.30.0",
-    "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0",
-    "@kreuzberg/html-to-markdown-node-linux-x64-gnu": "^2.30.0",
     "@kreuzberg/html-to-markdown-node-linux-arm64-gnu": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-arm64-musl": "^2.30.0",
+    "@kreuzberg/html-to-markdown-node-linux-x64-gnu": "^2.30.0",
     "@kreuzberg/html-to-markdown-node-linux-x64-musl": "^2.30.0",
-    "@kreuzberg/html-to-markdown-node-linux-arm64-musl": "^2.30.0"
+    "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.68.0",
-    "@mariozechner/pi-ai": "^0.68.0",
-    "@sinclair/typebox": "^0.34.0",
     "@eslint/js": "^10.0.1",
+    "@mariozechner/pi-ai": "^0.68.0",
+    "@mariozechner/pi-coding-agent": "^0.68.0",
+    "@sinclair/typebox": "^0.34.0",
     "@types/dockerode": "^4.0.1",
     "@types/js-yaml": "^4.0.9",
     "@typescript-eslint/eslint-plugin": "^8.58.0",

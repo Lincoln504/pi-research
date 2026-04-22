@@ -35,9 +35,9 @@ The researcher uses broad tools to discover relevant information and identify hi
 
 ### Phase 2: Scraping
 The researcher deep-dives into the URLs identified during the Gathering phase to extract detailed content.
-- **Budget**: 4 Scrape calls (1 handshake + 3 execution batches).
+- **Budget**: 3 Scrape calls (Batch 1, Batch 2, Batch 3).
 - **Goal**: Depth-first extraction of specific data and evidence.
-- **Deduplication**: Researchers check a shared URL pool to avoid re-scraping links already handled by siblings in the same operation.
+- **Deduplication**: Researchers check a shared URL pool to avoid re-scraping links already handled by siblings. Shared links are injected into the system prompt at session creation and updated in real-time as siblings scrape new URLs.
 
 ### Phase 3: Reporting
 The researcher synthesizes its individual findings into a structured Markdown report.
@@ -57,15 +57,16 @@ Each researcher session is constrained by a `ToolUsageTracker` to prevent infini
 - **grep**: Local codebase search using `ripgrep` (fallback to `grep`).
 
 ### Context-Aware Scraping Protocol
-To avoid exceeding LLM context windows, the `scrape` tool follows a four-step handshake. **Each batch step is gated by a 55% context check** — if the session token count already exceeds 55% of the model's context window, that batch is skipped entirely and the tool returns early.
+To avoid exceeding LLM context windows, the `scrape` tool follows a three-batch protocol. **Each batch step is gated by a 55% context check** — if the session token count already exceeds 55% of the model's context window, that batch is skipped entirely and the tool returns early.
 
-1. **Handshake**: The researcher identifies target URLs. The tool returns a list of URLs already scraped by siblings. No network activity; no context check.
-2. **Batch 1**: Up to 3 URLs — primary broad scraping.
-3. **Batch 2**: Up to 2 URLs — targeted follow-up, deduplicated against Batch 1.
-4. **Batch 3**: Up to 3 URLs — deep-dive scraping.
+1. **Batch 1**: Up to 3 URLs — primary broad scraping.
+2. **Batch 2**: Up to 2 URLs — targeted follow-up, deduplicated against Batch 1.
+3. **Batch 3**: Up to 3 URLs — deep-dive scraping.
+
+Shared links are injected into the researcher's system prompt at session creation time and updated in real-time via lightweight `session.steer()` messages when siblings scrape new URLs.
 
 ### Shared Link Deduplication
-Researchers share a URL pool per research operation, used by the `scrape` handshake to avoid redundant network requests. The pool tracks URLs only — findings are shared separately via Report Injection. It resets for each new query.
+Researchers share a URL pool per research operation. Shared links are injected into the system prompt at session creation and updated in real-time via lightweight messages when siblings scrape new URLs. The pool tracks URLs only — findings are shared separately via Report Injection. It resets for each new query.
 
 ### SearXNG Lifecycle Management
 SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXNG_IMAGE_TAG`, default `latest`).

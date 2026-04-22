@@ -4,7 +4,10 @@ import { search } from '../../../src/web-research/search.ts';
 vi.mock('../../../src/web-research/utils.ts', () => ({
   getSearxngUrl: vi.fn().mockReturnValue('http://localhost:8080'),
   incrementConnectionCount: vi.fn(),
-  decrementConnectionCount: vi.fn()
+  decrementConnectionCount: vi.fn(),
+  isFallbackSearchEnabled: vi.fn().mockReturnValue(false),
+  setFallbackSearchEnabled: vi.fn(),
+  filterRelevantResults: vi.fn().mockImplementation((_query, results) => results)
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -23,13 +26,13 @@ describe('search', () => {
   });
 
   it('should return results for a successful search', async () => {
-    const mockResults = [{ url: 'http://example.com', title: 'Example', content: 'Content' }];
+    const mockResults = [{ url: 'http://example.com', title: 'Example Result', content: 'This is a relevant content for example query' }];
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => ({ results: mockResults })
     } as Response);
 
-    const result = await search(['test query']);
+    const result = await search(['example query']);
     
     expect(result).toHaveLength(1);
     expect(result[0]!.results).toEqual(mockResults);

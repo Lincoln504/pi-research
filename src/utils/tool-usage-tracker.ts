@@ -86,7 +86,7 @@ export class ToolUsageTracker {
     const limit = usage.limit;
 
     if (category === 'scrape') {
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape calls (handshake + 3 batches). ` +
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
         `This tool cannot be used again. Proceed immediately to Phase 3: synthesize your findings and submit your report.`;
     }
     return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +

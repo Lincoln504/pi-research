@@ -130,7 +130,7 @@ export function createGrepTool(options: {
     description: 'Search codebase using ripgrep (rg) or grep fallback. Fast recursive text search.',
     promptSnippet: 'Search codebase using ripgrep/grep',
     promptGuidelines: [
-      'Use grep for fast recursive text search in codebases.',
+      'Available for fast recursive text search in codebases.',
       'Pattern supports regex. Path and flags are optional.',
       'Falls back to grep if rg is not available.',
       'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',

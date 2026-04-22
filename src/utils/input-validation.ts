@@ -5,12 +5,7 @@
  */
 
 import { logger } from '../logger.ts';
-
-/** Maximum query length */
-export const MAX_QUERY_LENGTH = 500;
-
-/** Minimum query length */
-export const MIN_QUERY_LENGTH = 3;
+import { MAX_QUERY_LENGTH, MIN_QUERY_LENGTH } from '../constants.ts';
 
 /**
  * Validate research query

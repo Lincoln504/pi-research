@@ -9,6 +9,7 @@ import type { Theme } from '@mariozechner/pi-coding-agent';
 import type { SearxngStatus } from '../infrastructure/searxng-lifecycle.ts';
 import { getPiActivePanels } from '../utils/session-state.ts';
 import { FLASH_DURATION_MS } from '../constants.ts';
+import { isFallbackSearchEnabled } from '../web-research/utils.ts';
 
 export interface SliceState {
   id: string;
@@ -284,11 +285,8 @@ function renderPanelBlock(
   showSearxng: boolean
 ): string[] {
   const LEFT_INNER = 7;
-  const LEFT_BOX_W = LEFT_INNER + 2;
-  const GAP = 1;
-  const totalLeftOffset = LEFT_BOX_W + GAP;
-  const availableForRight = Math.max(1, width - totalLeftOffset);
-  const rightInner = Math.max(1, availableForRight - 2);
+  const LEFT_BOX_W = LEFT_INNER + 2;  // 9: left border + content + right joint
+  const totalLeftOffset = LEFT_BOX_W + 1; // 10: used as minimum-width threshold only
 
   const numRows = 4;
 
@@ -304,22 +302,26 @@ function renderPanelBlock(
 
   if (showSearxng && width >= totalLeftOffset + 10) {
     const status = state.searxngStatus;
-    const statusText = getStatusText(status.state).trim();
-    const portStr = extractPort(status.url).trim();
-    
-    // 4 rows: row 1 is status, row 2 is port
-    const rows = [
-      '│' + statusText.padEnd(LEFT_INNER),
-      '│' + portStr.padEnd(LEFT_INNER)
-    ];
+    const isFallback = isFallbackSearchEnabled();
+    const statusText = isFallback ? 'Play' : getStatusText(status.state).trim();
+    const portStr = isFallback ? 'wright' : extractPort(status.url).trim();
 
     leftRaw = {
       top: '┌' + '─'.repeat(LEFT_INNER),
-      rows,
+      rows: [
+        '│' + statusText.padEnd(LEFT_INNER),
+        '│' + portStr.padEnd(LEFT_INNER),
+      ],
       bottom: '└' + '─'.repeat(LEFT_INNER),
-      statusColor: status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted',
+      statusColor: isFallback ? 'success' : (status.state === 'error' ? 'error' : (status.state === 'active' || status.state === 'starting_up') ? 'success' : 'muted'),
     };
   }
+
+  // rightInner = chars available for column content + dividers.
+  // Derived from actual rendered left width so panel fills exactly `width` chars.
+  // Left renders as LEFT_BOX_W (9) when SearXNG shown, totalLeftOffset (10) otherwise.
+  const actualLeftWidth = leftRaw !== null ? LEFT_BOX_W : totalLeftOffset;
+  const rightInner = Math.max(1, width - actualLeftWidth - 1);
 
   const sliceIds = Array.from(state.slices.keys()).filter(id => !state.slices.get(id)!.queued);
   const numSlices = sliceIds.length;
@@ -372,14 +374,9 @@ function renderPanelBlock(
 
       let topPart;
       if (isEval) {
-        // Eval box: rounded top corners on both sides
-        // Reserve space for corners on both sides
-        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
-        if (contentWidth > 0) {
-          topPart = '╭' + '─'.repeat(contentWidth);
-        } else {
-          topPart = '╭';
-        }
+        // Eval box: left corner (╭) provided by previous column's topRightCorner
+        // Eval's own top is just dashes filling the column width
+        topPart = '─'.repeat(w);
       } else if (canShowCornerLabel) {
         const sideWidth = w - cornerLabel.length;
         const leftPad = Math.floor(sideWidth / 2);
@@ -395,10 +392,10 @@ function renderPanelBlock(
       }
       
       // Determine right border character based on if next column is eval
-      const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
+      const nextSliceId = i + 1 < totalCols ? (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1]) : null;
       const nextSlice = nextSliceId ? state.slices.get(nextSliceId) : null;
       const nextIsEval = nextSlice?.label === 'Eval';
-      const topRightCorner = nextIsEval ? '╮' : (isLast ? '┐' : '┬');
+      const topRightCorner = isEval ? '╮' : (nextIsEval ? '╭' : (isLast ? '┐' : '┬'));
       
       rightRawRows[0]!.push(topPart + topRightCorner);
       rightColors[0]!.push('accent');
@@ -406,15 +403,13 @@ function renderPanelBlock(
       // Token Row (always row 1)
       let tokenStr: string;
       if (isEval) {
-        // Eval box: double borders on BOTH sides (││ on left, ││ on right = 4 chars total)
-        const borderChars = 4; // Both left and right double borders
-        const contentWidth = Math.max(1, w - borderChars);
-        const evalDisplay = 'Eval'.length > contentWidth ? 'Eval'.slice(0, contentWidth) : 'Eval';
-        const padding = contentWidth - evalDisplay.length;
+        // Eval box: inner decorative │ on both sides, text centered between them
+        const innerWidth = Math.max(0, w - 2);
+        const evalDisplay = 'Eval'.length > innerWidth ? 'Eval'.slice(0, innerWidth) : 'Eval';
+        const padding = innerWidth - evalDisplay.length;
         const leftPad = Math.floor(padding / 2);
         const rightPad = padding - leftPad;
-        const centered = ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad);
-        tokenStr = '││' + centered;
+        tokenStr = '│' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '│';
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
@@ -424,7 +419,7 @@ function renderPanelBlock(
         const display = raw.length > w ? raw.slice(0, w) : raw;
         tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      const vBorder = isEval ? '││' : '│';
+      const vBorder = '│';
       rightRawRows[1]!.push(tokenStr + vBorder);
       const flashColor = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
       rightColors[1]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
@@ -432,10 +427,9 @@ function renderPanelBlock(
       // Cost Row (row 2)
       let costStr: string;
       if (isEval) {
-        // Eval box: double borders on BOTH sides (same as token row)
-        const borderChars = 4; // Both left and right double borders
-        const contentWidth = Math.max(1, w - borderChars);
-        costStr = '││' + ' '.repeat(contentWidth);
+        // Eval box: inner decorative │ on both sides (second body row, all spaces between)
+        const innerWidth = Math.max(0, w - 2);
+        costStr = '│' + ' '.repeat(innerWidth) + '│';
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -449,19 +443,10 @@ function renderPanelBlock(
       rightRawRows[2]!.push(costStr + vBorder);
       rightColors[2]!.push(flashColor || (slice?.completed ? 'muted' : 'text'));
 
-      // Bottom Border - rounded corners for eval on both sides
-      let bottomContent;
-      if (isEval) {
-        const contentWidth = Math.max(0, w - 2); // Reserve 1 char on each side
-        if (contentWidth > 0) {
-          bottomContent = '╰' + '─'.repeat(contentWidth);
-        } else {
-          bottomContent = '╰';
-        }
-      } else {
-        bottomContent = '─'.repeat(w);
-      }
-      const bottomRightCorner = nextIsEval ? '╯' : (isLast ? '┘' : '┴');
+      // Bottom Border
+      // For eval: left corner (╰) is provided by the previous column's bottomRightCorner
+      const bottomContent = '─'.repeat(w);
+      const bottomRightCorner = isEval ? '╯' : (nextIsEval ? '╰' : (isLast ? '┘' : '┴'));
       rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
     }
@@ -530,7 +515,14 @@ function renderPanelBlock(
         }
       } else {
         const color = rightRowColors[colIdx]!;
-        line += theme.fg(color, content);
+        // Eval body rows: content is │...│ — render inner decorative borders as accent
+        if (content.length >= 2 && content[0] === '│' && content[content.length - 1] === '│') {
+          line += theme.fg('accent', '│');
+          line += theme.fg(color, content.slice(1, -1));
+          line += theme.fg('accent', '│');
+        } else {
+          line += theme.fg(color, content);
+        }
       }
       line += theme.fg('accent', wall);
     }
@@ -558,39 +550,33 @@ export function createMasterResearchPanel(
           
           // Header line for each block (fixed width, rounded corners)
           const pctStr = renderProgressPct(panel.progress);
-          const status = panel.statusMessage ? `[${panel.statusMessage}]` : '';
+          const statusMsg = (panel.statusMessage ?? '').replace(/\.+$/, '');
           let headerText: string;
           if (pctStr) {
-            headerText = status ? ` Research: ${pctStr} (${status})` : ` Research: ${pctStr}`;
+            headerText = ` Research: ${pctStr}`;
+          } else if (statusMsg) {
+            headerText = ` ${statusMsg}`;
           } else {
-            headerText = status ? ` Research (${status})` : ` Research`;
+            headerText = ` Research`;
           }
 
-          // Only shrink text if terminal is too narrow (no growing padding)
-          const maxWidth = Math.max(20, width - 4);
+          // Shrink only if terminal is too narrow (framing = '──' + ' ─╮' = 5 chars)
+          const maxWidth = Math.max(20, width - 5);
           if (headerText.length > maxWidth) {
-            // Priority: keep percentage, shorten/trim status
             if (pctStr) {
-              const remainingLen = maxWidth - ` Research: ${pctStr} `.length;
-              if (remainingLen > 6) {
-                headerText = ` Research: ${pctStr} ${status.slice(0, remainingLen - 4)}..`;
-              } else {
-                headerText = ` Research: ${pctStr}`;
-              }
+              headerText = ` Research: ${pctStr}`;
+            } else if (statusMsg) {
+              headerText = ` ${statusMsg.slice(0, maxWidth - 1)}`;
             } else {
-              const remainingLen = maxWidth - ` Research `.length;
-              if (remainingLen > 6) {
-                headerText = ` Research ${status.slice(0, remainingLen - 4)}..`;
-              } else {
-                headerText = ` Research`;
-              }
+              headerText = ` Research`;
             }
           }
 
-          // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
-          const leftDecor = theme.fg('accent', '──');
-          const rightDecor = theme.fg('accent', ' ─╮');
-          const headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
+          // Render header: ╭─ text ─╮ (curved left, aligned to leftmost researcher box)
+          // SearXNG box is 9 chars wide (┌ + 7 content + │), researcher box starts at char 9
+          const searxngWidth = 9; // Fixed width of SearXNG box when shown
+          const headerPadding = ' '.repeat(searxngWidth);
+          const headerLine = theme.fg('muted', headerPadding + '╭─' + headerText + ' ─╮');
           allLines.push(headerLine);
 
           // Show SearXNG box only for the bottom-most panel in the Master Widget stack

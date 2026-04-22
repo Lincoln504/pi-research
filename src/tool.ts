@@ -89,6 +89,7 @@ async function ensureFunctionalHealth(
     const health = await runHealthCheck();
     
     if (!health.success) {
+      setFunctional(false);
       throw new Error(`Functional health check failed: ${health.error || 'Unknown error'}. Your network or search engines may be blocked.`);
     }
     
@@ -122,8 +123,8 @@ export function createResearchTool(): ToolDefinition {
       'Research is organized into Rounds. Each round contains multiple parallel siblings.',
       'SCRAPE PROTOCOL: Call the `scrape` tool up to FOUR times per agent: (1) handshake returns globally scraped links, (2) Batch 1 broad scrape ≤3 URLs, (3) Batch 2 targeted ≤2 URLs, (4) Batch 3 deep-dive ≤3 URLs. Batches skip automatically when context > 55%.',
       'The last sibling in each round evaluates progress and decides whether to continue or synthesize.',
-      'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
-      'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
+      '`security_search` is available for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
+      '`stackexchange` is available for technical questions, code solutions, debugging help, and best practices.',
     ],
     parameters: Type.Object({
       query: Type.String({

@@ -84,6 +84,38 @@ export function deduplicateUrls(urls: string[], alreadyScraped: string[]): {
 }
 
 /**
+ * Format a lightweight link update message for real-time injection into running siblings.
+ * Used when a researcher scrapes new URLs to immediately inform other running researchers.
+ * 
+ * @param newlyScrapedUrls - URLs that were just scraped
+ * @param sourceResearcherId - ID of the researcher that scraped these URLs
+ * @param sourceResearcherQuery - Query/topic of the source researcher
+ * @returns Formatted message for injection via session.steer()
+ */
+export function formatLightweightLinkUpdate(
+  newlyScrapedUrls: string[],
+  sourceResearcherId: string,
+  sourceResearcherQuery: string
+): string {
+  if (newlyScrapedUrls.length === 0) return '';
+
+  // Create a brief context phrase (less than a sentence)
+  const contextPhrase = sourceResearcherQuery.length > 60
+    ? sourceResearcherQuery.slice(0, 60) + '...'
+    : sourceResearcherQuery;
+
+  return `## Link Update: Sibling ${sourceResearcherId} Just Scraped
+
+**Topic**: ${contextPhrase}
+
+**${newlyScrapedUrls.length} link(s) added to shared pool:**
+${newlyScrapedUrls.map(url => `- ${url}`).join('\n')}
+
+> These links are now in the global pool — avoid re-scraping them.
+`;
+}
+
+/**
  * Format all completed reports into a shared links section for researcher prompts.
  * Extracts links from CITED LINKS and SCRAPE CANDIDATES sections.
  */
@@ -93,6 +125,22 @@ export function formatSharedLinksFromState(aspects: Record<string, { id: string;
 
   let output = '## Shared Links from Previous Research\n\n';
   output += 'The following links have already been examined by your siblings:\n\n';
+
+  // Extract all unique URLs for quick reference
+  const allUrls = new Set<string>();
+  for (const aspect of completed) {
+    const response = aspect.report!;
+    const urlMatches = response.matchAll(/\[[^\]]+\]\((https?:\/\/[^\)]+)\)/g);
+    for (const match of urlMatches) {
+      allUrls.add(match[2]!);
+    }
+  }
+
+  output += `### URLs in Shared Pool (${allUrls.size} total)\n\n`;
+  output += Array.from(allUrls).map(url => `- ${url}`).join('\n') + '\n\n';
+
+  // Detailed breakdown by researcher
+  output += '### Detailed Breakdown by Researcher\n\n';
 
   for (const aspect of completed) {
     const response = aspect.report!;

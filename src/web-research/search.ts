@@ -4,11 +4,12 @@
  * Search via SearXNG and return URLs, titles, and snippets.
  */
 
-import { getSearxngUrl } from './utils.ts';
+import { getSearxngUrl, isFallbackSearchEnabled, setFallbackSearchEnabled, filterRelevantResults } from './utils.ts';
 import { createTimeoutSignal } from './retry-utils.ts';
 import type { SearXNGResult, QueryResultWithError, SearxngSearchOptions } from './types.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
+import { performFallbackSearch } from './fallback-search.ts';
 
 // ============================================================================
 // Type Definitions
@@ -205,20 +206,39 @@ function classifyError(error: unknown): QueryResultWithError['error'] {
 // ============================================================================
 
 /**
- * Search multiple queries via SearXNG
+ * Search multiple queries via SearXNG with automatic headless fallback
  *
  * @param queries - Array of search query strings
  * @param options - Optional freshness and sourceType filters applied uniformly to all queries
  * @param signal - Optional AbortSignal; combined with the per-request timeout
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */
-export function search(queries: string[], options?: SearxngSearchOptions, signal?: AbortSignal): Promise<QueryResultWithError[]> {
+export async function search(queries: string[], options?: SearxngSearchOptions, signal?: AbortSignal): Promise<QueryResultWithError[]> {
+  // If fallback is already enabled, skip SearXNG entirely
+  if (isFallbackSearchEnabled()) {
+    logger.log(`[Web Research] Using fallback search mode (DDG Lite Stealth) for ${queries.length} queries`);
+    const fallbackResults = await performFallbackSearch(queries, signal);
+    return queries.map(q => ({
+      query: q,
+      results: fallbackResults.get(q) || [],
+      error: (fallbackResults.get(q)?.length || 0) === 0 ? { type: 'empty_results', message: 'Fallback search returned no results' } : undefined
+    }));
+  }
+
+  // 1. Primary SearXNG search
   const searchPromises = queries.map((query: string): Promise<QueryResultWithError> => {
     return searchSearxng(query, options, signal)
       .then((results: SearXNGResult[]): QueryResultWithError => {
-        const result: QueryResultWithError = { query, results };
-        // Explicitly mark as empty results if no results returned
-        if (results.length === 0) {
+        // Apply relevance guard to detect poisoned/junk results
+        const relevantResults = filterRelevantResults(query, results);
+        
+        if (results.length > 0 && relevantResults.length === 0) {
+          logger.warn(`[Web Research] Junk results detected for "${query}". Treating as empty to trigger fallback.`);
+          return { query, results: [] };
+        }
+
+        const result: QueryResultWithError = { query, results: relevantResults };
+        if (relevantResults.length === 0) {
           result.error = { type: 'empty_results', message: 'No results found for this query' };
         }
         return result;
@@ -231,5 +251,38 @@ export function search(queries: string[], options?: SearxngSearchOptions, signal
       });
   });
 
-  return Promise.all(searchPromises);
+  const primaryResults = await Promise.all(searchPromises);
+
+  // 2. Identify queries that failed or returned no results (likely due to blocking or junk filtering)
+  const failedQueries = primaryResults
+    .filter(r => r.results.length === 0)
+    .map(r => r.query);
+
+  if (failedQueries.length > 0 && !signal?.aborted) {
+    logger.warn(`[Web Research] ${failedQueries.length}/${queries.length} queries returned no results from SearXNG. Switching to fallback search mode.`);
+    
+    // Enable fallback for subsequent calls in this session
+    setFallbackSearchEnabled(true);
+    
+    try {
+      const fallbackResultsMap = await performFallbackSearch(failedQueries, signal);
+      
+      // 3. Merge fallback results back into the set
+      return primaryResults.map(r => {
+        const fallback = fallbackResultsMap.get(r.query);
+        if (fallback && fallback.length > 0) {
+          return {
+            query: r.query,
+            results: fallback,
+          };
+        }
+        return r;
+      });
+    } catch (fallbackError) {
+      logger.error(`[Web Research] Headless fallback search failed:`, fallbackError);
+      return primaryResults;
+    }
+  }
+
+  return primaryResults;
 }

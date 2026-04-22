@@ -7,8 +7,23 @@
  * consistency test below will fail.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getActiveSearxngEngines, validateEngineListConsistency } from '../../../src/utils/searxng-config.ts';
+
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn().mockReturnValue(`
+engines:
+  - name: google
+  - name: bing
+  - name: yahoo
+  - name: brave
+    disabled: true
+  - name: wikipedia
+    categories: [general]
+  - name: bing images
+    categories: [images]
+`)
+}));
 
 describe('getActiveSearxngEngines', () => {
   it('should return a non-empty list', () => {

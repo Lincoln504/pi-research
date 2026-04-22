@@ -25,21 +25,23 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 
 #### DEPTH PARAMETER — Controls research intensity
 
-**DEFAULT:** Omit depth parameter (uses `depth: 0` - Quick mode)
-- 1 researcher, 1 round
-- Fastest for most queries
+**DEFAULT:** Omit depth parameter (uses `depth: 0` - Quick mode, 1 researcher)
 
-**Higher depths** (only when user requests thoroughness):
+**Higher depths** (only when user asks for thoroughness):
 - `depth: 1` — Normal: 2 researchers, up to 2 rounds
 - `depth: 2` — Deep: 3 researchers, up to 3 rounds
 - `depth: 3` — Ultra: 5 researchers, up to 5 rounds
 
-**Key rule:** Default to depth 0. Use higher depths when user explicitly asks for "exhaustive", "deep-dive", "ultra", or "comprehensive" research.
+
+**Trigger words:** "exhaustive", "deep-dive", "ultra", "comprehensive" → use higher depth
+**IMPORTANT:** When processing topics with depth keywords ("level one/quick mode", "level two/normal mode", "level three/deep mode", "ultra mode"), EXTRACT the depth parameter from each topic individually. Example: "cyprus level one" → research({ query: "cyprus", depth: 0 }). Do NOT include depth keywords in the query string.
 
 ---
 
-#### MULTIPLE RESEARCH REQUESTS — Parallel vs. merged
+#### ONE OR MULTIPLE RESEARCH CALLS?
 
-**Different scopes** (unrelated topics): call `research` multiple times simultaneously in a single response — one tool call per distinct topic, run in parallel.
+**Use multiple parallel `research` calls when: different/unrelated topics**
 
-**Similar or overlapping scope**: merge into a single `research` call and consider raising depth one level to capture the additional breadth.
+**Use one `research` call with higher depth when: single complex topic**
+
+**Rule of thumb:** Different scopes = parallel calls. Same scope (even if broad or multifaceted) = one deep call.

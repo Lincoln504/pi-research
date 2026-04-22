@@ -227,25 +227,19 @@ function isPortListening(port: number, host: string = '127.0.0.1'): Promise<bool
  * This ensures the Python/Flask server is actually ready to serve requests.
  */
 async function isSearxngHttpReady(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
     const response = await fetch(`http://${host}:${port}/search?q=test&format=json`, {
       method: 'GET',
       signal: controller.signal,
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { 'Accept': 'application/json' },
     });
-
-    clearTimeout(timeoutId);
-    
-    // Any 2xx response means the server is ready (even if no results)
     return response.ok || response.status < 500;
   } catch {
-    // Connection refused, timeout, or any network error means not ready yet
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

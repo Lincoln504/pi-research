@@ -108,44 +108,30 @@ engines:
   - name: bing
     engine: bing
     shortcut: bi
-    weight: 1.5
+    weight: 1.0
+    disabled: true
 
   # Brave (scraping): independent index, different coverage from Bing
   # Can enter suspension after bursts; max_page 10 respected by SearXNG
   - name: brave
     engine: brave
     shortcut: bv
-    weight: 0.8
+    weight: 1.2
+    disabled: true
 
   # Yahoo: distinct backend, low blocking rate, fills gaps when others are suspended
   - name: yahoo
     engine: yahoo
     shortcut: yh
     weight: 0.8
+    disabled: true
 
-  # Qwant: EU-based independent index, low-volume private use stable
-  - name: qwant
-    engine: qwant
-    shortcut: qw
-    weight: 0.7
-
-  # DuckDuckGo: ddg-lite endpoint (no vqd); intermittent IP blocks (issue #4824 open)
-  - name: duckduckgo
-    engine: duckduckgo
-    shortcut: ddg
+  # Mojeek: independent index, less likely to block
+  - name: mojeek
+    engine: mojeek
+    shortcut: mj
     weight: 0.6
-
-  # DISABLED: startpage — sgt parameter missing in SearXNG parser (issue #4549, open)
-  # DISABLED: google — IP-blocks automated access within minutes
-
-  # Wikipedia: Encyclopedic reference
-  # - Reliability: HIGH (uses REST API)
-  # - Note: Keep weight low to prioritize search engines
-  - name: wikipedia
-    engine: wikipedia
-    shortcut: wp
-    categories: [general]
-    weight: 0.3  # LOWER - reference only, not primary search
+    disabled: true
 
   # Images (only when category=images is requested)
   - name: bing images

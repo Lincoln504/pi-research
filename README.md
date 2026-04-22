@@ -16,7 +16,7 @@ Other ways to connect pi to the internet exist. This one is designed differently
 
 **Safe by design** — Researcher agents cannot write files, edit files, or run shell commands. Web tools are isolated and rate-limited to keep agents focused.
 
-**Minimal setup** — Just install. A system prompt guides pi on when and how to use the tool. No prompt engineering. Works with other tools without conflicts.
+**Minimal setup** — Just install. A system prompt guides pi on when and how to use the tool. No advanced prompting required. Works alongside other tools without conflicts.
 
 ---
 
@@ -29,11 +29,11 @@ Other ways to connect pi to the internet exist. This one is designed differently
 - **Real-time TUI** — Per-researcher token and cost tracking
 
 ```
-── Research: 70% ─────────────────────────────────────
-┌───────┬────┐ 1 ┌─────┬────┐ 2 ┌────┬────┐ 3 ┌────┐
-│ SearXNG│     18k    │     36k     │     50k     │
-│ :55732 │   $0.0056  │   $0.0055   │   $0.0071   │
-└───────┴──────────────┴─────────────┴─────────────┘
+── Research: 70% ─╮
+┌───────┬──────┐ 1 ┌──────┬──────┐ 2 ┌──────┬──────┐ 3 ┌──────┐
+│SearXNG│  18k │     36k      │     50k      │     61k  │
+│:55732 │$0.006│   $0.0055    │   $0.0071    │  $0.0089 │
+└───────┴──────┴──────────────┴──────────────┴──────────┘
 ```
 
 ---
@@ -87,21 +87,26 @@ sudo usermod -aG docker $USER  # Log out and back in
 
 ## Usage
 
-Just ask pi for research. The `research` tool is registered automatically.
+Just talk to pi — the `research` tool registers automatically, no special slash command needed.
 
 ```
-Research "What is a binary search tree?"
-Do a deep dive on CVE-2024-3094 at depth 2
+research the latest developments in WebAssembly
+deep research AI inference hardware landscape
+deep research CVE-2024-3094 at depth 3
 ```
+
+Say **research** for a quick lookup. Say **deep research** for thorough investigation — pi selects depth 1–3 based on your query's scope and complexity, or pin it with **at depth N**.
+
+A `/research <query>` slash command is also available as a shortcut — it runs quick mode (depth 0) directly.
 
 **Depth levels**:
 
-| Depth | Mode | Researchers | Rounds |
-|-------|-------|-------------|---------|
-| 0     | Quick  | 1           | 1       |
-| 1     | Normal | 2           | 2       |
-| 2     | Deep   | 3           | 3       |
-| 3     | Ultra  | 5           | 5       |
+| Depth | Mode   | Researchers | Rounds |
+|-------|--------|-------------|--------|
+| 0     | Quick  | 1           | 1      |
+| 1     | Normal | 2           | 2      |
+| 2     | Deep   | 3           | 3      |
+| 3     | Ultra  | 5           | 5      |
 
 ---
 

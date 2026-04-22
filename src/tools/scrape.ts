@@ -1,18 +1,20 @@
 /**
  * scrape Tool
  *
- * Scrape full content from URLs using a context-aware, up-to-4-call protocol:
+ * Scrape full content from URLs using a context-aware, up-to-3-call protocol:
  *
- *   Call 1  (Handshake)  – Return already-scraped links; no network activity.
- *   Call 2  (Batch 1)    – Scrape up to MAX_SCRAPE_URLS URLs; requires context < 55%.
- *   Call 3  (Batch 2)    – Scrape up to BATCH_2_MAX_SCRAPE_URLS URLs (targeted follow-up);
+ *   Call 1 (Batch 1)     – Scrape up to MAX_SCRAPE_URLS URLs; requires context < 55%.
+ *   Call 2 (Batch 2)     – Scrape up to BATCH_2_MAX_SCRAPE_URLS URLs (targeted follow-up);
  *                          requires context < 55%; deduplicates against Batch 1.
- *   Call 4  (Batch 3)    – Scrape up to MAX_SCRAPE_URLS additional URLs; requires context < 55%.
- *   Call 5+ (Locked)     – All batches exhausted; move to synthesis.
+ *   Call 3 (Batch 3)     – Scrape up to MAX_SCRAPE_URLS additional URLs; requires context < 55%.
+ *   Call 4+ (Locked)     – All batches exhausted; move to synthesis.
  *
  * Context is measured as tokens_used / model_context_window.  When the threshold
  * is exceeded the tool returns an informative message instead of scraping, allowing
  * the researcher to proceed directly to synthesis with whatever it already has.
+ *
+ * Note: Global shared links (allScrapedLinks) are injected into the researcher's
+ * system prompt at session creation time, eliminating the need for a handshake call.
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -37,6 +39,8 @@ export function createScrapeTool(options: {
   tracker: ToolUsageTracker;
   getGlobalState: () => SystemResearchState;
   updateGlobalLinks: (links: string[]) => void;
+  /** Callback invoked when links are scraped (for real-time coordination) */
+  onLinksScraped?: (links: string[]) => void;
   /** Returns tokens consumed by this researcher session so far. */
   getTokensUsed?: () => number;
   /** Model context window in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
@@ -69,18 +73,17 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Context-aware 4-call protocol: handshake → batch 1 → batch 2 (targeted) → batch 3 (deep-dive).',
+    description: 'Scrape content from URLs. Supports HTML and PDF (auto-detected). Context-aware 3-call protocol: batch 1 → batch 2 (targeted) → batch 3 (deep-dive).',
     promptSnippet: 'Scrape full content from URLs (context-aware protocol)',
     promptGuidelines: [
-      'PROTOCOL: This tool uses up to FOUR calls per researcher session.',
-      'CALL 1 (Handshake): Provide your intended URLs. Returns links already scraped globally.',
-      'CALL 2 (Batch 1): Provide your filtered list (max 3 URLs). Primary broad scraping.',
-      'CALL 3 (Batch 2): Targeted follow-up (max 2 URLs). Deduplicated against Batch 1 automatically.',
-      'CALL 4 (Batch 3): Deep-dive scrape up to 3 more URLs.',
-      `CONTEXT LIMIT: All batches are skipped automatically if context exceeds ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%. Move to synthesis when this happens.`,
-      `BATCH 1 LIMIT: max ${MAX_SCRAPE_URLS} URLs. BATCH 2 LIMIT: max ${BATCH_2_MAX_SCRAPE_URLS} URLs (higher concurrency). BATCH 3 LIMIT: max ${MAX_SCRAPE_URLS} URLs.`,
-      'USE CASES FOR BATCH 2: Targeted follow-up on Batch 1 findings, retry failed scrapes.',
-      'USE CASES FOR BATCH 3 (if available): Deep-dive on a narrow sub-topic identified in Batch 1/2.',
+      'PROTOCOL: Up to 3 calls per researcher (batch 1 → batch 2 → batch 3).',
+      'Batch 1 (max 3 URLs): Primary broad scraping.',
+      'Batch 2 (max 2 URLs): Targeted follow-up. Auto-deduplicated.',
+      'Batch 3 (max 3 URLs): Deep-dive on narrow sub-topic.',
+      'Shared links from other researchers are in your system prompt — review before scraping.',
+      'PDFs auto-detected and converted to Markdown. Note extraction failures in Research Process Notes.',
+      `Batches skipped automatically if context exceeds ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%. Move to synthesis.`,
+      `Batch 2: max ${BATCH_2_MAX_SCRAPE_URLS} URLs with higher concurrency.`,
     ],
     parameters: Type.Object({
       urls: Type.Array(Type.String({
@@ -104,58 +107,13 @@ export function createScrapeTool(options: {
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
       const callCount = options.tracker.getCallCount('scrape');
-      const state = options.getGlobalState();
 
-      // ─── CALL 1: Handshake ────────────────────────────────────────────────
+      // ─── CALL 1: Batch 1 ──────────────────────────────────────────────────
       if (callCount === 0) {
-        options.tracker.recordCall('scrape');
-
-        const ctxFraction = getContextFraction();
-        const nextBatchProjection = getContextFraction(MAX_SCRAPE_URLS * AVG_TOKENS_PER_SCRAPE);
-        const ctxPct = Math.round(ctxFraction * 100);
-
-        // Tell the researcher how many batches are realistically available
-        const batch3Note = nextBatchProjection < MAX_CONTEXT_FRACTION_FOR_SCRAPING
-          ? `**Batches 1–3 available** — context is only ${ctxPct}% full.`
-          : `⚠️ Context is ${ctxPct}% full. **Batches 1–3 may be skipped** — consider proceeding directly to synthesis.`;
-
-        return {
-          content: [{
-            type: 'text',
-            text: [
-              '# Scrape Protocol: Call 1 (Handshake)',
-              'Here are all links already scraped in this research session:',
-              '',
-              state.allScrapedLinks && state.allScrapedLinks.length > 0
-                ? state.allScrapedLinks.map(l => `- ${l}`).join('\n')
-                : '*No links have been scraped yet.*',
-              '',
-              '**Protocol Overview:**',
-              `- **Batch 1** (Call 2): Up to ${MAX_SCRAPE_URLS} URLs — primary broad scraping.`,
-              `- **Batch 2** (Call 3): Up to ${BATCH_2_MAX_SCRAPE_URLS} URLs — targeted follow-up (auto-deduped against Batch 1).`,
-              `- **Batch 3** (Call 4): Up to ${MAX_SCRAPE_URLS} URLs — deep-dive.`,
-              '',
-              batch3Note,
-              '',
-              '**Action Required:**',
-              '1. Review the scraped links list above and remove duplicates from your list.',
-              `2. Call \`scrape\` again with your filtered list (max ${MAX_SCRAPE_URLS} URLs) to begin Batch 1.`,
-            ].join('\n')
-          }],
-          details: {
-            protocol: 'handshake',
-            previouslyScrapedCount: state.allScrapedLinks?.length || 0,
-            contextFraction: ctxFraction,
-          },
-        };
-      }
-
-      // ─── CALL 2: Batch 1 ──────────────────────────────────────────────────
-      if (callCount === 1) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
           // THROW to prevent researcher from calling again
-          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
+          throw new Error('Scrape limit reached. All 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;
@@ -209,6 +167,19 @@ export function createScrapeTool(options: {
         const failed = scrapeResults.filter(r => r.source === 'failed');
         const elapsed = Date.now() - startTime;
 
+        // Emit link-scraped event for real-time coordination
+        if (successful.length > 0 && options.onLinksScraped) {
+          const scrapedUrls = successful.map((r: any) => r.url).filter((u: string) => u);
+          if (scrapedUrls.length > 0) {
+            try {
+              options.onLinksScraped(scrapedUrls);
+            } catch (err) {
+              // Log error but don't fail the scrape operation
+              console.error('[scrape] Failed to emit onLinksScraped callback:', err);
+            }
+          }
+        }
+
         const ctxAfter = getContextFraction();
         const batch2Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_SCRAPING;
 
@@ -240,12 +211,12 @@ export function createScrapeTool(options: {
         };
       }
 
-      // ─── CALL 3: Batch 2 ──────────────────────────────────────────────────
-      if (callCount === 2) {
+      // ─── CALL 2: Batch 2 ──────────────────────────────────────────────────
+      if (callCount === 1) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
           // THROW to prevent researcher from calling again
-          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
+          throw new Error('Scrape limit reached. All 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;
@@ -315,6 +286,19 @@ export function createScrapeTool(options: {
         const failed = scrapeResults.filter(r => r.source === 'failed');
         const elapsed = Date.now() - startTime;
 
+        // Emit link-scraped event for real-time coordination
+        if (successful.length > 0 && options.onLinksScraped) {
+          const scrapedUrls = successful.map((r: any) => r.url).filter((u: string) => u);
+          if (scrapedUrls.length > 0) {
+            try {
+              options.onLinksScraped(scrapedUrls);
+            } catch (err) {
+              // Log error but don't fail the scrape operation
+              console.error('[scrape] Failed to emit onLinksScraped callback:', err);
+            }
+          }
+        }
+
         const ctxAfter = getContextFraction();
         const batch3Available = ctxAfter < MAX_CONTEXT_FRACTION_FOR_SCRAPING;
 
@@ -347,12 +331,12 @@ export function createScrapeTool(options: {
         };
       }
 
-      // ─── CALL 4: Batch 3 (context-gated deep-dive) ───────────────────────
-      if (callCount === 3) {
+      // ─── CALL 3: Batch 3 (context-gated deep-dive) ───────────────────────
+      if (callCount === 2) {
         const allowed = options.tracker.recordCall('scrape');
         if (!allowed) {
           // THROW to prevent researcher from calling again
-          throw new Error('Scrape limit reached. Handshake + 3 batches completed.');
+          throw new Error('Scrape limit reached. All 3 batches completed.');
         }
 
         const paramsRecord = params as Record<string, unknown>;
@@ -418,6 +402,19 @@ export function createScrapeTool(options: {
         const failed = scrapeResults.filter(r => r.source === 'failed');
         const elapsed = Date.now() - startTime;
 
+        // Emit link-scraped event for real-time coordination
+        if (successful.length > 0 && options.onLinksScraped) {
+          const scrapedUrls = successful.map((r: any) => r.url).filter((u: string) => u);
+          if (scrapedUrls.length > 0) {
+            try {
+              options.onLinksScraped(scrapedUrls);
+            } catch (err) {
+              // Log error but don't fail the scrape operation
+              console.error('[scrape] Failed to emit onLinksScraped callback:', err);
+            }
+          }
+        }
+
         let markdown = `# URL Scrape Results (Batch 3 — Deep-Dive)\n\n`;
         if (dedupNote) markdown += dedupNote;
         markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
@@ -441,7 +438,7 @@ export function createScrapeTool(options: {
         };
       }
 
-      // ─── CALL 5+: Locked ──────────────────────────────────────────────────
+      // ─── CALL 4+: Locked ──────────────────────────────────────────────────
       return {
         content: [{ type: 'text', text: 'Locked: All scrape batches have been used. Proceed directly to Phase 3 — Synthesis.' }],
         details: { locked: true },

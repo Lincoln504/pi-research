@@ -67,16 +67,32 @@ console.log(`\n📦 Detected platform: ${platform()}`);
 let browsersInstalled = false;
 let systemDepsInstalled = false;
 
+// Determine project root and browser cache directory
+const projectRoot = join(__dirname, '..');
+const browserCacheDir = join(projectRoot, '.browser');
+
+// Ensure browser cache directory exists
+if (!existsSync(browserCacheDir)) {
+  try {
+    execSync(`mkdir -p "${browserCacheDir}"`);
+  } catch (e) {
+    // Ignore if fails, will fall back to default behavior
+  }
+}
+
 // Check if we should skip browser installation
 const skipBrowserDownload = process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1';
 
 if (skipBrowserDownload) {
   console.log('\n⏭️  Skipping browser installation (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
 } else {
-  // Install browsers using npx playwright
-  console.log('\n🌐 Installing Playwright browsers...');
+  // Install Camoufox stealth browser
+  console.log('\n🌐 Installing Camoufox stealth browser (local to project)...');
 
   try {
+    // Set HOME to our local browser directory to force camoufox to install there
+    const env = { ...process.env, HOME: browserCacheDir, USERPROFILE: browserCacheDir };
+
     // Check if user wants to install system dependencies
     const installDeps = process.argv.includes('--system-deps') ||
                         process.env.PLAYWRIGHT_INSTALL_DEPS === 'true';
@@ -86,7 +102,7 @@ if (skipBrowserDownload) {
       try {
         execSync('npx playwright install-deps', {
           stdio: 'inherit',
-          env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' }
+          env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' }
         });
         console.log('✅ System dependencies installed');
         systemDepsInstalled = true;
@@ -97,18 +113,14 @@ if (skipBrowserDownload) {
       }
     }
 
-    // Install browser binaries
-    // Only Chromium is needed for scraping (as per scrapers.ts implementation)
-    console.log('   Installing Chromium browser...');
-    execSync('npx playwright install chromium', {
+    // Install Camoufox binaries
+    console.log('   Fetching Camoufox binaries...');
+    execSync('npx camoufox-js fetch', {
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || ''
-      }
+      env
     });
 
-    console.log('✅ Browsers installed successfully');
+    console.log('✅ Stealth browser installed successfully');
     browsersInstalled = true;
 
   } catch (error) {
@@ -117,17 +129,12 @@ if (skipBrowserDownload) {
 
     if (errorMsg.includes('npx: command not found')) {
       console.warn('\n⚠️  npx not available - skipping browser installation');
-      console.warn('   Chromium can be installed later with: npm run install:browsers');
-    } else if (errorMsg.includes('playwright') || errorMsg.includes('ENOENT')) {
-      console.warn('\n⚠️  Playwright package not yet available - skipping browser installation');
-      console.warn('   This is normal during initial npm install.');
-      console.warn('   Chromium will be installed automatically when you run the research tool.');
-      console.warn('   Or manually with: npm run install:browsers');
+      console.warn('   Camoufox can be installed later with: npx camoufox-js fetch');
     } else {
       console.warn('\n⚠️  Browser installation failed:');
       console.warn(`   ${errorMsg}`);
-      console.warn('\n💡 You can install Chromium later with:');
-      console.warn('   npm run install:browsers');
+      console.warn('\n💡 You can install Camoufox later with:');
+      console.warn('   npx camoufox-js fetch');
     }
 
     // NEVER exit with code 1 - let npm install complete
@@ -142,31 +149,29 @@ if (skipBrowserDownload) {
 // Verify installation
 console.log('\n📋 Verifying browser installation...');
 
-const browsers = ['chromium']; // Only Chromium is required for scraping
-const cacheDir = process.env['PLAYWRIGHT_BROWSERS_PATH'] ||
-  (process.platform === 'win32'
-    ? join(process.env['LOCALAPPDATA'] || join(homedir(), 'AppData', 'Local'), 'ms-playwright')
-    : join(homedir(), '.cache', 'ms-playwright'));
+// Camoufox stores binaries in $HOME/.cache/camoufox on Linux/macOS
+const camoufoxPath = isWindows 
+  ? join(browserCacheDir, "AppData", "Local", "camoufox", "camoufox", "Cache")
+  : join(browserCacheDir, '.cache', 'camoufox');
 
-browsers.forEach(browser => {
-  let browserDirs = [];
-  try {
-    browserDirs = readdirSync(cacheDir).filter(f =>
-      f.startsWith(browser) && statSync(join(cacheDir, f)).isDirectory()
-    );
-  } catch {
-    // cache dir may not exist yet or may be at a different path
-  }
+if (existsSync(camoufoxPath)) {
+    console.log(`   ✅ camoufox: Found in ${camoufoxPath}`);
+    try {
+        const versions = readdirSync(camoufoxPath).filter(f => 
+            statSync(join(camoufoxPath, f)).isDirectory()
+        );
+        if (versions.length > 0) {
+            console.log(`      Installed versions: ${versions.join(', ')}`);
+        }
+    } catch (e) {
+        // Ignore listing errors
+    }
+} else {
+    console.warn(`   ⚠️  camoufox: Not found in ${camoufoxPath}`);
+}
 
-  if (browserDirs.length > 0) {
-    console.log(`   ✅ ${browser}: ${browserDirs.sort().join(', ')}`);
-  } else {
-    console.warn(`   ⚠️  ${browser}: Not found in cache`);
-  }
-});
-
-// Show browser versions
-console.log('\n🔍 Browser versions:');
+// Show versions
+console.log('\n🔍 Versions:');
 try {
   const playwrightVersion = execSync('npx playwright --version', { encoding: 'utf8' }).trim();
   console.log(`   Playwright: ${playwrightVersion}`);
@@ -179,10 +184,10 @@ const setupComplete = browsersInstalled;
 
 console.log('\n' + '='.repeat(60));
 if (setupComplete) {
-  console.log('🎉 Setup complete! Chromium browser installed. pi-research is ready to use.');
+  console.log('🎉 Setup complete! Camoufox stealth browser installed. pi-research is ready to use.');
 } else {
   console.log('📦 pi-research installed successfully!');
-  console.log('   Chromium browser installation may be in progress or was skipped.');
+  console.log('   Camoufox browser installation may be in progress or was skipped.');
   console.log('   The browser will be installed automatically when you first use the research tool.');
 }
 console.log('='.repeat(60));
@@ -193,7 +198,7 @@ console.log('   • npm test              - Run unit tests');
 console.log('   • npm run type-check    - Type check TypeScript');
 console.log('   • npm run lint          - Run ESLint');
 console.log('   • npm run setup         - Full setup with system deps');
-console.log('   • npm run install:browsers - Install Chromium browser only');
+console.log('   • npx camoufox-js fetch - Update stealth browser binaries');
 
 // Platform-specific tips
 if (isLinux) {

@@ -5,8 +5,24 @@
  */
 
 import { createRequire } from 'module';
+import type { SearXNGResult } from './types.ts';
 
 const require = createRequire(import.meta.url);
+
+/**
+ * Filter search results based on keyword relevance to detect "junk" results
+ * from search engines that are blocking the bot.
+ */
+export function filterRelevantResults(query: string, results: SearXNGResult[]): SearXNGResult[] {
+  const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  if (keywords.length === 0) return results;
+
+  return results.filter((r: SearXNGResult) => {
+    const text = `${r.title} ${r.content}`.toLowerCase();
+    // At least one keyword must be present in title or snippet
+    return keywords.some(word => text.includes(word));
+  });
+}
 
 /**
  * SearXNG Manager interface
@@ -35,12 +51,27 @@ interface TrackedContext {
 
 // Manager instance (set by extension)
 let searxngManager: SearxngManager | null = null;
+let fallbackSearchEnabled = false;
 
 /**
  * Set the SearXNG manager instance (called by extension on session start)
  */
 export function setSearxngManager(manager: SearxngManager): void {
   searxngManager = manager;
+}
+
+/**
+ * Enable or disable fallback search mode (DuckDuckGo Lite stealth)
+ */
+export function setFallbackSearchEnabled(enabled: boolean): void {
+  fallbackSearchEnabled = enabled;
+}
+
+/**
+ * Check if fallback search mode is enabled
+ */
+export function isFallbackSearchEnabled(): boolean {
+  return fallbackSearchEnabled;
 }
 
 /**
@@ -64,7 +95,7 @@ export function resetConnectionCounters(): void {}
 
 /**
  * Clear all tracked contexts without closing them
- * Used when browser is closed externally (e.g., via stopChromium())
+ * Used when browser is closed externally (e.g., via stopCamoufox())
  */
 export function clearTrackedContexts(): void {
   activeContexts.clear();
@@ -92,7 +123,7 @@ export function checkModule(name: string): boolean {
 /**
  * Clean up all active browser contexts
  * IMPORTANT: This does NOT close the browser - only pages and contexts
- * The singleton browser is managed exclusively by stopChromium() in scrapers.ts
+ * The singleton browser is managed exclusively by stopCamoufox() in camoufox-lifecycle.ts
  */
 export async function cleanupAllContexts(): Promise<void> {
   const cleanupPromises: Promise<void>[] = [];
@@ -102,7 +133,7 @@ export async function cleanupAllContexts(): Promise<void> {
       (async (): Promise<void> => {
         try {
           // Close page first, then context
-          // Do NOT close browser here - it's managed by stopChromium()
+          // Do NOT close browser here - it's managed by stopCamoufox()
           if (ctx.page !== undefined) {
             await ctx.page.close().catch(() => {});
           }

@@ -19,7 +19,7 @@ export interface Config {
   PROXY_URL?: string;
   /** Brave Search API key — enables the braveapi engine in SearXNG when set (optional) */
   BRAVE_SEARCH_API_KEY?: string;
-  /** Health check timeout in milliseconds (default: 15000) */
+  /** Health check timeout in milliseconds (default: 25000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
   /** Global TUI refresh debounce in milliseconds (default: 10) */
   TUI_REFRESH_DEBOUNCE_MS: number;

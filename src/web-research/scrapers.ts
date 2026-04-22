@@ -3,7 +3,7 @@
  *
  * 2-layer scraping architecture:
  * Layer 1: fetch (Node built-in, concurrent, no browser overhead)
- * Layer 2: Playwright + Chromium (standard headless, for JS-heavy sites)
+ * Layer 2: Playwright + Camoufox (stealth Firefox, for JS-heavy or protected sites)
  *
  * Native HTML-to-Markdown conversion is preferred when available because it
  * offers the best filtering control. On macOS, the upstream native package is
@@ -19,33 +19,16 @@ import {
 import {
   trackContext,
   untrackContextById,
-  clearTrackedContexts,
   checkModule,
 } from './utils.ts';
 import { logger } from '../logger.ts';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
 // AbortSignal.any() and AbortSignal.timeout() are Node.js 20+ features
-
-// Playwright types (since module is optional/dynamically loaded)
-interface LaunchOptions {
-  headless: boolean;
-  args: string[];
-}
-
-interface Browser {
-  isConnected(): boolean;
-  close(): Promise<void>;
-   
-  newContext(options?: { viewport: unknown }): Promise<BrowserContext>;
-}
 
 interface BrowserContext {
   newPage(): Promise<Page>;
@@ -59,14 +42,7 @@ interface Page {
   close(): Promise<void>;
 }
 
-interface PlaywrightModule {
-  chromium: {
-     
-    launch(options: LaunchOptions): Promise<Browser>;
-  };
-}
-
-import { shutdownManager } from '../utils/shutdown-manager.ts';
+import { getCamoufoxBrowser } from '../infrastructure/camoufox-lifecycle.ts';
 
 // ============================================================================
 // Module State
@@ -112,142 +88,17 @@ export function initScraperDependencies(): void {
   }
 
   scraperDependenciesInitialized = true;
-  playwrightAvailable = checkModule('playwright');
-  shutdownManager.register(stopChromium);
+  playwrightAvailable = checkModule('playwright') && checkModule('camoufox-js');
 }
 
 initScraperDependencies();
 
 // ============================================================================
-// Chromium singleton browser
+// Stealth Browser (Camoufox)
 //
-// One Chromium process is shared across all scrape calls for the lifetime of
-// the session. Playwright manages the child process; each scrape opens its own
-// isolated BrowserContext+Page and closes them when done — the browser itself
-// stays alive. This eliminates the ~1-2s Chromium startup cost per tool call.
-//
-// Lifecycle:
-//   - Lazily started on first Layer 2 scrape attempt
-//   - stopChromium() is registered with the extension cleanup registry
-//   - pi triggers that cleanup from session_shutdown
-//   - On /reload, the old browser var is reset to null; the old Chromium process
-//     is an orphan but Playwright registers an on-exit handler that kills it when
-//     the Node process exits — acceptable bounded leak for the /reload case
+// Replaces standard Chromium with an anti-detect Firefox (Camoufox).
+// Lifecycle is managed by infrastructure/camoufox-lifecycle.ts
 // ============================================================================
-
-let sharedBrowser: Browser | null = null;
-let sharedBrowserLaunchPromise: Promise<Browser> | null = null;
-let chromiumInstallAttempted = false;
-
-function getBrowser(): Promise<Browser> {
-  // Return existing connected browser
-  if (sharedBrowser?.isConnected()) {
-    return Promise.resolve(sharedBrowser);
-  }
-
-  // Coalesce concurrent launch requests into one Promise
-  if (sharedBrowserLaunchPromise !== null) {
-    return sharedBrowserLaunchPromise;
-  }
-
-  if (sharedBrowser !== null) {
-    // Browser existed but lost connection — relaunch
-    logger.log('[Scrapers] Chromium disconnected, relaunching...');
-    sharedBrowser = null;
-  } else {
-    logger.log('[Scrapers] Launching Chromium...');
-  }
-
-  sharedBrowserLaunchPromise = (async (): Promise<Browser> => {
-    try {
-      const playwright = require('playwright') as PlaywrightModule;
-      sharedBrowser = await playwright.chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
-      logger.log('[Scrapers] Chromium launched');
-      return sharedBrowser;
-    } catch (error) {
-      // Check if this is a missing executable error and we haven't tried installing yet
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      const isMissingExecutableError =
-        errorMsg.includes('Executable') ||
-        errorMsg.includes('executable') ||
-        errorMsg.includes('not found') ||
-        errorMsg.includes('ENOENT') ||
-        errorMsg.includes('doesn\'t exist');
-
-      if (isMissingExecutableError && !chromiumInstallAttempted) {
-        chromiumInstallAttempted = true;
-        logger.log('[Scrapers] Chromium executable not found, installing...');
-
-        try {
-          // Dynamically import execSync to avoid top-level import
-          const { execSync } = await import('child_process');
-          execSync('npx playwright install chromium', {
-            stdio: 'inherit',
-            env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' },
-          });
-          logger.log('[Scrapers] Chromium installed, retrying launch...');
-
-          // Retry launch after installation
-          const playwright = require('playwright') as PlaywrightModule;
-          sharedBrowser = await playwright.chromium.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-          });
-          logger.log('[Scrapers] Chromium launched');
-          return sharedBrowser;
-        } catch (installError) {
-          // Log installation failure but let the original error propagate
-          logger.error('[Scrapers] Failed to install Chromium:', installError);
-          throw error; // Re-throw the original launch error
-        }
-      }
-
-      // Re-throw non-executable errors or if installation was already attempted
-      throw error;
-    } finally {
-      // Always clear the promise — success or failure — so the next call
-      // retries the launch rather than returning a permanently cached rejection.
-      sharedBrowserLaunchPromise = null;
-    }
-  })();
-
-  return sharedBrowserLaunchPromise;
-}
-
-export async function stopChromium(): Promise<void> {
-  const b = sharedBrowser;
-  const p = sharedBrowserLaunchPromise;
-
-  if (b === null && p === null) {
-    return; // Nothing to stop
-  }
-
-  logger.log('[Scrapers] Stopping Chromium...');
-
-  // Capture and null both references before any await so concurrent calls
-  // cannot double-close.
-  sharedBrowser = null;
-  sharedBrowserLaunchPromise = null;
-
-  // Clear all tracked contexts since they become invalid when browser closes
-  // This prevents memory leaks and stale references
-  clearTrackedContexts();
-
-  if (b !== null) {
-    await b.close().catch(() => {});
-  } else if (p !== null) {
-    // A launch was in-progress; wait for it, then close what it produced.
-    const launched = await p.catch(() => null);
-    if (launched !== null) {
-      await launched.close().catch(() => {});
-    }
-  }
-
-  logger.log('[Scrapers] Chromium stopped');
-}
 
 /**
  * Convert HTML to Markdown using visitor pattern for element-level filtering
@@ -382,7 +233,7 @@ function stripImageLinks(markdown: string): string {
 //
 // fetch() succeeds on pages that are HTTP 200 but contain no useful content:
 // bot-detection challenges, JS-required stubs, login redirects, or empty shells.
-// These must fail fast so the URL falls through to Chromium rather than
+// These must fail fast so the URL falls through to Camoufox rather than
 // returning garbage markdown to the caller.
 //
 // Checks (in order):
@@ -463,7 +314,7 @@ function validateContent(html: string, markdown: string, url: string): void {
  * Layer 1: fetch (Node built-in)
  *
  * Fast, concurrent, zero browser overhead. Works for any static or server-rendered
- * HTML page. Falls through to Chromium for JS-heavy or gated pages.
+ * HTML page. Falls through to Camoufox for JS-heavy or gated pages.
  *
  * Concurrency: each call is an independent async HTTP request on the event loop.
  * No per-connection state is shared, so many can run in parallel safely.
@@ -549,13 +400,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 
 
 /**
- * Layer 2: Playwright + Chromium (shared singleton browser)
+ * Layer 2: Playwright + Camoufox (shared singleton browser)
  *
- * Uses the module-level shared Chromium browser. Opens an isolated
+ * Uses the module-level shared Camoufox browser. Opens an isolated
  * BrowserContext+Page, closes them when done, but leaves the browser running.
  */
 
-async function scrapeWithChromium(_url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   if (signal?.aborted) {
     // Create an abort error using standard Error with the correct name
     const error = new Error('Aborted') as Error & { name: string; cause?: unknown };
@@ -564,7 +415,7 @@ async function scrapeWithChromium(_url: string, signal?: AbortSignal): Promise<S
     throw error;
   }
 
-  const browser = await getBrowser();
+  const browser = await getCamoufoxBrowser();
 
   // Re-check after the async browser acquisition — signal may have fired during launch
   if (signal?.aborted) {
@@ -595,7 +446,13 @@ async function scrapeWithChromium(_url: string, signal?: AbortSignal): Promise<S
 
   try {
     context = await browser.newContext({ viewport: null });
+    if (!context) {
+      throw new Error('Failed to create browser context');
+    }
     page = await context.newPage();
+    if (!page) {
+      throw new Error('Failed to create browser page');
+    }
 
     contextId = trackContext(browser, context, page);
 
@@ -616,7 +473,7 @@ async function scrapeWithChromium(_url: string, signal?: AbortSignal): Promise<S
 
     return {
       source: 'playwright',
-      layer: 'playwright+chromium',
+      layer: 'playwright+camoufox',
       markdown,
     };
   } finally {
@@ -788,17 +645,17 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<S
     errors.push({ layer: 'fetch', error: errorInfo.message, errorType: errorInfo.type });
   }
 
-  // Layer 2: Playwright + Chromium (shared singleton browser)
+  // Layer 2: Playwright + Camoufox (shared singleton browser)
   if (signal?.aborted) {
     return { url, source: 'cancelled', markdown: '', error: 'Cancelled before Layer 2', sourceCategory };
   }
   if (playwrightAvailable) {
     try {
-      const result = await scrapeWithChromium(url, signal);
+      const result = await scrapeWithStealthBrowser(url, signal);
       return { url, source: result.source, layer: result.layer, markdown: result.markdown, sourceCategory };
     } catch (error2) {
       const errorInfo = extractErrorInfo(error2);
-      errors.push({ layer: 'Playwright+Chromium', error: errorInfo.message, errorType: errorInfo.type });
+      errors.push({ layer: 'Playwright+Camoufox', error: errorInfo.message, errorType: errorInfo.type });
     }
   }
 
@@ -928,22 +785,22 @@ export async function scrape(urls: string[], maxConcurrency = 10, signal?: Abort
     aborted = true;
   }
 
-  // Layer 2: Playwright + Chromium (persistent singleton browser)
+  // Layer 2: Playwright + Camoufox (persistent singleton browser)
   if (!aborted && playwrightAvailable && failedUrls.length > 0) {
-    const layer2Results = await scrapeUrlsInLayer(failedUrls, maxConcurrency, scrapeWithChromium, signal);
+    const layer2Results = await scrapeUrlsInLayer(failedUrls, maxConcurrency, scrapeWithStealthBrowser, signal);
 
     layer2Results.forEach(result => {
       if (result.success && result.layer !== undefined) {
         results.set(result.url, {
           url: result.url,
           source: result.source ?? 'playwright',
-          layer: result.layer,
+          layer: 'playwright+camoufox',
           markdown: result.markdown ?? '',
           sourceCategory: classifySourceCategory(result.url),
         });
       } else if (!result.success) {
         const urlErrors = errors.get(result.url) ?? [];
-        urlErrors.push({ layer: 'Playwright+Chromium', error: result.error ?? 'Unknown error', errorType: result.errorType ?? 'Error' });
+        urlErrors.push({ layer: 'Playwright+Camoufox', error: result.error ?? 'Unknown error', errorType: result.errorType ?? 'Error' });
         errors.set(result.url, urlErrors);
       }
     });

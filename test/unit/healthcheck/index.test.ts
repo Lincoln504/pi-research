@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runHealthCheck, clearHealthCheckCache } from '../../../src/healthcheck/index.ts';
 import { logger } from '../../../src/logger.ts';
+import { setFallbackSearchEnabled } from '../../../src/web-research/utils.ts';
 
 // Mock dependencies
 vi.mock('../../../src/logger.ts', () => ({
@@ -34,6 +35,8 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 
 vi.mock('../../../src/web-research/utils.ts', () => ({
   setSearxngManager: vi.fn(),
+  setFallbackSearchEnabled: vi.fn(),
+  filterRelevantResults: vi.fn().mockImplementation((_query, results) => results)
 }));
 
 vi.mock('../../../src/utils/searxng-config.ts', () => ({
@@ -59,8 +62,8 @@ describe('healthcheck', () => {
       {
         query: 'open source software',
         results: [
-          { engine: 'google', title: 't1', url: 'u1', content: 'c1' },
-          { engine: 'bing', title: 't2', url: 'u2', content: 'c2' },
+          { engine: 'google', title: 'Open Source Software Guide', url: 'u1', content: 'Comprehensive guide to open source software' },
+          { engine: 'bing', title: 'What is Open Source?', url: 'u2', content: 'Learning about open source development' },
         ],
       },
     ]);
@@ -79,7 +82,7 @@ describe('healthcheck', () => {
     expect(result.error).toBeUndefined();
   });
 
-  it('should fail when search returns no results from general engines', async () => {
+  it('should pass via fallback when search returns no results from general engines', async () => {
     const { search } = await import('../../../src/web-research/search.ts');
 
     vi.mocked(search).mockResolvedValue([
@@ -93,9 +96,9 @@ describe('healthcheck', () => {
 
     const result = await runHealthCheck();
 
-    expect(result.success).toBe(false);
-    expect(result.searchOk).toBe(false);
-    expect(result.error).toContain('No working engines found');
+    expect(result.success).toBe(true);
+    expect(result.searchOk).toBe(true);
+    expect(setFallbackSearchEnabled).toHaveBeenCalledWith(true);
   });
 
   it('should fail when all scrape canaries return empty content', async () => {
@@ -105,7 +108,7 @@ describe('healthcheck', () => {
     vi.mocked(search).mockResolvedValue([
       {
         query: 'open source software',
-        results: [{ engine: 'google', title: 't1', url: 'u1', content: 'c1' }],
+        results: [{ engine: 'google', title: 'Open Source Projects', url: 'u1', content: 'Explore top open source projects' }],
       },
     ]);
 
@@ -130,7 +133,7 @@ describe('healthcheck', () => {
     vi.mocked(search).mockResolvedValue([
       {
         query: 'open source software',
-        results: [{ engine: 'google', title: 't1', url: 'u1', content: 'c1' }],
+        results: [{ engine: 'google', title: 'Open Source Projects', url: 'u1', content: 'Explore top open source projects' }],
       },
     ]);
 
@@ -157,7 +160,7 @@ describe('healthcheck', () => {
     const { search } = await import('../../../src/web-research/search.ts');
     const { scrapeSingle } = await import('../../../src/web-research/scrapers.ts');
 
-    vi.mocked(search).mockResolvedValue([{ query: 'q', results: [{ engine: 'google', title: 't', url: 'u', content: 'c' }] }]);
+    vi.mocked(search).mockResolvedValue([{ query: 'open source software', results: [{ engine: 'google', title: 'Open Source', url: 'u', content: 'Open source content' }] }]);
     vi.mocked(scrapeSingle).mockResolvedValue({ url: 'u', markdown: 'Substantial content', source: 'searxng' } as any);
 
     // First call
