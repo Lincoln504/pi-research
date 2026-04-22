@@ -1,8 +1,9 @@
 /**
  * Camoufox Browser Lifecycle Manager
  *
- * Manages a singleton Camoufox (anti-detect Firefox) instance for stealth scraping.
- * Reuses the same browser process across sessions to minimize overhead.
+ * Manages a pool of Camoufox (anti-detect Firefox) instances for stealth scraping.
+ * Reuses browser processes across sessions to minimize overhead while supporting
+ * high concurrency across multiple processes.
  */
 
 import { logger } from '../logger.ts';
@@ -11,14 +12,13 @@ import { createRequire } from 'module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import * as os from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
  * Robustly find the package root by looking for package.json.
- * This ensures the .browser directory is always in the npm install location,
- * regardless of the current working directory.
  */
 function findPackageRoot(startDir: string): string {
   let current = startDir;
@@ -28,22 +28,41 @@ function findPackageRoot(startDir: string): string {
     }
     current = dirname(current);
   }
-  // Fallback to relative path if package.json not found
   return resolve(startDir, '../../');
 }
 
 const packageRoot = findPackageRoot(__dirname);
 const browserCacheDir = join(packageRoot, '.browser');
 
+// ============================================================================
+// Browser Pool Module State
+// ============================================================================
+
+/**
+ * SMART CONCURRENCY:
+ * Calculate max pool size based on available CPU threads.
+ * Rule: total threads - 3 (to leave room for the OS and the main process).
+ * Minimum: 1, Maximum: 10 (to avoid IP rate limits).
+ */
+const cpuCount = os.cpus().length;
+const MAX_POOL_SIZE = Math.min(10, Math.max(1, cpuCount - 3));
+
+const browserPool: any[] = [];
+let launchLock: Promise<any> | null = null;
+let camoufoxFetchAttempted = false;
+
+/**
+ * Export the calculated concurrency limit for other modules to use.
+ */
+export function getRecommendedConcurrency(): number {
+  return MAX_POOL_SIZE;
+}
+
 /**
  * Configure environment for local Camoufox storage.
- * Camoufox-js uses top-level constants in its 'pkgman' module that are 
- * calculated when the module is first loaded, based on os.homedir().
- * We override HOME/USERPROFILE in the process environment before requiring the package.
  */
 function setupCamoufoxEnv() {
   if (!process.env['CAMOUFOX_LOCAL_CONFIGURED']) {
-    // Cache the original HOME to be a good citizen
     const oldHome = process.env['HOME'];
     const oldUserProfile = process.env['USERPROFILE'];
 
@@ -60,10 +79,6 @@ function setupCamoufoxEnv() {
 
 const require = createRequire(import.meta.url);
 
-let sharedBrowser: any = null;
-let launchPromise: Promise<any> | null = null;
-let camoufoxFetchAttempted = false;
-
 /**
  * Check if camoufox-js is installed
  */
@@ -71,13 +86,10 @@ function isCamoufoxAvailable(): boolean {
   try {
     const envState = setupCamoufoxEnv();
     require.resolve('camoufox-js');
-    
-    // Restore if we just configured it
     if (envState) {
       if (envState.oldHome) process.env['HOME'] = envState.oldHome;
       if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
     }
-    
     return true;
   } catch {
     return false;
@@ -85,92 +97,92 @@ function isCamoufoxAvailable(): boolean {
 }
 
 /**
- * Get or launch the shared Camoufox browser instance
+ * Get a browser from the pool or launch a new one.
+ * Implements a simple round-robin / load-balancing strategy.
  */
 export async function getCamoufoxBrowser(): Promise<any> {
-  if (sharedBrowser && sharedBrowser.isConnected()) {
-    return sharedBrowser;
+  // Log configuration on first access
+  if (browserPool.length === 0 && !launchLock) {
+    logger.log(`[Camoufox] Smart Concurrency: ${cpuCount} threads detected. Max pool size: ${MAX_POOL_SIZE}`);
   }
 
-  if (launchPromise) {
-    return launchPromise;
+  // 1. Clean up stale/disconnected browsers
+  for (let i = browserPool.length - 1; i >= 0; i--) {
+    if (!browserPool[i].isConnected()) {
+      browserPool.splice(i, 1);
+    }
   }
+
+  // 2. If we have a healthy browser and haven't hit the pool limit, 
+  // we might still want to return an existing one to save resources.
+  if (browserPool.length > 0) {
+    // Return a random browser from the pool to distribute load
+    return browserPool[Math.floor(Math.random() * browserPool.length)];
+  }
+
+  // 3. Coalesce concurrent launch requests
+  if (launchLock) return launchLock;
 
   const envState = setupCamoufoxEnv();
 
-  launchPromise = (async () => {
+  launchLock = (async () => {
     try {
       if (!isCamoufoxAvailable()) {
-        throw new Error('camoufox-js package not found. Please run: npm install camoufox-js');
+        throw new Error('camoufox-js package not found.');
       }
 
-      // Dynamic import/require so the env override is in effect
       const { Camoufox } = require('camoufox-js');
       
-      // RESTORE environment immediately after loading the module
-      // pkgman.js has already calculated its constants.
       if (envState) {
         if (envState.oldHome) process.env['HOME'] = envState.oldHome;
         if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
       }
 
-      logger.log('[Camoufox] Launching stealth browser...');
+      logger.log(`[Camoufox] Launching new stealth browser instance... (Pool Size: ${browserPool.length + 1})`);
       
-      sharedBrowser = await Camoufox({
+      const browser = await Camoufox({
         headless: true,
+        humanize: true,
+        block_images: true
       });
 
-      logger.log('[Camoufox] Stealth browser launched');
-      return sharedBrowser;
+      browserPool.push(browser);
+      return browser;
     } catch (error) {
-      // Restore on error as well
-      if (envState) {
-        if (envState.oldHome) process.env['HOME'] = envState.oldHome;
-        if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
-      }
-
       const msg = error instanceof Error ? error.message : String(error);
       
-      // Handle missing binaries
-      if ((msg.includes('Camoufox binaries not found') || msg.includes('not installed')) && !camoufoxFetchAttempted) {
+      if ((msg.includes('binaries not found') || msg.includes('not installed')) && !camoufoxFetchAttempted) {
         camoufoxFetchAttempted = true;
-        logger.warn('[Camoufox] Binaries missing in local directory, attempting to fetch...');
-        
-        try {
-          const { execSync } = await import('child_process');
-          // Ensure fetch also uses the local HOME
-          execSync('npx camoufox-js fetch', { 
-            stdio: 'inherit',
-            env: { ...process.env, HOME: browserCacheDir, USERPROFILE: browserCacheDir }
-          });
-          
-          // Retry launch
-          const { Camoufox } = require('camoufox-js');
-          sharedBrowser = await Camoufox({ headless: true });
-          return sharedBrowser;
-        } catch (fetchErr) {
-          logger.error('[Camoufox] Failed to fetch binaries:', fetchErr);
-        }
+        logger.warn('[Camoufox] Binaries missing, fetching...');
+        const { execSync } = await import('child_process');
+        execSync('npx camoufox-js fetch', { 
+          stdio: 'inherit',
+          env: { ...process.env, HOME: browserCacheDir, USERPROFILE: browserCacheDir }
+        });
+        const { Camoufox } = require('camoufox-js');
+        const browser = await Camoufox({ headless: true, block_images: true });
+        browserPool.push(browser);
+        return browser;
       }
 
       logger.error('[Camoufox] Failed to launch browser:', error);
       throw error;
     } finally {
-      launchPromise = null;
+      launchLock = null;
     }
   })();
 
-  return launchPromise;
+  return launchLock;
 }
 
 /**
- * Close the shared browser instance
+ * Stop all browser instances in the pool
  */
 export async function stopCamoufox(): Promise<void> {
-  if (sharedBrowser) {
-    logger.log('[Camoufox] Stopping stealth browser...');
-    await sharedBrowser.close().catch(() => {});
-    sharedBrowser = null;
+  if (browserPool.length > 0) {
+    logger.log(`[Camoufox] Stopping ${browserPool.length} stealth browser instances...`);
+    await Promise.all(browserPool.map(b => b.close().catch(() => {})));
+    browserPool.length = 0;
   }
 }
 
