@@ -17,7 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as os from 'node:os';
-import { FixedClusterPool } from 'poolifier';
+import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -67,11 +67,18 @@ class BrowserTaskScheduler {
     private pool: FixedClusterPool;
     private activeMainThreadCount = 0;
     private mainThreadQueue: { task: (browser: any) => Promise<any>, resolve: any, reject: any }[] = [];
+    private lastSearchTimestamp = 0;
+    private SEARCH_THROTTLE_MS = 3000; // Minimum 3s between any two searches globally
 
     constructor() {
         logger.log(`[Scheduler] Initializing FixedClusterPool (Size: ${MAX_CONCURRENT_TASKS})`);
         this.pool = new FixedClusterPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.js'), {
             errorHandler: (e) => logger.error('[Scheduler] Cluster Error:', e),
+            workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
+            enableTasksQueue: true,
+            tasksQueueOptions: {
+                concurrency: 1 // Crucial: Each worker process handles only one task at a time
+            }
         });
     }
 
@@ -79,6 +86,15 @@ class BrowserTaskScheduler {
      * Run Search via Cluster Worker (Process Isolation)
      */
     async runSearch(query: string): Promise<any> {
+        // GLOBAL THROTTLE: Ensure we don't burst DDG too hard across workers
+        const now = Date.now();
+        const timeSinceLast = now - this.lastSearchTimestamp;
+        if (timeSinceLast < this.SEARCH_THROTTLE_MS) {
+            const delay = this.SEARCH_THROTTLE_MS - timeSinceLast;
+            await new Promise(r => setTimeout(r, delay));
+        }
+        this.lastSearchTimestamp = Date.now();
+
         const result = (await this.pool.execute({ type: 'search', query })) as any;
         if (result.error) throw new Error(result.error);
         
