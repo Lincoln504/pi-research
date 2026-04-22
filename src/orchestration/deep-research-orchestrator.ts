@@ -12,7 +12,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtendedAgentSessionEvent } from '../types/extension-context.ts';
 import { complete, type Model } from '@mariozechner/pi-ai';
+import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { 
     ResearchPanelState, 
@@ -27,7 +29,8 @@ import {
     MAX_CONCURRENT_RESEARCHERS,
     MAX_ROUNDS_LEVEL_1,
     MAX_ROUNDS_LEVEL_2,
-    MAX_ROUNDS_LEVEL_3
+    MAX_ROUNDS_LEVEL_3,
+    AVG_TOKENS_PER_SCRAPE
 } from '../constants.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +61,8 @@ export class DeepResearchOrchestrator {
   private allScrapedLinks: string[] = [];
   private reports = new Map<string, string>();
   private currentRound = 1;
+  private siblingTokens = new Map<string, number>();
+  private siblingScrapeTokens = new Map<string, number>();
 
   constructor(private options: DeepResearchOrchestratorOptions) {}
 
@@ -194,11 +199,41 @@ export class DeepResearchOrchestrator {
             settingsManager: (this.options.ctx as any).settingsManager,
             systemPrompt,
             extensionCtx: this.options.ctx,
-            onLinksScraped: (links) => this.broadcastLinks(config.id, config.name, links)
+            onLinksScraped: (links) => this.broadcastLinks(config.id, config.name, links),
+            getTokensUsed: () => this.siblingTokens.get(config.id) ?? 0,
+            getScrapeTokens: () => this.siblingScrapeTokens.get(config.id) ?? 0,
+            contextWindowSize: (this.options.model as any)?.contextWindow ?? 200000,
+        });
+
+        const subscription = session.subscribe((event: ExtendedAgentSessionEvent) => {
+            if (event.type === 'message_end' && event.message?.role === 'assistant') {
+                const usage = parseTokenUsage(event.message?.usage);
+                const tokens = calculateTotalTokens(usage);
+                if (tokens > 0) {
+                    const currentTokens = this.siblingTokens.get(config.id) ?? 0;
+                    this.siblingTokens.set(config.id, currentTokens + tokens);
+                    this.options.onTokens(tokens);
+
+                    // Estimate scrape tokens
+                    const scrapeTokenEstimate = (event.message as any)?.toolResults?.reduce((sum: number, result: any) => {
+                        if (result.toolName === 'scrape') {
+                            return sum + ((result.details?.count ?? 0) * AVG_TOKENS_PER_SCRAPE);
+                        }
+                        return sum;
+                    }, 0) || 0;
+                    
+                    if (scrapeTokenEstimate > 0) {
+                        const currentScrapeTokens = this.siblingScrapeTokens.get(config.id) ?? 0;
+                        this.siblingScrapeTokens.set(config.id, currentScrapeTokens + scrapeTokenEstimate);
+                    }
+                }
+            }
         });
 
         this.activeSessions.set(config.id, session);
         await session.prompt("Begin your specialized research.");
+        
+        if (typeof subscription === 'function') subscription();
         
         const report = await this.extractFinalReport(session);
         this.reports.set(config.id, report);
@@ -273,7 +308,7 @@ export class DeepResearchOrchestrator {
   }
 
   private extractUrls(report: string): string[] {
-      const matches = report.matchAll(/https?:\/\/[^\s\)\]>"]+/g);
+      const matches = report.matchAll(/https?:\/\/[^\s)\]>"]+/g);
       return Array.from(new Set(Array.from(matches).map(m => m[0])));
   }
 

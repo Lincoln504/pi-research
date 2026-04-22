@@ -101,27 +101,23 @@ export function createScrapeTool(options: {
       const finalUrls = dedupedUrls.slice(0, callCount === 1 ? BATCH_2_MAX_SCRAPE_URLS : MAX_SCRAPE_URLS);
       options.updateGlobalLinks(finalUrls);
 
-      try {
-        const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || 10, signal);
-        const results = Array.isArray(scrapeResults) ? scrapeResults : [];
-        const successful = results.filter(r => r.success);
-        const failed = results.filter(r => !r.success);
-        
-        if (successful.length > 0 && options.onLinksScraped) {
-            options.onLinksScraped(successful.map(r => r.url));
-        }
-
-        let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
-        markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - startTime)/1000).toFixed(2)}s\n\n`;
-
-        for (const res of successful) {
-            markdown += `### ${res.url}\n${res.markdown}\n\n---\n\n`;
-        }
-        
-        return { content: [{ type: 'text', text: markdown }], details: { batch: callCount + 1, count: successful.length } };
-      } catch (err) {
-          throw err;
+      const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || 10, signal);
+      const results = Array.isArray(scrapeResults) ? scrapeResults : [];
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+      
+      if (successful.length > 0 && options.onLinksScraped) {
+          options.onLinksScraped(successful.map(r => r.url));
       }
+
+      let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
+      markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - startTime)/1000).toFixed(2)}s\n\n`;
+
+      for (const res of successful) {
+          markdown += `### ${res.url}\n${res.markdown}\n\n---\n\n`;
+      }
+      
+      return { content: [{ type: 'text', text: markdown }], details: { batch: callCount + 1, count: successful.length } };
     },
   };
 }

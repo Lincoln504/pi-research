@@ -32,6 +32,8 @@ export interface CreateResearcherSessionOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
+  /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */
+  getScrapeTokens?: () => number;
   /** Model context window size in tokens. */
   contextWindowSize?: number;
 }
@@ -48,6 +50,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     updateGlobalLinks,
     onLinksScraped,
     getTokensUsed,
+    getScrapeTokens,
     contextWindowSize,
   } = options;
 
@@ -77,6 +80,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
         updateGlobalLinks: globalLinks,
         onLinksScraped: onLinksScraped,
         getTokensUsed,
+        getScrapeTokens,
         contextWindowSize,
       }),
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session

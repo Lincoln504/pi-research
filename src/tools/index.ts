@@ -24,6 +24,8 @@ interface CreateToolsOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
+  /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */
+  getScrapeTokens?: () => number;
   /** Model context window size in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
   contextWindowSize?: number;
 }
@@ -61,6 +63,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       ...resolvedOptions,
       onLinksScraped: options.onLinksScraped,
       getTokensUsed: options.getTokensUsed,
+      getScrapeTokens: options.getScrapeTokens,
       contextWindowSize: options.contextWindowSize,
     }),
     createLinksTool(resolvedOptions),

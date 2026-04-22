@@ -61,7 +61,7 @@ class BrowserTaskScheduler {
     constructor() {
         // We use Poolifier to manage the "concurrency slots" logically
         // even though the actual work happens via the browser handles.
-        this.pool = new FixedThreadPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.js'), {
+        this.pool = new FixedThreadPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.cjs'), {
             errorHandler: (e) => logger.error('[Scheduler] Pool Error:', e),
             onlineHandler: () => logger.debug('[Scheduler] Worker Online'),
         });
@@ -158,7 +158,7 @@ async function performSearchHealthCheck(browser: any): Promise<boolean> {
             if (results.length === 0 || relevant.length === 0) return false;
         }
         return true;
-    } catch (e) {
+    } catch {
         return false;
     } finally {
         await context.close().catch(() => {});
@@ -190,24 +190,20 @@ export function isBrowserAvailable(): boolean {
 
 async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
   setupBrowserEnv();
-  try {
-    const { Camoufox } = require('camoufox-js');
-    logger.log(`[Browser Manager] Launching browser instance #${index+1}...`);
-    const browserInstance = await Camoufox({
-      headless: true,
-      humanize: true,
-    });
+  const { Camoufox } = require('camoufox-js');
+  logger.log(`[Browser Manager] Launching browser instance #${index+1}...`);
+  const browserInstance = await Camoufox({
+    headless: true,
+    humanize: true,
+  });
 
-    const isHealthy = await performSearchHealthCheck(browserInstance);
-    
-    return {
-      instance: browserInstance,
-      linkScrapeCount: 0,
-      isHealthy
-    };
-  } catch (error) {
-    throw error;
-  }
+  const isHealthy = await performSearchHealthCheck(browserInstance);
+  
+  return {
+    instance: browserInstance,
+    linkScrapeCount: 0,
+    isHealthy
+  };
 }
 
 export async function getCamoufoxBrowser(): Promise<any> {
