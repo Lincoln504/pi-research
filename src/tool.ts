@@ -261,7 +261,7 @@ export function createResearchTool(): ToolDefinition {
             const researcherPromptTemplate = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
             let researcherPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
                 .replace('{{goal}}', sanitizedQuery)
-                .replace('{{links}}', 'No pre-seeded links. Use search tool first.');
+                .replace('{{evidence_section}}', '');
             
             // QUICK MODE EFFICIENCY: Encourage early exit ONLY for definitive fact-finding.
             researcherPrompt += '\n\n## Quick Mode Efficiency\n' +

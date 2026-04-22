@@ -142,9 +142,15 @@ export class DeepResearchOrchestrator {
 
     try {
         const systemPromptTemplate = loadPrompt('researcher');
+        
+        // CONDITIONAL PRE-SEEDING: Only include links section if links are actually provided
+        const linksSection = initialLinks.length > 0 
+            ? `## Your Starting Evidence\nYou have been pre-seeded with the following high-priority links to investigate:\n${initialLinks.join('\n')}`
+            : '';
+
         const systemPrompt = systemPromptTemplate
             .replace('{{goal}}', config.goal)
-            .replace('{{links}}', initialLinks.length > 0 ? initialLinks.join('\n') : 'No pre-seeded links provided.');
+            .replace('{{evidence_section}}', linksSection);
 
         const session = await createResearcherSession({
             cwd: this.options.ctx.cwd,

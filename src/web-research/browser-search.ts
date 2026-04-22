@@ -30,7 +30,9 @@ async function extractDdgResults(page: any): Promise<SearXNGResult[]> {
         const u = new URL(url);
         const uddg = u.searchParams.get('uddg');
         if (uddg) url = decodeURIComponent(uddg);
-      } catch (e) {}
+      } catch {
+        // ignore
+      }
       
       if (title && url) {
         found.push({ title, url, content: snippet });

@@ -60,7 +60,9 @@ export async function cleanupAllContexts(): Promise<void> {
         try {
           if (ctx.page !== undefined) await ctx.page.close().catch(() => {});
           if (ctx.context !== undefined) await ctx.context.close().catch(() => {});
-        } catch (e) {}
+        } catch {
+          // ignore
+        }
       })()
     );
   }

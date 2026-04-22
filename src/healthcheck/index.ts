@@ -61,7 +61,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
           result.scrapeOk = true;
           break;
         }
-      } catch (e) {
+      } catch (_e) {
         logger.debug(`[healthcheck] Canary ${url} failed, trying next...`);
       }
     }

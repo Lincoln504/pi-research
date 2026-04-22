@@ -127,7 +127,7 @@ export function createMasterResearchPanel(piSessionId: string, getActivePanelsFn
            try {
              const { getPiActivePanels } = require('../utils/session-state.ts');
              getPanels = getPiActivePanels;
-           } catch (e) {
+           } catch (_e) {
              return [];
            }
         }

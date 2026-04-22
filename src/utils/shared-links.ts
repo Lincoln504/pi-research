@@ -130,7 +130,7 @@ export function formatSharedLinksFromState(aspects: Record<string, { id: string;
   const allUrls = new Set<string>();
   for (const aspect of completed) {
     const response = aspect.report!;
-    const urlMatches = response.matchAll(/\[[^\]]+\]\((https?:\/\/[^\)]+)\)/g);
+    const urlMatches = response.matchAll(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/g);
     for (const match of urlMatches) {
       allUrls.add(match[2]!);
     }
