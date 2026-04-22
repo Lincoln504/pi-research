@@ -114,7 +114,7 @@ export async function performSearch(queries: string[], signal?: AbortSignal): Pr
 
     const searchPromises = queries.map(async (query) => {
         if (signal?.aborted || !query) return;
-        const results = await runBrowserTask((browser) => searchDdgLite(browser, query, signal));
+        const results = await runBrowserTask((browser) => searchDdgLite(browser, query, signal), 'search');
         resultMap.set(query, results);
     });
 

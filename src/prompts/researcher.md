@@ -19,7 +19,7 @@ If you do not have starting evidence, or if you need more specific data:
 Analyze your starting evidence and the results from Phase 1. Scrape the most promising URLs using the 3-batch protocol:
 1. **Batch 1** (max 3 URLs): Primary broad scraping.
 2. **Batch 2** (max 2 URLs): Targeted follow-up.
-3. **Batch 3** (max 3 URLs): Deep-dive on narrow sub-topic.
+3. **Batch 3** (max 3 URLs): Extended coverage of remaining high-value links.
 
 ---
 

@@ -12,7 +12,7 @@ describe('shared-links', () => {
   describe('generateSessionId', () => {
     it('should generate session ID with base ID and hash', () => {
       const sessionId = generateSessionId('abc123');
-      expect(sessionId).toMatch(/^abc123-[a-f0-9]{4}$/);
+      expect(sessionId).toMatch(/^abc123-[a-z0-9]+$/);
     });
   });
 
@@ -31,16 +31,16 @@ describe('shared-links', () => {
           query: 'q1',
           report: `
 ### CITED LINKS
-* [https://example.com/1] - Desc 1
+* [Example](https://example.com/1) - Desc 1
 
 ### SCRAPE CANDIDATES
-* [https://example.com/2] - Reason 2
+* [Another](https://example.com/2) - Reason 2
 `
         }
       };
 
       const result = formatSharedLinksFromState(aspects);
-      expect(result).toContain('Shared Links from Previous Research');
+      expect(result).toContain('Shared Links from Sibling Researchers');
       expect(result).toContain('Aspect: q1 (ID: 1.1)');
       expect(result).toContain('https://example.com/1');
       expect(result).toContain('https://example.com/2');

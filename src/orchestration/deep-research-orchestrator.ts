@@ -79,7 +79,6 @@ export class DeepResearchOrchestrator {
       // PHASE 2: MASSIVE INITIAL SEARCH
       let researcherLinks = new Map<string, string[]>();
       if (plan.allQueries.length > 0) {
-          // Perform the massive burst - handled by the global browser queue internally
           const searchResults = await search(plan.allQueries.slice(0, 150), undefined, signal);
           researcherLinks = this.distributeResults(plan, searchResults);
       }
@@ -124,7 +123,6 @@ export class DeepResearchOrchestrator {
         
         results.forEach((res: any) => {
             const resQuery = res.query.toLowerCase().trim();
-            // Match if exact or if the result query starts with the planned query
             if (rQueries.some((rq: string) => resQuery.includes(rq))) {
                 res.results.forEach((item: any) => ownedLinks.push(item.url));
             }

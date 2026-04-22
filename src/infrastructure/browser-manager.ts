@@ -2,7 +2,16 @@
  * Browser Manager
  *
  * Manages a global queue of browser tasks and a pool of Camoufox instances.
- * Implements hardware-aware concurrency and internal quality checks.
+ * Implements hardware-aware concurrency and internal thread-health verification.
+ * 
+ * DISTINCTION:
+ * - Search: Finding links (via DuckDuckGo Lite).
+ * - Scrape: Extracting content from specific URLs (HTML or PDF).
+ * 
+ * INTERNAL QUALITY CHECKS:
+ * Every browser thread is verified using SEARCH tests:
+ * 1. On Launch: 2 test searches must pass.
+ * 2. Periodic: After every 13 links scraped, 2 test searches must pass.
  */
 
 import { logger } from '../logger.ts';
@@ -40,6 +49,7 @@ const MAX_CONCURRENT_TASKS = Math.min(10, Math.max(1, cpuCount - 3));
 
 type BrowserTask<T> = (browser: any) => Promise<T>;
 interface QueuedTask {
+    type: 'search' | 'scrape';
     execute: () => Promise<void>;
 }
 
@@ -49,7 +59,7 @@ let activeTaskCount = 0;
 // Browser Pool state
 interface ManagedBrowser {
     instance: any;
-    scrapeCount: number;
+    linkScrapeCount: number; // Counter for scraping tasks only
     isHealthy: boolean;
 }
 
@@ -63,7 +73,7 @@ export function getGlobalConcurrencyLimit(): number {
 }
 
 // ============================================================================
-// Internal Quality Checks
+// Internal Search-based Quality Checks
 // ============================================================================
 
 const QUALITY_CHECK_QUERIES = [
@@ -74,9 +84,10 @@ const QUALITY_CHECK_QUERIES = [
 ];
 
 /**
- * Performs 2 random searches to verify the browser is not blocked/poisoned.
+ * Performs 2 random searches to verify the thread isn't blocked by the engine.
+ * This is a "search-based health check" used to validate the thread's scraping ability.
  */
-async function performQualityCheck(browser: any): Promise<boolean> {
+async function performSearchHealthCheck(browser: any): Promise<boolean> {
     const context = await browser.newContext();
     const page = await context.newPage();
     
@@ -101,15 +112,15 @@ async function performQualityCheck(browser: any): Promise<boolean> {
 
             const relevant = filterRelevantResults(query, results as any);
             if (results.length === 0 || relevant.length === 0) {
-                logger.error(`[Browser Manager] Quality check FAILED for: "${query}". Browser may be blocked.`);
+                logger.error(`[Browser Manager] Search Health Check FAILED for: "${query}". Thread is blocked.`);
                 return false;
             }
         }
         
-        logger.log('[Browser Manager] ✓ Internal Quality Check Passed.');
+        logger.log('[Browser Manager] ✓ Thread Search Health Check Passed.');
         return true;
     } catch (e) {
-        logger.error('[Browser Manager] Quality check CRASHED:', e);
+        logger.error('[Browser Manager] Search Health Check CRASHED:', e);
         return false;
     } finally {
         await context.close().catch(() => {});
@@ -165,32 +176,20 @@ async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
     const browserInstance = await Camoufox({
       headless: true,
       humanize: true,
-      // No resource blocking as requested to avoid fingerprint detection
     });
 
-    // Initial Quality Check (2 searches)
-    const isHealthy = await performQualityCheck(browserInstance);
+    // Mandatory Launch Health Check (2 searches)
+    const isHealthy = await performSearchHealthCheck(browserInstance);
     
     return {
       instance: browserInstance,
-      scrapeCount: 0,
+      linkScrapeCount: 0,
       isHealthy
     };
   } catch (error) {
     if (envState) {
         if (envState.oldHome) process.env['HOME'] = envState.oldHome;
         if (envState.oldUserProfile) process.env['USERPROFILE'] = envState.oldUserProfile;
-    }
-    
-    const msg = error instanceof Error ? error.message : String(error);
-    if ((msg.includes('binaries not found') || msg.includes('not installed'))) {
-        logger.warn('[Browser Manager] Binaries missing, fetching...');
-        const { execSync } = await import('child_process');
-        execSync('npx camoufox-js fetch', { 
-          stdio: 'inherit',
-          env: { ...process.env, HOME: browserCacheDir, USERPROFILE: browserCacheDir }
-        });
-        return launchBrowserInstance(index);
     }
     throw error;
   }
@@ -235,46 +234,39 @@ export async function getCamoufoxBrowser(): Promise<any> {
   const b = browserPool[0];
   if (b) return b.instance;
   
-  // Wait for the first pending launch if pool is entirely empty but launching
   const firstPending = pendingLaunches.values().next().value;
   if (firstPending) return firstPending;
 
-  throw new Error("Browser Pool Exhausted and no launches pending.");
+  throw new Error("Browser Pool Exhausted.");
 }
+
+export const getBrowser = getCamoufoxBrowser;
 
 // ============================================================================
 // Global Task Queue Logic
 // ============================================================================
 
-export async function runBrowserTask<T>(task: BrowserTask<T>): Promise<T> {
+export async function runBrowserTask<T>(task: BrowserTask<T>, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
     return new Promise<T>((resolve, reject) => {
         const execute = async () => {
             activeTaskCount++;
             try {
-                // Find or launch a browser
                 await getCamoufoxBrowser();
-                
-                // Get the managed record for this thread
                 const mb = browserPool[Math.floor(Math.random() * browserPool.length)];
                 
-                if (!mb) {
-                  throw new Error("No browser available in pool.");
-                }
+                if (!mb) throw new Error("No browser available.");
 
-                // PERIODIC QUALITY CHECK: Every 13 links scraped, do 2 test searches
-                if (mb.scrapeCount > 0 && mb.scrapeCount % 13 === 0) {
-                    const healthy = await performQualityCheck(mb.instance);
+                // PERIODIC SEARCH-BASED HEALTH CHECK: Every 13 links scraped, do 2 test searches
+                if (type === 'scrape' && mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
+                    const healthy = await performSearchHealthCheck(mb.instance);
                     if (!healthy) {
                         mb.isHealthy = false;
-                        throw new Error("Browser failed periodic quality check (blocked).");
+                        throw new Error("Thread failed periodic search health check.");
                     }
                 }
 
                 const result = await task(mb.instance);
-                
-                // If the task was a scrape (implied by call site), increment counter
-                // We track this at the managed browser level
-                mb.scrapeCount++;
+                if (type === 'scrape') mb.linkScrapeCount++;
                 
                 resolve(result);
             } catch (err) {
@@ -285,7 +277,7 @@ export async function runBrowserTask<T>(task: BrowserTask<T>): Promise<T> {
             }
         };
 
-        taskQueue.push({ execute });
+        taskQueue.push({ type, execute });
         processQueue();
     });
 }
@@ -296,17 +288,11 @@ function processQueue() {
     if (task) task.execute();
 }
 
-// ============================================================================
-// Cleanup
-// ============================================================================
-
 export async function stopBrowserManager(): Promise<void> {
   if (browserPool.length > 0) {
     logger.log(`[Browser Manager] Shutting down ${browserPool.length} browsers...`);
     await Promise.all(browserPool.map(mb => {
-        if (mb && mb.instance) {
-            return mb.instance.close().catch(() => {});
-        }
+        if (mb && mb.instance) return mb.instance.close().catch(() => {});
         return Promise.resolve();
     }));
     browserPool.length = 0;

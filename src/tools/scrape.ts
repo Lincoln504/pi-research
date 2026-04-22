@@ -46,9 +46,6 @@ export function createScrapeTool(options: {
   contextWindowSize?: number;
 }): ToolDefinition {
 
-  // Helper to get globally scraped URLs for deduplication
-  const getScrapedState = () => options.getGlobalState().allScrapedLinks || [];
-
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
   const getContextFraction = (additionalTokens: number = 0): number => {
     if (!options.getTokensUsed) return 0;
@@ -72,13 +69,13 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Supports HTML and PDF (auto-detected). Context-aware 3-call protocol: batch 1 → batch 2 (targeted) → batch 3 (deep-dive).',
+    description: 'Scrape content from URLs. Supports HTML and PDF (auto-detected). Context-aware 3-call protocol: batch 1 → batch 2 (targeted) → batch 3 (extended coverage).',
     promptSnippet: 'Scrape full content from URLs (context-aware protocol)',
     promptGuidelines: [
       'PROTOCOL: Up to 3 calls per researcher (batch 1 → batch 2 → batch 3).',
       'Batch 1 (max 3 URLs): Primary broad scraping.',
       'Batch 2 (max 2 URLs): Targeted follow-up. Auto-deduplicated.',
-      'Batch 3 (max 3 URLs): Deep-dive on narrow sub-topic.',
+      'Batch 3 (max 3 URLs): Extended coverage of remaining high-value links.',
       'Shared links from other researchers are in your system prompt — review before scraping.',
       'PDFs auto-detected and converted to Markdown. Note extraction failures in Research Process Notes.',
       `Batches skipped automatically if context exceeds ${Math.round(MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100)}%. Move to synthesis.`,
@@ -242,7 +239,7 @@ export function createScrapeTool(options: {
         }
 
         // Deduplicate against globally scraped URLs (includes all previous batches)
-        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, getScrapedState());
+        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, options.getGlobalState().rootQuery);
         
         // Report duplicates to the AI
         let dedupNote = '';
@@ -359,7 +356,7 @@ export function createScrapeTool(options: {
         }
 
         // Deduplicate against globally scraped URLs (includes all previous batches)
-        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, getScrapedState());
+        const { kept: dedupedUrls, duplicates: globalDuplicates } = deduplicateUrls(urls, options.getGlobalState().rootQuery);
         
         // Report duplicates to the AI
         let dedupNote = '';
@@ -414,7 +411,7 @@ export function createScrapeTool(options: {
           }
         }
 
-        let markdown = `# URL Scrape Results (Batch 3 — Deep-Dive)\n\n`;
+        let markdown = `# URL Scrape Results (Batch 3 — Extended Coverage)\n\n`;
         if (dedupNote) markdown += dedupNote;
         markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
         markdown += `**All scrape batches complete.** Proceed to Phase 3 — Synthesis.\n\n`;
