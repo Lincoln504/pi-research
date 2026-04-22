@@ -308,9 +308,7 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('search');
-      expect(tool.promptGuidelines).toContain(
-        'CRITICAL: Provide exactly one list of 10-150 queries.'
-      );
+      expect(tool.promptGuidelines[0]).toContain('10-150 queries');
     });
 
     it('should properly track scrape tool calls', () => {

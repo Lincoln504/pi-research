@@ -1,8 +1,7 @@
 /**
  * search Tool
  *
- * Perform high-fidelity browser-based searches (10-150 queries).
- * Simplified for universal use by researchers and coordinators.
+ * Perform exhaustive high-fidelity browser-based searches (10-150 queries).
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -18,19 +17,20 @@ export function createSearchTool(options: {
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a massive list of queries (10-150).',
-    promptSnippet: 'Search the web with a high-fidelity browser (minimum 10 queries, max 150)',
+    description: 'Search the web using a massive list of queries (10-150) for exhaustive coverage.',
+    promptSnippet: 'Exhaustive web search (10-150 queries)',
     promptGuidelines: [
-      'CRITICAL: Provide exactly one list of 10-150 queries.',
-      'The system handles pagination and extraction for you.',
-      'Agents are limited to EXACTLY ONE search call. Make it count.',
-      'Coordinates broad discovery before targeted scraping.',
+      'CRITICAL: Provide a comprehensive list of 10-150 queries per call.',
+      'EXHAUSTIVE VARIATIONS: Include ALL possible query variations, related concepts, alternative perspectives, and specific data points needed to fully map the subject.',
+      'HIGH VOLUME: Use a very high number of queries as needed to ensure no evidence is missed. The system processes all queries efficiently.',
+      'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
+      'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
     parameters: Type.Object({
       queries: Type.Array(Type.String(), { 
           minItems: 10, 
           maxItems: 150,
-          description: 'A list of 10-150 specific search queries to execute.' 
+          description: 'A list of 10-150 exhaustive search queries to execute.' 
       }),
     }),
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
@@ -39,19 +39,19 @@ export function createSearchTool(options: {
       const queries = (p['queries'] || []) as string[];
 
       if (queries.length < 10) {
-        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries.`);
+        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries with exhaustive variations.`);
       }
 
       const allowed = options.tracker.recordCall('search');
       if (!allowed) {
-        throw new Error('Search limit reached. Only one search call is permitted per agent.');
+        throw new Error('Search limit reached. Only one massive search call is permitted per agent.');
       }
 
       try {
         const results = await search(queries, undefined, signal);
         const elapsed = Date.now() - startTime;
 
-        let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
+        let markdown = `# Exhaustive Web Search Results (${queries.length} queries)\n\n`;
         results.forEach((r, i) => {
           markdown += `## Query ${i + 1}: ${r.query}\n`;
           if (r.results.length === 0) {
