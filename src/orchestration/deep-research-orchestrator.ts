@@ -7,6 +7,9 @@
  * 3. Researchers spawn with pre-seeded links and perform one massive search of their own.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { complete, type Model } from '@mariozechner/pi-ai';
 import { logger } from '../logger.ts';
@@ -18,6 +21,19 @@ import {
 } from '../tui/research-panel.ts';
 import { createResearcherSession } from './researcher.ts';
 import { search } from '../web-research/search.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function loadPrompt(name: string): string {
+  try {
+    const promptPath = join(__dirname, '..', 'prompts', `${name}.md`);
+    return readFileSync(promptPath, 'utf-8');
+  } catch (err) {
+    logger.error(`[Orchestrator] Failed to load prompt: ${name}`, err);
+    return '';
+  }
+}
 
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -40,7 +56,10 @@ export class DeepResearchOrchestrator {
       addSlice(this.options.panelState, 'coord', 'Coordinator: Planning & Initial Search', true);
       this.options.onUpdate();
 
-      const planningPrompt = this.buildPlanningPrompt();
+      const planningPrompt = loadPrompt('system-coordinator')
+        .replace('{{query}}', this.options.query)
+        .replace('{{maxResearchers}}', (this.options.complexity * 2).toString());
+
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
       
@@ -60,7 +79,7 @@ export class DeepResearchOrchestrator {
       // PHASE 2: MASSIVE INITIAL SEARCH
       let researcherLinks = new Map<string, string[]>();
       if (plan.allQueries.length > 0) {
-          // Flatten all queries (up to 150)
+          // Perform the massive burst - handled by the global browser queue internally
           const searchResults = await search(plan.allQueries.slice(0, 150), undefined, signal);
           researcherLinks = this.distributeResults(plan, searchResults);
       }
@@ -77,8 +96,7 @@ export class DeepResearchOrchestrator {
       await Promise.all(researcherPromises);
       
       // PHASE 4: SYNTHESIS
-      // The individual researchers have completed their work.
-      return "Research completed. See individual reports.";
+      return "Research completed. Detailed reports available in session history.";
 
     } catch (error) {
       logger.error('[Orchestrator] Run failed:', error);
@@ -86,38 +104,28 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private buildPlanningPrompt(): string {
-      return `You are the Lead Research Coordinator. 
-Your goal is to research: "${this.options.query}"
-
-Plan a team of up to ${this.options.complexity * 2} specialized researchers.
-For each researcher, provide:
-1. A unique ID.
-2. A specialized goal.
-3. A list of 5-15 highly specific search queries.
-
-Output your plan as a JSON block:
-{
-  "researchers": [{ "id": "r1", "name": "...", "goal": "...", "queries": ["...", "..."] }],
-  "allQueries": ["flat", "list", "of", "all", "queries"]
-}`;
-  }
-
   private parseCoordinatorPlan(text: string): any {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("Coordinator failed to provide a valid JSON plan.");
-    return JSON.parse(jsonMatch[0]);
+    try {
+        return JSON.parse(jsonMatch[0]);
+    } catch (e) {
+        logger.error("[Orchestrator] JSON Parse Failed. Content:", jsonMatch[0]);
+        throw e;
+    }
   }
 
   private distributeResults(plan: any, results: any[]): Map<string, string[]> {
     const linkMap = new Map<string, string[]>();
     
-    // Simple distribution based on query ownership
     plan.researchers.forEach((r: any) => {
         const ownedLinks: string[] = [];
-        r.queries.forEach((q: string) => {
-            const res = results.find(rs => rs.query === q);
-            if (res) {
+        const rQueries = r.queries.map((q: string) => q.toLowerCase().trim());
+        
+        results.forEach((res: any) => {
+            const resQuery = res.query.toLowerCase().trim();
+            // Match if exact or if the result query starts with the planned query
+            if (rQueries.some((rq: string) => resQuery.includes(rq))) {
                 res.results.forEach((item: any) => ownedLinks.push(item.url));
             }
         });
@@ -133,45 +141,27 @@ Output your plan as a JSON block:
     this.options.onUpdate();
 
     try {
+        const systemPromptTemplate = loadPrompt('researcher');
+        const systemPrompt = systemPromptTemplate
+            .replace('{{goal}}', config.goal)
+            .replace('{{links}}', initialLinks.length > 0 ? initialLinks.join('\n') : 'No pre-seeded links provided.');
+
         const session = await createResearcherSession({
             cwd: this.options.ctx.cwd,
             ctxModel: this.options.model,
             modelRegistry: this.options.ctx.modelRegistry,
             settingsManager: (this.options.ctx as any).settingsManager,
-            systemPrompt: this.buildResearcherPrompt(config, initialLinks),
+            systemPrompt,
             extensionCtx: this.options.ctx,
         });
 
         await session.prompt("Begin your specialized research based on the provided links and one optional massive search call.");
         
-        // Extract final response from session state if needed.
-        const state = (session as any).state;
-        const lastMsg = state?.messages ? state.messages[state.messages.length - 1] : null;
-        let finalResponse = "Research completed.";
-        if (lastMsg?.role === 'assistant' && Array.isArray(lastMsg.content)) {
-            const textContent = lastMsg.content.find((c: any) => c.type === 'text');
-            if (textContent?.text) finalResponse = textContent.text;
-        }
-
         completeSlice(this.options.panelState, label);
-        return finalResponse;
+        return "Researcher completed.";
     } catch (e) {
         removeSlice(this.options.panelState, label);
         throw e;
     }
-  }
-
-  private buildResearcherPrompt(config: any, links: string[]): string {
-      return `You are a specialized researcher. 
-Goal: ${config.goal}
-
-You have been pre-seeded with the following links to investigate:
-${links.join('\n')}
-
-GUIDELINES:
-1. Analyze the provided links first.
-2. You may use the 'search' tool EXACTLY ONCE to find more information if needed.
-3. Your search call must contain 10-150 queries to be effective.
-4. Focus on deep analysis and extraction of evidence.`;
   }
 }

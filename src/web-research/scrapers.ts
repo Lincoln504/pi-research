@@ -42,7 +42,7 @@ interface Page {
   close(): Promise<void>;
 }
 
-import { getCamoufoxBrowser } from '../infrastructure/browser-manager.ts';
+import { runBrowserTask } from '../infrastructure/browser-manager.ts';
 
 // ============================================================================
 // Module State
@@ -415,92 +415,91 @@ async function scrapeWithStealthBrowser(_url: string, signal?: AbortSignal): Pro
     throw error;
   }
 
-  const browser = await getCamoufoxBrowser();
+  return runBrowserTask(async (browser) => {
+    // Re-check after the async browser acquisition — signal may have fired during launch
+    if (signal?.aborted) {
+      const error = new Error('Aborted') as Error & { name: string; cause?: unknown };
+      error.name = 'AbortError';
+      error.cause = signal;
+      throw error;
+    }
 
-  // Re-check after the async browser acquisition — signal may have fired during launch
-  if (signal?.aborted) {
-    const error = new Error('Aborted') as Error & { name: string; cause?: unknown };
-    error.name = 'AbortError';
-    error.cause = signal;
-    throw error;
-  }
+    let context: BrowserContext | null = null;
+    let page: Page | null = null;
+    let contextId: string | null = null;
+    let abortListener: (() => void) | null = null;
 
-  let context: BrowserContext | null = null;
-  let page: Page | null = null;
-  let contextId: string | null = null;
-  let abortListener: (() => void) | null = null;
+    if (signal !== undefined) {
+      abortListener = (): void => {
+        // Close page then context to release browser resources on abort.
+        // Both may be null if abort fires before or during their creation.
+        if (page !== null) {
+          page.close().catch(() => {});
+        }
+        if (context !== null) {
+          context.close().catch(() => {});
+        }
+      };
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
 
-  if (signal !== undefined) {
-    abortListener = (): void => {
-      // Close page then context to release browser resources on abort.
-      // Both may be null if abort fires before or during their creation.
+    try {
+      context = await browser.newContext({ viewport: null });
+      if (!context) {
+        throw new Error('Failed to create browser context');
+      }
+      page = await context.newPage();
+      if (!page) {
+        throw new Error('Failed to create browser page');
+      }
+
+      contextId = trackContext(browser, context, page);
+
+      await page.goto(_url, { waitUntil: 'domcontentloaded', timeout: FALLBACK_SCRAPER_TIMEOUT });
+
+      const html = await page.content();
+      let markdown: string;
+      try {
+        markdown = await convertToMarkdown(html);
+      } catch (error) {
+        throw new Error(`HTML-to-markdown conversion failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      }
+
+      // Validate content quality — bot-challenge pages served to a real browser
+      // (cookie consent walls, DDoS-Guard JS challenges) still produce garbage
+      // markdown; better to surface an error than silently return a stub.
+      validateContent(html, markdown, _url);
+
+      return {
+        source: 'playwright',
+        layer: 'playwright+camoufox',
+        markdown,
+      };
+    } finally {
+      // Remove abort listener if it was added and never fired
+      // Note: With { once: true }, the listener auto-removes when it fires
+      if (signal !== undefined && abortListener !== null) {
+        try {
+          signal.removeEventListener('abort', abortListener);
+        } catch {
+          // Listener might have already fired and auto-removed
+        }
+      }
+
+      if (contextId !== null) {
+        untrackContextById(contextId);
+      }
+
+      // Close page and context if they exist
       if (page !== null) {
-        page.close().catch(() => {});
+        await page.close().catch(() => {});
       }
       if (context !== null) {
-        context.close().catch(() => {});
+        await context.close().catch(() => {});
       }
-    };
-    signal.addEventListener('abort', abortListener, { once: true });
-  }
-
-  try {
-    context = await browser.newContext({ viewport: null });
-    if (!context) {
-      throw new Error('Failed to create browser context');
+      // browser is intentionally NOT closed here
     }
-    page = await context.newPage();
-    if (!page) {
-      throw new Error('Failed to create browser page');
-    }
-
-    contextId = trackContext(browser, context, page);
-
-    await page.goto(_url, { waitUntil: 'domcontentloaded', timeout: FALLBACK_SCRAPER_TIMEOUT });
-
-    const html = await page.content();
-    let markdown: string;
-    try {
-      markdown = await convertToMarkdown(html);
-    } catch (error) {
-      throw new Error(`HTML-to-markdown conversion failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-    }
-
-    // Validate content quality — bot-challenge pages served to a real browser
-    // (cookie consent walls, DDoS-Guard JS challenges) still produce garbage
-    // markdown; better to surface an error than silently return a stub.
-    validateContent(html, markdown, _url);
-
-    return {
-      source: 'playwright',
-      layer: 'playwright+camoufox',
-      markdown,
-    };
-  } finally {
-    // Remove abort listener if it was added and never fired
-    // Note: With { once: true }, the listener auto-removes when it fires
-    if (signal !== undefined && abortListener !== null) {
-      try {
-        signal.removeEventListener('abort', abortListener);
-      } catch {
-        // Listener might have already fired and auto-removed
-      }
-    }
-
-    if (contextId !== null) {
-      untrackContextById(contextId);
-    }
-
-    // Close page and context if they exist
-    if (page !== null) {
-      await page.close().catch(() => {});
-    }
-    if (context !== null) {
-      await context.close().catch(() => {});
-    }
-    // browser is intentionally NOT closed here
-  }
-
+  });
 }
 
 interface ScrapeUrlResult {

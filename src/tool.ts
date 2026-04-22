@@ -249,15 +249,19 @@ export function createResearchTool(): ToolDefinition {
             const sliceLabel = `researching: ${truncatedQuery}`;
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
-            // Quick mode: deterministic tool limits
-            // - 4 gathering calls (search/security/stackexchange/grep combined)
-            // - 4 scrape calls (handshake + 3 batches)
-            // Total: 8 tool calls, then STOP
-            panelState.progress = { expected: 8, made: 0, extended: false };
+            
+            // QUICK MODE: deterministic tool limits
+            // - 1 massive search call (10-150 queries)
+            // - 3 scrape batches
+            // Total: 4 tool calls, then STOP
+            panelState.progress = { expected: 4, made: 0, extended: false };
             logger.info('[research] quick mode started', { query: sanitizedQuery });
             refreshAllSessions(piSessionId);
-            const researcherPromptRaw = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
-            let researcherPrompt = injectCurrentDate(researcherPromptRaw, 'researcher');
+
+            const researcherPromptTemplate = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
+            let researcherPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
+                .replace('{{goal}}', sanitizedQuery)
+                .replace('{{links}}', 'No pre-seeded links. Use search tool first.');
             
             // QUICK MODE EFFICIENCY: Encourage early exit ONLY for definitive fact-finding.
             researcherPrompt += '\n\n## Quick Mode Efficiency\n' +

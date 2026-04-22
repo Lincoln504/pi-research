@@ -85,6 +85,11 @@ async function searchDdgLite(browser: any, query: string, signal?: AbortSignal):
 
         const relevant = filterRelevantResults(query, mapped);
         logger.log(`[Search] Found ${relevant.length} verified results for: ${query}`);
+        
+        // ULTRA-TIGHT DELAY: Provide jitter to avoid triggering rate-limits 
+        // when the queue immediately launches the next task on this thread
+        await new Promise(r => setTimeout(r, 100 + Math.random() * 200));
+        
         return relevant;
 
     } catch (error) {
