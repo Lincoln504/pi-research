@@ -1,7 +1,12 @@
 /**
  * Browser Manager
  *
- * Manages a global queue of browser tasks using poolifier for high-performance scheduling.
+ * HYBRID TASK SCHEDULER using FIXED CLUSTER POOL:
+ * 1. Search Tasks: Offloaded to Poolifier Cluster Workers (Parallel Processes).
+ *    Optimized for I/O performance and process isolation.
+ * 2. Scrape Tasks: Managed in Main Thread (Shared Singleton Pool).
+ *    Ensures precise coordination of the 3-batch protocol.
+ * 
  * Implements hardware-aware concurrency and internal thread-health verification.
  */
 
@@ -12,8 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as os from 'node:os';
-import { FixedThreadPool } from 'poolifier';
-import { filterRelevantResults } from '../web-research/utils.ts';
+import { FixedClusterPool } from 'poolifier';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,63 +53,94 @@ const browserPool: ManagedBrowser[] = [];
 const pendingLaunches = new Map<number, Promise<any>>();
 
 /**
- * Task Execution Logic using Poolifier patterns
- * Since Playwright handles are not serializable, we use Poolifier
- * to manage the "slots" while keeping the handles in the main thread.
+ * Task Performance Tracker
+ */
+const metrics = {
+    search: { count: 0, totalDuration: 0 },
+    scrape: { count: 0, totalDuration: 0 }
+};
+
+/**
+ * High-Performance Scheduler
  */
 class BrowserTaskScheduler {
-    private pool: FixedThreadPool;
-    private activeCount = 0;
-    private queue: { task: (browser: any) => Promise<any>, type: 'search' | 'scrape', resolve: any, reject: any }[] = [];
+    private pool: FixedClusterPool;
+    private activeMainThreadCount = 0;
+    private mainThreadQueue: { task: (browser: any) => Promise<any>, resolve: any, reject: any }[] = [];
 
     constructor() {
-        // We use Poolifier to manage the "concurrency slots" logically
-        // even though the actual work happens via the browser handles.
-        this.pool = new FixedThreadPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.cjs'), {
-            errorHandler: (e) => logger.error('[Scheduler] Pool Error:', e),
-            onlineHandler: () => logger.debug('[Scheduler] Worker Online'),
+        logger.log(`[Scheduler] Initializing FixedClusterPool (Size: ${MAX_CONCURRENT_TASKS})`);
+        this.pool = new FixedClusterPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.js'), {
+            errorHandler: (e) => logger.error('[Scheduler] Cluster Error:', e),
         });
     }
 
-    async run<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape'): Promise<T> {
+    /**
+     * Run Search via Cluster Worker (Process Isolation)
+     */
+    async runSearch(query: string): Promise<any> {
+        const result = (await this.pool.execute({ type: 'search', query })) as any;
+        if (result.error) throw new Error(result.error);
+        
+        metrics.search.count++;
+        metrics.search.totalDuration += result.duration;
+        
+        return result.results;
+    }
+
+    /**
+     * Run Scrape via Main Thread (Shared handles)
+     */
+    async runScrape<T>(task: (browser: any) => Promise<T>): Promise<T> {
         return new Promise<T>((resolve, reject) => {
-            this.queue.push({ task, type, resolve, reject });
-            this.process();
+            this.mainThreadQueue.push({ task, resolve, reject });
+            this.processMainThreadQueue();
         });
     }
 
-    private async process() {
-        if (this.activeCount >= MAX_CONCURRENT_TASKS || this.queue.length === 0) return;
+    private async processMainThreadQueue() {
+        if (this.activeMainThreadCount >= MAX_CONCURRENT_TASKS || this.mainThreadQueue.length === 0) return;
         
-        this.activeCount++;
-        const item = this.queue.shift();
-        if (!item) { this.activeCount--; return; }
-        const { task, type, resolve, reject } = item;
+        this.activeMainThreadCount++;
+        const item = this.mainThreadQueue.shift();
+        if (!item) { this.activeMainThreadCount--; return; }
+        const { task, resolve, reject } = item;
         
+        const startTime = Date.now();
         try {
             const browser = await getCamoufoxBrowser();
             const mb = browserPool.find(b => b.instance === browser);
-            
             if (!mb) throw new Error("Browser lost from pool.");
 
-            // Health Check
-            if (type === 'scrape' && mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
+            if (mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
                 const healthy = await performSearchHealthCheck(mb.instance);
                 if (!healthy) {
                     mb.isHealthy = false;
-                    throw new Error("Thread failed health check.");
+                    throw new Error("Main thread browser failed health check.");
                 }
             }
 
             const result = await task(mb.instance);
-            if (type === 'scrape') mb.linkScrapeCount++;
+            mb.linkScrapeCount++;
+            
+            metrics.scrape.count++;
+            metrics.scrape.totalDuration += (Date.now() - startTime);
+            
             resolve(result);
         } catch (err) {
             reject(err);
         } finally {
-            this.activeCount--;
-            this.process();
+            this.activeMainThreadCount--;
+            this.processMainThreadQueue();
         }
+    }
+
+    getStats() {
+        return {
+            avgSearch: metrics.search.count ? (metrics.search.totalDuration / metrics.search.count).toFixed(2) : 0,
+            avgScrape: metrics.scrape.count ? (metrics.scrape.totalDuration / metrics.scrape.count).toFixed(2) : 0,
+            queueSize: this.mainThreadQueue.length
+        };
     }
 
     async shutdown() {
@@ -134,39 +169,26 @@ const QUALITY_CHECK_QUERIES = [
 async function performSearchHealthCheck(browser: any): Promise<boolean> {
     const context = await browser.newContext();
     const page = await context.newPage();
-    
     try {
-        const testQueries = [...QUALITY_CHECK_QUERIES].sort(() => 0.5 - Math.random()).slice(0, 2);
-        
-        for (const query of testQueries) {
-            await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await page.fill('input[name="q"]', query);
-            await Promise.all([
-                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
-                page.keyboard.press('Enter')
-            ]);
-
-            const results = await page.evaluate(() => {
-                const doc = (globalThis as any).document;
-                return Array.from(doc.querySelectorAll('a.result-link')).map((link: any) => ({
-                    title: link.textContent?.trim() || '',
-                    content: link.closest('tr')?.nextElementSibling?.querySelector('td.result-snippet')?.textContent?.trim() || ''
-                }));
-            });
-
-            const relevant = filterRelevantResults(query, results as any);
-            if (results.length === 0 || relevant.length === 0) return false;
-        }
-        return true;
+        const query = QUALITY_CHECK_QUERIES[Math.floor(Math.random() * QUALITY_CHECK_QUERIES.length)]!;
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.fill('input[name="q"]', query);
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+            page.keyboard.press('Enter')
+        ]);
+        const count = await page.locator('a.result-link').count();
+        return count > 0;
     } catch {
         return false;
     } finally {
+        await page.close().catch(() => {});
         await context.close().catch(() => {});
     }
 }
 
 // ============================================================================
-// Browser Instance Management
+// Environment & Binary Management
 // ============================================================================
 
 function setupBrowserEnv() {
@@ -192,18 +214,9 @@ async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
   setupBrowserEnv();
   const { Camoufox } = require('camoufox-js');
   logger.log(`[Browser Manager] Launching browser instance #${index+1}...`);
-  const browserInstance = await Camoufox({
-    headless: true,
-    humanize: true,
-  });
-
+  const browserInstance = await Camoufox({ headless: true, humanize: true });
   const isHealthy = await performSearchHealthCheck(browserInstance);
-  
-  return {
-    instance: browserInstance,
-    linkScrapeCount: 0,
-    isHealthy
-  };
+  return { instance: browserInstance, linkScrapeCount: 0, isHealthy };
 }
 
 export async function getCamoufoxBrowser(): Promise<any> {
@@ -214,12 +227,10 @@ export async function getCamoufoxBrowser(): Promise<any> {
         browserPool.splice(i, 1);
     }
   }
-
   if (browserPool.length > 0) {
     const mb = browserPool[Math.floor(Math.random() * browserPool.length)];
     return mb ? mb.instance : browserPool[0]!.instance;
   }
-
   const MAX_PROCESSES = Math.min(3, MAX_CONCURRENT_TASKS);
   if (browserPool.length < MAX_PROCESSES) {
     const idx = browserPool.length;
@@ -234,12 +245,26 @@ export async function getCamoufoxBrowser(): Promise<any> {
     }
     return pendingLaunches.get(idx);
   }
-
   return browserPool[0]!.instance;
 }
 
+// ============================================================================
+// Public Task Interface
+// ============================================================================
+
 export async function runBrowserTask<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
-    return getScheduler().run(task, type);
+    if (type === 'search') {
+        return getScheduler().runSearch((task as any).query) as any;
+    }
+    return getScheduler().runScrape(task);
+}
+
+export async function runWorkerSearch(query: string): Promise<any> {
+    return getScheduler().runSearch(query);
+}
+
+export function getSchedulerStats() {
+    return getScheduler().getStats();
 }
 
 export async function stopBrowserManager(): Promise<void> {
