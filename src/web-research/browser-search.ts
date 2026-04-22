@@ -1,11 +1,11 @@
 /**
- * Web Research Extension - Stealth Search (DuckDuckGo Lite)
+ * Web Research Extension - Browser-based Search (DuckDuckGo Lite)
  * 
- * Provides a robust stealth-browser based primary search using DuckDuckGo Lite.
- * Utilizes the global Stealth Browser Queue for hardware-aware concurrency.
+ * Provides a robust primary search using DuckDuckGo Lite via a managed browser pool.
+ * Utilizes the global Browser Manager for hardware-aware concurrency.
  */
 
-import { runStealthTask } from '../infrastructure/stealth-browser-manager.ts';
+import { runBrowserTask } from '../infrastructure/browser-manager.ts';
 import { trackContext, untrackContextById, filterRelevantResults } from './utils.ts';
 import { logger } from '../logger.ts';
 import type { SearXNGResult } from './types.ts';
@@ -51,7 +51,7 @@ async function searchDdgLite(browser: any, query: string, signal?: AbortSignal):
     try {
         if (signal?.aborted) return [];
 
-        // STEP 1: Search from Results or Home
+        // Page 1
         await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.fill('input[name="q"]', query);
         await Promise.all([
@@ -62,7 +62,7 @@ async function searchDdgLite(browser: any, query: string, signal?: AbortSignal):
         const resultsP1 = await extractDdgResults(page);
         if (signal?.aborted) return resultsP1;
 
-        // STEP 2: Paginate (Page 2)
+        // Page 2 (Pagination)
         let resultsP2: SearXNGResult[] = [];
         const nextButton = page.locator('input[value="Next Page >"]');
         if (await nextButton.count() > 0) {
@@ -78,18 +78,18 @@ async function searchDdgLite(browser: any, query: string, signal?: AbortSignal):
         // Map to standard format
         const mapped: SearXNGResult[] = allResults.map(r => ({
             ...r,
-            engine: 'stealth-browser',
+            engine: 'browser',
             score: 1.0,
             category: 'general'
         }));
 
         const relevant = filterRelevantResults(query, mapped);
-        logger.log(`[Stealth Search] Found ${relevant.length} verified results for: ${query}`);
+        logger.log(`[Search] Found ${relevant.length} verified results for: ${query}`);
         return relevant;
 
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        logger.error(`[Stealth Search] Failed for "${query}": ${msg}`);
+        logger.error(`[Search] Failed for "${query}": ${msg}`);
         return [];
     } finally {
         untrackContextById(contextId);
@@ -98,20 +98,16 @@ async function searchDdgLite(browser: any, query: string, signal?: AbortSignal):
 }
 
 /**
- * Orchestrate high-fidelity stealth search across multiple queries.
- * Utilizes the global task queue for concurrent hardware scaling.
+ * Orchestrate high-fidelity search across multiple queries.
  */
-export async function performStealthSearch(queries: string[], signal?: AbortSignal): Promise<Map<string, SearXNGResult[]>> {
+export async function performSearch(queries: string[], signal?: AbortSignal): Promise<Map<string, SearXNGResult[]>> {
     const resultMap = new Map<string, SearXNGResult[]>();
     
-    logger.log(`[Stealth Search] Queuing ${queries.length} queries in global manager...`);
+    logger.log(`[Search] Queuing ${queries.length} queries...`);
 
-    // Run ALL queries in parallel - the Queue will handle hardware-aware limiting
     const searchPromises = queries.map(async (query) => {
         if (signal?.aborted || !query) return;
-        
-        // Use the global queue!
-        const results = await runStealthTask((browser) => searchDdgLite(browser, query, signal));
+        const results = await runBrowserTask((browser) => searchDdgLite(browser, query, signal));
         resultMap.set(query, results);
     });
 

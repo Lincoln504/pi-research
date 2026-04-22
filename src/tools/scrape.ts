@@ -34,7 +34,6 @@ import {
 } from '../constants.ts';
 
 export function createScrapeTool(options: {
-  searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
   getGlobalState: () => SystemResearchState;

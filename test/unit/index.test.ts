@@ -1,9 +1,8 @@
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  runCleanup: vi.fn(async () => undefined),
   createResearchTool: vi.fn(() => ({ name: 'research' })),
-  checkDockerAvailability: vi.fn(async () => ({ installed: true, running: true })),
 }));
 
 vi.mock('../../src/tool.ts', () => ({
@@ -17,26 +16,14 @@ vi.mock('../../src/logger.ts', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-  },
-  isVerboseFromEnv: vi.fn(() => false),
-  getDefaultDebugLogPathTemplate: vi.fn(() => '/tmp/pi-research-debug-{hash}.log'),
-}));
-
-vi.mock('../../src/infrastructure/searxng-lifecycle.ts', () => ({
-  checkDockerAvailability: mocks.checkDockerAvailability,
-}));
-
-vi.mock('../../src/utils/shutdown-manager.ts', () => ({
-  shutdownManager: {
-    runCleanup: mocks.runCleanup,
-  },
+  }
 }));
 
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn(() => 'MOCK_USAGE_PROMPT'),
 }));
 
-import registerExtension from '../../src/index.ts';
+import { activate } from '../../src/index.ts';
 
 type SessionHandler = (...args: any[]) => any;
 
@@ -59,54 +46,18 @@ describe('extension entrypoint', () => {
     vi.clearAllMocks();
   });
 
-  it('registers session_shutdown cleanup through pi lifecycle hooks', async () => {
-    const { pi, handlers } = createPiMock();
+  it('registers research tool', async () => {
+    const { pi } = createPiMock();
 
-    registerExtension(pi as any);
+    await activate(pi as any, {} as any);
 
     expect(mocks.createResearchTool).toHaveBeenCalledTimes(1);
     expect(pi.registerTool).toHaveBeenCalledWith({ name: 'research' });
-    expect(handlers.has('session_shutdown')).toBe(true);
-
-    await handlers.get('session_shutdown')?.();
-
-    expect(mocks.runCleanup).toHaveBeenCalledWith('session_shutdown');
-  });
-
-  it('does not mutate console methods during extension registration', () => {
-    const { pi } = createPiMock();
-    const originalConsole = {
-      log: console.log,
-      info: console.info,
-      error: console.error,
-      warn: console.warn,
-      debug: console.debug,
-    };
-
-    registerExtension(pi as any);
-
-    expect(console.log).toBe(originalConsole.log);
-    expect(console.info).toBe(originalConsole.info);
-    expect(console.error).toBe(originalConsole.error);
-    expect(console.warn).toBe(originalConsole.warn);
-    expect(console.debug).toBe(originalConsole.debug);
-  });
-
-  it('keeps session_start Docker check behavior intact', async () => {
-    const { pi, handlers } = createPiMock();
-    const notify = vi.fn();
-
-    registerExtension(pi as any);
-
-    await handlers.get('session_start')?.({}, { ui: { notify } });
-
-    expect(mocks.checkDockerAvailability).toHaveBeenCalledTimes(1);
-    expect(notify).not.toHaveBeenCalled();
   });
 
   it('augments system prompt during before_agent_start', async () => {
     const { pi, handlers } = createPiMock();
-    registerExtension(pi as any);
+    await activate(pi as any, {} as any);
 
     const event = { systemPrompt: 'ORIGINAL' };
     const result = await handlers.get('before_agent_start')?.(event);

@@ -22,7 +22,6 @@ interface SecuritySearchParamsType {
 }
 
 export function createSecuritySearchTool(options: {
-  searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
 }): ToolDefinition {

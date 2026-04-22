@@ -24,7 +24,6 @@ export interface CreateResearcherSessionOptions {
   modelRegistry: ModelRegistry;
   settingsManager: SettingsManager;
   systemPrompt: string;
-  searxngUrl: string;
   extensionCtx: ExtensionContext;
   // Optional: real closures for global state management
   getGlobalState?: () => SystemResearchState;
@@ -44,7 +43,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     modelRegistry,
     settingsManager,
     systemPrompt,
-    searxngUrl,
     extensionCtx,
     getGlobalState,
     updateGlobalLinks,
@@ -62,10 +60,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     throw new Error('Invalid system prompt: must be a non-empty string');
   }
 
-  if (!searxngUrl || typeof searxngUrl !== 'string') {
-    throw new Error('Invalid SearXNG URL: must be a non-empty string');
-  }
-
   // Create tool usage tracker for this researcher
   const tracker = new ToolUsageTracker(createDefaultToolLimits());
 
@@ -77,7 +71,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     const result = await createAgentSession({
       cwd,
       customTools: createResearchTools({
-        searxngUrl,
         ctx: extensionCtx,
         tracker,
         getGlobalState: globalState,

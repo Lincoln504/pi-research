@@ -15,7 +15,6 @@ import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
 
 interface CreateToolsOptions {
-  searxngUrl: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;

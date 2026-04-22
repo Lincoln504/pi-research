@@ -1,49 +1,52 @@
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { search } from '../../../src/web-research/search.ts';
 
+// Mock dependencies
 vi.mock('../../../src/web-research/utils.ts', () => ({
   getSearxngUrl: vi.fn().mockReturnValue('http://localhost:8080'),
-  incrementConnectionCount: vi.fn(),
-  decrementConnectionCount: vi.fn(),
   isFallbackSearchEnabled: vi.fn().mockReturnValue(false),
   setFallbackSearchEnabled: vi.fn(),
   filterRelevantResults: vi.fn().mockImplementation((_query, results) => results)
 }));
 
+vi.mock('../../../src/web-research/browser-search.ts', () => ({
+  performSearch: vi.fn()
+}));
+
 vi.mock('../../../src/logger.ts', () => ({
   logger: {
     warn: vi.fn(),
+    error: vi.fn(),
     log: vi.fn(),
-    error: vi.fn()
+    debug: vi.fn()
   }
 }));
 
-describe('search', () => {
+import { performSearch } from '../../../src/web-research/browser-search.ts';
+
+describe('search orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock global fetch
-    globalThis.fetch = vi.fn();
   });
 
   it('should return results for a successful search', async () => {
-    const mockResults = [{ url: 'http://example.com', title: 'Example Result', content: 'This is a relevant content for example query' }];
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({ results: mockResults })
-    } as Response);
+    const mockResults = [{ 
+      url: 'http://example.com', 
+      title: 'Example Result', 
+      content: 'This is a relevant content' 
+    }];
+    
+    vi.mocked(performSearch).mockResolvedValue(new Map([['example query', mockResults]]));
 
     const result = await search(['example query']);
-    
+
     expect(result).toHaveLength(1);
     expect(result[0]!.results).toEqual(mockResults);
-    expect(result[0]!.error).toBeUndefined();
   });
 
   it('should handle empty results', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({ results: [] })
-    } as Response);
+    vi.mocked(performSearch).mockResolvedValue(new Map([['empty query', []]]));
 
     const result = await search(['empty query']);
     
@@ -52,31 +55,13 @@ describe('search', () => {
     expect(result[0]!.error?.type).toBe('empty_results');
   });
 
-  it('should classify timeout errors', async () => {
-    vi.mocked(fetch).mockRejectedValue(new Error('AbortError'));
+  it('should handle errors gracefully', async () => {
+    vi.mocked(performSearch).mockRejectedValue(new Error('Search failed'));
 
-    const result = await search(['timeout query']);
+    const result = await search(['error query']);
     
-    expect(result[0]!.error?.type).toBe('timeout');
-  });
-
-  it('should classify network errors', async () => {
-    vi.mocked(fetch).mockRejectedValue(new Error('ECONNREFUSED'));
-
-    const result = await search(['network query']);
-    
-    expect(result[0]!.error?.type).toBe('network_error');
-  });
-
-  it('should handle non-ok responses', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error'
-    } as Response);
-
-    const result = await search(['server error query']);
-    
-    expect(result[0]!.error?.type).toBe('service_unavailable');
+    expect(result).toHaveLength(1);
+    expect(result[0]!.error?.type).toBe('unknown');
+    expect(result[0]!.error?.message).toBe('Search failed');
   });
 });

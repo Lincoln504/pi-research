@@ -82,12 +82,6 @@ describe('npm pack', () => {
     expect(srcFiles.length).toBeGreaterThan(0);
   });
 
-  it('should include config directory', () => {
-    const files = getPackFiles();
-    const configFiles = files.filter(f => f.startsWith('config/'));
-    expect(configFiles.length).toBeGreaterThan(0);
-  });
-
   it('should include scripts directory', () => {
     const files = getPackFiles();
     const scriptsFiles = files.filter(f => f.startsWith('scripts/'));
@@ -171,15 +165,7 @@ describe('npm pack', () => {
     expect(envFiles.length).toBe(0);
   });
 
-  it('should include essential config files', () => {
-    const files = getPackFiles();
-    
-    // Check for key config files
-    expect(files).toContain('config/searxng/default-settings.yml');
-    expect(files).toContain('config/searxng/limiter.toml');
-  });
-
-  it('should include setup script', () => {
+  it('should include main entry point', () => {
     const files = getPackFiles();
     expect(files).toContain('scripts/setup.js');
   });

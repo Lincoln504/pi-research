@@ -40,14 +40,6 @@ import {
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
 import { isTextContentBlock, parseTokenUsage, calculateTotalTokens } from './types/llm.ts';
-import {
-  initLifecycle,
-  ensureRunning,
-  getStatus,
-  isFunctional,
-  setFunctional,
-} from './infrastructure/searxng-lifecycle.ts';
-import { getManager } from './infrastructure/searxng-lifecycle.ts';
 import { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
 import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
@@ -70,15 +62,12 @@ const __dirname = dirname(__filename);
 /**
  * Functional Health Check for Tool Start
  * 
- * Ensures SearXNG is not just running, but actually returning results.
- * Shows status in TUI while running.
+ * Ensures browser binaries are ready.
  */
 async function ensureFunctionalHealth(
   panelState: any, 
   onUpdate: () => void
 ): Promise<void> {
-  if (isFunctional()) return;
-
   const sliceLabel = 'health check ...';
   addSlice(panelState, sliceLabel, sliceLabel, false);
   activateSlice(panelState, sliceLabel);
@@ -89,11 +78,8 @@ async function ensureFunctionalHealth(
     const health = await runHealthCheck();
     
     if (!health.success) {
-      setFunctional(false);
-      throw new Error(`Functional health check failed: ${health.error || 'Unknown error'}. Your network or search engines may be blocked.`);
+      throw new Error(`Functional health check failed: ${health.error || 'Unknown error'}. Your network or browser may be blocked.`);
     }
-    
-    setFunctional(true);
   } finally {
     removeSlice(panelState, sliceLabel);
     onUpdate();
@@ -182,13 +168,6 @@ export function createResearchTool(): ToolDefinition {
 
         try {
           validateConfig();
-          await initLifecycle(ctx);
-          const searxngUrl = await ensureRunning();
-          const manager = getManager();
-          if (manager) {
-            const { setSearxngManager } = await import('./web-research/utils.ts');
-            setSearxngManager(manager);
-          }
 
           let selectedModel = baseModel;
           if (modelId) {
@@ -220,13 +199,13 @@ export function createResearchTool(): ToolDefinition {
             logger.info('[research] cleanup completed', { piSessionId, researchId });
           };
 
-          const panelState = createInitialPanelState(researchId, sanitizedQuery, getStatus(), modelIdStr);
+          const panelState = createInitialPanelState(researchId, sanitizedQuery, modelIdStr);
           
           // Register this research run's state and the master update function
           registerSessionPanel(piSessionId, researchId, panelState);
           const updateMasterWidget = () => {
-            const masterPanelCreator = createMasterResearchPanel(piSessionId);
-            ctx.ui.setWidget(masterWidgetId, masterPanelCreator, { placement: 'aboveEditor' });
+            const masterPanelCreator = createMasterResearchPanel(piSessionId, getPiActivePanels);
+            ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => masterPanelCreator(theme), { placement: 'aboveEditor' });
           };
           registerMasterUpdate(piSessionId, updateMasterWidget);
           
@@ -297,7 +276,6 @@ export function createResearchTool(): ToolDefinition {
               modelRegistry: ctx.modelRegistry,
               settingsManager: extendedCtx.settingsManager || (ctx as unknown as { settingsManager: SettingsManager }).settingsManager!,
               systemPrompt: researcherPrompt,
-              searxngUrl,
               extensionCtx: ctx,
               getTokensUsed: () => quickSessionTokens,
               contextWindowSize: quickContextWindowSize,
@@ -402,7 +380,6 @@ export function createResearchTool(): ToolDefinition {
               complexity: orchestratorComplexity,
               onTokens,
               onUpdate: () => refreshAllSessions(piSessionId),
-              searxngUrl,
               panelState,
             });
 
