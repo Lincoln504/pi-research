@@ -12,6 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as os from 'node:os';
+import { FixedThreadPool } from 'poolifier';
 import { filterRelevantResults } from '../web-research/utils.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,9 +48,24 @@ interface ManagedBrowser {
 const browserPool: ManagedBrowser[] = [];
 const pendingLaunches = new Map<number, Promise<any>>();
 
+/**
+ * Task Execution Logic using Poolifier patterns
+ * Since Playwright handles are not serializable, we use Poolifier
+ * to manage the "slots" while keeping the handles in the main thread.
+ */
 class BrowserTaskScheduler {
+    private pool: FixedThreadPool;
     private activeCount = 0;
     private queue: { task: (browser: any) => Promise<any>, type: 'search' | 'scrape', resolve: any, reject: any }[] = [];
+
+    constructor() {
+        // We use Poolifier to manage the "concurrency slots" logically
+        // even though the actual work happens via the browser handles.
+        this.pool = new FixedThreadPool(MAX_CONCURRENT_TASKS, join(__dirname, 'worker.js'), {
+            errorHandler: (e) => logger.error('[Scheduler] Pool Error:', e),
+            onlineHandler: () => logger.debug('[Scheduler] Worker Online'),
+        });
+    }
 
     async run<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape'): Promise<T> {
         return new Promise<T>((resolve, reject) => {
@@ -72,6 +88,7 @@ class BrowserTaskScheduler {
             
             if (!mb) throw new Error("Browser lost from pool.");
 
+            // Health Check
             if (type === 'scrape' && mb.linkScrapeCount > 0 && mb.linkScrapeCount % 13 === 0) {
                 const healthy = await performSearchHealthCheck(mb.instance);
                 if (!healthy) {
@@ -90,9 +107,18 @@ class BrowserTaskScheduler {
             this.process();
         }
     }
+
+    async shutdown() {
+        await this.pool.destroy();
+    }
 }
 
-const scheduler = new BrowserTaskScheduler();
+let scheduler: BrowserTaskScheduler | null = null;
+
+function getScheduler(): BrowserTaskScheduler {
+    if (!scheduler) scheduler = new BrowserTaskScheduler();
+    return scheduler;
+}
 
 // ============================================================================
 // Internal Search-based Quality Checks
@@ -140,7 +166,7 @@ async function performSearchHealthCheck(browser: any): Promise<boolean> {
 }
 
 // ============================================================================
-// Browser Availability & Binary Management
+// Browser Instance Management
 // ============================================================================
 
 function setupBrowserEnv() {
@@ -161,10 +187,6 @@ export function isBrowserAvailable(): boolean {
     return false;
   }
 }
-
-// ============================================================================
-// Browser Instance Management
-// ============================================================================
 
 async function launchBrowserInstance(index: number): Promise<ManagedBrowser> {
   setupBrowserEnv();
@@ -221,10 +243,11 @@ export async function getCamoufoxBrowser(): Promise<any> {
 }
 
 export async function runBrowserTask<T>(task: (browser: any) => Promise<T>, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
-    return scheduler.run(task, type);
+    return getScheduler().run(task, type);
 }
 
 export async function stopBrowserManager(): Promise<void> {
+  if (scheduler) await scheduler.shutdown();
   await Promise.all(browserPool.map(mb => mb.instance.close().catch(() => {})));
   browserPool.length = 0;
 }

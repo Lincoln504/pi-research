@@ -1,7 +1,7 @@
 /**
  * Tool Factory
  *
- * Creates all research tools with properly configured SearXNG URL.
+ * Creates all research tools with properly configured browser manager.
  * These tools are used by both direct tool calls and researcher agents.
  */
 
@@ -10,6 +10,7 @@ import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
+import { createLinksTool } from './links.ts';
 import { createSecuritySearchTool } from './security.ts';
 import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
@@ -32,7 +33,6 @@ interface CreateToolsOptions {
  */
 export function createResearchTools(options: CreateToolsOptions): ToolDefinition[] {
   // Create a fresh fallback state per tool instance to avoid state leakage between research runs
-  // This is only used when getGlobalState is not provided (e.g., quick mode with single researcher)
   const createFallbackState = (): SystemResearchState => ({
     version: 1,
     rootQuery: '',
@@ -63,6 +63,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       getTokensUsed: options.getTokensUsed,
       contextWindowSize: options.contextWindowSize,
     }),
+    createLinksTool(resolvedOptions),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
     createGrepTool(resolvedOptions),
@@ -74,6 +75,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
  */
 export { createSearchTool } from './search.ts';
 export { createScrapeTool } from './scrape.ts';
+export { createLinksTool } from './links.ts';
 export { createSecuritySearchTool } from './security.ts';
 export { createStackexchangeTool } from './stackexchange.ts';
 export { createGrepTool } from './grep.ts';

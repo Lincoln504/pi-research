@@ -308,8 +308,8 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('search');
-      expect(tool.promptGuidelines).toContainEqual(
-        expect.stringContaining('4 gathering calls')
+      expect(tool.promptGuidelines).toContain(
+        'CRITICAL: Provide exactly one list of 10-150 queries.'
       );
     });
 
