@@ -1,4 +1,4 @@
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { createResearchTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { readFileSync } from 'node:fs';
@@ -21,7 +21,7 @@ function loadPrompt(name: string): string {
 /**
  * Pi Research Extension
  */
-export async function activate(pi: any, _ctx: ExtensionContext) {
+export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
 
   // Register research tool

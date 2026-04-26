@@ -74,3 +74,9 @@ shared-links-pool-*.json
 Thumbs.db
 Desktop.ini
 .browser/
+
+# Performance/Stress testing output
+testing-results/
+*.testing-results/
+*.testing-results.json
+*.testing-results.log
