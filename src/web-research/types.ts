@@ -4,19 +4,10 @@
  * All TypeScript interfaces and types for the web research functionality
  */
 
-// Search filter options passed through to SearXNG
-export type SearchFreshness = 'any' | 'day' | 'week' | 'month' | 'year';
-export type SearchSourceType = 'general' | 'news' | 'github';
-
-export interface SearxngSearchOptions {
-  freshness?: SearchFreshness;
-  sourceType?: SearchSourceType;
-}
-
 // Search result with per-query error context.
 export interface QueryResultWithError {
   query: string;
-  results: SearXNGResult[];
+  results: SearchResult[];
   error?: {
     type: 'empty_results' | 'service_unavailable' | 'timeout' | 'network_error' | 'unknown';
     message: string;
@@ -32,8 +23,8 @@ export interface ScrapeLayerResult {
   layer: Layer;
 }
 
-// SearXNG types
-export interface SearXNGResult {
+// Search result type
+export interface SearchResult {
   title: string;
   url: string;
   content: string;

@@ -5,7 +5,7 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
@@ -44,7 +44,10 @@ export function createSearchTool(options: {
 
       const allowed = options.tracker.recordCall('search');
       if (!allowed) {
-        throw new Error('Search limit reached. Only one massive search call is permitted per agent.');
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('search') }],
+          details: { blocked: true, reason: 'limit_reached' },
+        };
       }
 
       try {

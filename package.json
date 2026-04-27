@@ -7,7 +7,6 @@
   "main": "./src/index.ts",
   "files": [
     "src/",
-    "config/searxng/",
     "docs/",
     "scripts/",
     "LICENSE",
@@ -62,7 +61,6 @@
   "dependencies": {
     "@kreuzberg/html-to-markdown-node": "^2.30.0",
     "camoufox-js": "^0.10.2",
-    "dockerode": "^4.0.10",
     "js-yaml": "^4.1.1",
     "node-html-markdown": "^2.0.0",
     "pdf-oxide-wasm": "^0.3.37",
@@ -80,21 +78,19 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "^0.68.0",
-    "@mariozechner/pi-coding-agent": "^0.68.0",
-    "@sinclair/typebox": "^0.34.0",
-    "@types/dockerode": "^4.0.1",
+    "@mariozechner/pi-ai": "^0.70.0",
+    "@mariozechner/pi-coding-agent": "^0.70.0",
+    "typebox": "^1.0.0",
     "@types/js-yaml": "^4.0.9",
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.0",
-    "testcontainers": "^11.13.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }

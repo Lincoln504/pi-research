@@ -5,69 +5,21 @@
  */
 
 import { createRequire } from 'module';
-import type { SearXNGResult } from './types.ts';
+import type { SearchResult } from './types.ts';
 
 const require = createRequire(import.meta.url);
 
 /**
  * Filter search results based on keyword relevance to detect "junk" results.
  */
-export function filterRelevantResults(query: string, results: SearXNGResult[]): SearXNGResult[] {
+export function filterRelevantResults(query: string, results: SearchResult[]): SearchResult[] {
   const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
   if (keywords.length === 0) return results;
 
-  return results.filter((r: SearXNGResult) => {
+  return results.filter((r: SearchResult) => {
     const text = `${r.title} ${r.content}`.toLowerCase();
     return keywords.some(word => text.includes(word));
   });
-}
-
-/**
- * Browser Context Tracker
- * Ensures all browser pages and contexts are cleaned up during session shutdown.
- */
-interface TrackedContext {
-  id: string;
-  browser: any;
-  context: any;
-  page: any;
-}
-
-const activeContexts = new Map<string, TrackedContext>();
-
-export function trackContext(browser: any, context: any, page: any): string {
-  const id = Math.random().toString(36).substring(7);
-  activeContexts.set(id, { id, browser, context, page });
-  return id;
-}
-
-export function untrackContextById(id: string): void {
-  activeContexts.delete(id);
-}
-
-export function clearTrackedContexts(): void {
-  activeContexts.clear();
-}
-
-/**
- * Clean up all active browser contexts.
- */
-export async function cleanupAllContexts(): Promise<void> {
-  const cleanupPromises: Promise<void>[] = [];
-  for (const ctx of activeContexts.values()) {
-    cleanupPromises.push(
-      (async (): Promise<void> => {
-        try {
-          if (ctx.page !== undefined) await ctx.page.close().catch(() => {});
-          if (ctx.context !== undefined) await ctx.context.close().catch(() => {});
-        } catch {
-          // ignore
-        }
-      })()
-    );
-  }
-  await Promise.all(cleanupPromises);
-  activeContexts.clear();
 }
 
 /**

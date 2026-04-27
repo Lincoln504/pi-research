@@ -27,6 +27,8 @@ export function makeResourceLoader(systemPromptText: string): ResourceLoader {
     setModel: async () => true,
     getThinkingLevel: () => 'off',
     setThinkingLevel: () => {},
+    assertActive: () => {},
+    invalidate: () => {},
   };
 
   return {

@@ -23,7 +23,7 @@ vi.mock('node:fs', () => ({
   readFileSync: vi.fn(() => 'MOCK_USAGE_PROMPT'),
 }));
 
-import { activate } from '../../src/index.ts';
+import activate from '../../src/index.ts';
 
 type SessionHandler = (...args: any[]) => any;
 

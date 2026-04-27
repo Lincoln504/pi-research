@@ -95,7 +95,7 @@ describe('StateManager Integration-style Tests', () => {
 
   it('should recover from corrupted JSON', async () => {
     // Manually corrupt the file
-    const stateFile = path.join(testDir, 'searxng-singleton.json');
+    const stateFile = path.join(testDir, 'research-state.json');
     await fs.mkdir(path.dirname(stateFile), { recursive: true });
     await fs.writeFile(stateFile, '{ corrupted: json [ ] ', 'utf-8');
 

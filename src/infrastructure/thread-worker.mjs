@@ -1,58 +1,57 @@
 /**
  * Poolifier Thread Worker
  *
- * Executes search tasks in worker threads.
- *
+ * Executes search and scrape tasks in worker threads using Camoufox.
+ * 
  * PRODUCTION CONFIGURATION:
  * - Browser Mode: WARM (reuses browser instances)
- * - Performance: 3x faster than fresh browser (0.300 vs 0.094 q/s)
+ * - Jitter: 200-600ms (for search only)
+ * - Health Check: Integrated into worker pool
  */
 
+/* global document, URL, setTimeout */
 import { ThreadWorker } from 'poolifier';
+import { createRequire } from 'module';
 import * as os from 'node:os';
+import process from 'node:process';
+
+const require = createRequire(import.meta.url);
 
 // Set worker priority to reduce system impact
 try {
     os.setPriority(process.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
-} catch (e) {}
+} catch {
+    // ignore
+}
 
-// Warm browser: Reuse browser instance across queries
+// Warm browser: Reuse browser instance across tasks
 let browser = null;
 let context = null;
 
 async function initBrowser() {
-    if (!browser || !context) {
-        const { Camoufox } = require('camoufox-js');
-        browser = await Camoufox({ headless: true, humanize: true });
-        context = await browser.newContext();
-    }
-}
-
-async function checkBlocked(page) {
     try {
-        const blocked = await page.evaluate(() => {
-            const text = document.body.textContent.toLowerCase();
-            const blockedKeywords = [
-                'access denied',
-                'too many requests',
-                'rate limit',
-                'blocked',
-                'captcha',
-                'please wait',
-                'human verification',
-                'security check',
-                'temporarily blocked',
-                'ip blocked'
-            ];
-            return blockedKeywords.some(kw => text.includes(kw));
-        });
-        return blocked;
+        if (!browser || !browser.isConnected()) {
+            const { Camoufox } = require('camoufox-js');
+            browser = await Camoufox({
+                headless: true,
+                humanize: true
+            });
+            context = await browser.newContext({
+                viewport: { width: 1280, height: 800 },
+            });
+        } else if (!context) {
+            context = await browser.newContext({
+                viewport: { width: 1280, height: 800 },
+            });
+        }
     } catch (e) {
-        return false;
+        browser = null;
+        context = null;
+        throw e;
     }
 }
 
-async function extractResults(page) {
+async function extractSearchResults(page) {
     return await page.evaluate(() => {
         const found = [];
         const links = Array.from(document.querySelectorAll('a.result-link'));
@@ -65,8 +64,12 @@ async function extractResults(page) {
                 const u = new URL(url);
                 const uddg = u.searchParams.get('uddg');
                 if (uddg) url = decodeURIComponent(uddg);
-            } catch {}
-            if (title && url) found.push({ title, url, content: snippet });
+            } catch {
+                // ignore
+            }
+            if (title && url && !url.includes('duckduckgo.com') && url.startsWith('http')) {
+                found.push({ title, url, content: snippet });
+            }
         });
         return found;
     });
@@ -74,31 +77,15 @@ async function extractResults(page) {
 
 async function executeSearchTask(browser, context, query) {
     const page = await context.newPage();
-
     try {
-        await page.goto('https://lite.duckduckgo.com/lite/', { 
-            waitUntil: 'domcontentloaded', 
-            timeout: 30000 
-        });
-        
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.fill('input[name="q"]', query);
-        
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
             page.keyboard.press('Enter')
         ]);
 
-        // Check if blocked
-        const blocked = await checkBlocked(page);
-        if (blocked) {
-            await page.close();
-            return { results: [], blocked: true };
-        }
-
-        // Extract page 1 results
-        const p1Results = await extractResults(page);
-        
-        // Try to get page 2 results
+        const p1Results = await extractSearchResults(page);
         let p2Results = [];
         try {
             const nextButton = page.locator('input[value="Next Page >"]');
@@ -107,19 +94,17 @@ async function executeSearchTask(browser, context, query) {
                     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
                     nextButton.first().click()
                 ]);
-                p2Results = await extractResults(page);
+                p2Results = await extractSearchResults(page);
             }
-        } catch (e) {
-            // Ignore errors on page 2
-        }
+        } catch { /* ignore */ }
 
         await page.close();
+        const jitter = Math.floor(Math.random() * 401) + 200;
+        await new Promise(r => setTimeout(r, jitter));
 
         return {
             results: [...p1Results, ...p2Results],
-            page1Results: p1Results.length,
-            page2Results: p2Results.length,
-            blocked: false
+            jitter
         };
     } catch (error) {
         await page.close().catch(() => {});
@@ -127,23 +112,69 @@ async function executeSearchTask(browser, context, query) {
     }
 }
 
+async function executeScrapeTask(browser, context, url) {
+    const page = await context.newPage();
+    try {
+        // High-fidelity wait: try domcontentloaded first for speed
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const contentType = (await response?.headerValue('content-type')) || '';
+        
+        if (contentType.includes('application/pdf')) {
+            const buffer = await response.body();
+            await page.close();
+            return { contentType, buffer: Array.from(new Uint8Array(buffer)) };
+        }
+
+        // If it's HTML, check if we need to wait longer (JS-heavy sites)
+        let html = await page.content();
+        
+        // Simple heuristic: if the body is very short, wait for networkidle
+        if (html.length < 5000) {
+            await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            html = await page.content();
+        }
+        
+        await page.close();
+        return { contentType, html };
+    } catch (error) {
+        await page.close().catch(() => {});
+        throw error;
+    }
+}
+
+async function executeHealthCheck(browser, context) {
+    const page = await context.newPage();
+    try {
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const title = await page.title();
+        await page.close();
+        return { success: !!title };
+    } catch (error) {
+        await page.close().catch(() => {});
+        throw error;
+    }
+}
+
 async function runTask(data) {
-    const { type, query } = data;
+    const { type, query, url } = data;
     const startTime = Date.now();
     
     try {
         await initBrowser();
 
         if (type === 'search') {
-            // WARM: Reuse browser and context
-            const searchResults = await executeSearchTask(browser, context, query);
-            
-            return {
-                results: searchResults.results,
-                duration: Date.now() - startTime,
-                workerId: process.pid,
-                blocked: searchResults.blocked
-            };
+            const result = await executeSearchTask(browser, context, query);
+            return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
+        }
+        
+        if (type === 'scrape') {
+            const result = await executeScrapeTask(browser, context, url);
+            return { ...result, duration: Date.now() - startTime };
+        }
+
+        if (type === 'healthcheck') {
+            const result = await executeHealthCheck(browser, context);
+            return { ...result, duration: Date.now() - startTime };
         }
         
         return { error: 'Unknown task type' };
@@ -157,11 +188,9 @@ async function runTask(data) {
 
 export default new ThreadWorker(runTask, {
     maxInactiveTime: 60000,
-    // Warm browser initialization on worker startup
     onlineHandler: async () => {
-        await initBrowser();
+        await initBrowser().catch(() => {});
     },
-    // Cleanup when worker exits
     exitHandler: async () => {
         if (context) await context.close().catch(() => {});
         if (browser) await browser.close().catch(() => {});

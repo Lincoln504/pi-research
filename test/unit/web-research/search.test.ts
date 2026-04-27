@@ -4,9 +4,6 @@ import { search } from '../../../src/web-research/search.ts';
 
 // Mock dependencies
 vi.mock('../../../src/web-research/utils.ts', () => ({
-  getSearxngUrl: vi.fn().mockReturnValue('http://localhost:8080'),
-  isFallbackSearchEnabled: vi.fn().mockReturnValue(false),
-  setFallbackSearchEnabled: vi.fn(),
   filterRelevantResults: vi.fn().mockImplementation((_query, results) => results)
 }));
 

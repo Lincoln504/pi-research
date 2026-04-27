@@ -5,7 +5,7 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import { stackexchangeCommand } from '../stackexchange/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 

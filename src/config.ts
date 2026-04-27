@@ -1,8 +1,7 @@
 /**
- * Configuration Module (Refactored for Testability)
+ * Configuration Module
  *
- * Uses factory pattern instead of module-level caching.
- * Allows for different configurations in tests.
+ * Centralized configuration management for pi-research.
  */
 
 import { logger } from './logger.ts';
@@ -15,20 +14,14 @@ export interface Config {
   RESEARCHER_TIMEOUT_MS: number;
   /** Maximum researchers allowed to run simultaneously (default: 3) */
   MAX_CONCURRENT_RESEARCHERS: number;
-  /** Proxy URL for SearXNG searches (optional) */
+  /** Proxy URL for outgoing searches and scraping (optional) */
   PROXY_URL?: string;
-  /** Brave Search API key — enables the braveapi engine in SearXNG when set (optional) */
-  BRAVE_SEARCH_API_KEY?: string;
   /** Health check timeout in milliseconds (default: 25000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
   /** Global TUI refresh debounce in milliseconds (default: 10) */
   TUI_REFRESH_DEBOUNCE_MS: number;
   /** Console restore delay after research in milliseconds (default: 15000) */
   CONSOLE_RESTORE_DELAY_MS: number;
-  /** BCP 47 language tag sent to SearXNG to filter search results (default: 'en-US') */
-  SEARCH_LANGUAGE: string;
-  /** External SearXNG base URL — bypasses Docker container management entirely when set */
-  SEARXNG_URL?: string;
 }
 
 /**
@@ -38,12 +31,9 @@ const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 240000,
   MAX_CONCURRENT_RESEARCHERS: 3,
   PROXY_URL: undefined,
-  BRAVE_SEARCH_API_KEY: undefined,
   HEALTH_CHECK_TIMEOUT_MS: 25000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
-  SEARCH_LANGUAGE: 'en-US',
-  SEARXNG_URL: undefined,
 };
 
 /**
@@ -96,7 +86,6 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       DEFAULTS.MAX_CONCURRENT_RESEARCHERS
     ),
     PROXY_URL: parseEnvString(env, 'PROXY_URL'),
-    BRAVE_SEARCH_API_KEY: parseEnvString(env, 'BRAVE_SEARCH_API_KEY'),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(
       env,
       'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
@@ -112,13 +101,11 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS',
       DEFAULTS.CONSOLE_RESTORE_DELAY_MS
     ),
-    SEARCH_LANGUAGE: parseEnvString(env, 'PI_RESEARCH_SEARCH_LANGUAGE') ?? DEFAULTS.SEARCH_LANGUAGE,
-    SEARXNG_URL: parseEnvString(env, 'SEARXNG_URL'),
   };
 }
 
 /**
- * Global configuration instance (for backward compatibility)
+ * Global configuration instance
  */
 let globalConfig: Config | null = null;
 
@@ -173,7 +160,7 @@ export function validateConfig(config: Config = getConfig()): void {
 
   // Warn if proxy is configured
   if (config.PROXY_URL) {
-    logger.warn('[config] Proxy configured - searches will be routed through:', config.PROXY_URL);
+    logger.warn('[config] Proxy configured - research will be routed through:', config.PROXY_URL);
   }
 
   logger.debug('[config] Configuration validated:', {
@@ -187,38 +174,10 @@ export function validateConfig(config: Config = getConfig()): void {
 // Backward Compatibility Exports
 // ============================================================================
 
-/**
- * @deprecated Use getConfig().RESEARCHER_TIMEOUT_MS instead
- * Returns current config value - reflects environment changes if config is reset
- */
-export function getResearcherTimeoutMs(): number {
-  return getConfig().RESEARCHER_TIMEOUT_MS;
-}
+/** @deprecated Use getConfig().RESEARCHER_TIMEOUT_MS */
+export function getResearcherTimeoutMs(): number { return getConfig().RESEARCHER_TIMEOUT_MS; }
+/** @deprecated Use getConfig().PROXY_URL */
+export function getProxyUrl(): string | undefined { return getConfig().PROXY_URL; }
 
-/**
- * @deprecated Use getConfig().PROXY_URL instead
- * Returns current config value - reflects environment changes if config is reset
- */
-export function getProxyUrl(): string | undefined {
-  return getConfig().PROXY_URL;
-}
-
-/**
- * @deprecated Use getConfig().BRAVE_SEARCH_API_KEY instead
- */
-export function getBraveSearchApiKey(): string | undefined {
-  return getConfig().BRAVE_SEARCH_API_KEY;
-}
-
-/**
- * @deprecated Use getConfig().SEARXNG_URL instead
- */
-export function getExternalSearxngUrl(): string | undefined {
-  return getConfig().SEARXNG_URL;
-}
-
-// Legacy variable exports (for backward compatibility, but reflect module load time values)
 export const RESEARCHER_TIMEOUT_MS = getResearcherTimeoutMs();
 export const PROXY_URL = getProxyUrl();
-export const BRAVE_SEARCH_API_KEY = getBraveSearchApiKey();
-export const SEARXNG_URL = getExternalSearxngUrl();

@@ -23,7 +23,7 @@ describe('tools/security', () => {
 
   describe('Tool Definition', () => {
     it('should create tool with correct metadata', () => {
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker: createMockTracker() });
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       expect(tool.name).toBe('security_search');
       expect(tool.label).toBe('Security Search');
     });
@@ -41,7 +41,7 @@ describe('tools/security', () => {
 
       const tracker = createMockTracker();
       const spy = vi.spyOn(tracker, 'recordCall');
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker });
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker });
       
       await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
 
@@ -52,7 +52,7 @@ describe('tools/security', () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('security_search'); // Limit reached
 
-      const tool = createSecuritySearchTool({ searxngUrl: 'http://localhost:8888', ctx: createMockContext(), tracker });
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker });
 
       await expect(
         tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any)

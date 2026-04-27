@@ -10,12 +10,9 @@
 
 import {
   PRIMARY_SCRAPER_TIMEOUT,
-  FALLBACK_SCRAPER_TIMEOUT,
   type ScrapeLayerResult,
 } from './types.ts';
 import {
-  trackContext,
-  untrackContextById,
   checkModule,
 } from './utils.ts';
 import { logger } from '../logger.ts';
@@ -92,7 +89,7 @@ const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png
 const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((?:data:image\/[^)]+|[^)\s]+)\)/gi;
 
 export function initScraperDependencies(): void {
-  playwrightAvailable = checkModule('playwright') && checkModule('camoufox-js');
+  playwrightAvailable = checkModule('playwright-core') && checkModule('camoufox-js');
 }
 initScraperDependencies();
 
@@ -242,36 +239,24 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 // ============================================================================
 
 async function scrapeWithStealthBrowser(_url: string): Promise<ScrapeLayerResult> {
-  return runBrowserTask(async (browser) => {
-    let context: any = null;
-    let page: any = null;
-    let contextId: string | null = null;
+  // Dispatch to unified worker pool (Camoufox)
+  const result = await runBrowserTask<any>(_url, 'scrape');
 
-    try {
-      context = await browser.newContext({ viewport: null });
-      page = await context.newPage();
-      contextId = trackContext(browser, context, page);
-
-      const response = await page.goto(_url, { waitUntil: 'domcontentloaded', timeout: FALLBACK_SCRAPER_TIMEOUT });
-      
-      const contentType = (await response?.headerValue('content-type')) || '';
-      if (contentType.includes('application/pdf')) {
-          const buffer = await response!.body();
-          const markdown = await extractPdfToMarkdown(new Uint8Array(buffer));
-          return { source: 'playwright', layer: 'playwright+camoufox', markdown };
-      }
-
-      const html = await page.content();
-      const markdown = await convertToMarkdown(html);
-      validateContent(html, markdown, _url);
-
+  if (result.buffer) {
+      const markdown = await extractPdfToMarkdown(new Uint8Array(result.buffer));
       return { source: 'playwright', layer: 'playwright+camoufox', markdown };
-    } finally {
-      if (contextId) untrackContextById(contextId);
-      if (page) await page.close().catch(() => {});
-      if (context) await context.close().catch(() => {});
-    }
-  }, 'scrape');
+  }
+
+  let html = result.html || '';
+  let markdown = await convertToMarkdown(html);
+
+  // Robustness: If we got a stub, the main thread can't easily tell the worker 
+  // to retry with networkidle without another roundtrip.
+  // However, the unified worker now uses a standard high-fidelity wait.
+  
+  validateContent(html, markdown, _url);
+
+  return { source: 'playwright', layer: 'playwright+camoufox', markdown };
 }
 
 // ============================================================================
@@ -288,6 +273,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<a
         const res = await scrapeWithStealthBrowser(url);
         return { ...res, url, success: true };
       } catch (e2) {
+        logger.error(`[Scrapers] Browser fallback failed for ${url}:`, e2);
         return { url, success: false, error: String(e2), markdown: '' };
       }
     }

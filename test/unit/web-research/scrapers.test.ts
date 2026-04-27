@@ -9,11 +9,12 @@ vi.mock('../../../src/web-research/utils.ts', () => ({
 }));
 
 // Mock playwright module to avoid enum issues
-vi.mock('playwright', () => ({
-  chromium: {
+vi.mock('playwright-core', () => ({
+  firefox: {
     launch: vi.fn(),
   },
 }));
+
 
 describe('scrapers', () => {
   beforeEach(() => {

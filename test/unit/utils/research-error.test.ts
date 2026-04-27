@@ -147,8 +147,13 @@ describe('isTransientError', () => {
     expect(isTransientError(error)).toBe(true);
   });
 
-  it('should identify SearXNG start failures as transient', () => {
-    const error = new ResearchError(ResearchErrorCode.SEARXNG_START_FAILED, 'Start failed');
+  it('should identify browser launch failures as transient', () => {
+    const error = new ResearchError(ResearchErrorCode.BROWSER_LAUNCH_FAILED, 'Launch failed');
+    expect(isTransientError(error)).toBe(true);
+  });
+
+  it('should identify IP blocks as transient', () => {
+    const error = new ResearchError(ResearchErrorCode.IP_BLOCKED, 'IP blocked');
     expect(isTransientError(error)).toBe(true);
   });
 

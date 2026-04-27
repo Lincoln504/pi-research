@@ -11,6 +11,7 @@ import type { SystemResearchState } from '../../../src/orchestration/deep-resear
 describe('deepResearchReducer', () => {
   const initialState: SystemResearchState = {
     version: 1,
+    researchId: 'test-research-id',
     rootQuery: 'test query',
     complexity: 2,
     currentRound: 1,

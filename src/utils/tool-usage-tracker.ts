@@ -14,6 +14,8 @@ export interface ToolLimits {
   gathering?: number;
   // Scrape limit
   scrape?: number;
+  // Specific tool limits (overrides category limit if stricter)
+  search?: number;
   // read tool (default pi file read) has no limit
   read?: number;
 }
@@ -22,6 +24,7 @@ export interface ToolUsage {
   category: string;
   callCount: number;
   limit?: number;
+  toolCounts: Map<string, number>;
 }
 
 export class ToolUsageTracker {
@@ -50,31 +53,53 @@ export class ToolUsageTracker {
    */
   recordCall(toolName: string): boolean {
     const category = this.getCategory(toolName);
-    const limit = this.limits[category as keyof ToolLimits];
+    const catLimit = this.limits[category as keyof ToolLimits];
+    const toolLimit = this.limits[toolName as keyof ToolLimits];
+    
     const usage = this.getUsage(category);
 
-    // Check limit — if reached, return false without incrementing
-    if (limit !== undefined && usage.callCount >= limit) {
+    // Check category limit
+    if (catLimit !== undefined && usage.callCount >= catLimit) {
       logger.debug(
-        `[tool-usage] category=${category} blocked tool=${toolName} (limit=${limit})`
+        `[tool-usage] category=${category} blocked tool=${toolName} (limit=${catLimit})`
       );
       return false;
     }
 
+    // Check specific tool limit
+    const toolCount = usage.toolCounts.get(toolName) || 0;
+    if (toolLimit !== undefined && toolCount >= toolLimit) {
+        logger.debug(
+            `[tool-usage] tool=${toolName} blocked (limit=${toolLimit})`
+        );
+        return false;
+    }
+
     // Allowed — increment and log
     usage.callCount++;
+    usage.toolCounts.set(toolName, toolCount + 1);
+    
     logger.debug(
-      `[tool-usage] category=${category} calls=${usage.callCount}/${limit ?? 'unlimited'} tool=${toolName}`
+      `[tool-usage] category=${category} calls=${usage.callCount}/${catLimit ?? 'unlimited'} tool=${toolName} count=${toolCount + 1}/${toolLimit ?? 'unlimited'}`
     );
     return true;
   }
 
   /**
-   * Get current call count for a tool
+   * Get current call count for a tool's category
    */
   getCallCount(toolName: string): number {
     const category = this.getCategory(toolName);
     return this.getUsage(category).callCount;
+  }
+
+  /**
+   * Get current call count for a specific tool
+   */
+  getToolCallCount(toolName: string): number {
+    const category = this.getCategory(toolName);
+    const usage = this.getUsage(category);
+    return usage.toolCounts.get(toolName) || 0;
   }
 
   /**
@@ -83,13 +108,20 @@ export class ToolUsageTracker {
   getLimitMessage(toolName: string): string {
     const category = this.getCategory(toolName);
     const usage = this.getUsage(category);
-    const limit = usage.limit;
+    
+    const toolLimit = this.limits[toolName as keyof ToolLimits];
+    const catLimit = usage.limit;
+
+    if (toolName === 'search' && toolLimit === 1) {
+        return `SEARCH LIMIT REACHED: Only one massive search call is permitted per agent. ` +
+            `You have already executed your search. Use the scrape tool for full deep-dives into your results.`;
+    }
 
     if (category === 'scrape') {
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${catLimit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
         `This tool cannot be used again. Proceed immediately to Phase 3: synthesize your findings and submit your report.`;
     }
-    return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
+    return `GATHERING LIMIT REACHED: All ${catLimit} gathering calls have been used. ` +
       `This tool and all other gathering tools cannot be used again. ` +
       `Proceed to Phase 2: call scrape with your collected URLs now.`;
   }
@@ -103,6 +135,7 @@ export class ToolUsageTracker {
         category,
         callCount: 0,
         limit: this.limits[category as keyof ToolLimits],
+        toolCounts: new Map(),
       });
     }
     return this.usage.get(category)!;
@@ -130,6 +163,7 @@ export function createDefaultToolLimits(): ToolLimits {
   return {
     gathering: MAX_GATHERING_CALLS,
     scrape: MAX_SCRAPE_CALLS,
+    search: 1,
     read: undefined,
   };
 }

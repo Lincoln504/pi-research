@@ -17,11 +17,6 @@ import {
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
 describe('Multi-Session TUI Coordination', () => {
-  const searxngStatus = {
-    state: 'active' as const,
-    url: 'http://localhost:8080',
-    isFunctional: false,
-  };
 
   beforeEach(() => {
     resetAllPiSessions();
@@ -35,7 +30,7 @@ describe('Multi-Session TUI Coordination', () => {
 
     // 1. Start Session 1 (Bottom-most)
     const s1 = startResearchSession(piSessionId);
-    const panelState1 = createInitialPanelState(s1, 'query1', searxngStatus, 'model1');
+    const panelState1 = createInitialPanelState(s1, 'query1', 'model1');
     registerSessionPanel(piSessionId, s1, panelState1);
 
     // Initial refresh
@@ -49,7 +44,7 @@ describe('Multi-Session TUI Coordination', () => {
 
     // 2. Start Session 2 (Top-most)
     const s2 = startResearchSession(piSessionId);
-    const panelState2 = createInitialPanelState(s2, 'query2', searxngStatus, 'model2');
+    const panelState2 = createInitialPanelState(s2, 'query2', 'model2');
     registerSessionPanel(piSessionId, s2, panelState2);
 
     // Refresh after adding s2

@@ -11,9 +11,9 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext, AgentSession } from '@mariozechner/pi-coding-agent';
 import type { ExtendedAgentSessionEvent } from '../types/extension-context.ts';
-import { complete, type Model } from '@mariozechner/pi-ai';
+import { complete, type Model, type TextContent } from '@mariozechner/pi-ai';
 import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { 
@@ -24,14 +24,18 @@ import {
 } from '../tui/research-panel.ts';
 import { createResearcherSession } from './researcher.ts';
 import { search } from '../web-research/search.ts';
-import { formatLightweightLinkUpdate } from '../utils/shared-links.ts';
-import { 
+import { formatLightweightLinkUpdate, registerScrapedLinks, getScrapedLinks } from '../utils/shared-links.ts';
+import { extractJson } from '../utils/json-utils.ts';
+import { ensureAssistantResponse } from '../utils/text-utils.ts';
+import {
     MAX_CONCURRENT_RESEARCHERS,
     MAX_ROUNDS_LEVEL_1,
     MAX_ROUNDS_LEVEL_2,
     MAX_ROUNDS_LEVEL_3,
-    AVG_TOKENS_PER_SCRAPE
+    AVG_TOKENS_PER_SCRAPE,
+    MAX_EVALUATOR_REPORT_LENGTH,
 } from '../constants.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -56,8 +60,22 @@ export interface DeepResearchOrchestratorOptions {
   panelState: ResearchPanelState;
 }
 
+interface ResearcherConfig {
+    id: string;
+    name: string;
+    goal: string;
+    queries: string[];
+}
+
+interface ResearchPlan {
+    researchers: ResearcherConfig[];
+    allQueries: string[];
+    action?: 'synthesize' | 'delegate';
+    content?: string;
+}
+
 export class DeepResearchOrchestrator {
-  private activeSessions = new Map<string, any>();
+  private activeSessions = new Map<string, AgentSession>();
   private allScrapedLinks: string[] = [];
   private reports = new Map<string, string>();
   private currentRound = 1;
@@ -84,7 +102,7 @@ export class DeepResearchOrchestrator {
         messages: [{ role: 'user', content: [{ type: 'text', text: planningPrompt }], timestamp: Date.now() }]
       }, { apiKey: auth.apiKey, headers: auth.headers, signal });
       
-      const textContent = planResponse.content.find((c: any) => c.type === 'text') as any;
+      const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
       let currentPlan = this.parseJsonPlan(textContent?.text || "");
 
       const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
@@ -102,6 +120,7 @@ export class DeepResearchOrchestrator {
               
               const newLinks = Array.from(new Set(Array.from(researcherLinks.values()).flat()));
               this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...newLinks]));
+              registerScrapedLinks(this.options.panelState.researchId, newLinks);
           }
 
           completeSlice(this.options.panelState, 'coord');
@@ -113,8 +132,8 @@ export class DeepResearchOrchestrator {
           // PHASE 4: EVALUATE & DECIDE
           const evalResult = await this.evaluate(signal);
           
-          if (evalResult.action === 'synthesize') {
-              return evalResult.content;
+          if (evalResult.action === 'synthesize' || !evalResult.researchers) {
+              return evalResult.content || "Research complete.";
           } else {
               // DELEGATE: Transition to new round
               this.currentRound++;
@@ -132,15 +151,17 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private parseJsonPlan(text: string): any {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("Failed to extract valid JSON plan.");
-    return JSON.parse(jsonMatch[0]);
+  private parseJsonPlan(text: string): ResearchPlan {
+    const result = extractJson<ResearchPlan>(text, 'object');
+    if (!result.success || !result.value) {
+        throw new Error(`Failed to extract valid JSON plan: ${result.error}`);
+    }
+    return result.value;
   }
 
-  private distributeResults(plan: any, results: any[]): Map<string, string[]> {
+  private distributeResults(plan: ResearchPlan, results: any[]): Map<string, string[]> {
     const linkMap = new Map<string, string[]>();
-    plan.researchers.forEach((r: any) => {
+    plan.researchers.forEach((r) => {
         const ownedLinks: string[] = [];
         const rQueries = r.queries.map((q: string) => q.toLowerCase().trim());
         results.forEach((res: any) => {
@@ -157,7 +178,7 @@ export class DeepResearchOrchestrator {
    * Manages concurrent execution of researchers.
    * Ensures exactly MAX_CONCURRENT_RESEARCHERS (3) run at a time.
    */
-  private async runResearchersParallel(configs: any[], linksMap: Map<string, string[]>, signal?: AbortSignal) {
+  private async runResearchersParallel(configs: ResearcherConfig[], linksMap: Map<string, string[]>, signal?: AbortSignal) {
       const queue = [...configs];
       const active = new Set<Promise<void>>();
 
@@ -177,7 +198,7 @@ export class DeepResearchOrchestrator {
       }
   }
 
-  private async runResearcher(config: any, initialLinks: string[]): Promise<void> {
+  private async runResearcher(config: ResearcherConfig, initialLinks: string[]): Promise<void> {
     const label = `researcher.${config.id}`;
     addSlice(this.options.panelState, label, `Researcher: ${config.name}`, true);
     this.options.onUpdate();
@@ -200,6 +221,12 @@ export class DeepResearchOrchestrator {
             systemPrompt,
             extensionCtx: this.options.ctx,
             onLinksScraped: (links) => this.broadcastLinks(config.id, config.name, links),
+            getGlobalState: () => ({
+                researchId: this.options.panelState.researchId,
+                rootQuery: this.options.query,
+                allScrapedLinks: getScrapedLinks(this.options.panelState.researchId),
+            } as SystemResearchState),
+            updateGlobalLinks: (links) => registerScrapedLinks(this.options.panelState.researchId, links),
             getTokensUsed: () => this.siblingTokens.get(config.id) ?? 0,
             getScrapeTokens: () => this.siblingScrapeTokens.get(config.id) ?? 0,
             contextWindowSize: (this.options.model as any)?.contextWindow ?? 200000,
@@ -235,7 +262,7 @@ export class DeepResearchOrchestrator {
         
         if (typeof subscription === 'function') subscription();
         
-        const report = await this.extractFinalReport(session);
+        const report = ensureAssistantResponse(session, `Researcher ${config.id}`);
         this.reports.set(config.id, report);
         await this.injectCompletionSummary(config.id, config.name, report);
 
@@ -254,6 +281,7 @@ export class DeepResearchOrchestrator {
           if (id !== sourceId) session.steer(updateMsg).catch(() => {});
       }
       this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...links]));
+      registerScrapedLinks(this.options.panelState.researchId, links);
   }
 
   private async injectCompletionSummary(sourceId: string, sourceName: string, fullReport: string) {
@@ -266,7 +294,7 @@ export class DeepResearchOrchestrator {
       }
   }
 
-  private async evaluate(signal?: AbortSignal): Promise<any> {
+  private async evaluate(signal?: AbortSignal): Promise<ResearchPlan> {
       addSlice(this.options.panelState, 'eval', 'Lead Evaluator: Assessing Findings', true);
       this.options.onUpdate();
 
@@ -276,7 +304,12 @@ export class DeepResearchOrchestrator {
           .replace('{MAX_ROUNDS}', ((this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 : this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 : MAX_ROUNDS_LEVEL_3)).toString());
 
       const reportsText = Array.from(this.reports.entries())
-          .map(([id, report]) => `### Researcher ${id} Report\n\n${report}`)
+          .map(([id, report]) => {
+              const truncated = report.length > MAX_EVALUATOR_REPORT_LENGTH
+                  ? report.slice(0, MAX_EVALUATOR_REPORT_LENGTH) + '\n\n[Report truncated]'
+                  : report;
+              return `### Researcher ${id} Report\n\n${truncated}`;
+          })
           .join('\n\n---\n\n');
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
@@ -284,20 +317,24 @@ export class DeepResearchOrchestrator {
 
       const response = await complete(this.options.model, {
           messages: [
-              { role: 'user', content: [{ type: 'text', text: `Findings so far:\n\n${reportsText}` }], timestamp: Date.now() },
-              { role: 'user', content: [{ type: 'text', text: evalPrompt }], timestamp: Date.now() }
+              {
+                  role: 'user',
+                  content: [{ type: 'text', text: `Findings so far:\n\n${reportsText}\n\n---\n\n${evalPrompt}` }],
+                  timestamp: Date.now(),
+              },
           ]
       }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
-      const textContent = response.content.find((c: any) => c.type === 'text') as any;
+      const textContent = response.content.find((c): c is TextContent => c.type === 'text');
       const text = textContent?.text || "";
       completeSlice(this.options.panelState, 'eval');
       this.options.onUpdate();
 
-      if (text.trim().startsWith('{')) {
-          return this.parseJsonPlan(text);
+      const extracted = extractJson<ResearchPlan>(text, 'any');
+      if (extracted.success && extracted.value) {
+          return extracted.value;
       } else {
-          return { action: 'synthesize', content: text };
+          return { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       }
   }
 
@@ -310,14 +347,5 @@ export class DeepResearchOrchestrator {
   private extractUrls(report: string): string[] {
       const matches = report.matchAll(/https?:\/\/[^\s)\]>"]+/g);
       return Array.from(new Set(Array.from(matches).map(m => m[0])));
-  }
-
-  private async extractFinalReport(session: any): Promise<string> {
-      const state = session.state;
-      const last = state.messages[state.messages.length - 1];
-      if (last?.role === 'assistant' && Array.isArray(last.content)) {
-          return last.content.find((c: any) => c.type === 'text')?.text || "";
-      }
-      return "";
   }
 }

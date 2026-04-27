@@ -11,6 +11,7 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
   // Deep clone state to ensure true purity
   const newState: SystemResearchState = {
     ...state,
+    researchId: state.researchId,
     lastUpdated: Date.now(),
     initialAgenda: [...state.initialAgenda],
     allScrapedLinks: [...state.allScrapedLinks],

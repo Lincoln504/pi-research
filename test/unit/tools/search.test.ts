@@ -41,8 +41,10 @@ describe('tools/search', () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
     const queries = Array(10).fill('test query');
     await tool.execute('id1', { queries }, undefined, () => {}, {} as any);
-    
-    await expect(tool.execute('id2', { queries }, undefined, () => {}, {} as any))
-      .rejects.toThrow('Search limit reached');
-  });
-});
+
+    const result = await tool.execute('id2', { queries }, undefined, () => {}, {} as any);
+    expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+    expect(result.content[0].text).toContain('LIMIT REACHED');
+    });
+    });
+

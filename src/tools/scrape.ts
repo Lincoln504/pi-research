@@ -6,14 +6,16 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { deduplicateUrls } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
+  MAX_SCRAPE_CALLS,
   BATCH_2_MAX_SCRAPE_URLS,
+  BATCH_2_DEFAULT_CONCURRENCY,
   MAX_CONTEXT_FRACTION_FOR_SCRAPING,
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING,
   DEFAULT_MODEL_CONTEXT_WINDOW,
@@ -58,7 +60,7 @@ export function createScrapeTool(options: {
     description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2 → Batch 3.',
     promptSnippet: 'Scrape full content from URLs (3-batch protocol)',
     promptGuidelines: [
-      'PROTOCOL: Batch 1 (3 URLs) → Batch 2 (2 URLs) → Batch 3 (3 URLs).',
+      'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).',
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
@@ -69,9 +71,12 @@ export function createScrapeTool(options: {
       maxConcurrency: Type.Optional(Type.Number({ default: 10, minimum: 1, maximum: 20 })),
     }),
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
-      const callCount = options.tracker.getCallCount('scrape');
-      if (callCount >= 3) {
-          throw new Error('SCRAPE LIMIT REACHED. All 3 batches completed. Proceed to synthesis.');
+      const callCount = options.tracker.getToolCallCount('scrape');
+      if (callCount >= MAX_SCRAPE_CALLS) {
+          return {
+            content: [{ type: 'text', text: options.tracker.getLimitMessage('scrape') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
       }
 
       const p = params as Record<string, any>;
@@ -91,7 +96,7 @@ export function createScrapeTool(options: {
       const startTime = Date.now();
       
       // Global Deduplication
-      const { kept: dedupedUrls, duplicates } = deduplicateUrls(urls, options.getGlobalState().rootQuery);
+      const { kept: dedupedUrls, duplicates } = deduplicateUrls(urls, options.getGlobalState().researchId);
       let dedupNote = duplicates.length > 0 ? `**Global Deduplication**: ${duplicates.length} URL(s) skipped (already in pool).\n\n` : '';
       
       if (dedupedUrls.length === 0) {
@@ -101,7 +106,8 @@ export function createScrapeTool(options: {
       const finalUrls = dedupedUrls.slice(0, callCount === 1 ? BATCH_2_MAX_SCRAPE_URLS : MAX_SCRAPE_URLS);
       options.updateGlobalLinks(finalUrls);
 
-      const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || 10, signal);
+      const defaultConcurrency = callCount === 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;
+      const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || defaultConcurrency, signal);
       const results = Array.isArray(scrapeResults) ? scrapeResults : [];
       const successful = results.filter(r => r.success);
       const failed = results.filter(r => !r.success);

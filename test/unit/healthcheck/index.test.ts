@@ -1,11 +1,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runHealthCheck, clearHealthCheckCache } from '../../../src/healthcheck/index.ts';
-import { logger } from '../../../src/logger.ts';
-import { isBrowserAvailable } from '../../../src/infrastructure/browser-manager.ts';
+import { isBrowserAvailable, runBrowserHealthCheck } from '../../../src/infrastructure/browser-manager.ts';
 import { scrapeSingle } from '../../../src/web-research/scrapers.ts';
 
 // Mock dependencies
+vi.mock('../../../src/config.ts', () => ({
+  getConfig: () => ({ HEALTH_CHECK_TIMEOUT_MS: 25000 }),
+}));
+
 vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
@@ -18,6 +21,7 @@ vi.mock('../../../src/logger.ts', () => ({
 
 vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
   isBrowserAvailable: vi.fn(),
+  runBrowserHealthCheck: vi.fn(),
 }));
 
 vi.mock('../../../src/web-research/scrapers.ts', () => ({
@@ -30,9 +34,11 @@ describe('healthcheck', () => {
     clearHealthCheckCache();
   });
 
-  it('should pass health check when browser and scrape are healthy', async () => {
+  it('should pass health check when browser, search and scrape are healthy', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
     vi.mocked(scrapeSingle).mockResolvedValue({
+      success: true,
       url: 'https://en.wikipedia.org/wiki/Main_Page',
       markdown: 'A'.repeat(600),
       source: 'fetch',
@@ -56,9 +62,22 @@ describe('healthcheck', () => {
     expect(result.error).toContain('Browser binaries');
   });
 
+  it('should fail when search validation fails', async () => {
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: false });
+
+    const result = await runHealthCheck();
+
+    expect(result.success).toBe(false);
+    expect(result.searchOk).toBe(false);
+    expect(result.error).toContain('Search validation failed');
+  });
+
   it('should fail when scrape validation fails', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
     vi.mocked(scrapeSingle).mockResolvedValue({
+      success: false,
       url: 'any',
       markdown: 'too short',
       source: 'fetch',

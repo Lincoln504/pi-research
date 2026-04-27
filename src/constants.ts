@@ -22,8 +22,8 @@ export const MAX_GATHERING_CALLS = 4;
 /** Maximum scrape tool calls per researcher (3 batches: Batch 1, Batch 2, Batch 3) */
 export const MAX_SCRAPE_CALLS = 3;
 
-/** Maximum URLs to scrape per batch */
-export const MAX_SCRAPE_URLS = 3;
+/** Maximum URLs to scrape per batch (Batch 1 and 3) */
+export const MAX_SCRAPE_URLS = 4;
 
 /** Maximum siblings (researchers) allowed to run simultaneously across all rounds */
 export const MAX_CONCURRENT_RESEARCHERS = 3;
@@ -52,7 +52,6 @@ export const MAX_EXTRA_ROUNDS = 2;
 
 // ==================== Timeout Constants ====================
 
-export const SEARXNG_TIMEOUT_MS = 30000;
 export const OSV_TIMEOUT_MS = 30000;
 export const NVD_TIMEOUT_MS = 30000;
 
@@ -94,7 +93,7 @@ export const AVG_TOKENS_PER_SCRAPE = 15000;
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
 /** Maximum URLs per second-scrape batch (more targeted than batch 1). */
-export const BATCH_2_MAX_SCRAPE_URLS = 2;
+export const BATCH_2_MAX_SCRAPE_URLS = 3;
 
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
@@ -108,8 +107,3 @@ export const PROGRESS_BAR_WIDTH = 18;
 /** Maximum characters per researcher report when sent to lead evaluator */
 export const MAX_EVALUATOR_REPORT_LENGTH = 50000;
 
-/** Delay in milliseconds between launching concurrent researchers to stagger startup */
-export const RESEARCHER_LAUNCH_DELAY_MS = 300;
-
-export const STATE_PROPAGATION_DELAY_MS = 50;
-export const STREAMING_UPDATE_THRESHOLD_CHARS = 200;

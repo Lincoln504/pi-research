@@ -4,19 +4,13 @@
  * Streamlined multi-session research progress tracker.
  */
 
-import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
+import { type Component, truncateToWidth } from '@mariozechner/pi-tui';
 
 /**
  * Local Theme interface mirroring pi-tui
  */
 export interface Theme {
-  accent: (text: string) => string;
-  bright: (text: string) => string;
-  dim: (text: string) => string;
-  success: (text: string) => string;
-  error: (text: string) => string;
-  info: (text: string) => string;
-  warning: (text: string) => string;
+  fg: (color: string, text: string) => string;
 }
 
 export interface SliceState {
@@ -120,7 +114,7 @@ export function clearAllFlashTimeouts(researchId: string) {
 export function createMasterResearchPanel(piSessionId: string, getActivePanelsFn?: (piSessionId: string) => ResearchPanelState[]) {
   return (theme: Theme): Component => {
     const component: Component = {
-      render(): string[] {
+      render(width: number): string[] {
         // Use provided function or attempt dynamic require (only for runtime)
         let getPanels = getActivePanelsFn;
         if (!getPanels) {
@@ -131,31 +125,30 @@ export function createMasterResearchPanel(piSessionId: string, getActivePanelsFn
              return [];
            }
         }
-        
+
         const activePanels: ResearchPanelState[] = getPanels ? getPanels(piSessionId) : [];
 
         if (!activePanels || activePanels.length === 0) return [];
 
-        const width = visibleWidth(' '); 
-        const divider = theme.accent('─'.repeat(width));
+        const divider = theme.fg('accent', '─'.repeat(width));
         const lines: string[] = [];
 
         activePanels.forEach((state, index) => {
           if (index > 0) lines.push('');
-          
+
           lines.push(divider);
-          lines.push(theme.bright(` 🔎 RESEARCH: ${state.query} `));
-          lines.push(theme.dim(`    Model: ${state.modelId} | Tokens: ${state.totalTokens}`));
+          lines.push(theme.fg('text', ` 🔎 RESEARCH: ${state.query} `));
+          lines.push(theme.fg('muted', `    Model: ${state.modelId} | Tokens: ${state.totalTokens}`));
           lines.push(divider);
 
           if (state.statusMessage) {
-            lines.push(theme.info(` > ${state.statusMessage}`));
+            lines.push(theme.fg('info', ` > ${state.statusMessage}`));
           }
 
           if (state.progress) {
             const percent = Math.min(100, Math.floor((state.progress.made / state.progress.expected) * 100));
             const barWidth = Math.floor((width - 10) * (percent / 100));
-            const bar = theme.success('█'.repeat(barWidth)) + theme.dim('░'.repeat(width - 10 - barWidth));
+            const bar = theme.fg('success', '█'.repeat(barWidth)) + theme.fg('muted', '░'.repeat(width - 10 - barWidth));
             lines.push(` [${bar}] ${percent}%`);
           }
 
@@ -164,11 +157,11 @@ export function createMasterResearchPanel(piSessionId: string, getActivePanelsFn
             lines.push('');
             slices.forEach(s => {
               let label = s.label;
-              if (s.flashColor === 'red') label = theme.error(label);
-              else if (s.flashColor === 'green') label = theme.success(label);
-              else if (s.isActive) label = theme.info(label);
-              else if (s.isComplete) label = theme.dim(label);
-              
+              if (s.flashColor === 'red') label = theme.fg('error', label);
+              else if (s.flashColor === 'green') label = theme.fg('success', label);
+              else if (s.isActive) label = theme.fg('info', label);
+              else if (s.isComplete) label = theme.fg('muted', label);
+
               lines.push(`  ${s.isActive ? '▶' : s.isComplete ? '✓' : '○'} ${label}`);
             });
           }

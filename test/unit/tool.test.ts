@@ -36,16 +36,6 @@ vi.mock('../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: vi.fn(),
 }));
 
-vi.mock('../../src/infrastructure/searxng-lifecycle.ts', () => ({
-  initLifecycle: vi.fn(async () => undefined),
-  ensureRunning: vi.fn(async () => 'http://localhost:8888'),
-  getStatus: vi.fn(() => ({ state: 'active', url: '', isFunctional: true })),
-  onStatusChange: vi.fn(() => vi.fn()),
-  getManager: vi.fn(() => ({})),
-  isFunctional: vi.fn().mockReturnValue(true), // Skip health check by default
-  setFunctional: vi.fn(),
-}));
-
 vi.mock('../../src/healthcheck/index.ts', () => ({
   runHealthCheck: vi.fn(async () => ({ success: true, details: {} })),
 }));
@@ -62,7 +52,6 @@ vi.mock('../../src/tui/research-panel.ts', () => ({
   flashSlice: vi.fn(),
   updateSliceTokens: vi.fn(),
   createInitialPanelState: vi.fn(() => ({
-    searxngStatus: { state: 'active', url: '', isFunctional: true },
     totalTokens: 0,
     slices: new Map(),
     modelName: 'test-model',
@@ -89,7 +78,6 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
 
 vi.mock('../../src/web-research/utils.ts', () => ({
   onConnectionCountChange: vi.fn(() => vi.fn()),
-  setSearxngManager: vi.fn(),
 }));
 
 vi.mock('node:fs', () => ({

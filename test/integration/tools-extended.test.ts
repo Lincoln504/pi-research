@@ -37,7 +37,6 @@ describe('Extended Tools Integration', () => {
     it('should instantiate security search tool with correct properties', () => {
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -54,7 +53,6 @@ describe('Extended Tools Integration', () => {
     it('should have proper parameter schema for security search', () => {
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -72,7 +70,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -110,7 +107,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 10 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -140,7 +136,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -170,7 +165,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -196,7 +190,6 @@ describe('Extended Tools Integration', () => {
     it('should handle empty terms array', async () => {
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -219,7 +212,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -243,7 +235,6 @@ describe('Extended Tools Integration', () => {
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -533,10 +524,9 @@ describe('Extended Tools Integration', () => {
     it('should enforce global gathering limit across different tools', async () => {
       const tracker = new ToolUsageTracker({ gathering: 3 });
       
-      const searchTool = createSecuritySearchTool({ 
-        searxngUrl: 'http://localhost:8080', 
-        ctx: mockExtensionCtx as any, 
-        tracker 
+      const searchTool = createSecuritySearchTool({
+        ctx: mockExtensionCtx as any,
+        tracker
       });
       const grepTool = createGrepTool({ tracker });
       const seTool = createStackexchangeTool({ 

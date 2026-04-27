@@ -4,12 +4,12 @@
  * pi-research Postinstall Setup Script
  *
  * This script runs automatically after `npm install` and ensures:
- * 1. Playwright browser binaries are installed (Chromium)
+ * 1. Camoufox stealth browser binaries are installed
  * 2. System dependencies are available (if run with --system-deps flag)
  *
  * Key Design Principles:
  * - NEVER exits with code 1 - this would block npm install from completing
- * - Uses npx playwright install, which works if playwright is in node_modules
+ * - Uses npx camoufox-js fetch
  * - Provides clear feedback about installation status
  * - Gracefully handles missing dependencies (warns but doesn't fail)
  *
@@ -173,8 +173,9 @@ if (existsSync(camoufoxPath)) {
 // Show versions
 console.log('\n🔍 Versions:');
 try {
-  const playwrightVersion = execSync('npx playwright --version', { encoding: 'utf8' }).trim();
-  console.log(`   Playwright: ${playwrightVersion}`);
+  // playwright-core provides the CLI for version checking when using core
+  const playwrightVersion = execSync('npx playwright-core --version', { encoding: 'utf8' }).trim();
+  console.log(`   Playwright Core: ${playwrightVersion}`);
 } catch (error) {
   console.warn('   Could not determine Playwright version');
 }

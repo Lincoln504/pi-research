@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import * as nodePath from 'node:path';
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 const DEFAULT_MAX_BYTES = 100 * 1024; // 100KB

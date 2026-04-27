@@ -314,7 +314,6 @@ describe('tool-limiting-robustness', () => {
     it('should properly track scrape tool calls', () => {
       const tracker = new ToolUsageTracker({ scrape: 2 });
       const tool = createScrapeTool({
-        searxngUrl: 'http://localhost:8888',
         ctx: {} as any,
         tracker,
         getGlobalState: () => ({ allScrapedLinks: [] } as any),
@@ -324,7 +323,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('scrape');
       expect(tool.promptGuidelines).toContain(
-        'PROTOCOL: Batch 1 (3 URLs) → Batch 2 (2 URLs) → Batch 3 (3 URLs).'
+        'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).'
       );
     });
 
@@ -341,10 +340,9 @@ describe('tool-limiting-robustness', () => {
 
     it('should properly track security_search tool calls', () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
-      const tool = createSecuritySearchTool({
-        searxngUrl: 'http://localhost:8888',
-        ctx: {} as any,
-        tracker,
+      const tool = createSecuritySearchTool({ 
+        ctx: {} as any, 
+        tracker, 
       });
 
       // Verify tool has correct metadata

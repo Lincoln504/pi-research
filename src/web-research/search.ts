@@ -16,7 +16,7 @@ import type { QueryResultWithError } from './types.ts';
  * Search multiple queries via the Browser-based Search Queue.
  *
  * @param queries - Array of search query strings
- * @param _options - (Ignored) Legacy SearXNG filter options
+ * @param _options - (Ignored) Legacy options
  * @param signal - Optional AbortSignal
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */

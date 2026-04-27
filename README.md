@@ -2,17 +2,15 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a self-hosted SearXNG container to search the web, scrape pages, check security databases, and shows everything in real-time.
+Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a high-fidelity stealth browser system to search the web, scrape pages, check security databases, and shows everything in real-time.
 
 ---
 
 ## Why This Extension
 
-Other ways to connect pi to the internet exist. This one is designed differently.
+**High-Fidelity Stealth Research** — Uses `camoufox` (stealth Firefox) to bypass bot detection. No search API keys or external infrastructure required.
 
-**Self-hosted search** — Uses SearXNG running in Docker. Free, no API keys. One container serves all research sessions — no duplicate instances, no overhead. Point `SEARXNG_URL` at an existing instance to skip container management.
-
-**Multi-agent research** — AI coordinator breaks your question into parallel research tracks. Each track runs in a separate subagent. An AI evaluator combines results or launches deeper rounds.
+**Multi-agent Orchestration** — AI coordinator breaks your question into parallel research tracks. Each track runs in a separate researcher session. An AI evaluator combines results or launches deeper rounds.
 
 **Safe by design** — Researcher agents cannot write files, edit files, or run shell commands. Web tools are isolated and rate-limited to keep agents focused.
 
@@ -22,27 +20,19 @@ Other ways to connect pi to the internet exist. This one is designed differently
 
 ## What It Does
 
-- **Web search** — SearXNG aggregates Bing, Brave, Yahoo, DuckDuckGo, Wikipedia, GitHub, arXiv, and Semantic Scholar. Engines can be enabled or disabled in config.
-- **URL scraping** — Fast HTML fetching with Playwright/Chromium for JavaScript-heavy pages
-- **Security databases** — NVD, CISA KEV, GitHub Advisories, and OSV
-- **Stack Exchange** — Full network search and filtering
-- **Real-time TUI** — Per-researcher token and cost tracking
-
-```
-── Research: 70% ─╮
-┌───────┬──────┐ 1 ┌──────┬──────┐ 2 ┌──────┬──────┐ 3 ┌──────┐
-│SearXNG│  18k │     36k      │     50k      │     61k  │
-│:55732 │$0.006│   $0.0055    │   $0.0071    │  $0.0089 │
-└───────┴──────┴──────────────┴──────────────┴──────────┘
-```
+- **Web Search** — Multi-threaded, parallel search bursts using DuckDuckGo Lite.
+- **URL Scraping** — Context-aware, 3-batch scraping protocol with PDF support and global deduplication.
+- **Security Databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
+- **Stack Exchange** — Full network search and filtering.
+- **Real-time TUI** — Live progress tracking with token and cost monitoring.
+- **Local Context** — Integrated `ripgrep` for searching local codebases.
 
 ---
 
 ## Requirements
 
-- Node.js 22.13.0 or 24.x+
+- Node.js >= 22.13.0
 - pi CLI installed and configured
-- Docker running (required for SearXNG)
 - Internet access
 - LLM in pi with 100k+ context window
 
@@ -54,34 +44,13 @@ Other ways to connect pi to the internet exist. This one is designed differently
 pi install npm:@lincoln504/pi-research
 ```
 
-This installs dependencies and Playwright browsers. Takes a few minutes on first install.
-
-**Manual browser setup** (if needed):
-
-```bash
-npm run install:browsers
-```
+This installs dependencies and the stealth browser engine. Takes a few minutes on first install.
 
 **Local install** (from repo):
 
 ```bash
 pi install .
 ```
-
----
-
-## Platform Setup
-
-**macOS** — Install Docker Desktop and start it from Applications.
-
-**Linux** — Install Docker for your distribution:
-```bash
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker $USER  # Log out and back in
-```
-
-**Windows** — Install Docker Desktop (Linux containers).
 
 ---
 
@@ -114,19 +83,14 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SEARXNG_URL` | — | External SearXNG URL (e.g., `http://localhost:8080`). Set this to skip Docker management. |
-| `BRAVE_SEARCH_API_KEY` | — | Enables `braveapi` engine (official REST API). |
+| `PI_RESEARCH_MAX_CONCURRENT` | `3` | Max concurrent researchers (1-10). |
+| `PI_RESEARCH_BROWSER_HEADLESS` | `true` | Run research browser in headless mode. |
+| `PI_RESEARCH_EXPORT_DIR` | `cwd` | Directory for final research reports. |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (`1`). |
 | `PROXY_URL` | — | Proxy for outgoing requests (e.g., `socks5://127.0.0.1:9050`). |
 | `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases limit). |
-| `PI_RESEARCH_SEARCH_LANGUAGE` | `en-US` | Search language filter (BCP 47). |
-| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (30s-10m). |
-| `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Max concurrent researchers (1-10). |
-| `PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS` | `15000` | Delay before TUI clears after research. |
-| `SEARXNG_IMAGE_TAG` | `latest` | Pin SearXNG Docker image version. |
-
-**Verbose logging** — Logs written to `{os.tmpdir()}/pi-research-debug-{hash}.log` as JSONL. Each line includes session ID for concurrent sessions.
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (default 4m). |
 
 ---
 
@@ -136,13 +100,8 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 - `npm run lint` / `npm run lint:fix` — Code quality
 - `npm run type-check` — TypeScript verification
 - `npm run test:unit` — Unit tests
-- `npm run test:integration` — Integration tests (requires Docker)
+- `npm run test:integration` — Integration tests
 - `npm run test:coverage` — Coverage report
-
-**Release**
-1. `npm version patch` (or `minor`/`major`)
-2. `git push origin main --tags`
-3. GitHub Action publishes to npm automatically
 
 ---
 

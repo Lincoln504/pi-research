@@ -86,7 +86,7 @@ describe('scripts/setup.js integration tests', () => {
 
     // Should show status message
     expect(result.stdout).toContain('pi-research installed successfully');
-    expect(result.stdout).toContain('chromium') || expect(result.stdout).toContain('Chromium');
+    expect(result.stdout).toContain('camoufox') || expect(result.stdout).toContain('Camoufox');
   });
 
   it('should show version information', async () => {

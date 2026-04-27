@@ -26,10 +26,12 @@ export enum ResearchErrorCode {
   API_TIMEOUT = 'API_TIMEOUT',
   API_UNAVAILABLE = 'API_UNAVAILABLE',
 
-  // SearXNG errors
-  SEARXNG_START_FAILED = 'SEARXNG_START_FAILED',
-  SEARXNG_NOT_RUNNING = 'SEARXNG_NOT_RUNNING',
-  SEARXNG_QUERY_FAILED = 'SEARXNG_QUERY_FAILED',
+  // Browser/Search errors
+  BROWSER_LAUNCH_FAILED = 'BROWSER_LAUNCH_FAILED',
+  BROWSER_CRASHED = 'BROWSER_CRASHED',
+  SEARCH_FAILED = 'SEARCH_FAILED',
+  SEARCH_TIMEOUT = 'SEARCH_TIMEOUT',
+  IP_BLOCKED = 'IP_BLOCKED',
 
   // Orchestrator errors
   ORCHESTRATION_FAILED = 'ORCHESTRATION_FAILED',
@@ -188,7 +190,9 @@ export function isTransientError(error: ResearchError): boolean {
     ResearchErrorCode.API_RATE_LIMITED,
     ResearchErrorCode.API_TIMEOUT,
     ResearchErrorCode.API_UNAVAILABLE,
-    ResearchErrorCode.SEARXNG_START_FAILED,
+    ResearchErrorCode.BROWSER_LAUNCH_FAILED,
+    ResearchErrorCode.SEARCH_TIMEOUT,
+    ResearchErrorCode.IP_BLOCKED,
   ];
 
   return transientCodes.includes(error.code);

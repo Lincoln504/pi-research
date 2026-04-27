@@ -22,7 +22,7 @@ import type {
   ExtendedAgentSessionEvent,
 } from './types/extension-context.ts';
 import type { Model } from '@mariozechner/pi-ai';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig } from './config.ts';
 import {
@@ -101,7 +101,7 @@ export function createResearchTool(): ToolDefinition {
     promptGuidelines: [
       'Specifically for web research.',
       'Research is organized into Rounds with parallel siblings.',
-      'SCRAPE PROTOCOL: Up to 3 batches (Batch 1: 3 URLs, Batch 2: 2 URLs, Batch 3: 3 URLs). Batches skip if context is full.',
+      'SCRAPE PROTOCOL: Up to 3 batches (Batch 1: 4 URLs, Batch 2: 3 URLs, Batch 3: 3 URLs). Batches skip if context is full.',
       'Steering messages provide real-time evidence updates from siblings.',
       '`security_search` and `stackexchange` are available for specialized data.',
     ],
@@ -147,6 +147,8 @@ export function createResearchTool(): ToolDefinition {
           const masterWidgetId = `pi-research-master-${piSessionId}`;
 
           cleanup = () => {
+            if (cleanup === null) return; // guard against double-call
+            cleanup = null;
             if (unsubOrder) unsubOrder();
             endResearchSession(piSessionId, researchId);
             cleanupSharedLinks(researchId);

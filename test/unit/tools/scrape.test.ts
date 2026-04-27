@@ -23,6 +23,14 @@ describe('tools/scrape', () => {
     tracker = new ToolUsageTracker({ scrape: 3 });
   });
 
+  it('should have correct metadata and protocol in guidelines', () => {
+    const tool = createScrapeTool({ ...mockOptions, tracker });
+    expect(tool.name).toBe('scrape');
+    expect(tool.promptGuidelines).toContain(
+      'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).'
+    );
+  });
+
   it('should perform Batch 1 on first call', async () => {
     const tool = createScrapeTool({ ...mockOptions, tracker });
     const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -45,7 +53,8 @@ describe('tools/scrape', () => {
     await tool.execute('call-2', { urls: ['url2'] }, undefined, () => {}, {} as any);
     await tool.execute('call-3', { urls: ['url3'] }, undefined, () => {}, {} as any);
     
-    await expect(tool.execute('call-4', { urls: ['url4'] }, undefined, () => {}, {} as any))
-      .rejects.toThrow('SCRAPE LIMIT REACHED');
+    const result = await tool.execute('call-4', { urls: ['url4'] }, undefined, () => {}, {} as any);
+    expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+    expect(result.content[0].text).toContain('COMPLETE');
   });
 });

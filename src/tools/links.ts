@@ -6,7 +6,7 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from '@sinclair/typebox';
+import { Type } from 'typebox';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { getScrapedLinks } from '../utils/shared-links.ts';
 
@@ -40,7 +40,7 @@ export function createLinksTool(options: {
       const query = (p['query'] || '').toLowerCase();
       
       const state = options.getGlobalState();
-      const researchId = state.rootQuery; // Using rootQuery as unique ID for link pool
+      const researchId = state.researchId; 
       const links = getScrapedLinks(researchId);
 
       let filtered = links;

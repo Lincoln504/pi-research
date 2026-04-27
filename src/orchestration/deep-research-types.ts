@@ -29,6 +29,7 @@ export interface ResearchSibling {
 
 export interface SystemResearchState {
   version: number;
+  researchId: string; // Unique session ID
   rootQuery: string;
   complexity: 1 | 2 | 3; // 1: Normal, 2: Deep, 3: Ultra
   currentRound: number;

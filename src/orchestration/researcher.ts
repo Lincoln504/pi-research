@@ -3,7 +3,7 @@
  *
  * Responsible for instantiating individual researcher agent sessions. 
  * Each researcher is an autonomous agent equipped with a suite of specialized tools:
- * - Web search via SearXNG
+ * - Web search via DuckDuckGo Lite
  * - Context-aware URL scraping via Playwright
  * - Security vulnerability database queries (NVD, CISA, OSV)
  * - Technical Q&A retrieval from Stack Exchange

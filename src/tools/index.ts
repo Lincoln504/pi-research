@@ -37,6 +37,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
   // Create a fresh fallback state per tool instance to avoid state leakage between research runs
   const createFallbackState = (): SystemResearchState => ({
     version: 1,
+    researchId: 'fallback',
     rootQuery: '',
     complexity: 1,
     currentRound: 1,

@@ -8,19 +8,16 @@ Two primary modes: **Quick Mode** and **Deep Mode**.
 Routes research tasks to a single **Agent Researcher** session. No coordination or evaluation overhead — suitable for focused queries.
 
 ### Deep Mode
-Uses a state machine to manage a three-status research lifecycle:
+Uses a multi-agent workflow to manage a research lifecycle:
 
-1.  **Planning Status**: The AI coordinator analyzes the conversation context and generates a JSON-formatted research agenda—a list of high-level research tasks.
-2.  **Researching Status**: 
-    - **Parallel Execution**: **Agent Researchers** run in parallel (up to 3 concurrent). Each researcher handles one agenda task per round.
-    - **Report Injection**: Collective knowledge is managed by the orchestrator. When a researcher completes its task, its full report (up to 50k chars) is **injected** into the context of siblings starting later, or **steered** into already running ones. This ensures researchers don't just know *what* was scraped, but also *what was found*.
-    - **Lead Evaluation**: When a round is complete, a **Lead Evaluator** agent call is triggered. It reviews all accumulated findings against the original agenda.
-    - **Decision Outcome**: The evaluator makes a binary choice:
-        - **Synthesize**: Generate a final, exhaustive Markdown report (transition to **Completed**).
-        - **Delegate**: Formulate new, targeted queries for a subsequent round (remain in **Researching**).
-3.  **Completed Status**: The final synthesis is returned as the tool result.
-
-State transitions are managed by a pure reducer (`src/orchestration/deep-research-reducer.ts`), ensuring predictable behavior.
+1.  **Planning Phase**: The AI coordinator generates a JSON-formatted research agenda—a list of specialized researchers and an exhaustive set of search queries.
+2.  **Search Burst**: Before researchers spawn, a massive search burst (up to 150 queries) is executed across a multi-threaded worker pool to pre-seed the global link pool.
+3.  **Research Phase**: 
+    - **Parallel Execution**: **Agent Researchers** run in parallel (up to 3 concurrent). Each researcher handles one specialized aspect.
+    - **Real-Time Coordination**: Collective knowledge is managed by the orchestrator. Scraped links are shared between siblings in real-time via steering messages.
+    - **Completion Summary**: When a researcher finishes, a summary of its findings is broadcast to all active siblings.
+4.  **Evaluation Phase**: When a round is complete, a **Lead Evaluator** reviews all findings.
+    - **Decision Outcome**: The evaluator choose to either **Synthesize** (generate the final report) or **Delegate** (formulate new, targeted researchers for a subsequent round).
 
 ---
 
@@ -29,82 +26,56 @@ State transitions are managed by a pure reducer (`src/orchestration/deep-researc
 An **Agent Researcher** is the fundamental building block of `pi-research`. Regardless of the orchestration mode, every researcher follows a structured three-phase internal lifecycle:
 
 ### Phase 1: Gathering
-The researcher uses broad tools to discover relevant information and identify high-quality URLs for further investigation.
+The researcher uses broad tools to discover relevant information and identify high-quality URLs.
 - **Budget**: 4 Gathering calls (shared across `search`, `security_search`, `stackexchange`, and `grep`).
 - **Goal**: Breadth-first exploration and URL discovery.
 
 ### Phase 2: Scraping
-The researcher deep-dives into the URLs identified during the Gathering phase to extract detailed content.
+The researcher deep-dives into URLs to extract detailed content.
 - **Budget**: 3 Scrape calls (Batch 1, Batch 2, Batch 3).
 - **Goal**: Depth-first extraction of specific data and evidence.
-- **Deduplication**: Researchers check a shared URL pool to avoid re-scraping links already handled by siblings. Shared links are injected into the system prompt at session creation and updated in real-time as siblings scrape new URLs.
+- **Deduplication**: Researchers check a shared URL pool to avoid redundant work.
 
 ### Phase 3: Reporting
 The researcher synthesizes its individual findings into a structured Markdown report.
-- **Structure**: Includes an executive summary, key findings, and a list of cited links.
-- **Signaling**: Once finished, the report is submitted to the orchestrator for injection into siblings (Deep Mode) or final return (Quick Mode).
+- **Signaling**: Once finished, the report is submitted to the orchestrator for synthesis or delegation.
 
 ---
 
 ## Component Details
 
 ### Research Tools & Limits
-Each researcher session is constrained by a `ToolUsageTracker` to prevent infinite loops and manage token consumption:
-- **search**: Interfaces with the local SearXNG instance. Supports multiple queries per call.
-- **scrape**: Multi-batch protocol for page extraction.
+Each researcher session is constrained by a `ToolUsageTracker`:
+- **search**: Multi-threaded browser-based search using DuckDuckGo Lite.
+- **scrape**: Multi-batch protocol for page extraction using stealth browser.
 - **security_search**: Queries NVD, CISA KEV, GitHub Advisories, and OSV.
-- **stackexchange**: Queries the Stack Exchange network (Stack Overflow, etc.).
-- **grep**: Local codebase search using `ripgrep` (fallback to `grep`).
+- **stackexchange**: Queries the Stack Exchange network.
+- **grep**: Local codebase search using `ripgrep`.
 
 ### Context-Aware Scraping Protocol
-To avoid exceeding LLM context windows, the `scrape` tool follows a three-batch protocol. **Each batch step is gated by a 55% context check** — if the session token count already exceeds 55% of the model's context window, that batch is skipped entirely and the tool returns early.
+To avoid exceeding LLM context windows, the `scrape` tool follows a three-batch protocol. **Each batch is gated by a context window check** (threshold: 55%).
 
-1. **Batch 1**: Up to 3 URLs — primary broad scraping.
-2. **Batch 2**: Up to 2 URLs — targeted follow-up, deduplicated against Batch 1.
+1. **Batch 1**: Up to 4 URLs — primary broad scraping.
+2. **Batch 2**: Up to 3 URLs — targeted follow-up.
 3. **Batch 3**: Up to 3 URLs — deep-dive scraping.
 
-Shared links are injected into the researcher's system prompt at session creation time and updated in real-time via lightweight `session.steer()` messages when siblings scrape new URLs.
-
-### Shared Link Deduplication
-Researchers share a URL pool per research operation. Shared links are injected into the system prompt at session creation and updated in real-time via lightweight messages when siblings scrape new URLs. The pool tracks URLs only — findings are shared separately via Report Injection. It resets for each new query.
-
-### SearXNG Lifecycle Management
-SearXNG runs as a Docker container (`searxng/searxng`, tag controlled by `SEARXNG_IMAGE_TAG`, default `latest`).
-- **Lazy Initialization**: The container starts only upon the first research request.
-- **Singleton Pattern**: A single container is shared across all pi processes on the machine. State is persisted to `~/.pi/state/searxng-singleton.json`; each pi process registers a session by PID and the container stays alive until all registered processes have exited.
-- **Configuration**: Runtime settings (proxies, API keys) are generated dynamically and volume-mounted into the container.
-- **Engine configuration**: Active search engines are defined in `config/searxng/default-settings.yml`. Engines can be enabled or disabled by editing that file before starting the container.
-- **Cross-Session Persistence**: Container state and locking are managed via `~/.pi/state/searxng-singleton.json` to handle multiple concurrent pi processes.
+### Browser Infrastructure
+`pi-research` uses a unified task scheduler for all browser-based operations:
+1.  **Unified Pool**: A `FixedThreadPool` (Poolifier) manages 3 worker processes that handle **Search**, **Scraping**, and **Health Checks**. Each worker maintains a "warm" `camoufox` (stealth Firefox) instance.
+2.  **Resource Caps**: By using a single shared pool, the system strictly limits the total number of browser processes to 3 globally, preventing system overload regardless of the number of active PI sessions.
+3.  **Stealth Engine**: `camoufox-js` provides advanced fingerprinting protection to bypass automated request detection.
+4.  **Health Check**: The system performs a "Start + Every 20" search health check strategy, offloaded to the worker pool, to detect IP blocks or network failures.
 
 ### Output File Location
-
-When research completes, the report is written to a `.md` file named `pi-research-{sanitized-query}-{hash}.md` (e.g. `pi-research-rust-async-runtimes-a3.md`). The destination directory is resolved from the pi session's working directory (`cwd`) using a three-tier priority:
-
-1. **cwd is home or a system directory** → `os.tmpdir()`. Prevents cluttering `~`, drive roots, or system paths like `/usr`.
-2. **cwd contains a recognised subdirectory** → that subdirectory. Probed in priority order: `research`, `docs`, `doc`, `ref`, `references`, `notes`. Matching is case-insensitive so it works on macOS APFS and Windows NTFS.
-3. **Otherwise** → cwd itself.
-
-The two-character hash suffix (`{letter}{digit}`, e.g. `b7`) is a collision guard — the file is opened with an exclusive-create flag and the hash is regenerated on `EEXIST`. The full saved path is appended as a footer in the report and returned to the pi UI.
-
-### TUI Progress Percentage
-
-The header percentage (`Research: 70%`) tracks tool-call units completed against a budget established after planning. The budget is set from the number of agenda items the coordinator produces — which scales with query complexity (complexity 1 → 2 initial researchers, 2 → 3, 3 → 5), each researcher allocated 10 units. The budget expands dynamically when the evaluator delegates additional rounds. If research goes beyond the planned rounds the display switches to `exploring` instead of a percentage.
-
-### Evaluator Decision Framework
-The Lead Evaluator follows a strict priority list:
-1.  **Error Check**: If all researchers in a round failed, it reports a critical failure and stops.
-2.  **Coverage Check**: It compares cumulative findings against the initial agenda items.
-3.  **Round Budget**: It checks the round budget (`targetRounds + MAX_EXTRA_ROUNDS`). The hard limit is `targetRounds + 2` bonus rounds.
-4.  **Action Selection**: Produces either a Markdown synthesis (final result) or a JSON delegation object (`{"action": "delegate", "queries": [...]}`). Any non-JSON response is treated as a final synthesis to prevent the research from getting stuck.
+Research reports are saved as Markdown files with a collision-guarded naming scheme: `pi-research-{sanitized-query}-{hash}.md`. The destination is resolved based on the session's working directory, prioritizing `research/` or `docs/` subdirectories if they exist.
 
 ---
 
 ## Project Structure
 
-- `src/orchestration/`: Core state machine, coordinator, and evaluator logic.
-- `src/infrastructure/`: Docker container management and SearXNG lifecycle.
-- `src/tools/`: Implementations for search, scraping, and specialized database queries.
-- `src/tui/`: Real-time terminal UI components using `pi`'s display capabilities.
-- `src/utils/`: Shared utilities for token tracking, JSON extraction, and link deduplication.
-- `src/prompts/`: Markdown-based system instructions for the Coordinator, Researcher, and Evaluator.
-- `config/`: Default SearXNG engine and rate-limiter configurations.
+- `src/orchestration/`: Multi-agent coordination and evaluation logic.
+- `src/infrastructure/`: Browser management, thread pooling, and singleton state.
+- `src/tools/`: Implementation of the research tool suite.
+- `src/web-research/`: Stealth search and scraping layers.
+- `src/tui/`: Terminal UI for real-time progress tracking.
+- `src/prompts/`: System instructions for the various agent roles.

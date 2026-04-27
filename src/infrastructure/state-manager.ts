@@ -121,10 +121,10 @@ export class StateManager {
       stateDir = path.join(homeDir, '.pi', 'state');
     }
 
-    this.stateFilePath = path.join(stateDir, 'searxng-singleton.json');
+    this.stateFilePath = path.join(stateDir, 'research-state.json');
     this.lockDirPath = path.join(stateDir, '.locks');
     this.backupDirPath = path.join(stateDir, 'backups');
-    this.lockFilePath = path.join(this.lockDirPath, 'searxng-singleton.lock');
+    this.lockFilePath = path.join(this.lockDirPath, 'research-state.lock');
 
     // Clean up any stale locks on initialization (fire and forget)
     this.cleanupStaleLocksOnStartup().catch((error: unknown) => {
@@ -276,7 +276,7 @@ export class StateManager {
       await this.createBackup();
 
       // Create temporary file with UUID for atomic write
-      const tempFileName = `searxng-singleton-${crypto.randomBytes(16).toString('hex')}.tmp`;
+      const tempFileName = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
       const tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
 
       // Write to temporary file
@@ -556,7 +556,7 @@ export class StateManager {
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupFileName = `searxng-singleton-${timestamp}.json`;
+      const backupFileName = `research-state-${timestamp}.json`;
       const backupFilePath = path.join(this.backupDirPath, backupFileName);
 
       await fs.copyFile(this.stateFilePath, backupFilePath);
@@ -583,7 +583,7 @@ export class StateManager {
         const filePath = path.join(this.backupDirPath, entry);
         const stats = await fs.stat(filePath);
 
-        if (stats.isFile() && entry.startsWith('searxng-singleton-') && entry.endsWith('.json')) {
+        if (stats.isFile() && entry.startsWith('research-state-') && entry.endsWith('.json')) {
           backupFiles.push({ name: entry, mtime: stats.mtime });
         }
       }
@@ -615,7 +615,7 @@ export class StateManager {
         for (const entry of entries) {
           const filePath = path.join(this.backupDirPath, entry);
           const stats = await fs.stat(filePath);
-          if (stats.isFile() && entry.startsWith('searxng-singleton-') && entry.endsWith('.json')) {
+          if (stats.isFile() && entry.startsWith('research-state-') && entry.endsWith('.json')) {
             if (newestBackup === null || stats.mtime > newestBackup.mtime) {
               newestBackup = { name: entry, mtime: stats.mtime };
             }
@@ -633,7 +633,7 @@ export class StateManager {
         // No backups — write default state directly (atomic rename, no lock needed)
         const defaultState = this.getDefaultState();
         defaultState.lastUpdated = Date.now();
-        const tempFile = `searxng-singleton-${crypto.randomBytes(16).toString('hex')}.tmp`;
+        const tempFile = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
         const tempPath = path.join(path.dirname(this.stateFilePath), tempFile);
         await fs.writeFile(tempPath, JSON.stringify(defaultState, null, 2), 'utf-8');
         await fs.rename(tempPath, this.stateFilePath);
