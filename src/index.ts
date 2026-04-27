@@ -27,6 +27,24 @@ export default function (pi: ExtensionAPI) {
   // Register research tool
   pi.registerTool(createResearchTool());
 
+  // /research [--deep|-d] <query>
+  // Without a flag: quick research (depth 0, agent default).
+  // With --deep/-d:  deep multi-round research; the word "deep" in the message
+  //                  causes the agent to skip quick mode per the system prompt.
+  pi.registerCommand('research', {
+    description: 'Research a topic on the web. Use --deep or -d for multi-round deep research.',
+    handler: async (args) => {
+      let text = args.trim();
+      if (!text) return;
+
+      const deep = /(?:^|\s)(--deep|-d)(?:\s|$)/.test(text);
+      text = text.replace(/(?:^|\s)(--deep|-d)(?:\s|$)/g, ' ').trim();
+      if (!text) return;
+
+      pi.sendUserMessage(deep ? `Deep research: ${text}` : `Research: ${text}`);
+    },
+  });
+
   // Append research tool usage instructions to the system prompt
   pi.on('before_agent_start', async (event: any) => {
     const researchPrompt = loadPrompt('research-tool-usage');
