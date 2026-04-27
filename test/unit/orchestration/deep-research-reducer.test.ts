@@ -90,4 +90,79 @@ describe('deepResearchReducer', () => {
     expect(nextState.status).toBe('completed');
     expect(nextState.finalSynthesis).toBe('the end');
   });
+
+  it('should complete when max rounds reached even if next queries provided', () => {
+    const state = { ...initialState, currentRound: 3 as const, status: 'researching' as const };
+    const nextState = deepResearchReducer(state, {
+      type: 'PROMOTION_DECISION',
+      nextQueries: ['ignored query'],
+      maxRounds: 3,
+    });
+    expect(nextState.status).toBe('completed');
+    expect(nextState.currentRound).toBe(3);
+  });
+
+  it('should handle SIBLING_STARTED', () => {
+    const state: any = {
+      ...initialState,
+      aspects: { '1.1': { id: '1.1', query: 'q', status: 'pending' } },
+    };
+    const next = deepResearchReducer(state, { type: 'SIBLING_STARTED', id: '1.1' });
+    expect(next.aspects['1.1']?.status).toBe('running');
+  });
+
+  it('should handle SIBLING_TOKENS accumulation', () => {
+    const state: any = {
+      ...initialState,
+      aspects: { '1.1': { id: '1.1', query: 'q', status: 'running', tokens: 100, cost: 0.001 } },
+    };
+    const next = deepResearchReducer(state, {
+      type: 'SIBLING_TOKENS',
+      id: '1.1',
+      tokens: 500,
+      cost: 0.005,
+    });
+    expect(next.aspects['1.1']?.tokens).toBe(600);
+    expect(next.aspects['1.1']?.cost).toBeCloseTo(0.006);
+  });
+
+  it('should deduplicate links in LINKS_SCRAPED', () => {
+    const state: any = { ...initialState, allScrapedLinks: ['https://a.com'] };
+    const next = deepResearchReducer(state, {
+      type: 'LINKS_SCRAPED',
+      links: ['https://a.com', 'https://b.com'],
+    });
+    expect(next.allScrapedLinks).toEqual(['https://a.com', 'https://b.com']);
+  });
+
+  it('should set promotedId on PROMOTION_STARTED', () => {
+    const state: any = { ...initialState };
+    const next = deepResearchReducer(state, { type: 'PROMOTION_STARTED', id: '1.1' });
+    expect(next.promotedId).toBe('1.1');
+  });
+
+  it('should not mutate original state', () => {
+    const state: any = {
+      ...initialState,
+      aspects: { '1.1': { id: '1.1', query: 'q', status: 'pending' } },
+    };
+    deepResearchReducer(state, { type: 'SIBLING_STARTED', id: '1.1' });
+    expect(state.aspects['1.1'].status).toBe('pending');
+  });
+
+  it('should silently ignore events for unknown aspect IDs', () => {
+    const state: any = {
+      ...initialState,
+      aspects: { '1.1': { id: '1.1', query: 'q', status: 'pending' } },
+    };
+    const nextStarted   = deepResearchReducer(state, { type: 'SIBLING_STARTED',   id: '9.9' });
+    const nextCompleted = deepResearchReducer(state, { type: 'SIBLING_COMPLETED', id: '9.9', report: 'x' });
+    const nextFailed    = deepResearchReducer(state, { type: 'SIBLING_FAILED',    id: '9.9', error: 'e' });
+    const nextTokens    = deepResearchReducer(state, { type: 'SIBLING_TOKENS',    id: '9.9', tokens: 1, cost: 0 });
+
+    for (const next of [nextStarted, nextCompleted, nextFailed, nextTokens]) {
+      expect(next.aspects['1.1']?.status).toBe('pending');
+      expect(next.aspects['9.9']).toBeUndefined();
+    }
+  });
 });

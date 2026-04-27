@@ -16,13 +16,7 @@ vi.mock('@mariozechner/pi-tui', () => ({
 
 describe('TUI Research Panel', () => {
   const mockTheme = {
-    accent: (s) => s,
-    bright: (s) => s,
-    dim: (s) => s,
-    success: (s) => s,
-    error: (s) => s,
-    info: (s) => s,
-    warning: (s) => s,
+    fg: (_color: string, text: string) => text,
   };
 
   describe('createInitialPanelState', () => {
