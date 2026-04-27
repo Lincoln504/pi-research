@@ -55,10 +55,35 @@ export function extractJsonFromCodeBlocks<T = unknown>(
 }
 
 /**
+ * Walk forward from `start` tracking brace depth, respecting JSON string literals.
+ * Returns the index of the matching closing `}`, or -1 if not found.
+ */
+function findMatchingBrace(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\' && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Extract JSON object from raw text
  *
- * Looks for a JSON object spanning from the first `{` to the last `}`.
- * Useful when JSON is embedded in prose without code blocks.
+ * Finds the first `{` then walks forward with depth-tracking (respecting string
+ * literals) to locate its matching `}`. This correctly handles text that contains
+ * multiple JSON objects or has trailing content after the object.
  *
  * @param text - Text to search for JSON object
  * @returns Extraction result with parsed value or error
@@ -67,13 +92,21 @@ export function extractJsonObject<T = unknown>(
   text: string
 ): JsonExtractionResult<T> {
   const objStart = text.indexOf('{');
-  const objEnd = text.lastIndexOf('}');
 
-  if (objStart === -1 || objEnd <= objStart) {
+  if (objStart === -1) {
     return {
       success: false,
       value: undefined,
       error: 'No JSON object boundaries found',
+    };
+  }
+
+  const objEnd = findMatchingBrace(text, objStart);
+  if (objEnd === -1) {
+    return {
+      success: false,
+      value: undefined,
+      error: 'No matching closing brace found',
     };
   }
 

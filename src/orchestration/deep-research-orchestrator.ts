@@ -156,7 +156,17 @@ export class DeepResearchOrchestrator {
     if (!result.success || !result.value) {
         throw new Error(`Failed to extract valid JSON plan: ${result.error}`);
     }
-    return result.value;
+    const plan = result.value;
+    if (!Array.isArray(plan.researchers)) {
+        throw new Error(`Coordinator returned invalid plan: 'researchers' is not an array (got ${JSON.stringify(plan.researchers)})`);
+    }
+    for (let i = 0; i < plan.researchers.length; i++) {
+        const r = plan.researchers[i]!;
+        if (!Array.isArray(r.queries)) {
+            throw new Error(`Coordinator plan researcher[${i}] (id=${r.id}) has no queries array (got ${JSON.stringify(r.queries)})`);
+        }
+    }
+    return plan;
   }
 
   private distributeResults(plan: ResearchPlan, results: any[]): Map<string, string[]> {
@@ -334,6 +344,7 @@ export class DeepResearchOrchestrator {
       if (extracted.success && extracted.value) {
           return extracted.value;
       } else {
+          logger.warn(`[Orchestrator] Evaluator returned malformed JSON (${extracted.error}); defaulting to synthesize`);
           return { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       }
   }

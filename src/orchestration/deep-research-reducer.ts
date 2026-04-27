@@ -6,6 +6,7 @@
  */
 
 import type { SystemResearchState, DeepResearchEvent } from './deep-research-types.ts';
+import { logger } from '../logger.ts';
 
 export function deepResearchReducer(state: SystemResearchState, event: DeepResearchEvent): SystemResearchState {
   // Deep clone state to ensure true purity
@@ -37,6 +38,8 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
           ...aspect,
           status: 'running'
         };
+      } else {
+        logger.warn(`[Reducer] SIBLING_STARTED: unknown aspect id="${event.id}"`);
       }
       break;
     }
@@ -49,6 +52,8 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
           status: 'completed',
           report: event.report
         };
+      } else {
+        logger.warn(`[Reducer] SIBLING_COMPLETED: unknown aspect id="${event.id}"`);
       }
       break;
     }
@@ -61,6 +66,8 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
           status: 'failed',
           error: event.error
         };
+      } else {
+        logger.warn(`[Reducer] SIBLING_FAILED: unknown aspect id="${event.id}"`);
       }
       break;
     }
@@ -76,6 +83,8 @@ export function deepResearchReducer(state: SystemResearchState, event: DeepResea
           tokens: currentTokens + event.tokens,
           cost: currentCost + event.cost
         };
+      } else {
+        logger.warn(`[Reducer] SIBLING_TOKENS: unknown aspect id="${event.id}"`);
       }
       break;
     }

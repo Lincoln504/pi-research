@@ -118,10 +118,12 @@ export class ToolUsageTracker {
     }
 
     if (category === 'scrape') {
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${catLimit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
+      const limit = catLimit ?? MAX_SCRAPE_CALLS;
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
         `This tool cannot be used again. Proceed immediately to Phase 3: synthesize your findings and submit your report.`;
     }
-    return `GATHERING LIMIT REACHED: All ${catLimit} gathering calls have been used. ` +
+    const limit = catLimit ?? MAX_GATHERING_CALLS;
+    return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
       `This tool and all other gathering tools cannot be used again. ` +
       `Proceed to Phase 2: call scrape with your collected URLs now.`;
   }
