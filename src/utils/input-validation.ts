@@ -31,9 +31,9 @@ export function validateQuery(query: string): { isValid: boolean; error?: string
     return { isValid: false, error: `Query must be at most ${MAX_QUERY_LENGTH} characters` };
   }
 
-  // Check for empty or whitespace-only queries
-  if (trimmed === '') {
-    return { isValid: false, error: 'Query cannot be empty or whitespace-only' };
+  // Check for whitespace-only queries
+  if (/^\s+$/.test(query)) {
+    return { isValid: false, error: 'Query cannot be whitespace-only' };
   }
 
   // Check for potentially dangerous patterns

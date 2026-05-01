@@ -8,6 +8,7 @@
 import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
+import { createReadTool } from '@mariozechner/pi-coding-agent';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
 import { createLinksTool } from './links.ts';
@@ -16,6 +17,7 @@ import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
 
 interface CreateToolsOptions {
+  cwd: string;
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;
@@ -59,6 +61,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
   };
 
   return [
+    createReadTool(options.cwd),
     createSearchTool(resolvedOptions),
     createScrapeTool({
       ...resolvedOptions,

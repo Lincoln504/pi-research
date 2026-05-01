@@ -6,7 +6,7 @@
 
 import { spawn } from 'node:child_process';
 import * as nodePath from 'node:path';
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
@@ -145,7 +145,7 @@ export function createGrepTool(options: {
       params: unknown,
       _signal: unknown,
       _onUpdate: unknown,
-      _ctx: ExtensionContext,
+      _ctx: any,
     ): Promise<AgentToolResult<unknown>> {
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('grep');

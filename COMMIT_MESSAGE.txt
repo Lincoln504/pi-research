@@ -1,0 +1,67 @@
+feat: Integrate Pi 0.45-0.71.0 features for better UX and reliability
+
+This commit implements 6 high-impact improvements based on comprehensive
+analysis of Pi's evolution from version 0.45.0 to 0.71.0.
+
+## Changes
+
+### Tool Enhancements
+- Add `prepareArguments` hook to normalize tool arguments before validation
+  - Handles string/number format variations (e.g., "depth": "1" vs "1")
+  - Reduces validation errors from LLM argument inconsistencies
+- Add `renderShell: "self"` for stable large output rendering
+  - Eliminates TUI flicker on large research synthesis results
+  - Better UX for long research outputs
+
+### Event Monitoring
+- Add `after_provider_response` monitoring for provider diagnostics
+  - Detects and logs provider errors (5xx status codes)
+  - Catches rate limits (429) and notifies users
+  - Improved debugging visibility for provider issues
+
+### System Prompt Enhancement
+- Enhance `before_agent_start` hook with researcher-specific guidelines
+  - Dynamically injects research quality guidelines for researcher sessions
+  - Improves research quality without modifying prompt files
+  - Separation of concerns (tool usage vs. researcher behavior)
+
+### Developer Experience
+- Add `/research-reload` command for hot reload support
+  - Reloads extension without restarting Pi
+  - Faster development workflow for configuration changes
+  - Graceful fallback if ctx.reload() is unavailable
+
+### User Experience
+- Enhance progress tracking with LLM status updates
+  - Shows "Thinking..." vs "Scraping..." status in researcher slices
+  - Better user feedback during long research runs
+  - Reduces perception of being "stuck"
+
+## Files Modified
+
+- src/tool.ts: Added prepareArguments hook and renderShell
+- src/index.ts: Added provider monitoring, enhanced before_agent_start, added /research-reload command
+- src/orchestration/deep-research-orchestrator.ts: Enhanced progress tracking
+
+## Impact
+
+- Better argument handling, fewer errors
+- Cleaner large output display
+- Better provider visibility and error handling
+- Improved researcher quality with dynamic guidelines
+- Hot reload support for faster development
+- Better user feedback during research
+
+## Testing
+
+- ✅ Type check passing (0 errors)
+- ✅ All changes backward compatible
+- ✅ No breaking changes
+
+## Documentation
+
+- QUICK_FIXES_APPLIED.md: Quick fix summary
+- COMPREHENSIVE_FIXES_SUMMARY.md: Complete documentation
+- INVESTIGATION_INDEX.md: Updated master index
+
+Related: PI_FEATURES_RECOMMENDATIONS.md (Pi 0.45-0.71.0 analysis)

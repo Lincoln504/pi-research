@@ -25,23 +25,41 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 
 #### DEPTH PARAMETER — Controls research intensity
 
-**DEFAULT:** Omit depth parameter (uses `depth: 0` - Quick mode, 1 researcher)
+**Always specify a depth.** Judge it from the user's language and task complexity.
 
-**Higher depths** (only when user asks for thoroughness):
-- `depth: 1` — Normal: 2 researchers, up to 2 rounds
-- `depth: 2` — Deep: 3 researchers, up to 3 rounds
-- `depth: 3` — Ultra: 5 researchers, up to 5 rounds
+**User says a depth word (highest priority):**
+- "quick" / "brief" / "simple" → `depth: 0`
+- "normal" / "moderate" / "standard" → `depth: 1`
+- "deep" / "thorough" / "in-depth" → `depth: 2` (never depth 3)
+- "ultra" / "exhaustive" / "comprehensive" / "deep-dive" → `depth: 3`
 
+**User says nothing about depth — judge complexity:**
+- `depth: 0` — Simple facts, lookups, news, definitions, "what is X". This covers ~85%+ of queries. Single session: runs 20–30 targeted search queries then scrapes the best sources.
+- `depth: 1` — Moderate scope: comparisons, overviews, background research.
+- `depth: 2` — Complex multi-faceted topics: policy analysis, tech evaluations, academic-style research.
+- `depth: 3` — Never without explicit user request.
 
-**Trigger words:** "exhaustive", "deep-dive", "ultra", "comprehensive" → use higher depth
-**IMPORTANT:** When processing topics with depth keywords ("level one/quick mode", "level two/normal mode", "level three/deep mode", "ultra mode"), EXTRACT the depth parameter from each topic individually. Example: "cyprus level one" → research({ query: "cyprus", depth: 0 }). Do NOT include depth keywords in the query string.
+**How depth works internally:**
+- `depth: 0` (Quick) — One direct agent session. Fast, definitive answers for simple queries.
+- `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, evaluator decides whether to continue deeper. Team size and number of rounds scale with complexity. The coordinator and evaluator dynamically determine how many researchers are needed each round — it's not a fixed number.
+
+**Max siblings per round by depth:**
+- `depth: 1` — up to 2 researchers per round
+- `depth: 2` — up to 3 researchers per round
+- `depth: 3` — up to 5 researchers per round
+
+The coordinator will plan as many researchers as needed (up to the max). You do not need to use the maximum — just enough to cover the topic thoroughly.
+
+**Special keyword handling:**
+- "level one/1" through "level three/3" and "ultra mode" in the query ARE depth instructions. Extract depth from them, strip them from the query text.
+- "deep dive" as part of a topic phrase ("python deep dive") is NOT a depth instruction — it's topic content.
 
 ---
 
-#### ONE OR MULTIPLE RESEARCH CALLS?
+#### MULTIPLE RESEARCH CALLS
 
-**Use multiple parallel `research` calls when: different/unrelated topics**
+**Different/unrelated topics:** Use multiple parallel `research` calls.
 
-**Use one `research` call with higher depth when: single complex topic**
+**One topic with multiple aspects:** Do NOT decompose a single user query into multiple research calls — the coordinator inside the tool handles decomposition into sub-topics internally. A single call with appropriate depth handles multi-faceted topics.
 
-**Rule of thumb:** Different scopes = parallel calls. Same scope (even if broad or multifaceted) = one deep call.
+**Do NOT escalate depth just because a topic is broad or has multiple aspects** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.

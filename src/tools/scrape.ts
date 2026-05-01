@@ -1,8 +1,9 @@
 /**
  * scrape Tool
  *
- * Scrape full content from URLs using a context-aware, up-to-3-call protocol.
- * Optimized for real-time link sharing and handshake elimination.
+ * Scrape full content from URLs using a context-aware, up-to-2-call protocol.
+ * Call 1 = Batch 1 (broad), Call 2 = Batch 2 (targeted).
+ * After both batches are exhausted, the tool returns the limit-reached message.
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -14,7 +15,6 @@ import { deduplicateUrls } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   MAX_SCRAPE_CALLS,
-  BATCH_2_MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
   MAX_CONTEXT_FRACTION_FOR_SCRAPING,
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING,
@@ -34,7 +34,7 @@ export function createScrapeTool(options: {
 }): ToolDefinition {
 
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
-  
+
   const getContextFraction = (additionalTokens: number = 0): number => {
     if (!options.getTokensUsed) return 0;
     // Use scrape-specific tokens if tracked, otherwise total tokens
@@ -57,10 +57,10 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2 → Batch 3.',
-    promptSnippet: 'Scrape full content from URLs (3-batch protocol)',
+    description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2.',
+    promptSnippet: 'Scrape full content from URLs (2-batch protocol)',
     promptGuidelines: [
-      'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).',
+      `PROTOCOL: Batch 1 (up to ${MAX_SCRAPE_URLS} URLs) → Batch 2 (up to ${MAX_SCRAPE_URLS} URLs).`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
@@ -80,7 +80,36 @@ export function createScrapeTool(options: {
       }
 
       const p = params as Record<string, any>;
-      const urls = p['urls'] as string[];
+      let rawUrls = p['urls'] as string[];
+      
+      // Sanitization: Handle LLM errors where it passes an array-like string
+      // or a single string instead of an array (though typebox should catch latter)
+      let urls: string[] = [];
+      if (Array.isArray(rawUrls)) {
+          rawUrls.forEach(u => {
+              if (typeof u === 'string') {
+                  // If the string contains [ ] or commas, it's likely a malformed array-as-string
+                  if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
+                      const cleaned = u.replace(/[\[\]]/g, '').split(',').map(s => s.trim());
+                      urls.push(...cleaned);
+                  } else {
+                      urls.push(u.trim());
+                  }
+              }
+          });
+      } else if (typeof rawUrls === 'string') {
+          // Fallback for extreme LLM hallucination
+          const s = rawUrls as string;
+          urls = s.replace(/[\[\]]/g, '').split(',').map(u => u.trim());
+      }
+      
+      // Deduplicate and filter out empty
+      urls = Array.from(new Set(urls)).filter(u => u.startsWith('http'));
+
+      if (urls.length === 0) {
+          return { content: [{ type: 'text', text: 'No valid URLs provided for scraping.' }], details: { error: 'invalid_input' } };
+      }
+
       const batchLabel = `Batch ${callCount + 1}`;
 
       // Context Gate
@@ -103,7 +132,7 @@ export function createScrapeTool(options: {
           return { content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool.` }], details: { all_duplicates: true } };
       }
 
-      const finalUrls = dedupedUrls.slice(0, callCount === 1 ? BATCH_2_MAX_SCRAPE_URLS : MAX_SCRAPE_URLS);
+      const finalUrls = dedupedUrls.slice(0, MAX_SCRAPE_URLS);
       options.updateGlobalLinks(finalUrls);
 
       const defaultConcurrency = callCount === 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;

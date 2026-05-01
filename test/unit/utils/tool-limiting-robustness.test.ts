@@ -252,7 +252,7 @@ describe('tool-limiting-robustness', () => {
 
         expect(msg).toContain('GATHERING LIMIT REACHED');
         expect(msg).toContain('4');
-        expect(msg).toContain('Phase 2');
+        expect(msg).toContain('Step 2');
       });
 
       it('should provide correct message for scrape tools', () => {
@@ -261,7 +261,7 @@ describe('tool-limiting-robustness', () => {
 
         expect(msg).toContain('SCRAPE PROTOCOL COMPLETE');
         expect(msg).toContain('3');
-        expect(msg).toContain('Phase 3');
+        expect(msg).toContain('Step 4');
       });
 
       it('should provide message for unlimited tools (uses gathering category)', () => {
@@ -271,7 +271,7 @@ describe('tool-limiting-robustness', () => {
         // Unlimited tools fall back to gathering category message
         expect(msg).toContain('GATHERING LIMIT REACHED');
         expect(msg).toContain('gathering calls');
-        expect(msg).toContain('Phase 2');
+        expect(msg).toContain('Step 2');
       });
     });
 
@@ -308,7 +308,7 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('search');
-      expect(tool.promptGuidelines[0]).toContain('10-150 queries');
+      expect(tool.promptGuidelines[0]).toContain('10-50 queries');
     });
 
     it('should properly track scrape tool calls', () => {
@@ -323,7 +323,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('scrape');
       expect(tool.promptGuidelines).toContain(
-        'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).'
+        'PROTOCOL: Batch 1 (up to 4 URLs) → Batch 2 (up to 4 URLs).'
       );
     });
 
@@ -372,7 +372,7 @@ describe('tool-limiting-robustness', () => {
       const limits = createDefaultToolLimits();
 
       expect(limits.gathering).toBe(4);
-      expect(limits.scrape).toBe(3);
+      expect(limits.scrape).toBe(2);
       expect(limits.read).toBeUndefined();
     });
 
@@ -406,7 +406,7 @@ describe('tool-limiting-robustness', () => {
     });
 
     it('should handle security research workflow', () => {
-      const tracker = new ToolUsageTracker({ gathering: 4, scrape: 3 });
+      const tracker = new ToolUsageTracker({ gathering: 4, scrape: 2 });
 
       // Security workflow: 3 security_search, 1 grep
       expect(tracker.recordCall('security_search')).toBe(true);
@@ -420,10 +420,12 @@ describe('tool-limiting-robustness', () => {
 
       // Scrape still available
       expect(tracker.recordCall('scrape')).toBe(true);
+      expect(tracker.recordCall('scrape')).toBe(true);
+      expect(tracker.recordCall('scrape')).toBe(false);
     });
 
     it('should handle code-focused research workflow', () => {
-      const tracker = new ToolUsageTracker({ gathering: 4, scrape: 3 });
+      const tracker = new ToolUsageTracker({ gathering: 4, scrape: 2 });
 
       // Code workflow: 3 grep, 1 search
       expect(tracker.recordCall('grep')).toBe(true);

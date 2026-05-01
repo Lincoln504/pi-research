@@ -1,5 +1,6 @@
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import type { AssistantMessage } from '@mariozechner/pi-ai';
+import { logger } from '../logger.ts';
 
 /**
  * Text Utilities
@@ -77,6 +78,16 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
       throw new Error(`Model API rate limit (429) — wait a moment and retry. Details: ${msg}`);
     }
     throw new Error(`${label}: Provider error - ${msg}`);
+  }
+
+  // Warn if the response was truncated due to token limit
+  if (last.stopReason === 'length') {
+    const text = extractText(last);
+    if (text.trim()) {
+      logger.warn(`${label}: Response truncated by token limit — returning partial result`);
+      return text;
+    }
+    throw new Error(`${label}: Response was truncated by token limit and produced no usable text.`);
   }
 
   const text = extractText(last);

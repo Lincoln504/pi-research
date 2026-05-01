@@ -205,7 +205,11 @@ function validateContent(html: string, markdown: string, url: string): void {
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PRIMARY_SCRAPER_TIMEOUT);
-  if (signal) signal.addEventListener('abort', () => clearTimeout(timeoutId));
+  const onAbort = () => {
+    clearTimeout(timeoutId);
+    controller.abort();
+  };
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
   try {
     const response = await fetch(url, {
@@ -231,6 +235,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     return { source: 'fetch', layer: 'fetch', markdown };
   } finally {
     clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -264,6 +269,11 @@ async function scrapeWithStealthBrowser(_url: string): Promise<ScrapeLayerResult
 // ============================================================================
 
 export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<any> {
+  // Robustness: ensure we actually have a single string URL
+  if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
+      return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
+  }
+  
   try {
     const res = await scrapeWithFetch(url, signal);
     return { ...res, url, success: true };

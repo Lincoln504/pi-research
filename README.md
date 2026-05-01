@@ -87,7 +87,6 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 | `PI_RESEARCH_BROWSER_HEADLESS` | `true` | Run research browser in headless mode. |
 | `PI_RESEARCH_EXPORT_DIR` | `cwd` | Directory for final research reports. |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
-| `PI_RESEARCH_SKIP_HEALTHCHECK` | — | Skip startup health check (`1`). |
 | `PROXY_URL` | — | Proxy for outgoing requests (e.g., `socks5://127.0.0.1:9050`). |
 | `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases limit). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (default 4m). |

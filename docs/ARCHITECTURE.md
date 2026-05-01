@@ -32,7 +32,7 @@ The researcher uses broad tools to discover relevant information and identify hi
 
 ### Phase 2: Scraping
 The researcher deep-dives into URLs to extract detailed content.
-- **Budget**: 3 Scrape calls (Batch 1, Batch 2, Batch 3).
+- **Budget**: 2 Scrape calls (Batch 1, Batch 2).
 - **Goal**: Depth-first extraction of specific data and evidence.
 - **Deduplication**: Researchers check a shared URL pool to avoid redundant work.
 
@@ -53,18 +53,17 @@ Each researcher session is constrained by a `ToolUsageTracker`:
 - **grep**: Local codebase search using `ripgrep`.
 
 ### Context-Aware Scraping Protocol
-To avoid exceeding LLM context windows, the `scrape` tool follows a three-batch protocol. **Each batch is gated by a context window check** (threshold: 55%).
+To avoid exceeding LLM context windows, the `scrape` tool follows a two-batch protocol. **Each batch is gated by a context window check** (threshold: 55%).
 
 1. **Batch 1**: Up to 4 URLs — primary broad scraping.
-2. **Batch 2**: Up to 3 URLs — targeted follow-up.
-3. **Batch 3**: Up to 3 URLs — deep-dive scraping.
+2. **Batch 2**: Up to 4 URLs — targeted follow-up.
 
 ### Browser Infrastructure
 `pi-research` uses a unified task scheduler for all browser-based operations:
 1.  **Unified Pool**: A `FixedThreadPool` (Poolifier) manages 3 worker processes that handle **Search**, **Scraping**, and **Health Checks**. Each worker maintains a "warm" `camoufox` (stealth Firefox) instance.
 2.  **Resource Caps**: By using a single shared pool, the system strictly limits the total number of browser processes to 3 globally, preventing system overload regardless of the number of active PI sessions.
 3.  **Stealth Engine**: `camoufox-js` provides advanced fingerprinting protection to bypass automated request detection.
-4.  **Health Check**: The system performs a "Start + Every 20" search health check strategy, offloaded to the worker pool, to detect IP blocks or network failures.
+4.  **Health Check**: The system performs a robust health check at the start of research, offloaded to the worker pool, to detect IP blocks or network failures. Concurrent sessions share the same pending check result.
 
 ### Output File Location
 Research reports are saved as Markdown files with a collision-guarded naming scheme: `pi-research-{sanitized-query}-{hash}.md`. The destination is resolved based on the session's working directory, prioritizing `research/` or `docs/` subdirectories if they exist.

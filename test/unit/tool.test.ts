@@ -38,6 +38,7 @@ vi.mock('../../src/orchestration/researcher.ts', () => ({
 
 vi.mock('../../src/healthcheck/index.ts', () => ({
   runHealthCheck: vi.fn(async () => ({ success: true, details: {} })),
+  isHealthCheckSuccessful: vi.fn(async () => true),
 }));
 
 // Mock the panel module
@@ -51,6 +52,7 @@ vi.mock('../../src/tui/research-panel.ts', () => ({
   removeSlice: vi.fn(),
   flashSlice: vi.fn(),
   updateSliceTokens: vi.fn(),
+  updateSliceStatus: vi.fn(),
   createInitialPanelState: vi.fn(() => ({
     totalTokens: 0,
     slices: new Map(),
@@ -124,7 +126,7 @@ function createMockSession(responseText = 'Test answer') {
           message: {
             role: 'assistant',
             content: [{ type: 'text', text: responseText }],
-            usage: { totalTokens: 150 },
+            usage: { totalTokens: 150, input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
           },
         })
       );

@@ -24,7 +24,10 @@ try {
     // ignore
 }
 
-// Warm browser: Reuse browser instance across tasks
+// Warm browser: Reuse browser instance across tasks.
+// These are safe module-level vars because poolifier is configured with
+// tasksQueueOptions: { concurrency: 1 }, guaranteeing serial task execution
+// per worker thread — initBrowser() is never called concurrently in one worker.
 let browser = null;
 let context = null;
 

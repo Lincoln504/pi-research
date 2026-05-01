@@ -36,6 +36,8 @@ export interface CreateResearcherSessionOptions {
   getScrapeTokens?: () => number;
   /** Model context window size in tokens. */
   contextWindowSize?: number;
+  /** If true, the researcher will not be given the search tool. */
+  noSearch?: boolean;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
@@ -52,6 +54,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     getTokensUsed,
     getScrapeTokens,
     contextWindowSize,
+    noSearch,
   } = options;
 
   // Validate required parameters
@@ -71,24 +74,46 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   const globalLinks = updateGlobalLinks || (() => {});
 
   try {
+    const allTools = createResearchTools({
+      cwd,
+      ctx: extensionCtx,
+      tracker,
+      getGlobalState: globalState,
+      updateGlobalLinks: globalLinks,
+      onLinksScraped: onLinksScraped,
+      getTokensUsed,
+      getScrapeTokens,
+      contextWindowSize,
+    });
+
+    // Exclude search and grep tools for web research
+    // grep searches local filesystem, which is useless for web research topics
+    const customTools = noSearch 
+      ? allTools.filter(t => t.name !== 'search' && t.name !== 'grep')
+      : allTools;
+
+    // CRITICAL: Explicitly limit tools to ONLY what we provide.
+    // This prevents the core AgentSession from injecting default tools like 'bash', 'write', 'edit', etc.
+    const tools = customTools.map(t => t.name);
+
     const result = await createAgentSession({
       cwd,
-      customTools: createResearchTools({
-        ctx: extensionCtx,
-        tracker,
-        getGlobalState: globalState,
-        updateGlobalLinks: globalLinks,
-        onLinksScraped: onLinksScraped,
-        getTokensUsed,
-        getScrapeTokens,
-        contextWindowSize,
-      }),
+      customTools,
+      tools, // STRICT TOOL LOCKDOWN
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
+      // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
+      // Inheriting the user's default thinking level (often 'medium') causes every turn
+      // to burn minutes on internal thinking, compounding to 15-25 min per researcher.
+      thinkingLevel: 'off',
     });
+
+    // Log to confirm thinking level was set
+    const { logger: piLogger } = await import('../logger.ts');
+    piLogger.log(`[Researcher] Created session with thinkingLevel='off', model=${ctxModel?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');

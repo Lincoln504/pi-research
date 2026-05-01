@@ -113,19 +113,19 @@ export class ToolUsageTracker {
     const catLimit = usage.limit;
 
     if (toolName === 'search' && toolLimit === 1) {
-        return `SEARCH LIMIT REACHED: Only one massive search call is permitted per agent. ` +
-            `You have already executed your search. Use the scrape tool for full deep-dives into your results.`;
+        return `SEARCH LIMIT REACHED: You have already used your one search call. ` +
+            `Proceed to scraping: use the scrape tool for full deep-dives into your best search results.`;
     }
 
     if (category === 'scrape') {
       const limit = catLimit ?? MAX_SCRAPE_CALLS;
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
-        `This tool cannot be used again. Proceed immediately to Phase 3: synthesize your findings and submit your report.`;
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2). ` +
+        `This tool cannot be used again. Proceed immediately to Step 4: synthesize your findings and submit your report.`;
     }
     const limit = catLimit ?? MAX_GATHERING_CALLS;
     return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +
       `This tool and all other gathering tools cannot be used again. ` +
-      `Proceed to Phase 2: call scrape with your collected URLs now.`;
+      `Proceed to Step 2: call scrape with your collected URLs now.`;
   }
 
   /**

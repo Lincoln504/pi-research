@@ -2,7 +2,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runHealthCheck, clearHealthCheckCache } from '../../../src/healthcheck/index.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../../../src/infrastructure/browser-manager.ts';
-import { scrapeSingle } from '../../../src/web-research/scrapers.ts';
 
 // Mock dependencies
 vi.mock('../../../src/config.ts', () => ({
@@ -24,26 +23,15 @@ vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
   runBrowserHealthCheck: vi.fn(),
 }));
 
-vi.mock('../../../src/web-research/scrapers.ts', () => ({
-  scrapeSingle: vi.fn(),
-}));
-
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearHealthCheckCache();
   });
 
-  it('should pass health check when browser, search and scrape are healthy', async () => {
+  it('should pass health check when browser pool reports success', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
     vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
-    vi.mocked(scrapeSingle).mockResolvedValue({
-      success: true,
-      url: 'https://en.wikipedia.org/wiki/Main_Page',
-      markdown: 'A'.repeat(600),
-      source: 'fetch',
-      layer: 'fetch'
-    });
 
     const result = await runHealthCheck();
 
@@ -62,7 +50,7 @@ describe('healthcheck', () => {
     expect(result.error).toContain('Browser binaries');
   });
 
-  it('should fail when search validation fails', async () => {
+  it('should fail when browser pool health check fails', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
     vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: false });
 
@@ -70,24 +58,17 @@ describe('healthcheck', () => {
 
     expect(result.success).toBe(false);
     expect(result.searchOk).toBe(false);
-    expect(result.error).toContain('Search validation failed');
+    expect(result.error).toContain('Browser healthcheck failed');
   });
 
-  it('should fail when scrape validation fails', async () => {
+  it('should fail when browser pool health check throws', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
-    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
-    vi.mocked(scrapeSingle).mockResolvedValue({
-      success: false,
-      url: 'any',
-      markdown: 'too short',
-      source: 'fetch',
-      layer: 'fetch'
-    });
+    vi.mocked(runBrowserHealthCheck).mockRejectedValue(new Error('connection refused'));
 
     const result = await runHealthCheck();
 
     expect(result.success).toBe(false);
-    expect(result.scrapeOk).toBe(false);
-    expect(result.error).toContain('Scrape verification failed');
+    expect(result.searchOk).toBe(false);
+    expect(result.error).toContain('connection refused');
   });
 });

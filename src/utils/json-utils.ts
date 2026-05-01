@@ -58,10 +58,12 @@ export function extractJsonFromCodeBlocks<T = unknown>(
  * Walk forward from `start` tracking brace depth, respecting JSON string literals.
  * Returns the index of the matching closing `}`, or -1 if not found.
  */
-function findMatchingBrace(text: string, start: number): number {
+function findMatchingBracket(text: string, start: number): number {
   let depth = 0;
   let inString = false;
   let escaped = false;
+  const open = text[start]!;
+  const close = open === '{' ? '}' : ']';
 
   for (let i = start; i < text.length; i++) {
     const ch = text[i]!;
@@ -69,8 +71,8 @@ function findMatchingBrace(text: string, start: number): number {
     if (ch === '\\' && inString) { escaped = true; continue; }
     if (ch === '"') { inString = !inString; continue; }
     if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') {
+    if (ch === open) depth++;
+    else if (ch === close) {
       depth--;
       if (depth === 0) return i;
     }
@@ -101,7 +103,7 @@ export function extractJsonObject<T = unknown>(
     };
   }
 
-  const objEnd = findMatchingBrace(text, objStart);
+  const objEnd = findMatchingBracket(text, objStart);
   if (objEnd === -1) {
     return {
       success: false,
@@ -136,19 +138,28 @@ export function extractJsonObject<T = unknown>(
 export function extractJsonArray<T = unknown>(
   text: string
 ): JsonExtractionResult<T[]> {
-  const stripped = text.trim();
-  
-  // Quick check if it's a JSON array
-  if (!stripped.startsWith('[') || !stripped.endsWith(']')) {
+  const arrStart = text.indexOf('[');
+
+  if (arrStart === -1) {
     return {
       success: false,
       value: undefined,
-      error: 'Text is not a JSON array',
+      error: 'No JSON array boundaries found',
+    };
+  }
+
+  const arrEnd = findMatchingBracket(text, arrStart);
+  if (arrEnd === -1) {
+    return {
+      success: false,
+      value: undefined,
+      error: 'No matching closing bracket found',
     };
   }
 
   try {
-    const parsed = JSON.parse(stripped);
+    const jsonStr = text.slice(arrStart, arrEnd + 1);
+    const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) {
       return {
         success: false,

@@ -36,6 +36,7 @@ export interface SingletonState {
   port: number;
   sessions: { [sessionId: string]: SessionInfo };
   lastUpdated: number;
+  browserServer?: { port: number; pid: number };
 }
 
 /**
@@ -778,9 +779,44 @@ export class StateManager {
       }
     }
   }
+/**
+ * Get the current browser server information
+ */
+public async getBrowserServer(): Promise<{ port: number; pid: number } | null> {
+  const state = await this.readState();
+  return state.browserServer ?? null;
+}
 
-  /**
-   * Validate the structure and version of a state object
+/**
+ * Set the current browser server information (atomic: only overwrites if no live server exists)
+ */
+public async setBrowserServer(port: number, pid: number): Promise<void> {
+  await this.updateState((state) => {
+    state.browserServer = { port, pid };
+    return state;
+  });
+}
+
+/**
+ * Clear the browser server information
+ */
+public async clearBrowserServer(): Promise<void> {
+  await this.updateState((state) => {
+    delete state.browserServer;
+    return state;
+  });
+}
+
+/**
+ * Check if a process is alive
+ */
+public async isPidAlive(pid: number): Promise<boolean> {
+  return this.isProcessAlive(pid);
+}
+
+/**
+ * Validate the structure and version of a state object
+...
    * @param state The state object to validate
    * @throws Error if state structure or version is invalid
    */
@@ -800,6 +836,16 @@ export class StateManager {
 
     if (state.lastUpdated < 0) {
       throw new Error(`Invalid state: lastUpdated must be a non-negative number, got ${state.lastUpdated}`);
+    }
+
+    if (state.browserServer !== undefined) {
+      const bs = state.browserServer as any;
+      if (typeof bs.port !== 'number' || typeof bs.pid !== 'number') {
+        throw new Error('Invalid state: browserServer must have numeric port and pid fields');
+      }
+      if (bs.port < 0 || bs.port > 65535) {
+        throw new Error(`Invalid state: browserServer.port must be 0-65535, got ${bs.port}`);
+      }
     }
 
     for (const [sessionId, sessionData] of Object.entries(state.sessions)) {

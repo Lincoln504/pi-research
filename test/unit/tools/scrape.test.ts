@@ -20,14 +20,14 @@ describe('tools/scrape', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    tracker = new ToolUsageTracker({ scrape: 3 });
+    tracker = new ToolUsageTracker({ scrape: 2 });
   });
 
   it('should have correct metadata and protocol in guidelines', () => {
     const tool = createScrapeTool({ ...mockOptions, tracker });
     expect(tool.name).toBe('scrape');
     expect(tool.promptGuidelines).toContain(
-      'PROTOCOL: Batch 1 (4 URLs) → Batch 2 (3 URLs) → Batch 3 (3 URLs).'
+      'PROTOCOL: Batch 1 (up to 4 URLs) → Batch 2 (up to 4 URLs).'
     );
   });
 
@@ -47,13 +47,12 @@ describe('tools/scrape', () => {
     expect(result.details).toMatchObject({ batch: 2 });
   });
 
-  it('should fail on fourth call (limit 3)', async () => {
+  it('should fail on third call (limit 2)', async () => {
     const tool = createScrapeTool({ ...mockOptions, tracker });
-    await tool.execute('call-1', { urls: ['url1'] }, undefined, () => {}, {} as any);
-    await tool.execute('call-2', { urls: ['url2'] }, undefined, () => {}, {} as any);
-    await tool.execute('call-3', { urls: ['url3'] }, undefined, () => {}, {} as any);
+    await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined, () => {}, {} as any);
+    await tool.execute('call-2', { urls: ['https://example.com/2'] }, undefined, () => {}, {} as any);
     
-    const result = await tool.execute('call-4', { urls: ['url4'] }, undefined, () => {}, {} as any);
+    const result = await tool.execute('call-3', { urls: ['https://example.com/3'] }, undefined, () => {}, {} as any);
     expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
     expect(result.content[0].text).toContain('COMPLETE');
   });

@@ -1,7 +1,7 @@
 /**
  * search Tool
  *
- * Perform exhaustive high-fidelity browser-based searches (10-150 queries).
+ * Perform comprehensive browser-based searches (10-50 queries).
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -17,20 +17,20 @@ export function createSearchTool(options: {
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a massive list of queries (10-150) for exhaustive coverage.',
-    promptSnippet: 'Exhaustive web search (10-150 queries)',
+    description: 'Search the web using a list of queries (10-50) for targeted coverage.',
+    promptSnippet: 'Web search (10-50 queries)',
     promptGuidelines: [
-      'CRITICAL: Provide a comprehensive list of 10-150 queries per call.',
-      'EXHAUSTIVE VARIATIONS: Include ALL possible query variations, related concepts, alternative perspectives, and specific data points needed to fully map the subject.',
-      'HIGH VOLUME: Use a very high number of queries as needed to ensure no evidence is missed. The system processes all queries efficiently.',
+      'CRITICAL: Provide 10-50 queries per call.',
+      'COVERAGE: Include query variations, related concepts, and specific data points.',
+      'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
     parameters: Type.Object({
-      queries: Type.Array(Type.String(), { 
-          minItems: 10, 
-          maxItems: 150,
-          description: 'A list of 10-150 exhaustive search queries to execute.' 
+      queries: Type.Array(Type.String(), {
+          minItems: 10,
+          maxItems: 50,
+          description: 'A list of 10-50 search queries to execute.'
       }),
     }),
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
@@ -39,7 +39,7 @@ export function createSearchTool(options: {
       const queries = (p['queries'] || []) as string[];
 
       if (queries.length < 10) {
-        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries with exhaustive variations.`);
+        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries.`);
       }
 
       const allowed = options.tracker.recordCall('search');
@@ -54,7 +54,7 @@ export function createSearchTool(options: {
         const results = await search(queries, undefined, signal);
         const elapsed = Date.now() - startTime;
 
-        let markdown = `# Exhaustive Web Search Results (${queries.length} queries)\n\n`;
+        let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
         results.forEach((r, i) => {
           markdown += `## Query ${i + 1}: ${r.query}\n`;
           if (r.results.length === 0) {

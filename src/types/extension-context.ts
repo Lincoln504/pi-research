@@ -6,6 +6,7 @@
  */
 
 import type { SettingsManager } from '@mariozechner/pi-coding-agent';
+export type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 
 /**
  * Session manager interface for accessing session metadata
@@ -39,22 +40,7 @@ export interface ModelWithId {
 }
 
 /**
- * Agent session event with usage and error information
+ * Re-export AgentSessionEvent as ExtendedAgentSessionEvent for backwards compat.
+ * The real SDK type has the correct shape for all event fields.
  */
-export interface ExtendedAgentSessionEvent {
-  type: string;
-  message?: {
-    role?: string;
-    usage?: {
-      totalTokens?: number;
-      input?: number;
-      output?: number;
-      cacheRead?: number;
-      cacheWrite?: number;
-    };
-  };
-  isError?: boolean;
-  details?: {
-    blocked?: boolean;
-  };
-}
+export type { AgentSessionEvent as ExtendedAgentSessionEvent } from '@mariozechner/pi-coding-agent';
