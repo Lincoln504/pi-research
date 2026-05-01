@@ -43,6 +43,8 @@ export interface ResearchPanelState {
   totalCost: number;
   slices: Map<string, SliceState>;
   modelName: string;
+  /** True when the research is actively searching (queueing/executing search tool) */
+  isSearching?: boolean;
   /** Optional progress bar data. Set after planning completes. */
   progress?: ResearchProgress;
   /** Temporary status message displayed in the header (e.g. 'planning...') */
@@ -185,17 +187,12 @@ function renderPanelBlock(
   const numSlices = sliceIds.length;
   const MAX_VISIBLE_SLICES = 6;
   
-  let visibleSliceIds: string[] = [];
-  let showIndicator = false;
-  let hiddenCount = 0;
+  const showIndicator = numSlices > MAX_VISIBLE_SLICES;
+  const hiddenCount = showIndicator ? numSlices - MAX_VISIBLE_SLICES : 0;
+  const visibleSliceIds = showIndicator 
+    ? sliceIds.slice(numSlices - MAX_VISIBLE_SLICES) 
+    : sliceIds;
 
-  if (numSlices <= MAX_VISIBLE_SLICES) {
-    visibleSliceIds = sliceIds;
-  } else {
-    visibleSliceIds = sliceIds.slice(numSlices - MAX_VISIBLE_SLICES);
-    hiddenCount = numSlices - MAX_VISIBLE_SLICES;
-    showIndicator = true;
-  }
   const numVisible = showIndicator ? MAX_VISIBLE_SLICES : numSlices;
   const totalCols = showIndicator ? numVisible + 1 : numVisible;
 
@@ -275,10 +272,13 @@ function renderPanelBlock(
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const tokens = slice?.tokens || 0;
-        let raw = (isPlanning || tokens === 0) ? '' : formatTokens(tokens);
+        let raw = '';
         
-        if (!raw && slice?.status && !slice.completed && !slice.queued) {
+        // Prioritize status (like "Searching: 1/10...") over token counts for active slices
+        if (slice?.status && !slice.completed && !slice.queued) {
             raw = slice.status;
+        } else if (!isPlanning && tokens > 0) {
+            raw = formatTokens(tokens);
         }
 
         const display = raw.length > w ? raw.slice(0, w) : raw;
@@ -426,7 +426,28 @@ export function createMasterResearchPanel(
           // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
           const leftDecor = theme.fg('accent', '──');
           const rightDecor = theme.fg('accent', ' ─╮');
-          const headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
+          
+          let headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
+          
+          if (panel.isSearching) {
+            const currentWidth = visibleWidth(headerLine);
+            const targetWidth = width - 1; 
+            const available = targetWidth - (currentWidth + 2); // Two spaces of padding
+            if (available > 0) {
+              const pattern = '_._.';
+              const pWidth = visibleWidth(pattern);
+              const count = Math.floor(available / pWidth);
+              let fill = pattern.repeat(count);
+              
+              // Fill remaining small gap with partial pattern if needed
+              const remaining = available % pWidth;
+              if (remaining >= 2) fill += '_.';
+              if (remaining >= 4) fill += '_.'; // This shouldn't happen with pattern '_._.' but for robustness
+              
+              headerLine += '  ' + theme.fg('accent', fill);
+            }
+          }
+
           allLines.push(headerLine);
 
           const blockLines = renderPanelBlock(panel, theme, width);

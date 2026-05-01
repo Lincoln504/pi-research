@@ -26,6 +26,8 @@ export interface Config {
   TUI_REFRESH_DEBOUNCE_MS: number;
   /** Console restore delay after research in milliseconds (default: 15000) */
   CONSOLE_RESTORE_DELAY_MS: number;
+  /** Default depth for /research command (0-3, default: 0) */
+  DEFAULT_RESEARCH_DEPTH: number;
 }
 
 /**
@@ -40,6 +42,7 @@ const DEFAULTS: Config = {
   HEALTH_CHECK_TIMEOUT_MS: 60000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
+  DEFAULT_RESEARCH_DEPTH: 0,
 };
 
 /**
@@ -117,6 +120,11 @@ export function createConfig(env: Record<string, string | undefined> = process.e
       'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS',
       DEFAULTS.CONSOLE_RESTORE_DELAY_MS
     ),
+    DEFAULT_RESEARCH_DEPTH: parseEnvNumber(
+      env,
+      'PI_RESEARCH_DEFAULT_DEPTH',
+      DEFAULTS.DEFAULT_RESEARCH_DEPTH
+    ),
   };
 }
 
@@ -180,6 +188,12 @@ export function validateConfig(config: Config = getConfig()): void {
     );
   }
 
+  if (config.DEFAULT_RESEARCH_DEPTH < 0 || config.DEFAULT_RESEARCH_DEPTH > 3) {
+    throw new Error(
+      `PI_RESEARCH_DEFAULT_DEPTH must be between 0 and 3, got ${config.DEFAULT_RESEARCH_DEPTH}`
+    );
+  }
+
   if (config.HEALTH_CHECK_TIMEOUT_MS !== undefined && (config.HEALTH_CHECK_TIMEOUT_MS < 20000 || config.HEALTH_CHECK_TIMEOUT_MS > 120000)) {
     throw new Error(
       `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS must be between 20000ms (20s) and 120000ms (2m), got ${config.HEALTH_CHECK_TIMEOUT_MS}ms`
@@ -198,6 +212,7 @@ export function validateConfig(config: Config = getConfig()): void {
     RESEARCHER_MAX_RETRY_DELAY_MS: config.RESEARCHER_MAX_RETRY_DELAY_MS,
     PROXY_URL: config.PROXY_URL,
     HEALTH_CHECK_TIMEOUT_MS: config.HEALTH_CHECK_TIMEOUT_MS,
+    DEFAULT_RESEARCH_DEPTH: config.DEFAULT_RESEARCH_DEPTH,
   });
 }
 

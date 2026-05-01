@@ -12,7 +12,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { injectCurrentDate } from '../utils/inject-date.ts';
-import type { ExtensionContext, AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import { 
+    convertToLlm,
+    buildSessionContext,
+    type ExtensionContext, 
+    type AgentSession, 
+    type AgentSessionEvent 
+} from '@mariozechner/pi-coding-agent';
 import { complete, completeSimple, type Model, type TextContent, type Usage } from '@mariozechner/pi-ai';
 import { calculateTotalTokens, isTextContentBlock } from '../types/llm.ts';
 import { logger } from '../logger.ts';
@@ -43,7 +49,6 @@ import {
     MAX_QUERIES_PER_RESEARCHER_LEVEL_2,
     MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
     AVG_TOKENS_PER_SCRAPE,
-    MAX_EVALUATOR_REPORT_LENGTH,
     MAX_EXTRA_ROUNDS,
     RESEARCHER_LAUNCH_DELAY_MS,
     MAX_GATHERING_CALLS,
@@ -158,8 +163,8 @@ export class DeepResearchOrchestrator {
                   for (const term of searchTerms) {
                       try {
                           const result = await grep(term, this.options.ctx.cwd);
-                          localContextSection += `\n### Matches for "${term}"\n\n${result.slice(0, 2000)}\n\n...[truncated]\n\n`;
-                      } catch (e) {
+                          localContextSection += `\n### Matches for "${term}"\n\n${result.slice(0, 10000)}\n\n...[truncated]\n\n`;
+                      } catch (_e) {
                           // Grep failed, skip this term
                       }
                   }
@@ -185,15 +190,15 @@ export class DeepResearchOrchestrator {
         const retryHint = attempt > 1
           ? '\n\nCRITICAL: Your previous response could not be parsed as JSON. Return ONLY the raw JSON object — no markdown, no explanation, no code fences.'
           : '';
+        
+        // BRANCHING: Coordinator sees the full parent conversation history
+        const history = this.options.ctx.sessionManager.getBranch();
+        const sessionContext = buildSessionContext(history);
+        const historyMessages = convertToLlm(sessionContext.messages);
+
         const planResponse = await complete(this.options.model, {
-          messages: [{ 
-            role: 'user', 
-            content: [{ 
-              type: 'text', 
-              text: basePlanningPrompt + localContextSection + retryHint 
-            }], 
-            timestamp: Date.now() 
-          }],
+          systemPrompt: basePlanningPrompt + localContextSection + retryHint,
+          messages: historyMessages,
         }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning: 'low' });
 
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
@@ -219,7 +224,20 @@ export class DeepResearchOrchestrator {
           logger.warn('[Orchestrator] JSON parse failed on attempt 1, retrying coordinator with explicit JSON reminder');
         }
       }
-      // parseJsonPlan throws on failure so currentPlan is always set here
+      // 1. Cap team size deterministically (enforce max siblings per round)
+      const maxTeamSize = this.options.complexity === 1 ? MAX_TEAM_SIZE_LEVEL_1 :
+                           this.options.complexity === 2 ? MAX_TEAM_SIZE_LEVEL_2 :
+                           MAX_TEAM_SIZE_LEVEL_3;
+
+      if (currentPlan.researchers.length > maxTeamSize) {
+          const capped = currentPlan.researchers.slice(0, maxTeamSize);
+          const keptIds = new Set(capped.map(r => r.id));
+          logger.warn(`[Orchestrator] Capping team size from ${currentPlan.researchers.length} to ${maxTeamSize} — kept: ${[...keptIds].join(', ')}`);
+          currentPlan.researchers = capped;
+          currentPlan.allQueries = capped.flatMap(r => r.queries);
+      }
+
+      // 2. Cap individual researcher budgets and global round budget
       currentPlan = this.capResearcherQueries(currentPlan!);
       logger.log(`[Orchestrator] ${this.elapsed()} Coordinator done in ${((Date.now() - coordStartMs) / 1000).toFixed(1)}s — planned ${currentPlan.researchers.length} researcher(s)`);
 
@@ -235,58 +253,51 @@ export class DeepResearchOrchestrator {
                            MAX_ROUNDS_LEVEL_3;
       const hardLimit = maxRounds + MAX_EXTRA_ROUNDS;
 
-      const maxTeamSize = this.options.complexity === 1 ? MAX_TEAM_SIZE_LEVEL_1 :
-                           this.options.complexity === 2 ? MAX_TEAM_SIZE_LEVEL_2 :
-                           MAX_TEAM_SIZE_LEVEL_3;
-
-      // Cap team size deterministically (enforce max siblings per round)
-      if (currentPlan.researchers.length > maxTeamSize) {
-          const capped = currentPlan.researchers.slice(0, maxTeamSize);
-          const keptIds = new Set(capped.map(r => r.id));
-          const keptQueries = capped.flatMap(r => r.queries);
-          logger.warn(`[Orchestrator] Capping team size from ${currentPlan.researchers.length} to ${maxTeamSize} — kept: ${[...keptIds].join(', ')}`);
-          currentPlan.researchers = capped;
-          currentPlan.allQueries = keptQueries;
-      }
-
       while (this.currentRound <= hardLimit) {
           const roundStartMs = Date.now();
           logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} starting (target: ${maxRounds}, hard limit: ${hardLimit})`);
-
-          // Clear old researcher slices from previous rounds
-          if (this.currentRound > 1) {
-              const toRemove = Array.from(this.options.panelState.slices.keys())
-                  .filter(id => id !== 'coord' && id !== 'eval' && !id.startsWith(`researcher.${this.currentRound}.`));
-              for (const id of toRemove) {
-                  removeSlice(this.options.panelState, id);
-              }
-              this.options.onUpdate();
-          }
 
           // PHASE 2: SEARCH BURST (Pre-seed all researchers in round)
           // Round 1: coord slice transitions Planning... → Searching... here.
           // Round 2+: eval slice was left alive by evaluate() with status "Searching..." — no re-add needed.
           let researcherLinks = new Map<string, string[]>();
           if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
-              if (this.currentRound === 1) {
-                  updateSliceStatus(this.options.panelState, 'coord', 'Searching...');
-              } else if (!this.options.panelState.slices.has('eval')) {
-                  // Fallback: eval slice wasn't persisted — create it now.
-                  addSlice(this.options.panelState, 'eval', 'eval', true);
-                  activateSlice(this.options.panelState, 'eval');
-                  updateSliceStatus(this.options.panelState, 'eval', 'Searching...');
+              this.options.panelState.isSearching = true;
+              try {
+                  if (this.currentRound === 1) {
+                      updateSliceStatus(this.options.panelState, 'coord', 'Searching...');
+                  } else if (!this.options.panelState.slices.has('eval')) {
+                      // Fallback: eval slice wasn't persisted — create it now.
+                      addSlice(this.options.panelState, 'eval', 'eval', true);
+                      activateSlice(this.options.panelState, 'eval');
+                      updateSliceStatus(this.options.panelState, 'eval', 'Searching...');
+                  }
+                  this.options.onUpdate();
+
+                  const searchStartMs = Date.now();
+                  this.allSearchedQueries.push(...currentPlan.allQueries);
+                  
+                  const onSearchProgress = (completed: number, total: number) => {
+                      const status = `Searching: ${completed}/${total}...`;
+                      if (this.currentRound === 1) {
+                          updateSliceStatus(this.options.panelState, 'coord', status);
+                      } else {
+                          updateSliceStatus(this.options.panelState, 'eval', status);
+                      }
+                      this.options.onUpdate();
+                  };
+
+                  const searchResults = await search(currentPlan.allQueries, undefined, signal, onSearchProgress);
+                  researcherLinks = this.distributeResults(currentPlan, searchResults);
+                  logger.log(`[Orchestrator] ${this.elapsed()} Search burst done in ${((Date.now() - searchStartMs) / 1000).toFixed(1)}s — ${currentPlan.allQueries.length} queries`);
+
+                  const newLinks = Array.from(new Set(Array.from(researcherLinks.values()).flat()));
+                  this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...newLinks]));
+                  registerScrapedLinks(this.options.panelState.researchId, newLinks);
+              } finally {
+                  this.options.panelState.isSearching = false;
+                  this.options.onUpdate();
               }
-              this.options.onUpdate();
-
-              const searchStartMs = Date.now();
-              this.allSearchedQueries.push(...currentPlan.allQueries);
-              const searchResults = await search(currentPlan.allQueries, undefined, signal);
-              researcherLinks = this.distributeResults(currentPlan, searchResults);
-              logger.log(`[Orchestrator] ${this.elapsed()} Search burst done in ${((Date.now() - searchStartMs) / 1000).toFixed(1)}s — ${currentPlan.allQueries.length} queries`);
-
-              const newLinks = Array.from(new Set(Array.from(researcherLinks.values()).flat()));
-              this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...newLinks]));
-              registerScrapedLinks(this.options.panelState.researchId, newLinks);
           }
 
           // Clean up the planning/search slice before launching researchers.
@@ -305,6 +316,19 @@ export class DeepResearchOrchestrator {
           // PHASE 3: EXECUTE RESEARCHERS (Concurrency limited to 3)
           const researchStartMs = Date.now();
           logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers launching (${currentPlan.researchers.length} researcher(s))`);
+          
+          // Clear old researcher slices just before launching new ones.
+          // This keeps the TUI occupied during the Search Burst phase.
+          if (this.currentRound > 1) {
+              const currentRoundIds = new Set(currentPlan.researchers.map(r => r.id.replace(/^r/, '')));
+              const toRemove = Array.from(this.options.panelState.slices.keys())
+                  .filter(id => id !== 'coord' && id !== 'eval' && !currentRoundIds.has(id));
+              for (const id of toRemove) {
+                  removeSlice(this.options.panelState, id);
+              }
+              this.options.onUpdate();
+          }
+
           await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
           logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers done in ${((Date.now() - researchStartMs) / 1000).toFixed(1)}s`);
 
@@ -361,6 +385,9 @@ export class DeepResearchOrchestrator {
     } catch (error) {
       logger.error('[Orchestrator] Run failed:', error);
       throw error;
+    } finally {
+      this.options.panelState.isSearching = false;
+      this.options.onUpdate();
     }
   }
 
@@ -382,6 +409,13 @@ export class DeepResearchOrchestrator {
 
   private capResearcherQueries(plan: ResearchPlan): ResearchPlan {
     const budget = this.getQueryBudget();
+    
+    // Scale round cap by complexity: L1=20, L2=40, L3=60
+    const ROUND_HARD_CAP = this.options.complexity === 1 ? 20 
+                         : this.options.complexity === 2 ? 40 
+                         : 60;
+
+    // 1. Cap individual researchers first
     plan.researchers = plan.researchers.map(r => {
       if (r.queries.length > budget) {
         logger.warn(`[Orchestrator] Capping researcher ${r.id} queries: ${r.queries.length} → ${budget}`);
@@ -389,6 +423,30 @@ export class DeepResearchOrchestrator {
       }
       return r;
     });
+
+    // 2. Enforce global round hard cap (max 40 queries total)
+    let totalQueries = plan.researchers.reduce((sum, r) => sum + r.queries.length, 0);
+    if (totalQueries > ROUND_HARD_CAP) {
+        logger.warn(`[Orchestrator] Total round queries (${totalQueries}) exceeds hard cap (${ROUND_HARD_CAP}). Trimming...`);
+        
+        // Simple fair trimming: remove queries from the end of the lists until we fit
+        while (totalQueries > ROUND_HARD_CAP) {
+            // Find the researcher with the most queries remaining
+            let maxIdx = -1;
+            let maxCount = -1;
+            for (let i = 0; i < plan.researchers.length; i++) {
+                if (plan.researchers[i].queries.length > maxCount) {
+                    maxCount = plan.researchers[i].queries.length;
+                    maxIdx = i;
+                }
+            }
+            if (maxIdx === -1 || maxCount === 0) break; // Should not happen
+            
+            plan.researchers[maxIdx].queries.pop();
+            totalQueries--;
+        }
+    }
+
     plan.allQueries = plan.researchers.flatMap(r => r.queries);
     return plan;
   }
@@ -468,13 +526,12 @@ export class DeepResearchOrchestrator {
   }
 
   private async runResearcher(config: ResearcherConfig, initialLinks: string[]): Promise<void> {
-    const internalId = `${this.currentRound}.${config.id}`;
-    const label = `researcher.${internalId}`;
-    // Extract the numeric part of the ID (e.g. "1" from "r1") or use the ID directly
     const displayNum = config.id.replace(/^r/, '');
-    addSlice(this.options.panelState, label, displayNum, true);
-    activateSlice(this.options.panelState, label);
-    updateSliceStatus(this.options.panelState, label, 'Scraping...');
+    const internalId = displayNum;
+    const label = displayNum;
+    
+    addSlice(this.options.panelState, internalId, label, true);
+    activateSlice(this.options.panelState, internalId);
     this.options.onUpdate();
 
     try {
@@ -499,6 +556,10 @@ export class DeepResearchOrchestrator {
             extensionCtx: this.options.ctx,
             noSearch: true,
             onLinksScraped: (links) => this.broadcastLinks(internalId, config.name, links),
+            onSearchProgress: (completed, total) => {
+                updateSliceStatus(this.options.panelState, internalId, `Searching: ${completed}/${total}...`);
+                this.options.onUpdate();
+            },
             getGlobalState: () => ({
                 researchId: this.options.panelState.researchId,
                 rootQuery: this.options.query,
@@ -511,7 +572,7 @@ export class DeepResearchOrchestrator {
         });
 
         const researcherStartMs = Date.now();
-        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} (${config.name}) started`);
+        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} started`);
 
         // Fractional progress credit per tool call (up to 90% of UNITS_PER_RESEARCHER before completion)
         const perToolCredit = DeepResearchOrchestrator.UNITS_PER_RESEARCHER / RESEARCHER_TOOL_BUDGET;
@@ -522,21 +583,15 @@ export class DeepResearchOrchestrator {
         const llmCallStartStack: number[] = [];
 
         const subscription = session.subscribe((event: AgentSessionEvent) => {
-            // Track LLM call timing and update status for user visibility
+            // Track LLM call timing
             if (event.type === 'message_start') {
                 llmCallStartStack.push(Date.now());
                 logger.debug(`[Orchestrator] ${this.elapsed()} LLM call started for ${internalId} (stack depth: ${llmCallStartStack.length})`);
-                // Update status to show LLM is thinking
-                updateSliceStatus(this.options.panelState, label, 'Thinking...');
-                this.options.onUpdate();
             }
             if (event.type === 'message_end') {
                 const startTime = llmCallStartStack.pop() || Date.now();
                 const duration = Date.now() - startTime;
                 logger.debug(`[Orchestrator] ${this.elapsed()} LLM call completed for ${internalId} in ${duration}ms (${(duration/1000).toFixed(1)}s)`);
-                // Update status after LLM call completes
-                updateSliceStatus(this.options.panelState, label, 'Scraping...');
-                this.options.onUpdate();
             }
             if (event.type === 'message_end') {
                 const msg = event.message as any;
@@ -550,12 +605,6 @@ export class DeepResearchOrchestrator {
                     const newTotal = currentTotal + tokens;
                     this.siblingTokens.set(internalId, newTotal);
                     
-                    // Warn if context is getting too large (>80K tokens)
-                    const CONTEXT_WARNING_THRESHOLD = 80000;
-                    if (newTotal > CONTEXT_WARNING_THRESHOLD && (currentTotal <= CONTEXT_WARNING_THRESHOLD || newTotal % 20000 < 2000)) {
-                        logger.warn(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} context size: ${newTotal.toLocaleString()} tokens - this may cause performance degradation`);
-                    }
-
                     this.options.onTokens(tokens);
                     this.options.panelState.totalCost += cost;
                     updateSliceTokens(this.options.panelState, label, tokens, cost);
@@ -621,10 +670,11 @@ export class DeepResearchOrchestrator {
         }
 
         const researcherElapsedMs = Date.now() - researcherStartMs;
-        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} (${config.name}) done in ${(researcherElapsedMs / 1000).toFixed(1)}s`);
+        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} done in ${(researcherElapsedMs / 1000).toFixed(1)}s`);
 
         const report = ensureAssistantResponse(session, `Researcher ${internalId}`);
-        this.reports.set(internalId, report);
+        // Store report with round-prefixed key for the evaluator, but use internalId for logging
+        this.reports.set(`${this.currentRound}.${internalId}`, report);
         await this.injectCompletionSummary(internalId, config.name, report);
 
         completeSlice(this.options.panelState, label);
@@ -649,8 +699,8 @@ export class DeepResearchOrchestrator {
     }
   }
 
-  private broadcastLinks(sourceId: string, sourceName: string, links: string[]) {
-      const updateMsg = formatLightweightLinkUpdate(links, sourceId, sourceName);
+  private broadcastLinks(sourceId: string, _sourceName: string, links: string[]) {
+      const updateMsg = formatLightweightLinkUpdate(links, sourceId, _sourceName);
       for (const [id, session] of this.activeSessions) {
           if (id !== sourceId) session.steer(updateMsg).catch(() => {});
       }
@@ -658,15 +708,15 @@ export class DeepResearchOrchestrator {
       registerScrapedLinks(this.options.panelState.researchId, links);
   }
 
-  private async injectCompletionSummary(sourceId: string, sourceName: string, fullReport: string) {
+  private async injectCompletionSummary(sourceId: string, _sourceName: string, fullReport: string) {
       const summary = this.extractSummary(fullReport);
       const urls = this.extractUrls(fullReport);
-      const msg = `## Sibling ${sourceId} (${sourceName}) Completed\n\n### Summary\n${summary}\n\n### URLs\n${urls.map(u => `- ${u}`).join('\n')}\n\n> Adjust your direction.`;
-
+      const msg = `## Sibling ${sourceId} Completed\n\n### Summary\n${summary}\n\n### URLs\n${urls.map(u => `- ${u}`).join('\n')}\n\n> Adjust your direction.`;
       for (const [id, session] of this.activeSessions) {
           if (id !== sourceId) session.steer(msg).catch(() => {});
       }
   }
+
 
   private buildFallbackSynthesis(): string {
     const sections = Array.from(this.reports.entries())
@@ -692,9 +742,12 @@ export class DeepResearchOrchestrator {
           : "None";
 
       // Calculate next available numeric ID for continuity
-      // Report keys are "round.rN" (e.g. "1.r2"). Extract the researcher number only.
+      // Previously used "round.rN". Now we just want simple numbers "1", "2", "3"...
       const existingIds = Array.from(this.reports.keys())
-          .map(id => { const m = id.match(/\.r?(\d+)$/); return m ? parseInt(m[1]!) : NaN; })
+          .map(id => { 
+              const m = id.match(/(\d+)$/); 
+              return m ? parseInt(m[1]!) : NaN; 
+          })
           .filter(n => !isNaN(n));
       const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
 
@@ -704,7 +757,7 @@ export class DeepResearchOrchestrator {
           .replace('{MAX_ROUNDS}', ((this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 : this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 : MAX_ROUNDS_LEVEL_3)).toString())
           .replace('{MAX_TEAM_SIZE}', maxTeamSize.toString())
           .replace('{PREVIOUS_QUERIES}', previousQueriesList)
-          .replace('{NEXT_ID}', `r${nextId}`);
+          .replace('{NEXT_ID}', `${nextId}`);
 
       // FIX: For delegation-only, send only current round's reports to keep input size constant
       let reportsToUse = this.reports;
@@ -722,10 +775,7 @@ export class DeepResearchOrchestrator {
 
       const reportsText = Array.from(reportsToUse.entries())
           .map(([id, report]) => {
-              const truncated = report.length > MAX_EVALUATOR_REPORT_LENGTH
-                  ? report.slice(0, MAX_EVALUATOR_REPORT_LENGTH) + '\n\n[Report truncated]'
-                  : report;
-              return `### Researcher ${id} Report\n\n${truncated}`;
+              return `### Researcher ${id} Report\n\n${report}`;
           })
           .join('\n\n---\n\n');
 

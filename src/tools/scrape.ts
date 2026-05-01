@@ -34,8 +34,10 @@ export function createScrapeTool(options: {
 }): ToolDefinition {
 
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+  const MAX_CHARS_PER_URL = 10000; // ~2.5K tokens per URL
 
   const getContextFraction = (additionalTokens: number = 0): number => {
+
     if (!options.getTokensUsed) return 0;
     // Use scrape-specific tokens if tracked, otherwise total tokens
     const tokens = options.getScrapeTokens ? options.getScrapeTokens() : options.getTokensUsed();
@@ -90,7 +92,7 @@ export function createScrapeTool(options: {
               if (typeof u === 'string') {
                   // If the string contains [ ] or commas, it's likely a malformed array-as-string
                   if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
-                      const cleaned = u.replace(/[\[\]]/g, '').split(',').map(s => s.trim());
+                      const cleaned = u.replace(/[[]]/g, '').split(',').map(s => s.trim());
                       urls.push(...cleaned);
                   } else {
                       urls.push(u.trim());
@@ -100,7 +102,7 @@ export function createScrapeTool(options: {
       } else if (typeof rawUrls === 'string') {
           // Fallback for extreme LLM hallucination
           const s = rawUrls as string;
-          urls = s.replace(/[\[\]]/g, '').split(',').map(u => u.trim());
+          urls = s.replace(/[[]]/g, '').split(',').map(u => u.trim());
       }
       
       // Deduplicate and filter out empty
@@ -149,7 +151,11 @@ export function createScrapeTool(options: {
       markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - startTime)/1000).toFixed(2)}s\n\n`;
 
       for (const res of successful) {
-          markdown += `### ${res.url}\n${res.markdown}\n\n---\n\n`;
+          let content = res.markdown || '';
+          if (content.length > MAX_CHARS_PER_URL) {
+              content = content.slice(0, MAX_CHARS_PER_URL) + '\n\n[...truncated - content too long for full analysis...]';
+          }
+          markdown += `### ${res.url}\n${content}\n\n---\n\n`;
       }
       
       return { content: [{ type: 'text', text: markdown }], details: { batch: callCount + 1, count: successful.length } };

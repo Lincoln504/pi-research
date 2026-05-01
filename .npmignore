@@ -44,9 +44,10 @@ yarn-error.log*
 Makefile
 .nvmrc
 
-# Playwright
+# Playwright and Camoufox
 test-results/
 playwright-report/
+.browser/
 
 # Temp
 *.tmp

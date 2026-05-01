@@ -5,6 +5,8 @@
  */
 
 import { createRequire } from 'module';
+import { existsSync } from 'node:fs';
+import { getCamoufoxBinaryPath } from '../infrastructure/browser-config.ts';
 import type { SearchResult } from './types.ts';
 
 const require = createRequire(import.meta.url);
@@ -47,4 +49,11 @@ export function checkModule(name: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if browser binaries are installed
+ */
+export function checkBrowserBinaries(): boolean {
+  return existsSync(getCamoufoxBinaryPath());
 }

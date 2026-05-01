@@ -183,6 +183,7 @@ export function createResearchTool(): ToolDefinition {
         let aborted = false;
         let cleanup: (() => void) | null = null;
         let unsubOrder: (() => void) | null = null;
+        let panelState: any = null;
 
         try {
           validateConfig();
@@ -214,7 +215,7 @@ export function createResearchTool(): ToolDefinition {
             logger.info('[research] cleanup completed', { piSessionId, researchId });
           };
 
-          const panelState = createInitialPanelState(researchId, sanitizedQuery, modelIdStr);
+          panelState = createInitialPanelState(researchId, sanitizedQuery, modelIdStr);
           registerSessionPanel(piSessionId, researchId, panelState);
           
           let renderTimeout: NodeJS.Timeout | null = null;
@@ -288,6 +289,10 @@ export function createResearchTool(): ToolDefinition {
               settingsManager: extendedCtx.settingsManager || (ctx as any).settingsManager!,
               systemPrompt: researcherPrompt,
               extensionCtx: ctx,
+              onSearchProgress: (completed, total) => {
+                updateSliceStatus(panelState, sliceLabel, `Searching: ${completed}/${total}...`);
+                debouncedRefresh();
+              },
               getTokensUsed: () => quickSessionTokens,
               contextWindowSize: quickContextWindowSize,
             });
@@ -311,6 +316,12 @@ export function createResearchTool(): ToolDefinition {
                   panelState.progress.made += 1;
                   debouncedRefresh();
                 }
+              } else if (event.type === 'tool_execution_start' && event.toolName === 'search') {
+                panelState.isSearching = true;
+                debouncedRefresh();
+              } else if (event.type === 'tool_execution_end' && event.toolName === 'search') {
+                panelState.isSearching = false;
+                debouncedRefresh();
               }
             });
 
@@ -336,6 +347,7 @@ export function createResearchTool(): ToolDefinition {
 
               return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
             } finally {
+              panelState.isSearching = false;
               if (typeof subscription === 'function') subscription();
               completeSlice(panelState, sliceLabel);
               cleanup?.();
@@ -360,6 +372,7 @@ export function createResearchTool(): ToolDefinition {
           }
         } catch (error) {
           if (aborted) return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
+          
           cleanup?.();
           logger.error('[research] run failed', error);
           return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };

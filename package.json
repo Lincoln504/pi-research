@@ -1,10 +1,14 @@
 {
   "name": "@lincoln504/pi-research",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "A set of web research tools (search, scrape, and others) and research agent system that uses them safely and efficiently.",
   "type": "module",
   "private": false,
   "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
   "files": [
     "src/",
     "docs/",
@@ -51,7 +55,9 @@
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
     "postinstall": "node scripts/setup.js",
-    "setup": "node scripts/setup.js"
+    "setup": "node scripts/setup.js",
+    "install:browsers": "node scripts/setup.js",
+    "install:system-deps": "node scripts/setup.js --system-deps"
   },
   "pi": {
     "extensions": [

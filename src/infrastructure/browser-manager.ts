@@ -2,9 +2,11 @@ import { logger } from '../logger.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
 import { StateManager } from './state-manager.ts';
 import { BrowserServer } from './browser-server.ts';
+import { getBrowserEnv, ensureBrowserCacheDir, getCamoufoxBinaryPath } from './browser-config.ts';
 import { createRequire } from 'module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import * as http from 'node:http';
 import { FixedThreadPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
@@ -27,7 +29,13 @@ class BrowserTaskScheduler implements IScheduler {
 
     constructor() {
         logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${MAX_WORKERS}) on PID ${process.pid}`);
+        
+        // Ensure browser cache directory exists and get environment variables for redirection
+        ensureBrowserCacheDir();
+        const browserEnv = getBrowserEnv();
+
         this.pool = new FixedThreadPool(MAX_WORKERS, join(__dirname, 'thread-worker.mjs'), {
+            env: browserEnv,
             errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
             workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
             enableTasksQueue: true,
@@ -74,11 +82,13 @@ class BrowserClient implements IScheduler {
     }
 
     private async request<T>(path: string, data: any): Promise<T> {
+        const start = Date.now();
         return new Promise((resolve, reject) => {
+            const timeoutMs = 45000;
             const timer = setTimeout(() => {
                 req.destroy();
-                reject(new Error(`[BrowserClient] Request to ${path} timed out after 30s`));
-            }, 30000);
+                reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
 
             const req = http.request({
                 hostname: '127.0.0.1',
@@ -91,14 +101,16 @@ class BrowserClient implements IScheduler {
                 let body = '';
                 res.on('data', chunk => body += chunk);
                 res.on('end', () => {
+                    const duration = Date.now() - start;
                     try {
                         const parsed = JSON.parse(body);
                         if (res.statusCode !== 200) {
                             reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
                         } else {
+                            logger.debug(`[BrowserClient] Request ${path} completed in ${duration}ms`);
                             resolve(parsed);
                         }
-                    } catch (e) {
+                    } catch (_e) {
                         reject(new Error(`Failed to parse response: ${body}`));
                     }
                 });
@@ -211,7 +223,8 @@ const require = createRequire(import.meta.url);
 export function isBrowserAvailable(): boolean {
   try {
     require.resolve('camoufox-js');
-    return true;
+    // Also check if the binary exists in the projected path
+    return existsSync(getCamoufoxBinaryPath());
   } catch {
     return false;
   }

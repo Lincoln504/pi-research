@@ -45,11 +45,14 @@ export default function (pi: ExtensionAPI) {
       if (!text) return;
 
       try {
+        const { getConfig } = await import('./config.ts');
+        const config = getConfig();
+        
         // Directly invoke the research tool, bypassing the LLM entirely.
         // The tool handles its own TUI panel, progress tracking, and cleanup.
         const result = await researchTool.execute(
           randomUUID(),
-          { query: text },
+          { query: text, depth: config.DEFAULT_RESEARCH_DEPTH },
           ctx.signal,
           undefined,
           ctx as any,
@@ -106,6 +109,88 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // /research-config — interactive configuration dashboard
+  pi.registerCommand('research-config', {
+    description: 'Interactive research configuration dashboard.',
+    handler: async (_args, ctx) => {
+      const { getConfig, validateConfig } = await import('./config.ts');
+      const constants = await import('./constants.ts');
+      const config = getConfig();
+
+      const result = await ctx.ui.custom((_tui: any, theme: any, _keybindings: any, done: any) => {
+          const content: any[] = [
+              { type: 'text', text: '🔬 pi-research Configuration Dashboard', color: 'cyan' },
+              { type: 'text', text: '═'.repeat(40), color: 'accent' },
+              { type: 'text', text: ' [ Researchers ]', color: 'yellow' },
+              { type: 'text', text: `  1. Max Concurrent:  ${config.MAX_CONCURRENT_RESEARCHERS.toString().padEnd(10)} (active slots)`, color: 'text' },
+              { type: 'text', text: `  2. Timeout:        ${(config.RESEARCHER_TIMEOUT_MS / 1000).toString().padEnd(10)} (seconds)`, color: 'text' },
+              { type: 'text', text: `  3. Max Retries:    ${config.RESEARCHER_MAX_RETRIES.toString().padEnd(10)} (per request)`, color: 'text' },
+              { type: 'text', text: `  4. Default Depth:  ${config.DEFAULT_RESEARCH_DEPTH.toString().padEnd(10)} (for /research)`, color: 'text' },
+              
+              { type: 'text', text: '\n [ Context & Scraping ]', color: 'yellow' },
+              { type: 'text', text: `  5. Scrape Limit:   ${Math.round(constants.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100).toString().padEnd(10)} (% of context)`, color: 'text' },
+              { type: 'text', text: `  6. Total Limit:    ${Math.round(constants.MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100).toString().padEnd(10)} (% total budget)`, color: 'text' },
+              { type: 'text', text: `  7. Avg Tokens:     ${constants.AVG_TOKENS_PER_SCRAPE.toString().padEnd(10)} (estimation)`, color: 'text' },
+
+              { type: 'text', text: '\n [ TUI / UX ]', color: 'yellow' },
+              { type: 'text', text: `  8. Refresh Rate:   ${config.TUI_REFRESH_DEBOUNCE_MS.toString().padEnd(10)} (ms debounce)`, color: 'text' },
+              { type: 'text', text: `  9. Restore Delay:  ${(config.CONSOLE_RESTORE_DELAY_MS / 1000).toString().padEnd(10)} (seconds)`, color: 'text' },
+              
+              { type: 'text', text: '═'.repeat(40), color: 'accent' },
+              { type: 'text', text: ' [1-9] Edit Setting | [Enter] Save | [Esc] Cancel', color: 'muted' },
+          ];
+
+          return {
+              render: () => content.map(c => theme.fg(c.color, c.text)),
+              invalidate: () => {},
+              handleInput: async (key: string) => {
+                  if (key === 'escape') {
+                      done({ type: 'cancel' });
+                  } else if (key === 'enter') {
+                      done({ type: 'submit', data: config });
+                  } else if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(key)) {
+                      const labels = [
+                          'Max Concurrent Researchers', 'Researcher Timeout (s)', 'Max Retries',
+                          'Default Research Depth (0-3)',
+                          'Scrape Token Limit (%)', 'Total Context Limit (%)', 'Estimated Tokens per Scrape',
+                          'TUI Refresh Rate (ms)', 'Console Restore Delay (s)'
+                      ];
+                      const idx = parseInt(key) - 1;
+                      const val = await ctx.ui.input(`Edit ${labels[idx]}:`);
+                      
+                      if (val) {
+                          const num = parseInt(val);
+                          if (!isNaN(num)) {
+                              switch(key) {
+                                  case '1': config.MAX_CONCURRENT_RESEARCHERS = num; break;
+                                  case '2': config.RESEARCHER_TIMEOUT_MS = num * 1000; break;
+                                  case '3': config.RESEARCHER_MAX_RETRIES = num; break;
+                                  case '4': config.DEFAULT_RESEARCH_DEPTH = num; break;
+                                  case '5': (constants as any).MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = num / 100; break;
+                                  case '6': (constants as any).MAX_CONTEXT_FRACTION_FOR_SCRAPING = num / 100; break;
+                                  case '7': (constants as any).AVG_TOKENS_PER_SCRAPE = num; break;
+                                  case '8': config.TUI_REFRESH_DEBOUNCE_MS = num; break;
+                                  case '9': config.CONSOLE_RESTORE_DELAY_MS = num * 1000; break;
+                              }
+                          }
+                      }
+                  }
+              }
+          };
+      });
+
+      if ((result as any).type === 'submit') {
+          try {
+              validateConfig(config);
+              ctx.ui.notify('✅ Configuration updated', 'info');
+              logger.info('[pi-research] Configuration updated via dashboard', config);
+          } catch (e: any) {
+              ctx.ui.notify(`❌ Invalid config: ${e.message}`, 'error');
+          }
+      }
+    },
+  });
+
   // Append research tool usage instructions to the system prompt
   pi.on('before_agent_start', async (event: any, ctx: any) => {
     const researchPrompt = loadPrompt('research-tool-usage');
@@ -138,7 +223,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Monitor provider responses for diagnostics
-  pi.on('after_provider_response', (event: any, ctx: any) => {
+  pi.on('after_provider_response', async (event: any, ctx: any) => {
     const { status, headers } = event;
 
     // Log provider status for diagnostics

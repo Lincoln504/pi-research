@@ -1,3 +1,7 @@
+---
+argument-hint: <query> [depth:0|1|2|3] [model:<id>]
+---
+
 ### 🔍 RESEARCH TOOL USAGE
 
 **For any web/internet research questions, use the `research` tool.**

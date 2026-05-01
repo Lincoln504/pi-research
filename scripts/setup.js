@@ -69,12 +69,19 @@ let systemDepsInstalled = false;
 
 // Determine project root and browser cache directory
 const projectRoot = join(__dirname, '..');
-const browserCacheDir = join(projectRoot, '.browser');
+
+/**
+ * Determine the browser cache directory.
+ * Priority:
+ * 1. PLAYWRIGHT_BROWSERS_PATH environment variable
+ * 2. Project-local .browser directory
+ */
+const browserCacheDir = process.env.PLAYWRIGHT_BROWSERS_PATH || join(projectRoot, '.browser');
 
 // Ensure browser cache directory exists
 if (!existsSync(browserCacheDir)) {
   try {
-    execSync(`mkdir -p "${browserCacheDir}"`);
+    execSync(`mkdir -p "${browserCacheDir}"`, { stdio: 'ignore' });
   } catch (e) {
     // Ignore if fails, will fall back to default behavior
   }
@@ -87,11 +94,16 @@ if (skipBrowserDownload) {
   console.log('\n⏭️  Skipping browser installation (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
 } else {
   // Install Camoufox stealth browser
-  console.log('\n🌐 Installing Camoufox stealth browser (local to project)...');
+  console.log(`\n🌐 Installing Camoufox stealth browser to: ${browserCacheDir}`);
 
   try {
-    // Set HOME to our local browser directory to force camoufox to install there
-    const env = { ...process.env, HOME: browserCacheDir, USERPROFILE: browserCacheDir };
+    // Set HOME/USERPROFILE to our local browser directory to force camoufox to install there
+    const env = { 
+        ...process.env, 
+        PLAYWRIGHT_BROWSERS_PATH: browserCacheDir,
+        HOME: browserCacheDir, 
+        USERPROFILE: browserCacheDir 
+    };
 
     // Check if user wants to install system dependencies
     const installDeps = process.argv.includes('--system-deps') ||
@@ -115,7 +127,11 @@ if (skipBrowserDownload) {
 
     // Install Camoufox binaries
     console.log('   Fetching Camoufox binaries...');
-    execSync('npx camoufox-js fetch', {
+    // We try to use the local camoufox-js if available in node_modules
+    const camoufoxBin = join(projectRoot, 'node_modules', '.bin', 'camoufox-js');
+    const cmd = existsSync(camoufoxBin) ? `"${camoufoxBin}" fetch` : 'npx camoufox-js fetch';
+    
+    execSync(cmd, {
       stdio: 'inherit',
       env
     });
@@ -127,14 +143,12 @@ if (skipBrowserDownload) {
     // Parse error message to provide better guidance
     const errorMsg = error instanceof Error ? error.message : String(error);
 
-    if (errorMsg.includes('npx: command not found')) {
-      console.warn('\n⚠️  npx not available - skipping browser installation');
+    if (errorMsg.includes('command not found')) {
+      console.warn('\n⚠️  camoufox-js fetch command not found');
       console.warn('   Camoufox can be installed later with: npx camoufox-js fetch');
     } else {
       console.warn('\n⚠️  Browser installation failed:');
       console.warn(`   ${errorMsg}`);
-      console.warn('\n💡 You can install Camoufox later with:');
-      console.warn('   npx camoufox-js fetch');
     }
 
     // NEVER exit with code 1 - let npm install complete
@@ -150,9 +164,14 @@ if (skipBrowserDownload) {
 console.log('\n📋 Verifying browser installation...');
 
 // Camoufox stores binaries in $HOME/.cache/camoufox on Linux/macOS
-const camoufoxPath = isWindows 
-  ? join(browserCacheDir, "AppData", "Local", "camoufox", "camoufox", "Cache")
-  : join(browserCacheDir, '.cache', 'camoufox');
+let camoufoxPath;
+if (isWindows) {
+    camoufoxPath = join(browserCacheDir, "AppData", "Local", "camoufox", "camoufox", "Cache");
+} else if (isDarwin) {
+    camoufoxPath = join(browserCacheDir, 'Library', 'Caches', 'camoufox');
+} else {
+    camoufoxPath = join(browserCacheDir, '.cache', 'camoufox');
+}
 
 if (existsSync(camoufoxPath)) {
     console.log(`   ✅ camoufox: Found in ${camoufoxPath}`);

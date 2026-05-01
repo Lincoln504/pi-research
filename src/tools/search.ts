@@ -6,21 +6,23 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
+import { logger } from '../logger.ts';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 
 export function createSearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
+  onProgress?: (completed: number, total: number) => void;
 }): ToolDefinition {
 
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a list of queries (10-50) for targeted coverage.',
-    promptSnippet: 'Web search (10-50 queries)',
+    description: 'Search the web using a list of queries (10-30) for targeted coverage.',
+    promptSnippet: 'Web search (10-30 queries)',
     promptGuidelines: [
-      'CRITICAL: Provide 10-50 queries per call.',
+      'CRITICAL: Provide 10-30 queries per call.',
       'COVERAGE: Include query variations, related concepts, and specific data points.',
       'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
@@ -30,16 +32,22 @@ export function createSearchTool(options: {
       queries: Type.Array(Type.String(), {
           minItems: 10,
           maxItems: 50,
-          description: 'A list of 10-50 search queries to execute.'
+          description: 'A list of 10-30 search queries to execute.'
       }),
     }),
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
       const p = params as Record<string, any>;
-      const queries = (p['queries'] || []) as string[];
+      let queries = (p['queries'] || []) as string[];
 
       if (queries.length < 10) {
         throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries.`);
+      }
+
+      // Hard cap for safety
+      if (queries.length > 40) {
+          logger.warn(`[search tool] Capping tool call queries: ${queries.length} → 40`);
+          queries = queries.slice(0, 40);
       }
 
       const allowed = options.tracker.recordCall('search');
@@ -51,7 +59,7 @@ export function createSearchTool(options: {
       }
 
       try {
-        const results = await search(queries, undefined, signal);
+        const results = await search(queries, undefined, signal, options.onProgress);
         const elapsed = Date.now() - startTime;
 
         let markdown = `# Web Search Results (${queries.length} queries)\n\n`;

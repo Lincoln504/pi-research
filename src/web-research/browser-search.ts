@@ -13,12 +13,17 @@ import type { SearchResult } from './types.ts';
  * Uses true multithreaded worker processes for maximum burst performance.
  * Each worker maintains its own "warm" browser process.
  */
-export async function performSearch(queries: string[], signal?: AbortSignal): Promise<Map<string, SearchResult[]>> {
+export async function performSearch(
+    queries: string[], 
+    signal?: AbortSignal, 
+    onProgress?: (completed: number, total: number) => void
+): Promise<Map<string, SearchResult[]>> {
     const resultMap = new Map<string, SearchResult[]>();
     
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${MAX_WORKERS} worker threads...`);
 
     const activePromises = new Set<Promise<void>>();
+    let completedCount = 0;
 
     for (const query of queries) {
         if (signal?.aborted) break;
@@ -37,6 +42,9 @@ export async function performSearch(queries: string[], signal?: AbortSignal): Pr
                 const msg = error instanceof Error ? error.message : String(error);
                 logger.error(`[Search] Worker failed for "${query}": ${msg}`);
                 resultMap.set(query, []);
+            } finally {
+                completedCount++;
+                if (onProgress) onProgress(completedCount, queries.length);
             }
         })();
 

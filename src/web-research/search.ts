@@ -18,15 +18,21 @@ import type { QueryResultWithError } from './types.ts';
  * @param queries - Array of search query strings
  * @param _options - (Ignored) Legacy options
  * @param signal - Optional AbortSignal
+ * @param onProgress - Optional callback for progress tracking (completed, total)
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */
-export async function search(queries: string[], _options?: any, signal?: AbortSignal): Promise<QueryResultWithError[]> {
+export async function search(
+  queries: string[], 
+  _options?: any, 
+  signal?: AbortSignal,
+  onProgress?: (completed: number, total: number) => void
+): Promise<QueryResultWithError[]> {
   if (queries.length === 0) return [];
   
   logger.log(`[Search] Orchestrating ${queries.length} queries via Browser Queue...`);
   
   try {
-    const resultMap = await performSearch(queries, signal);
+    const resultMap = await performSearch(queries, signal, onProgress);
     
     return queries.map(q => {
       const results = resultMap.get(q) || [];

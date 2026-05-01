@@ -30,6 +30,8 @@ export interface CreateResearcherSessionOptions {
   updateGlobalLinks?: (links: string[]) => void;
   /** Callback invoked when links are scraped (for real-time coordination) */
   onLinksScraped?: (links: string[]) => void;
+  /** Callback invoked during search progress (completed, total) */
+  onSearchProgress?: (completed: number, total: number) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
   /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */
@@ -51,6 +53,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     getGlobalState,
     updateGlobalLinks,
     onLinksScraped,
+    onSearchProgress,
     getTokensUsed,
     getScrapeTokens,
     contextWindowSize,
@@ -81,6 +84,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       getGlobalState: globalState,
       updateGlobalLinks: globalLinks,
       onLinksScraped: onLinksScraped,
+      onSearchProgress: onSearchProgress,
       getTokensUsed,
       getScrapeTokens,
       contextWindowSize,
@@ -110,6 +114,12 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       // to burn minutes on internal thinking, compounding to 15-25 min per researcher.
       thinkingLevel: 'off',
     });
+
+    // Customize thinking label for researchers to distinguish them in the TUI
+    if (extensionCtx.ui?.setHiddenThinkingLabel && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
+      const internalId = systemPrompt.match(/ID: ([^)]+)/)?.[1] || 'Unknown';
+      extensionCtx.ui.setHiddenThinkingLabel(`Researcher ${internalId}`);
+    }
 
     // Log to confirm thinking level was set
     const { logger: piLogger } = await import('../logger.ts');

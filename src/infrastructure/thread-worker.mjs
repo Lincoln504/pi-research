@@ -34,7 +34,16 @@ let context = null;
 async function initBrowser() {
     try {
         if (!browser || !browser.isConnected()) {
-            const { Camoufox } = require('camoufox-js');
+            let CamoufoxModule;
+            try {
+                CamoufoxModule = require('camoufox-js');
+            } catch (e) {
+                throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`);
+            }
+
+            const { Camoufox } = CamoufoxModule;
+            
+            // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
             browser = await Camoufox({
                 headless: true,
                 humanize: true
@@ -50,6 +59,12 @@ async function initBrowser() {
     } catch (e) {
         browser = null;
         context = null;
+        const msg = e instanceof Error ? e.message : String(e);
+        
+        if (msg.includes('Camoufox is not installed')) {
+            throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`);
+        }
+        
         throw e;
     }
 }
@@ -148,7 +163,7 @@ async function executeScrapeTask(browser, context, url) {
 async function executeHealthCheck(browser, context) {
     const page = await context.newPage();
     try {
-        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 10000 });
         const title = await page.title();
         await page.close();
         return { success: !!title };

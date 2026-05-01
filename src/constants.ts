@@ -68,15 +68,15 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
 // ==================== Context-Aware Scraping Constants ====================
 
 /** Fraction of context window consumed beyond which all scraping is blocked. */
-export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.55;
+export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.15; // 30k / 200k
 
 /** 
  * Fraction of SCRAPE-SOURCED tokens beyond which scraping is blocked.
  */
-export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.45;
+export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.1; // 20k / 200k
 
 /** Estimated tokens consumed per scrape call */
-export const AVG_TOKENS_PER_SCRAPE = 15000;
+export const AVG_TOKENS_PER_SCRAPE = 10000;
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
@@ -89,9 +89,6 @@ export const PROGRESS_BAR_WIDTH = 18;
 
 // ==================== Orchestrator Constants ====================
 
-/** Maximum characters per researcher report when sent to lead evaluator */
-export const MAX_EVALUATOR_REPORT_LENGTH = 50000;
-
 /**
  * Extra rounds the lead evaluator may earn beyond targetRounds when critical gaps remain.
  * Rounds targetRounds+1 through targetRounds+MAX_EXTRA_ROUNDS are "bonus" territory.
@@ -103,7 +100,7 @@ export const MAX_EXTRA_ROUNDS = 2;
 export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 
 /** Hard cap on search queries per researcher, enforced after LLM planning */
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 20;  // FIX: Match prompt (was 10)
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 30;  // FIX: Match prompt (was 15)
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 5;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 10;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 15;
 
