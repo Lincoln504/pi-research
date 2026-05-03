@@ -13,9 +13,38 @@
 import { ThreadWorker } from 'poolifier';
 import { createRequire } from 'module';
 import * as os from 'node:os';
+import * as fs from 'node:fs';
 import process from 'node:process';
 
 const require = createRequire(import.meta.url);
+
+// Generate a random ID for this worker thread to track distribution in logs
+const workerId = Math.random().toString(36).substring(2, 6);
+
+/**
+ * File-based logger for workers that mirrors the main process format
+ */
+function logToDebugFile(level, ...args) {
+    const logFile = process.env.PI_RESEARCH_LOG_FILE;
+    if (!logFile) return;
+
+    try {
+        const timestamp = new Date().toISOString();
+        const entry = {
+            timestamp,
+            level,
+            workerId,
+            message: args.map(arg => {
+                if (arg instanceof Error) return arg.stack || arg.message;
+                if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg);
+                return String(arg);
+            }).join(' ')
+        };
+        fs.appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
+    } catch {
+        // ignore
+    }
+}
 
 // Set worker priority to reduce system impact
 try {
@@ -34,6 +63,7 @@ let context = null;
 async function initBrowser() {
     try {
         if (!browser || !browser.isConnected()) {
+            logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
             let CamoufoxModule;
             try {
                 CamoufoxModule = require('camoufox-js');
@@ -51,6 +81,7 @@ async function initBrowser() {
             context = await browser.newContext({
                 viewport: { width: 1280, height: 800 },
             });
+            logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
         } else if (!context) {
             context = await browser.newContext({
                 viewport: { width: 1280, height: 800 },
@@ -96,6 +127,7 @@ async function extractSearchResults(page) {
 async function executeSearchTask(browser, context, query) {
     const page = await context.newPage();
     try {
+                logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
         await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
         await page.fill('input[name="q"]', query);
         await Promise.all([
@@ -119,6 +151,7 @@ async function executeSearchTask(browser, context, query) {
 async function executeScrapeTask(browser, context, url) {
     const page = await context.newPage();
     try {
+                logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
         // High-fidelity wait: try domcontentloaded first for speed
         const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         const contentType = (await response?.headerValue('content-type')) || '';
@@ -167,17 +200,20 @@ async function executeHealthCheck(browser, context) {
 async function runTask(data) {
     const { type, query, url } = data;
     const startTime = Date.now();
+        logToDebugFile('DEBUG', `[Worker-${workerId}] Received task: ${type}`);
     
     try {
         await initBrowser();
 
         if (type === 'search') {
             const result = await executeSearchTask(browser, context, query);
+                        logToDebugFile('DEBUG', `[Worker-${workerId}] Search completed in ${Date.now() - startTime}ms`);
             return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
         }
         
         if (type === 'scrape') {
             const result = await executeScrapeTask(browser, context, url);
+                        logToDebugFile('DEBUG', `[Worker-${workerId}] Scrape completed in ${Date.now() - startTime}ms`);
             return { ...result, duration: Date.now() - startTime };
         }
 
@@ -189,6 +225,7 @@ async function runTask(data) {
         return { error: 'Unknown task type' };
     } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
+                logToDebugFile('ERROR', `[Worker-${workerId}] Task failed: ${errMsg}`);
         
         // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
         if (errMsg.includes('Target closed') || 

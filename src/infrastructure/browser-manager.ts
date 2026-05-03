@@ -1,4 +1,4 @@
-import { logger } from '../logger.ts';
+import { logger, getLogger } from '../logger.ts';
 import { shutdownManager } from '../utils/shutdown-manager.ts';
 import { StateManager } from './state-manager.ts';
 import { BrowserServer } from './browser-server.ts';
@@ -10,11 +10,12 @@ import { existsSync } from 'node:fs';
 import * as http from 'node:http';
 import { FixedThreadPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
+import { getConfig } from '../config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export const MAX_WORKERS = 3;
+export const MAX_WORKERS = getConfig().WORKER_THREADS;
 
 interface IScheduler {
     runSearch(query: string): Promise<SearchResult[]>;
@@ -33,13 +34,23 @@ class BrowserTaskScheduler implements IScheduler {
         // Ensure browser cache directory exists and get environment variables for redirection
         ensureBrowserCacheDir();
         const browserEnv = getBrowserEnv();
+        
+        // Pass the log file path to workers so they can log to the same file
+        const logFilePath = getLogger().getLogFilePath();
+        if (logFilePath) {
+            browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
+        }
 
         this.pool = new FixedThreadPool(MAX_WORKERS, join(__dirname, 'thread-worker.mjs'), {
             env: browserEnv,
             errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
             workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
             enableTasksQueue: true,
-            tasksQueueOptions: { concurrency: 1 }
+            tasksQueueOptions: { 
+                concurrency: 1,
+                taskStealing: true,
+                tasksStealingOnBackPressure: true
+            }
         });
     }
 
@@ -84,10 +95,11 @@ class BrowserClient implements IScheduler {
     private async request<T>(path: string, data: any): Promise<T> {
         const start = Date.now();
         return new Promise((resolve, reject) => {
-            const timeoutMs = 45000;
+            // Increased timeout to 120s to allow for shared pool queuing delays
+            const timeoutMs = 120000;
             const timer = setTimeout(() => {
                 req.destroy();
-                reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms`));
+                reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`));
             }, timeoutMs);
 
             const req = http.request({

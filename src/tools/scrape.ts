@@ -13,14 +13,12 @@ import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { deduplicateUrls } from '../utils/shared-links.ts';
+import { getConfig } from '../config.ts';
 import {
   MAX_SCRAPE_URLS,
-  MAX_SCRAPE_CALLS,
   BATCH_2_DEFAULT_CONCURRENCY,
-  MAX_CONTEXT_FRACTION_FOR_SCRAPING,
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING,
   DEFAULT_MODEL_CONTEXT_WINDOW,
-  AVG_TOKENS_PER_SCRAPE,
+  getMaxScrapeBatches,
 } from '../constants.ts';
 
 export function createScrapeTool(options: {
@@ -45,7 +43,10 @@ export function createScrapeTool(options: {
     return (tokens + additionalTokens) / ctxWindow;
   };
 
-  const getThreshold = () => options.getScrapeTokens ? MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING : MAX_CONTEXT_FRACTION_FOR_SCRAPING;
+  const config = getConfig();
+  const threshold = config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING;
+  const maxScrapeBatches = getMaxScrapeBatches();
+  const maxScrapeBatchesDisplay = maxScrapeBatches > 5 ? 'unlimited (capped at scrape limit %)' : maxScrapeBatches.toString();
 
   const ScrapeParams = Type.Object({
     urls: Type.Array(Type.String(), { minItems: 1 }),
@@ -55,7 +56,7 @@ export function createScrapeTool(options: {
   const contextLimitMessage = (fraction: number, batchLabel: string, projected: boolean = false): string => [
     `# Scrape Skipped — Context Budget ${projected ? 'Projection' : 'Reached'} (${batchLabel})`,
     '',
-    `Your research context is currently **${Math.round(fraction * 100)}% full** (threshold: ${Math.round(getThreshold() * 100)}%).`,
+    `Your research context is currently **${Math.round(fraction * 100)}% full** (threshold: ${Math.round(threshold * 100)}%).`,
     'Scraping beyond this point risks truncating your findings during synthesis.',
     '',
     '**Action**: Proceed directly to **Phase 3 — Synthesis**.',
@@ -65,19 +66,19 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2 → Batch 3.',
-    promptSnippet: 'Scrape full content from URLs (3-batch protocol)',
+    description: `Scrape content from URLs. Supports HTML and PDF. Protocol: up to ${maxScrapeBatchesDisplay} batches.`,
+    promptSnippet: `Scrape full content from URLs (up to ${maxScrapeBatchesDisplay} batches)`,
     promptGuidelines: [
-      `PROTOCOL: Batch 1 → Batch 2 → Batch 3 (up to ${MAX_SCRAPE_URLS} URLs each).`,
+      `PROTOCOL: Batch 1 → Batch 2 → ... (up to ${maxScrapeBatchesDisplay}, up to ${MAX_SCRAPE_URLS} URLs each).`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
-      `Batches skipped automatically if context exceeds ${Math.round(getThreshold() * 100)}% — do not skip batches manually.`,
+      `Batches skipped automatically if context exceeds ${Math.round(threshold * 100)}% — do not skip batches manually.`,
     ],
     parameters: ScrapeParams,
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
       const callCount = options.tracker.getToolCallCount('scrape');
-      const limit = options.tracker.getToolLimit('scrape') ?? MAX_SCRAPE_CALLS;
+      const limit = options.tracker.getToolLimit('scrape') ?? maxScrapeBatches;
       if (callCount >= limit) {
           return {
             content: [{ type: 'text', text: options.tracker.getLimitMessage('scrape') }],
@@ -126,8 +127,8 @@ export function createScrapeTool(options: {
       const batchLabel = `Batch ${callCount + 1}`;
 
       // Context Gate
-      const projectedFraction = getContextFraction(urls.length * AVG_TOKENS_PER_SCRAPE);
-      if (projectedFraction >= getThreshold()) {
+      const projectedFraction = getContextFraction(urls.length * config.AVG_TOKENS_PER_SCRAPE);
+      if (projectedFraction >= threshold) {
         return {
           content: [{ type: 'text', text: contextLimitMessage(projectedFraction, batchLabel, true) }],
           details: { skipped: true, reason: 'context_limit' },

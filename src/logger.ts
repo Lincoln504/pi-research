@@ -80,7 +80,14 @@ export function getDefaultDebugLogPathTemplate(): string {
  * Check if verbose mode is enabled from environment
  */
 export function isVerboseFromEnv(): boolean {
-  return process.argv.includes('--verbose') || process.env['PI_RESEARCH_VERBOSE'] === '1';
+  // Support standard flags and environment variables
+  return process.argv.includes('--verbose') || 
+         process.argv.includes('-v') ||
+         process.argv.includes('--debug') ||
+         process.env['PI_RESEARCH_VERBOSE'] === '1' ||
+         process.env['PI_RESEARCH_DEBUG'] === '1' ||
+         process.env['DEBUG'] === '1' ||
+         process.env['DEBUG'] === 'pi-research';
 }
 
 export function createResearchRunId(): string {

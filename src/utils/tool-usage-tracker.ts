@@ -7,7 +7,7 @@
  */
 
 import { logger } from '../logger.ts';
-import { MAX_GATHERING_CALLS, MAX_SCRAPE_CALLS } from '../constants.ts';
+import { MAX_GATHERING_CALLS, MAX_SCRAPE_CALLS, getMaxScrapeBatches } from '../constants.ts';
 
 export interface ToolLimits {
   // Combined gathering limit (search, security_search, stackexchange, grep)
@@ -125,8 +125,13 @@ export class ToolUsageTracker {
     }
 
     if (category === 'scrape') {
-      const limit = catLimit ?? MAX_SCRAPE_CALLS;
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
+      const limit = catLimit ?? getMaxScrapeBatches();
+      const effectiveLimit = limit > 5 ? 'unlimited (capped at scrape limit %)' : limit.toString();
+      // Generate batch list based on actual limit, but cap display at 6 batches to avoid overly long messages
+      const displayLimit = Math.min(limit, 6);
+      const batchList = displayLimit <= 3 ? 'Batch 1, Batch 2, Batch 3' :
+        Array.from({ length: displayLimit }, (_, i) => `Batch ${i + 1}`).join(', ') + (limit > 6 ? ', ...' : '');
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${effectiveLimit} scrape batches (${batchList}). ` +
         `This tool cannot be used again. Proceed immediately to synthesis: compile your findings and submit your full report.`;
     }
     const limit = catLimit ?? MAX_GATHERING_CALLS;
@@ -169,9 +174,20 @@ export class ToolUsageTracker {
  * Create default tool limits for a researcher
  */
 export function createDefaultToolLimits(): ToolLimits {
+  // Dynamic import to avoid circular dependency with config.ts
+  let maxScrapeBatches = MAX_SCRAPE_CALLS; // Default fallback
+  try {
+    const { getConfig } = require('../config.ts');
+    const configBatches = getConfig().MAX_SCRAPE_BATCHES;
+    // 0 or values > 99 are treated as "unlimited" (capped at scrape limit %)
+    maxScrapeBatches = (configBatches === 0 || configBatches > 99) ? 99 : configBatches;
+  } catch (_e) {
+    // Use fallback if config is not available
+  }
+
   return {
     gathering: MAX_GATHERING_CALLS,
-    scrape: MAX_SCRAPE_CALLS,
+    scrape: maxScrapeBatches,
     search: 1,
     read: undefined,
   };

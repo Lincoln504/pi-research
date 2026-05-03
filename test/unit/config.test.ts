@@ -18,22 +18,31 @@ describe('config (refactored)', () => {
     describe('positive cases', () => {
       it('should use defaults when no environment vars', () => {
         const env = {} as Record<string, string | undefined>;
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000);
+        expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(3);
+        expect(config.RESEARCHER_MAX_RETRIES).toBe(3);
+        expect(config.RESEARCHER_MAX_RETRY_DELAY_MS).toBe(5000);
         expect(config.PROXY_URL).toBeUndefined();
+        expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(10);
+        expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(15000);
+        expect(config.DEFAULT_RESEARCH_DEPTH).toBe(0);
+        expect(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING).toBe(0.45);
+        expect(config.AVG_TOKENS_PER_SCRAPE).toBe(10000);
+        expect(config.WORKER_THREADS).toBe(3);
       });
 
       it('should use custom RESEARCHER_TIMEOUT_MS from env', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '300000' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(300000);
       });
 
       it('should use custom PROXY_URL from env', () => {
         const env = { PROXY_URL: 'http://proxy.example.com:8080' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.PROXY_URL).toBe('http://proxy.example.com:8080');
       });
@@ -43,7 +52,7 @@ describe('config (refactored)', () => {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180000',
           PROXY_URL: 'socks5://127.0.0.1:9050',
         };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
         expect(config.PROXY_URL).toBe('socks5://127.0.0.1:9050');
@@ -53,9 +62,16 @@ describe('config (refactored)', () => {
     describe('negative cases', () => {
       it('should handle invalid RESEARCHER_TIMEOUT_MS string', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: 'invalid' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
+      });
+
+      it('should handle WORKER_THREADS from env', () => {
+        const env = { PI_RESEARCH_WORKER_THREADS: '5' };
+        const config = createConfig(env, {});
+
+        expect(config.WORKER_THREADS).toBe(5);
       });
 
       it('should handle empty string values', () => {
@@ -63,10 +79,10 @@ describe('config (refactored)', () => {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '',
           PROXY_URL: '',
         };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
-        expect(config.PROXY_URL).toBe(''); // Empty string, not undefined
+        expect(config.PROXY_URL).toBeUndefined(); // Empty string treated as undefined
       });
 
       it('should handle undefined values in env object', () => {
@@ -74,7 +90,7 @@ describe('config (refactored)', () => {
           PI_RESEARCH_RESEARCHER_TIMEOUT_MS: undefined,
           PROXY_URL: undefined,
         };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
         expect(config.PROXY_URL).toBeUndefined();
@@ -84,35 +100,35 @@ describe('config (refactored)', () => {
     describe('edge cases', () => {
       it('should handle very large RESEARCHER_TIMEOUT_MS', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '999999999' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(999999999);
       });
 
       it('should handle very small positive RESEARCHER_TIMEOUT_MS', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '1' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(1);
       });
 
       it('should handle decimal RESEARCHER_TIMEOUT_MS (parsed as base 10)', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180.5' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180); // parseInt floors decimals
       });
 
       it('should handle proxy URL with special characters', () => {
         const env = { PROXY_URL: 'socks5://user:pass@127.0.0.1:9050' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.PROXY_URL).toBe('socks5://user:pass@127.0.0.1:9050');
       });
 
       it('should handle unicode in proxy URL', () => {
         const env = { PROXY_URL: 'http://example.com/path/日本語' };
-        const config = createConfig(env);
+        const config = createConfig(env, {});
 
         expect(config.PROXY_URL).toContain('日本語');
       });
@@ -164,7 +180,13 @@ describe('config (refactored)', () => {
           PROXY_URL: 'http://custom-proxy.com',
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         setConfig(customConfig);
@@ -183,7 +205,13 @@ describe('config (refactored)', () => {
           PROXY_URL: config1.PROXY_URL,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         setConfig(customConfig);
@@ -198,7 +226,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 12345,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         setConfig(customConfig);
@@ -219,7 +253,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: -1, // Invalid
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => setConfig(customConfig)).not.toThrow();
@@ -237,14 +277,20 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 12345,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         setConfig(customConfig);
         expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(12345);
 
         resetConfig();
-        expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(240000); // Back to default
+        expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(360000); // Back to default
       });
 
       it('should work when no config was set', () => {
@@ -258,7 +304,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 99999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         });
         resetConfig();
 
@@ -266,7 +318,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 55555,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
         setConfig(newConfig);
 
@@ -279,10 +337,16 @@ describe('config (refactored)', () => {
     describe('positive cases', () => {
       it('should validate default config', () => {
         const config: Config = {
-          RESEARCHER_TIMEOUT_MS: 240000,
+          RESEARCHER_TIMEOUT_MS: 360000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -293,7 +357,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 30000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 1,
+          RESEARCHER_MAX_RETRIES: 0,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 1000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.01,
+          AVG_TOKENS_PER_SCRAPE: 1000,
+          WORKER_THREADS: 1,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -304,7 +374,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 600000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 10,
+          RESEARCHER_MAX_RETRIES: 10,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 60000,
+          DEFAULT_RESEARCH_DEPTH: 3,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.99,
+          AVG_TOKENS_PER_SCRAPE: 100000,
+          WORKER_THREADS: 16,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -315,7 +391,13 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 180000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 5,
+          RESEARCHER_MAX_RETRIES: 5,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 1,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -323,10 +405,16 @@ describe('config (refactored)', () => {
 
       it('should use global config if none provided', () => {
         setConfig({
-          RESEARCHER_TIMEOUT_MS: 240000,
+          RESEARCHER_TIMEOUT_MS: 360000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         });
 
         expect(() => validateConfig()).not.toThrow();
@@ -339,10 +427,16 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 29999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
-        expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
+        expect(() => validateConfig(config)).toThrow('must be 30000–600000ms');
       });
 
       it('should throw for RESEARCHER_TIMEOUT_MS above maximum', () => {
@@ -350,10 +444,16 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 600001,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
-        expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
+        expect(() => validateConfig(config)).toThrow('must be 30000–600000ms');
       });
 
       it('should throw for negative RESEARCHER_TIMEOUT_MS', () => {
@@ -361,10 +461,16 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: -1,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
-        expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
+        expect(() => validateConfig(config)).toThrow('must be 30000–600000ms');
       });
 
       it('should throw for zero RESEARCHER_TIMEOUT_MS', () => {
@@ -372,10 +478,16 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 0,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
-        expect(() => validateConfig(config)).toThrow('must be between 30000ms (30s) and 600000ms (10m)');
+        expect(() => validateConfig(config)).toThrow('must be 30000–600000ms');
       });
     });
 
@@ -385,13 +497,25 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 30000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
         const config2: Config = {
           RESEARCHER_TIMEOUT_MS: 600000,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => validateConfig(config1)).not.toThrow();
@@ -403,13 +527,25 @@ describe('config (refactored)', () => {
           RESEARCHER_TIMEOUT_MS: 29999,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
         const config2: Config = {
           RESEARCHER_TIMEOUT_MS: 600001,
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => validateConfig(config1)).toThrow();
@@ -418,11 +554,17 @@ describe('config (refactored)', () => {
 
       it('should handle config with proxy', () => {
         const config: Config = {
-          RESEARCHER_TIMEOUT_MS: 240000,
+          RESEARCHER_TIMEOUT_MS: 360000,
           PROXY_URL: 'http://proxy.example.com:8080',
           TUI_REFRESH_DEBOUNCE_MS: 10,
           CONSOLE_RESTORE_DELAY_MS: 15000,
-          MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+          MAX_CONCURRENT_RESEARCHERS: 3,
+          RESEARCHER_MAX_RETRIES: 3,
+          RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+          DEFAULT_RESEARCH_DEPTH: 0,
+          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+          AVG_TOKENS_PER_SCRAPE: 10000,
+          WORKER_THREADS: 3,
         };
 
         expect(() => validateConfig(config)).not.toThrow();
@@ -432,9 +574,12 @@ describe('config (refactored)', () => {
 
   describe('integration scenarios', () => {
     it('should support full config lifecycle', () => {
+      // Reset to ensure clean state
+      resetConfig();
+
       // Start with defaults
       const config1 = getConfig();
-      expect(config1.RESEARCHER_TIMEOUT_MS).toBe(240000);
+      expect(config1.RESEARCHER_TIMEOUT_MS).toBe(360000);
 
       // Set custom config
       const customConfig: Config = {
@@ -442,7 +587,13 @@ describe('config (refactored)', () => {
         PROXY_URL: 'http://proxy.com',
         TUI_REFRESH_DEBOUNCE_MS: 10,
         CONSOLE_RESTORE_DELAY_MS: 15000,
-        MAX_CONCURRENT_RESEARCHERS: 3, SEARCH_LANGUAGE: 'en-US',
+        MAX_CONCURRENT_RESEARCHERS: 3,
+        RESEARCHER_MAX_RETRIES: 3,
+        RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+        DEFAULT_RESEARCH_DEPTH: 0,
+        MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+        AVG_TOKENS_PER_SCRAPE: 10000,
+        WORKER_THREADS: 3,
       };
       setConfig(customConfig);
 
@@ -458,7 +609,7 @@ describe('config (refactored)', () => {
 
       // Back to defaults
       const config3 = getConfig();
-      expect(config3.RESEARCHER_TIMEOUT_MS).toBe(240000);
+      expect(config3.RESEARCHER_TIMEOUT_MS).toBe(360000);
     });
 
     it('should work with test environment', () => {
@@ -466,7 +617,7 @@ describe('config (refactored)', () => {
         PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '120000',
       };
 
-      const config = createConfig(testEnv);
+      const config = createConfig(testEnv, {});
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(120000);
 
       expect(() => validateConfig(config)).not.toThrow();

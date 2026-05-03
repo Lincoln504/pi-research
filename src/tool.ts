@@ -53,7 +53,7 @@ import {
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
-import { MAX_SCRAPE_CALLS, MAX_GATHERING_CALLS } from './constants.ts';
+import { MAX_GATHERING_CALLS, getMaxScrapeBatches } from './constants.ts';
 import { getConfig } from './config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -207,7 +207,6 @@ export function createResearchTool(): ToolDefinition {
           cleanup = () => {
             if (cleanup === null) return; // guard against double-call
             cleanup = null;
-            if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
             if (unsubOrder) unsubOrder();
             if (unsubInput) { unsubInput(); unsubInput = null; }
             endResearchSession(piSessionId, researchId);
@@ -226,8 +225,7 @@ export function createResearchTool(): ToolDefinition {
 
           panelState = createInitialPanelState(researchId, sanitizedQuery, modelIdStr);
           registerSessionPanel(piSessionId, researchId, panelState);
-          
-          let renderTimeout: NodeJS.Timeout | null = null;
+
           const debouncedRefresh = () => {
             refreshAllSessions(piSessionId);
           };
@@ -276,14 +274,16 @@ export function createResearchTool(): ToolDefinition {
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
             updateSliceStatus(panelState, sliceLabel, 'Researching...');
-            
-            // Expected progress: total tool budget (gathering + scraping)
-            // Reduced by 3 to ensure we don't hit 100% prematurely before synthesis
-            const expectedTools = Math.max(1, MAX_GATHERING_CALLS + MAX_SCRAPE_CALLS - 3);
-            panelState.progress = { expected: expectedTools, made: 0 };
-            debouncedRefresh();
 
             const researcherPromptTemplate = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
+            const maxScrapeBatches = getMaxScrapeBatches();
+            const maxScrapeBatchesDisplay = maxScrapeBatches > 5 ? 'unlimited (capped at scrape limit %)' : maxScrapeBatches.toString();
+
+            // Expected progress: total tool budget (gathering + scraping)
+            // Reduced by 3 to ensure we don't hit 100% prematurely before synthesis
+            const expectedTools = Math.max(1, MAX_GATHERING_CALLS + maxScrapeBatches - 3);
+            panelState.progress = { expected: expectedTools, made: 0 };
+            debouncedRefresh();
             const quickEvidenceSection =
                 '## Search\n' +
                 'You have access to the `search` tool. You get EXACTLY ONE search call — make it count.\n' +
@@ -291,7 +291,7 @@ export function createResearchTool(): ToolDefinition {
                 'Each query must target a distinct piece of information. Avoid generic queries.\n' +
                 'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
                 '## Scrape\n' +
-                'After searching, scrape the best sources using the `scrape` tool (up to 3 rounds, up to 4 URLs each — stop early if the tool signals context is full).\n' +
+                `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to 4 URLs each — stop early if the tool signals context is full).\n` +
                 'Prioritize primary sources and authoritative data.';
             let researcherPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
                 .replace('{{goal}}', sanitizedQuery)
@@ -301,6 +301,7 @@ export function createResearchTool(): ToolDefinition {
             
             const extendedCtx = ctx as ExtendedExtensionContext;
             let quickSessionTokens = 0;
+            let quickScrapeTokens = 0;
             const quickContextWindowSize = (selectedModel as any)?.contextWindow ?? 200000;
 
             const session = await createResearcherSession({
@@ -315,6 +316,7 @@ export function createResearchTool(): ToolDefinition {
                 debouncedRefresh();
               },
               getTokensUsed: () => quickSessionTokens,
+              getScrapeTokens: () => quickScrapeTokens,
               contextWindowSize: quickContextWindowSize,
             });
             
@@ -358,8 +360,16 @@ export function createResearchTool(): ToolDefinition {
                 }
               } else if (event.type === 'tool_execution_end') {
                 logger.debug(`[research] Tool ${event.toolName} completed ${event.isError ? '(FAILED)' : '(OK)'}`);
-                if (!event.isError && panelState.progress) {
-                  panelState.progress.made = Math.min(panelState.progress.expected, panelState.progress.made + 1);
+                if (!event.isError) {
+                  if (panelState.progress) {
+                    panelState.progress.made = Math.min(panelState.progress.expected, panelState.progress.made + 1);
+                  }
+                  if (event.toolName === 'scrape') {
+                    const scrapeCount = (event.result as any)?.details?.count ?? 0;
+                    if (scrapeCount > 0) {
+                      quickScrapeTokens += scrapeCount * getConfig().AVG_TOKENS_PER_SCRAPE;
+                    }
+                  }
                 }
                 if (event.toolName === 'search') {
                   panelState.isSearching = false;

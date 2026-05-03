@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
+import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
 import { createResearchTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { readFileSync } from 'node:fs';
@@ -7,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
-import { 
-  MAX_TEAM_SIZE_LEVEL_1, 
-  MAX_TEAM_SIZE_LEVEL_2, 
-  MAX_TEAM_SIZE_LEVEL_3 
+import {
+  MAX_TEAM_SIZE_LEVEL_1,
+  MAX_TEAM_SIZE_LEVEL_2,
+  MAX_TEAM_SIZE_LEVEL_3,
 } from './constants.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,7 +56,7 @@ export default function (pi: ExtensionAPI) {
 
   // /research <query> — direct quick research, no LLM turn.
   pi.registerCommand('research', {
-    description: 'Quick web research.',
+    description: 'Web research a query',
     handler: async (args, ctx) => {
       const text = args.trim();
       if (!text) return;
@@ -101,108 +102,254 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // /research-reload — hot reload the pi-research extension
-  pi.registerCommand('research-reload', {
-    description: 'Reload pi-research extension (hot reload config changes)',
-    handler: async (_args, ctx) => {
-      try {
-        ctx.ui.notify('🔄 Reloading pi-research...', 'info');
-        
-        // Use Pi's reload function if available
-        if (typeof ctx.reload === 'function') {
-          await ctx.reload();
-          ctx.ui.notify('✅ pi-research reloaded successfully', 'info');
-        } else {
-          // Fallback: notify user that reload is not available
-          ctx.ui.notify('⚠️ Hot reload not available - restart Pi to reload', 'warning');
-          logger.warn('[pi-research] ctx.reload() not available in this Pi version');
-        }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('[pi-research] /research-reload failed:', error);
-        ctx.ui.notify(`❌ Reload failed: ${message}`, 'error');
-      }
-    },
-  });
-
   // /research-config — interactive configuration dashboard
   pi.registerCommand('research-config', {
-    description: 'Interactive research configuration dashboard.',
+    description: 'Research Configuration TUI',
     handler: async (_args, ctx) => {
-      const { getConfig, validateConfig } = await import('./config.ts');
-      const constants = await import('./constants.ts');
-      const config = getConfig();
+      if (!ctx.hasUI) {
+        ctx.ui.notify('Research Configuration TUI requires interactive mode', 'error');
+        return;
+      }
 
-      const result = await ctx.ui.custom((_tui: any, theme: any, _keybindings: any, done: any) => {
-          const content: any[] = [
-              { type: 'text', text: '🔬 pi-research Configuration Dashboard', color: 'cyan' },
-              { type: 'text', text: '═'.repeat(40), color: 'accent' },
-              { type: 'text', text: ' [ Researchers ]', color: 'yellow' },
-              { type: 'text', text: `  1. Max Concurrent:  ${config.MAX_CONCURRENT_RESEARCHERS.toString().padEnd(10)} (active slots)`, color: 'text' },
-              { type: 'text', text: `  2. Timeout:        ${(config.RESEARCHER_TIMEOUT_MS / 1000).toString().padEnd(10)} (seconds)`, color: 'text' },
-              { type: 'text', text: `  3. Max Retries:    ${config.RESEARCHER_MAX_RETRIES.toString().padEnd(10)} (per request)`, color: 'text' },
-              { type: 'text', text: `  4. Default Depth:  ${config.DEFAULT_RESEARCH_DEPTH.toString().padEnd(10)} (for /research)`, color: 'text' },
-              
-              { type: 'text', text: '\n [ Context & Scraping ]', color: 'yellow' },
-              { type: 'text', text: `  5. Scrape Limit:   ${Math.round(constants.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100).toString().padEnd(10)} (% of context)`, color: 'text' },
-              { type: 'text', text: `  6. Total Limit:    ${Math.round(constants.MAX_CONTEXT_FRACTION_FOR_SCRAPING * 100).toString().padEnd(10)} (% total budget)`, color: 'text' },
-              { type: 'text', text: `  7. Avg Tokens:     ${constants.AVG_TOKENS_PER_SCRAPE.toString().padEnd(10)} (estimation)`, color: 'text' },
+      const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } = await import('./config.ts');
+      const config = { ...getConfig() }; // Work on a copy
 
-              { type: 'text', text: '\n [ TUI / UX ]', color: 'yellow' },
-              { type: 'text', text: `  8. Refresh Rate:   ${config.TUI_REFRESH_DEBOUNCE_MS.toString().padEnd(10)} (ms debounce)`, color: 'text' },
-              { type: 'text', text: `  9. Restore Delay:  ${(config.CONSOLE_RESTORE_DELAY_MS / 1000).toString().padEnd(10)} (seconds)`, color: 'text' },
-              
-              { type: 'text', text: '═'.repeat(40), color: 'accent' },
-              { type: 'text', text: ' [1-9] Edit Setting | [Enter] Save | [Esc] Cancel', color: 'muted' },
-          ];
+      // Get .env file location for help text
+      const envFilePath = getEnvFilePath();
+      // Make the path more user-friendly by using ~ for home directory
+      const homeDir = process.env['HOME'] || '';
+      const displayEnvPath = envFilePath.startsWith(homeDir) 
+        ? envFilePath.replace(homeDir, '~') 
+        : envFilePath;
 
-          return {
-              render: () => content.map(c => theme.fg(c.color, c.text)),
-              invalidate: () => {},
-              handleInput: async (key: string) => {
-                  if (key === 'escape') {
-                      done({ type: 'cancel' });
-                  } else if (key === 'enter') {
-                      done({ type: 'submit', data: config });
-                  } else if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(key)) {
-                      const labels = [
-                          'Max Concurrent Researchers', 'Researcher Timeout (s)', 'Max Retries',
-                          'Default Research Depth (0-3)',
-                          'Scrape Token Limit (%)', 'Total Context Limit (%)', 'Estimated Tokens per Scrape',
-                          'TUI Refresh Rate (ms)', 'Console Restore Delay (s)'
-                      ];
-                      const idx = parseInt(key) - 1;
-                      const val = await ctx.ui.input(`Edit ${labels[idx]}:`);
-                      
-                      if (val) {
-                          const num = parseInt(val);
-                          if (!isNaN(num)) {
-                              switch(key) {
-                                  case '1': config.MAX_CONCURRENT_RESEARCHERS = num; break;
-                                  case '2': config.RESEARCHER_TIMEOUT_MS = num * 1000; break;
-                                  case '3': config.RESEARCHER_MAX_RETRIES = num; break;
-                                  case '4': config.DEFAULT_RESEARCH_DEPTH = num; break;
-                                  case '5': (constants as any).MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = num / 100; break;
-                                  case '6': (constants as any).MAX_CONTEXT_FRACTION_FOR_SCRAPING = num / 100; break;
-                                  case '7': (constants as any).AVG_TOKENS_PER_SCRAPE = num; break;
-                                  case '8': config.TUI_REFRESH_DEBOUNCE_MS = num; break;
-                                  case '9': config.CONSOLE_RESTORE_DELAY_MS = num * 1000; break;
-                              }
-                          }
-                      }
-                  }
+      // Define configuration items with their bounds, step values, and formatters
+      type ConfigKey = keyof typeof config;
+      interface ConfigItem {
+        key: ConfigKey;
+        label: string;
+        description: string;
+        min: number;
+        max: number;
+        step: number;
+        displayMin: number;  // Display value for min (different units)
+        displayMax: number;  // Display value for max (different units)
+        toDisplay: (value: number) => number;  // Convert stored value to display value
+        fromDisplay: (display: number) => number;  // Convert display value to stored value
+        format: (value: number) => string;
+      }
+
+      const configItems: ConfigItem[] = [
+        {
+          key: 'MAX_CONCURRENT_RESEARCHERS',
+          label: 'Max Concurrent',
+          description: '(Researchers)',
+          min: 1,
+          max: 5,
+          displayMin: 1,
+          displayMax: 5,
+          step: 1,
+          toDisplay: (v) => v,
+          fromDisplay: (v) => v,
+          format: (v) => v.toString(),
+        },
+        {
+          key: 'DEFAULT_RESEARCH_DEPTH',
+          label: 'Default Depth',
+          description: '(0=quick 1-3=deep)',
+          min: 0,
+          max: 3,
+          displayMin: 0,
+          displayMax: 3,
+          step: 1,
+          toDisplay: (v) => v,
+          fromDisplay: (v) => v,
+          format: (v) => v.toString(),
+        },
+        {
+          key: 'RESEARCHER_TIMEOUT_MS',
+          label: 'Researcher Timeout',
+          description: '(3-30 min)',
+          min: 180000,   // Stored in milliseconds (3 min = 180000ms)
+          max: 1800000,  // Stored in milliseconds (30 min = 1800000ms)
+          displayMin: 180,   // Displayed in seconds (3 min)
+          displayMax: 1800,  // Displayed in seconds (30 min)
+          step: 30,  // Adjust in 30 second increments (display units = seconds)
+          toDisplay: (v) => v / 1000,  // ms to seconds
+          fromDisplay: (v) => v * 1000,  // seconds to ms
+          format: (v) => `${v}s`,
+        },
+        {
+          key: 'WORKER_THREADS',
+          label: 'Worker Threads',
+          description: '(Playwright Search)',
+          min: 1,
+          max: 16,
+          displayMin: 1,
+          displayMax: 16,
+          step: 1,
+          toDisplay: (v) => v,
+          fromDisplay: (v) => v,
+          format: (v) => v.toString(),
+        },
+        {
+          key: 'MAX_SCRAPE_BATCHES',
+          label: 'Max Scrape Batches',
+          description: '(2-5, 6+=Unlimited)',
+          min: 2,
+          max: 6,
+          displayMin: 2,
+          displayMax: 6,
+          step: 1,
+          toDisplay: (v) => v,
+          fromDisplay: (v) => v,
+          format: (v) => v >= 6 ? 'Unlimited' : v.toString(),
+        },
+        {
+          key: 'MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
+          label: 'Scrape Limit',
+          description: '(Max context scraping allowed)',
+          min: 0.01,   // Stored as fraction (0.0-1.0)
+          max: 0.99,
+          displayMin: 1,   // Displayed as percentage (1-99)
+          displayMax: 99,
+          step: 5,  // Adjust in 5% increments (display units = percentage)
+          toDisplay: (v) => v * 100,  // fraction to percentage
+          fromDisplay: (v) => v / 100,  // percentage to fraction
+          format: (v) => `${Math.round(v)}%`,
+        },
+      ];
+
+      // Use ctx.ui.custom() to create a proper TUI component
+      const result = await ctx.ui.custom<{ type: string; data?: typeof config } | undefined>(
+        (tui, theme, _kb, done) => {
+          // TUI Component class for configuration dashboard
+          class ConfigDashboardComponent {
+            private selectedIndex: number;
+            private cachedLines: string[] = [];
+            private cachedWidth = 0;
+            private cachedVersion = -1;
+            private version = 0;
+
+            constructor() {
+              this.selectedIndex = 0; // Start on first item (Max Concurrent)
+            }
+
+            render(width: number): string[] {
+              // Check cache
+              if (this.cachedWidth === width && this.cachedVersion === this.version) {
+                return this.cachedLines;
               }
-          };
-      });
 
-      if ((result as any).type === 'submit') {
-          try {
-              validateConfig(config);
-              ctx.ui.notify('✅ Configuration updated', 'info');
-              logger.info('[pi-research] Configuration updated via dashboard', config);
-          } catch (e: any) {
-              ctx.ui.notify(`❌ Invalid config: ${e.message}`, 'error');
+              const sep = theme.fg('accent', '─'.repeat(Math.max(0, width - 2)));
+              const lines = [theme.fg('accent', ' pi-research Configuration'), sep];
+
+              configItems.forEach((item, idx) => {
+                const value = config[item.key] as number;
+                const displayValue = item.format(item.toDisplay(value));
+                const isSelected = idx === this.selectedIndex;
+                const prefix = isSelected ? theme.fg('accent', '► ') : '  ';
+                const valueDisplay = isSelected
+                  ? theme.fg('accent', displayValue.padStart(6))
+                  : displayValue.padStart(6);
+                lines.push(theme.fg('text', `${prefix}${item.label.padEnd(20)} ${valueDisplay} ${item.description}`));
+              });
+
+              lines.push(sep);
+              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust  [Enter] Save  [Esc] Cancel'));
+              lines.push(theme.fg('muted', ` Additional configuration options found in ${displayEnvPath}`));
+
+              // Truncate lines to fit within width
+              this.cachedLines = lines.map(line => {
+                const lw = visibleWidth(line);
+                return lw > width ? truncateToWidth(line, Math.max(1, width)) : line;
+              });
+              this.cachedWidth = width;
+              this.cachedVersion = this.version;
+
+              return this.cachedLines;
+            }
+
+            handleInput(key: string): void {
+              // Escape - cancel (must check before arrow keys, matchesKey properly distinguishes)
+              if (matchesKey(key, 'escape')) {
+                done({ type: 'cancel' });
+                return;
+              }
+
+              // Enter - save (handle both CR and LF)
+              if (key === '\r' || key === '\n') {
+                done({ type: 'submit', data: config });
+                return;
+              }
+
+              // Up arrow - move selection up (wraps to bottom)
+              if (matchesKey(key, 'up')) {
+                this.selectedIndex = this.selectedIndex > 0 ? this.selectedIndex - 1 : configItems.length - 1;
+                this.version++;
+                tui.requestRender();
+                return;
+              }
+
+              // Down arrow - move selection down (wraps to top)
+              if (matchesKey(key, 'down')) {
+                this.selectedIndex = this.selectedIndex < configItems.length - 1 ? this.selectedIndex + 1 : 0;
+                this.version++;
+                tui.requestRender();
+                return;
+              }
+
+              // Left arrow - decrease value
+              if (matchesKey(key, 'left')) {
+                const item = configItems[this.selectedIndex];
+                if (!item) return;
+                const currentValue = config[item.key] as number;
+                const currentDisplay = item.toDisplay(currentValue);
+                const newDisplay = Math.max(item.displayMin, currentDisplay - item.step);
+                const newValue = item.fromDisplay(newDisplay);
+                if (newValue !== currentValue) {
+                  (config[item.key] as any) = newValue;
+                  this.version++;
+                  tui.requestRender();
+                }
+                return;
+              }
+
+              // Right arrow - increase value
+              if (matchesKey(key, 'right')) {
+                const item = configItems[this.selectedIndex];
+                if (!item) return;
+                const currentValue = config[item.key] as number;
+                const currentDisplay = item.toDisplay(currentValue);
+                const newDisplay = Math.min(item.displayMax, currentDisplay + item.step);
+                const newValue = item.fromDisplay(newDisplay);
+                if (newValue !== currentValue) {
+                  (config[item.key] as any) = newValue;
+                  this.version++;
+                  tui.requestRender();
+                }
+                return;
+              }
+            }
+
+            invalidate(): void {
+              this.cachedVersion = -1;
+            }
           }
+
+          return new ConfigDashboardComponent();
+        },
+      );
+
+      if (result && result.type === 'submit' && result.data) {
+        try {
+          validateConfig(result.data);
+          saveConfig(result.data);
+          resetConfig();
+          ctx.ui.notify('Configuration updated and saved', 'info');
+          logger.info('[pi-research] Configuration updated via dashboard', result.data);
+        } catch (e: any) {
+          ctx.ui.notify(`Invalid config: ${e.message}`, 'error');
+        }
       }
     },
   });

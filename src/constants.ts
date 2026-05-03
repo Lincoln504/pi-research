@@ -16,13 +16,27 @@ export const REQUEST_DELAY_MS_OTHER = 1000;
 export const MAX_GATHERING_CALLS = 10;
 
 /** Maximum scrape tool calls per researcher (3 batches: Batch 1, Batch 2, Batch 3) */
+/** @deprecated Use getConfig().MAX_SCRAPE_BATCHES instead */
 export const MAX_SCRAPE_CALLS = 3;
+
+/**
+ * Get the maximum scrape batches from config.
+ * This function should be used instead of MAX_SCRAPE_CALLS to support dynamic configuration.
+ */
+export function getMaxScrapeBatches(): number {
+  try {
+    // Dynamic import to avoid circular dependency
+    const { getConfig } = require('./config.ts');
+    const batches = getConfig().MAX_SCRAPE_BATCHES;
+    // 0 or values > 99 are treated as "unlimited" (capped at scrape limit %)
+    return batches === 0 || batches > 99 ? 99 : batches;
+  } catch {
+    return 3; // Fallback to default if config not available
+  }
+}
 
 /** Maximum URLs to scrape per batch (Batch 1 and 2) */
 export const MAX_SCRAPE_URLS = 4;
-
-/** Maximum siblings (researchers) running simultaneously (across all rounds) */
-export const MAX_CONCURRENT_RESEARCHERS = 3;
 
 
 // ==================== Complexity Levels ====================
@@ -66,17 +80,6 @@ export const DEFAULT_INITIAL_DELAY_MS = 1000;
 export const DEFAULT_MAX_DELAY_MS = 10000;
 
 // ==================== Context-Aware Scraping Constants ====================
-
-/** Fraction of context window consumed beyond which all scraping is blocked. */
-export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.55; // 110k / 200k
-
-/** 
- * Fraction of SCRAPE-SOURCED tokens beyond which scraping is blocked.
- */
-export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.45; // 90k / 200k
-
-/** Estimated tokens consumed per scrape call */
-export const AVG_TOKENS_PER_SCRAPE = 10000;
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
