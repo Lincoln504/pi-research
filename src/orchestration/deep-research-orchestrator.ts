@@ -231,10 +231,7 @@ export class DeepResearchOrchestrator {
       while (this.currentRound < maxRounds + MAX_EXTRA_ROUNDS) {
           if (signal?.aborted) throw new Error("Research aborted.");
           this.currentRound++;
-          
-          // Clear completed researchers from previous rounds for clean TUI display
-          clearCompletedResearchers(this.options.panelState);
-          
+
           if (!currentPlan || !currentPlan.researchers) break;
           
           logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers launching (${currentPlan.researchers.length} researcher(s))`);
@@ -279,15 +276,21 @@ export class DeepResearchOrchestrator {
           this.plan = currentPlan;
           currentPlan = await this.evaluate(signal, mustSynthesize);
 
+          // Complete eval slice - evaluator has finished regardless of action
+          completeSlice(this.options.panelState, 'eval');
+
           if (currentPlan.action === 'synthesize') {
               const synthesis = currentPlan.content || this.buildFallbackSynthesis();
-              completeSlice(this.options.panelState, 'eval');
               if (this.options.panelState.progress) {
                   this.options.panelState.progress.made = this.options.panelState.progress.expected;
               }
               this.options.onUpdate(); // Ensure TUI reflects final state
               return synthesis;
           }
+
+          // Evaluator delegated to another round - clear old completed researchers
+          clearCompletedResearchers(this.options.panelState);
+          this.options.onUpdate();
 
           // If delegating to a new round, expand the expected budget
           if (currentPlan.researchers && currentPlan.researchers.length > 0) {
