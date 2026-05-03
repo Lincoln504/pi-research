@@ -119,6 +119,23 @@ export function reactivateSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
+ * Clear completed researchers from previous rounds.
+ * Keeps coord, eval, and burst slices intact for their lifecycle.
+ */
+export function clearCompletedResearchers(state: ResearchPanelState): void {
+  const toRemove: string[] = [];
+  for (const [id, slice] of state.slices.entries()) {
+    // Remove completed numbered researchers (keep coord, eval, burst for their lifecycle)
+    if (slice.completed && !['coord', 'eval', 'burst'].some(special => id.startsWith(special))) {
+      toRemove.push(id);
+    }
+  }
+  for (const id of toRemove) {
+    state.slices.delete(id);
+  }
+}
+
+/**
  * Create initial panel state (without SearXNG status)
  */
 export function createInitialPanelState(sessionId: string, query: string, modelName: string): ResearchPanelState {
@@ -252,13 +269,13 @@ function renderPanelBlock(
       // Token Row (row 1)
       let tokenStr: string;
       if (isEval) {
-        // Eval box: inner decorative ┋ on both sides, text centered between them
+        // Eval box: inner decorative ⋮ on both sides, text centered between them
         const innerWidth = Math.max(0, w - 2);
         const evalDisplay = 'eval'.length > innerWidth ? 'eval'.slice(0, innerWidth) : 'eval';
         const padding = innerWidth - evalDisplay.length;
         const leftPad = Math.floor(padding / 2);
         const rightPad = padding - leftPad;
-        tokenStr = '┋' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '┋';
+        tokenStr = '⋮' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '⋮';
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
@@ -287,7 +304,7 @@ function renderPanelBlock(
         const evalCostRaw = evalCost > 0 ? formatCost(evalCost) : '';
         const evalCostDisplay = evalCostRaw.length > innerWidth ? evalCostRaw.slice(0, innerWidth) : evalCostRaw;
         const evalCostPad = innerWidth - evalCostDisplay.length;
-        costStr = '┋' + ' '.repeat(Math.floor(evalCostPad / 2)) + evalCostDisplay + ' '.repeat(evalCostPad - Math.floor(evalCostPad / 2)) + '┋';
+        costStr = '⋮' + ' '.repeat(Math.floor(evalCostPad / 2)) + evalCostDisplay + ' '.repeat(evalCostPad - Math.floor(evalCostPad / 2)) + '⋮';
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -332,11 +349,11 @@ function renderPanelBlock(
         line += theme.fg('accent', content);
       } else {
         const color = rightRowColors[colIdx]!;
-        // Eval body rows: content is ┋...┋ — render inner decorative borders as accent
-        if (content.length >= 2 && content[0] === '┋' && content[content.length - 1] === '┋') {
-          line += theme.fg('accent', '┋');
+        // Eval body rows: content is ⋮...⋮ — render inner decorative borders as accent
+        if (content.length >= 2 && content[0] === '⋮' && content[content.length - 1] === '⋮') {
+          line += theme.fg('accent', '⋮');
           line += theme.fg(color, content.slice(1, -1));
-          line += theme.fg('accent', '┋');
+          line += theme.fg('accent', '⋮');
         } else {
           line += theme.fg(color, content);
         }
@@ -430,7 +447,7 @@ export function createMasterResearchPanel(
         return allLines.map(line => {
           const w = visibleWidth(line);
           if (w > width) {
-            return truncateToWidth(line, Math.max(3, width - 1));
+            return truncateToWidth(line, Math.max(1, width));
           }
           return line;
         });

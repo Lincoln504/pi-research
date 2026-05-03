@@ -12,10 +12,12 @@ import {
 import { complete, completeSimple, type Model, type TextContent } from '@mariozechner/pi-ai';
 import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
+import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';
 import { 
     addSlice, 
     activateSlice, 
+    clearCompletedResearchers,
     completeSlice, 
     updateSliceTokens,
     updateSliceStatus,
@@ -27,7 +29,6 @@ import type { QueryResultWithError } from '../web-research/types.ts';
 import { extractJson } from '../utils/json-utils.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
 import {
-    MAX_CONCURRENT_RESEARCHERS,
     MAX_TEAM_SIZE_LEVEL_1,
     MAX_TEAM_SIZE_LEVEL_2,
     MAX_TEAM_SIZE_LEVEL_3,
@@ -231,6 +232,9 @@ export class DeepResearchOrchestrator {
           if (signal?.aborted) throw new Error("Research aborted.");
           this.currentRound++;
           
+          // Clear completed researchers from previous rounds for clean TUI display
+          clearCompletedResearchers(this.options.panelState);
+          
           if (!currentPlan || !currentPlan.researchers) break;
           
           logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers launching (${currentPlan.researchers.length} researcher(s))`);
@@ -270,11 +274,10 @@ export class DeepResearchOrchestrator {
           logger.info(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers done`);
 
           // Evaluation Phase
-          const atTarget = this.currentRound >= maxRounds;
           const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
 
           this.plan = currentPlan;
-          currentPlan = await this.evaluate(signal, mustSynthesize, atTarget);
+          currentPlan = await this.evaluate(signal, mustSynthesize);
 
           if (currentPlan.action === 'synthesize') {
               const synthesis = currentPlan.content || this.buildFallbackSynthesis();
@@ -337,7 +340,77 @@ export class DeepResearchOrchestrator {
     } else if (this.options.complexity === 2) {
       return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources.";
     } else {
-      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned.";
+      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will drill down into specific gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage.";
+    }
+  }
+
+  private getEvaluatorComplexityGuidance(): string {
+    if (this.options.complexity === 1) {
+      return `**Level 1 (Quick)** - Focused, direct investigation.
+
+- **SYNTHESIZE when**: Primary facts are established, core question is answerable
+- **DELEGATE only when**: Essential information missing, critical gaps that prevent answering
+
+Be conservative with delegation. The goal is efficiency — answer the core question directly without exhaustive coverage.`;
+    } else if (this.options.complexity === 2) {
+      return `**Level 2 (Normal)** - Thorough, multi-angle investigation.
+
+- **SYNTHESIZE when**: Multiple angles covered, substantial findings available, research agenda substantially addressed
+- **DELEGATE when**: Important gaps remain, additional perspectives would significantly improve completeness
+
+Balance thoroughness with efficiency. Delegate when new rounds would meaningfully enhance the depth or breadth of findings.`;
+    } else {
+      return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive.
+
+- **SYNTHESIZE when**: Exhaustively covered across all substantial avenues, no meaningful gaps, no significant unexplored angles
+- **DELEGATE when**: ANY meaningful gaps, nuances, or angles remain. Prioritize thoroughness over efficiency. Lean heavily toward delegation for completeness.
+
+Be aggressive with delegation. Level 3 is for exhaustive research — don't stop early. Use remaining rounds to drill into specialized details, verify findings, or explore nuanced dimensions. Only synthesize when you've truly exhausted substantial research avenues.`;
+    }
+  }
+
+  private getRoundPhaseGuidance(maxRounds: number): string {
+    const roundRatio = this.currentRound / maxRounds;
+    
+    if (roundRatio <= 0.5) {
+      // Early rounds: be more aggressive with delegation
+      return `
+
+---
+
+**Round Phase: EARLY (Round ${this.currentRound} of ${maxRounds})**
+
+You are in the early phase of research. Be more permissive with delegation:
+- Deploy researchers to broadly map the landscape
+- Don't worry if findings are incomplete — later rounds can fill gaps
+- Focus on breadth and initial exploration
+- Use available researchers to cover distinct angles in parallel`;
+    } else if (roundRatio <= 0.8) {
+      // Middle rounds: balanced approach
+      return `
+
+---
+
+**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**
+
+You are in the middle phase of research. Apply balanced judgment:
+- Synthesize if you have substantial coverage of the key aspects
+- Delegate for significant gaps or to explore specialized sub-topics
+- Consider depth over breadth at this stage
+- Focus on rounding out incomplete areas`;
+    } else {
+      // Late rounds: higher threshold for delegation
+      return `
+
+---
+
+**Round Phase: LATE (Round ${this.currentRound} of ${maxRounds})**
+
+You are in the late phase of research. Set a higher threshold for delegation:
+- Synthesize if the core question is answerable with current findings
+- Delegate only for CRITICAL gaps that cannot be resolved from existing findings
+- Avoid delegating for minor details or marginal improvements
+- Focus on delivering a complete, coherent response`;
     }
   }
 
@@ -451,7 +524,9 @@ export class DeepResearchOrchestrator {
       while (queue.length > 0 || active.size > 0) {
           if (signal?.aborted) throw new Error("Research aborted.");
 
-          // Fill active slots (up to MAX_CONCURRENT_RESEARCHERS = 3 at once)
+          const { MAX_CONCURRENT_RESEARCHERS } = getConfig();
+
+          // Fill active slots
           while (active.size < MAX_CONCURRENT_RESEARCHERS && queue.length > 0) {
               if (active.size > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
               const config = queue.shift()!;
@@ -557,7 +632,7 @@ export class DeepResearchOrchestrator {
                 }
             }
         } else if (event.type === 'tool_execution_start') {
-            updateSliceStatus(this.options.panelState, internalId, `Running ${event.toolName}...`);
+            updateSliceStatus(this.options.panelState, internalId, `${event.toolName}`);
             this.options.onUpdate();
         } else if (event.type === 'tool_execution_end') {
             updateSliceStatus(this.options.panelState, internalId, undefined);
@@ -565,8 +640,9 @@ export class DeepResearchOrchestrator {
             if (!event.isError) {
                 // Track estimated scrape tokens for the context gate
                 if (event.toolName === 'scrape' && (event.result as any)?.details?.count) {
+                    const { AVG_TOKENS_PER_SCRAPE } = getConfig();
                     const scrapeCount = (event.result as any).details.count;
-                    const estimatedTokens = scrapeCount * 10000; // AVG_TOKENS_PER_SCRAPE
+                    const estimatedTokens = scrapeCount * AVG_TOKENS_PER_SCRAPE;
                     const currentScrapeTotal = this.siblingScrapeTokens.get(internalId) ?? 0;
                     this.siblingScrapeTokens.set(internalId, currentScrapeTotal + estimatedTokens);
                 }
@@ -624,7 +700,7 @@ export class DeepResearchOrchestrator {
     return `# Research Findings\n\n${sections}`;
   }
 
-  private async evaluate(signal?: AbortSignal, mustSynthesize = false, atTarget = false): Promise<ResearchPlan> {
+  private async evaluate(signal?: AbortSignal, mustSynthesize = false): Promise<ResearchPlan> {
       addSlice(this.options.panelState, 'eval', 'eval', false);
       activateSlice(this.options.panelState, 'eval');
       updateSliceStatus(this.options.panelState, 'eval', 'Assessing...');
@@ -637,11 +713,19 @@ export class DeepResearchOrchestrator {
       const nextId = this.plan?.researchers ? this.plan.researchers.length + 1 : 1;
       const maxTeamSize = this.getTeamSize();
 
+      const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
+                           this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 :
+                           MAX_ROUNDS_LEVEL_3;
+
       const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator'), 'evaluator')
           .replace(/\{ROOT_QUERY\}/g, this.options.query)
           .replace('{ROUND_NUMBER}', this.currentRound.toString())
-          .replace('{MAX_ROUNDS}', ((this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 : this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 : MAX_ROUNDS_LEVEL_3)).toString())
+          .replace('{MAX_ROUNDS}', maxRounds.toString())
           .replace('{MAX_TEAM_SIZE}', maxTeamSize.toString())
+          .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
+          .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Level 1 (Quick)' : this.options.complexity === 2 ? 'Level 2 (Normal)' : 'Level 3 (Ultra)')
+          .replace('{COMPLEXITY_GUIDANCE}', this.getEvaluatorComplexityGuidance())
+          .replace('{ROUND_PHASE_GUIDANCE}', this.getRoundPhaseGuidance(maxRounds))
           .replace('{{previous_queries_section}}', previousQueriesSection)
           .replace('{NEXT_ID}', `${nextId}`);
 
@@ -659,10 +743,9 @@ export class DeepResearchOrchestrator {
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
 
+      // Hard stop override — only apply when absolute limit reached
       const synthOverride = mustSynthesize
           ? '\n\n**MANDATORY — ABSOLUTE MAXIMUM REACHED**: No further research rounds are permitted. You MUST return `"action": "synthesize"` with a comprehensive synthesis in the `content` field. Do NOT return delegate.'
-          : atTarget
-          ? '\n\n**NOTICE — TARGET DEPTH REACHED**: Synthesize if the research agenda is substantially covered. Only delegate if CRITICAL gaps remain that cannot be resolved from existing findings.'
           : '';
 
       const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
