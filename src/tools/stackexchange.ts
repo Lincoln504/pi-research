@@ -5,15 +5,43 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { stackexchangeCommand } from '../stackexchange/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import { MAX_GATHERING_CALLS } from '../constants.ts';
 
 export function createStackexchangeTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
 }): ToolDefinition {
   const { tracker } = options;
+
+  const StackExchangeParams = Type.Object({
+    command: Type.String({
+      description: 'Command: search, get, user, or site',
+    }),
+    query: Type.Optional(Type.String({
+      description: 'Search query (for search command)',
+    })),
+    id: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+    site: Type.Optional(Type.String({
+      description: 'Stack Exchange site (default: stackoverflow.com)',
+    })),
+    limit: Type.Optional(Type.Number({
+      description: 'Results count (1-100, default: 10)',
+      default: 10,
+      minimum: 1,
+      maximum: 100,
+    })),
+    format: Type.Optional(Type.String({
+      description: 'Output format: table, json, or compact (default: table)',
+      default: 'table',
+    })),
+    tags: Type.Optional(Type.String({
+      description: 'Filter by tags (comma-separated)',
+    })),
+  });
 
   return {
     name: 'stackexchange',
@@ -26,33 +54,9 @@ export function createStackexchangeTool(options: {
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
-      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
+      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
-    parameters: Type.Object({
-      command: Type.String({
-        description: 'Command: search, get, user, or site',
-      }),
-      query: Type.Optional(Type.String({
-        description: 'Search query (for search command)',
-      })),
-      id: Type.Optional(Type.Union([Type.String(), Type.Number()])),
-      site: Type.Optional(Type.String({
-        description: 'Stack Exchange site (default: stackoverflow.com)',
-      })),
-      limit: Type.Optional(Type.Number({
-        description: 'Results count (1-100, default: 10)',
-        default: 10,
-        minimum: 1,
-        maximum: 100,
-      })),
-      format: Type.Optional(Type.String({
-        description: 'Output format: table, json, or compact (default: table)',
-        default: 'table',
-      })),
-      tags: Type.Optional(Type.String({
-        description: 'Filter by tags (comma-separated)',
-      })),
-    }),
+    parameters: StackExchangeParams,
     async execute(
       _toolCallId,
       params,
@@ -63,12 +67,21 @@ export function createStackexchangeTool(options: {
       // Record call in tracker - returns false if limit reached
       const allowed = tracker.recordCall('stackexchange');
       if (!allowed) {
-        // THROW to prevent researcher from calling again
-        throw new Error(tracker.getLimitMessage('stackexchange'));
+          return {
+            content: [{ type: 'text', text: tracker.getLimitMessage('stackexchange') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
       }
 
-      const paramsRecord = params as Record<string, unknown>;
-      const command = paramsRecord['command'] as string;
+      if (!Value.Check(StackExchangeParams, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for stackexchange tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
+      const p = params as Static<typeof StackExchangeParams>;
+      const command = p.command;
 
       if (!command || typeof command !== 'string') {
         throw new Error('Stack Exchange command is required and must be a string');
@@ -77,7 +90,7 @@ export function createStackexchangeTool(options: {
       try {
         return await stackexchangeCommand({
           command,
-          params: paramsRecord,
+          params: p as Record<string, unknown>,
           ctx: extensionCtx,
           signal,
         });

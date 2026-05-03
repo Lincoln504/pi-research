@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createStackexchangeTool } from '../../../src/tools/stackexchange';
-import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker';
+import { createStackexchangeTool } from '../../../src/tools/stackexchange.ts';
+import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 // Mock stackexchange command
 vi.mock('../../../src/stackexchange/index.ts', () => ({
@@ -54,15 +54,15 @@ describe('tools/stackexchange', () => {
       expect(spy).toHaveBeenCalledWith('stackexchange');
     });
 
-    it('should throw error if limit exceeded', async () => {
+    it('should return limit reached message if budget exceeded', async () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('stackexchange'); // Limit reached
 
       const tool = createStackexchangeTool({ ctx: createMockContext(), tracker });
 
-      await expect(
-        tool.execute('test-id', { command: 'search', query: 'test' }, undefined, undefined, undefined as any)
-      ).rejects.toThrow('GATHERING LIMIT REACHED');
+      const result = await tool.execute('test-id', { command: 'search', query: 'test' }, undefined, undefined, undefined as any);
+      expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+      expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
     });
   });
 });

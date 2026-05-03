@@ -30,8 +30,8 @@ export interface CreateResearcherSessionOptions {
   updateGlobalLinks?: (links: string[]) => void;
   /** Callback invoked when links are scraped (for real-time coordination) */
   onLinksScraped?: (links: string[]) => void;
-  /** Callback invoked during search progress (completed, total) */
-  onSearchProgress?: (completed: number, total: number) => void;
+  /** Callback invoked during search with cumulative link count found so far */
+  onSearchProgress?: (links: number) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
   /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */
@@ -40,6 +40,8 @@ export interface CreateResearcherSessionOptions {
   contextWindowSize?: number;
   /** If true, the researcher will not be given the search tool. */
   noSearch?: boolean;
+  /** If true, the researcher will not be given the grep tool. Defaults to false. */
+  noGrep?: boolean;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
@@ -58,6 +60,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     getScrapeTokens,
     contextWindowSize,
     noSearch,
+    noGrep = false,
   } = options;
 
   // Validate required parameters
@@ -90,11 +93,14 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       contextWindowSize,
     });
 
-    // Exclude search and grep tools for web research
-    // grep searches local filesystem, which is useless for web research topics
-    const customTools = noSearch 
-      ? allTools.filter(t => t.name !== 'search' && t.name !== 'grep')
-      : allTools;
+    // Exclude tools based on options
+    let customTools = allTools;
+    if (noSearch) {
+        customTools = customTools.filter(t => t.name !== 'search');
+    }
+    if (noGrep) {
+        customTools = customTools.filter(t => t.name !== 'grep');
+    }
 
     // CRITICAL: Explicitly limit tools to ONLY what we provide.
     // This prevents the core AgentSession from injecting default tools like 'bash', 'write', 'edit', etc.

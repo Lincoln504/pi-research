@@ -12,11 +12,11 @@ export const REQUEST_DELAY_MS_OTHER = 1000;
 
 // ==================== Research Constraints ====================
 
-/** Maximum gathering (tool) calls per researcher */
-export const MAX_GATHERING_CALLS = 4;
+/** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */
+export const MAX_GATHERING_CALLS = 10;
 
-/** Maximum scrape tool calls per researcher (2 batches: Batch 1, Batch 2) */
-export const MAX_SCRAPE_CALLS = 2;
+/** Maximum scrape tool calls per researcher (3 batches: Batch 1, Batch 2, Batch 3) */
+export const MAX_SCRAPE_CALLS = 3;
 
 /** Maximum URLs to scrape per batch (Batch 1 and 2) */
 export const MAX_SCRAPE_URLS = 4;
@@ -68,12 +68,12 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
 // ==================== Context-Aware Scraping Constants ====================
 
 /** Fraction of context window consumed beyond which all scraping is blocked. */
-export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.15; // 30k / 200k
+export const MAX_CONTEXT_FRACTION_FOR_SCRAPING = 0.55; // 110k / 200k
 
 /** 
  * Fraction of SCRAPE-SOURCED tokens beyond which scraping is blocked.
  */
-export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.1; // 20k / 200k
+export const MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING = 0.45; // 90k / 200k
 
 /** Estimated tokens consumed per scrape call */
 export const AVG_TOKENS_PER_SCRAPE = 10000;
@@ -100,7 +100,7 @@ export const MAX_EXTRA_ROUNDS = 2;
 export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 
 /** Hard cap on search queries per researcher, enforced after LLM planning */
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 5;
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 10;
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 15;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 20;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 30;
 

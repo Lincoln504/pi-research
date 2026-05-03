@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createSecuritySearchTool } from '../../../src/tools/security';
-import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker';
+import { createSecuritySearchTool } from '../../../src/tools/security.ts';
+import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 // Mock security search function
 vi.mock('../../../src/security/index.ts', () => ({
@@ -48,15 +48,15 @@ describe('tools/security', () => {
       expect(spy).toHaveBeenCalledWith('security_search');
     });
 
-    it('should throw error if limit exceeded', async () => {
+    it('should return limit reached message if budget exceeded', async () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('security_search'); // Limit reached
 
       const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker });
 
-      await expect(
-        tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any)
-      ).rejects.toThrow('GATHERING LIMIT REACHED');
+      const result = await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
+      expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+      expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
     });
   });
 });

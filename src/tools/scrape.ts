@@ -7,7 +7,8 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
@@ -46,6 +47,11 @@ export function createScrapeTool(options: {
 
   const getThreshold = () => options.getScrapeTokens ? MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING : MAX_CONTEXT_FRACTION_FOR_SCRAPING;
 
+  const ScrapeParams = Type.Object({
+    urls: Type.Array(Type.String(), { minItems: 1 }),
+    maxConcurrency: Type.Optional(Type.Number({ default: 10, minimum: 1, maximum: 20 })),
+  });
+
   const contextLimitMessage = (fraction: number, batchLabel: string, projected: boolean = false): string => [
     `# Scrape Skipped — Context Budget ${projected ? 'Projection' : 'Reached'} (${batchLabel})`,
     '',
@@ -59,30 +65,35 @@ export function createScrapeTool(options: {
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2.',
-    promptSnippet: 'Scrape full content from URLs (2-batch protocol)',
+    description: 'Scrape content from URLs. Supports HTML and PDF. Protocol: Batch 1 → Batch 2 → Batch 3.',
+    promptSnippet: 'Scrape full content from URLs (3-batch protocol)',
     promptGuidelines: [
-      `PROTOCOL: Batch 1 (up to ${MAX_SCRAPE_URLS} URLs) → Batch 2 (up to ${MAX_SCRAPE_URLS} URLs).`,
+      `PROTOCOL: Batch 1 → Batch 2 → Batch 3 (up to ${MAX_SCRAPE_URLS} URLs each).`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
-      `Batches skipped if real research data exceeds ${Math.round(getThreshold() * 100)}% of context.`,
+      `Batches skipped automatically if context exceeds ${Math.round(getThreshold() * 100)}% — do not skip batches manually.`,
     ],
-    parameters: Type.Object({
-      urls: Type.Array(Type.String(), { minItems: 1 }),
-      maxConcurrency: Type.Optional(Type.Number({ default: 10, minimum: 1, maximum: 20 })),
-    }),
+    parameters: ScrapeParams,
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
       const callCount = options.tracker.getToolCallCount('scrape');
-      if (callCount >= MAX_SCRAPE_CALLS) {
+      const limit = options.tracker.getToolLimit('scrape') ?? MAX_SCRAPE_CALLS;
+      if (callCount >= limit) {
           return {
             content: [{ type: 'text', text: options.tracker.getLimitMessage('scrape') }],
             details: { blocked: true, reason: 'limit_reached' },
           };
       }
 
-      const p = params as Record<string, any>;
-      let rawUrls = p['urls'] as string[];
+      if (!Value.Check(ScrapeParams, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for scrape tool. Expected an array of URLs.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
+      const p = params as Static<typeof ScrapeParams>;
+      let rawUrls = p.urls;
       
       // Sanitization: Handle LLM errors where it passes an array-like string
       // or a single string instead of an array (though typebox should catch latter)
@@ -137,7 +148,7 @@ export function createScrapeTool(options: {
       const finalUrls = dedupedUrls.slice(0, MAX_SCRAPE_URLS);
       options.updateGlobalLinks(finalUrls);
 
-      const defaultConcurrency = callCount === 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;
+      const defaultConcurrency = callCount >= 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;
       const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || defaultConcurrency, signal);
       const results = Array.isArray(scrapeResults) ? scrapeResults : [];
       const successful = results.filter(r => r.success);

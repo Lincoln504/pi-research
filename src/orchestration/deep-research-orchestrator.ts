@@ -1,40 +1,29 @@
 /**
  * Deep Research Orchestrator
  *
- * Implements the Coordinator-Search-Spawn workflow with:
- * 1. Coordinated Search Burst: Seeds all researchers with links before they start.
- * 2. Concurrency Control: Max 3 parallel researchers, others queued.
- * 3. Real-Time Coordination: Steering messages for link sharing.
- * 4. Multi-Round Execution: Search-Spawn-Evaluate-Delegate cycle.
+ * This is the heart of the pi-research system. It implements a multi-round,
+ * multi-agent research loop inspired by systems like OpenAI Deep Research.
  */
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { injectCurrentDate } from '../utils/inject-date.ts';
 import { 
-    convertToLlm,
-    buildSessionContext,
     type ExtensionContext, 
-    type AgentSession, 
     type AgentSessionEvent 
 } from '@mariozechner/pi-coding-agent';
-import { complete, completeSimple, type Model, type TextContent, type Usage } from '@mariozechner/pi-ai';
-import { calculateTotalTokens, isTextContentBlock } from '../types/llm.ts';
+import { complete, completeSimple, type Model, type TextContent } from '@mariozechner/pi-ai';
+import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
-import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';
 import { 
     addSlice, 
-    activateSlice,
+    activateSlice, 
     completeSlice, 
-    removeSlice,
     updateSliceTokens,
     updateSliceStatus,
 } from '../tui/research-panel.ts';
 import { createResearcherSession } from './researcher.ts';
 import { search } from '../web-research/search.ts';
-import { formatLightweightLinkUpdate, registerScrapedLinks, getScrapedLinks } from '../utils/shared-links.ts';
+import { recordResearcherFailure, shouldStopResearch } from '../utils/session-state.ts';
+import type { QueryResultWithError } from '../web-research/types.ts';
 import { extractJson } from '../utils/json-utils.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
 import {
@@ -48,28 +37,45 @@ import {
     MAX_QUERIES_PER_RESEARCHER_LEVEL_1,
     MAX_QUERIES_PER_RESEARCHER_LEVEL_2,
     MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
-    AVG_TOKENS_PER_SCRAPE,
-    MAX_EXTRA_ROUNDS,
     RESEARCHER_LAUNCH_DELAY_MS,
-    MAX_GATHERING_CALLS,
-    MAX_SCRAPE_CALLS,
+    MAX_EXTRA_ROUNDS,
 } from '../constants.ts';
-
-const STREAMING_UPDATE_THRESHOLD_CHARS = 100;
-import type { SystemResearchState } from './deep-research-types.ts';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { injectCurrentDate } from '../utils/inject-date.ts';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 function loadPrompt(name: string): string {
   try {
-    const promptPath = join(__dirname, '..', 'prompts', `${name}.md`);
-    return readFileSync(promptPath, 'utf-8');
+    const path = join(__dirname, '..', 'prompts', `${name}.md`);
+    return readFileSync(path, 'utf-8');
   } catch (err) {
     logger.error(`[Orchestrator] Failed to load prompt: ${name}`, err);
     return '';
   }
 }
+
+const ResearcherConfigSchema = Type.Object({
+    id: Type.Union([Type.String(), Type.Number()]),
+    name: Type.String(),
+    goal: Type.String(),
+    queries: Type.Array(Type.String())
+});
+
+const ResearchPlanSchema = Type.Object({
+    action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate')])),
+    researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
+    allQueries: Type.Optional(Type.Array(Type.String())),
+    content: Type.Optional(Type.String())
+});
+
+type ResearchPlan = Static<typeof ResearchPlanSchema>;
+type ResearcherConfig = Static<typeof ResearcherConfigSchema>;
 
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -81,419 +87,362 @@ export interface DeepResearchOrchestratorOptions {
   panelState: ResearchPanelState;
 }
 
-interface ResearcherConfig {
-    id: string;
-    name: string;
-    goal: string;
-    queries: string[];
-}
-
-interface ResearchPlan {
-    researchers: ResearcherConfig[];
-    allQueries: string[];
-    action?: 'synthesize' | 'delegate';
-    content?: string;
-}
-
-// Max tool calls per researcher (for fractional progress within a researcher's run)
-const RESEARCHER_TOOL_BUDGET = MAX_GATHERING_CALLS + MAX_SCRAPE_CALLS;
-
 export class DeepResearchOrchestrator {
-  private activeSessions = new Map<string, AgentSession>();
-  private allScrapedLinks: string[] = [];
-  private allSearchedQueries: string[] = [];
-  private reports = new Map<string, string>();
-  private currentRound = 1;
-  private siblingTokens = new Map<string, number>();
-  private siblingScrapeTokens = new Map<string, number>();
-  private progressCredits = new Map<string, number>();
-  private runStartMs = Date.now();
-
-  private static readonly UNITS_PER_RESEARCHER = 1;
-  private static readonly LEAD_EVAL_UNITS = 1;
+  private reports = new Map<string, string>(); // researcherId -> report
+  private currentRound = 0;
+  private plan: ResearchPlan | null = null;
+  private startTime: number = Date.now();
+  private progressCredits = new Map<string, number>(); // researcherId -> units made
+  private siblingScrapeTokens = new Map<string, number>(); // researcherId -> estimated scrape tokens
+  
+  // Weights for progress bar
+  private static UNITS_PER_RESEARCHER = 10;
+  private static LEAD_EVAL_UNITS = 2;
 
   constructor(private options: DeepResearchOrchestratorOptions) {}
 
   private elapsed(): string {
-    const ms = Date.now() - this.runStartMs;
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    return m > 0 ? `+${m}m${s % 60}s` : `+${s}s`;
+    const s = Math.round((Date.now() - this.startTime) / 1000);
+    return `+${s}s`;
   }
 
-  public async run(signal?: AbortSignal): Promise<string> {
-    this.runStartMs = Date.now();
-    logger.log(`[Orchestrator] ${this.elapsed()} Starting research: "${this.options.query}" (Complexity: ${this.options.complexity})`);
+  /**
+   * Run the multi-round research loop
+   */
+  async run(signal?: AbortSignal): Promise<string> {
+    logger.log(`[Orchestrator] Starting deep research with complexity ${this.options.complexity}`);
+
+    const basePlanningPrompt = injectCurrentDate(loadPrompt('system-coordinator'), 'coordinator')
+      .replace(/\{ROOT_QUERY\}/g, this.options.query)
+      .replace('{MAX_TEAM_SIZE}', this.getTeamSize().toString())
+      .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
+      .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Quick' : this.options.complexity === 2 ? 'Normal' : 'Deep')
+      .replace('{COMPLEXITY_GUIDANCE}', this.getComplexityGuidance())
+      .replace('{{local_context_section}}', '');
+
+    let currentPlan: ResearchPlan | null = null;
+    const coordStartMs = Date.now();
 
     try {
-      // PHASE 1: INITIAL PLANNING
-      const coordStartMs = Date.now();
-      addSlice(this.options.panelState, 'coord', 'coord', true);
+      // 1. Initial Planning
+      addSlice(this.options.panelState, 'coord', `coordinator`, false);
       activateSlice(this.options.panelState, 'coord');
-      updateSliceStatus(this.options.panelState, 'coord', 'Planning...');
       this.options.onUpdate();
-
-      const complexityLabel = this.options.complexity === 1 ? 'Level 1 — Normal'
-          : this.options.complexity === 2 ? 'Level 2 — Deep'
-          : 'Level 3 — Ultra (exhaustive)';
-
-      const complexityGuidance = this.options.complexity === 3
-          ? `**Ultra mode**: This is a comprehensive, exhaustive research effort. Plan ALL ${this.getTeamSize()} researcher slots. Each researcher should use the FULL query budget of ${this.getQueryBudget()} queries. Coverage must be thorough — no sub-topic should be left unresearched.`
-          : this.options.complexity === 2
-          ? `**Deep mode**: Plan enough researchers to cover all major angles (up to ${this.getTeamSize()}). Use a substantial portion of the query budget for each.`
-          : `**Normal mode**: Plan ${this.getTeamSize()} researchers covering the most important angles.`;
-
-      // Add local codebase context to coordinator planning if query references local code
-      let localContextSection = '';
-      const queryLower = this.options.query.toLowerCase();
-      const isCodeResearch = queryLower.includes('codebase') || queryLower.includes('code') || 
-                           queryLower.includes('project') || queryLower.includes('this') ||
-                           queryLower.includes('implementation') || queryLower.includes('architecture');
-      
-      if (isCodeResearch) {
-          try {
-              const { grep } = await import('../tools/grep.ts');
-              // Search for key terms from query in local codebase
-              const searchTerms = this.options.query.split(/\s+/).filter((w, i, arr) => 
-                  w.length > 3 && arr.indexOf(w) === i  // unique words > 3 chars
-              ).slice(0, 3);  // Limit to first 3 terms
-              
-              if (searchTerms.length > 0) {
-                  localContextSection = '\n\n## Local Codebase Context\n\nFound matches for: ' + searchTerms.join(', ') + '\n\n';
-                  for (const term of searchTerms) {
-                      try {
-                          const result = await grep(term, this.options.ctx.cwd);
-                          localContextSection += `\n### Matches for "${term}"\n\n${result.slice(0, 10000)}\n\n...[truncated]\n\n`;
-                      } catch (_e) {
-                          // Grep failed, skip this term
-                      }
-                  }
-              }
-          } catch (e) {
-              // Grep tool not available or failed, continue without local context
-              logger.debug('[Orchestrator] Could not add local context to coordinator:', e);
-          }
-      }
-
-      const basePlanningPrompt = loadPrompt('system-coordinator')
-        .replace('{{query}}', this.options.query)
-        .replace('{COMPLEXITY_LABEL}', complexityLabel)
-        .replace('{MAX_TEAM_SIZE}', this.getTeamSize().toString())
-        .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
-        .replace('{COMPLEXITY_GUIDANCE}', complexityGuidance);
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
 
-      let currentPlan: ResearchPlan | undefined;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        const retryHint = attempt > 1
-          ? '\n\nCRITICAL: Your previous response could not be parsed as JSON. Return ONLY the raw JSON object — no markdown, no explanation, no code fences.'
-          : '';
+      const historyMessages: any[] = [];
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
         
-        // BRANCHING: Coordinator sees the full parent conversation history
-        const history = this.options.ctx.sessionManager.getBranch();
-        const sessionContext = buildSessionContext(history);
-        const historyMessages = convertToLlm(sessionContext.messages);
+        // Ensure at least one user message is always present. 
+        // Some providers/models return empty responses if messages is empty.
+        const messages = attempt === 1 
+          ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${this.options.query}"` }] }]
+          : historyMessages;
 
+        updateSliceStatus(this.options.panelState, 'coord', attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
         const planResponse = await complete(this.options.model, {
-          systemPrompt: basePlanningPrompt + localContextSection + retryHint,
-          messages: historyMessages,
-        }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning: 'low' });
+          systemPrompt: basePlanningPrompt + retryHint,
+          messages,
+        }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
         const rawPlanText = textContent?.text || "";
+        
+        if (!rawPlanText) {
+          logger.warn('[Orchestrator] Model returned no text content in planning response:', JSON.stringify(planResponse.content));
+        }
+        
         logger.debug('[Orchestrator] Raw planning response (attempt %d):', attempt, rawPlanText);
+        
         try {
           currentPlan = this.parseJsonPlan(rawPlanText);
+
           // Track coordinator tokens (only on success — billed attempt)
-          const coordUsage = (planResponse as any).usage as Usage | undefined;
-          if (coordUsage) {
+          const coordUsageObj = (planResponse as any).usage;
+          if (coordUsageObj) {
+              const coordUsage = parseTokenUsage(coordUsageObj);
               const tokens = calculateTotalTokens(coordUsage);
+              const inputTokens = coordUsage.input ?? 0;
+              const modelContextSize = (this.options.model as any)?.contextWindow ?? 200000;
+              const percent = ((inputTokens / modelContextSize) * 100).toFixed(1);
+              
+              logger.debug(`[Orchestrator] coordinator message_end: totalTokens=${tokens} cost=${(coordUsageObj as any).cost?.total ?? 0} context=${inputTokens} (${percent}%)`);
+
               if (tokens > 0) {
-                  const cost = (coordUsage as any).cost?.total ?? 0;
+                  const cost = (coordUsageObj as any).cost?.total ?? 0;
                   this.options.onTokens(tokens);
                   this.options.panelState.totalCost += cost;
                   updateSliceTokens(this.options.panelState, 'coord', tokens, cost);
                   this.options.onUpdate();
               }
           }
-          break;
+          break; 
         } catch (err) {
-          if (attempt >= 2) throw err;
-          logger.warn('[Orchestrator] JSON parse failed on attempt 1, retrying coordinator with explicit JSON reminder');
+          if (attempt >= 3) throw err;
+          
+          // Add failed attempt to history for better retry context
+          if (attempt === 1) {
+            historyMessages.push(messages[0]);
+          }
+          historyMessages.push({ role: 'assistant', content: planResponse.content });
+          historyMessages.push({ role: 'user', content: [{ type: 'text', text: retryHint }] });
+
+          logger.warn(`[Orchestrator] JSON parse failed on attempt ${attempt}, retrying coordinator${attempt === 2 ? ' (no history)' : ' with JSON reminder'}`);
         }
       }
+
+      if (!currentPlan || !currentPlan.researchers) {
+          throw new Error('Coordinator failed to plan any researchers.');
+      }
+
       // 1. Cap team size deterministically (enforce max siblings per round)
-      const maxTeamSize = this.options.complexity === 1 ? MAX_TEAM_SIZE_LEVEL_1 :
-                           this.options.complexity === 2 ? MAX_TEAM_SIZE_LEVEL_2 :
-                           MAX_TEAM_SIZE_LEVEL_3;
+      const maxTeamSize = this.getTeamSize();
 
       if (currentPlan.researchers.length > maxTeamSize) {
           const capped = currentPlan.researchers.slice(0, maxTeamSize);
-          const keptIds = new Set(capped.map(r => r.id));
+          const keptIds = new Set(capped.map(r => String(r.id)));
           logger.warn(`[Orchestrator] Capping team size from ${currentPlan.researchers.length} to ${maxTeamSize} — kept: ${[...keptIds].join(', ')}`);
           currentPlan.researchers = capped;
           currentPlan.allQueries = capped.flatMap(r => r.queries);
       }
 
       // 2. Cap individual researcher budgets and global round budget
-      currentPlan = this.capResearcherQueries(currentPlan!);
+      currentPlan = this.capResearcherQueries(currentPlan);
+      if (!currentPlan.researchers) throw new Error('No researchers planned after capping.');
+      
       logger.log(`[Orchestrator] ${this.elapsed()} Coordinator done in ${((Date.now() - coordStartMs) / 1000).toFixed(1)}s — planned ${currentPlan.researchers.length} researcher(s)`);
 
       // Initialize progress tracking: 1 unit per researcher + 1 per evaluator
       const initialResearchersCount = currentPlan.researchers.length;
       const expectedUnits = (initialResearchersCount * DeepResearchOrchestrator.UNITS_PER_RESEARCHER)
         + DeepResearchOrchestrator.LEAD_EVAL_UNITS;
-      this.options.panelState.progress = { expected: expectedUnits, made: 0, extended: false };
+      this.options.panelState.progress = { expected: expectedUnits, made: 0 };
       this.options.onUpdate();
 
       const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
                            this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 :
                            MAX_ROUNDS_LEVEL_3;
-      const hardLimit = maxRounds + MAX_EXTRA_ROUNDS;
 
-      while (this.currentRound <= hardLimit) {
-          const roundStartMs = Date.now();
-          logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} starting (target: ${maxRounds}, hard limit: ${hardLimit})`);
-
-          // PHASE 2: SEARCH BURST (Pre-seed all researchers in round)
-          // Round 1: coord slice transitions Planning... → Searching... here.
-          // Round 2+: eval slice was left alive by evaluate() with status "Searching..." — no re-add needed.
-          let researcherLinks = new Map<string, string[]>();
+      // 2. Iterative Research Loop
+      while (this.currentRound < maxRounds + MAX_EXTRA_ROUNDS) {
+          if (signal?.aborted) throw new Error("Research aborted.");
+          this.currentRound++;
+          
+          if (!currentPlan || !currentPlan.researchers) break;
+          
+          logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers launching (${currentPlan.researchers.length} researcher(s))`);
+          
+          // Initial search burst for this round
           if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
+              // Use coord slice for round 1, eval slice for subsequent rounds to avoid "extra" boxes
+              const sliceId = this.currentRound === 1 ? 'coord' : 'eval';
+              updateSliceStatus(this.options.panelState, sliceId, '0 Results');
               this.options.panelState.isSearching = true;
+              this.options.onUpdate();
+
+              const searchStart = Date.now();
+              let searchResults;
               try {
-                  if (this.currentRound === 1) {
-                      updateSliceStatus(this.options.panelState, 'coord', 'Searching...');
-                  } else if (!this.options.panelState.slices.has('eval')) {
-                      // Fallback: eval slice wasn't persisted — create it now.
-                      addSlice(this.options.panelState, 'eval', 'eval', true);
-                      activateSlice(this.options.panelState, 'eval');
-                      updateSliceStatus(this.options.panelState, 'eval', 'Searching...');
-                  }
-                  this.options.onUpdate();
-
-                  const searchStartMs = Date.now();
-                  this.allSearchedQueries.push(...currentPlan.allQueries);
-                  
-                  const onSearchProgress = (completed: number, total: number) => {
-                      const status = `Searching: ${completed}/${total}...`;
-                      if (this.currentRound === 1) {
-                          updateSliceStatus(this.options.panelState, 'coord', status);
-                      } else {
-                          updateSliceStatus(this.options.panelState, 'eval', status);
-                      }
+                  searchResults = await search(currentPlan.allQueries, undefined, signal, (links) => {
+                      updateSliceStatus(this.options.panelState, sliceId, `${links} Results`);
                       this.options.onUpdate();
-                  };
-
-                  const searchResults = await search(currentPlan.allQueries, undefined, signal, onSearchProgress);
-                  researcherLinks = this.distributeResults(currentPlan, searchResults);
-                  logger.log(`[Orchestrator] ${this.elapsed()} Search burst done in ${((Date.now() - searchStartMs) / 1000).toFixed(1)}s — ${currentPlan.allQueries.length} queries`);
-
-                  const newLinks = Array.from(new Set(Array.from(researcherLinks.values()).flat()));
-                  this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...newLinks]));
-                  registerScrapedLinks(this.options.panelState.researchId, newLinks);
+                  });
               } finally {
                   this.options.panelState.isSearching = false;
                   this.options.onUpdate();
               }
+              logger.info(`[Orchestrator] ${this.elapsed()} Search burst done in ${((Date.now() - searchStart) / 1000).toFixed(1)}s — ${currentPlan.allQueries.length} queries`);
+
+              if (this.currentRound === 1) completeSlice(this.options.panelState, 'coord');
+
+              // Distribute results to researchers
+              const researcherLinks = this.distributeResults(currentPlan, searchResults);
+              await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
+          } else {
+              if (this.currentRound === 1) completeSlice(this.options.panelState, 'coord');
+              await this.runResearchersParallel(currentPlan.researchers, new Map(), signal);
           }
 
-          // Clean up the planning/search slice before launching researchers.
-          // This is the single point of cleanup for both coord (round 1) and eval (round 2+).
-          if (this.currentRound === 1) {
-              updateSliceStatus(this.options.panelState, 'coord', undefined);
-              completeSlice(this.options.panelState, 'coord');
-              removeSlice(this.options.panelState, 'coord');
-          } else if (this.options.panelState.slices.has('eval')) {
-              updateSliceStatus(this.options.panelState, 'eval', undefined);
+
+          logger.info(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers done`);
+
+          // Evaluation Phase
+          const atTarget = this.currentRound >= maxRounds;
+          const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
+
+          this.plan = currentPlan;
+          currentPlan = await this.evaluate(signal, mustSynthesize, atTarget);
+
+          if (currentPlan.action === 'synthesize') {
+              const synthesis = currentPlan.content || this.buildFallbackSynthesis();
               completeSlice(this.options.panelState, 'eval');
-              removeSlice(this.options.panelState, 'eval');
-          }
-          this.options.onUpdate();
-
-          // PHASE 3: EXECUTE RESEARCHERS (Concurrency limited to 3)
-          const researchStartMs = Date.now();
-          logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers launching (${currentPlan.researchers.length} researcher(s))`);
-          
-          // Clear old researcher slices just before launching new ones.
-          // This keeps the TUI occupied during the Search Burst phase.
-          if (this.currentRound > 1) {
-              const currentRoundIds = new Set(currentPlan.researchers.map(r => r.id.replace(/^r/, '')));
-              const toRemove = Array.from(this.options.panelState.slices.keys())
-                  .filter(id => id !== 'coord' && id !== 'eval' && !currentRoundIds.has(id));
-              for (const id of toRemove) {
-                  removeSlice(this.options.panelState, id);
-              }
-              this.options.onUpdate();
-          }
-
-          await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
-          logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} researchers done in ${((Date.now() - researchStartMs) / 1000).toFixed(1)}s`);
-
-          // PHASE 4: EVALUATE & DECIDE
-          const evalStartMs = Date.now();
-          const isAtHardLimit = this.currentRound >= hardLimit;
-          const isAtTarget = this.currentRound >= maxRounds;
-          const evalResult = await this.evaluate(signal, isAtHardLimit, isAtTarget && !isAtHardLimit);
-          logger.log(`[Orchestrator] ${this.elapsed()} Round ${this.currentRound} evaluator done in ${((Date.now() - evalStartMs) / 1000).toFixed(1)}s → action=${evalResult.action ?? 'delegate'} (round total: ${((Date.now() - roundStartMs) / 1000).toFixed(1)}s)`);
-
-          if (evalResult.action === 'synthesize' || !evalResult.researchers) {
               if (this.options.panelState.progress) {
                   this.options.panelState.progress.made = this.options.panelState.progress.expected;
-                  this.options.panelState.progress.extended = false;
               }
-              return evalResult.content || "Research complete.";
-          } else if (isAtHardLimit) {
-              // Evaluator insisted on delegate despite the mandatory synthesis instruction.
-              // Fall through to emergency synthesis below.
-              logger.warn('[Orchestrator] Evaluator returned delegate at hard limit — forcing emergency synthesis');
-              break;
-          } else {
-              // DELEGATE: Transition to new round — evaluator planned the next team,
-              // no coordinator needed. eval slice will re-appear as Searching... next iteration.
-              if (evalResult.researchers.length > maxTeamSize) {
-                  const capped = evalResult.researchers.slice(0, maxTeamSize);
-                  const keptIds = new Set(capped.map(r => r.id));
-                  const keptQueries = capped.flatMap(r => r.queries);
-                  logger.warn(`[Orchestrator] Capping evaluator delegation from ${evalResult.researchers.length} to ${maxTeamSize} — kept: ${[...keptIds].join(', ')}`);
-                  evalResult.researchers = capped;
-                  evalResult.allQueries = keptQueries;
+              return synthesis;
+          }
+
+          // If delegating to a new round, expand the expected budget
+          if (currentPlan.researchers && currentPlan.researchers.length > 0) {
+              const newResearcherUnits = currentPlan.researchers.length * DeepResearchOrchestrator.UNITS_PER_RESEARCHER;
+              const nextEvalUnits = DeepResearchOrchestrator.LEAD_EVAL_UNITS;
+              if (this.options.panelState.progress) {
+                  this.options.panelState.progress.expected += newResearcherUnits + nextEvalUnits;
               }
-              this.currentRound++;
-              currentPlan = this.capResearcherQueries(evalResult);
           }
       }
 
-      // Emergency synthesis: rounds exhausted but reports exist — synthesize them now.
+      // Final fallback if we somehow exited the loop without synthesis
+      logger.warn('[Orchestrator] Exited loop without explicit synthesis; building fallback.');
+      const synthesis = this.buildFallbackSynthesis();
+      if (this.options.panelState.progress) {
+          this.options.panelState.progress.made = this.options.panelState.progress.expected;
+      }
+      return synthesis;
+
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Research aborted.') {
+        throw error;
+      }
+      logger.error('[Orchestrator] Run failed:', error);
       if (this.reports.size > 0) {
-          logger.warn(`[Orchestrator] Round limit reached with ${this.reports.size} report(s); running emergency synthesis`);
-          const emergencyResult = await this.evaluate(signal, true);
-          if (this.options.panelState.progress) {
-              this.options.panelState.progress.made = this.options.panelState.progress.expected;
-              this.options.panelState.progress.extended = false;
-          }
-          return emergencyResult.content || this.buildFallbackSynthesis();
+          logger.warn('[Orchestrator] Attempting fallback synthesis from partial findings...');
+          return this.buildFallbackSynthesis();
       }
       if (this.options.panelState.progress) {
           this.options.panelState.progress.made = this.options.panelState.progress.expected;
-          this.options.panelState.progress.extended = false;
       }
-      return "Research complete (no findings).";
-
-    } catch (error) {
-      logger.error('[Orchestrator] Run failed:', error);
-      throw error;
-    } finally {
-      this.options.panelState.isSearching = false;
-      this.options.onUpdate();
+      return "Research failed. Check debug logs for details.";
     }
-  }
-
-  private getQueryBudget(): number {
-    return this.options.complexity === 1
-      ? MAX_QUERIES_PER_RESEARCHER_LEVEL_1
-      : this.options.complexity === 2
-        ? MAX_QUERIES_PER_RESEARCHER_LEVEL_2
-        : MAX_QUERIES_PER_RESEARCHER_LEVEL_3;
   }
 
   private getTeamSize(): number {
-    return this.options.complexity === 1
-      ? MAX_TEAM_SIZE_LEVEL_1
-      : this.options.complexity === 2
-        ? MAX_TEAM_SIZE_LEVEL_2
-        : MAX_TEAM_SIZE_LEVEL_3;
+    return this.options.complexity === 1 ? MAX_TEAM_SIZE_LEVEL_1 :
+           this.options.complexity === 2 ? MAX_TEAM_SIZE_LEVEL_2 :
+           MAX_TEAM_SIZE_LEVEL_3;
   }
 
+  private getQueryBudget(): number {
+    return this.options.complexity === 1 ? MAX_QUERIES_PER_RESEARCHER_LEVEL_1 :
+           this.options.complexity === 2 ? MAX_QUERIES_PER_RESEARCHER_LEVEL_2 :
+           MAX_QUERIES_PER_RESEARCHER_LEVEL_3;
+  }
+
+  private getComplexityGuidance(): string {
+    if (this.options.complexity === 1) {
+      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts.";
+    } else if (this.options.complexity === 2) {
+      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources.";
+    } else {
+      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned.";
+    }
+  }
+
+  /**
+   * Limit the number of queries planned per round to prevent context overflow.
+   */
   private capResearcherQueries(plan: ResearchPlan): ResearchPlan {
     const budget = this.getQueryBudget();
     
-    // Scale round cap by complexity: L1=20, L2=40, L3=60
     const ROUND_HARD_CAP = this.options.complexity === 1 ? 20 
-                         : this.options.complexity === 2 ? 40 
+                         : this.options.complexity === 2 ? 40
                          : 60;
 
-    // 1. Cap individual researchers first
-    plan.researchers = plan.researchers.map(r => {
-      if (r.queries.length > budget) {
-        logger.warn(`[Orchestrator] Capping researcher ${r.id} queries: ${r.queries.length} → ${budget}`);
-        return { ...r, queries: r.queries.slice(0, budget) };
-      }
-      return r;
-    });
+    if (!plan.researchers) return plan;
 
-    // 2. Enforce global round hard cap (max 40 queries total)
+    // 1. Normalize IDs to strings and cap individual researchers
+    plan.researchers = plan.researchers
+      .filter(r => r && typeof r === 'object' && Array.isArray(r.queries))
+      .map(r => {
+        const normalized = { ...r, id: String(r.id) };
+        if (normalized.queries.length > budget) {
+          logger.warn(`[Orchestrator] Capping researcher ${normalized.id} queries: ${normalized.queries.length} → ${budget}`);
+          normalized.queries = normalized.queries.slice(0, budget);
+        }
+        return normalized;
+      });
+
+    // 2. Enforce global round budget
     let totalQueries = plan.researchers.reduce((sum, r) => sum + r.queries.length, 0);
     if (totalQueries > ROUND_HARD_CAP) {
         logger.warn(`[Orchestrator] Total round queries (${totalQueries}) exceeds hard cap (${ROUND_HARD_CAP}). Trimming...`);
-        
-        // Simple fair trimming: remove queries from the end of the lists until we fit
         while (totalQueries > ROUND_HARD_CAP) {
-            // Find the researcher with the most queries remaining
+            let maxCount = 0;
             let maxIdx = -1;
-            let maxCount = -1;
+            if (!plan.researchers) break;
             for (let i = 0; i < plan.researchers.length; i++) {
-                if (plan.researchers[i].queries.length > maxCount) {
-                    maxCount = plan.researchers[i].queries.length;
+                if (plan.researchers[i]!.queries.length > maxCount) {
+                    maxCount = plan.researchers[i]!.queries.length;
                     maxIdx = i;
                 }
             }
-            if (maxIdx === -1 || maxCount === 0) break; // Should not happen
-            
-            plan.researchers[maxIdx].queries.pop();
+            if (maxIdx === -1) break;
+            plan.researchers[maxIdx]!.queries.pop();
             totalQueries--;
         }
     }
-
+    
     plan.allQueries = plan.researchers.flatMap(r => r.queries);
     return plan;
   }
 
   private parseJsonPlan(text: string): ResearchPlan {
-    const result = extractJson<ResearchPlan>(text, 'object');
+    const result = extractJson<unknown>(text, 'object');
     if (!result.success || !result.value) {
         const preview = text.length > 100 ? text.slice(0, 100) + '...' : text;
         throw new Error(`Failed to extract valid JSON plan: ${result.error}. Raw response preview: "${preview}"`);
     }
-    const plan = result.value;
-    if (!Array.isArray(plan.researchers)) {
-        throw new Error(`Coordinator returned invalid plan: 'researchers' is not an array (got ${JSON.stringify(plan.researchers)})`);
-    }
-    for (let i = 0; i < plan.researchers.length; i++) {
-        const r = plan.researchers[i]!;
-        if (!Array.isArray(r.queries)) {
-            throw new Error(`Coordinator plan researcher[${i}] (id=${r.id}) has no queries array (got ${JSON.stringify(r.queries)})`);
+
+    // Robust validation using TypeBox
+    try {
+        const plan = Value.Convert(ResearchPlanSchema, result.value) as ResearchPlan;
+        
+        if (!Value.Check(ResearchPlanSchema, plan)) {
+            const errors = [...Value.Errors(ResearchPlanSchema, plan)];
+            logger.warn(`[Orchestrator] Plan validation failed: ${errors.map(e => String(e.message)).join(', ')}`);
         }
+
+        if (!Array.isArray(plan.researchers)) {
+            throw new Error(`Coordinator returned invalid plan: 'researchers' is not an array`);
+        }
+        
+        plan.researchers.forEach((r, i) => {
+            r.id = String(r.id);
+            if (!Array.isArray(r.queries)) {
+                throw new Error(`Coordinator plan researcher[${i}] (id=${r.id}) has no queries array`);
+            }
+        });
+
+        return plan;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Plan validation error: ${msg}`, { cause: err });
     }
-    return plan;
   }
 
-  private distributeResults(plan: ResearchPlan, results: any[]): Map<string, string[]> {
+  private distributeResults(plan: ResearchPlan, results: QueryResultWithError[]): Map<string, string[]> {
     const linkMap = new Map<string, string[]>();
+    if (!plan.researchers) return linkMap;
+
     plan.researchers.forEach((r) => {
         const ownedLinks: string[] = [];
         const rQueries = new Set(r.queries.map((q: string) => q.toLowerCase().trim()));
-        results.forEach((res: any) => {
-            // Match if the search result query exactly matches one of the researcher's queries
-            // or if the researcher's query is a close substring match
+        results.forEach((res) => {
             const resQuery = String(res.query ?? '').toLowerCase().trim();
             if (rQueries.has(resQuery) || [...rQueries].some((rq) => resQuery.includes(rq) || rq.includes(resQuery))) {
-                (res.results ?? []).forEach((item: any) => {
+                (res.results ?? []).forEach((item) => {
                     if (item?.url) ownedLinks.push(item.url);
                 });
             }
         });
-        linkMap.set(r.id, Array.from(new Set(ownedLinks)));
+        linkMap.set(String(r.id), Array.from(new Set(ownedLinks)));
     });
     return linkMap;
   }
 
-  /**
-   * Manages concurrent execution of researchers.
-   * Ensures exactly MAX_CONCURRENT_RESEARCHERS (3) run at a time.
-   */
   private async runResearchersParallel(configs: ResearcherConfig[], linksMap: Map<string, string[]>, signal?: AbortSignal) {
       const queue = [...configs];
       const active = new Set<Promise<void>>();
@@ -506,27 +455,34 @@ export class DeepResearchOrchestrator {
           while (active.size < MAX_CONCURRENT_RESEARCHERS && queue.length > 0) {
               if (active.size > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
               const config = queue.shift()!;
-              const links = linksMap.get(config.id) || [];
-              const p = this.runResearcher(config, links)
+              const links = linksMap.get(String(config.id)) || [];
+              const p = this.runResearcher(config, links, signal)
                   .catch((err) => {
                       errors.push(`Researcher ${config.id} (${config.name}): ${err.message || err}`);
+                      recordResearcherFailure(this.options.panelState.sessionId, this.options.panelState.researchId, String(config.id));
                   })
                   .finally(() => { active.delete(p); });
               active.add(p);
           }
 
           // Wait for at least one to finish before spawning next
-          if (active.size > 0) await Promise.race(active);
+          if (active.size > 0) {
+              await Promise.race(active);
+              
+              if (shouldStopResearch(this.options.panelState.sessionId, this.options.panelState.researchId)) {
+                  throw new Error("Research stopped due to excessive infrastructure failures. Multiple researchers failed.");
+              }
+          }
       }
 
-      // Log any researcher failures but don't crash the round
+      // Log any remaining researcher failures
       if (errors.length > 0) {
-          logger.warn(`[Orchestrator] ${errors.length} researcher(s) failed (continuing with remaining reports):\n${errors.join('\n')}`);
+          logger.warn(`[Orchestrator] ${errors.length} researcher(s) failed in this round:\n${errors.join('\n')}`);
       }
   }
 
-  private async runResearcher(config: ResearcherConfig, initialLinks: string[]): Promise<void> {
-    const displayNum = config.id.replace(/^r/, '');
+  private async runResearcher(config: ResearcherConfig, initialLinks: string[], _signal?: AbortSignal): Promise<void> {
+    const displayNum = String(config.id).replace(/^r/, '');
     const internalId = displayNum;
     const label = displayNum;
     
@@ -534,248 +490,169 @@ export class DeepResearchOrchestrator {
     activateSlice(this.options.panelState, internalId);
     this.options.onUpdate();
 
-    try {
-        const systemPromptTemplate = loadPrompt('researcher');
-        let researcherPrompt = injectCurrentDate(systemPromptTemplate, 'researcher')
-            .replace('{{goal}}', config.goal);
+    const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
+        ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
+        : '';
 
-        const seeder = this.currentRound === 1 ? 'Initial Coordinator' : 'Lead Evaluator';
-        if (initialLinks.length > 0) {
-            researcherPrompt = researcherPrompt.replace('{{evidence_section}}',
-                `## Starting Evidence (from ${seeder})\nThe following links were identified through a search pass run by the ${seeder}. Begin your scraping from these:\n\n${initialLinks.join('\n')}`);
-        } else {
-            researcherPrompt = researcherPrompt.replace('{{evidence_section}}', '');
-        }
+    const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+    const evidenceSection = `## Evidence Provided\n${initialLinks.length > 0 ? `Initial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}` : 'No initial URLs provided. Perform a web search to begin.'}`;
+    const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
+      .replace('{{goal}}', config.goal)
+      .replace('{{evidence_section}}', evidenceSection)
+      .replace('{{coordination_section}}', previousQueriesSection)
+      .replace('{{extra_tool_guidelines}}', '');
 
-        const session = await createResearcherSession({
-            cwd: this.options.ctx.cwd,
-            ctxModel: this.options.model,
-            modelRegistry: this.options.ctx.modelRegistry,
-            settingsManager: (this.options.ctx as any).settingsManager,
-            systemPrompt: researcherPrompt,
-            extensionCtx: this.options.ctx,
-            noSearch: true,
-            onLinksScraped: (links) => this.broadcastLinks(internalId, config.name, links),
-            onSearchProgress: (completed, total) => {
-                updateSliceStatus(this.options.panelState, internalId, `Searching: ${completed}/${total}...`);
-                this.options.onUpdate();
-            },
-            getGlobalState: () => ({
-                researchId: this.options.panelState.researchId,
-                rootQuery: this.options.query,
-                allScrapedLinks: getScrapedLinks(this.options.panelState.researchId),
-            } as SystemResearchState),
-            updateGlobalLinks: (links) => registerScrapedLinks(this.options.panelState.researchId, links),
-            getTokensUsed: () => this.siblingTokens.get(internalId) ?? 0,
-            getScrapeTokens: () => this.siblingScrapeTokens.get(internalId) ?? 0,
-            contextWindowSize: (this.options.model as any)?.contextWindow ?? 200000,
-        });
+    const extendedCtx = this.options.ctx as any;
+    let researcherTokens = 0;
+    const modelContextSize = (this.options.model as any)?.contextWindow ?? 200000;
 
-        const researcherStartMs = Date.now();
-        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} started`);
+    const session = await createResearcherSession({
+      cwd: this.options.ctx.cwd,
+      ctxModel: this.options.model,
+      modelRegistry: this.options.ctx.modelRegistry,
+      settingsManager: extendedCtx.settingsManager,
+      systemPrompt: prompt,
+      extensionCtx: this.options.ctx,
+      noSearch: true,
+      onSearchProgress: (links) => {
+          updateSliceStatus(this.options.panelState, internalId, `${links} Results`);
+          this.options.onUpdate();
+      },
+      getTokensUsed: () => researcherTokens,
+      getScrapeTokens: () => this.siblingScrapeTokens.get(internalId) ?? 0,
+      contextWindowSize: modelContextSize,
+    });
 
-        // Fractional progress credit per tool call (up to 90% of UNITS_PER_RESEARCHER before completion)
-        const perToolCredit = DeepResearchOrchestrator.UNITS_PER_RESEARCHER / RESEARCHER_TOOL_BUDGET;
-        const maxFractionalCredit = DeepResearchOrchestrator.UNITS_PER_RESEARCHER * 0.9;
-
-        // Track LLM call durations to diagnose performance issues
-        // FIX: Use LIFO stack instead of map for accurate timing
-        const llmCallStartStack: number[] = [];
-
-        const subscription = session.subscribe((event: AgentSessionEvent) => {
-            // Track LLM call timing
-            if (event.type === 'message_start') {
-                llmCallStartStack.push(Date.now());
-                logger.debug(`[Orchestrator] ${this.elapsed()} LLM call started for ${internalId} (stack depth: ${llmCallStartStack.length})`);
-            }
-            if (event.type === 'message_end') {
-                const startTime = llmCallStartStack.pop() || Date.now();
-                const duration = Date.now() - startTime;
-                logger.debug(`[Orchestrator] ${this.elapsed()} LLM call completed for ${internalId} in ${duration}ms (${(duration/1000).toFixed(1)}s)`);
-            }
-            if (event.type === 'message_end') {
-                const msg = event.message as any;
-                if (msg?.role !== 'assistant') return;
-                const rawUsage = msg.usage as Usage | undefined;
-                const tokens = calculateTotalTokens(rawUsage ?? {});
-                // Use the pre-calculated cost from pi-ai (already computed by the provider)
+    const llmCallStartStack: number[] = [];
+    const subscription = session.subscribe((event: AgentSessionEvent) => {
+        if (event.type === 'message_start') {
+            llmCallStartStack.push(Date.now());
+            logger.debug(`[Orchestrator] ${this.elapsed()} LLM call started for ${internalId}`);
+        } else if (event.type === 'message_end') {
+            const startTime = llmCallStartStack.pop() || Date.now();
+            const duration = Date.now() - startTime;
+            
+            const msg = event.message as any;
+            if (msg?.role !== 'assistant') return;
+            const rawUsage = msg.usage;
+            if (rawUsage) {
+                const parsed = parseTokenUsage(rawUsage);
+                const tokens = calculateTotalTokens(parsed);
+                const inputTokens = parsed.input ?? 0;
+                const percent = ((inputTokens / modelContextSize) * 100).toFixed(1);
                 const cost: number = rawUsage ? ((rawUsage as any).cost?.total ?? 0) : 0;
+                
+                logger.debug(`[Orchestrator] ${this.elapsed()} LLM call for ${internalId} in ${duration}ms: totalTokens=${tokens} cost=${cost} context=${inputTokens} (${percent}%)`);
+
                 if (tokens > 0) {
-                    const currentTotal = this.siblingTokens.get(internalId) ?? 0;
-                    const newTotal = currentTotal + tokens;
-                    this.siblingTokens.set(internalId, newTotal);
-                    
+                    researcherTokens += tokens;
                     this.options.onTokens(tokens);
+                }
+                if (cost > 0) {
                     this.options.panelState.totalCost += cost;
-                    updateSliceTokens(this.options.panelState, label, tokens, cost);
                 }
-            } else if (event.type === 'tool_execution_end' && !event.isError) {
-                // FIX: Track scrape tokens here where event.result is available
-                if (event.toolName === 'scrape' && event.result?.details?.count) {
-                    const scrapeTokenEstimate = event.result.details.count * AVG_TOKENS_PER_SCRAPE;
-                    const currentScrapeTotal = this.siblingScrapeTokens.get(internalId) ?? 0;
-                    this.siblingScrapeTokens.set(internalId, currentScrapeTotal + scrapeTokenEstimate);
-                }
-
-                // Advance progress fractionally as tools complete, capped at 90% before final credit
-                if (this.options.panelState.progress) {
-                    const currentCredit = this.progressCredits.get(config.id) ?? 0;
-                    if (currentCredit < maxFractionalCredit) {
-                        const delta = Math.min(perToolCredit, maxFractionalCredit - currentCredit);
-                        this.progressCredits.set(config.id, currentCredit + delta);
-                        this.options.panelState.progress.made += delta;
-                        this.options.onUpdate();
-                    }
-                }
-            } else if (event.type === 'message_update') {
-                const updateMsg = event.message as any;
-                if (updateMsg?.role === 'assistant') {
-                    const content = updateMsg.content;
-                    if (Array.isArray(content)) {
-                        const textLen = content
-                            .filter(isTextContentBlock)
-                            .reduce((sum: number, b: any) => sum + b.text.length, 0);
-                        if (textLen > STREAMING_UPDATE_THRESHOLD_CHARS) {
-                            const estimate = Math.ceil(textLen / 4);
-                            updateSliceTokens(this.options.panelState, label, estimate, 0);
-                            this.options.onUpdate();
-                        }
-                    }
+                if (tokens > 0 || cost > 0) {
+                    updateSliceTokens(this.options.panelState, internalId, tokens, cost);
+                    this.options.onUpdate();
                 }
             }
-        });
-
-        this.activeSessions.set(internalId, session);
-        try {
-            // FIX: Enforce researcher timeout to prevent hung sessions
-            const config = getConfig();
-            const timeoutPromise = new Promise<void>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error(`Researcher ${internalId} timed out after ${config.RESEARCHER_TIMEOUT_MS}ms`));
-                }, config.RESEARCHER_TIMEOUT_MS);
-            });
-
-            await Promise.race([
-                session.prompt("Begin your specialized research."),
-                timeoutPromise
-            ]);
-        } catch (error) {
-            if (error instanceof Error && error.message?.includes('timed out')) {
-                logger.error(`[Orchestrator] ${this.elapsed()} ${error.message}`);
-                throw error;
-            }
-            throw error;
-        } finally {
-            if (typeof subscription === 'function') subscription();
-        }
-
-        const researcherElapsedMs = Date.now() - researcherStartMs;
-        logger.log(`[Orchestrator] ${this.elapsed()} Researcher ${internalId} done in ${(researcherElapsedMs / 1000).toFixed(1)}s`);
-
-        const report = ensureAssistantResponse(session, `Researcher ${internalId}`);
-        // Store report with round-prefixed key for the evaluator, but use internalId for logging
-        this.reports.set(`${this.currentRound}.${internalId}`, report);
-        await this.injectCompletionSummary(internalId, config.name, report);
-
-        completeSlice(this.options.panelState, label);
-
-        // Credit the remaining 10% on researcher completion (final credit)
-        if (this.options.panelState.progress) {
-          const alreadyCredited = this.progressCredits.get(config.id) ?? 0;
-          if (alreadyCredited < DeepResearchOrchestrator.UNITS_PER_RESEARCHER) {
-            const topUp = DeepResearchOrchestrator.UNITS_PER_RESEARCHER - alreadyCredited;
-            this.options.panelState.progress.made += topUp;
-            this.progressCredits.set(config.id, DeepResearchOrchestrator.UNITS_PER_RESEARCHER);
+        } else if (event.type === 'tool_execution_start') {
+            updateSliceStatus(this.options.panelState, internalId, `Running ${event.toolName}...`);
             this.options.onUpdate();
-          }
-        }
+        } else if (event.type === 'tool_execution_end') {
+            updateSliceStatus(this.options.panelState, internalId, undefined);
+            
+            if (!event.isError) {
+                // Track estimated scrape tokens for the context gate
+                if (event.toolName === 'scrape' && (event.result as any)?.details?.count) {
+                    const scrapeCount = (event.result as any).details.count;
+                    const estimatedTokens = scrapeCount * 10000; // AVG_TOKENS_PER_SCRAPE
+                    const currentScrapeTotal = this.siblingScrapeTokens.get(internalId) ?? 0;
+                    this.siblingScrapeTokens.set(internalId, currentScrapeTotal + estimatedTokens);
+                }
 
-        this.activeSessions.delete(internalId);
-    } catch (e) {
-        completeSlice(this.options.panelState, label);
-        this.options.onUpdate();
-        this.activeSessions.delete(internalId);
-        throw e;
+                if (this.options.panelState.progress) {
+                    const currentCredit = this.progressCredits.get(String(config.id)) ?? 0;
+                    const delta = 1;
+                    if (currentCredit + delta <= DeepResearchOrchestrator.UNITS_PER_RESEARCHER) {
+                        this.options.panelState.progress.made += delta;
+                        this.progressCredits.set(String(config.id), currentCredit + delta);
+                    }
+                }
+            }
+            this.options.onUpdate();
+        }
+    });
+
+    try {
+      const { getConfig } = await import('../config.ts');
+      const configObj = getConfig();
+      
+      const timeoutPromise = new Promise<void>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Researcher ${internalId} timed out after ${configObj.RESEARCHER_TIMEOUT_MS}ms`));
+        }, configObj.RESEARCHER_TIMEOUT_MS);
+      });
+
+      await Promise.race([
+        session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
+        timeoutPromise
+      ]);
+      const responseText = ensureAssistantResponse(session, String(config.id));
+      this.reports.set(`${this.currentRound}.${config.id}`, responseText);
+      
+      // Ensure we credit the full amount for this researcher upon completion
+      if (this.options.panelState.progress) {
+          const alreadyCredited = this.progressCredits.get(String(config.id)) ?? 0;
+          const remaining = DeepResearchOrchestrator.UNITS_PER_RESEARCHER - alreadyCredited;
+          if (remaining > 0) {
+            this.options.panelState.progress.made += remaining;
+            this.progressCredits.set(String(config.id), DeepResearchOrchestrator.UNITS_PER_RESEARCHER);
+          }
+      }
+    } finally {
+      subscription();
+      completeSlice(this.options.panelState, internalId);
+      this.options.onUpdate();
     }
   }
 
-  private broadcastLinks(sourceId: string, _sourceName: string, links: string[]) {
-      const updateMsg = formatLightweightLinkUpdate(links, sourceId, _sourceName);
-      for (const [id, session] of this.activeSessions) {
-          if (id !== sourceId) session.steer(updateMsg).catch(() => {});
-      }
-      this.allScrapedLinks = Array.from(new Set([...this.allScrapedLinks, ...links]));
-      registerScrapedLinks(this.options.panelState.researchId, links);
-  }
-
-  private async injectCompletionSummary(sourceId: string, _sourceName: string, fullReport: string) {
-      const summary = this.extractSummary(fullReport);
-      const urls = this.extractUrls(fullReport);
-      const msg = `## Sibling ${sourceId} Completed\n\n### Summary\n${summary}\n\n### URLs\n${urls.map(u => `- ${u}`).join('\n')}\n\n> Adjust your direction.`;
-      for (const [id, session] of this.activeSessions) {
-          if (id !== sourceId) session.steer(msg).catch(() => {});
-      }
-  }
-
-
   private buildFallbackSynthesis(): string {
     const sections = Array.from(this.reports.entries())
-      .map(([id, report]) => `## Researcher ${id} Findings\n\n${report}`)
+      .map(([_id, report]) => report)
       .join('\n\n---\n\n');
     return `# Research Findings\n\n${sections}`;
   }
 
   private async evaluate(signal?: AbortSignal, mustSynthesize = false, atTarget = false): Promise<ResearchPlan> {
-      if (!this.options.panelState.slices.has('eval')) {
-          addSlice(this.options.panelState, 'eval', 'eval', true);
-      }
+      addSlice(this.options.panelState, 'eval', 'eval', false);
       activateSlice(this.options.panelState, 'eval');
       updateSliceStatus(this.options.panelState, 'eval', 'Assessing...');
       this.options.onUpdate();
 
-      const maxTeamSize = this.options.complexity === 1 ? MAX_TEAM_SIZE_LEVEL_1 :
-                           this.options.complexity === 2 ? MAX_TEAM_SIZE_LEVEL_2 :
-                           MAX_TEAM_SIZE_LEVEL_3;
-                           
-      const previousQueriesList = this.allSearchedQueries.length > 0 
-          ? this.allSearchedQueries.map(q => `- ${q}`).join('\n')
-          : "None";
+      const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
+          ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
+          : '';
 
-      // Calculate next available numeric ID for continuity
-      // Previously used "round.rN". Now we just want simple numbers "1", "2", "3"...
-      const existingIds = Array.from(this.reports.keys())
-          .map(id => { 
-              const m = id.match(/(\d+)$/); 
-              return m ? parseInt(m[1]!) : NaN; 
-          })
-          .filter(n => !isNaN(n));
-      const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+      const nextId = this.plan?.researchers ? this.plan.researchers.length + 1 : 1;
+      const maxTeamSize = this.getTeamSize();
 
-      const evalPrompt = loadPrompt('system-lead-evaluator')
-          .replace('{ROOT_QUERY}', this.options.query)
+      const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator'), 'evaluator')
+          .replace(/\{ROOT_QUERY\}/g, this.options.query)
           .replace('{ROUND_NUMBER}', this.currentRound.toString())
           .replace('{MAX_ROUNDS}', ((this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 : this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 : MAX_ROUNDS_LEVEL_3)).toString())
           .replace('{MAX_TEAM_SIZE}', maxTeamSize.toString())
-          .replace('{PREVIOUS_QUERIES}', previousQueriesList)
+          .replace('{{previous_queries_section}}', previousQueriesSection)
           .replace('{NEXT_ID}', `${nextId}`);
 
-      // FIX: For delegation-only, send only current round's reports to keep input size constant
-      let reportsToUse = this.reports;
-      if (!mustSynthesize && !atTarget) {
-          // Delegation decision: use only current round's reports
-          const currentRoundReports = new Map<string, string>();
-          for (const [id, report] of this.reports.entries()) {
-              if (id.startsWith(`${this.currentRound}.`)) {
-                  currentRoundReports.set(id, report);
-              }
-          }
-          reportsToUse = currentRoundReports;
-      }
-      // For synthesis or at-target, use all reports as before
+      // Always send ALL reports to the evaluator for full context
+      const reportsToUse = this.reports;
 
       const reportsText = Array.from(reportsToUse.entries())
           .map(([id, report]) => {
-              return `### Researcher ${id} Report\n\n${report}`;
+              // Strip round prefix ("1.2" → "2") so evaluator sees sequential IDs, not "round.id"
+              const displayId = id.includes('.') ? id.split('.').slice(1).join('.') : id;
+              return `### Researcher ${displayId} Report\n\n${report}`;
           })
           .join('\n\n---\n\n');
 
@@ -788,42 +665,85 @@ export class DeepResearchOrchestrator {
           ? '\n\n**NOTICE — TARGET DEPTH REACHED**: Synthesize if the research agenda is substantially covered. Only delegate if CRITICAL gaps remain that cannot be resolved from existing findings.'
           : '';
 
-      const response = await completeSimple(this.options.model, {
-          messages: [
-              {
-                  role: 'user',
-                  content: [{ type: 'text', text: `Findings so far:\n\n${reportsText}\n\n---\n\n${evalPrompt}${synthOverride}` }],
-                  timestamp: Date.now(),
-              },
-          ]
-      }, {
-          apiKey: auth.apiKey,
-          headers: auth.headers,
-          signal,
-          reasoning: 'low',
-      });
+      const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
+      
+      let text = "";
+      for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
+          const response = await completeSimple(this.options.model, {
+              messages: [
+                  {
+                      role: 'user',
+                      content: [{ type: 'text', text: evalUserMessage }],
+                      timestamp: Date.now(),
+                  },
+              ]
+          }, {
+              apiKey: auth.apiKey,
+              headers: auth.headers,
+              signal,
+          });
 
-      const textContent = response.content.find((c): c is TextContent => c.type === 'text');
-      const text = textContent?.text || "";
-      logger.debug('[Orchestrator] Raw evaluator response:', text);
+          const textContent = response.content.find((c): c is TextContent => c.type === 'text');
+          text = textContent?.text || "";
+          logger.debug('[Orchestrator] Raw evaluator response (attempt %d):', evalAttempt, text);
 
-      // Track evaluator tokens
-      const evalUsage = (response as any).usage as Usage | undefined;
-      if (evalUsage) {
-          const tokens = calculateTotalTokens(evalUsage);
-          if (tokens > 0) {
-              const cost: number = (evalUsage as any).cost?.total ?? 0;
-              this.options.onTokens(tokens);
-              this.options.panelState.totalCost += cost;
-              updateSliceTokens(this.options.panelState, 'eval', tokens, cost);
+          // Track evaluator tokens on every billed attempt
+          const evalUsageObj = (response as any).usage;
+          if (evalUsageObj) {
+              const evalUsage = parseTokenUsage(evalUsageObj);
+              const tokens = calculateTotalTokens(evalUsage);
+              const inputTokens = evalUsage.input ?? 0;
+              const modelContextSize = (this.options.model as any)?.contextWindow ?? 200000;
+              const percent = ((inputTokens / modelContextSize) * 100).toFixed(1);
+              const cost: number = (evalUsageObj as any).cost?.total ?? 0;
+              
+              logger.debug(`[Orchestrator] eval message_end: totalTokens=${tokens} cost=${cost} input=${inputTokens} (${percent}%) output=${(evalUsageObj as any)?.output}`);
+              
+              if (tokens > 0) {
+                  this.options.onTokens(tokens);
+              }
+              if (cost > 0) {
+                  this.options.panelState.totalCost += cost;
+              }
+              if (tokens > 0 || cost > 0) {
+                  updateSliceTokens(this.options.panelState, 'eval', tokens, cost);
+              }
+          }
+
+          if (text.trim()) break; // Got a real response
+          if (evalAttempt < 2) {
+              logger.warn('[Orchestrator] Evaluator returned empty response, retrying');
           }
       }
+      logger.debug('[Orchestrator] Evaluator final text:', text.slice(0, 200));
 
       // Parse first, then decide what to do with the slice based on outcome.
       const extracted = extractJson<ResearchPlan>(text, 'any');
       let plan: ResearchPlan;
       if (extracted.success && extracted.value) {
           plan = extracted.value;
+          // Sanitization: Ensure researchers is a valid array of objects
+          if (plan.action === 'delegate') {
+              if (!Array.isArray(plan.researchers)) {
+                  logger.warn('[Orchestrator] Evaluator returned delegate but researchers is not an array; defaulting to synthesize');
+                  plan.action = 'synthesize';
+              } else {
+                  // Filter out non-objects (e.g. LLM returned [1, 2, 3] instead of objects)
+                  plan.researchers = plan.researchers.filter(r => r && typeof r === 'object' && Array.isArray(r.queries));
+                  if (plan.researchers.length === 0) {
+                      logger.warn('[Orchestrator] Evaluator returned 0 valid researcher objects; defaulting to synthesize');
+                      plan.action = 'synthesize';
+                  }
+              }
+
+              // Ensure allQueries is a valid array of strings
+              if (!Array.isArray(plan.allQueries)) {
+                  plan.allQueries = plan.researchers ? plan.researchers.flatMap(r => r.queries) : [];
+              } else {
+                  plan.allQueries = plan.allQueries.filter(q => typeof q === 'string');
+              }
+          }
+          
           if (plan.action === 'synthesize' && !plan.content) {
               plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
           }
@@ -831,6 +751,8 @@ export class DeepResearchOrchestrator {
           logger.warn(`[Orchestrator] Evaluator returned malformed JSON (${extracted.error}); defaulting to synthesize`);
           plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       }
+
+      if (!plan) throw new Error('Failed to determine research plan.');
 
       const willDelegate = plan.action !== 'synthesize' && Array.isArray(plan.researchers) && plan.researchers.length > 0 && !mustSynthesize;
 
@@ -841,37 +763,14 @@ export class DeepResearchOrchestrator {
           this.options.panelState.progress.made += DeepResearchOrchestrator.LEAD_EVAL_UNITS;
           this.progressCredits.set(evalKey, DeepResearchOrchestrator.LEAD_EVAL_UNITS);
         }
-        // If delegating to a new round, expand the expected budget and mark as extended
-        if (willDelegate && plan.researchers && plan.researchers.length > 0) {
-          const newResearcherUnits = plan.researchers.length * DeepResearchOrchestrator.UNITS_PER_RESEARCHER;
-          const nextEvalUnits = DeepResearchOrchestrator.LEAD_EVAL_UNITS;
-          this.options.panelState.progress.expected += newResearcherUnits + nextEvalUnits;
-          this.options.panelState.progress.extended = true;
-        }
       }
 
       if (willDelegate) {
-          // Keep the eval slice alive and transition it to "Searching..." so the TUI
-          // shows a continuous signal through the upcoming search burst — no flicker.
-          updateSliceStatus(this.options.panelState, 'eval', 'Searching...');
+          // Transition eval slice to "Results..." for search burst
+          updateSliceStatus(this.options.panelState, 'eval', 'Results...');
+          return this.capResearcherQueries(plan);
       } else {
-          updateSliceStatus(this.options.panelState, 'eval', undefined);
-          completeSlice(this.options.panelState, 'eval');
-          removeSlice(this.options.panelState, 'eval');
+          return plan;
       }
-      this.options.onUpdate();
-
-      return plan;
-  }
-
-  private extractSummary(report: string): string {
-      const match = report.match(/###\s*Executive\s*Summary\s*\n([\s\S]*?)(?=\n###|$)/i);
-      if (match) return match[1]!.trim().split('.').slice(0, 4).join('.') + '.';
-      return report.split('.').slice(0, 3).join('.') + '.';
-  }
-
-  private extractUrls(report: string): string[] {
-      const matches = report.matchAll(/https?:\/\/[^\s)\]>"]+/g);
-      return Array.from(new Set(Array.from(matches).map(m => m[0])));
   }
 }

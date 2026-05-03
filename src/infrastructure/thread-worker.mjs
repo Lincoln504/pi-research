@@ -38,7 +38,7 @@ async function initBrowser() {
             try {
                 CamoufoxModule = require('camoufox-js');
             } catch (e) {
-                throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`);
+                throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
             }
 
             const { Camoufox } = CamoufoxModule;
@@ -62,7 +62,7 @@ async function initBrowser() {
         const msg = e instanceof Error ? e.message : String(e);
         
         if (msg.includes('Camoufox is not installed')) {
-            throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`);
+            throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`, { cause: e });
         }
         
         throw e;
@@ -103,27 +103,13 @@ async function executeSearchTask(browser, context, query) {
             page.keyboard.press('Enter')
         ]);
 
-        const p1Results = await extractSearchResults(page);
-        let p2Results = [];
-        try {
-            const nextButton = page.locator('input[value="Next Page >"]');
-            if (await nextButton.count() > 0) {
-                await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
-                    nextButton.first().click()
-                ]);
-                p2Results = await extractSearchResults(page);
-            }
-        } catch { /* ignore */ }
+        const results = await extractSearchResults(page);
 
         await page.close();
         const jitter = Math.floor(Math.random() * 401) + 200;
         await new Promise(r => setTimeout(r, jitter));
 
-        return {
-            results: [...p1Results, ...p2Results],
-            jitter
-        };
+        return { results, jitter };
     } catch (error) {
         await page.close().catch(() => {});
         throw error;
@@ -140,14 +126,19 @@ async function executeScrapeTask(browser, context, url) {
         if (contentType.includes('application/pdf')) {
             const buffer = await response.body();
             await page.close();
-            return { contentType, buffer: Array.from(new Uint8Array(buffer)) };
+            return { contentType, buffer };
         }
 
         // If it's HTML, check if we need to wait longer (JS-heavy sites)
         let html = await page.content();
         
-        // Simple heuristic: if the body is very short, wait for networkidle
-        if (html.length < 5000) {
+        // Improved heuristic: wait if very short OR if it contains common SPA mount points
+        const needsWait = html.length < 5000 || 
+                          html.includes('id="root"') || 
+                          html.includes('id="app"') ||
+                          html.includes('<noscript>');
+
+        if (needsWait) {
             await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
             html = await page.content();
         }
@@ -197,8 +188,21 @@ async function runTask(data) {
         
         return { error: 'Unknown task type' };
     } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        
+        // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
+        if (errMsg.includes('Target closed') || 
+            errMsg.includes('browser has disconnected') || 
+            errMsg.includes('Protocol error') ||
+            errMsg.includes('Session closed')) {
+            if (context) context.close().catch(() => {});
+            if (browser) browser.close().catch(() => {});
+            context = null;
+            browser = null;
+        }
+
         return { 
-            error: error instanceof Error ? error.message : String(error),
+            error: errMsg,
             duration: Date.now() - startTime
         };
     }

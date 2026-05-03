@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createGrepTool } from '../../../src/tools/grep';
-import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker';
+import { createGrepTool } from '../../../src/tools/grep.ts';
+import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 describe('tools/grep', () => {
   const createMockTracker = () => new ToolUsageTracker({ gathering: 6 });
@@ -29,24 +29,20 @@ describe('tools/grep', () => {
       
       // Mock execCommand or just let it fail/pass
       // For tracker test, we just care that recordCall was called
-      try {
-        await tool.execute('test-id', { pattern: 'test' }, undefined, undefined, {} as any);
-      } catch (e) {
-        // ignore execution errors, we only care about tracker
-      }
+      await tool.execute('test-id', { pattern: 'test' }, {} as any);
 
       expect(spy).toHaveBeenCalledWith('grep');
     });
 
-    it('should throw error if limit exceeded', async () => {
+    it('should return limit reached message if budget exceeded', async () => {
       const tracker = new ToolUsageTracker({ gathering: 1 });
       tracker.recordCall('grep'); // Limit reached
 
       const tool = createGrepTool({ tracker });
 
-      await expect(
-        tool.execute('test-id', { pattern: 'test' }, undefined, undefined, {} as any)
-      ).rejects.toThrow('GATHERING LIMIT REACHED');
+      const result = await tool.execute('test-id', { pattern: 'test' }, {} as any);
+      expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+      expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
     });
   });
 });

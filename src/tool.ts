@@ -21,7 +21,7 @@ import type {
   ModelWithId,
 } from './types/extension-context.ts';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import { type Model, type Usage } from '@mariozechner/pi-ai';
+import { type Model } from '@mariozechner/pi-ai';
 import { Type } from 'typebox';
 import { createResearcherSession } from "./orchestration/researcher.ts";
 import { validateConfig } from './config.ts';
@@ -36,7 +36,7 @@ import {
   createInitialPanelState,
 } from './tui/research-panel.ts';
 import { ensureAssistantResponse } from './utils/text-utils.ts';
-import { calculateTotalTokens } from './types/llm.ts';
+import { calculateTotalTokens, parseTokenUsage } from './types/llm.ts';
 import { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
 import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
@@ -53,6 +53,8 @@ import {
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
+import { MAX_SCRAPE_CALLS, MAX_GATHERING_CALLS } from './constants.ts';
+import { getConfig } from './config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -107,7 +109,7 @@ export function createResearchTool(): ToolDefinition {
     promptGuidelines: [
       'Specifically for web research, not local project exploration.',
       'Research is organized into Rounds. Each round contains multiple parallel siblings.',
-      'SCRAPE PROTOCOL: Up to 2 batches (Batch 1: 4 URLs, Batch 2: 4 URLs). Batches skip automatically when context > 55%.',
+      'SCRAPE PROTOCOL: Up to 3 batches (Batch 1, 2, 3: 4 URLs each). Batches skip automatically when context limit is reached.',
       'After each round, a Lead Evaluator assesses all findings and decides whether to delegate further or synthesize.',
       'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
       'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
@@ -183,7 +185,12 @@ export function createResearchTool(): ToolDefinition {
         let aborted = false;
         let cleanup: (() => void) | null = null;
         let unsubOrder: (() => void) | null = null;
+        let unsubInput: (() => void) | null = null;
         let panelState: any = null;
+
+        // Internal abort controller — user-triggered cancel (ESC/Ctrl-C double-press).
+        // Separate from pi's signal so killing research does not kill the pi session.
+        const internalAbort = new AbortController();
 
         try {
           validateConfig();
@@ -200,7 +207,9 @@ export function createResearchTool(): ToolDefinition {
           cleanup = () => {
             if (cleanup === null) return; // guard against double-call
             cleanup = null;
+            if (renderTimeout) { clearTimeout(renderTimeout); renderTimeout = null; }
             if (unsubOrder) unsubOrder();
+            if (unsubInput) { unsubInput(); unsubInput = null; }
             endResearchSession(piSessionId, researchId);
             cleanupSharedLinks(researchId);
             const activePanels = getPiActivePanels(piSessionId);
@@ -220,11 +229,7 @@ export function createResearchTool(): ToolDefinition {
           
           let renderTimeout: NodeJS.Timeout | null = null;
           const debouncedRefresh = () => {
-            if (renderTimeout) return;
-            renderTimeout = setTimeout(() => {
-              renderTimeout = null;
-              refreshAllSessions(piSessionId);
-            }, 50);
+            refreshAllSessions(piSessionId);
           };
 
           const updateMasterWidget = () => {
@@ -249,11 +254,21 @@ export function createResearchTool(): ToolDefinition {
           const researchComplexity = depth ?? 0;
           const isQuick = researchComplexity === 0;
 
+          // Propagate pi's outer abort into our internal controller
           signal?.addEventListener('abort', () => {
             aborted = true;
-            logger.warn('[research] run aborted', { piSessionId, researchId });
+            logger.warn('[research] run aborted by pi signal', { piSessionId, researchId });
+            internalAbort.abort();
             cleanup?.();
           }, { once: true });
+
+          // ESC or Ctrl-C cancels research immediately
+          unsubInput = ctx.ui.onTerminalInput((data: string) => {
+            if (data !== '\x1b' && data !== '\x03') return undefined;
+            logger.warn('[research] cancelled by user', { piSessionId, researchId, key: data === '\x1b' ? 'ESC' : 'Ctrl-C' });
+            internalAbort.abort();
+            return { consume: true };
+          });
 
           if (isQuick) {
             const truncatedQuery = sanitizedQuery.length > 20 ? sanitizedQuery.slice(0, 20) + '...' : sanitizedQuery;
@@ -261,22 +276,28 @@ export function createResearchTool(): ToolDefinition {
             addSlice(panelState, sliceLabel, sliceLabel, false);
             activateSlice(panelState, sliceLabel);
             updateSliceStatus(panelState, sliceLabel, 'Researching...');
-            panelState.progress = { expected: 10, made: 0, extended: false };
+            
+            // Expected progress: total tool budget (gathering + scraping)
+            // Reduced by 3 to ensure we don't hit 100% prematurely before synthesis
+            const expectedTools = Math.max(1, MAX_GATHERING_CALLS + MAX_SCRAPE_CALLS - 3);
+            panelState.progress = { expected: expectedTools, made: 0 };
             debouncedRefresh();
 
             const researcherPromptTemplate = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
             const quickEvidenceSection =
                 '## Search\n' +
                 'You have access to the `search` tool. You get EXACTLY ONE search call — make it count.\n' +
-                'Submit **20–30 diverse, specific, and non-overlapping queries** covering every possible angle of the topic.\n' +
+                'Submit **5–10 diverse, specific, and non-overlapping queries** covering the most important angles of the topic.\n' +
                 'Each query must target a distinct piece of information. Avoid generic queries.\n' +
-                'Your goal is to gather a high-fidelity pool of initial links.\n\n' +
+                'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
                 '## Scrape\n' +
-                'After searching, you must scrape the best 10–12 sources using the `scrape` tool (2 rounds, up to 6 URLs each).\n' +
+                'After searching, scrape the best sources using the `scrape` tool (up to 3 rounds, up to 4 URLs each — stop early if the tool signals context is full).\n' +
                 'Prioritize primary sources and authoritative data.';
             let researcherPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
                 .replace('{{goal}}', sanitizedQuery)
-                .replace('{{evidence_section}}', quickEvidenceSection);
+                .replace('{{evidence_section}}', quickEvidenceSection)
+                .replace('{{coordination_section}}', '') // No siblings in quick mode
+                .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
             
             const extendedCtx = ctx as ExtendedExtensionContext;
             let quickSessionTokens = 0;
@@ -289,54 +310,85 @@ export function createResearchTool(): ToolDefinition {
               settingsManager: extendedCtx.settingsManager || (ctx as any).settingsManager!,
               systemPrompt: researcherPrompt,
               extensionCtx: ctx,
-              onSearchProgress: (completed, total) => {
-                updateSliceStatus(panelState, sliceLabel, `Searching: ${completed}/${total}...`);
+              onSearchProgress: (links) => {
+                updateSliceStatus(panelState, sliceLabel, `Searching: ${links} links...`);
                 debouncedRefresh();
               },
               getTokensUsed: () => quickSessionTokens,
               contextWindowSize: quickContextWindowSize,
             });
             
+            const llmCallStartStack: number[] = [];
             const subscription = session.subscribe((event: AgentSessionEvent) => {
+              if (event.type === 'message_start') {
+                llmCallStartStack.push(Date.now());
+                logger.debug(`[research] LLM call started`);
+              }
               if (event.type === 'message_end') {
+                const startTime = llmCallStartStack.pop() || Date.now();
+                const duration = Date.now() - startTime;
+                logger.debug(`[research] LLM call completed in ${duration}ms (${(duration/1000).toFixed(1)}s)`);
+
                 const msg = event.message as any;
                 if (msg?.role !== 'assistant') return;
-                const rawUsage = msg.usage as Usage | undefined;
-                const tokens = calculateTotalTokens(rawUsage ?? {});
-                // Use pre-calculated cost from pi-ai provider
-                const cost: number = rawUsage ? ((rawUsage as any).cost?.total ?? 0) : 0;
+                const rawUsageObj = msg.usage;
+                const parsedUsage = parseTokenUsage(rawUsageObj);
+                const tokens = calculateTotalTokens(parsedUsage);
+                const inputTokens = parsedUsage.input ?? 0;
+                const percent = ((inputTokens / quickContextWindowSize) * 100).toFixed(1);
+                const cost: number = rawUsageObj ? ((rawUsageObj as any).cost?.total ?? 0) : 0;
+
+                logger.debug(`[research] message_end usage: totalTokens=${tokens} cost=${cost} input=${inputTokens} (${percent}%) output=${(rawUsageObj as any)?.output}`);
+
                 if (tokens > 0) {
                   quickSessionTokens += tokens;
                   onTokens(tokens);
+                }                // Track cost independently — some providers return cost even when totalTokens=0
+                if (cost > 0) {
                   panelState.totalCost += cost;
+                }
+                if (tokens > 0 || cost > 0) {
                   updateSliceTokens(panelState, sliceLabel, tokens, cost);
                 }
-              } else if (event.type === 'tool_execution_end' && !event.isError) {
-                if (panelState.progress) {
-                  panelState.progress.made += 1;
+              } else if (event.type === 'tool_execution_start') {
+                logger.debug(`[research] Tool ${event.toolName} started`);
+                if (event.toolName === 'search') {
+                  panelState.isSearching = true;
                   debouncedRefresh();
                 }
-              } else if (event.type === 'tool_execution_start' && event.toolName === 'search') {
-                panelState.isSearching = true;
-                debouncedRefresh();
-              } else if (event.type === 'tool_execution_end' && event.toolName === 'search') {
-                panelState.isSearching = false;
+              } else if (event.type === 'tool_execution_end') {
+                logger.debug(`[research] Tool ${event.toolName} completed ${event.isError ? '(FAILED)' : '(OK)'}`);
+                if (!event.isError && panelState.progress) {
+                  panelState.progress.made = Math.min(panelState.progress.expected, panelState.progress.made + 1);
+                }
+                if (event.toolName === 'search') {
+                  panelState.isSearching = false;
+                  updateSliceStatus(panelState, sliceLabel, undefined);
+                }
                 debouncedRefresh();
               }
             });
 
             try {
-              if (signal) {
-                await Promise.race([
-                  session.prompt(sanitizedQuery),
-                  new Promise<never>((_, reject) => {
-                    if (signal.aborted) reject(new Error('Aborted'));
-                    signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
-                  }),
-                ]);
-              } else {
-                  await session.prompt(sanitizedQuery);
-              }
+              const config = getConfig();
+              let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+              const timeoutPromise = new Promise<void>((_, reject) => {
+                  timeoutHandle = setTimeout(() => {
+                      const msg = `Quick research timed out after ${config.RESEARCHER_TIMEOUT_MS}ms`;
+                      session.abort().catch(() => {}).finally(() => reject(new Error(msg)));
+                  }, config.RESEARCHER_TIMEOUT_MS);
+              });
+
+              await Promise.race([
+                session.prompt(sanitizedQuery),
+                timeoutPromise,
+                new Promise<never>((_, reject) => {
+                  if (internalAbort.signal.aborted) reject(new Error('Aborted'));
+                  internalAbort.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+                }),
+              ]).finally(() => {
+                  if (timeoutHandle) clearTimeout(timeoutHandle);
+              });
               
               const result = ensureAssistantResponse(session, 'Quick');
               if (panelState.progress) panelState.progress.made = panelState.progress.expected;
@@ -363,7 +415,7 @@ export function createResearchTool(): ToolDefinition {
               panelState,
             });
 
-            const result = await orchestrator.run(signal);
+            const result = await orchestrator.run(internalAbort.signal);
             const exportPath = await exportResearchReport(sanitizedQuery, result, 'deep', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
 
@@ -371,8 +423,10 @@ export function createResearchTool(): ToolDefinition {
             return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
           }
         } catch (error) {
-          if (aborted) return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
-          
+          if (aborted || internalAbort.signal.aborted) {
+            cleanup?.();
+            return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
+          }
           cleanup?.();
           logger.error('[research] run failed', error);
           return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };

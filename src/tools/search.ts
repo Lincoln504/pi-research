@@ -5,43 +5,54 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
-import { logger } from '../logger.ts';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import { logger } from '../logger.ts';
 
 export function createSearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
-  onProgress?: (completed: number, total: number) => void;
+  onProgress?: (links: number) => void;
 }): ToolDefinition {
+
+  const SearchParams = Type.Object({
+    queries: Type.Array(Type.String(), {
+        minItems: 5,
+        maxItems: 50,
+        description: 'A list of 5-30 search queries to execute.'
+    }),
+  });
 
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a list of queries (10-30) for targeted coverage.',
-    promptSnippet: 'Web search (10-30 queries)',
+    description: 'Search the web using a list of queries (5-30) for targeted coverage.',
+    promptSnippet: 'Web search (5-30 queries)',
     promptGuidelines: [
-      'CRITICAL: Provide 10-30 queries per call.',
+      'CRITICAL: Provide 5-30 queries per call.',
       'COVERAGE: Include query variations, related concepts, and specific data points.',
       'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
-    parameters: Type.Object({
-      queries: Type.Array(Type.String(), {
-          minItems: 10,
-          maxItems: 50,
-          description: 'A list of 10-30 search queries to execute.'
-      }),
-    }),
+    parameters: SearchParams,
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
-      const p = params as Record<string, any>;
-      let queries = (p['queries'] || []) as string[];
 
-      if (queries.length < 10) {
-        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 10 highly specific queries.`);
+      if (!Value.Check(SearchParams, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for search tool. Expected an array of 5-30 queries.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
+      const p = params as Static<typeof SearchParams>;
+      let queries = p.queries;
+
+      if (queries.length < 5) {
+        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 5 highly specific queries.`);
       }
 
       // Hard cap for safety

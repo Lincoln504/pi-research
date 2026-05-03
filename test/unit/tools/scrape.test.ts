@@ -27,7 +27,7 @@ describe('tools/scrape', () => {
     const tool = createScrapeTool({ ...mockOptions, tracker });
     expect(tool.name).toBe('scrape');
     expect(tool.promptGuidelines).toContain(
-      'PROTOCOL: Batch 1 (up to 4 URLs) → Batch 2 (up to 4 URLs).'
+      'PROTOCOL: Batch 1 → Batch 2 → Batch 3 (up to 4 URLs each).'
     );
   });
 

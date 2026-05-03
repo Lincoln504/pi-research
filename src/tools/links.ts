@@ -6,7 +6,8 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { getScrapedLinks } from '../utils/shared-links.ts';
 
@@ -14,6 +15,16 @@ export function createLinksTool(options: {
   ctx: ExtensionContext;
   getGlobalState: () => SystemResearchState;
 }): ToolDefinition {
+
+  const LinksParams = Type.Object({
+    action: Type.String({ 
+        enum: ['list', 'search'],
+        description: 'Action to perform: "list" all scraped links or "search" for specific keywords in URLs.' 
+    }),
+    query: Type.Optional(Type.String({
+        description: 'Keyword to search for in the URL pool (required for "search" action).'
+    })),
+  });
 
   return {
     name: 'links',
@@ -25,19 +36,18 @@ export function createLinksTool(options: {
       'Prevents redundant work by identifying overlapping sources.',
       'Does NOT cost a gathering or scrape call.',
     ],
-    parameters: Type.Object({
-      action: Type.String({ 
-          enum: ['list', 'search'],
-          description: 'Action to perform: "list" all scraped links or "search" for specific keywords in URLs.' 
-      }),
-      query: Type.Optional(Type.String({
-          description: 'Keyword to search for in the URL pool (required for "search" action).'
-      })),
-    }),
+    parameters: LinksParams,
     async execute(_callId, params): Promise<AgentToolResult<unknown>> {
-      const p = params as Record<string, any>;
-      const action = p['action'] as 'list' | 'search';
-      const query = (p['query'] || '').toLowerCase();
+      if (!Value.Check(LinksParams, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for links tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
+      const p = params as Static<typeof LinksParams>;
+      const action = p.action as 'list' | 'search';
+      const query = (p.query || '').toLowerCase();
       
       const state = options.getGlobalState();
       const researchId = state.researchId; 

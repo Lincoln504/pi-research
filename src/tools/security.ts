@@ -5,26 +5,44 @@
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { searchSecurityDatabases } from '../security/index.ts';
-import type { SecuritySearchParams } from '../security/types.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
-
-interface SecuritySearchParamsType {
-  databases?: string[];
-  terms: string[];
-  severity?: string;
-  maxResults?: number;
-  includeExploited?: boolean;
-  ecosystem?: string;
-  githubRepo?: string;
-  [key: string]: unknown;
-}
+import { MAX_GATHERING_CALLS } from '../constants.ts';
 
 export function createSecuritySearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
 }): ToolDefinition {
+
+  const SecuritySearchParamsSchema = Type.Object({
+    databases: Type.Optional(Type.Array(Type.String({
+      description: 'Databases to search (default: all): nvd, cisa_kev, github, osv',
+    }))),
+    terms: Type.Array(Type.String({
+      description: 'Search terms: CVE IDs (e.g., CVE-2024-1234), package names, keywords',
+    }), { minItems: 1 }),
+    severity: Type.Optional(Type.String({
+      description: 'Filter by severity: LOW, MEDIUM, HIGH, CRITICAL',
+    })),
+    maxResults: Type.Optional(Type.Number({
+      description: 'Max results per database (default: 20)',
+      default: 20,
+      minimum: 1,
+      maximum: 100,
+    })),
+    includeExploited: Type.Optional(Type.Boolean({
+      description: 'Only include actively exploited vulnerabilities',
+      default: false,
+    })),
+    ecosystem: Type.Optional(Type.String({
+      description: 'Package ecosystem for OSV: npm, pip, maven, go, rust, cargo, etc.',
+    })),
+    githubRepo: Type.Optional(Type.String({
+      description: 'GitHub repository for advisories: "owner/repo" format',
+    })),
+  });
 
   return {
     name: 'security_search',
@@ -35,35 +53,9 @@ export function createSecuritySearchTool(options: {
       'Available for looking up CVE IDs, package vulnerabilities, or security advisories.',
       'Supports databases: NVD (340k+ CVEs), CISA KEV (actively exploited), GitHub Advisories (open source), OSV (packages).',
       'Filter by severity, CVE ID, package name, or include only actively exploited vulnerabilities.',
-      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
+      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
-    parameters: Type.Object({
-      databases: Type.Optional(Type.Array(Type.String({
-        description: 'Databases to search (default: all): nvd, cisa_kev, github, osv',
-      }))),
-      terms: Type.Array(Type.String({
-        description: 'Search terms: CVE IDs (e.g., CVE-2024-1234), package names, keywords',
-      }), { minItems: 1 }),
-      severity: Type.Optional(Type.String({
-        description: 'Filter by severity: LOW, MEDIUM, HIGH, CRITICAL',
-      })),
-      maxResults: Type.Optional(Type.Number({
-        description: 'Max results per database (default: 20)',
-        default: 20,
-        minimum: 1,
-        maximum: 100,
-      })),
-      includeExploited: Type.Optional(Type.Boolean({
-        description: 'Only include actively exploited vulnerabilities',
-        default: false,
-      })),
-      ecosystem: Type.Optional(Type.String({
-        description: 'Package ecosystem for OSV: npm, pip, maven, go, rust, cargo, etc.',
-      })),
-      githubRepo: Type.Optional(Type.String({
-        description: 'GitHub repository for advisories: "owner/repo" format',
-      })),
-    }),
+    parameters: SecuritySearchParamsSchema,
     async execute(
       _toolCallId,
       params,
@@ -74,40 +66,43 @@ export function createSecuritySearchTool(options: {
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('security_search');
       if (!allowed) {
-        // THROW to prevent researcher from calling again
-        throw new Error(options.tracker.getLimitMessage('security_search'));
+          return {
+            content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
+      }
+
+      if (!Value.Check(SecuritySearchParamsSchema, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for security_search tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
       }
 
       const startTime = Date.now();
-      const paramsRecord = params as Record<string, unknown>;
+      const p = params as Static<typeof SecuritySearchParamsSchema>;
 
-      if (!isSecuritySearchParams(paramsRecord)) {
-        throw new Error('Invalid parameters for security_search');
-      }
-
-      const terms = paramsRecord['terms'] as string[];
+      const terms = p.terms;
       if (terms.length === 0) {
         throw new Error('At least one search term is required');
       }
 
-      const databasesParam = paramsRecord['databases'] as string[] | undefined;
-      const databases = databasesParam !== undefined && databasesParam.length > 0
-        ? databasesParam
+      const databases = p.databases !== undefined && p.databases.length > 0
+        ? p.databases
         : ['nvd', 'cisa_kev', 'github', 'osv'];
-
-      const maxResults = (paramsRecord['maxResults'] as number | undefined) ?? 20;
+      const maxResults = p.maxResults ?? 20;
 
       let results;
       try {
         results = await searchSecurityDatabases({
-          databases,
           terms,
-          severity: paramsRecord['severity'] as string | undefined,
+          databases: databases as any,
+          severity: p.severity,
           maxResults,
-          includeExploited: (paramsRecord['includeExploited'] as boolean | undefined) ?? false,
-          ecosystem: paramsRecord['ecosystem'] as string | undefined,
-          githubRepo: paramsRecord['githubRepo'] as string | undefined,
-        } as SecuritySearchParams);
+          includeExploited: p.includeExploited ?? false,
+          ecosystem: p.ecosystem,
+          githubRepo: p.githubRepo,
+        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
@@ -278,14 +273,4 @@ export function createSecuritySearchTool(options: {
       };
     },
   };
-}
-
-function isSecuritySearchParams(params: Record<string, unknown>): params is SecuritySearchParamsType {
-  return (
-    typeof params === 'object' &&
-    params !== null &&
-    'terms' in params &&
-    Array.isArray(params['terms']) &&
-    (params['terms'] as unknown[]).every((t: unknown) => typeof t === 'string')
-  );
 }

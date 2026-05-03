@@ -83,13 +83,14 @@
     "@kreuzberg/html-to-markdown-node-win32-x64-msvc": "^2.30.0"
   },
   "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
     "typebox": "*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "^0.70.0",
-    "@mariozechner/pi-coding-agent": "^0.70.0",
+    "@mariozechner/pi-ai": "^0.72.1",
+    "@mariozechner/pi-coding-agent": "^0.72.1",
     "typebox": "^1.0.0",
     "@types/js-yaml": "^4.0.9",
     "@typescript-eslint/eslint-plugin": "^8.58.0",

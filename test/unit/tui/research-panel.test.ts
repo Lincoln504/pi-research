@@ -30,28 +30,28 @@ describe('TUI Research Panel', () => {
   describe('progress tracking', () => {
     it('should render progress percentage when progress is set', () => {
       const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
-      state.progress = { expected: 10, made: 5, extended: false };
+      state.progress = { expected: 10, made: 5 };
 
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator(undefined, mockTheme);
-      const lines = component.render();
+      const lines = component.render(80);
 
       const headerLine = lines[0];
       expect(headerLine).toMatch(/Research.*50%/);
     });
 
-    it('should render "exploring" when progress is extended', () => {
+    it('should render status message in header if present', () => {
       const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
-      state.progress = { expected: 10, made: 8, extended: true };
+      state.statusMessage = 'planning';
 
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator(undefined, mockTheme);
-      const lines = component.render();
+      const lines = component.render(80);
 
       const headerLine = lines[0];
-      expect(headerLine).toMatch(/Research.*exploring/);
+      expect(headerLine).toMatch(/Research.*planning/);
     });
 
     it('should not render progress percentage when progress is undefined', () => {
@@ -60,11 +60,11 @@ describe('TUI Research Panel', () => {
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator(undefined, mockTheme);
-      const lines = component.render();
+      const lines = component.render(80);
 
       const headerLine = lines[0];
       expect(headerLine).toMatch(/Research/);
-      expect(headerLine).not.toMatch(/\d+%|exploring/);
+      expect(headerLine).not.toMatch(/\d+%/);
     });
   });
 

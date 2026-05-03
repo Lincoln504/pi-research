@@ -24,8 +24,8 @@ interface CreateToolsOptions {
   updateGlobalLinks?: (links: string[]) => void;
   /** Callback invoked when links are scraped (for real-time coordination) */
   onLinksScraped?: (links: string[]) => void;
-  /** Callback invoked during search progress (completed, total) */
-  onSearchProgress?: (completed: number, total: number) => void;
+  /** Callback invoked during search with cumulative link count found so far */
+  onSearchProgress?: (links: number) => void;
   /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
   getTokensUsed?: () => number;
   /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */

@@ -24,6 +24,11 @@ vi.mock('../../src/logger.ts', () => ({
   isVerboseFromEnv: vi.fn(() => false),
 }));
 
+vi.mock('../../src/config.ts', () => ({
+  validateConfig: vi.fn(),
+  getConfig: vi.fn(() => ({ RESEARCHER_TIMEOUT_MS: 360000 })),
+}));
+
 // Mock DeepResearchOrchestrator as a class
 const mockRun = vi.fn(async () => 'deep research result');
 vi.mock('../../src/orchestration/deep-research-orchestrator.ts', () => ({
@@ -76,6 +81,14 @@ vi.mock('../../src/utils/session-state.ts', () => ({
 vi.mock('../../src/utils/shared-links.ts', () => ({
   generateSessionId: vi.fn(() => 'session-id-123'),
   cleanupSharedLinks: vi.fn(),
+}));
+
+vi.mock('../../src/utils/text-utils.ts', () => ({
+  ensureAssistantResponse: vi.fn(() => 'Mocked assistant response'),
+}));
+
+vi.mock('../../src/utils/input-validation.ts', () => ({
+  validateAndSanitizeQuery: vi.fn((q) => q),
 }));
 
 vi.mock('../../src/web-research/utils.ts', () => ({
@@ -146,7 +159,12 @@ function createMockContext() {
       getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'key', headers: {} })),
     },
     cwd: '/test',
-    ui: { setWidget: vi.fn(), notify: vi.fn() },
+    ui: { 
+      setWidget: vi.fn(), 
+      notify: vi.fn(),
+      onTerminalInput: vi.fn(() => vi.fn()),
+      setWorkingVisible: vi.fn(),
+    },
     sessionManager: {
       getBranch: vi.fn().mockReturnValue([]),
       getSessionId: vi.fn(() => 'pi-session-123'),

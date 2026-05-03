@@ -48,9 +48,9 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 - `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, evaluator decides whether to continue deeper. Team size and number of rounds scale with complexity. The coordinator and evaluator dynamically determine how many researchers are needed each round — it's not a fixed number.
 
 **Max siblings per round by depth:**
-- `depth: 1` — up to 2 researchers per round
-- `depth: 2` — up to 3 researchers per round
-- `depth: 3` — up to 5 researchers per round
+- `depth: 1` — up to {MAX_TEAM_SIZE_L1} researchers per round
+- `depth: 2` — up to {MAX_TEAM_SIZE_L2} researchers per round
+- `depth: 3` — up to {MAX_TEAM_SIZE_L3} researchers per round
 
 The coordinator will plan as many researchers as needed (up to the max). You do not need to use the maximum — just enough to cover the topic thoroughly.
 

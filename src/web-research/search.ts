@@ -18,14 +18,14 @@ import type { QueryResultWithError } from './types.ts';
  * @param queries - Array of search query strings
  * @param _options - (Ignored) Legacy options
  * @param signal - Optional AbortSignal
- * @param onProgress - Optional callback for progress tracking (completed, total)
+ * @param onProgress - Optional callback with cumulative link count across completed queries
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */
 export async function search(
-  queries: string[], 
-  _options?: any, 
+  queries: string[],
+  _options?: any,
   signal?: AbortSignal,
-  onProgress?: (completed: number, total: number) => void
+  onProgress?: (links: number) => void
 ): Promise<QueryResultWithError[]> {
   if (queries.length === 0) return [];
   

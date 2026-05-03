@@ -15,15 +15,15 @@ import type { SearchResult } from './types.ts';
  */
 export async function performSearch(
     queries: string[], 
-    signal?: AbortSignal, 
-    onProgress?: (completed: number, total: number) => void
+    signal?: AbortSignal,
+    onProgress?: (links: number) => void
 ): Promise<Map<string, SearchResult[]>> {
     const resultMap = new Map<string, SearchResult[]>();
-    
+
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${MAX_WORKERS} worker threads...`);
 
     const activePromises = new Set<Promise<void>>();
-    let completedCount = 0;
+    const seenUrls = new Set<string>();
 
     for (const query of queries) {
         if (signal?.aborted) break;
@@ -34,17 +34,17 @@ export async function performSearch(
                 // Offload search to Poolifier worker
                 const results = await runWorkerSearch(query);
                 resultMap.set(query, results || []);
-                
+
                 if (results?.length > 0) {
                     logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
+                    for (const r of results) { if (r.url) seenUrls.add(r.url); }
                 }
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 logger.error(`[Search] Worker failed for "${query}": ${msg}`);
                 resultMap.set(query, []);
             } finally {
-                completedCount++;
-                if (onProgress) onProgress(completedCount, queries.length);
+                if (onProgress) onProgress(seenUrls.size);
             }
         })();
 

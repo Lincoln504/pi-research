@@ -19,7 +19,7 @@ export const PROJECT_ROOT = join(__dirname, '..', '..');
  * 2. Project-local .browser directory
  */
 export function getBrowserCacheDir(): string {
-    const envPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    const envPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
     if (envPath) return envPath;
     
     return join(PROJECT_ROOT, '.browser');
@@ -35,13 +35,13 @@ export function getBrowserEnv(): Record<string, string> {
     // Camoufox uses os.homedir() which respects HOME/USERPROFILE
     const env: Record<string, string> = {
         ...process.env,
-        PLAYWRIGHT_BROWSERS_PATH: cacheDir,
-    };
+        'PLAYWRIGHT_BROWSERS_PATH': cacheDir,
+    } as Record<string, string>;
 
     if (platform() === 'win32') {
-        env.USERPROFILE = cacheDir;
+        env['USERPROFILE'] = cacheDir;
     } else {
-        env.HOME = cacheDir;
+        env['HOME'] = cacheDir;
     }
 
     return env;
@@ -55,7 +55,7 @@ export function ensureBrowserCacheDir(): string {
     if (!existsSync(cacheDir)) {
         try {
             mkdirSync(cacheDir, { recursive: true });
-        } catch (e) {
+        } catch (_e) {
             // Ignore if already exists (race condition)
         }
     }

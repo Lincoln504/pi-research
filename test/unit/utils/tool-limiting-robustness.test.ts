@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ToolUsageTracker, createDefaultToolLimits } from '../../../src/utils/tool-usage-tracker';
-import { createSearchTool } from '../../../src/tools/search';
-import { createScrapeTool } from '../../../src/tools/scrape';
-import { createSecuritySearchTool } from '../../../src/tools/security';
-import { createStackexchangeTool } from '../../../src/tools/stackexchange';
-import { createGrepTool } from '../../../src/tools/grep';
+import { ToolUsageTracker, createDefaultToolLimits } from '../../../src/utils/tool-usage-tracker.ts';
+import { createSearchTool } from '../../../src/tools/search.ts';
+import { createScrapeTool } from '../../../src/tools/scrape.ts';
+import { createSecuritySearchTool } from '../../../src/tools/security.ts';
+import { createStackexchangeTool } from '../../../src/tools/stackexchange.ts';
+import { createGrepTool } from '../../../src/tools/grep.ts';
 
 describe('tool-limiting-robustness', () => {
   describe('ToolUsageTracker - Robustness', () => {
@@ -261,7 +261,7 @@ describe('tool-limiting-robustness', () => {
 
         expect(msg).toContain('SCRAPE PROTOCOL COMPLETE');
         expect(msg).toContain('3');
-        expect(msg).toContain('Step 4');
+        expect(msg).toContain('synthesis');
       });
 
       it('should provide message for unlimited tools (uses gathering category)', () => {
@@ -308,7 +308,7 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('search');
-      expect(tool.promptGuidelines[0]).toContain('10-30 queries');
+      expect(tool.promptGuidelines[0]).toContain('5-30 queries');
     });
 
     it('should properly track scrape tool calls', () => {
@@ -323,7 +323,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('scrape');
       expect(tool.promptGuidelines).toContain(
-        'PROTOCOL: Batch 1 (up to 4 URLs) → Batch 2 (up to 4 URLs).'
+        'PROTOCOL: Batch 1 → Batch 2 → Batch 3 (up to 4 URLs each).'
       );
     });
 
@@ -334,7 +334,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('grep');
       expect(tool.promptGuidelines).toContainEqual(
-        expect.stringContaining('4 gathering calls')
+        expect.stringContaining('10 gathering calls')
       );
     });
 
@@ -348,7 +348,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('security_search');
       expect(tool.promptGuidelines).toContainEqual(
-        expect.stringContaining('4 gathering calls')
+        expect.stringContaining('10 gathering calls')
       );
     });
 
@@ -362,7 +362,7 @@ describe('tool-limiting-robustness', () => {
       // Verify tool has correct metadata
       expect(tool.name).toBe('stackexchange');
       expect(tool.promptGuidelines).toContainEqual(
-        expect.stringContaining('4 gathering calls')
+        expect.stringContaining('10 gathering calls')
       );
     });
   });
@@ -371,8 +371,8 @@ describe('tool-limiting-robustness', () => {
     it('should create limits with correct values', () => {
       const limits = createDefaultToolLimits();
 
-      expect(limits.gathering).toBe(4);
-      expect(limits.scrape).toBe(2);
+      expect(limits.gathering).toBe(10);
+      expect(limits.scrape).toBe(3);
       expect(limits.read).toBeUndefined();
     });
 

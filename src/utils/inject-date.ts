@@ -22,7 +22,7 @@ function getCurrentDateString(): string {
  * Inject current date into a prompt
  * Prepends a date context line to the prompt
  */
-export function injectCurrentDate(prompt: string, _agentType: 'coordinator' | 'researcher'): string {
+export function injectCurrentDate(prompt: string, _agentType: 'coordinator' | 'researcher' | 'evaluator'): string {
   const dateString = getCurrentDateString();
   const dateContext = `**Current Date:** ${dateString}\n\n`;
   return dateContext + prompt;

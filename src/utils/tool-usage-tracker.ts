@@ -103,6 +103,13 @@ export class ToolUsageTracker {
   }
 
   /**
+   * Get the specific limit configured for a tool
+   */
+  getToolLimit(toolName: string): number | undefined {
+    return this.limits[toolName as keyof ToolLimits];
+  }
+
+  /**
    * Get limit-reached message for a blocked tool
    */
   getLimitMessage(toolName: string): string {
@@ -119,8 +126,8 @@ export class ToolUsageTracker {
 
     if (category === 'scrape') {
       const limit = catLimit ?? MAX_SCRAPE_CALLS;
-      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2). ` +
-        `This tool cannot be used again. Proceed immediately to Step 4: synthesize your findings and submit your report.`;
+      return `SCRAPE PROTOCOL COMPLETE: You have completed all ${limit} scrape batches (Batch 1, Batch 2, Batch 3). ` +
+        `This tool cannot be used again. Proceed immediately to synthesis: compile your findings and submit your full report.`;
     }
     const limit = catLimit ?? MAX_GATHERING_CALLS;
     return `GATHERING LIMIT REACHED: All ${limit} gathering calls have been used. ` +

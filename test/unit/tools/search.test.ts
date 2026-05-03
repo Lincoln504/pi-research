@@ -21,25 +21,26 @@ describe('tools/search', () => {
   it('should create tool with correct metadata', () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
     expect(tool.name).toBe('search');
-    expect(tool.promptGuidelines[0]).toContain('10-30 queries');
+    expect(tool.promptGuidelines[0]).toContain('5-30 queries');
   });
 
-  it('should fail if less than 10 queries provided', async () => {
+  it('should fail if less than 5 queries provided', async () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
-    await expect(tool.execute('id', { queries: ['q1'] }, undefined, () => {}, {} as any))
-      .rejects.toThrow('Insufficient queries');
+    const result = await tool.execute('id', { queries: ['q1'] }, undefined, () => {}, {} as any);
+    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+    expect(result.content[0].text).toContain('Invalid parameters');
   });
 
-  it('should succeed with 10 queries', async () => {
+  it('should succeed with 5 queries', async () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
-    const queries = Array(10).fill('test query');
+    const queries = Array(5).fill('test query');
     const result = await tool.execute('id', { queries }, undefined, () => {}, {} as any);
-    expect(result.details).toMatchObject({ queryCount: 10 });
+    expect(result.details).toMatchObject({ queryCount: 5 });
   });
 
   it('should throw error on second call', async () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
-    const queries = Array(10).fill('test query');
+    const queries = Array(5).fill('test query');
     await tool.execute('id1', { queries }, undefined, () => {}, {} as any);
 
     const result = await tool.execute('id2', { queries }, undefined, () => {}, {} as any);

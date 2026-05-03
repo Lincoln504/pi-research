@@ -5,6 +5,13 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { shutdownManager } from './utils/shutdown-manager.ts';
+
+import { 
+  MAX_TEAM_SIZE_LEVEL_1, 
+  MAX_TEAM_SIZE_LEVEL_2, 
+  MAX_TEAM_SIZE_LEVEL_3 
+} from './constants.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,6 +39,15 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  */
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
+
+  // Ensure background resources like browser pools are cleaned up
+  process.on('exit', () => {
+      shutdownManager.runCleanup('process exit').catch(err => logger.error('[pi-research] exit cleanup failed:', err));
+  });
+  process.on('SIGINT', () => {
+      shutdownManager.runCleanup('SIGINT').catch(err => logger.error('[pi-research] SIGINT cleanup failed:', err));
+      process.exit(0);
+  });
 
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
@@ -193,28 +209,17 @@ export default function (pi: ExtensionAPI) {
 
   // Append research tool usage instructions to the system prompt
   pi.on('before_agent_start', async (event: any, ctx: any) => {
-    const researchPrompt = loadPrompt('research-tool-usage');
+    const researchPrompt = loadPrompt('research-tool-usage')
+      .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
+      .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
+      .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
     
     // Check if this is a researcher session by examining the model ID or system prompt
     const isResearcher = ctx?.model?.id?.toLowerCase().includes('researcher') ||
                         event.systemPrompt?.toLowerCase().includes('researcher');
 
     if (isResearcher) {
-      // Add researcher-specific guidelines for better research quality
-      const researcherGuidelines = `
-
-## Research Guidelines (Auto-Injected)
-
-- **Focus on Evidence**: Gather facts and evidence from reliable sources
-- **Avoid Speculation**: Only report what sources explicitly confirm
-- **Cite Sources**: Explicitly cite sources when making claims
-- **Flag Uncertainty**: Mark information as uncertain when sources disagree
-- **Be Thorough**: Use the full tool budget for comprehensive coverage
-- **Stay Focused**: Maintain focus on the assigned research goal
-`;
-      return {
-        systemPrompt: event.systemPrompt + '\n\n' + researchPrompt + researcherGuidelines
-      };
+      return { systemPrompt: event.systemPrompt };
     }
 
     return {

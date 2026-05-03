@@ -20,7 +20,7 @@ describe('config (refactored)', () => {
         const env = {} as Record<string, string | undefined>;
         const config = createConfig(env);
 
-        expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000);
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000);
         expect(config.PROXY_URL).toBeUndefined();
       });
 
@@ -55,7 +55,7 @@ describe('config (refactored)', () => {
         const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: 'invalid' };
         const config = createConfig(env);
 
-        expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
       });
 
       it('should handle empty string values', () => {
@@ -65,7 +65,7 @@ describe('config (refactored)', () => {
         };
         const config = createConfig(env);
 
-        expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
         expect(config.PROXY_URL).toBe(''); // Empty string, not undefined
       });
 
@@ -76,7 +76,7 @@ describe('config (refactored)', () => {
         };
         const config = createConfig(env);
 
-        expect(config.RESEARCHER_TIMEOUT_MS).toBe(240000); // Default
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000); // Default
         expect(config.PROXY_URL).toBeUndefined();
       });
     });

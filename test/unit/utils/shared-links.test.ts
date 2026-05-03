@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   generateSessionId,
   formatSharedLinksFromState,
-} from '../../../src/utils/shared-links';
+} from '../../../src/utils/shared-links.ts';
 
 describe('shared-links', () => {
   describe('generateSessionId', () => {

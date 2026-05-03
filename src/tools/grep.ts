@@ -6,19 +6,24 @@
 
 import { spawn } from 'node:child_process';
 import * as nodePath from 'node:path';
+import { logger } from '../logger.ts';
 import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import { MAX_GATHERING_CALLS } from '../constants.ts';
 
 const DEFAULT_MAX_BYTES = 100 * 1024; // 100KB
 const DEFAULT_MAX_LINES = 200;
 const STREAM_MAX_BYTES = 10 * 1024 * 1024; // 10MB max in stream (prevent RangeError)
 
-interface RgGrepParams {
-  pattern: string;
-  path?: string;
-  flags?: string;
-}
+const GrepParams = Type.Object({
+  pattern: Type.String({ description: 'Search pattern (regex supported)' }),
+  path: Type.Optional(Type.String({ description: 'Directory to search (default: current directory)' })),
+  flags: Type.Optional(Type.String({ description: 'Additional flags for rg/grep (e.g., "-i", "-w")' })),
+});
+
+type GrepParamsType = Static<typeof GrepParams>;
 
 function truncateHead(content: string, maxBytes: number, maxLines: number): string {
   const lines = content.split('\n');
@@ -56,6 +61,12 @@ async function execCommand(
     let stderr = '';
     let wasTruncated = false;
 
+    const timeout = setTimeout(() => {
+        wasTruncated = true;
+        child.kill();
+        logger.warn(`[grep] Command ${command} timed out after 30s`);
+    }, 30000);
+
     child.stdout?.on('data', (data) => {
       // Check if adding this chunk would exceed stream limit
       const chunk = data.toString();
@@ -73,10 +84,12 @@ async function execCommand(
     });
 
     child.on('close', (code) => {
+      clearTimeout(timeout);
       resolve({ stdout, stderr, exitCode: code, wasTruncated });
     });
 
     child.on('error', (error) => {
+      clearTimeout(timeout);
       reject(error);
     });
   });
@@ -133,13 +146,9 @@ export function createGrepTool(options: {
       'Available for fast recursive text search in codebases.',
       'Pattern supports regex. Path and flags are optional.',
       'Falls back to grep if rg is not available.',
-      'CRITICAL: You are allowed a maximum of 4 gathering calls total across ALL tools. Use them for breadth.',
+      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
-    parameters: Type.Object({
-      pattern: Type.String({ description: 'Search pattern (regex supported)' }),
-      path: Type.Optional(Type.String({ description: 'Directory to search (default: current directory)' })),
-      flags: Type.Optional(Type.String({ description: 'Additional flags (e.g., "-i" for case-insensitive)' })),
-    }),
+    parameters: GrepParams,
     async execute(
       _toolCallId: string,
       params: unknown,
@@ -150,11 +159,20 @@ export function createGrepTool(options: {
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('grep');
       if (!allowed) {
-        // THROW to prevent researcher from calling again
-        throw new Error(options.tracker.getLimitMessage('grep'));
+          return {
+            content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
+            details: { blocked: true, reason: 'limit_reached' },
+          };
       }
 
-      const record = params as RgGrepParams;
+      if (!Value.Check(GrepParams, params)) {
+          return {
+            content: [{ type: 'text', text: 'Invalid parameters for grep tool.' }],
+            details: { error: 'invalid_parameters' },
+          };
+      }
+
+      const record = params as GrepParamsType;
       const { pattern } = record;
       const path = resolveWorkspacePath(record.path ?? '.');
       const flags = record.flags ?? '';
@@ -171,7 +189,7 @@ export function createGrepTool(options: {
 
       // Try rg first
       try {
-        const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, path];
+        const rgArgs = ['--no-heading', '-n', ...flagParts, '--', pattern, path];
         const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
         const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
@@ -208,7 +226,7 @@ export function createGrepTool(options: {
       } catch (rgError) {
         // rg not found, try grep
         try {
-          const grepArgs = ['-rn', ...flagParts, pattern, path];
+          const grepArgs = ['-rn', ...flagParts, '--', pattern, path];
           const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
           const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
@@ -272,7 +290,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
 
   // Try rg first
   try {
-    const rgArgs = ['--no-heading', '-n', ...flagParts, pattern, resolvedPath];
+    const rgArgs = ['--no-heading', '-n', ...flagParts, '--', pattern, resolvedPath];
     const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
     let markdown = '# Search Results (rg)\n\n';
@@ -301,7 +319,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
   } catch (rgError) {
     // rg not found, try grep
     try {
-      const grepArgs = ['-rn', ...flagParts, pattern, resolvedPath];
+      const grepArgs = ['-rn', ...flagParts, '--', pattern, resolvedPath];
       const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
       let markdown = '# Search Results (grep)\n\n';

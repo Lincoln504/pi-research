@@ -194,15 +194,15 @@ describe('Extended Tools Integration', () => {
         tracker 
       });
       
-      await expect(
-        tool.execute(
-          'sec-empty-terms',
-          { terms: [], databases: ['osv'] },
-          undefined,
-          undefined,
-          mockExtensionCtx as any
-        )
-      ).rejects.toThrow();
+      const result = await tool.execute(
+        'sec-empty-terms',
+        { terms: [], databases: ['osv'] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+      expect(result.content[0].text).toContain('Invalid parameters');
     });
 
     it('should handle invalid database names gracefully', async () => {

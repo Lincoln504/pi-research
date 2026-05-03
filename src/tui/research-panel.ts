@@ -30,8 +30,6 @@ export interface ResearchProgress {
   expected: number;
   /** Actual tool calls completed so far. */
   made: number;
-  /** True when research has expanded beyond the initial planned researchers. */
-  extended: boolean;
 }
 
 export interface ResearchPanelState {
@@ -148,7 +146,6 @@ function formatTokens(tokens: number): string {
  */
 function renderProgressPct(progress: ResearchProgress | undefined): string {
   if (!progress || progress.expected <= 0) return '';
-  if (progress.extended) return 'exploring';
   const pct = Math.round(Math.min(1, progress.made / progress.expected) * 100);
   return `${pct}%`;
 }
@@ -179,8 +176,8 @@ function renderPanelBlock(
   const sliceIds = Array.from(state.slices.keys()).filter(id => {
     const s = state.slices.get(id);
     if (!s || s.queued) return false;
-    // Hide completed coordinator and evaluator boxes
-    if ((id === 'coord' || id === 'eval') && s.completed) return false;
+    // Hide completed coordinator, evaluator, and burst boxes
+    if ((id === 'coord' || id === 'eval' || id.startsWith('burst.')) && s.completed) return false;
     return true;
   });
 
@@ -231,24 +228,19 @@ function renderPanelBlock(
       const nextIsEval = nextSlice?.label.toLowerCase() === 'eval';
 
       // Top Border with Label
-      const cornerLabel = `┐ ${labelStr} ┌`;
-      const canShowCornerLabel = w >= cornerLabel.length;
-      const canShowBasicLabel = w >= labelStr.length + 2;
-
+      const labelPadding = 2; // Spaces around label
+      const totalLabelWidth = labelStr.length + labelPadding;
+      
       let topPart;
       if (isEval) {
+        // Eval box: left corner (╭) provided by previous column's topRightCorner
         // Eval's own top is just dashes filling the column width
         topPart = '─'.repeat(w);
-      } else if (canShowCornerLabel) {
-        const sideWidth = w - cornerLabel.length;
+      } else if (w >= totalLabelWidth) {
+        const sideWidth = w - totalLabelWidth;
         const leftPad = Math.floor(sideWidth / 2);
         const rightPad = sideWidth - leftPad;
-        topPart = '─'.repeat(leftPad) + cornerLabel + '─'.repeat(rightPad);
-      } else if (canShowBasicLabel) {
-        const sideWidth = w - labelStr.length;
-        const leftPad = Math.floor(sideWidth / 2);
-        const rightPad = sideWidth - leftPad;
-        topPart = '─'.repeat(leftPad) + labelStr + '─'.repeat(rightPad);
+        topPart = '─'.repeat(leftPad) + ' ' + labelStr + ' ' + '─'.repeat(rightPad);
       } else {
         topPart = '─'.repeat(w);
       }
@@ -260,13 +252,13 @@ function renderPanelBlock(
       // Token Row (row 1)
       let tokenStr: string;
       if (isEval) {
-        // Eval box: inner decorative │ on both sides, text centered between them
+        // Eval box: inner decorative ┋ on both sides, text centered between them
         const innerWidth = Math.max(0, w - 2);
         const evalDisplay = 'eval'.length > innerWidth ? 'eval'.slice(0, innerWidth) : 'eval';
         const padding = innerWidth - evalDisplay.length;
         const leftPad = Math.floor(padding / 2);
         const rightPad = padding - leftPad;
-        tokenStr = '│' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '│';
+        tokenStr = '┋' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '┋';
       } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
@@ -295,7 +287,7 @@ function renderPanelBlock(
         const evalCostRaw = evalCost > 0 ? formatCost(evalCost) : '';
         const evalCostDisplay = evalCostRaw.length > innerWidth ? evalCostRaw.slice(0, innerWidth) : evalCostRaw;
         const evalCostPad = innerWidth - evalCostDisplay.length;
-        costStr = '│' + ' '.repeat(Math.floor(evalCostPad / 2)) + evalCostDisplay + ' '.repeat(evalCostPad - Math.floor(evalCostPad / 2)) + '│';
+        costStr = '┋' + ' '.repeat(Math.floor(evalCostPad / 2)) + evalCostDisplay + ' '.repeat(evalCostPad - Math.floor(evalCostPad / 2)) + '┋';
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -336,33 +328,15 @@ function renderPanelBlock(
       const content = part.slice(0, -1);
       const wall = part.slice(-1);
 
-      if (rowIdx === 0) {
-        const cornerStart = content.indexOf('┐');
-        if (cornerStart !== -1) {
-          const cornerEnd = content.lastIndexOf('┌') + 1;
-          const before = content.slice(0, cornerStart);
-          const cornerOpen = content.slice(cornerStart, cornerStart + 1);
-          const labelText = content.slice(cornerStart + 1, cornerEnd - 1);
-          const cornerClose = content.slice(cornerEnd - 1, cornerEnd);
-          const after = content.slice(cornerEnd);
-
-          line += theme.fg('accent', before);
-          line += theme.fg('accent', cornerOpen);
-          line += theme.fg('muted', labelText);
-          line += theme.fg('accent', cornerClose);
-          line += theme.fg('accent', after);
-        } else {
-          line += theme.fg('accent', content);
-        }
-      } else if (rowIdx === 3) {
+      if (rowIdx === 0 || rowIdx === 3) {
         line += theme.fg('accent', content);
       } else {
         const color = rightRowColors[colIdx]!;
-        // Eval body rows: content is │...│ — render inner decorative borders as accent
-        if (content.length >= 2 && content[0] === '│' && content[content.length - 1] === '│') {
-          line += theme.fg('accent', '│');
+        // Eval body rows: content is ┋...┋ — render inner decorative borders as accent
+        if (content.length >= 2 && content[0] === '┋' && content[content.length - 1] === '┋') {
+          line += theme.fg('accent', '┋');
           line += theme.fg(color, content.slice(1, -1));
-          line += theme.fg('accent', '│');
+          line += theme.fg('accent', '┋');
         } else {
           line += theme.fg(color, content);
         }
@@ -426,24 +400,23 @@ export function createMasterResearchPanel(
           // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
           const leftDecor = theme.fg('accent', '──');
           const rightDecor = theme.fg('accent', ' ─╮');
-          
+
           let headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
-          
+
           if (panel.isSearching) {
             const currentWidth = visibleWidth(headerLine);
-            const targetWidth = width - 1; 
+            const targetWidth = width - 1;
             const available = targetWidth - (currentWidth + 2); // Two spaces of padding
             if (available > 0) {
-              const pattern = '_._.';
+              const pattern = 'ˍ＿';
               const pWidth = visibleWidth(pattern);
               const count = Math.floor(available / pWidth);
               let fill = pattern.repeat(count);
-              
+
               // Fill remaining small gap with partial pattern if needed
               const remaining = available % pWidth;
-              if (remaining >= 2) fill += '_.';
-              if (remaining >= 4) fill += '_.'; // This shouldn't happen with pattern '_._.' but for robustness
-              
+              if (remaining >= 1) fill += 'ˍ';
+
               headerLine += '  ' + theme.fg('accent', fill);
             }
           }
