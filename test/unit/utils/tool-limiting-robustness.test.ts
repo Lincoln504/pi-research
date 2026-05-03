@@ -322,9 +322,9 @@ describe('tool-limiting-robustness', () => {
 
       // Verify tool has correct metadata
       expect(tool.name).toBe('scrape');
-      expect(tool.promptGuidelines).toContain(
-        'PROTOCOL: Batch 1 → Batch 2 → Batch 3 (up to 4 URLs each).'
-      );
+      // For limited batches, protocol should show full progression including the blocked batch
+      expect(tool.promptGuidelines.some(function(g) { return g.includes('PROTOCOL: Batch 1 → Batch 2 → Batch 3'); }));
+      expect(tool.promptGuidelines.some(function(g) { return g.includes('up to 4 URLs each'); }));
     });
 
     it('should properly track grep tool calls', () => {

@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as http from 'node:http';
+import * as crypto from 'node:crypto';
 import { FixedThreadPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
 import { getConfig } from '../config.ts';
@@ -15,7 +16,73 @@ import { getConfig } from '../config.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export const MAX_WORKERS = getConfig().WORKER_THREADS;
+/**
+ * Generate a version hash for the scheduler based on critical config values.
+ * This allows us to detect when configuration changes and invalidate the cache.
+ */
+function generateSchedulerVersion(): string {
+    const config = getConfig();
+    const versionString = `v1:${config.WORKER_THREADS}:${config.MAX_CONCURRENT_RESEARCHERS}`;
+    return crypto.createHash('sha256').update(versionString).digest('hex').substring(0, 16);
+}
+
+/**
+ * Store the current scheduler version globally for quick invalidation checks.
+ */
+let cachedSchedulerVersion: string | null = null;
+
+/**
+ * Get the current number of worker threads from config.
+ * This is a function instead of a constant to allow config changes to take effect
+ * without requiring a process restart.
+ */
+export function getMaxWorkers(): number {
+    return getConfig().WORKER_THREADS;
+}
+
+/**
+ * Get the current scheduler version hash.
+ */
+export function getSchedulerVersion(): string {
+    return generateSchedulerVersion();
+}
+
+/**
+ * Force a restart of the scheduler by clearing the global cache and state.
+ * This should be called when configuration changes are detected.
+ */
+export async function forceSchedulerRestart(): Promise<void> {
+    logger.log('[Scheduler] Forcing scheduler restart due to config change...');
+    
+    // Clear global cache
+    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
+    cachedSchedulerVersion = null;
+    initializationPromise = null;
+    
+    // Clear browser server from state
+    const stateManager = new StateManager();
+    await stateManager.clearBrowserServer().catch((error) => {
+        logger.warn('[Scheduler] Failed to clear browser server from state:', error);
+    });
+    
+    // Find and kill any stale scheduler processes
+    const serverInfo = await stateManager.getBrowserServer();
+    if (serverInfo) {
+        const isAlive = await stateManager.isPidAlive(serverInfo.pid);
+        if (isAlive && serverInfo.pid !== process.pid) {
+            try {
+                logger.log(`[Scheduler] Terminating stale scheduler process (PID ${serverInfo.pid})...`);
+                process.kill(serverInfo.pid, 'SIGTERM');
+                // Give it a moment to shutdown gracefully
+                await new Promise<void>(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+                logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
+            }
+        }
+    }
+    
+    logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
+}
 
 interface IScheduler {
     runSearch(query: string): Promise<SearchResult[]>;
@@ -25,33 +92,13 @@ interface IScheduler {
 }
 
 class BrowserTaskScheduler implements IScheduler {
-    private pool: FixedThreadPool;
+    private pool: FixedThreadPool | null = null;
     private server: BrowserServer | null = null;
+    private currentWorkerCount: number | null = null;
 
     constructor() {
-        logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${MAX_WORKERS}) on PID ${process.pid}`);
-        
-        // Ensure browser cache directory exists and get environment variables for redirection
-        ensureBrowserCacheDir();
-        const browserEnv = getBrowserEnv();
-        
-        // Pass the log file path to workers so they can log to the same file
-        const logFilePath = getLogger().getLogFilePath();
-        if (logFilePath) {
-            browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
-        }
-
-        this.pool = new FixedThreadPool(MAX_WORKERS, join(__dirname, 'thread-worker.mjs'), {
-            env: browserEnv,
-            errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
-            workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
-            enableTasksQueue: true,
-            tasksQueueOptions: { 
-                concurrency: 1,
-                taskStealing: true,
-                tasksStealingOnBackPressure: true
-            }
-        });
+        // Pool initialization is deferred to first use via ensurePool()
+        // This allows config changes to be detected and handled
     }
 
     async startServer(): Promise<number> {
@@ -63,9 +110,60 @@ class BrowserTaskScheduler implements IScheduler {
         return this.server.start();
     }
 
+    /**
+     * Ensure the pool is initialized with the current config.
+     * Recreates the pool if the worker count has changed.
+     */
+    private async ensurePool(): Promise<FixedThreadPool> {
+        const maxWorkers = getMaxWorkers();
+        
+        // If pool doesn't exist or worker count changed, recreate it
+        if (!this.pool || this.currentWorkerCount !== maxWorkers) {
+            if (this.pool && this.currentWorkerCount !== maxWorkers) {
+                logger.log(`[Scheduler] Worker count changed from ${this.currentWorkerCount} to ${maxWorkers}, recreating pool...`);
+                await this.pool.destroy();
+            }
+            
+            this.currentWorkerCount = maxWorkers;
+            const oldPool = this.pool;
+            
+            logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${maxWorkers}) on PID ${process.pid}`);
+            
+            // Ensure browser cache directory exists and get environment variables for redirection
+            ensureBrowserCacheDir();
+            const browserEnv = getBrowserEnv();
+            
+            // Pass the log file path to workers so they can log to the same file
+            const logFilePath = getLogger().getLogFilePath();
+            if (logFilePath) {
+                browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
+            }
+
+            this.pool = new FixedThreadPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
+                env: browserEnv,
+                errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
+                workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
+                enableTasksQueue: true,
+                tasksQueueOptions: { 
+                    concurrency: maxWorkers, // Allow tasks to be dequeued in parallel up to worker count
+                    taskStealing: true,
+                    tasksStealingOnBackPressure: true
+                }
+            });
+            
+            // If we replaced an old pool, we're done
+            if (oldPool) {
+                return this.pool;
+            }
+        }
+        
+        return this.pool;
+    }
+
     async runSearch(query: string): Promise<SearchResult[]> {
+        const pool = await this.ensurePool();
         const startTime = Date.now();
-        const result = (await this.pool.execute({ type: 'search', query })) as { results: SearchResult[], error?: string };
+        const result = (await pool.execute({ type: 'search', query })) as { results: SearchResult[], error?: string };
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) throw new Error(result.error);
@@ -73,14 +171,16 @@ class BrowserTaskScheduler implements IScheduler {
     }
 
     async runScrape(url: string): Promise<any> {
-        const result = (await this.pool.execute({ type: 'scrape', url })) as any;
+        const pool = await this.ensurePool();
+        const result = (await pool.execute({ type: 'scrape', url })) as any;
         if (result.error) throw new Error(result.error);
         return result;
     }
 
     async runHealthCheck(): Promise<{ success: boolean }> {
+        const pool = await this.ensurePool();
         const startTime = Date.now();
-        const result = (await this.pool.execute({ type: 'healthcheck' })) as { success: boolean; error?: string };
+        const result = (await pool.execute({ type: 'healthcheck' })) as { success: boolean; error?: string };
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         if (result.error) throw new Error(result.error);
@@ -89,7 +189,8 @@ class BrowserTaskScheduler implements IScheduler {
 
     async shutdown() {
         if (this.server) await this.server.stop();
-        await this.pool.destroy();
+        if (this.pool) await this.pool.destroy();
+        this.pool = null;
     }
 }
 
@@ -164,24 +265,60 @@ class BrowserClient implements IScheduler {
 let initializationPromise: Promise<IScheduler> | null = null;
 
 async function getScheduler(): Promise<IScheduler> {
-    const existing = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const currentVersion = generateSchedulerVersion();
+    let existing = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    
+    // Check if cached scheduler has different version (config changed)
+    if (existing && cachedSchedulerVersion && cachedSchedulerVersion !== currentVersion) {
+        logger.log(`[Scheduler] Config changed (old: ${cachedSchedulerVersion}, new: ${currentVersion}), forcing restart...`);
+        await forceSchedulerRestart();
+        existing = null; // Clear reference after restart
+    }
+    
     if (existing) return existing;
 
     if (initializationPromise) return initializationPromise;
 
     initializationPromise = (async () => {
+        const schedulerVersion = generateSchedulerVersion(); // Unique name to avoid shadowing
         const stateManager = new StateManager();
         const serverInfo = await stateManager.getBrowserServer();
-
-        // Fast path: an established leader is already running — connect as client
+        
+        // Check if existing scheduler has different config version
         if (serverInfo) {
             const isAlive = await stateManager.isPidAlive(serverInfo.pid);
             if (isAlive) {
-                const client = new BrowserClient(serverInfo.port);
-                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
-                return client;
+                // Get the stored version from state
+                const state = await stateManager.readState();
+                const storedVersion = state.schedulerVersion;
+                
+                // If version mismatch, we need to restart the scheduler
+                if (storedVersion && storedVersion !== currentVersion) {
+                    logger.log(`[Scheduler] Existing scheduler has stale config (old: ${storedVersion}, new: ${currentVersion}), forcing restart...`);
+                    
+                    // Terminate the old scheduler process
+                    try {
+                        if (serverInfo.pid !== process.pid) {
+                            process.kill(serverInfo.pid, 'SIGTERM');
+                            await new Promise<void>(resolve => setTimeout(resolve, 1000));
+                        }
+                    } catch (error) {
+                        logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
+                    }
+                    
+                    // Clear server info from state to force a restart
+                    await stateManager.clearBrowserServer();
+                    
+                    // Fall through to start a new scheduler
+                } else {
+                    // Version matches, use existing scheduler
+                    logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
+                    const client = new BrowserClient(serverInfo.port);
+                    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+                    cachedSchedulerVersion = currentVersion;
+                    return client;
+                }
             }
-            logger.warn(`[Scheduler] Detected dead leader (PID ${serverInfo.pid}), taking over...`);
         }
 
         // Slow path: start a server then atomically claim leadership via compare-and-set.
@@ -195,6 +332,7 @@ async function getScheduler(): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
             (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+            cachedSchedulerVersion = currentVersion;
             return scheduler;
         }
 
@@ -211,12 +349,14 @@ async function getScheduler(): Promise<IScheduler> {
                     }
                 }
                 state.browserServer = { port, pid: process.pid };
+                state.schedulerVersion = schedulerVersion; // Store current version in state
                 wonElection = true;
                 return state;
             });
         } catch (error) {
             logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
             (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+            cachedSchedulerVersion = currentVersion;
             return scheduler;
         }
 
@@ -225,10 +365,14 @@ async function getScheduler(): Promise<IScheduler> {
             await scheduler.shutdown();
             const client = new BrowserClient(winnerPort);
             (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+            cachedSchedulerVersion = schedulerVersion;
             return client;
         }
 
         logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
+        logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
+        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+        cachedSchedulerVersion = schedulerVersion;
         (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
         return scheduler;
     })();

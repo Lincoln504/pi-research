@@ -28,8 +28,9 @@ export function getMaxScrapeBatches(): number {
     // Dynamic import to avoid circular dependency
     const { getConfig } = require('./config.ts');
     const batches = getConfig().MAX_SCRAPE_BATCHES;
-    // 0 or values > 99 are treated as "unlimited" (capped at scrape limit %)
-    return batches === 0 || batches > 99 ? 99 : batches;
+    // 0 or values > 99 are treated as "unlimited" (capped only by context)
+    // Return a very large number for unlimited mode to avoid hitting the limit
+    return batches === 0 || batches > 99 ? 999999 : batches;
   } catch {
     return 3; // Fallback to default if config not available
   }

@@ -4,7 +4,7 @@
  * Orchestrates exhaustive search bursts across multiple worker processes.
  */
 
-import { runWorkerSearch, MAX_WORKERS } from '../infrastructure/browser-manager.ts';
+import { runWorkerSearch, getMaxWorkers } from '../infrastructure/browser-manager.ts';
 import { logger } from '../logger.ts';
 import type { SearchResult } from './types.ts';
 
@@ -20,8 +20,9 @@ export async function performSearch(
 ): Promise<Map<string, SearchResult[]>> {
     const resultMap = new Map<string, SearchResult[]>();
     const seenUrls = new Set<string>();
+    const maxWorkers = getMaxWorkers();
 
-    logger.log(`[Search] Orchestrating ${queries.length} queries across ${MAX_WORKERS} worker threads...`);
+    logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker threads...`);
 
     // Fire all queries concurrently - the FixedThreadPool manages concurrency via task queue
     const searchTasks = queries.filter(q => q).map(async (query) => {

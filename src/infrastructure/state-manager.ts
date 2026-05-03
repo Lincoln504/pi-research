@@ -37,6 +37,7 @@ export interface SingletonState {
   sessions: { [sessionId: string]: SessionInfo };
   lastUpdated: number;
   browserServer?: { port: number; pid: number };
+  schedulerVersion?: string; // Track scheduler config version for detecting changes
 }
 
 /**

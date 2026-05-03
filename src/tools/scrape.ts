@@ -33,7 +33,6 @@ export function createScrapeTool(options: {
 }): ToolDefinition {
 
   const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
-  const MAX_CHARS_PER_URL = 10000; // ~2.5K tokens per URL
 
   const getContextFraction = (additionalTokens: number = 0): number => {
 
@@ -46,7 +45,6 @@ export function createScrapeTool(options: {
   const config = getConfig();
   const threshold = config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING;
   const maxScrapeBatches = getMaxScrapeBatches();
-  const maxScrapeBatchesDisplay = maxScrapeBatches > 5 ? 'unlimited (capped at scrape limit %)' : maxScrapeBatches.toString();
 
   const ScrapeParams = Type.Object({
     urls: Type.Array(Type.String(), { minItems: 1 }),
@@ -63,13 +61,26 @@ export function createScrapeTool(options: {
     'Compile your findings from search results and any earlier scrape batches, and submit your full report now.',
   ].join('\n');
 
+  const isUnlimited = maxScrapeBatches > 5;
+  // Check tracker limit to determine actual effective limit for protocol display
+  const trackerLimit = options.tracker.getToolLimit('scrape');
+  const effectiveLimit = trackerLimit !== undefined && trackerLimit < maxScrapeBatches ? trackerLimit : maxScrapeBatches;
+  let batchProtocolText: string;
+  if (isUnlimited) {
+    batchProtocolText = 'PROTOCOL: Batch 1 → Batch 2 → ... (unlimited batches, context-gated)';
+  } else {
+    const batchNumbers = Array.from({ length: effectiveLimit + 1 }, (_, i) => `Batch ${i + 1}`).join(' → ');
+    batchProtocolText = `PROTOCOL: ${batchNumbers} (up to ${MAX_SCRAPE_URLS} URLs each).`;
+  }
+
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: `Scrape content from URLs. Supports HTML and PDF. Protocol: up to ${maxScrapeBatchesDisplay} batches.`,
-    promptSnippet: `Scrape full content from URLs (up to ${maxScrapeBatchesDisplay} batches)`,
+    description: `Scrape content from URLs. Supports HTML and PDF. N-batch protocol${isUnlimited ? ' (unlimited, context-gated)' : ` (up to ${maxScrapeBatches} batches)`}.`,
+    promptSnippet: `Scrape full content from URLs${isUnlimited ? ' (unlimited batches, context-gated)' : ` (up to ${maxScrapeBatches} batches)`}`,
     promptGuidelines: [
-      `PROTOCOL: Batch 1 → Batch 2 → ... (up to ${maxScrapeBatchesDisplay}, up to ${MAX_SCRAPE_URLS} URLs each).`,
+      batchProtocolText,
+      `Up to ${MAX_SCRAPE_URLS} URLs per batch.`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
@@ -126,6 +137,9 @@ export function createScrapeTool(options: {
 
       const batchLabel = `Batch ${callCount + 1}`;
 
+      // Record call BEFORE checking context gate (ensures batch limit check happens first)
+      options.tracker.recordCall('scrape');
+
       // Context Gate
       const projectedFraction = getContextFraction(urls.length * config.AVG_TOKENS_PER_SCRAPE);
       if (projectedFraction >= threshold) {
@@ -134,9 +148,7 @@ export function createScrapeTool(options: {
           details: { skipped: true, reason: 'context_limit' },
         };
       }
-
-      options.tracker.recordCall('scrape');
-      const startTime = Date.now();
+      const scrapeStartTime = Date.now();
       
       // Global Deduplication
       const { kept: dedupedUrls, duplicates } = deduplicateUrls(urls, options.getGlobalState().researchId);
@@ -160,13 +172,10 @@ export function createScrapeTool(options: {
       }
 
       let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
-      markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - startTime)/1000).toFixed(2)}s\n\n`;
+      markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
 
       for (const res of successful) {
-          let content = res.markdown || '';
-          if (content.length > MAX_CHARS_PER_URL) {
-              content = content.slice(0, MAX_CHARS_PER_URL) + '\n\n[...truncated - content too long for full analysis...]';
-          }
+          const content = res.markdown || '';
           markdown += `### ${res.url}\n${content}\n\n---\n\n`;
       }
       

@@ -257,13 +257,23 @@ export class DeepResearchOrchestrator {
               }
               logger.info(`[Orchestrator] ${this.elapsed()} Search burst done in ${((Date.now() - searchStart) / 1000).toFixed(1)}s — ${currentPlan.allQueries.length} queries`);
 
-              if (this.currentRound === 1) completeSlice(this.options.panelState, 'coord');
+              if (this.currentRound === 1) {
+                  completeSlice(this.options.panelState, 'coord');
+                  // Clear coordinator immediately after it completes - don't show it while researchers run
+                  this.options.panelState.slices.delete('coord');
+                  this.options.onUpdate();
+              }
 
               // Distribute results to researchers
               const researcherLinks = this.distributeResults(currentPlan, searchResults);
               await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
           } else {
-              if (this.currentRound === 1) completeSlice(this.options.panelState, 'coord');
+              if (this.currentRound === 1) {
+                  completeSlice(this.options.panelState, 'coord');
+                  // Clear coordinator immediately after it completes - don't show it while researchers run
+                  this.options.panelState.slices.delete('coord');
+                  this.options.onUpdate();
+              }
               await this.runResearchersParallel(currentPlan.researchers, new Map(), signal);
           }
 
@@ -273,22 +283,33 @@ export class DeepResearchOrchestrator {
           // Evaluation Phase
           const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
 
+          // DO NOT clear completed researchers here - they should stay visible while evaluator runs
+          // They will be cleared after the evaluator finishes
+          this.options.onUpdate();
+
           this.plan = currentPlan;
           currentPlan = await this.evaluate(signal, mustSynthesize);
 
           // Complete eval slice - evaluator has finished regardless of action
           completeSlice(this.options.panelState, 'eval');
+          this.options.onUpdate(); // Show evaluator as completed (grey/muted) first
+
+          // Small delay to allow the evaluator's completed state to be visible before clearing
+          await new Promise(resolve => setTimeout(resolve, 500));
 
           if (currentPlan.action === 'synthesize') {
               const synthesis = currentPlan.content || this.buildFallbackSynthesis();
               if (this.options.panelState.progress) {
                   this.options.panelState.progress.made = this.options.panelState.progress.expected;
               }
+              // Synthesis case: clear the completed evaluator before returning
+              clearCompletedResearchers(this.options.panelState);
               this.options.onUpdate(); // Ensure TUI reflects final state
               return synthesis;
           }
 
-          // Evaluator delegated to another round - clear old completed researchers
+          // Delegation case: clear the completed evaluator before starting new researchers
+          // This also clears all completed researchers from the previous round
           clearCompletedResearchers(this.options.panelState);
           this.options.onUpdate();
 
@@ -366,10 +387,16 @@ Balance thoroughness with efficiency. Delegate when new rounds would meaningfull
     } else {
       return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive.
 
-- **SYNTHESIZE when**: Exhaustively covered across all substantial avenues, no meaningful gaps, no significant unexplored angles
-- **DELEGATE when**: ANY meaningful gaps, nuances, or angles remain. Prioritize thoroughness over efficiency. Lean heavily toward delegation for completeness.
+- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple sources per major topic, no meaningful gaps remain, and you have utilized most of your available round budget (4+ rounds).
+- **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, or areas needing deeper investigation remain. Prioritize thoroughness over efficiency. Lean HEAVILY toward delegation for completeness.
 
-Be aggressive with delegation. Level 3 is for exhaustive research — don't stop early. Use remaining rounds to drill into specialized details, verify findings, or explore nuanced dimensions. Only synthesize when you've truly exhausted substantial research avenues.`;
+**CRITICAL FOR LEVEL 3**: Do NOT synthesize early. With ${MAX_ROUNDS_LEVEL_3} rounds available, you should typically delegate for 4-5 rounds before considering synthesis. Each round adds breadth and depth. Only synthesize when you have:
+1. Multiple rounds of findings (4+ recommended)
+2. Diverse sources across all major topics (10+ distinct source domains)
+3. Substantial depth per major area (not just surface coverage)
+4. No significant gaps that additional rounds would meaningfully address
+
+Be aggressive with delegation. Level 3 is for exhaustive research — use remaining rounds to drill into specialized details, verify findings, or explore nuanced dimensions.`;
     }
   }
 
@@ -424,9 +451,13 @@ You are in the late phase of research. Set a higher threshold for delegation:
   private capResearcherQueries(plan: ResearchPlan): ResearchPlan {
     const budget = this.getQueryBudget();
     
-    const ROUND_HARD_CAP = this.options.complexity === 1 ? 20 
-                         : this.options.complexity === 2 ? 40
-                         : 60;
+    // Hard caps per round - based on actual maximum possible queries
+    // Level 1: 2 researchers × 10 queries = 20 maximum
+    // Level 2: 3 researchers × 20 queries = 60 maximum  
+    // Level 3: 5 researchers × 30 queries = 150 maximum
+    const ROUND_HARD_CAP = this.options.complexity === 1 ? 20
+                         : this.options.complexity === 2 ? 60
+                         : 150;
 
     if (!plan.researchers) return plan;
 
