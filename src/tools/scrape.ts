@@ -1,9 +1,9 @@
 /**
  * scrape Tool
  *
- * Scrape full content from URLs using a context-aware, up-to-2-call protocol.
- * Call 1 = Batch 1 (broad), Call 2 = Batch 2 (targeted).
- * After both batches are exhausted, the tool returns the limit-reached message.
+ * Scrape full content from URLs using a batch protocol.
+ * Batch 1, Batch 2, etc. up to configured limit.
+ * After all batches are exhausted, the tool returns the limit-reached message.
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -13,11 +13,9 @@ import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
 import { deduplicateUrls } from '../utils/shared-links.ts';
-import { getConfig } from '../config.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
   getMaxScrapeBatches,
 } from '../constants.ts';
 
@@ -27,23 +25,8 @@ export function createScrapeTool(options: {
   getGlobalState: () => SystemResearchState;
   updateGlobalLinks: (links: string[]) => void;
   onLinksScraped?: (links: string[]) => void;
-  getTokensUsed?: () => number;
-  getScrapeTokens?: () => number;
-  contextWindowSize?: number;
 }): ToolDefinition {
 
-  const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
-
-  const getContextFraction = (additionalTokens: number = 0): number => {
-
-    if (!options.getTokensUsed) return 0;
-    // Use scrape-specific tokens if tracked, otherwise total tokens
-    const tokens = options.getScrapeTokens ? options.getScrapeTokens() : options.getTokensUsed();
-    return (tokens + additionalTokens) / ctxWindow;
-  };
-
-  const config = getConfig();
-  const threshold = config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING;
   const maxScrapeBatches = getMaxScrapeBatches();
 
   const ScrapeParams = Type.Object({
@@ -51,40 +34,28 @@ export function createScrapeTool(options: {
     maxConcurrency: Type.Optional(Type.Number({ default: 10, minimum: 1, maximum: 20 })),
   });
 
-  const contextLimitMessage = (fraction: number, batchLabel: string, projected: boolean = false): string => [
-    `# Scrape Skipped — Context Budget ${projected ? 'Projection' : 'Reached'} (${batchLabel})`,
-    '',
-    `Your research context is currently **${Math.round(fraction * 100)}% full** (threshold: ${Math.round(threshold * 100)}%).`,
-    'Scraping beyond this point risks truncating your findings during synthesis.',
-    '',
-    '**Action**: Proceed directly to **Phase 3 — Synthesis**.',
-    'Compile your findings from search results and any earlier scrape batches, and submit your full report now.',
-  ].join('\n');
-
-  const isUnlimited = maxScrapeBatches > 5;
   // Check tracker limit to determine actual effective limit for protocol display
   const trackerLimit = options.tracker.getToolLimit('scrape');
   const effectiveLimit = trackerLimit !== undefined && trackerLimit < maxScrapeBatches ? trackerLimit : maxScrapeBatches;
   let batchProtocolText: string;
-  if (isUnlimited) {
-    batchProtocolText = 'PROTOCOL: Batch 1 → Batch 2 → ... (unlimited batches, context-gated)';
+  if (effectiveLimit > 6) {
+    batchProtocolText = `PROTOCOL: Batch 1 → Batch 2 → ... (up to ${effectiveLimit} batches)`;
   } else {
-    const batchNumbers = Array.from({ length: effectiveLimit + 1 }, (_, i) => `Batch ${i + 1}`).join(' → ');
+    const batchNumbers = Array.from({ length: effectiveLimit }, (_, i) => `Batch ${i + 1}`).join(' → ');
     batchProtocolText = `PROTOCOL: ${batchNumbers} (up to ${MAX_SCRAPE_URLS} URLs each).`;
   }
 
   return {
     name: 'scrape',
     label: 'Scrape',
-    description: `Scrape content from URLs. Supports HTML and PDF. N-batch protocol${isUnlimited ? ' (unlimited, context-gated)' : ` (up to ${maxScrapeBatches} batches)`}.`,
-    promptSnippet: `Scrape full content from URLs${isUnlimited ? ' (unlimited batches, context-gated)' : ` (up to ${maxScrapeBatches} batches)`}`,
+    description: `Scrape content from URLs. Supports HTML and PDF. Up to ${maxScrapeBatches} batches.`,
+    promptSnippet: `Scrape full content from URLs (up to ${maxScrapeBatches} batches)`,
     promptGuidelines: [
       batchProtocolText,
       `Up to ${MAX_SCRAPE_URLS} URLs per batch.`,
       'Handshake is ELIMINATED. Start scraping immediately.',
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
-      `Batches skipped automatically if context exceeds ${Math.round(threshold * 100)}% — do not skip batches manually.`,
     ],
     parameters: ScrapeParams,
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
@@ -139,15 +110,6 @@ export function createScrapeTool(options: {
 
       // Record call BEFORE checking context gate (ensures batch limit check happens first)
       options.tracker.recordCall('scrape');
-
-      // Context Gate
-      const projectedFraction = getContextFraction(urls.length * config.AVG_TOKENS_PER_SCRAPE);
-      if (projectedFraction >= threshold) {
-        return {
-          content: [{ type: 'text', text: contextLimitMessage(projectedFraction, batchLabel, true) }],
-          details: { skipped: true, reason: 'context_limit' },
-        };
-      }
       const scrapeStartTime = Date.now();
       
       // Global Deduplication

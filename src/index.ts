@@ -194,28 +194,15 @@ export default function (pi: ExtensionAPI) {
         {
           key: 'MAX_SCRAPE_BATCHES',
           label: 'Max Scrape Batches',
-          description: '(0-6, Unlimited)',
+          description: '(1-16, Unlimited)',
           min: 0,
-          max: 6,
+          max: 16,
           displayMin: 0,
-          displayMax: 6,
+          displayMax: 16,
           step: 1,
           toDisplay: (v) => v,
           fromDisplay: (v) => v,
           format: (v) => v === 0 ? 'Unlimited' : v.toString(),
-        },
-        {
-          key: 'MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
-          label: 'Scrape Limit',
-          description: '(Max context scraping allowed)',
-          min: 0.01,   // Stored as fraction (0.0-1.0)
-          max: 0.99,
-          displayMin: 1,   // Displayed as percentage (1-99)
-          displayMax: 99,
-          step: 5,  // Adjust in 5% increments (display units = percentage)
-          toDisplay: (v) => v * 100,  // fraction to percentage
-          fromDisplay: (v) => v / 100,  // percentage to fraction
-          format: (v) => `${Math.round(v)}%`,
         },
       ];
 

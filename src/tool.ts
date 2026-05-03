@@ -300,8 +300,6 @@ export function createResearchTool(): ToolDefinition {
                 .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
             
             const extendedCtx = ctx as ExtendedExtensionContext;
-            let quickSessionTokens = 0;
-            let quickScrapeTokens = 0;
             const quickContextWindowSize = (selectedModel as any)?.contextWindow ?? 200000;
 
             const session = await createResearcherSession({
@@ -315,9 +313,6 @@ export function createResearchTool(): ToolDefinition {
                 updateSliceStatus(panelState, sliceLabel, `Searching: ${links} links...`);
                 debouncedRefresh();
               },
-              getTokensUsed: () => quickSessionTokens,
-              getScrapeTokens: () => quickScrapeTokens,
-              contextWindowSize: quickContextWindowSize,
             });
             
             const llmCallStartStack: number[] = [];
@@ -343,7 +338,6 @@ export function createResearchTool(): ToolDefinition {
                 logger.debug(`[research] message_end usage: totalTokens=${tokens} cost=${cost} input=${inputTokens} (${percent}%) output=${(rawUsageObj as any)?.output}`);
 
                 if (tokens > 0) {
-                  quickSessionTokens += tokens;
                   onTokens(tokens);
                 }                // Track cost independently — some providers return cost even when totalTokens=0
                 if (cost > 0) {
@@ -363,12 +357,6 @@ export function createResearchTool(): ToolDefinition {
                 if (!event.isError) {
                   if (panelState.progress) {
                     panelState.progress.made = Math.min(panelState.progress.expected, panelState.progress.made + 1);
-                  }
-                  if (event.toolName === 'scrape') {
-                    const scrapeCount = (event.result as any)?.details?.count ?? 0;
-                    if (scrapeCount > 0) {
-                      quickScrapeTokens += scrapeCount * getConfig().AVG_TOKENS_PER_SCRAPE;
-                    }
                   }
                 }
                 if (event.toolName === 'search') {

@@ -32,12 +32,6 @@ export interface CreateResearcherSessionOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
-  /** Returns tokens consumed by this researcher session so far (for context-aware scrape gating). */
-  getTokensUsed?: () => number;
-  /** Returns estimated scrape-specific tokens consumed by this researcher session so far. */
-  getScrapeTokens?: () => number;
-  /** Model context window size in tokens. */
-  contextWindowSize?: number;
   /** If true, the researcher will not be given the search tool. */
   noSearch?: boolean;
   /** If true, the researcher will not be given the grep tool. Defaults to false. */
@@ -56,9 +50,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     updateGlobalLinks,
     onLinksScraped,
     onSearchProgress,
-    getTokensUsed,
-    getScrapeTokens,
-    contextWindowSize,
     noSearch,
     noGrep = false,
   } = options;
@@ -88,9 +79,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       updateGlobalLinks: globalLinks,
       onLinksScraped: onLinksScraped,
       onSearchProgress: onSearchProgress,
-      getTokensUsed,
-      getScrapeTokens,
-      contextWindowSize,
     });
 
     // Exclude tools based on options

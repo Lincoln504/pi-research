@@ -36,10 +36,6 @@ export interface Config {
   DEFAULT_RESEARCH_DEPTH: number;
   /** Maximum scrape batches per researcher (2-5, 0=unlimited, default: 3) */
   MAX_SCRAPE_BATCHES: number;
-  /** Fraction of scrape-sourced tokens beyond which scraping is blocked (0.0–1.0) */
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: number;
-  /** Estimated tokens consumed per scrape call */
-  AVG_TOKENS_PER_SCRAPE: number;
   /** Number of parallel browser workers for search and scraping (default: 3) */
   WORKER_THREADS: number;
 }
@@ -55,8 +51,6 @@ const DEFAULTS: Config = {
   CONSOLE_RESTORE_DELAY_MS: 15000,
   DEFAULT_RESEARCH_DEPTH: 0,
   MAX_SCRAPE_BATCHES: 3,
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-  AVG_TOKENS_PER_SCRAPE: 10000,
   WORKER_THREADS: 3,
 };
 
@@ -108,8 +102,6 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS: String(config.CONSOLE_RESTORE_DELAY_MS),
     PI_RESEARCH_DEFAULT_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
-    PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100)),
-    PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
   };
   if (config.PROXY_URL) {
@@ -236,9 +228,6 @@ export function createConfig(
     CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
     DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
-    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING:
-      parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', Math.round(DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100)) / 100,
-    AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
   };
 }
@@ -296,11 +285,6 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.MAX_SCRAPE_BATCHES < 0 || config.MAX_SCRAPE_BATCHES > 99) {
     throw new Error(
       `PI_RESEARCH_MAX_SCRAPE_BATCHES must be 0–99, got ${config.MAX_SCRAPE_BATCHES}`,
-    );
-  }
-  if (config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING < 0.01 || config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING > 0.99) {
-    throw new Error(
-      `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING must be 0.01–0.99 (1–99%), got ${config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING}`,
     );
   }
   if (config.WORKER_THREADS < 1 || config.WORKER_THREADS > 16) {

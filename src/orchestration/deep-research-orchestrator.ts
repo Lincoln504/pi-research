@@ -94,7 +94,6 @@ export class DeepResearchOrchestrator {
   private plan: ResearchPlan | null = null;
   private startTime: number = Date.now();
   private progressCredits = new Map<string, number>(); // researcherId -> units made
-  private siblingScrapeTokens = new Map<string, number>(); // researcherId -> estimated scrape tokens
   
   // Weights for progress bar
   private static UNITS_PER_RESEARCHER = 10;
@@ -628,9 +627,6 @@ You are in the late phase of research. Set a higher threshold for delegation:
           updateSliceStatus(this.options.panelState, internalId, `${links} Results`);
           this.options.onUpdate();
       },
-      getTokensUsed: () => researcherTokens,
-      getScrapeTokens: () => this.siblingScrapeTokens.get(internalId) ?? 0,
-      contextWindowSize: modelContextSize,
     });
 
     const llmCallStartStack: number[] = [];
@@ -673,14 +669,6 @@ You are in the late phase of research. Set a higher threshold for delegation:
             updateSliceStatus(this.options.panelState, internalId, undefined);
             
             if (!event.isError) {
-                // Track estimated scrape tokens for the context gate
-                if (event.toolName === 'scrape' && (event.result as any)?.details?.count) {
-                    const { AVG_TOKENS_PER_SCRAPE } = getConfig();
-                    const scrapeCount = (event.result as any).details.count;
-                    const estimatedTokens = scrapeCount * AVG_TOKENS_PER_SCRAPE;
-                    const currentScrapeTotal = this.siblingScrapeTokens.get(internalId) ?? 0;
-                    this.siblingScrapeTokens.set(internalId, currentScrapeTotal + estimatedTokens);
-                }
 
                 if (this.options.panelState.progress) {
                     const currentCredit = this.progressCredits.get(String(config.id)) ?? 0;
