@@ -80,10 +80,11 @@ export const DEFAULT_INITIAL_DELAY_MS = 1000;
 /** Default maximum delay for exponential backoff in milliseconds */
 export const DEFAULT_MAX_DELAY_MS = 10000;
 
-// ==================== Context-Aware Scraping Constants ====================
+// ==================== Scraping Constants ====================
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
+/** Default concurrency for batch 2 and beyond (higher than batch 1's 10) */
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
 // ==================== UI Constants ====================

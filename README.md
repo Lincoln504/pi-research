@@ -21,7 +21,7 @@ Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a h
 ## What It Does
 
 - **Web Search** — Multi-threaded, parallel search bursts using DuckDuckGo Lite.
-- **URL Scraping** — Context-aware, 3-batch scraping protocol with PDF support and global deduplication.
+- **URL Scraping** — Configurable batch scraping protocol (1-16 batches or unlimited) with PDF support and global deduplication.
 - **Security Databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
 - **Stack Exchange** — Full network search and filtering.
 - **Real-time TUI** — Live progress tracking with token and cost monitoring.

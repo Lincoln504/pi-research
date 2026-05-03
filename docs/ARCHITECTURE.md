@@ -32,7 +32,7 @@ The researcher uses broad tools to discover relevant information and identify hi
 
 ### Phase 2: Scraping
 The researcher deep-dives into URLs to extract detailed content.
-- **Budget**: 2 Scrape calls (Batch 1, Batch 2).
+- **Budget**: Configurable scrape batches (default: 3, range: 1-16, or unlimited).
 - **Goal**: Depth-first extraction of specific data and evidence.
 - **Deduplication**: Researchers check a shared URL pool to avoid redundant work.
 
@@ -52,11 +52,14 @@ Each researcher session is constrained by a `ToolUsageTracker`:
 - **stackexchange**: Queries the Stack Exchange network.
 - **grep**: Local codebase search using `ripgrep`.
 
-### Context-Aware Scraping Protocol
-To avoid exceeding LLM context windows, the `scrape` tool follows a two-batch protocol. **Each batch is gated by a context window check** (threshold: 55%).
+### Scrape Protocol
+The `scrape` tool uses a configurable batch protocol for controlled page extraction.
 
-1. **Batch 1**: Up to 4 URLs — primary broad scraping.
-2. **Batch 2**: Up to 4 URLs — targeted follow-up.
+- **Batch Limit**: Configured via `MAX_SCRAPE_BATCHES` (default: 3, range: 0-16, where 0 = unlimited)
+- **Per Batch**: Up to 4 URLs per batch
+- **Concurreny**: Batch 1 uses 10 concurrent requests, batch 2+ uses 15
+
+This provides a simple, predictable limit system that can be adjusted from the TUI or `.env` file.
 
 ### Browser Infrastructure
 `pi-research` uses a unified task scheduler for all browser-based operations:

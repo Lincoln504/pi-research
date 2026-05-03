@@ -108,7 +108,7 @@ export function createScrapeTool(options: {
 
       const batchLabel = `Batch ${callCount + 1}`;
 
-      // Record call BEFORE checking context gate (ensures batch limit check happens first)
+      // Record call BEFORE checking batch limit
       options.tracker.recordCall('scrape');
       const scrapeStartTime = Date.now();
       
