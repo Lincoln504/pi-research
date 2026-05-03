@@ -192,8 +192,7 @@ function renderPanelBlock(
   const sliceIds = Array.from(state.slices.keys()).filter(id => {
     const s = state.slices.get(id);
     if (!s || s.queued) return false;
-    // Hide completed slices
-    if (s.completed) return false;
+    // Completed slices stay visible (rendered as grey) until cleared
     return true;
   });
 
