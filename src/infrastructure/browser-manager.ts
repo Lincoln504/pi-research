@@ -64,7 +64,10 @@ class BrowserTaskScheduler implements IScheduler {
     }
 
     async runSearch(query: string): Promise<SearchResult[]> {
+        const startTime = Date.now();
         const result = (await this.pool.execute({ type: 'search', query })) as { results: SearchResult[], error?: string };
+        const duration = Date.now() - startTime;
+        logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) throw new Error(result.error);
         return result.results;
     }
@@ -76,7 +79,10 @@ class BrowserTaskScheduler implements IScheduler {
     }
 
     async runHealthCheck(): Promise<{ success: boolean }> {
+        const startTime = Date.now();
         const result = (await this.pool.execute({ type: 'healthcheck' })) as { success: boolean; error?: string };
+        const duration = Date.now() - startTime;
+        logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         if (result.error) throw new Error(result.error);
         return result;
     }

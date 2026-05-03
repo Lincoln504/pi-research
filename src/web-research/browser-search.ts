@@ -19,45 +19,34 @@ export async function performSearch(
     onProgress?: (links: number) => void
 ): Promise<Map<string, SearchResult[]>> {
     const resultMap = new Map<string, SearchResult[]>();
+    const seenUrls = new Set<string>();
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${MAX_WORKERS} worker threads...`);
 
-    const activePromises = new Set<Promise<void>>();
-    const seenUrls = new Set<string>();
-
-    for (const query of queries) {
-        if (signal?.aborted) break;
-        if (!query) continue;
-
-        const promise = (async () => {
-            try {
-                // Offload search to Poolifier worker
-                const results = await runWorkerSearch(query);
-                resultMap.set(query, results || []);
-
-                if (results?.length > 0) {
-                    logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
-                    for (const r of results) { if (r.url) seenUrls.add(r.url); }
-                }
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                logger.error(`[Search] Worker failed for "${query}": ${msg}`);
-                resultMap.set(query, []);
-            } finally {
-                if (onProgress) onProgress(seenUrls.size);
-            }
-        })();
-
-        activePromises.add(promise);
-        promise.finally(() => activePromises.delete(promise));
-
-        // Maintain strict concurrency limit to prevent system overload
-        if (activePromises.size >= MAX_WORKERS) {
-            await Promise.race(activePromises);
+    // Fire all queries concurrently - the FixedThreadPool manages concurrency via task queue
+    const searchTasks = queries.filter(q => q).map(async (query) => {
+        if (signal?.aborted) {
+            resultMap.set(query, []);
+            return;
         }
-    }
+        try {
+            const results = await runWorkerSearch(query);
+            resultMap.set(query, results || []);
 
-    await Promise.all(activePromises);
+            if (results?.length > 0) {
+                logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
+                for (const r of results) { if (r.url) seenUrls.add(r.url); }
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+            resultMap.set(query, []);
+        } finally {
+            if (onProgress) onProgress(seenUrls.size);
+        }
+    });
+
+    await Promise.all(searchTasks);
 
     // Detect total failure: if every query returned empty, the worker pool is likely dead.
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);

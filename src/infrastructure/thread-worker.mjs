@@ -248,9 +248,11 @@ async function runTask(data) {
 export default new ThreadWorker(runTask, {
     maxInactiveTime: 60000,
     onlineHandler: async () => {
+        logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);
         await initBrowser().catch(() => {});
     },
     exitHandler: async () => {
+        logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
         if (context) await context.close().catch(() => {});
         if (browser) await browser.close().catch(() => {});
     }
