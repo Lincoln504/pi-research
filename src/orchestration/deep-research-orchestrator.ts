@@ -285,6 +285,7 @@ export class DeepResearchOrchestrator {
               if (this.options.panelState.progress) {
                   this.options.panelState.progress.made = this.options.panelState.progress.expected;
               }
+              this.options.onUpdate(); // Ensure TUI reflects final state
               return synthesis;
           }
 
