@@ -119,14 +119,13 @@ export function reactivateSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
- * Clear completed researchers from previous rounds.
- * Keeps coord, eval, and burst slices intact for their lifecycle.
+ * Clear all completed slices from the TUI panel.
+ * This includes researchers, coordinator, and evaluator once completed.
  */
 export function clearCompletedResearchers(state: ResearchPanelState): void {
   const toRemove: string[] = [];
   for (const [id, slice] of state.slices.entries()) {
-    // Remove completed numbered researchers (keep coord, eval, burst for their lifecycle)
-    if (slice.completed && !['coord', 'eval', 'burst'].some(special => id.startsWith(special))) {
+    if (slice.completed) {
       toRemove.push(id);
     }
   }
@@ -193,8 +192,8 @@ function renderPanelBlock(
   const sliceIds = Array.from(state.slices.keys()).filter(id => {
     const s = state.slices.get(id);
     if (!s || s.queued) return false;
-    // Hide completed coordinator, evaluator, and burst boxes
-    if ((id === 'coord' || id === 'eval' || id.startsWith('burst.')) && s.completed) return false;
+    // Hide completed slices
+    if (s.completed) return false;
     return true;
   });
 
