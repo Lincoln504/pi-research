@@ -8,6 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
+// Modular Orchestration Exports
+export { runResearch } from './orchestration/research-manager.ts';
+export { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
+export { QuickResearchOrchestrator } from './orchestration/quick-research-orchestrator.ts';
+export type { ResearchObserver } from './orchestration/research-observer.ts';
+
 import {
   MAX_TEAM_SIZE_LEVEL_1,
   MAX_TEAM_SIZE_LEVEL_2,

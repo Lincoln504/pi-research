@@ -7,6 +7,7 @@
 import { runWorkerSearch, getMaxWorkers } from '../infrastructure/browser-manager.ts';
 import { logger } from '../logger.ts';
 import type { SearchResult } from './types.ts';
+import type { Config } from '../config.ts';
 
 /**
  * Orchestrate high-fidelity search across multiple queries.
@@ -15,12 +16,13 @@ import type { SearchResult } from './types.ts';
  */
 export async function performSearch(
     queries: string[], 
+    config?: Config,
     signal?: AbortSignal,
     onProgress?: (links: number) => void
 ): Promise<Map<string, SearchResult[]>> {
     const resultMap = new Map<string, SearchResult[]>();
     const seenUrls = new Set<string>();
-    const maxWorkers = getMaxWorkers();
+    const maxWorkers = getMaxWorkers(config);
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker threads...`);
 
@@ -31,9 +33,9 @@ export async function performSearch(
             return;
         }
         try {
-            const results = await runWorkerSearch(query);
+            const results = await runWorkerSearch(query, config);
             resultMap.set(query, results || []);
-
+...
             if (results?.length > 0) {
                 logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
                 for (const r of results) { if (r.url) seenUrls.add(r.url); }

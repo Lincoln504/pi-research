@@ -15,6 +15,7 @@ import { createLinksTool } from './links.ts';
 import { createSecuritySearchTool } from './security.ts';
 import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
+import type { Config } from '../config.ts';
 
 interface CreateToolsOptions {
   cwd: string;
@@ -26,6 +27,7 @@ interface CreateToolsOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
+  config?: Config;
 }
 
 /**

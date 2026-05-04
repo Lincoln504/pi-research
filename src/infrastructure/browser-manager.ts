@@ -11,7 +11,7 @@ import * as http from 'node:http';
 import * as crypto from 'node:crypto';
 import { FixedThreadPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, type Config } from '../config.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,9 +20,9 @@ const __dirname = dirname(__filename);
  * Generate a version hash for the scheduler based on critical config values.
  * This allows us to detect when configuration changes and invalidate the cache.
  */
-function generateSchedulerVersion(): string {
-    const config = getConfig();
-    const versionString = `v1:${config.WORKER_THREADS}:${config.MAX_CONCURRENT_RESEARCHERS}`;
+function generateSchedulerVersion(config?: Config): string {
+    const c = config || getConfig();
+    const versionString = `v1:${c.WORKER_THREADS}:${c.MAX_CONCURRENT_RESEARCHERS}`;
     return crypto.createHash('sha256').update(versionString).digest('hex').substring(0, 16);
 }
 
@@ -36,15 +36,15 @@ let cachedSchedulerVersion: string | null = null;
  * This is a function instead of a constant to allow config changes to take effect
  * without requiring a process restart.
  */
-export function getMaxWorkers(): number {
-    return getConfig().WORKER_THREADS;
+export function getMaxWorkers(config?: Config): number {
+    return (config || getConfig()).WORKER_THREADS;
 }
 
 /**
  * Get the current scheduler version hash.
  */
-export function getSchedulerVersion(): string {
-    return generateSchedulerVersion();
+export function getSchedulerVersion(config?: Config): string {
+    return generateSchedulerVersion(config);
 }
 
 /**
@@ -85,9 +85,9 @@ export async function forceSchedulerRestart(): Promise<void> {
 }
 
 interface IScheduler {
-    runSearch(query: string): Promise<SearchResult[]>;
-    runScrape(url: string): Promise<any>;
-    runHealthCheck(): Promise<{ success: boolean }>;
+    runSearch(query: string, config?: Config): Promise<SearchResult[]>;
+    runScrape(url: string, config?: Config): Promise<any>;
+    runHealthCheck(config?: Config): Promise<{ success: boolean }>;
     shutdown(): Promise<void>;
 }
 
@@ -114,8 +114,8 @@ class BrowserTaskScheduler implements IScheduler {
      * Ensure the pool is initialized with the current config.
      * Recreates the pool if the worker count has changed.
      */
-    private async ensurePool(): Promise<FixedThreadPool> {
-        const maxWorkers = getMaxWorkers();
+    private async ensurePool(config?: Config): Promise<FixedThreadPool> {
+        const maxWorkers = getMaxWorkers(config);
         
         // If pool doesn't exist or worker count changed, recreate it
         if (!this.pool || this.currentWorkerCount !== maxWorkers) {
@@ -160,8 +160,8 @@ class BrowserTaskScheduler implements IScheduler {
         return this.pool;
     }
 
-    async runSearch(query: string): Promise<SearchResult[]> {
-        const pool = await this.ensurePool();
+    async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
+        const pool = await this.ensurePool(config);
         const startTime = Date.now();
         const result = (await pool.execute({ type: 'search', query })) as { results: SearchResult[], error?: string };
         const duration = Date.now() - startTime;
@@ -170,15 +170,15 @@ class BrowserTaskScheduler implements IScheduler {
         return result.results;
     }
 
-    async runScrape(url: string): Promise<any> {
-        const pool = await this.ensurePool();
+    async runScrape(url: string, config?: Config): Promise<any> {
+        const pool = await this.ensurePool(config);
         const result = (await pool.execute({ type: 'scrape', url })) as any;
         if (result.error) throw new Error(result.error);
         return result;
     }
 
-    async runHealthCheck(): Promise<{ success: boolean }> {
-        const pool = await this.ensurePool();
+    async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
+        const pool = await this.ensurePool(config);
         const startTime = Date.now();
         const result = (await pool.execute({ type: 'healthcheck' })) as { success: boolean; error?: string };
         const duration = Date.now() - startTime;
@@ -245,15 +245,15 @@ class BrowserClient implements IScheduler {
         });
     }
 
-    async runSearch(query: string): Promise<SearchResult[]> {
+    async runSearch(query: string, _config?: Config): Promise<SearchResult[]> {
         return this.request('/search', { query });
     }
 
-    async runScrape(url: string): Promise<any> {
+    async runScrape(url: string, _config?: Config): Promise<any> {
         return this.request('/scrape', { url });
     }
 
-    async runHealthCheck(): Promise<{ success: boolean }> {
+    async runHealthCheck(_config?: Config): Promise<{ success: boolean }> {
         return this.request('/healthcheck', {});
     }
 
@@ -264,8 +264,8 @@ class BrowserClient implements IScheduler {
 
 let initializationPromise: Promise<IScheduler> | null = null;
 
-async function getScheduler(): Promise<IScheduler> {
-    const currentVersion = generateSchedulerVersion();
+async function getScheduler(config?: Config): Promise<IScheduler> {
+    const currentVersion = generateSchedulerVersion(config);
     let existing = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
     
     // Check if cached scheduler has different version (config changed)
@@ -280,7 +280,7 @@ async function getScheduler(): Promise<IScheduler> {
     if (initializationPromise) return initializationPromise;
 
     initializationPromise = (async () => {
-        const schedulerVersion = generateSchedulerVersion(); // Unique name to avoid shadowing
+        const schedulerVersion = currentVersion;
         const stateManager = new StateManager();
         const serverInfo = await stateManager.getBrowserServer();
         
@@ -322,9 +322,6 @@ async function getScheduler(): Promise<IScheduler> {
         }
 
         // Slow path: start a server then atomically claim leadership via compare-and-set.
-        // Two processes that concurrently reach this point will both start a server, but
-        // only the one that wins the file-lock race will keep it; the loser shuts down
-        // its server and connects as a client to the winner.
         const scheduler = new BrowserTaskScheduler();
         let port: number;
         try {
@@ -373,7 +370,6 @@ async function getScheduler(): Promise<IScheduler> {
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
         cachedSchedulerVersion = schedulerVersion;
-        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
         return scheduler;
     })();
 
@@ -395,29 +391,29 @@ export function isBrowserAvailable(): boolean {
 /**
  * Dispatches a browser task to the unified worker pool.
  */
-export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape'): Promise<T> {
-    const scheduler = await getScheduler();
+export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape', config?: Config): Promise<T> {
+    const scheduler = await getScheduler(config);
     if (type === 'search') {
         const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
-        return (await scheduler.runSearch(query)) as any;
+        return (await scheduler.runSearch(query, config)) as any;
     }
     
     const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
     if (url) {
-        return (await scheduler.runScrape(url)) as any;
+        return (await scheduler.runScrape(url, config)) as any;
     }
 
     throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
 }
 
-export async function runBrowserHealthCheck(): Promise<{ success: boolean }> {
-    const scheduler = await getScheduler();
-    return scheduler.runHealthCheck();
+export async function runBrowserHealthCheck(config?: Config): Promise<{ success: boolean }> {
+    const scheduler = await getScheduler(config);
+    return scheduler.runHealthCheck(config);
 }
 
-export async function runWorkerSearch(query: string): Promise<SearchResult[]> {
-    const scheduler = await getScheduler();
-    return scheduler.runSearch(query);
+export async function runWorkerSearch(query: string, config?: Config): Promise<SearchResult[]> {
+    const scheduler = await getScheduler(config);
+    return scheduler.runSearch(query, config);
 }
 
 export async function stopBrowserManager(): Promise<void> {

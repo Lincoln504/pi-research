@@ -17,6 +17,7 @@ import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
+import type { Config } from '../config.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -36,6 +37,7 @@ export interface CreateResearcherSessionOptions {
   noSearch?: boolean;
   /** If true, the researcher will not be given the grep tool. Defaults to false. */
   noGrep?: boolean;
+  config?: Config;
 }
 
 export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
@@ -52,6 +54,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     onSearchProgress,
     noSearch,
     noGrep = false,
+    config,
   } = options;
 
   // Validate required parameters
@@ -79,6 +82,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       updateGlobalLinks: globalLinks,
       onLinksScraped: onLinksScraped,
       onSearchProgress: onSearchProgress,
+      config,
     });
 
     // Exclude tools based on options

@@ -7,6 +7,7 @@
 import { logger } from '../logger.ts';
 import { performSearch } from './browser-search.ts';
 import type { QueryResultWithError } from './types.ts';
+import type { Config } from '../config.ts';
 
 // ============================================================================
 // Multiple Query Search
@@ -16,14 +17,14 @@ import type { QueryResultWithError } from './types.ts';
  * Search multiple queries via the Browser-based Search Queue.
  *
  * @param queries - Array of search query strings
- * @param _options - (Ignored) Legacy options
+ * @param config - Optional configuration override
  * @param signal - Optional AbortSignal
  * @param onProgress - Optional callback with cumulative link count across completed queries
  * @returns Promise<QueryResultWithError[]> - Array of search results with error information
  */
 export async function search(
   queries: string[],
-  _options?: any,
+  config?: Config,
   signal?: AbortSignal,
   onProgress?: (links: number) => void
 ): Promise<QueryResultWithError[]> {
@@ -32,7 +33,7 @@ export async function search(
   logger.log(`[Search] Orchestrating ${queries.length} queries via Browser Queue...`);
   
   try {
-    const resultMap = await performSearch(queries, signal, onProgress);
+    const resultMap = await performSearch(queries, config, signal, onProgress);
     
     return queries.map(q => {
       const results = resultMap.get(q) || [];

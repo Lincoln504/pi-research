@@ -18,6 +18,7 @@ import {
   BATCH_2_DEFAULT_CONCURRENCY,
   getMaxScrapeBatches,
 } from '../constants.ts';
+import type { Config } from '../config.ts';
 
 export function createScrapeTool(options: {
   ctx: ExtensionContext;
@@ -25,9 +26,10 @@ export function createScrapeTool(options: {
   getGlobalState: () => SystemResearchState;
   updateGlobalLinks: (links: string[]) => void;
   onLinksScraped?: (links: string[]) => void;
+  config?: Config;
 }): ToolDefinition {
 
-  const maxScrapeBatches = getMaxScrapeBatches();
+  const maxScrapeBatches = getMaxScrapeBatches(options.config);
 
   const ScrapeParams = Type.Object({
     urls: Type.Array(Type.String(), { minItems: 1 }),

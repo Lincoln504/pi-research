@@ -18,6 +18,7 @@ import {
 import { logger } from '../logger.ts';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { runBrowserTask } from '../infrastructure/browser-manager.ts';
+import type { Config } from '../config.ts';
 
 // ============================================================================
 // Type Definitions
@@ -243,9 +244,9 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 // Layer 2: Browser
 // ============================================================================
 
-async function scrapeWithStealthBrowser(_url: string): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, config?: Config): Promise<ScrapeLayerResult> {
   // Dispatch to unified worker pool (Camoufox)
-  const result = await runBrowserTask<any>(_url, 'scrape');
+  const result = await runBrowserTask<any>(_url, 'scrape', config);
 
   if (result.buffer) {
       const markdown = await extractPdfToMarkdown(new Uint8Array(result.buffer));
@@ -268,7 +269,7 @@ async function scrapeWithStealthBrowser(_url: string): Promise<ScrapeLayerResult
 // Public API
 // ============================================================================
 
-export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<any> {
+export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config): Promise<any> {
   // Robustness: ensure we actually have a single string URL
   if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
       return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
@@ -280,7 +281,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<a
   } catch (e1) {
     if (playwrightAvailable) {
       try {
-        const res = await scrapeWithStealthBrowser(url);
+        const res = await scrapeWithStealthBrowser(url, config);
         return { ...res, url, success: true };
       } catch (e2) {
         logger.error(`[Scrapers] Browser fallback failed for ${url}:`, e2);
@@ -291,11 +292,11 @@ export async function scrapeSingle(url: string, signal?: AbortSignal): Promise<a
   }
 }
 
-export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal): Promise<any[]> {
+export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config): Promise<any[]> {
     const results: any[] = [];
     for (let i = 0; i < urls.length; i += maxConcurrency) {
         const batch = urls.slice(i, i + maxConcurrency);
-        const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal)));
+        const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config)));
         results.push(...batchRes);
     }
     return results;

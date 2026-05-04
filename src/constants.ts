@@ -4,6 +4,8 @@
  * Centralized constants for magic numbers and configuration values.
  */
 
+import { getConfig, type Config } from './config.ts';
+
 // ==================== Time Constants ====================
 
 /** Delay between API requests in milliseconds */
@@ -15,29 +17,26 @@ export const REQUEST_DELAY_MS_OTHER = 1000;
 /** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */
 export const MAX_GATHERING_CALLS = 10;
 
-/** Maximum scrape tool calls per researcher (configurable, default: 3) */
-/** @deprecated Use getConfig().MAX_SCRAPE_BATCHES instead */
-export const MAX_SCRAPE_CALLS = 3;
-
 /**
  * Get the maximum scrape batches from config.
  * This function should be used instead of MAX_SCRAPE_CALLS to support dynamic configuration.
  */
-export function getMaxScrapeBatches(): number {
+export function getMaxScrapeBatches(config?: Config): number {
   try {
-    // Dynamic import to avoid circular dependency
-    const { getConfig } = require('./config.ts');
-    const batches = getConfig().MAX_SCRAPE_BATCHES;
-    // 0 or values > 99 are treated as "unlimited"
-    // Return a very large number for unlimited mode to avoid hitting the limit
+    const batches = (config || getConfig()).MAX_SCRAPE_BATCHES;
     return batches === 0 || batches > 99 ? 999999 : batches;
   } catch {
-    return 3; // Fallback to default if config not available
+    return 3; // Fallback to default
   }
 }
 
 /** Maximum URLs to scrape per batch (Batch 1 and 2) */
 export const MAX_SCRAPE_URLS = 4;
+
+/** Progress bar weight per individual researcher */
+export const UNITS_PER_RESEARCHER = 10;
+/** Progress bar weight per lead evaluator round */
+export const LEAD_EVAL_UNITS = 2;
 
 
 // ==================== Complexity Levels ====================
@@ -108,4 +107,3 @@ export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 20;
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 30;
-

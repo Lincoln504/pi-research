@@ -10,11 +10,13 @@ import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { logger } from '../logger.ts';
+import type { Config } from '../config.ts';
 
 export function createSearchTool(options: {
   ctx: ExtensionContext;
   tracker: ToolUsageTracker;
   onProgress?: (links: number) => void;
+  config?: Config;
 }): ToolDefinition {
 
   const SearchParams = Type.Object({
@@ -70,7 +72,7 @@ export function createSearchTool(options: {
       }
 
       try {
-        const results = await search(queries, undefined, signal, options.onProgress);
+        const results = await search(queries, options.config, signal, options.onProgress);
         const elapsed = Date.now() - startTime;
 
         let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
