@@ -33,7 +33,15 @@ export function getMaxScrapeBatches(config?: Config): number {
 /** Maximum URLs to scrape per batch (Batch 1 and 2) */
 export const MAX_SCRAPE_URLS = 4;
 
-/** Progress bar weight per individual researcher */
+/**
+ * Get the units per researcher for the progress bar.
+ * Units = 1 (for start/search) + number of scrape batches.
+ */
+export function getUnitsPerResearcher(config?: Config): number {
+  return 1 + getMaxScrapeBatches(config);
+}
+
+/** Progress bar weight per individual researcher (Legacy, use getUnitsPerResearcher) */
 export const UNITS_PER_RESEARCHER = 10;
 /** Progress bar weight per lead evaluator round */
 export const LEAD_EVAL_UNITS = 2;
@@ -59,8 +67,11 @@ export const NVD_TIMEOUT_MS = 30000;
 
 // ==================== Export Constants ====================
 
-/** Maximum query length for filename sanitization */
+/** Maximum query length for validation */
 export const MAX_QUERY_LENGTH = 12000;
+
+/** Maximum query length for filename sanitization */
+export const MAX_FILENAME_QUERY_LENGTH = 150;
 
 /** Minimum query length */
 export const MIN_QUERY_LENGTH = 3;

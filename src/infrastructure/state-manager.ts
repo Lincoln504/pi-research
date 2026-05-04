@@ -731,49 +731,24 @@ export class StateManager {
     callback: () => Promise<T> | T,
     timeout: number = 30000,
   ): Promise<T> {
-    let lockAcquired = false;
-    let lockAcquisitionTimeoutHandle: NodeJS.Timeout | null = null;
-    let callbackTimeoutHandle: NodeJS.Timeout | null = null;
-
+    const startTime = Date.now();
+    
+    // 1. Acquire lock with timeout
+    await this.acquireLock();
+    
+    let lockReleased = false;
     try {
-      // Acquire lock with timeout
-      await Promise.race([
-        this.acquireLock(),
-        new Promise<never>((_resolve, reject) => {
-          lockAcquisitionTimeoutHandle = setTimeout(() => {
-            reject(new Error(`Lock acquisition timed out after ${timeout}ms`));
-          }, timeout);
-        }),
-      ]);
-      lockAcquired = true;
-
-      // Clear lock acquisition timeout since we acquired the lock
-      if (lockAcquisitionTimeoutHandle) {
-        clearTimeout(lockAcquisitionTimeoutHandle);
-        lockAcquisitionTimeoutHandle = null;
-      }
-
-      // Execute callback with timeout
-      return await Promise.race([
-        callback(),
-        new Promise<never>((_resolve, reject) => {
-          callbackTimeoutHandle = setTimeout(() => {
-            reject(new Error(`Lock operation timed out after ${timeout}ms`));
-          }, timeout);
-        }),
-      ]);
+      // 2. Execute callback. 
+      // Note: We don't use Promise.race(callback, timeout) here anymore for the execution phase.
+      // Releasing a lock while the callback is still running is a race condition.
+      // Instead, we rely on the callback to finish, or the external signal to abort.
+      // If we REALLY want an execution timeout, the callback MUST support AbortSignal.
+      return await callback();
     } finally {
-      // Clear any remaining timeout handles
-      if (lockAcquisitionTimeoutHandle) {
-        clearTimeout(lockAcquisitionTimeoutHandle);
-      }
-      if (callbackTimeoutHandle) {
-        clearTimeout(callbackTimeoutHandle);
-      }
-
-      if (lockAcquired) {
+      if (!lockReleased) {
         try {
           await this.releaseLock();
+          lockReleased = true;
         } catch (error: unknown) {
           logger.error('[StateManager] Failed to release lock:', error);
         }

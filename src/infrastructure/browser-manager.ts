@@ -145,7 +145,7 @@ class BrowserTaskScheduler implements IScheduler {
                 workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
                 enableTasksQueue: true,
                 tasksQueueOptions: { 
-                    concurrency: maxWorkers, // Allow tasks to be dequeued in parallel up to worker count
+                    concurrency: 2, // Allow 2 tasks per worker at a time
                     taskStealing: true,
                     tasksStealingOnBackPressure: true
                 }

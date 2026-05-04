@@ -35,7 +35,7 @@ export async function performSearch(
         try {
             const results = await runWorkerSearch(query, config);
             resultMap.set(query, results || []);
-...
+
             if (results?.length > 0) {
                 logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
                 for (const r of results) { if (r.url) seenUrls.add(r.url); }

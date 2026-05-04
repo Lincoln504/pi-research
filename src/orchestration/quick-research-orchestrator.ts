@@ -75,6 +75,7 @@ export class QuickResearchOrchestrator {
       settingsManager: extendedCtx.settingsManager,
       systemPrompt: prompt,
       extensionCtx: ctx,
+      getGlobalState: () => ({ researchId: this.options.researchId } as any),
       onSearchProgress: (links) => {
         observer?.onSearchProgress?.(links);
       },
@@ -100,7 +101,7 @@ export class QuickResearchOrchestrator {
                 observer?.onSearchStart?.([]);
             }
         } else if (event.type === 'tool_execution_end') {
-            observer?.onResearcherProgress?.('quick', '');
+            observer?.onResearcherProgress?.('quick', `done:${event.toolName}`);
             if (event.toolName === 'search') {
                 observer?.onSearchComplete?.(0); // Count not easily available here
             }

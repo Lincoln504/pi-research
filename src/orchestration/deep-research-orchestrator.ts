@@ -87,6 +87,8 @@ export class DeepResearchOrchestrator {
   private plan: ResearchPlan | null = null;
   private startTime: number = Date.now();
   private config: Config;
+  private allLinks = new Set<string>();
+  private allQueriesHistory: string[] = [];
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig();
@@ -181,8 +183,9 @@ export class DeepResearchOrchestrator {
           if (!currentPlan || !currentPlan.researchers) break;
           
           this.options.observer?.onRoundStart?.(this.currentRound);
-          
+          // 2. Search Burst
           if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
+              this.allQueriesHistory.push(...currentPlan.allQueries);
               this.options.observer?.onSearchStart?.(currentPlan.allQueries);
               const searchResults = await search(currentPlan.allQueries, undefined, signal, (links) => {
                   this.options.observer?.onSearchProgress?.(links);
@@ -463,6 +466,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
       systemPrompt: prompt,
       extensionCtx: this.options.ctx,
       noSearch: true,
+      getGlobalState: () => ({ researchId: this.options.researchId } as any),
       onSearchProgress: (links) => {
           this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
       },
@@ -485,7 +489,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         } else if (event.type === 'tool_execution_start') {
             this.options.observer?.onResearcherProgress?.(id, `${event.toolName}`);
         } else if (event.type === 'tool_execution_end') {
-            this.options.observer?.onResearcherProgress?.(id, '');
+            this.options.observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
         }
     });
 
@@ -514,7 +518,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
           ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
           : '';
 
-      const nextId = this.plan?.researchers ? this.plan.researchers.length + 1 : 1;
+      const nextId = this.totalResearchersPlanned + 1;
       const maxTeamSize = this.getTeamSize();
       const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
                            this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 :
@@ -573,6 +577,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
               else {
                   plan.researchers = plan.researchers.filter(r => r && typeof r === 'object' && Array.isArray(r.queries));
                   if (plan.researchers.length === 0) plan.action = 'synthesize';
+                  else this.totalResearchersPlanned += plan.researchers.length;
               }
               if (!Array.isArray(plan.allQueries)) plan.allQueries = plan.researchers ? plan.researchers.flatMap(r => r.queries) : [];
               else plan.allQueries = plan.allQueries.filter(q => typeof q === 'string');

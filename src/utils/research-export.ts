@@ -17,7 +17,7 @@ import { promises as fs } from 'node:fs';
 import { homedir, tmpdir, platform } from 'node:os';
 import { join, resolve, normalize, sep } from 'node:path';
 import { logger } from '../logger.ts';
-import { MAX_QUERY_LENGTH, MAX_EXPORT_RETRIES } from '../constants.ts';
+import { MAX_FILENAME_QUERY_LENGTH, MAX_EXPORT_RETRIES } from '../constants.ts';
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const DIGITS = '0123456789';
@@ -135,7 +135,7 @@ function sanitizeQuery(query: string): string {
   return query
     .toLowerCase()
     .trim()
-    .slice(0, MAX_QUERY_LENGTH)
+    .slice(0, MAX_FILENAME_QUERY_LENGTH)
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
