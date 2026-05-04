@@ -59,14 +59,18 @@ let context = null;
 let initPromise = null;
 
 async function initBrowser() {
-    // If initialization is already in progress, wait for it
+    // 0. Fast path: browser already connected
+    if (browser && browser.isConnected() && context) return;
+
+    // 1. If initialization is already in progress, wait for it
     if (initPromise) return initPromise;
 
-    // Start initialization and store the promise
+    // 2. Start initialization and store the promise
     initPromise = (async () => {
         try {
             if (!browser || !browser.isConnected()) {
                 logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
+                // ... setup Camoufox ...
                 let CamoufoxModule;
                 try {
                     CamoufoxModule = require('camoufox-js');
@@ -76,7 +80,6 @@ async function initBrowser() {
 
                 const { Camoufox } = CamoufoxModule;
                 
-                // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
                 browser = await Camoufox({
                     headless: true,
                     humanize: true
@@ -101,8 +104,6 @@ async function initBrowser() {
             
             throw e;
         } finally {
-            // Clear the promise so subsequent calls can check health again if needed
-            // But only if browser is actually initialized or failed.
             initPromise = null;
         }
     })();

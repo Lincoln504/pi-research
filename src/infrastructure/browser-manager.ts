@@ -93,6 +93,7 @@ interface IScheduler {
 
 class BrowserTaskScheduler implements IScheduler {
     private pool: FixedThreadPool | null = null;
+    private poolInitializationPromise: Promise<FixedThreadPool> | null = null;
     private server: BrowserServer | null = null;
     private currentWorkerCount: number | null = null;
 
@@ -117,47 +118,55 @@ class BrowserTaskScheduler implements IScheduler {
     private async ensurePool(config?: Config): Promise<FixedThreadPool> {
         const maxWorkers = getMaxWorkers(config);
         
-        // If pool doesn't exist or worker count changed, recreate it
-        if (!this.pool || this.currentWorkerCount !== maxWorkers) {
-            if (this.pool && this.currentWorkerCount !== maxWorkers) {
-                logger.log(`[Scheduler] Worker count changed from ${this.currentWorkerCount} to ${maxWorkers}, recreating pool...`);
-                await this.pool.destroy();
-            }
-            
-            this.currentWorkerCount = maxWorkers;
-            const oldPool = this.pool;
-            
-            logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${maxWorkers}) on PID ${process.pid}`);
-            
-            // Ensure browser cache directory exists and get environment variables for redirection
-            ensureBrowserCacheDir();
-            const browserEnv = getBrowserEnv();
-            
-            // Pass the log file path to workers so they can log to the same file
-            const logFilePath = getLogger().getLogFilePath();
-            if (logFilePath) {
-                browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
-            }
-
-            this.pool = new FixedThreadPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
-                env: browserEnv,
-                errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
-                workerChoiceStrategy: WorkerChoiceStrategies.LEAST_USED,
-                enableTasksQueue: true,
-                tasksQueueOptions: { 
-                    concurrency: 2, // Allow 2 tasks per worker at a time
-                    taskStealing: true,
-                    tasksStealingOnBackPressure: true
-                }
-            });
-            
-            // If we replaced an old pool, we're done
-            if (oldPool) {
-                return this.pool;
-            }
+        // If pool exists and worker count matches, return it immediately
+        if (this.pool && this.currentWorkerCount === maxWorkers) {
+            return this.pool;
         }
-        
-        return this.pool;
+
+        // Use a promise to coalesce concurrent initialization calls
+        if (this.poolInitializationPromise) {
+            return this.poolInitializationPromise;
+        }
+
+        this.poolInitializationPromise = (async () => {
+            try {
+                if (this.pool && this.currentWorkerCount !== maxWorkers) {
+                    logger.log(`[Scheduler] Worker count changed from ${this.currentWorkerCount} to ${maxWorkers}, recreating pool...`);
+                    await this.pool.destroy();
+                    this.pool = null;
+                }
+                
+                this.currentWorkerCount = maxWorkers;
+                
+                logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${maxWorkers}) on PID ${process.pid}`);
+                
+                ensureBrowserCacheDir();
+                const browserEnv = getBrowserEnv();
+                
+                const logFilePath = getLogger().getLogFilePath();
+                if (logFilePath) {
+                    browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
+                }
+
+                this.pool = new FixedThreadPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
+                    env: browserEnv,
+                    errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
+                    workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
+                    enableTasksQueue: true,
+                    tasksQueueOptions: { 
+                        concurrency: 4, // Allow up to 4 tasks per worker to fully saturate event loops
+                        taskStealing: true,
+                        tasksStealingOnBackPressure: true
+                    }
+                });
+                
+                return this.pool;
+            } finally {
+                this.poolInitializationPromise = null;
+            }
+        })();
+
+        return this.poolInitializationPromise;
     }
 
     async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
