@@ -53,8 +53,12 @@ export default function (pi: ExtensionAPI) {
       shutdownManager.runCleanup('process exit').catch(err => logger.error('[pi-research] exit cleanup failed:', err));
   });
   process.on('SIGINT', () => {
-      shutdownManager.runCleanup('SIGINT').catch(err => logger.error('[pi-research] SIGINT cleanup failed:', err));
-      process.exit(0);
+      shutdownManager.runCleanup('SIGINT')
+          .then(() => process.exit(0))
+          .catch(err => {
+              logger.error('[pi-research] SIGINT cleanup failed:', err);
+              process.exit(1);
+          });
   });
 
   // Create and register the research tool
@@ -355,9 +359,10 @@ export default function (pi: ExtensionAPI) {
       .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
       .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
     
-    // Check if this is a researcher session by examining the model ID or system prompt
-    const isResearcher = ctx?.model?.id?.toLowerCase().includes('researcher') ||
-                        event.systemPrompt?.toLowerCase().includes('researcher');
+    // Check if this is a researcher session by examining the system prompt.
+    // Note: model IDs (e.g., claude-opus-4-7) do not contain 'researcher', so we rely on
+    // the system prompt containing the word 'researcher' to identify researcher sessions.
+    const isResearcher = event.systemPrompt?.toLowerCase().includes('researcher');
 
     if (isResearcher) {
       return { systemPrompt: event.systemPrompt };

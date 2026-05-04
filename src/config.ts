@@ -34,7 +34,7 @@ export interface Config {
   CONSOLE_RESTORE_DELAY_MS: number;
   /** Default depth for /research command (0-3, default: 0) */
   DEFAULT_RESEARCH_DEPTH: number;
-  /** Maximum scrape batches per researcher (2-5, 0=unlimited, default: 3) */
+  /** Maximum scrape batches per researcher (0-16, 0=unlimited, default: 3) */
   MAX_SCRAPE_BATCHES: number;
   /** Number of parallel browser workers for search and scraping (default: 3) */
   WORKER_THREADS: number;
@@ -103,10 +103,9 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_DEFAULT_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
+    // Always include PROXY_URL - empty string means "clear this value"
+    PROXY_URL: config.PROXY_URL ?? '',
   };
-  if (config.PROXY_URL) {
-    newValues['PROXY_URL'] = config.PROXY_URL;
-  }
 
   try {
     let lines: string[] = [];
@@ -138,17 +137,20 @@ export function saveConfig(config: Config): void {
 
       const key = line.slice(0, eq).trim();
       if (newValues[key] !== undefined) {
-        outLines.push(`${key}=${newValues[key]}`);
+        // If new value is empty string, omit the line entirely (clears the value)
+        if (newValues[key] !== '') {
+          outLines.push(`${key}=${newValues[key]}`);
+        }
         updatedKeys.add(key);
       } else {
         outLines.push(line);
       }
     }
 
-    // Add missing keys
+    // Add missing keys (skip keys with empty values - they were intentionally cleared)
     let addedAny = false;
     for (const [key, val] of Object.entries(newValues)) {
-      if (!updatedKeys.has(key)) {
+      if (!updatedKeys.has(key) && val !== '') {
         if (!addedAny && outLines.length > 0 && outLines[outLines.length - 1]?.trim() !== '') {
           outLines.push('');
         }

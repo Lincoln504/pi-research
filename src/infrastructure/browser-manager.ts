@@ -69,14 +69,27 @@ export async function forceSchedulerRestart(): Promise<void> {
     cachedSchedulerVersion = null;
     initializationPromise = null;
     
-    // Clear browser server from state
+    // Find and kill any stale scheduler processes BEFORE clearing state
     const stateManager = new StateManager();
+    const serverInfo = await stateManager.getBrowserServer();
+    if (serverInfo) {
+        const isAlive = await stateManager.isPidAlive(serverInfo.pid);
+        if (isAlive && serverInfo.pid !== process.pid) {
+            try {
+                logger.log(`[Scheduler] Terminating stale scheduler process (PID ${serverInfo.pid})...`);
+                process.kill(serverInfo.pid, 'SIGTERM');
+                // Give it a moment to shutdown gracefully
+                await new Promise<void>(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+                logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
+            }
+        }
+    }
+    
+    // Clear browser server from state
     await stateManager.clearBrowserServer().catch((error) => {
         logger.warn('[Scheduler] Failed to clear browser server from state:', error);
     });
-    
-    // Find and kill any stale scheduler processes
-    const serverInfo = await stateManager.getBrowserServer();
     if (serverInfo) {
         const isAlive = await stateManager.isPidAlive(serverInfo.pid);
         if (isAlive && serverInfo.pid !== process.pid) {
