@@ -58,11 +58,12 @@ export class StackExchangeClient {
     }, this._timeout);
 
     // Chain the signal if provided
+    const abortHandler = () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
     if (signal) {
-      signal.addEventListener('abort', () => {
-        clearTimeout(timeoutId);
-        controller.abort();
-      });
+      signal.addEventListener('abort', abortHandler, { once: true });
     }
 
     try {
@@ -105,6 +106,10 @@ export class StackExchangeClient {
       }
 
       throw error;
+    } finally {
+      if (signal) {
+        signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 
