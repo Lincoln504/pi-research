@@ -26,7 +26,7 @@ export interface Config {
   RESEARCHER_MAX_RETRY_DELAY_MS: number;
   /** Proxy URL for outgoing searches and scraping (optional) */
   PROXY_URL?: string;
-  /** Health check timeout in milliseconds (default: 60000) */
+  /** Health check timeout in milliseconds (default: 30000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
   /** Global TUI refresh debounce in milliseconds (default: 10) */
   TUI_REFRESH_DEBOUNCE_MS: number;
@@ -46,7 +46,7 @@ export const DEFAULTS: Config = {
   RESEARCHER_MAX_RETRIES: 3,
   RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
   PROXY_URL: undefined,
-  HEALTH_CHECK_TIMEOUT_MS: 60000,
+  HEALTH_CHECK_TIMEOUT_MS: 30000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
   DEFAULT_RESEARCH_DEPTH: 0,

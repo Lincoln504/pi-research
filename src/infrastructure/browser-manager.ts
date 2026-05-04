@@ -210,7 +210,7 @@ class BrowserTaskScheduler implements IScheduler {
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = 30000;
+        const timeoutMs = 25000;
         const result = await Promise.race([
             pool.execute({ type: 'healthcheck' }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs))
