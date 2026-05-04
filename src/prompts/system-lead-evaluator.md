@@ -25,6 +25,11 @@ You orchestrate the next phase of research.
 **SYNTHESIZE if:** Research meets the complexity-specific synthesis criteria above.
 **DELEGATE if:** Research meets the complexity-specific delegation criteria above.
 
+**COMMON MISTAKES TO AVOID:**
+- Do NOT synthesize early just because you've done "enough" rounds. Synthesis should only occur when you have comprehensive, high-quality findings across all major topics.
+- Do NOT synthesize with gaps remaining, hoping they can be "filled in later". Complete the research first.
+- Remember: Each additional round adds depth and breadth. Delegating is the default path for Level 2.
+
 Use unique, targeted queries for any new researchers.
 
 **Decision**: Return valid JSON in a code block:
@@ -48,6 +53,7 @@ Use unique, targeted queries for any new researchers.
 **DELEGATION REQUIREMENTS**:
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget.
 - **Maximize coverage**: Use the maximum number of researchers ({MAX_TEAM_SIZE}) to cover distinct angles in parallel.
+- **DEFAULT TO DELEGATE**: When in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.
 
 ---
 
