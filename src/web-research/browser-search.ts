@@ -24,41 +24,32 @@ export async function performSearch(
     const seenUrls = new Set<string>();
     const maxWorkers = getMaxWorkers(config);
 
-    logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker threads (Chunk size: ${maxWorkers * 4})...`);
+    logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 
-    // Process in chunks to prevent client-side queue timeouts (120s).
-    // If we fire 150 queries at once with 3 workers @ concurrency 2 (6 total),
-    // the last query would wait ~300s, exceeding the 120s timeout.
-    const CHUNK_SIZE = maxWorkers * 4;
     const filteredQueries = queries.filter(q => q);
-    
-    for (let i = 0; i < filteredQueries.length; i += CHUNK_SIZE) {
-        const chunk = filteredQueries.slice(i, i + CHUNK_SIZE);
-        const searchTasks = chunk.map(async (query) => {
-            if (signal?.aborted) {
-                resultMap.set(query, []);
-                return;
-            }
-            try {
-                const results = await runWorkerSearch(query, config);
-                resultMap.set(query, results || []);
+    const searchTasks = filteredQueries.map(async (query) => {
+        if (signal?.aborted) {
+            resultMap.set(query, []);
+            return;
+        }
+        try {
+            const results = await runWorkerSearch(query, config);
+            resultMap.set(query, results || []);
 
-                if (results?.length > 0) {
-                    logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
-                    for (const r of results) { if (r.url) seenUrls.add(r.url); }
-                }
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                logger.error(`[Search] Worker failed for "${query}": ${msg}`);
-                resultMap.set(query, []);
-            } finally {
-                if (onProgress) onProgress(seenUrls.size);
+            if (results?.length > 0) {
+                logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
+                for (const r of results) { if (r.url) seenUrls.add(r.url); }
             }
-        });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+            resultMap.set(query, []);
+        } finally {
+            if (onProgress) onProgress(seenUrls.size);
+        }
+    });
 
-        await Promise.all(searchTasks);
-        if (signal?.aborted) break;
-    }
+    await Promise.all(searchTasks);
 
     // Detect total failure: if every query returned empty, the worker pool is likely dead.
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);

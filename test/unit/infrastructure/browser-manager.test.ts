@@ -1,19 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runBrowserTask, stopBrowserManager } from '../../../src/infrastructure/browser-manager.ts';
 
-// Mock FixedThreadPool
+// Mock poolifier
 vi.mock('poolifier', () => {
+  class MockPool {
+    execute = vi.fn(async (task) => {
+        if (task.type === 'search') return { results: [] };
+        if (task.type === 'scrape') return { html: '<html></html>' };
+        if (task.type === 'healthcheck') return { success: true };
+        return {};
+    });
+    destroy = vi.fn(async () => {});
+  }
   return {
-    FixedThreadPool: class {
-        execute = vi.fn(async (task) => {
-            if (task.type === 'search') return { results: [] };
-            if (task.type === 'scrape') return { html: '<html></html>' };
-            if (task.type === 'healthcheck') return { success: true };
-            return {};
-        });
-        destroy = vi.fn(async () => {});
-    },
-    WorkerChoiceStrategies: { LEAST_USED: 'LEAST_USED' },
+    FixedThreadPool: MockPool,
+    FixedClusterPool: MockPool,
+    WorkerChoiceStrategies: { LEAST_USED: 'LEAST_USED', ROUND_ROBIN: 'ROUND_ROBIN' },
   };
 });
 

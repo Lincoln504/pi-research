@@ -1,16 +1,11 @@
 /**
- * Poolifier Thread Worker
+ * Poolifier Worker
  *
- * Executes search and scrape tasks in worker threads using Camoufox.
- * 
- * PRODUCTION CONFIGURATION:
- * - Browser Mode: WARM (reuses browser instances)
- * - Jitter: 200-600ms (for search only)
- * - Health Check: Integrated into worker pool
+ * Executes search and scrape tasks in worker processes using Camoufox.
  */
 
 /* global document, URL, setTimeout */
-import { ThreadWorker } from 'poolifier';
+import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'module';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
@@ -18,7 +13,7 @@ import process from 'node:process';
 
 const require = createRequire(import.meta.url);
 
-// Generate a random ID for this worker thread to track distribution in logs
+// Generate a random ID for this worker process to track distribution in logs
 const workerId = Math.random().toString(36).substring(2, 6);
 
 /**
@@ -46,13 +41,6 @@ function logToDebugFile(level, ...args) {
     }
 }
 
-// Set worker priority to reduce system impact
-try {
-    os.setPriority(process.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
-} catch {
-    // ignore
-}
-
 // Warm browser: Reuse browser instance across tasks.
 let browser = null;
 let context = null;
@@ -70,7 +58,6 @@ async function initBrowser() {
         try {
             if (!browser || !browser.isConnected()) {
                 logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
-                // ... setup Camoufox ...
                 let CamoufoxModule;
                 try {
                     CamoufoxModule = require('camoufox-js');
@@ -80,6 +67,7 @@ async function initBrowser() {
 
                 const { Camoufox } = CamoufoxModule;
                 
+                // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
                 browser = await Camoufox({
                     headless: true,
                     humanize: true
@@ -104,6 +92,8 @@ async function initBrowser() {
             
             throw e;
         } finally {
+            // Clear the promise so subsequent calls can check health again if needed
+            // But only if browser is actually initialized or failed.
             initPromise = null;
         }
     })();
@@ -256,7 +246,7 @@ async function runTask(data) {
     }
 }
 
-export default new ThreadWorker(runTask, {
+export default new ClusterWorker(runTask, {
     maxInactiveTime: 60000,
     onlineHandler: async () => {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);

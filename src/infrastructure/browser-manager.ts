@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
-import { FixedThreadPool, WorkerChoiceStrategies } from 'poolifier';
+import { FixedThreadPool, FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 
@@ -17,12 +17,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Global HTTP Agent for high-concurrency client requests
+ */
+const clientAgent = new http.Agent({
+    keepAlive: true,
+    maxSockets: 100, // Allow up to 100 concurrent requests to the leader
+    maxFreeSockets: 10,
+    timeout: 60000
+});
+
+/**
  * Generate a version hash for the scheduler based on critical config values.
  * This allows us to detect when configuration changes and invalidate the cache.
  */
 function generateSchedulerVersion(config?: Config): string {
     const c = config || getConfig();
-    const versionString = `v1:${c.WORKER_THREADS}:${c.MAX_CONCURRENT_RESEARCHERS}`;
+    const versionString = `v2:${c.WORKER_THREADS}:${c.MAX_CONCURRENT_RESEARCHERS}`;
     return crypto.createHash('sha256').update(versionString).digest('hex').substring(0, 16);
 }
 
@@ -92,8 +102,8 @@ interface IScheduler {
 }
 
 class BrowserTaskScheduler implements IScheduler {
-    private pool: FixedThreadPool | null = null;
-    private poolInitializationPromise: Promise<FixedThreadPool> | null = null;
+    private pool: any | null = null;
+    private poolInitializationPromise: Promise<any> | null = null;
     private server: BrowserServer | null = null;
     private currentWorkerCount: number | null = null;
 
@@ -115,7 +125,7 @@ class BrowserTaskScheduler implements IScheduler {
      * Ensure the pool is initialized with the current config.
      * Recreates the pool if the worker count has changed.
      */
-    private async ensurePool(config?: Config): Promise<FixedThreadPool> {
+    private async ensurePool(config?: Config): Promise<any> {
         const maxWorkers = getMaxWorkers(config);
         
         // If pool exists and worker count matches, return it immediately
@@ -138,7 +148,7 @@ class BrowserTaskScheduler implements IScheduler {
                 
                 this.currentWorkerCount = maxWorkers;
                 
-                logger.log(`[Scheduler] Initializing Unified FixedThreadPool (Size: ${maxWorkers}) on PID ${process.pid}`);
+                logger.log(`[Scheduler] Initializing Unified FixedClusterPool (Size: ${maxWorkers}) on PID ${process.pid}`);
                 
                 ensureBrowserCacheDir();
                 const browserEnv = getBrowserEnv();
@@ -148,13 +158,13 @@ class BrowserTaskScheduler implements IScheduler {
                     browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
                 }
 
-                this.pool = new FixedThreadPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
+                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
                     env: browserEnv,
-                    errorHandler: (e: Error) => logger.error('[Scheduler] Thread Error:', e),
+                    errorHandler: (e: Error) => logger.error('[Scheduler] Cluster Error:', e),
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
                     enableTasksQueue: true,
                     tasksQueueOptions: { 
-                        concurrency: 4, // Allow up to 4 tasks per worker to fully saturate event loops
+                        concurrency: 2, // Allow up to 2 tasks per process to saturate event loops
                         taskStealing: true,
                         tasksStealingOnBackPressure: true
                     }
@@ -223,6 +233,7 @@ class BrowserClient implements IScheduler {
                 port: this.port,
                 path,
                 method: 'POST',
+                agent: clientAgent, // Use high-concurrency agent
                 headers: { 'Content-Type': 'application/json' }
             }, (res) => {
                 clearTimeout(timer);
