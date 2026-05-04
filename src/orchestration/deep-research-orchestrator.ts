@@ -508,7 +508,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
       settingsManager: extendedCtx.settingsManager,
       systemPrompt: prompt,
       extensionCtx: this.options.ctx,
-      noSearch: true,
+      // Allow researchers to search if no initial links provided from evaluator searches
+      noSearch: false,
       getGlobalState: () => ({ researchId: this.options.researchId } as any),
       onSearchProgress: (links) => {
           this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
