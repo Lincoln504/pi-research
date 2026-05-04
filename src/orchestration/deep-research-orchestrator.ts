@@ -495,7 +495,11 @@ You are in the late phase of research. Set a higher threshold for delegation:
         : '';
 
     const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
-    const evidenceSection = `## Evidence Provided\n${initialLinks.length > 0 ? `Initial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}` : 'No initial URLs provided. Perform a web search to begin.'}`;
+    // CRITICAL: initialLinks are ALWAYS provided - orchestrator guarantees search results for all delegated researchers
+    if (initialLinks.length === 0) {
+        throw new Error(`[Orchestrator] Researcher ${id} has no initial search results. Orchestrator guarantee violated: researchers must always receive search results.`);
+    }
+    const evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
     const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
       .replace('{{goal}}', config.goal)
       .replace('{{evidence_section}}', evidenceSection)

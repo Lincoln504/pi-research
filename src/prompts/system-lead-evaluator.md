@@ -51,6 +51,7 @@ Use unique, targeted queries for any new researchers.
 ```
 
 **DELEGATION REQUIREMENTS**:
+- **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget.
 - **Maximize coverage**: Use the maximum number of researchers ({MAX_TEAM_SIZE}) to cover distinct angles in parallel.
 - **DEFAULT TO DELEGATE**: When in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.
