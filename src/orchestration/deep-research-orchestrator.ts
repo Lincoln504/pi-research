@@ -87,7 +87,6 @@ export class DeepResearchOrchestrator {
   private plan: ResearchPlan | null = null;
   private startTime: number = Date.now();
   private config: Config;
-  private allLinks = new Set<string>();
   private allQueriesHistory: string[] = [];
   private totalResearchersPlanned: number = 0;
 
@@ -225,7 +224,20 @@ export class DeepResearchOrchestrator {
   }
 
   private buildFallbackSynthesis(): string {
-    return `# Research Findings\n\n` + Array.from(this.reports.entries()).map(([_id, report]) => report).join('\n\n---\n\n');
+    const reportCount = this.reports.size;
+    const roundInfo = this.currentRound > 0 ? ` (up to Round ${this.currentRound})` : "";
+    let synthesis = `# Research Findings${roundInfo}\n\n`;
+    
+    if (reportCount === 0) {
+        synthesis += "_No researcher reports were generated before the process stopped._";
+    } else {
+        synthesis += `*This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.*\n\n`;
+        synthesis += Array.from(this.reports.entries())
+            .map(([id, report]) => `## Researcher ${id}\n\n${report}`)
+            .join('\n\n---\n\n');
+    }
+    
+    return synthesis;
   }
 
   private getTeamSize(): number {
@@ -403,13 +415,39 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
     plan.researchers.forEach((r) => {
         const ownedLinks: string[] = [];
-        const rQueries = new Set(r.queries.map((q: string) => q.toLowerCase().trim()));
+        const rQueries = new Set(
+            r.queries
+                .map((q: string) => q.toLowerCase().trim())
+                .filter(q => q.length > 0)
+        );
+        
+        // Convert Set to array once per researcher to avoid repeated spreads in the inner loop
+        const rQueriesArr = Array.from(rQueries);
+
         results.forEach((res) => {
             const resQuery = String(res.query ?? '').toLowerCase().trim();
-            if (rQueries.has(resQuery) || [...rQueries].some((rq) => resQuery.includes(rq) || rq.includes(resQuery))) {
-                (res.results ?? []).forEach((item) => {
-                    if (item?.url) ownedLinks.push(item.url);
-                });
+            if (resQuery.length === 0) return;
+            
+            // Check direct match first (O(1))
+            let matched = rQueries.has(resQuery);
+            
+            // Fallback to fuzzy includes matching (O(Q*L))
+            if (!matched) {
+                for (let i = 0; i < rQueriesArr.length; i++) {
+                    const rq = rQueriesArr[i] as string;
+                    if (resQuery.includes(rq) || rq.includes(resQuery)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (matched) {
+                const items = res.results ?? [];
+                for (let i = 0; i < items.length; i++) {
+                    const url = items[i]?.url;
+                    if (url) ownedLinks.push(url);
+                }
             }
         });
         linkMap.set(String(r.id), Array.from(new Set(ownedLinks)));
@@ -592,7 +630,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
           plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       }
 
-      this.options.observer?.onEvaluationDecision?.(plan.action as any, plan);
+      this.options.observer?.onEvaluationDecision?.(plan.action as any, plan, this.currentRound);
+
       return plan.action !== 'synthesize' && Array.isArray(plan.researchers) && plan.researchers.length > 0 && !mustSynthesize 
           ? this.capResearcherQueries(plan) : plan;
   }

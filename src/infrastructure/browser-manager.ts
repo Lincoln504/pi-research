@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as http from 'node:http';
 import * as crypto from 'node:crypto';
-import { FixedThreadPool, FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
+import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 
@@ -177,7 +177,7 @@ class BrowserTaskScheduler implements IScheduler {
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
                     enableTasksQueue: true,
                     tasksQueueOptions: {
-                        concurrency: 2, // 2 concurrent tasks per process; each gets its own page, safe for parallel I/O
+                        concurrency: 3, // 3 concurrent tasks per process; safe with page-level isolation
                         taskStealing: true,
                         tasksStealingOnBackPressure: true
                     }
@@ -196,8 +196,9 @@ class BrowserTaskScheduler implements IScheduler {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
         
-        // Add a 120s timeout to pool execution to prevent orchestration hangs
-        const timeoutMs = 120000;
+        // Timeout should be slightly longer than worker timeout (12s) but not too long
+        // Worker does 2 page loads at 12s each, so 25s provides buffer
+        const timeoutMs = 25000;
         const result = await Promise.race([
             pool.execute({ type: 'search', query }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs))

@@ -353,7 +353,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Append research tool usage instructions to the system prompt
-  pi.on('before_agent_start', async (event: any, ctx: any) => {
+  pi.on('before_agent_start', async (event: any, _ctx: any) => {
     const researchPrompt = loadPrompt('research-tool-usage')
       .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
       .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())

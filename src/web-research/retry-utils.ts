@@ -45,15 +45,22 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
   if (typeof AbortSignal.timeout === 'function') {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     if (signal && typeof AbortSignal.any === 'function') {
-      return AbortSignal.any([signal, timeoutSignal]);
+      try {
+        return AbortSignal.any([signal, timeoutSignal]);
+      } catch (e) {
+        // Fallback if AbortSignal.any fails or is not quite right
+        logger.warn(`[createTimeoutSignal] AbortSignal.any failed, falling back to manual combination: ${e}`);
+      }
     }
-    return timeoutSignal;
+    if (!signal) return timeoutSignal;
   }
   
-  // Fallback for older Node.js versions
+  // Fallback for older Node.js versions or if signal combination is needed manually
   const controller = new AbortController();
+  const combinedController = signal ? new AbortController() : controller;
+  
   const timeoutId = setTimeout(() => {
-    controller.abort();
+    combinedController.abort('timeout');
   }, timeoutMs);
   
   // Unref so it doesn't keep the process alive
@@ -62,8 +69,6 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
   }
   
   if (signal) {
-    // Combine signals manually for older versions
-    const combinedController = new AbortController();
     const abortHandler = () => {
       clearTimeout(timeoutId);
       combinedController.abort();
@@ -71,10 +76,14 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
     
     signal.addEventListener('abort', abortHandler, { once: true });
     
-    return combinedController.signal;
+    // Also clean up signal listener if timeout fires first
+    combinedController.signal.addEventListener('abort', () => {
+      clearTimeout(timeoutId);
+      signal.removeEventListener('abort', abortHandler);
+    }, { once: true });
   }
   
-  return controller.signal;
+  return combinedController.signal;
 }
 
 /**
@@ -86,60 +95,33 @@ export function withTimeout<T>(
   label: string,
   signal?: AbortSignal
 ): Promise<T> {
-  const timeoutController = new AbortController();
-  const timeoutSignal = timeoutController.signal;
-  const combinedSignal = signal
-    ? createTimeoutSignal(timeoutMs, signal)
-    : timeoutSignal;
+  const combinedSignal = createTimeoutSignal(timeoutMs, signal);
     
   logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
 
-  let raceWon = false;
-  let timeoutId: NodeJS.Timeout | undefined;
-  let aborted = false;
-
-  const wrappedPromise = promise.then((val) => {
-    raceWon = true;
-    if (timeoutId) clearTimeout(timeoutId);
-    return val;
-  });
-
-  const rejectPromise = new Promise<T>((_, reject) => {
-    // Handle external abort signal (user cancellation, Ctrl+C)
+  return new Promise<T>((resolve, reject) => {
     if (combinedSignal.aborted) {
       logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
-      aborted = true;
-      reject(new Error(`${label} cancelled`));
-      return;
+      return reject(new Error(`${label} cancelled or timed out`));
     }
 
-    combinedSignal.addEventListener('abort', () => {
-      if (!raceWon && !aborted) {
-        logger.error(`[withTimeout] ${label} EXTERNAL ABORT SIGNAL FIRED`);
-        aborted = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        reject(new Error(`${label} cancelled`));
+    const abortHandler = () => {
+      logger.error(`[withTimeout] ${label} ABORTED (timeout or external signal)`);
+      reject(new Error(`${label} cancelled or timed out`));
+    };
+    
+    combinedSignal.addEventListener('abort', abortHandler, { once: true });
+
+    promise.then(
+      (val) => {
+        combinedSignal.removeEventListener('abort', abortHandler);
+        resolve(val);
+      },
+      (err) => {
+        combinedSignal.removeEventListener('abort', abortHandler);
+        reject(err);
       }
-    }, { once: true });
-
-    // Timeout handler
-    timeoutId = setTimeout(() => {
-      if (!raceWon && !aborted) {
-        aborted = true;
-        logger.error(`[withTimeout] ${label} TIMEOUT after ${timeoutMs}ms`);
-        timeoutController.abort();
-        reject(new Error(`${label} timeout after ${timeoutMs}ms`));
-      }
-    }, timeoutMs);
-
-    // Unref so it doesn't keep the process alive
-    (timeoutId as TimeoutHandle).unref?.();
-  });
-
-  return Promise.race([wrappedPromise, rejectPromise]).finally(() => {
-    // Clean up on completion or error
-    if (timeoutId) clearTimeout(timeoutId);
-    timeoutController.abort();
+    );
   });
 }
 

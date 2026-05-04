@@ -729,10 +729,8 @@ export class StateManager {
    */
   private async withLock<T>(
     callback: () => Promise<T> | T,
-    timeout: number = 30000,
+    _timeout: number = 30000,
   ): Promise<T> {
-    const startTime = Date.now();
-    
     // 1. Acquire lock with timeout
     await this.acquireLock();
     

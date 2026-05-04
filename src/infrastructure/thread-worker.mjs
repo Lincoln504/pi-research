@@ -131,12 +131,17 @@ async function extractSearchResults(page) {
 
 async function executeSearchTask(browser, context, query) {
     const page = await context.newPage();
+    const SEARCH_TIMEOUT = 12000;
+    page.setDefaultTimeout(SEARCH_TIMEOUT);
+    page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
+    
     try {
                 logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
-        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // Tighten timeouts: DDG Lite is fast, 10-15s should be plenty
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
         await page.fill('input[name="q"]', query);
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
             page.keyboard.press('Enter')
         ]);
 
@@ -155,10 +160,14 @@ async function executeSearchTask(browser, context, query) {
 
 async function executeScrapeTask(browser, context, url) {
     const page = await context.newPage();
+    const SCRAPE_TIMEOUT = 10000;
+    page.setDefaultTimeout(SCRAPE_TIMEOUT);
+    page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
+    
     try {
                 logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
         // High-fidelity wait: try domcontentloaded first for speed
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
         const contentType = (await response?.headerValue('content-type')) || '';
         
         if (contentType.includes('application/pdf')) {
@@ -191,8 +200,12 @@ async function executeScrapeTask(browser, context, url) {
 
 async function executeHealthCheck(browser, context) {
     const page = await context.newPage();
+    const HEALTH_TIMEOUT = 10000;
+    page.setDefaultTimeout(HEALTH_TIMEOUT);
+    page.setDefaultNavigationTimeout(HEALTH_TIMEOUT);
+    
     try {
-        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
         const title = await page.title();
         await page.close();
         return { success: !!title };

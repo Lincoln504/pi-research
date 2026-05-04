@@ -49,10 +49,7 @@ import {
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
 import { 
-  MAX_GATHERING_CALLS, 
-  getMaxScrapeBatches,
   getUnitsPerResearcher,
-  UNITS_PER_RESEARCHER,
   LEAD_EVAL_UNITS 
 } from './constants.ts';
 
@@ -286,15 +283,34 @@ export function createResearchTool(): ToolDefinition {
               panelState.progress = { expected: units, made: 0 };
               debouncedRefresh();
             },
+            onRoundStart: (round) => {
+              if (round > 1) {
+                clearCompletedResearchers(panelState);
+                debouncedRefresh();
+              }
+            },
             onSearchStart: () => {
-              const sliceId = panelState.slices.has('coord') ? 'coord' : (quickSliceLabel || 'eval');
+              let sliceId = 'coord';
+              if (!panelState.slices.has('coord') && !quickSliceLabel) {
+                 sliceId = 'eval';
+                 if (!panelState.slices.has('eval')) {
+                    addSlice(panelState, 'eval', 'eval', false);
+                 }
+              } else if (quickSliceLabel) {
+                 sliceId = quickSliceLabel;
+              }
               if (panelState.slices.has(sliceId)) reactivateSlice(panelState, sliceId);
               updateSliceStatus(panelState, sliceId, '0 Results');
               panelState.isSearching = true;
               debouncedRefresh();
             },
             onSearchProgress: (count) => {
-              const sliceId = panelState.slices.has('coord') ? 'coord' : (quickSliceLabel || 'eval');
+              let sliceId = 'coord';
+              if (!panelState.slices.has('coord') && !quickSliceLabel) {
+                  sliceId = 'eval';
+              } else if (quickSliceLabel) {
+                  sliceId = quickSliceLabel;
+              }
               updateSliceStatus(panelState, sliceId, `${count} Results`);
               debouncedRefresh();
             },
@@ -309,7 +325,8 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherStart: (id) => {
-              clearCompletedResearchers(panelState);
+              if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
+              if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
               const displayNum = id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
@@ -390,10 +407,10 @@ export function createResearchTool(): ToolDefinition {
               panelState.totalTokens += tokens;
               debouncedRefresh();
             },
-            onEvaluationDecision: (action, plan) => {
+            onEvaluationDecision: (action, plan, round) => {
               completeSlice(panelState, 'eval');
               if (panelState.progress) {
-                const key = `eval.${panelState.slices.size}`;
+                const key = `eval.round.${round ?? panelState.slices.size}`;
                 if (!progressCredits.has(key)) {
                   panelState.progress.made += LEAD_EVAL_UNITS;
                   progressCredits.set(key, LEAD_EVAL_UNITS);

@@ -30,7 +30,7 @@ export interface ResearchObserver {
   onEvaluationStart?(round: number): void;
   onEvaluationProgress?(status: string): void;
   onEvaluationTokens?(tokens: number, cost: number): void;
-  onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: any): void;
+  onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: any, round?: number): void;
   
   // Synthesis/Completion
   onSynthesisStart?(): void;
