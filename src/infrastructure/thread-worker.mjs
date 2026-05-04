@@ -9,8 +9,19 @@ import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'module';
 import * as fs from 'node:fs';
 import process from 'node:process';
+import cluster from 'node:cluster';
 
 const require = createRequire(import.meta.url);
+
+// Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
+if (cluster.isWorker && cluster.worker) {
+    cluster.worker.on('error', (err) => {
+        if (err && err.code === 'ERR_IPC_CHANNEL_CLOSED') {
+            return;
+        }
+        throw err;
+    });
+}
 
 // Generate a random ID for this worker process to track distribution in logs
 const workerId = Math.random().toString(36).substring(2, 6);
@@ -268,7 +279,7 @@ export default new ClusterWorker(runTask, {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);
         await initBrowser().catch(() => {});
     },
-    exitHandler: async () => {
+    killHandler: async () => {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
         if (context) await context.close().catch(() => {});
         if (browser) await browser.close().catch(() => {});

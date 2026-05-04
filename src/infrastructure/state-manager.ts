@@ -822,6 +822,10 @@ public async isPidAlive(pid: number): Promise<boolean> {
       }
     }
 
+    if ((state as any).schedulerVersion !== undefined && typeof (state as any).schedulerVersion !== 'string') {
+      throw new Error('Invalid state: schedulerVersion must be a string');
+    }
+
     for (const [sessionId, sessionData] of Object.entries(state.sessions)) {
       if (typeof sessionId !== 'string') {
         throw new Error('Invalid state: session IDs must be strings');

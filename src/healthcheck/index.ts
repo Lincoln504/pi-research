@@ -100,12 +100,17 @@ async function performActualCheck(): Promise<HealthCheckResult> {
     return result;
   };
 
+  let timeoutId: NodeJS.Timeout;
   const timeoutPromise = new Promise<HealthCheckResult>((_, reject) =>
-    setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs)
+    timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs)
   );
 
   try {
-    return await Promise.race([check(), timeoutPromise]);
+    try {
+      return await Promise.race([check(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   } catch (e) {
     return {
       success: false,

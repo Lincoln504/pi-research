@@ -199,10 +199,20 @@ class BrowserTaskScheduler implements IScheduler {
         // Timeout should be slightly longer than worker timeout (12s) but not too long
         // Worker does 2 page loads at 12s each, so 25s provides buffer
         const timeoutMs = 25000;
-        const result = await Promise.race([
-            pool.execute({ type: 'search', query }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs))
-        ]) as { results: SearchResult[], error?: string };
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        let result: { results: SearchResult[], error?: string };
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'search', query }),
+                timeoutPromise
+            ]) as { results: SearchResult[], error?: string };
+        } finally {
+            clearTimeout(timeoutId!);
+        }
         
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
@@ -213,10 +223,21 @@ class BrowserTaskScheduler implements IScheduler {
     async runScrape(url: string, config?: Config): Promise<any> {
         const pool = await this.ensurePool(config);
         const timeoutMs = 120000;
-        const result = await Promise.race([
-            pool.execute({ type: 'scrape', url }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs))
-        ]) as any;
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        let result: any;
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'scrape', url }),
+                timeoutPromise
+            ]);
+        } finally {
+            clearTimeout(timeoutId!);
+        }
+        
         if (result.error) throw new Error(result.error);
         return result;
     }
@@ -225,10 +246,21 @@ class BrowserTaskScheduler implements IScheduler {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
         const timeoutMs = 25000;
-        const result = await Promise.race([
-            pool.execute({ type: 'healthcheck' }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs))
-        ]) as { success: boolean; error?: string };
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        let result: { success: boolean; error?: string };
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'healthcheck' }),
+                timeoutPromise
+            ]) as { success: boolean; error?: string };
+        } finally {
+            clearTimeout(timeoutId!);
+        }
+        
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         if (result.error) throw new Error(result.error);
@@ -237,7 +269,11 @@ class BrowserTaskScheduler implements IScheduler {
 
     async shutdown() {
         if (this.server) await this.server.stop();
-        if (this.pool) await this.pool.destroy();
+        if (this.pool) {
+            await this.pool.destroy();
+            // Allow time for IPC channels to close gracefully
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
         this.pool = null;
     }
 }

@@ -537,14 +537,19 @@ You are in the late phase of research. Set a higher threshold for delegation:
     });
 
     try {
+      let timeoutId: NodeJS.Timeout;
       const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error(`Researcher ${id} timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`)), this.config.RESEARCHER_TIMEOUT_MS);
+        timeoutId = setTimeout(() => reject(new Error(`Researcher ${id} timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`)), this.config.RESEARCHER_TIMEOUT_MS);
       });
 
-      await Promise.race([
-        session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
-        timeoutPromise
-      ]);
+      try {
+        await Promise.race([
+          session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
+          timeoutPromise
+        ]);
+      } finally {
+        clearTimeout(timeoutId!);
+      }
       const responseText = ensureAssistantResponse(session, id);
       this.reports.set(`${this.currentRound}.${id}`, responseText);
       this.options.observer?.onResearcherComplete?.(id, responseText);

@@ -109,21 +109,26 @@ export class QuickResearchOrchestrator {
     });
 
     try {
+      let timeoutId: NodeJS.Timeout;
       const timeoutPromise = new Promise<void>((_, reject) => {
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
               const msg = `Quick research timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
               session.abort().catch(() => {}).finally(() => reject(new Error(msg)));
           }, this.config.RESEARCHER_TIMEOUT_MS);
       });
 
-      await Promise.race([
-        session.prompt(query),
-        timeoutPromise,
-        new Promise<never>((_, reject) => {
-          if (signal?.aborted) reject(new Error('Aborted'));
-          signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
-        }),
-      ]);
+      try {
+        await Promise.race([
+          session.prompt(query),
+          timeoutPromise,
+          new Promise<never>((_, reject) => {
+            if (signal?.aborted) reject(new Error('Aborted'));
+            signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+          }),
+        ]);
+      } finally {
+        clearTimeout(timeoutId!);
+      }
       
       const result = ensureAssistantResponse(session, 'Quick');
       observer?.onComplete?.(result);
