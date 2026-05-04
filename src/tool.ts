@@ -109,7 +109,7 @@ export function createResearchTool(): ToolDefinition {
     promptGuidelines: [
       'Specifically for web research, not local project exploration.',
       'Research is organized into Rounds. Each round contains multiple parallel siblings.',
-      'SCRAPE PROTOCOL: Up to 3 batches (Batch 1, 2, 3: 4 URLs each). Batches skip automatically when context limit is reached.',
+      'SCRAPE PROTOCOL: Configurable batches (1-16 or unlimited, 4 URLs per batch). Set via /research-config.',
       'After each round, a Lead Evaluator assesses all findings and decides whether to delegate further or synthesize.',
       'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
       'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
@@ -277,7 +277,7 @@ export function createResearchTool(): ToolDefinition {
 
             const researcherPromptTemplate = readFileSync(join(__dirname, 'prompts', 'researcher.md'), 'utf-8');
             const maxScrapeBatches = getMaxScrapeBatches();
-            const maxScrapeBatchesDisplay = maxScrapeBatches > 5 ? 'unlimited (capped at scrape limit %)' : maxScrapeBatches.toString();
+            const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
             // Expected progress: total tool budget (gathering + scraping)
             // Reduced by 3 to ensure we don't hit 100% prematurely before synthesis
@@ -291,7 +291,7 @@ export function createResearchTool(): ToolDefinition {
                 'Each query must target a distinct piece of information. Avoid generic queries.\n' +
                 'Your goal is to gather a focused, high-quality pool of initial links.\n\n' +
                 '## Scrape\n' +
-                `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to 4 URLs each — stop early if the tool signals context is full).\n` +
+                `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to 4 URLs each).\n` +
                 'Prioritize primary sources and authoritative data.';
             let researcherPrompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
                 .replace('{{goal}}', sanitizedQuery)

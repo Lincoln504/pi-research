@@ -28,8 +28,7 @@ describe('config (refactored)', () => {
         expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(10);
         expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(15000);
         expect(config.DEFAULT_RESEARCH_DEPTH).toBe(0);
-        expect(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING).toBe(0.45);
-        expect(config.AVG_TOKENS_PER_SCRAPE).toBe(10000);
+        // Removed - setting no longer exists
         expect(config.WORKER_THREADS).toBe(3);
       });
 
@@ -184,8 +183,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -209,8 +206,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -230,8 +225,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -257,8 +250,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -281,8 +272,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -308,8 +297,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         });
         resetConfig();
@@ -322,8 +309,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
         setConfig(newConfig);
@@ -344,8 +329,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -361,8 +344,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 0,
           RESEARCHER_MAX_RETRY_DELAY_MS: 1000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.01,
-          AVG_TOKENS_PER_SCRAPE: 1000,
           WORKER_THREADS: 1,
         };
 
@@ -378,8 +359,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 10,
           RESEARCHER_MAX_RETRY_DELAY_MS: 60000,
           DEFAULT_RESEARCH_DEPTH: 3,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.99,
-          AVG_TOKENS_PER_SCRAPE: 100000,
           WORKER_THREADS: 16,
         };
 
@@ -395,8 +374,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 5,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 1,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -412,8 +389,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         });
 
@@ -431,8 +406,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -448,8 +421,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -465,8 +436,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -482,8 +451,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -501,8 +468,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
         const config2: Config = {
@@ -513,8 +478,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -531,8 +494,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
         const config2: Config = {
@@ -543,8 +504,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -562,8 +521,6 @@ describe('config (refactored)', () => {
           RESEARCHER_MAX_RETRIES: 3,
           RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
           DEFAULT_RESEARCH_DEPTH: 0,
-          MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-          AVG_TOKENS_PER_SCRAPE: 10000,
           WORKER_THREADS: 3,
         };
 
@@ -591,8 +548,6 @@ describe('config (refactored)', () => {
         RESEARCHER_MAX_RETRIES: 3,
         RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
         DEFAULT_RESEARCH_DEPTH: 0,
-        MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-        AVG_TOKENS_PER_SCRAPE: 10000,
         WORKER_THREADS: 3,
       };
       setConfig(customConfig);

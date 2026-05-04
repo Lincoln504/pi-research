@@ -15,7 +15,7 @@ export const REQUEST_DELAY_MS_OTHER = 1000;
 /** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */
 export const MAX_GATHERING_CALLS = 10;
 
-/** Maximum scrape tool calls per researcher (3 batches: Batch 1, Batch 2, Batch 3) */
+/** Maximum scrape tool calls per researcher (configurable, default: 3) */
 /** @deprecated Use getConfig().MAX_SCRAPE_BATCHES instead */
 export const MAX_SCRAPE_CALLS = 3;
 
@@ -28,7 +28,7 @@ export function getMaxScrapeBatches(): number {
     // Dynamic import to avoid circular dependency
     const { getConfig } = require('./config.ts');
     const batches = getConfig().MAX_SCRAPE_BATCHES;
-    // 0 or values > 99 are treated as "unlimited" (capped only by context)
+    // 0 or values > 99 are treated as "unlimited"
     // Return a very large number for unlimited mode to avoid hitting the limit
     return batches === 0 || batches > 99 ? 999999 : batches;
   } catch {
