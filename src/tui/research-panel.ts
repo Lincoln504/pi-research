@@ -272,9 +272,9 @@ function renderPanelBlock(
       // Token Row (row 1)
       let tokenStr: string;
       if (isEval) {
-        // Eval label display: show live status or fallback to "eval" with decorative borders
+        // Eval label display: ╷ eval ╷ with decorative borders
         const innerWidth = Math.max(0, w - 2);
-        const evalLabel = slice?.status || 'eval';
+        const evalLabel = 'eval';
         const labelDisplay = evalLabel.length > innerWidth ? evalLabel.slice(0, innerWidth) : evalLabel;
         const padding = innerWidth - labelDisplay.length;
         const leftPad = Math.floor(padding / 2);
