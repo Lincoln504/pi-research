@@ -323,12 +323,10 @@ export function createResearchTool(): ToolDefinition {
               }
               debouncedRefresh();
             },
-            onResearcherStart: (id) => {
-              // Extract round number from researcher ID (format: "round.id")
-              const roundMatch = id.match(/^(\d+)\./);
-              const currentRound = roundMatch ? parseInt(roundMatch[1] || '1', 10) : 1;
+            onResearcherStart: (id, _name, _goal, roundNumber) => {
+              const currentRound = roundNumber ?? 1;
 
-              // Clear old researchers when a new round's first researcher starts
+              // Clear old researchers and evaluator when a new round's first researcher starts
               if (currentRound > lastClearedRound) {
                 clearCompletedResearchers(panelState);
                 lastClearedRound = currentRound;
@@ -336,7 +334,7 @@ export function createResearchTool(): ToolDefinition {
 
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-              const displayNum = id.replace(/^r/, '');
+              const displayNum = id;
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
               debouncedRefresh();
@@ -429,8 +427,7 @@ export function createResearchTool(): ToolDefinition {
                 if (panelState.progress) panelState.progress.made = panelState.progress.expected;
                 setTimeout(() => { clearCompletedResearchers(panelState); debouncedRefresh(); }, 500);
               } else {
-                // Sibling researchers from previous round stay visible (grey)
-                // until the next round's researchers actually start.
+                // Researchers and evaluator will be cleared when next round's first researcher starts
                 if (plan?.researchers && plan.researchers.length > 0 && panelState.progress) {
                   const unitsPerResearcher = getUnitsPerResearcher();
                   panelState.progress.expected += (plan.researchers.length * unitsPerResearcher) + LEAD_EVAL_UNITS;

@@ -488,7 +488,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
   private async runResearcher(config: ResearcherConfig, initialLinks: string[], _signal?: AbortSignal): Promise<void> {
     const id = String(config.id);
-    this.options.observer?.onResearcherStart?.(id, config.name, config.goal);
+    this.options.observer?.onResearcherStart?.(id, config.name, config.goal, this.currentRound);
 
     const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
         ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
