@@ -235,6 +235,7 @@ function renderPanelBlock(
 
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
+      const isEval = labelStr.toLowerCase() === 'eval';
 
       // Determine right border character based on if next column is eval
       const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
@@ -246,7 +247,14 @@ function renderPanelBlock(
       const totalLabelWidth = labelStr.length + labelPadding;
 
       let topPart;
-      if (w >= totalLabelWidth) {
+      if (isEval) {
+        // Eval box: use dashed lines (╌) instead of solid (─)
+        if (w >= 2) {
+          topPart = '─' + '╌'.repeat(Math.max(0, w - 2)) + '─';
+        } else {
+          topPart = '╌'.repeat(w);
+        }
+      } else if (w >= totalLabelWidth) {
         const sideWidth = w - totalLabelWidth;
         const leftPad = Math.floor(sideWidth / 2);
         const rightPad = sideWidth - leftPad;
@@ -255,21 +263,30 @@ function renderPanelBlock(
         topPart = '─'.repeat(w);
       }
 
-      const topRightCorner = nextIsEval ? '╭' : (isLast ? '┐' : '┬');
+      const topRightCorner = isEval ? '╮' : (nextIsEval ? '╭' : (isLast ? '┐' : '┬'));
       rightRawRows[0]!.push(topPart + topRightCorner);
       rightColors[0]!.push('accent');
 
       // Token Row (row 1)
       let tokenStr: string;
-      if (isIndicator) {
+      if (isEval) {
+        // Eval label display: ╷ eval ╷ with decorative borders
+        const innerWidth = Math.max(0, w - 2);
+        const evalLabel = 'eval';
+        const labelDisplay = evalLabel.length > innerWidth ? evalLabel.slice(0, innerWidth) : evalLabel;
+        const padding = innerWidth - labelDisplay.length;
+        const leftPad = Math.floor(padding / 2);
+        const rightPad = padding - leftPad;
+        tokenStr = '╷' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╷';
+      } else if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const tokens = slice?.tokens || 0;
         let raw = '';
 
-        // Prioritize status (like "Searching: 1/10...") over token counts for active slices
-        if (slice?.status && !slice.completed && !slice.queued) {
+        // For non-eval columns: show token count or status, never eval's decorative text
+        if (slice?.status && !slice.completed && !slice.queued && !isPlanning) {
             raw = slice.status;
         } else if (!isPlanning && tokens > 0) {
             raw = formatTokens(tokens);
@@ -279,13 +296,17 @@ function renderPanelBlock(
         tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
 
-      const rightWall12 = nextIsEval ? '╎' : '│';
+      const rightWall12 = isEval ? '┆' : (nextIsEval ? '┆' : '│');
       rightRawRows[1]!.push(tokenStr + rightWall12);
       rightColors[1]!.push(slice?.completed ? 'muted' : 'text');
 
       // Cost Row (row 2)
       let costStr: string;
-      if (isIndicator) {
+      if (isEval) {
+        // Eval cost row: ╵ (empty space) ╵ with decorative borders
+        const innerWidth = Math.max(0, w - 2);
+        costStr = '╵' + ' '.repeat(innerWidth) + '╵';
+      } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       } else {
@@ -299,8 +320,18 @@ function renderPanelBlock(
       rightColors[2]!.push(slice?.completed ? 'muted' : 'text');
 
       // Bottom Border
-      const bottomContent = '─'.repeat(w);
-      const bottomRightCorner = nextIsEval ? '╰' : (isLast ? '┘' : '┴');
+      let bottomContent;
+      if (isEval) {
+        // Eval box: use dashed lines (╌) instead of solid (─)
+        if (w >= 2) {
+          bottomContent = '─' + '╌'.repeat(Math.max(0, w - 2)) + '─';
+        } else {
+          bottomContent = '╌'.repeat(w);
+        }
+      } else {
+        bottomContent = '─'.repeat(w);
+      }
+      const bottomRightCorner = isEval ? '╯' : (nextIsEval ? '╰' : (isLast ? '┘' : '┴'));
       rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
     }
@@ -308,8 +339,11 @@ function renderPanelBlock(
 
   // Final Assembly
   const blockResult: string[] = [];
+  const firstSliceId = visibleSliceIds[0];
+  const firstSlice = firstSliceId ? state.slices.get(firstSliceId) : null;
+  const startsWithEval = firstSlice?.label.toLowerCase() === 'eval';
 
-  const leftChars = ['┌', '│', '│', '└'];
+  const leftChars = startsWithEval ? ['╭', '┆', '┆', '╰'] : ['┌', '│', '│', '└'];
 
   for (let rowIdx = 0; rowIdx < 4; rowIdx++) {
     let line = theme.fg('accent', leftChars[rowIdx]!);
@@ -323,11 +357,26 @@ function renderPanelBlock(
       const wall = part.slice(-1);
 
       if (rowIdx === 0 || rowIdx === 3) {
+        // Top and bottom borders: all accent color
         line += theme.fg('accent', content);
       } else {
+        // Body rows (1-2)
         const color = rightRowColors[colIdx]!;
-        line += theme.fg(color, content);
+        const firstChar = content[0];
+        const lastChar = content[content.length - 1];
+
+        // Check if this is an eval decorative box (╷...╷ or ╵...╵)
+        if (content.length >= 2 && ((firstChar === '╷' && lastChar === '╷') || (firstChar === '╵' && lastChar === '╵'))) {
+          // Eval box: render decorative chars as accent, inner content as text
+          line += theme.fg('accent', firstChar as string);
+          line += theme.fg(color, content.slice(1, -1));
+          line += theme.fg('accent', lastChar as string);
+        } else {
+          line += theme.fg(color, content);
+        }
       }
+
+      // Walls: accent color
       line += theme.fg('accent', wall);
     }
     blockResult.push(line);
