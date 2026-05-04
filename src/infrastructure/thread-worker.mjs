@@ -7,9 +7,7 @@
 /* global document, URL, setTimeout */
 import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'module';
-import * as os from 'node:os';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import process from 'node:process';
 
 const require = createRequire(import.meta.url);
@@ -48,7 +46,6 @@ let context = null;
 let initPromise = null;
 
 async function initBrowser() {
-    // 0. Check health
     const isBrowserConnected = () => {
         try {
             return browser && typeof browser.isConnected === 'function' && browser.isConnected();
@@ -59,24 +56,12 @@ async function initBrowser() {
 
     if (isBrowserConnected() && context) return;
 
-    // 1. If initialization is already in progress, wait for it
     if (initPromise) return initPromise;
 
-    // 2. Start initialization and store the promise
     initPromise = (async () => {
         try {
             if (!isBrowserConnected() || !context) {
                 logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
-                
-                // CRUCIAL: Instead of isolating the entire HOME (which breaks cache access),
-                // we isolate only the Firefox profile using user_data_dir.
-                // We use process.env.HOME which is set to the project .browser dir by the manager.
-                const baseDir = process.env.HOME || path.join(process.cwd(), '.browser');
-                const profileDir = path.join(baseDir, 'profiles', `worker-${workerId}`);
-                if (!fs.existsSync(profileDir)) {
-                    fs.mkdirSync(profileDir, { recursive: true });
-                }
-                logToDebugFile('INFO', `[Worker-${workerId}] Using isolated profile: ${profileDir}`);
 
                 let CamoufoxModule;
                 try {
@@ -86,38 +71,31 @@ async function initBrowser() {
                 }
 
                 const { Camoufox } = CamoufoxModule;
-                
-                // When user_data_dir is provided, Camoufox returns a BrowserContext (persistent).
-                // Otherwise it returns a Browser instance.
-                const result = await Camoufox({
+
+                // Launch browser without user_data_dir so Playwright creates an isolated
+                // temp profile per instance. This avoids persistent-context semantics
+                // (where context.browser() returns null) and the profile-lock contention
+                // that came with sharing a single user_data_dir path.
+                browser = await Camoufox({
                     headless: true,
                     humanize: true,
-                    user_data_dir: profileDir
                 });
 
-                if (typeof result.newContext !== 'function') {
-                    // It's a BrowserContext
-                    context = result;
-                    browser = context.browser();
-                } else {
-                    // It's a Browser
-                    browser = result;
-                    context = await browser.newContext({
-                        viewport: { width: 1280, height: 800 },
-                    });
-                }
-                
+                context = await browser.newContext({
+                    viewport: { width: 1280, height: 800 },
+                });
+
                 logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
             }
         } catch (e) {
             browser = null;
             context = null;
             const msg = e instanceof Error ? e.message : String(e);
-            
+
             if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
-                throw new Error(`[Worker] Browser binaries not found in ${process.env.HOME}. Please run 'npm run setup' to install them.`, { cause: e });
+                throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them.`, { cause: e });
             }
-            
+
             throw e;
         } finally {
             initPromise = null;
@@ -180,7 +158,7 @@ async function executeScrapeTask(browser, context, url) {
     try {
                 logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
         // High-fidelity wait: try domcontentloaded first for speed
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
         const contentType = (await response?.headerValue('content-type')) || '';
         
         if (contentType.includes('application/pdf')) {
@@ -273,7 +251,6 @@ async function runTask(data) {
 }
 
 export default new ClusterWorker(runTask, {
-    maxInactiveTime: 60000,
     onlineHandler: async () => {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);
         await initBrowser().catch(() => {});
