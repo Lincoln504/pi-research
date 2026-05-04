@@ -273,13 +273,14 @@ export class StateManager {
     // Update lastUpdated timestamp
     state.lastUpdated = Date.now();
 
+    let tempFilePath: string | null = null;
     try {
       // Create backup before writing
       await this.createBackup();
 
       // Create temporary file with UUID for atomic write
       const tempFileName = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
-      const tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
+      tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
 
       // Write to temporary file
       const content = JSON.stringify(state, null, 2);
@@ -287,11 +288,16 @@ export class StateManager {
 
       // Atomic rename to target file
       await fs.rename(tempFilePath, this.stateFilePath);
+      tempFilePath = null;
 
       // Cleanup old backups
       await this.cleanupOldBackups();
     } catch (error: unknown) {
       throw new Error(`Failed to write state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    } finally {
+      if (tempFilePath) {
+        await fs.unlink(tempFilePath).catch(() => {});
+      }
     }
   }
 
