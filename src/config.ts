@@ -51,7 +51,7 @@ const DEFAULTS: Config = {
   CONSOLE_RESTORE_DELAY_MS: 15000,
   DEFAULT_RESEARCH_DEPTH: 0,
   MAX_SCRAPE_BATCHES: 3,
-  WORKER_THREADS: 3,
+  WORKER_THREADS: 4,
 };
 
 // ============================================================================

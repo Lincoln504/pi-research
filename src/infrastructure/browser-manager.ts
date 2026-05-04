@@ -164,7 +164,7 @@ class BrowserTaskScheduler implements IScheduler {
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
                     enableTasksQueue: true,
                     tasksQueueOptions: { 
-                        concurrency: 2, // Allow up to 2 tasks per process to saturate event loops
+                        concurrency: 1, // STRICT 1 task per worker process to ensure isolation
                         taskStealing: true,
                         tasksStealingOnBackPressure: true
                     }

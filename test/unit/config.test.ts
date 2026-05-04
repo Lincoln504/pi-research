@@ -51,7 +51,7 @@ describe('config (refactored)', () => {
         expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(10);
         expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(15000);
         expect(config.DEFAULT_RESEARCH_DEPTH).toBe(0);
-        expect(config.WORKER_THREADS).toBe(3);
+        expect(config.WORKER_THREADS).toBe(4);
       });
 
       it('should use custom RESEARCHER_TIMEOUT_MS from env', () => {

@@ -191,7 +191,9 @@ export class DeepResearchOrchestrator {
                   this.options.observer?.onSearchProgress?.(links);
               });
               this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0));
+              logger.info(`[Orchestrator] Search burst completed. Distributing results to researchers...`);
               const researcherLinks = this.distributeResults(currentPlan, searchResults);
+              logger.info(`[Orchestrator] Starting ${currentPlan.researchers.length} researchers in parallel...`);
               await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
           } else {
               await this.runResearchersParallel(currentPlan.researchers, new Map(), signal);
@@ -394,6 +396,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
   }
 
   private distributeResults(plan: ResearchPlan, results: QueryResultWithError[]): Map<string, string[]> {
+    const startTime = Date.now();
     const linkMap = new Map<string, string[]>();
     if (!plan.researchers) return linkMap;
 
@@ -410,6 +413,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         });
         linkMap.set(String(r.id), Array.from(new Set(ownedLinks)));
     });
+    logger.debug(`[Orchestrator] Distributed ${results.length} results in ${Date.now() - startTime}ms`);
     return linkMap;
   }
 

@@ -59,6 +59,18 @@ async function initBrowser() {
         try {
             if (!browser || !browser.isConnected()) {
                 logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
+                
+                // CRUCIAL: Give this worker process its own unique HOME to prevent profile locking contention.
+                // Camoufox uses process.env.HOME/USERPROFILE internally for Firefox profiles.
+                const baseDir = path.join(process.cwd(), '.browser');
+                const workerHome = path.join(baseDir, `worker-${workerId}`);
+                if (!fs.existsSync(workerHome)) {
+                    fs.mkdirSync(workerHome, { recursive: true });
+                }
+                process.env.HOME = workerHome;
+                process.env.USERPROFILE = workerHome;
+                logToDebugFile('INFO', `[Worker-${workerId}] Using isolated HOME: ${workerHome}`);
+
                 let CamoufoxModule;
                 try {
                     CamoufoxModule = require('camoufox-js');
@@ -68,7 +80,6 @@ async function initBrowser() {
 
                 const { Camoufox } = CamoufoxModule;
                 
-                // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
                 browser = await Camoufox({
                     headless: true,
                     humanize: true
