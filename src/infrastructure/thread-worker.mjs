@@ -48,8 +48,16 @@ let context = null;
 let initPromise = null;
 
 async function initBrowser() {
-    // 0. Fast path: browser already connected
-    if (browser && browser.isConnected() && context) return;
+    // 0. Check health
+    const isBrowserConnected = () => {
+        try {
+            return browser && typeof browser.isConnected === 'function' && browser.isConnected();
+        } catch {
+            return false;
+        }
+    };
+
+    if (isBrowserConnected() && context) return;
 
     // 1. If initialization is already in progress, wait for it
     if (initPromise) return initPromise;
@@ -57,19 +65,18 @@ async function initBrowser() {
     // 2. Start initialization and store the promise
     initPromise = (async () => {
         try {
-            if (!browser || !browser.isConnected()) {
-                logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
+            if (!isBrowserConnected() || !context) {
+                logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
                 
-                // CRUCIAL: Give this worker process its own unique HOME to prevent profile locking contention.
-                // Camoufox uses process.env.HOME/USERPROFILE internally for Firefox profiles.
-                const baseDir = path.join(process.cwd(), '.browser');
-                const workerHome = path.join(baseDir, `worker-${workerId}`);
-                if (!fs.existsSync(workerHome)) {
-                    fs.mkdirSync(workerHome, { recursive: true });
+                // CRUCIAL: Instead of isolating the entire HOME (which breaks cache access),
+                // we isolate only the Firefox profile using user_data_dir.
+                // We use process.env.HOME which is set to the project .browser dir by the manager.
+                const baseDir = process.env.HOME || path.join(process.cwd(), '.browser');
+                const profileDir = path.join(baseDir, 'profiles', `worker-${workerId}`);
+                if (!fs.existsSync(profileDir)) {
+                    fs.mkdirSync(profileDir, { recursive: true });
                 }
-                process.env.HOME = workerHome;
-                process.env.USERPROFILE = workerHome;
-                logToDebugFile('INFO', `[Worker-${workerId}] Using isolated HOME: ${workerHome}`);
+                logToDebugFile('INFO', `[Worker-${workerId}] Using isolated profile: ${profileDir}`);
 
                 let CamoufoxModule;
                 try {
@@ -80,32 +87,39 @@ async function initBrowser() {
 
                 const { Camoufox } = CamoufoxModule;
                 
-                browser = await Camoufox({
+                // When user_data_dir is provided, Camoufox returns a BrowserContext (persistent).
+                // Otherwise it returns a Browser instance.
+                const result = await Camoufox({
                     headless: true,
-                    humanize: true
+                    humanize: true,
+                    user_data_dir: profileDir
                 });
-                context = await browser.newContext({
-                    viewport: { width: 1280, height: 800 },
-                });
+
+                if (typeof result.newContext !== 'function') {
+                    // It's a BrowserContext
+                    context = result;
+                    browser = context.browser();
+                } else {
+                    // It's a Browser
+                    browser = result;
+                    context = await browser.newContext({
+                        viewport: { width: 1280, height: 800 },
+                    });
+                }
+                
                 logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
-            } else if (!context) {
-                context = await browser.newContext({
-                    viewport: { width: 1280, height: 800 },
-                });
             }
         } catch (e) {
             browser = null;
             context = null;
             const msg = e instanceof Error ? e.message : String(e);
             
-            if (msg.includes('Camoufox is not installed')) {
-                throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`, { cause: e });
+            if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
+                throw new Error(`[Worker] Browser binaries not found in ${process.env.HOME}. Please run 'npm run setup' to install them.`, { cause: e });
             }
             
             throw e;
         } finally {
-            // Clear the promise so subsequent calls can check health again if needed
-            // But only if browser is actually initialized or failed.
             initPromise = null;
         }
     })();
