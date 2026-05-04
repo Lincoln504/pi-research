@@ -187,10 +187,10 @@ export class DeepResearchOrchestrator {
           if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
               this.allQueriesHistory.push(...currentPlan.allQueries);
               this.options.observer?.onSearchStart?.(currentPlan.allQueries);
-              const searchResults = await search(currentPlan.allQueries, undefined, signal, (links) => {
+              const searchResults = await search(currentPlan.allQueries, this.config, signal, (links) => {
                   this.options.observer?.onSearchProgress?.(links);
               });
-              this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + r.results.length, 0));
+              this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0));
               const researcherLinks = this.distributeResults(currentPlan, searchResults);
               await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
           } else {

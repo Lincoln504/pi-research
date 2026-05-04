@@ -182,7 +182,14 @@ class BrowserTaskScheduler implements IScheduler {
     async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
-        const result = (await pool.execute({ type: 'search', query })) as { results: SearchResult[], error?: string };
+        
+        // Add a 120s timeout to pool execution to prevent orchestration hangs
+        const timeoutMs = 120000;
+        const result = await Promise.race([
+            pool.execute({ type: 'search', query }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs))
+        ]) as { results: SearchResult[], error?: string };
+        
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) throw new Error(result.error);
@@ -191,7 +198,11 @@ class BrowserTaskScheduler implements IScheduler {
 
     async runScrape(url: string, config?: Config): Promise<any> {
         const pool = await this.ensurePool(config);
-        const result = (await pool.execute({ type: 'scrape', url })) as any;
+        const timeoutMs = 120000;
+        const result = await Promise.race([
+            pool.execute({ type: 'scrape', url }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs))
+        ]) as any;
         if (result.error) throw new Error(result.error);
         return result;
     }

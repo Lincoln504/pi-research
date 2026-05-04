@@ -9,6 +9,7 @@ import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'module';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import process from 'node:process';
 
 const require = createRequire(import.meta.url);
@@ -241,6 +242,24 @@ async function runTask(data) {
 
         return { 
             error: errMsg,
+            duration: Date.now() - startTime
+        };
+    }
+}
+
+export default new ClusterWorker(runTask, {
+    maxInactiveTime: 60000,
+    onlineHandler: async () => {
+        logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);
+        await initBrowser().catch(() => {});
+    },
+    exitHandler: async () => {
+        logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
+        if (context) await context.close().catch(() => {});
+        if (browser) await browser.close().catch(() => {});
+    }
+});
+error: errMsg,
             duration: Date.now() - startTime
         };
     }
