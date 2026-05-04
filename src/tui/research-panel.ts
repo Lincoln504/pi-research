@@ -235,7 +235,6 @@ function renderPanelBlock(
 
       const isIndicator = showIndicator && i === 0;
       const labelStr = slice ? slice.label : `+${hiddenCount}`;
-      const isEval = labelStr.toLowerCase() === 'eval';
 
       // Determine right border character based on if next column is eval
       const nextSliceId = i + 1 < totalCols ? (showIndicator && i + 1 === 0 ? null : (showIndicator ? visibleSliceIds[i] : visibleSliceIds[i + 1])) : null;
@@ -245,16 +244,9 @@ function renderPanelBlock(
       // Top Border with Label
       const labelPadding = 2; // Spaces around label
       const totalLabelWidth = labelStr.length + labelPadding;
-      
+
       let topPart;
-      if (isEval) {
-        // Eval box: left corner (╭) provided by previous column's topRightCorner
-        if (w >= 2) {
-          topPart = '╴' + '-'.repeat(w - 2) + '╶';
-        } else {
-          topPart = '-'.repeat(w);
-        }
-      } else if (w >= totalLabelWidth) {
+      if (w >= totalLabelWidth) {
         const sideWidth = w - totalLabelWidth;
         const leftPad = Math.floor(sideWidth / 2);
         const rightPad = sideWidth - leftPad;
@@ -263,27 +255,19 @@ function renderPanelBlock(
         topPart = '─'.repeat(w);
       }
 
-      const topRightCorner = isEval ? '╮' : (nextIsEval ? '╭' : (isLast ? '┐' : '┬'));
+      const topRightCorner = nextIsEval ? '╭' : (isLast ? '┐' : '┬');
       rightRawRows[0]!.push(topPart + topRightCorner);
       rightColors[0]!.push('accent');
 
       // Token Row (row 1)
       let tokenStr: string;
-      if (isEval) {
-        // Eval box: inner decorative ╷ on both sides, text centered between them
-        const innerWidth = Math.max(0, w - 2);
-        const evalDisplay = 'eval'.length > innerWidth ? 'eval'.slice(0, innerWidth) : 'eval';
-        const padding = innerWidth - evalDisplay.length;
-        const leftPad = Math.floor(padding / 2);
-        const rightPad = padding - leftPad;
-        tokenStr = '╷' + ' '.repeat(leftPad) + evalDisplay + ' '.repeat(rightPad) + '╷';
-      } else if (isIndicator) {
+      if (isIndicator) {
         tokenStr = '...'.padStart(Math.floor((w + 3) / 2)).padEnd(w);
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const tokens = slice?.tokens || 0;
         let raw = '';
-        
+
         // Prioritize status (like "Searching: 1/10...") over token counts for active slices
         if (slice?.status && !slice.completed && !slice.queued) {
             raw = slice.status;
@@ -294,21 +278,14 @@ function renderPanelBlock(
         const display = raw.length > w ? raw.slice(0, w) : raw;
         tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
-      
-      const rightWall12 = isEval ? '╎' : (nextIsEval ? '╎' : '│');
+
+      const rightWall12 = nextIsEval ? '╎' : '│';
       rightRawRows[1]!.push(tokenStr + rightWall12);
       rightColors[1]!.push(slice?.completed ? 'muted' : 'text');
 
       // Cost Row (row 2)
       let costStr: string;
-      if (isEval) {
-        const innerWidth = Math.max(0, w - 2);
-        const evalCost = slice?.cost || 0;
-        const evalCostRaw = evalCost > 0 ? formatCost(evalCost) : '';
-        const evalCostDisplay = evalCostRaw.length > innerWidth ? evalCostRaw.slice(0, innerWidth) : evalCostRaw;
-        const evalCostPad = innerWidth - evalCostDisplay.length;
-        costStr = '╵' + ' '.repeat(Math.floor(evalCostPad / 2)) + evalCostDisplay + ' '.repeat(evalCostPad - Math.floor(evalCostPad / 2)) + '╵';
-      } else if (isIndicator) {
+      if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       } else {
@@ -322,17 +299,8 @@ function renderPanelBlock(
       rightColors[2]!.push(slice?.completed ? 'muted' : 'text');
 
       // Bottom Border
-      let bottomContent;
-      if (isEval) {
-        if (w >= 2) {
-          bottomContent = '╴' + '-'.repeat(w - 2) + '╶';
-        } else {
-          bottomContent = '-'.repeat(w);
-        }
-      } else {
-        bottomContent = '─'.repeat(w);
-      }
-      const bottomRightCorner = isEval ? '╯' : (nextIsEval ? '╰' : (isLast ? '┘' : '┴'));
+      const bottomContent = '─'.repeat(w);
+      const bottomRightCorner = nextIsEval ? '╰' : (isLast ? '┘' : '┴');
       rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
     }
@@ -340,11 +308,8 @@ function renderPanelBlock(
 
   // Final Assembly
   const blockResult: string[] = [];
-  const firstSliceId = visibleSliceIds[0];
-  const firstSlice = firstSliceId ? state.slices.get(firstSliceId) : null;
-  const startsWithEval = firstSlice?.label.toLowerCase() === 'eval';
-  
-  const leftChars = startsWithEval ? ['╭', '╎', '╎', '╰'] : ['┌', '│', '│', '└'];
+
+  const leftChars = ['┌', '│', '│', '└'];
 
   for (let rowIdx = 0; rowIdx < 4; rowIdx++) {
     let line = theme.fg('accent', leftChars[rowIdx]!);
@@ -361,16 +326,7 @@ function renderPanelBlock(
         line += theme.fg('accent', content);
       } else {
         const color = rightRowColors[colIdx]!;
-        // Eval body rows: content is ╷...╷ or ╵...╵ — render inner decorative borders as accent
-        const firstChar = content[0];
-        const lastChar = content[content.length - 1];
-        if (content.length >= 2 && (firstChar === '╷' || firstChar === '╵') && (lastChar === '╷' || lastChar === '╵')) {
-          line += theme.fg('accent', firstChar as string);
-          line += theme.fg(color, content.slice(1, -1));
-          line += theme.fg('accent', lastChar as string);
-        } else {
-          line += theme.fg(color, content);
-        }
+        line += theme.fg(color, content);
       }
       line += theme.fg('accent', wall);
     }
