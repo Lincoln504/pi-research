@@ -210,8 +210,7 @@ class BrowserTaskScheduler implements IScheduler {
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
-        // Allow 120s: cold-start pool init + 4 Firefox launches can take 30-55s.
-        const timeoutMs = 120000;
+        const timeoutMs = 30000;
         const result = await Promise.race([
             pool.execute({ type: 'healthcheck' }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs))

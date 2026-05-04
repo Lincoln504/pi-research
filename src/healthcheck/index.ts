@@ -55,7 +55,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
  * The actual check logic
  */
 async function performActualCheck(): Promise<HealthCheckResult> {
-  const timeoutMs = getConfig().HEALTH_CHECK_TIMEOUT_MS ?? 120000;
+  const timeoutMs = getConfig().HEALTH_CHECK_TIMEOUT_MS ?? 30000;
 
   const check = async (): Promise<HealthCheckResult> => {
     const result: HealthCheckResult = {
