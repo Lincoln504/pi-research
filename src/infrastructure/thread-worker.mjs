@@ -54,50 +54,60 @@ try {
 }
 
 // Warm browser: Reuse browser instance across tasks.
-// These are safe module-level vars because poolifier is configured with
-// tasksQueueOptions: { concurrency: 1 }, guaranteeing serial task execution
-// per worker thread — initBrowser() is never called concurrently in one worker.
 let browser = null;
 let context = null;
+let initPromise = null;
 
 async function initBrowser() {
-    try {
-        if (!browser || !browser.isConnected()) {
-            logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
-            let CamoufoxModule;
-            try {
-                CamoufoxModule = require('camoufox-js');
-            } catch (e) {
-                throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
-            }
+    // If initialization is already in progress, wait for it
+    if (initPromise) return initPromise;
 
-            const { Camoufox } = CamoufoxModule;
+    // Start initialization and store the promise
+    initPromise = (async () => {
+        try {
+            if (!browser || !browser.isConnected()) {
+                logToDebugFile('INFO', `[Worker-${workerId}] Initializing new browser instance...`);
+                let CamoufoxModule;
+                try {
+                    CamoufoxModule = require('camoufox-js');
+                } catch (e) {
+                    throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
+                }
+
+                const { Camoufox } = CamoufoxModule;
+                
+                // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
+                browser = await Camoufox({
+                    headless: true,
+                    humanize: true
+                });
+                context = await browser.newContext({
+                    viewport: { width: 1280, height: 800 },
+                });
+                logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
+            } else if (!context) {
+                context = await browser.newContext({
+                    viewport: { width: 1280, height: 800 },
+                });
+            }
+        } catch (e) {
+            browser = null;
+            context = null;
+            const msg = e instanceof Error ? e.message : String(e);
             
-            // Camoufox will use process.env.HOME/USERPROFILE which we set in the pool options
-            browser = await Camoufox({
-                headless: true,
-                humanize: true
-            });
-            context = await browser.newContext({
-                viewport: { width: 1280, height: 800 },
-            });
-            logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
-        } else if (!context) {
-            context = await browser.newContext({
-                viewport: { width: 1280, height: 800 },
-            });
+            if (msg.includes('Camoufox is not installed')) {
+                throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`, { cause: e });
+            }
+            
+            throw e;
+        } finally {
+            // Clear the promise so subsequent calls can check health again if needed
+            // But only if browser is actually initialized or failed.
+            initPromise = null;
         }
-    } catch (e) {
-        browser = null;
-        context = null;
-        const msg = e instanceof Error ? e.message : String(e);
-        
-        if (msg.includes('Camoufox is not installed')) {
-            throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them to the project directory.`, { cause: e });
-        }
-        
-        throw e;
-    }
+    })();
+
+    return initPromise;
 }
 
 async function extractSearchResults(page) {
