@@ -21,6 +21,7 @@ import {
     completeSlice, 
     updateSliceTokens,
     updateSliceStatus,
+    reactivateSlice,
 } from '../tui/research-panel.ts';
 import { createResearcherSession } from './researcher.ts';
 import { search } from '../web-research/search.ts';
@@ -239,6 +240,12 @@ export class DeepResearchOrchestrator {
           if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
               // Use coord slice for round 1, eval slice for subsequent rounds to avoid "extra" boxes
               const sliceId = this.currentRound === 1 ? 'coord' : 'eval';
+              
+              // Reactivate eval slice if delegating (it was marked as completed after evaluation)
+              if (this.currentRound > 1) {
+                  reactivateSlice(this.options.panelState, 'eval');
+              }
+              
               updateSliceStatus(this.options.panelState, sliceId, '0 Results');
               this.options.panelState.isSearching = true;
               this.options.onUpdate();
@@ -307,9 +314,18 @@ export class DeepResearchOrchestrator {
               return synthesis;
           }
 
-          // Delegation case: clear the completed evaluator before starting new researchers
-          // This also clears all completed researchers from the previous round
-          clearCompletedResearchers(this.options.panelState);
+          // Delegation case: don't clear the eval slice yet - it will be used for the search burst
+          // Clear only completed researchers from the previous round
+          const toRemove: string[] = [];
+          for (const [id, slice] of this.options.panelState.slices.entries()) {
+              // Remove completed researchers (r1, r2, etc.) but keep the eval slice
+              if (slice.completed && id !== 'eval') {
+                  toRemove.push(id);
+              }
+          }
+          for (const id of toRemove) {
+              this.options.panelState.slices.delete(id);
+          }
           this.options.onUpdate();
 
           // If delegating to a new round, expand the expected budget
@@ -872,8 +888,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
 
       if (willDelegate) {
-          // Transition eval slice to "Results..." for search burst
-          updateSliceStatus(this.options.panelState, 'eval', 'Results...');
+          // Don't set status here - the search burst in the main loop will show "0 Results" and update with count
           return this.capResearcherQueries(plan);
       } else {
           return plan;
