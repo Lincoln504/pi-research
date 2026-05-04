@@ -163,8 +163,8 @@ class BrowserTaskScheduler implements IScheduler {
                     errorHandler: (e: Error) => logger.error('[Scheduler] Cluster Error:', e),
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
                     enableTasksQueue: true,
-                    tasksQueueOptions: { 
-                        concurrency: 1, // STRICT 1 task per worker process to ensure isolation
+                    tasksQueueOptions: {
+                        concurrency: 2, // 2 concurrent tasks per process; each gets its own page, safe for parallel I/O
                         taskStealing: true,
                         tasksStealingOnBackPressure: true
                     }
