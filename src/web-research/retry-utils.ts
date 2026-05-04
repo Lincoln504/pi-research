@@ -87,7 +87,8 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
 }
 
 /**
- * Wraps a promise with a timeout and abort signal support
+ * Wraps a promise with a timeout and abort signal support.
+ * Ensures cleanup of event listeners on resolution/rejection.
  */
 export function withTimeout<T>(
   promise: Promise<T>,
@@ -96,30 +97,41 @@ export function withTimeout<T>(
   signal?: AbortSignal
 ): Promise<T> {
   const combinedSignal = createTimeoutSignal(timeoutMs, signal);
-    
+
   logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
 
   return new Promise<T>((resolve, reject) => {
+    // Early abort check: if signal is already aborted, reject immediately
     if (combinedSignal.aborted) {
       logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
       return reject(new Error(`${label} cancelled or timed out`));
     }
 
+    let settled = false;
     const abortHandler = () => {
-      logger.error(`[withTimeout] ${label} ABORTED (timeout or external signal)`);
-      reject(new Error(`${label} cancelled or timed out`));
+      if (!settled) {
+        settled = true;
+        logger.error(`[withTimeout] ${label} ABORTED (timeout or external signal)`);
+        reject(new Error(`${label} cancelled or timed out`));
+      }
     };
-    
+
     combinedSignal.addEventListener('abort', abortHandler, { once: true });
 
     promise.then(
       (val) => {
-        combinedSignal.removeEventListener('abort', abortHandler);
-        resolve(val);
+        if (!settled) {
+          settled = true;
+          combinedSignal.removeEventListener('abort', abortHandler);
+          resolve(val);
+        }
       },
       (err) => {
-        combinedSignal.removeEventListener('abort', abortHandler);
-        reject(err);
+        if (!settled) {
+          settled = true;
+          combinedSignal.removeEventListener('abort', abortHandler);
+          reject(err);
+        }
       }
     );
   });

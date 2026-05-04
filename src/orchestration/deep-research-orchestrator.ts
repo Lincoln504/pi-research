@@ -543,11 +543,14 @@ You are in the late phase of research. Set a higher threshold for delegation:
       });
 
       try {
+        // Race the researcher session against timeout. If timeout fires first, session will be aborted
+        // in the finally block below. If session completes first, we clear timeout and return result.
         await Promise.race([
           session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
           timeoutPromise
         ]);
       } finally {
+        // Ensure timeout is always cleared, regardless of which promise won the race
         clearTimeout(timeoutId!);
       }
       const responseText = ensureAssistantResponse(session, id);

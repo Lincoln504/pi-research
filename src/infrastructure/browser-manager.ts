@@ -288,9 +288,13 @@ class BrowserClient implements IScheduler {
         return new Promise((resolve, reject) => {
             // Increased timeout to 120s to allow for shared pool queuing delays
             const timeoutMs = 120000;
+            let resolved = false;
             const timer = setTimeout(() => {
-                req.destroy();
-                reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`));
+                if (!resolved) {
+                    resolved = true;
+                    req.destroy();
+                    reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`));
+                }
             }, timeoutMs);
 
             const req = http.request({
@@ -305,6 +309,8 @@ class BrowserClient implements IScheduler {
                 let body = '';
                 res.on('data', chunk => body += chunk);
                 res.on('end', () => {
+                    if (resolved) return;
+                    resolved = true;
                     const duration = Date.now() - start;
                     try {
                         const parsed = JSON.parse(body);
@@ -321,6 +327,8 @@ class BrowserClient implements IScheduler {
             });
 
             req.on('error', (err) => {
+                if (resolved) return;
+                resolved = true;
                 clearTimeout(timer);
                 logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, err);
                 reject(err);

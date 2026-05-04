@@ -121,10 +121,15 @@ export class QuickResearchOrchestrator {
         await Promise.race([
           session.prompt(query),
           timeoutPromise,
-          new Promise<never>((_, reject) => {
-            if (signal?.aborted) reject(new Error('Aborted'));
-            signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
-          }),
+          ...(signal ? [
+            new Promise<never>((_, reject) => {
+              if (signal.aborted) {
+                reject(new Error('Aborted'));
+              } else {
+                signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+              }
+            })
+          ] : []),
         ]);
       } finally {
         clearTimeout(timeoutId!);
