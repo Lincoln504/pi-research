@@ -89,6 +89,7 @@ export class DeepResearchOrchestrator {
   private config: Config;
   private allLinks = new Set<string>();
   private allQueriesHistory: string[] = [];
+  private totalResearchersPlanned: number = 0;
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig();

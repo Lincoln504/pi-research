@@ -12,6 +12,7 @@ import { shutdownManager } from './utils/shutdown-manager.ts';
 export { runResearch } from './orchestration/research-manager.ts';
 export { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
 export { QuickResearchOrchestrator } from './orchestration/quick-research-orchestrator.ts';
+export { shutdownManager } from './utils/shutdown-manager.ts';
 export type { ResearchObserver } from './orchestration/research-observer.ts';
 
 import {

@@ -40,7 +40,7 @@ export interface Config {
   WORKER_THREADS: number;
 }
 
-const DEFAULTS: Config = {
+export const DEFAULTS: Config = {
   RESEARCHER_TIMEOUT_MS: 360000,
   MAX_CONCURRENT_RESEARCHERS: 3,
   RESEARCHER_MAX_RETRIES: 3,

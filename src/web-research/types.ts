@@ -33,6 +33,6 @@ export interface SearchResult {
 }
 
 // Timeouts
-export const PRIMARY_SCRAPER_TIMEOUT = 15000;  // fetch layer
-export const FALLBACK_SCRAPER_TIMEOUT = 30000; // Camoufox layer (increased for stealth rendering)
+export const PRIMARY_SCRAPER_TIMEOUT = 10000;  // fetch layer
+export const FALLBACK_SCRAPER_TIMEOUT = 15000; // Camoufox layer (slightly higher to allow for browser startup/rendering)
 

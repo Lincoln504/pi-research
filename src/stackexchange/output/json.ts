@@ -2,7 +2,7 @@
  * JSON output formatter for Stack Exchange results
  */
 
-import type { Question, Answer, User, Site } from '../types';
+import type { Question, Answer, User, Site } from '../types.ts';
 
 export function formatQuestionsJSON(questions: Question[]): string {
   return JSON.stringify(questions, null, 2);

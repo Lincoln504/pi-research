@@ -75,7 +75,7 @@ When delegating, ensure:
 3. **Master List**: Deduplicate ALL "CITED LINKS" from ALL reports. Assign new sequential numbers [1], [2], etc.
 4. **Exhaustive Synthesis**: Use ALL findings from ALL reports. Include every fact, date, name, and statistic verbatim. Longer is better.
 5. **Strict Grounding**: Every sentence must come from a report. Use [N] inline citations. No prior knowledge.
-6. **CITED LINKS**: List the master URL list at the end of the `content` string.
+6. **CITED LINKS placement**: There must be exactly ONE `### CITED LINKS` section in the entire synthesis. Place it at the very end of the `content` string, after all topic sections. Do NOT include a `### CITED LINKS` block inside any individual topic section.
 
 ---
 

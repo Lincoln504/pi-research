@@ -2,7 +2,7 @@
  * Table output formatter for Stack Exchange results
  */
 
-import type { Question, Answer, User, Site } from '../types';
+import type { Question, Answer, User, Site } from '../types.ts';
 
 export function formatQuestionsTable(questions: Question[]): string {
   if (questions.length === 0) {

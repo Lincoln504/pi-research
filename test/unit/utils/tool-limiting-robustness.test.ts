@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ToolUsageTracker, createDefaultToolLimits } from '../../../src/utils/tool-usage-tracker.ts';
+import { getMaxScrapeBatches } from '../../../src/constants.ts';
 import { createSearchTool } from '../../../src/tools/search.ts';
 import { createScrapeTool } from '../../../src/tools/scrape.ts';
 import { createSecuritySearchTool } from '../../../src/tools/security.ts';
@@ -372,7 +373,7 @@ describe('tool-limiting-robustness', () => {
       const limits = createDefaultToolLimits();
 
       expect(limits.gathering).toBe(10);
-      expect(limits.scrape).toBe(3);
+      expect(limits.scrape).toBe(getMaxScrapeBatches());
       expect(limits.read).toBeUndefined();
     });
 

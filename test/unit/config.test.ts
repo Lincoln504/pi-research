@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { createConfig, getConfig, setConfig, resetConfig, validateConfig, type Config } from '../../src/config';
+import { createConfig, getConfig, setConfig, resetConfig, validateConfig, type Config, DEFAULTS } from '../../src/config';
 
 // Mock fs to avoid reading .env during tests
 vi.mock('node:fs', async () => {
@@ -43,15 +43,15 @@ describe('config (refactored)', () => {
         const env = {} as Record<string, string | undefined>;
         const config = createConfig(env, {});
 
-        expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000);
-        expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(3);
-        expect(config.RESEARCHER_MAX_RETRIES).toBe(3);
-        expect(config.RESEARCHER_MAX_RETRY_DELAY_MS).toBe(5000);
-        expect(config.PROXY_URL).toBeUndefined();
-        expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(10);
-        expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(15000);
-        expect(config.DEFAULT_RESEARCH_DEPTH).toBe(0);
-        expect(config.WORKER_THREADS).toBe(4);
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
+        expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(DEFAULTS.MAX_CONCURRENT_RESEARCHERS);
+        expect(config.RESEARCHER_MAX_RETRIES).toBe(DEFAULTS.RESEARCHER_MAX_RETRIES);
+        expect(config.RESEARCHER_MAX_RETRY_DELAY_MS).toBe(DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS);
+        expect(config.PROXY_URL).toBe(DEFAULTS.PROXY_URL);
+        expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(DEFAULTS.TUI_REFRESH_DEBOUNCE_MS);
+        expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(DEFAULTS.CONSOLE_RESTORE_DELAY_MS);
+        expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
+        expect(config.WORKER_THREADS).toBe(DEFAULTS.WORKER_THREADS);
       });
 
       it('should use custom RESEARCHER_TIMEOUT_MS from env', () => {
@@ -77,7 +77,7 @@ describe('config (refactored)', () => {
   describe('getConfig', () => {
     it('should return default config if no env', () => {
       const config = getConfig();
-      expect(config.RESEARCHER_TIMEOUT_MS).toBe(360000);
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
     });
   });
 
