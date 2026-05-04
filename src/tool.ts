@@ -242,6 +242,7 @@ export function createResearchTool(): ToolDefinition {
           const researchComplexity = depth ?? 0;
           const progressCredits = new Map<string, number>();
           let quickSliceLabel = '';
+          let lastClearedRound = 0; // Track which round's researchers were last cleared
 
           const observer: ResearchObserver = {
             onStart: (query, complexity) => {
@@ -283,11 +284,9 @@ export function createResearchTool(): ToolDefinition {
               panelState.progress = { expected: units, made: 0 };
               debouncedRefresh();
             },
-            onRoundStart: (round) => {
-              if (round > 1) {
-                clearCompletedResearchers(panelState);
-                debouncedRefresh();
-              }
+            onRoundStart: () => {
+              // Don't clear researchers here - they should stay visible (grey) while evaluator is working.
+              // They will be cleared when the new round's first researcher starts.
             },
             onSearchStart: () => {
               let sliceId = 'coord';
@@ -325,6 +324,16 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherStart: (id) => {
+              // Extract round number from researcher ID (format: "round.id")
+              const roundMatch = id.match(/^(\d+)\./);
+              const currentRound = roundMatch ? parseInt(roundMatch[1] || '1', 10) : 1;
+
+              // Clear old researchers when a new round's first researcher starts
+              if (currentRound > lastClearedRound) {
+                clearCompletedResearchers(panelState);
+                lastClearedRound = currentRound;
+              }
+
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
               const displayNum = id.replace(/^r/, '');
@@ -450,7 +459,7 @@ export function createResearchTool(): ToolDefinition {
           }, internalAbort.signal);
 
           const exportPath = await exportResearchReport(sanitizedQuery, result, researchComplexity === 0 ? 'quick' : 'deep', ctx.cwd);
-          const finalResult = exportPath ? appendExportMessage(result, exportPath) : result;
+          const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
 
           cleanup?.();
           return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };

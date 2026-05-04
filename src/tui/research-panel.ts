@@ -159,11 +159,13 @@ function formatTokens(tokens: number): string {
 /**
  * Render a percentage string for the header.
  * Returns empty string when progress data is absent or not yet initialised.
+ * Rounds to nearest 10% increment (10, 20, 30, ..., 90, 100).
  */
 function renderProgressPct(progress: ResearchProgress | undefined): string {
   if (!progress || progress.expected <= 0) return '';
-  const pct = Math.round(Math.min(1, progress.made / progress.expected) * 100);
-  return `${pct}%`;
+  const pct = Math.min(1, progress.made / progress.expected) * 100;
+  const rounded = Math.round(pct / 10) * 10;
+  return `${Math.min(100, rounded)}%`;
 }
 
 function formatCost(cost: number): string {

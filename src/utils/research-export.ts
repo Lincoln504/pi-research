@@ -192,8 +192,13 @@ export async function exportResearchReport(
 }
 
 /**
- * Append the saved-path footer to a research result string.
+ * Append the saved-path footer and total cost to a research result string.
  */
-export function appendExportMessage(result: string, filepath: string): string {
-  return result + `\n\n---\n\nResearch report saved to: ${filepath}`;
+export function appendExportMessage(result: string, filepath: string, totalCost?: number): string {
+  let footer = `\n\n---\n\nResearch report saved to: ${filepath}`;
+  if (totalCost !== undefined) {
+    const costStr = totalCost < 0.0001 ? '<$0.01' : `$${totalCost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
+    footer += `\nTotal cost: ${costStr}`;
+  }
+  return result + footer;
 }
