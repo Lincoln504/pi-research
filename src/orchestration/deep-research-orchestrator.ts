@@ -184,20 +184,21 @@ export class DeepResearchOrchestrator {
           
           this.options.observer?.onRoundStart?.(this.currentRound);
           // 2. Search Burst
-          if (currentPlan.allQueries && currentPlan.allQueries.length > 0) {
-              this.allQueriesHistory.push(...currentPlan.allQueries);
-              this.options.observer?.onSearchStart?.(currentPlan.allQueries);
-              const searchResults = await search(currentPlan.allQueries, this.config, signal, (links) => {
-                  this.options.observer?.onSearchProgress?.(links);
-              });
-              this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0));
-              logger.info(`[Orchestrator] Search burst completed. Distributing results to researchers...`);
-              const researcherLinks = this.distributeResults(currentPlan, searchResults);
-              logger.info(`[Orchestrator] Starting ${currentPlan.researchers.length} researchers in parallel...`);
-              await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
-          } else {
-              await this.runResearchersParallel(currentPlan.researchers, new Map(), signal);
+          // CRITICAL: Researchers MUST have search results. If no queries, this is an error.
+          if (!currentPlan.allQueries || currentPlan.allQueries.length === 0) {
+              throw new Error(`[Orchestrator] Delegated ${currentPlan.researchers?.length || 0} researchers but no queries to search. Researchers cannot run without search results.`);
           }
+
+          this.allQueriesHistory.push(...currentPlan.allQueries);
+          this.options.observer?.onSearchStart?.(currentPlan.allQueries);
+          const searchResults = await search(currentPlan.allQueries, this.config, signal, (links) => {
+              this.options.observer?.onSearchProgress?.(links);
+          });
+          this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0));
+          logger.info(`[Orchestrator] Search burst completed. Distributing results to ${currentPlan.researchers.length} researcher(s)...`);
+          const researcherLinks = this.distributeResults(currentPlan, searchResults);
+          logger.info(`[Orchestrator] Starting ${currentPlan.researchers.length} researchers in parallel with search results...`);
+          await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
 
           const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
           this.plan = currentPlan;
@@ -339,8 +340,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
     if (!plan.researchers) return plan;
 
     // 1. Normalize IDs to strings and cap individual researchers
+    // CRITICAL: Only keep researchers with non-empty queries to guarantee search results
     plan.researchers = plan.researchers
-      .filter(r => r && typeof r === 'object' && Array.isArray(r.queries))
+      .filter(r => r && typeof r === 'object' && Array.isArray(r.queries) && r.queries.length > 0)
       .map(r => {
         const normalized = { ...r, id: String(r.id) };
         if (normalized.queries.length > budget) {
@@ -508,8 +510,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
       settingsManager: extendedCtx.settingsManager,
       systemPrompt: prompt,
       extensionCtx: this.options.ctx,
-      // Allow researchers to search if no initial links provided from evaluator searches
-      noSearch: false,
+      noSearch: true,
       getGlobalState: () => ({ researchId: this.options.researchId } as any),
       onSearchProgress: (links) => {
           this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
