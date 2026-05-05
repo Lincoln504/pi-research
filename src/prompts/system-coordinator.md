@@ -35,7 +35,7 @@ Return ONLY a JSON block containing your full team plan and query set:
 {
   "researchers": [
     {
-      "id": "r1",
+      "id": "1",
       "name": "[Specialty]",
       "goal": "[Focused goal]",
       "queries": ["query 1", "query 2", "query 3", ... (up to QUERY_BUDGET queries)]
