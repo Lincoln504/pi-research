@@ -21,7 +21,7 @@ export function createSearchTool(options: {
 
   const SearchParams = Type.Object({
     queries: Type.Array(Type.String(), {
-        minItems: 5,
+        minItems: 1,
         maxItems: 50,
         description: 'A list of 5-30 search queries to execute.'
     }),
@@ -53,8 +53,8 @@ export function createSearchTool(options: {
       const p = params as Static<typeof SearchParams>;
       let queries = p.queries;
 
-      if (queries.length < 5) {
-        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 5 highly specific queries.`);
+      if (queries.length < 1) {
+        throw new Error(`Insufficient queries: ${queries.length}. Provide at least 1 highly specific queries.`);
       }
 
       // Hard cap for safety

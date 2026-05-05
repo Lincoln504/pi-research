@@ -24,11 +24,10 @@ describe('tools/search', () => {
     expect(tool.promptGuidelines[0]).toContain('5-30 queries');
   });
 
-  it('should fail if less than 5 queries provided', async () => {
+  it('should succeed with 1 query', async () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
     const result = await tool.execute('id', { queries: ['q1'] }, undefined, () => {}, {} as any);
-    expect(result.details).toMatchObject({ error: 'invalid_parameters' });
-    expect(result.content[0].text).toContain('Invalid parameters');
+    expect(result.details).toMatchObject({ queryCount: 1 });
   });
 
   it('should succeed with 5 queries', async () => {
