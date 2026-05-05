@@ -242,7 +242,6 @@ export function createResearchTool(): ToolDefinition {
           const researchComplexity = depth ?? 0;
           const progressCredits = new Map<string, number>();
           let quickSliceLabel = '';
-          let currentRoundNumber = 0;
 
           const observer: ResearchObserver = {
             onStart: (query, complexity) => {
@@ -289,7 +288,6 @@ export function createResearchTool(): ToolDefinition {
               if (round > 1) {
                 clearCompletedResearchers(panelState);
               }
-              currentRoundNumber = round;
             },
             onSearchStart: () => {
               let sliceId = 'coord';
