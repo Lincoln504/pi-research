@@ -6,8 +6,8 @@ You orchestrate the next phase of research.
 - **ROOT QUERY**: {ROOT_QUERY}
 - **Current round**: {ROUND_NUMBER} / {MAX_ROUNDS}
 - **Complexity**: {COMPLEXITY_LABEL}
-- **Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. For this complexity level, use **{MAX_TEAM_SIZE}** — maximize coverage.
-- **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**.
+- **Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on remaining research gaps and topic complexity — add more researchers when substantial new angles remain, use fewer when drilling deeper into known areas.
+- **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Prioritize queries that uncover authoritative sources and citable evidence.
 {{previous_queries_section}}
 
 ---
@@ -52,8 +52,9 @@ Use unique, targeted queries for any new researchers.
 
 **DELEGATION REQUIREMENTS**:
 - **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
-- **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget.
-- **Maximize coverage**: Use the maximum number of researchers ({MAX_TEAM_SIZE}) to cover distinct angles in parallel.
+- **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
+- **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps: more researchers for breadth, focused researchers for depth.
+- **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
 - **DEFAULT TO DELEGATE**: When in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.
 
 ---

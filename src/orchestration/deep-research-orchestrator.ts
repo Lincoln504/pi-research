@@ -255,11 +255,11 @@ export class DeepResearchOrchestrator {
 
   private getComplexityGuidance(): string {
     if (this.options.complexity === 1) {
-      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts.";
+      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts. Use a minimal team (1-2 researchers) to answer core questions efficiently.";
     } else if (this.options.complexity === 2) {
-      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources. Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will drill down into specific gaps.";
+      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will drill down into specific gaps. Scale your team (up to {MAX_TEAM_SIZE}) based on topic scope — fewer researchers for focused depth, more for broad coverage.";
     } else {
-      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will drill down into specific gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage.";
+      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will drill down into specific gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.";
     }
   }
 
@@ -267,30 +267,31 @@ export class DeepResearchOrchestrator {
     if (this.options.complexity === 1) {
       return `**Level 1 (Quick)** - Focused, direct investigation.
 
-- **SYNTHESIZE when**: Primary facts are established, core question is answerable
+- **SYNTHESIZE when**: Primary facts are established, core question is answerable with multiple cited sources
 - **DELEGATE only when**: Essential information missing, critical gaps that prevent answering
 
-Be conservative with delegation. The goal is efficiency — answer the core question directly without exhaustive coverage.`;
+Be conservative with delegation. The goal is efficiency — answer the core question directly with adequate citations without exhaustive coverage.`;
     } else if (this.options.complexity === 2) {
-      return `**Level 2 (Normal)** - Thorough, multi-phase investigation.
+      return `**Level 2 (Normal)** - Thorough, multi-phase investigation with comprehensive citations.
 
-- **SYNTHESIZE when**: Multiple angles covered with substantial findings across all major topics.
-- **DELEGATE when**: ANY gaps remain, missing details, or areas that need deeper exploration. Don't synthesize prematurely.
+- **SYNTHESIZE when**: Multiple angles covered with substantial findings across all major topics, diverse sources cited throughout, and no significant gaps in coverage.
+- **DELEGATE when**: ANY gaps remain in major topics, insufficient source diversity, missing details, or areas that need deeper exploration. Don't synthesize prematurely.
 
-**IMPORTANT**: Level 2 is designed for multi-round research. You should typically delegate for 2-3 rounds before considering synthesis. Each round adds value and depth to your findings. Be proactive with delegation — default to delegating when in doubt, rather than synthesizing with incomplete findings.`;
+**IMPORTANT**: Level 2 is designed for multi-round research. You should typically delegate for 2-3 rounds before considering synthesis. Each round adds value, depth, and citation diversity to your findings. Prioritize source coverage — aim for multiple authoritative references per topic. Be proactive with delegation — default to delegating when in doubt, rather than synthesizing with incomplete findings or insufficient citations.`;
     } else {
-      return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive.
+      return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive with extensive citations.
 
-- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple sources per major topic, no meaningful gaps remain, and you have utilized most of your available round budget (4+ rounds).
-- **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, or areas needing deeper investigation remain. Prioritize thoroughness over efficiency. Lean HEAVILY toward delegation for completeness.
+- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, no meaningful gaps remain, and you have utilized most of your available round budget (4+ rounds).
+- **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, inadequate citations for existing findings, or areas needing deeper investigation remain. Prioritize thoroughness and citation richness over efficiency. Lean HEAVILY toward delegation for completeness.
 
-**CRITICAL FOR LEVEL 3**: Do NOT synthesize early. With ${MAX_ROUNDS_LEVEL_3} rounds available, you should typically delegate for 4-5 rounds before considering synthesis. Each round adds breadth and depth. Only synthesis when you have:
+**CRITICAL FOR LEVEL 3**: Do NOT synthesize early. With ${MAX_ROUNDS_LEVEL_3} rounds available, you should typically delegate for 4-5 rounds before considering synthesis. Each round adds breadth, depth, and citation diversity. Only synthesis when you have:
 1. Multiple rounds of findings (4+ recommended)
-2. Diverse sources across all major topics (10+ distinct source domains)
+2. Diverse sources across all major topics (10+ distinct source domains minimum)
 3. Substantial depth per major area (not just surface coverage)
-4. No significant gaps that additional rounds would meaningfully address
+4. Comprehensive citations throughout (every major claim supported by multiple sources)
+5. No significant gaps that additional rounds would meaningfully address
 
-Be aggressive with delegation. Level 3 is for exhaustive research — use remaining rounds to drill into specialized details, verify findings, or explore nuanced dimensions.`;
+Be aggressive with delegation. Level 3 is for exhaustive research — use remaining rounds to drill into specialized details, verify findings with additional sources, or explore nuanced dimensions.`;
     }
   }
 

@@ -15,8 +15,8 @@ You are being provided with the conversation history for context only.
 
 ## Complexity Level: {COMPLEXITY_LABEL}
 
-**Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. For this complexity level, use **{MAX_TEAM_SIZE}** — maximize coverage.
-**Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**.
+**Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on topic complexity — use the full team when the topic demands breadth, use fewer researchers when depth is prioritized.
+**Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Maximize coverage of each angle with targeted, specific queries.
 
 {COMPLEXITY_GUIDANCE}
 
@@ -46,6 +46,7 @@ Return ONLY a JSON block containing your full team plan and query set:
 ```
 
 **REQUIREMENTS**:
-- **Breadth**: Each researcher must cover a distinct, non-overlapping angle. No two researchers should repeat the same sub-topic.
-- **Depth**: Queries must be specific and targeted — avoid generic queries. Use exact terms, dates, names, events, sources.
+- **Breadth**: Each researcher must cover a distinct, non-overlapping angle. No two researchers should repeat the same sub-topic. Aim for maximum topical coverage.
+- **Depth**: Queries must be specific, targeted, and exhaustive — avoid generic queries. Use exact terms, dates, names, events, authoritative sources. Design queries to surface primary sources and technical documentation that will be citable in the final report.
+- **Citations**: Each researcher's queries should be designed to uncover sources that can be comprehensively cited. Prioritize queries that lead to authoritative references, data, and documented facts.
 - **Format**: Valid JSON only. No markdown, no explanation outside the JSON block.

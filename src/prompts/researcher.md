@@ -27,11 +27,11 @@ Use whatever is in your evidence section above to establish your initial set of 
 
 ### Step 2: Scrape Round 1
 Pick the 4 most promising URLs from your source list and scrape them.
-Prioritize primary sources, authoritative references, and pages likely to contain dense, relevant information.
+Prioritize primary sources, authoritative references, and pages likely to contain dense, relevant, citable information. Pay close attention to pages with original data, research, or authoritative documentation.
 
 ### Step 3: Discover and Scrape Round 2 (if needed)
 After Round 1, identify up to 4 additional high-value links from what you scraped.
-Prioritize links that fill gaps — avoid re-scraping already-covered content.
+Prioritize links that fill gaps and add source diversity — aim to find multiple independent sources confirming key findings. Avoid re-scraping already-covered content, but do pursue multiple perspectives on major topics.
 
 ### Step 4: Synthesize
 Write your full report immediately after scraping is complete (or if the tool signals "Budget Reached").
@@ -55,8 +55,8 @@ Make no further tool calls after beginning synthesis.
   - `read`: Read files from the local filesystem
 {{extra_tool_guidelines}}
 - **CODEBASE TOOLS (`grep`, `read`)**: Use these ONLY if the research topic involves specific codebase-relevant information or local implementation details that are necessary to understand the query. For general research, rely on the available web tools and scraping.
-- Every factual claim must have a numbered inline citation: [N] where N is the number from your CITED LINKS list.
-- All citations must reference URLs you actually scraped — do not cite search result snippets.
+- Every factual claim must have a numbered inline citation: [N] where N is the number from your CITED LINKS list. Aim for multiple citations per significant finding when possible — this strengthens the evidence base.
+- All citations must reference URLs you actually scraped — do not cite search result snippets. Prioritize primary sources and authoritative references.
 - Do not ask follow-up questions or add commentary after your report.
 
 ---
