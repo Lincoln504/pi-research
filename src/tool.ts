@@ -176,6 +176,7 @@ export function createResearchTool(): ToolDefinition {
         let unsubOrder: (() => void) | null = null;
         let unsubInput: (() => void) | null = null;
         let panelState: any = null;
+        let waveTimer: ReturnType<typeof setInterval> | null = null;
 
         const internalAbort = new AbortController();
 
@@ -194,6 +195,13 @@ export function createResearchTool(): ToolDefinition {
           cleanup = () => {
             if (cleanup === null) return;
             cleanup = null;
+
+            // Clear wave animation timer
+            if (waveTimer) {
+              clearInterval(waveTimer);
+              waveTimer = null;
+            }
+
             if (unsubOrder) unsubOrder();
             if (unsubInput) { unsubInput(); unsubInput = null; }
             endResearchSession(piSessionId, researchId);
@@ -302,6 +310,20 @@ export function createResearchTool(): ToolDefinition {
               if (panelState.slices.has(sliceId)) reactivateSlice(panelState, sliceId);
               updateSliceStatus(panelState, sliceId, '0 Results');
               panelState.isSearching = true;
+
+              // Start wave animation timer
+              panelState.waveFrame = 0;
+              if (waveTimer) clearInterval(waveTimer);
+              waveTimer = setInterval(() => {
+                if (!panelState.isSearching) {
+                  clearInterval(waveTimer!);
+                  waveTimer = null;
+                  return;
+                }
+                panelState.waveFrame = (panelState.waveFrame ?? 0) + 1;
+                debouncedRefresh();
+              }, 80); // 80ms = 12.5 FPS
+
               debouncedRefresh();
             },
             onSearchProgress: (count) => {
@@ -316,6 +338,14 @@ export function createResearchTool(): ToolDefinition {
             },
             onSearchComplete: () => {
               panelState.isSearching = false;
+
+              // Stop wave animation timer
+              if (waveTimer) {
+                clearInterval(waveTimer);
+                waveTimer = null;
+              }
+              panelState.waveFrame = undefined;
+
               if (panelState.slices.has('coord')) {
                 completeSlice(panelState, 'coord');
               } else if (!quickSliceLabel && panelState.slices.has('eval')) {

@@ -47,6 +47,8 @@ export interface ResearchPanelState {
   progress?: ResearchProgress;
   /** Temporary status message displayed in the header (e.g. 'planning...') */
   statusMessage?: string;
+  /** Animation frame counter for traveling wave effect during search */
+  waveFrame?: number;
 }
 
 /**
@@ -177,6 +179,275 @@ function formatCost(cost: number): string {
   }
   if (cost < 100) return `$${cost.toFixed(2)}`;
   return `$${Math.round(cost)}`;
+}
+
+// ============================================================================
+// Wave Animation - Color Utilities and Gradient Building
+// ============================================================================
+
+/**
+ * Parse ANSI foreground color escape code to extract color index or RGB values.
+ *
+ * Returns:
+ *   - { type: '256', index: N } for \x1b[38;5;Nm
+ *   - { type: 'rgb', r, g, b } for \x1b[38;2;r;g;bm
+ *   - { type: 'basic', index: N } for \x1b[30-37m
+ *   - null if parse fails
+ */
+function parseAnsiFgColor(
+  ansiCode: string
+): { type: '256' | 'rgb' | 'basic'; index?: number; r?: number; g?: number; b?: number } | null {
+  // ESC character for ANSI escape sequences
+  const ESC = '\x1b';
+
+  // Match \x1b[38;5;Nm (256-color)
+  // eslint-disable-next-line no-useless-escape
+  const match256 = ansiCode.match(new RegExp(`${ESC}\[38;5;(\\d+)m`));
+  if (match256 && match256[1] !== undefined) {
+    return { type: '256', index: parseInt(match256[1], 10) };
+  }
+
+  // Match \x1b[38;2;r;g;bm (truecolor)
+  // eslint-disable-next-line no-useless-escape
+  const matchRgb = ansiCode.match(new RegExp(`${ESC}\[38;2;(\\d+);(\\d+);(\\d+)m`));
+  if (matchRgb && matchRgb[1] !== undefined && matchRgb[2] !== undefined && matchRgb[3] !== undefined) {
+    return {
+      type: 'rgb',
+      r: parseInt(matchRgb[1], 10),
+      g: parseInt(matchRgb[2], 10),
+      b: parseInt(matchRgb[3], 10),
+    };
+  }
+
+  // Match basic colors \x1b[30-37m
+  // eslint-disable-next-line no-useless-escape
+  const matchBasic = ansiCode.match(new RegExp(`${ESC}\[3([0-7])m`));
+  if (matchBasic && matchBasic[1] !== undefined) {
+    return { type: 'basic', index: parseInt(matchBasic[1], 10) };
+  }
+
+  return null;
+}
+
+/**
+ * Convert RGB to nearest 256-color cube or grayscale index.
+ *
+ * Algorithm:
+ * 1. Convert RGB to 6×6×6 cube coordinates (0-5 each)
+ * 2. Find closest grayscale (232-255)
+ * 3. Return whichever is closer (with preference for cube if saturation > threshold)
+ */
+function rgbTo256(r: number, g: number, b: number): number {
+  // 6×6×6 cube values
+  const CUBE_VALUES = [0, 95, 135, 175, 215, 255];
+
+  // Find closest cube index
+  const findClosest = (value: number) => {
+    let minDist = Infinity;
+    let minIdx = 0;
+    for (let i = 0; i < CUBE_VALUES.length; i++) {
+      const cubeValue = CUBE_VALUES[i];
+      if (cubeValue === undefined) continue;
+      const dist = Math.abs(value - cubeValue);
+      if (dist < minDist) {
+        minDist = dist;
+        minIdx = i;
+      }
+    }
+    return minIdx;
+  };
+
+  const rIdx = findClosest(r);
+  const gIdx = findClosest(g);
+  const bIdx = findClosest(b);
+
+  // Cube color
+  const cubeIndex = 16 + 36 * rIdx + 6 * gIdx + bIdx;
+  const cubeR = CUBE_VALUES[rIdx] ?? 0;
+  const cubeG = CUBE_VALUES[gIdx] ?? 0;
+  const cubeB = CUBE_VALUES[bIdx] ?? 0;
+
+  // Calculate distances
+  const colorDistance = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
+    const dr = r1 - r2;
+    const dg = g1 - g2;
+    const db = b1 - b2;
+    // Weighted Euclidean distance (human eye more sensitive to green)
+    return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
+  };
+
+  const cubeDist = colorDistance(r, g, b, cubeR, cubeG, cubeB);
+
+  // Find closest grayscale (232-255)
+  const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  const GRAY_VALUES = Array.from({ length: 24 }, (_, i) => 8 + i * 10);
+  let minGrayDist = Infinity;
+  let minGrayIdx = 0;
+
+  for (let i = 0; i < GRAY_VALUES.length; i++) {
+    const dist = Math.abs(gray - (GRAY_VALUES[i] ?? 0));
+    if (dist < minGrayDist) {
+      minGrayDist = dist;
+      minGrayIdx = i;
+    }
+  }
+
+  const grayIndex = 232 + minGrayIdx;
+  const grayDist = colorDistance(r, g, b, gray, gray, gray);
+
+  // Check color saturation (spread between max and min channel)
+  const maxC = Math.max(r, g, b);
+  const minC = Math.min(r, g, b);
+  const spread = maxC - minC;
+
+  // Prefer cube if color has noticeable saturation AND cube is closer
+  if (spread > 10 && cubeDist < grayDist) {
+    return cubeIndex;
+  }
+
+  // Return whichever is closer
+  return cubeDist < grayDist ? cubeIndex : grayIndex;
+}
+
+/**
+ * Derive gradient colors from a base 256-color index.
+ *
+ * For 256-color cube (16-231):
+ *   n = index - 16
+ *   r = floor(n/36), g = floor((n%36)/6), b = n%6 (each 0-5)
+ *   Scale each component toward 0 for each gradient step
+ *
+ * For grayscale (232-255):
+ *   Scale (index - 232) toward 0
+ *
+ * Returns array of ANSI escape codes for foreground colors.
+ */
+function derive256Gradient(baseIndex: number, steps: number): string[] {
+  const gradient: string[] = [];
+
+  if (baseIndex >= 16 && baseIndex <= 231) {
+    // 6×6×6 color cube
+    const n = baseIndex - 16;
+    const r0 = Math.floor(n / 36);
+    const g0 = Math.floor((n % 36) / 6);
+    const b0 = n % 6;
+
+    for (let step = 0; step < steps; step++) {
+      const factor = 1 - step / steps; // 1.0 to 0.0
+
+      // Scale cube coordinates toward 0
+      const r = Math.round(r0 * factor);
+      const g = Math.round(g0 * factor);
+      const b = Math.round(b0 * factor);
+
+      // Convert back to index
+      const newIndex = 16 + 36 * r + 6 * g + b;
+      gradient.push(`\x1b[38;5;${newIndex}m`);
+    }
+  } else if (baseIndex >= 232 && baseIndex <= 255) {
+    // Grayscale ramp
+    const gray = baseIndex - 232; // 0-23
+
+    for (let step = 0; step < steps; step++) {
+      const factor = 1 - step / steps; // 1.0 to 0.0
+      const scaled = Math.round(gray * factor);
+      gradient.push(`\x1b[38;5;${232 + scaled}m`);
+    }
+  } else {
+    // Basic colors or out of range - fallback to gray gradient
+    const GRAY_START = 244;
+    const GRAY_END = 234;
+
+    for (let step = 0; step < steps; step++) {
+      const factor = step / (steps - 1); // 0.0 to 1.0
+      const gray = Math.round(GRAY_START - factor * (GRAY_START - GRAY_END));
+      gradient.push(`\x1b[38;5;${Math.max(GRAY_END, gray)}m`);
+    }
+  }
+
+  return gradient;
+}
+
+/**
+ * Derive gradient colors from RGB values.
+ *
+ * Scales each channel toward 0 and converts to nearest 256-color.
+ */
+function deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
+  const gradient: string[] = [];
+
+  for (let step = 0; step < steps; step++) {
+    const factor = 1 - step / steps; // 1.0 to 0.0
+    const scaledR = Math.round(r * factor);
+    const scaledG = Math.round(g * factor);
+    const scaledB = Math.round(b * factor);
+    const index = rgbTo256(scaledR, scaledG, scaledB);
+    gradient.push(`\x1b[38;5;${index}m`);
+  }
+
+  return gradient;
+}
+
+/**
+ * Build wave gradient colors from theme accent color.
+ *
+ * Parameters:
+ *   theme - Theme interface with fg() method
+ *   steps - Number of gradient steps (brightest to dimmest)
+ *
+ * Returns:
+ *   Array of ANSI foreground escape codes, where:
+ *   - index 0 = brightest color (peak of wave)
+ *   - last index = dimmest color (tail of wave)
+ *
+ * Fallback:
+ *   Returns gray gradient (244 down to 234) if accent color cannot be parsed.
+ */
+function buildWaveGradient(theme: Theme, steps: number): string[] {
+  // Get raw ANSI code for accent color
+  const accentText = theme.fg('accent', '');
+
+  // Parse ANSI code to extract color information
+  const parsed = parseAnsiFgColor(accentText);
+
+  if (!parsed) {
+    // Fallback: gray gradient
+    return Array.from({ length: steps }, (_, i) => {
+      const gray = Math.round(244 - (i / (steps - 1)) * 10);
+      return `\x1b[38;5;${Math.max(234, gray)}m`;
+    });
+  }
+
+  switch (parsed.type) {
+    case '256':
+      return derive256Gradient(parsed.index!, steps);
+
+    case 'rgb':
+      return deriveRgbGradient(parsed.r!, parsed.g!, parsed.b!, steps);
+
+    case 'basic': {
+      // Basic ANSI colors - map to approximate 256-color indices
+      const basicTo256: Record<number, number> = {
+        0: 16, // black
+        1: 196, // red
+        2: 46, // green
+        3: 226, // yellow
+        4: 21, // blue
+        5: 201, // magenta
+        6: 51, // cyan
+        7: 231, // white
+      };
+      const mappedIndex = basicTo256[parsed.index!] ?? 244;
+      return derive256Gradient(mappedIndex, steps);
+    }
+
+    default:
+      // Fallback
+      return Array.from({ length: steps }, (_, i) => {
+        const gray = Math.round(244 - (i / (steps - 1)) * 10);
+        return `\x1b[38;5;${Math.max(234, gray)}m`;
+      });
+  }
 }
 
 /**
@@ -445,7 +716,40 @@ export function createMasterResearchPanel(
             const currentWidth = visibleWidth(headerLine);
             const targetWidth = width - 1;
             const available = targetWidth - (currentWidth + 2); // Two spaces of padding
-            if (available > 0) {
+
+            if (available > 0 && panel.waveFrame !== undefined) {
+              // Traveling wave animation
+              const TRAIL_LEN = 8;
+              const BG_COLOR_INDEX = 237;
+              const WAVE_CHAR = '─';
+
+              // Build gradient colors from theme accent
+              const gradient = buildWaveGradient(theme, TRAIL_LEN);
+              const bgAnsi = `\x1b[38;5;${BG_COLOR_INDEX}m`;
+              const resetFg = '\x1b[39m';
+
+              // Calculate peak position
+              // peakPos ranges from -TRAIL_LEN to available+TRAIL_LEN
+              const peakPos = (panel.waveFrame % (available + TRAIL_LEN)) - TRAIL_LEN;
+
+              // Build wave fill string character by character
+              let fill = '';
+              for (let i = 0; i < available; i++) {
+                const distFromPeak = peakPos - i;
+
+                if (distFromPeak >= 0 && distFromPeak < TRAIL_LEN) {
+                  // Within wave trail - use gradient color
+                  const color = gradient[Math.min(distFromPeak, gradient.length - 1)];
+                  fill += `${color}${WAVE_CHAR}${resetFg}`;
+                } else {
+                  // Background - use dim gray
+                  fill += `${bgAnsi}${WAVE_CHAR}${resetFg}`;
+                }
+              }
+
+              headerLine += '  ' + fill;
+            } else if (available > 0) {
+              // Fallback to static pattern (no animation running)
               const pattern = 'ˍ＿';
               const pWidth = visibleWidth(pattern);
               const count = Math.floor(available / pWidth);
