@@ -203,7 +203,7 @@ function parseAnsiFgColor(
   const ESC = '\x1b';
 
   // Match \x1b[38;5;Nm (256-color)
-  // eslint-disable-next-line no-useless-escape
+   
   const pattern256 = ESC + '\\[38;5;(\\d+)m';
   const match256 = ansiCode.match(pattern256);
   if (match256 && match256[1] !== undefined) {
@@ -211,7 +211,7 @@ function parseAnsiFgColor(
   }
 
   // Match \x1b[38;2;r;g;bm (truecolor)
-  // eslint-disable-next-line no-useless-escape
+   
   const patternRgb = ESC + '\\[38;2;(\\d+);(\\d+);(\\d+)m';
   const matchRgb = ansiCode.match(patternRgb);
   if (matchRgb && matchRgb[1] !== undefined && matchRgb[2] !== undefined && matchRgb[3] !== undefined) {
@@ -224,7 +224,7 @@ function parseAnsiFgColor(
   }
 
   // Match basic colors \x1b[30-37m
-  // eslint-disable-next-line no-useless-escape
+   
   const patternBasic = ESC + '\\[3([0-7])m';
   const matchBasic = ansiCode.match(patternBasic);
   if (matchBasic && matchBasic[1] !== undefined) {
@@ -484,7 +484,7 @@ function addVariation(index: number, maxVariation: number = 1): number {
 /**
  * Add slight variation to an ANSI color code.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 // @ts-ignore
 function _addVariationToColor(ansiCode: string | undefined, maxVariation: number = 1): string {
   // Return background if undefined
@@ -508,7 +508,7 @@ function _addVariationToColor(ansiCode: string | undefined, maxVariation: number
   return `\\x1b[38;5;${clampedIndex}m`;
 }
 
-function derive256Gradient(baseIndex: number, steps: number): string[] {
+export function _derive256Gradient(baseIndex: number, steps: number): string[] {
   const gradient: string[] = [];
 
   if (baseIndex >= 16 && baseIndex <= 231) {
@@ -590,7 +590,7 @@ function derive256Gradient(baseIndex: number, steps: number): string[] {
  * Applies smooth falloff while keeping hue.
  * Scales toward dimmer version (25%) of original color.
  */
-function deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
+export function _deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
   const gradient: string[] = [];
 
   // Scale toward 25% of original (keeps hue, reduces brightness)
@@ -963,7 +963,8 @@ export function createMasterResearchPanel(
             if (available > 0 && panel.waveFrame !== undefined) {
               // Wave animation - HSL saturation/lightness cycling with snap-back
               const CYCLE_STEPS = 8;
-              const BG_COLOR_INDEX = 237;
+              const _BG_COLOR_INDEX = 237; _BG_COLOR_INDEX;
+              _BG_COLOR_INDEX;
 
               // Get accent color to base hue from
               const accentText = theme.fg('accent', '');
