@@ -62,8 +62,10 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 
 #### MULTIPLE RESEARCH CALLS
 
-**Different/unrelated topics:** Use multiple parallel `research` calls.
+**Different/unrelated topics:** Use multiple parallel `research` calls. The research tool can be called simultaneously if required.
 
 **One topic with multiple aspects:** Do NOT decompose a single user query into multiple research calls — the coordinator inside the tool handles decomposition into sub-topics internally. A single call with appropriate depth handles multi-faceted topics.
 
 **Do NOT escalate depth just because a topic is broad or has multiple aspects** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.
+
+**Direct Execution:** `pi-research` (this research tool for web research) should be called directly by you and not embedded in subagent calls. Do not use `invoke_agent` or delegate to subagents to perform research on your behalf.
