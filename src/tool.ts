@@ -242,6 +242,7 @@ export function createResearchTool(): ToolDefinition {
           const researchComplexity = depth ?? 0;
           const progressCredits = new Map<string, number>();
           let quickSliceLabel = '';
+          let currentRoundNumber = 0;
 
           const observer: ResearchObserver = {
             onStart: (query, complexity) => {
@@ -283,9 +284,8 @@ export function createResearchTool(): ToolDefinition {
               panelState.progress = { expected: units, made: 0 };
               debouncedRefresh();
             },
-            onRoundStart: () => {
-              // Don't clear researchers here - they should stay visible (grey) while evaluator is working.
-              // They will be cleared when the new round's first researcher starts.
+            onRoundStart: (round) => {
+              currentRoundNumber = round;
             },
             onSearchStart: () => {
               let sliceId = 'coord';
@@ -325,8 +325,12 @@ export function createResearchTool(): ToolDefinition {
             onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-              // Clear previous round researchers before starting new round
-              clearCompletedResearchers(panelState);
+              // Only clear completed researchers when moving to a new round.
+              // During concurrent researchers in the same round, keep completed ones visible (greyed).
+              if (_roundNumber > currentRoundNumber) {
+                clearCompletedResearchers(panelState);
+                currentRoundNumber = _roundNumber;
+              }
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
