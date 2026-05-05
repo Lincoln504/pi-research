@@ -15,7 +15,7 @@ You are being provided with the conversation history for context only.
 
 ## Complexity Level: {COMPLEXITY_LABEL}
 
-**Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on topic complexity — use the full team when the topic demands breadth, use fewer researchers when depth is prioritized.
+**Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on topic scope and coverage needs.
 **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Maximize coverage of each angle with targeted, specific queries.
 
 {COMPLEXITY_GUIDANCE}

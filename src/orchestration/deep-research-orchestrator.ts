@@ -255,11 +255,11 @@ export class DeepResearchOrchestrator {
 
   private getComplexityGuidance(): string {
     if (this.options.complexity === 1) {
-      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts. Use a minimal team (1-2 researchers) to answer core questions efficiently.";
+      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts.";
     } else if (this.options.complexity === 2) {
-      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will drill down into specific gaps. Scale your team (up to {MAX_TEAM_SIZE}) based on topic scope — fewer researchers for focused depth, more for broad coverage.";
+      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to {MAX_TEAM_SIZE}) based on topic scope.";
     } else {
-      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will drill down into specific gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.";
+      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.";
     }
   }
 
