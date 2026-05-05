@@ -21,7 +21,7 @@ describe('tools/search', () => {
   it('should create tool with correct metadata', () => {
     const tool = createSearchTool({ ...mockOptions, tracker });
     expect(tool.name).toBe('search');
-    expect(tool.promptGuidelines[0]).toContain('5-30 queries');
+    expect(tool.promptGuidelines[0]).toContain('5-30 queries per call (minimum 1)');
   });
 
   it('should succeed with 1 query', async () => {

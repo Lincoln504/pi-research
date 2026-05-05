@@ -23,17 +23,17 @@ export function createSearchTool(options: {
     queries: Type.Array(Type.String(), {
         minItems: 1,
         maxItems: 50,
-        description: 'A list of 5-30 search queries to execute.'
+        description: 'A list of 5-30 search queries to execute (minimum 1).'
     }),
   });
 
   return {
     name: 'search',
     label: 'Search',
-    description: 'Search the web using a list of queries (5-30) for targeted coverage.',
-    promptSnippet: 'Web search (5-30 queries)',
+    description: 'Search the web using a list of queries (5-30, minimum 1) for targeted coverage.',
+    promptSnippet: 'Web search (5-30 queries, minimum 1)',
     promptGuidelines: [
-      'CRITICAL: Provide 5-30 queries per call.',
+      'CRITICAL: Provide 5-30 queries per call (minimum 1).',
       'COVERAGE: Include query variations, related concepts, and specific data points.',
       'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
@@ -45,7 +45,7 @@ export function createSearchTool(options: {
 
       if (!Value.Check(SearchParams, params)) {
           return {
-            content: [{ type: 'text', text: 'Invalid parameters for search tool. Expected an array of 5-30 queries.' }],
+            content: [{ type: 'text', text: 'Invalid parameters for search tool. Expected an array of 5-30 queries (minimum 1).' }],
             details: { error: 'invalid_parameters' },
           };
       }
