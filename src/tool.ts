@@ -325,13 +325,13 @@ export function createResearchTool(): ToolDefinition {
             onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-              const displayNum = id;
+              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
               debouncedRefresh();
             },
             onResearcherProgress: (id, status, tokens, cost) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id;
+              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               const unitsPerResearcher = getUnitsPerResearcher();
               
               if (status !== undefined) {
@@ -361,7 +361,7 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherComplete: (id) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id;
+              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               if (panelState.progress) {
                 const unitsPerResearcher = getUnitsPerResearcher();
                 const current = progressCredits.get(id) ?? 0;
@@ -375,7 +375,7 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherFailure: (id) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id;
+              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               if (panelState.progress) {
                 const unitsPerResearcher = getUnitsPerResearcher();
                 const current = progressCredits.get(id) ?? 0;
