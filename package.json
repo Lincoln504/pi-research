@@ -43,7 +43,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "lint": "npx eslint --config config/tooling/eslint.config.js src/",
