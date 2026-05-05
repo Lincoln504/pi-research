@@ -87,8 +87,7 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "typebox": "*"
+    "@mariozechner/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -100,7 +99,6 @@
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.0",
-    "typebox": "^1.0.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }
