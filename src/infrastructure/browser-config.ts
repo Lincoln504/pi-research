@@ -21,6 +21,8 @@ export function getBrowserEnv(): Record<string, string> {
     const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
     if (customPath) {
         env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
+    } else {
+        delete env['PLAYWRIGHT_BROWSERS_PATH'];
     }
     return env;
 }

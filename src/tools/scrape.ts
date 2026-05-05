@@ -142,6 +142,15 @@ export function createScrapeTool(options: {
           const content = res.markdown || '';
           markdown += `### ${res.url}\n${content}\n\n---\n\n`;
       }
+
+      if (failed.length > 0) {
+          markdown += `## Failed URLs\n\n`;
+          for (const res of failed) {
+              const error = typeof res.error === 'string' && res.error.length > 0 ? res.error : 'Unknown error';
+              markdown += `- ${res.url}: ${error}\n`;
+          }
+          markdown += '\n';
+      }
       
       return { content: [{ type: 'text', text: markdown }], details: { batch: callCount + 1, count: successful.length } };
     },

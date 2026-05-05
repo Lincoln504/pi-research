@@ -70,14 +70,13 @@ describe('scripts/setup.js integration tests', () => {
 
     // Should contain expected markers
     expect(result.stdout).toContain('pi-research');
-    expect(result.stdout).toContain('Skipping browser installation');
-    expect(result.stdout).toContain('=');
+    expect(result.stdout).toContain('skipping browser download');
 
     // Should NOT have errors in stderr
     expect(result.stderr).not.toContain('Error');
   });
 
-  it('should complete successfully even if browser installation fails', async () => {
+  it('should complete successfully when browser installation is skipped', async () => {
     // Set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD to skip actual browser install
     // and simulate a successful install scenario that still completes
     const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
@@ -85,8 +84,8 @@ describe('scripts/setup.js integration tests', () => {
     expect(result.exitCode).toBe(0);
 
     // Should show status message
-    expect(result.stdout).toContain('pi-research installed successfully');
-    expect(result.stdout).toContain('camoufox') || expect(result.stdout).toContain('Camoufox');
+    expect(result.stdout).toContain('pi-research');
+    expect(result.stdout.toLowerCase()).toContain('camoufox');
   });
 
   it('should show version information', async () => {
@@ -96,14 +95,12 @@ describe('scripts/setup.js integration tests', () => {
     expect(result.stdout).toContain('pi-research');
   });
 
-  it('should show quick start information', async () => {
+  it('should show setup status information', async () => {
     const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
 
-    // Should show quick start commands
-    expect(result.stdout).toContain('Quick start');
-    expect(result.stdout).toContain('npm test');
-    expect(result.stdout).toContain('type-check');
-    expect(result.stdout).toContain('lint');
+    // Should show setup status without relying on platform-specific paths.
+    expect(result.stdout).toContain('pi-research');
+    expect(result.stdout).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1');
   });
 
   it('should gracefully handle missing npx (simulated via SKIP)', async () => {

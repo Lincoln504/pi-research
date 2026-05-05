@@ -1,36 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getBrowserCacheDir, getBrowserEnv, PROJECT_ROOT } from '../../../src/infrastructure/browser-config.ts';
+import { getBrowserCacheDir, getBrowserEnv, getCamoufoxBinaryPath } from '../../../src/infrastructure/browser-config.ts';
 import { join } from 'node:path';
-import { platform } from 'node:os';
+import { homedir, platform } from 'node:os';
 
 describe('browser-config', () => {
     beforeEach(() => {
         vi.resetModules();
-        process.env.PLAYWRIGHT_BROWSERS_PATH = '';
-        process.env.HOME = '/home/user';
-        process.env.USERPROFILE = 'C:\\Users\\user';
+        delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     });
 
-    it('should return project-local .browser directory by default', () => {
-        const expected = join(PROJECT_ROOT, '.browser');
-        expect(getBrowserCacheDir()).toBe(expected);
+    it('should return the user home directory by default', () => {
+        expect(getBrowserCacheDir()).toBe(homedir());
     });
 
     it('should respect PLAYWRIGHT_BROWSERS_PATH environment variable', () => {
-        const customPath = '/custom/path';
+        const customPath = join('custom', 'path');
         process.env.PLAYWRIGHT_BROWSERS_PATH = customPath;
         expect(getBrowserCacheDir()).toBe(customPath);
     });
 
-    it('should return correct environment variables for redirection', () => {
+    it('should not redirect home environment variables by default', () => {
         const env = getBrowserEnv();
-        const cacheDir = getBrowserCacheDir();
-        
-        expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe(cacheDir);
-        if (platform() === 'win32') {
-            expect(env.USERPROFILE).toBe(cacheDir);
-        } else {
-            expect(env.HOME).toBe(cacheDir);
-        }
+        expect(env.PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
+        expect(env.HOME).toBe(process.env.HOME);
+        expect(env.USERPROFILE).toBe(process.env.USERPROFILE);
+    });
+
+    it('should pass through explicit browser cache overrides', () => {
+        const customPath = join('custom', 'browser-cache');
+        process.env.PLAYWRIGHT_BROWSERS_PATH = customPath;
+
+        const env = getBrowserEnv();
+
+        expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe(customPath);
+    });
+
+    it('should compute the platform-specific camoufox binary path', () => {
+        const base = homedir();
+        const expected = platform() === 'win32'
+            ? join(base, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+            : platform() === 'darwin'
+                ? join(base, 'Library', 'Caches', 'camoufox')
+                : join(base, '.cache', 'camoufox');
+
+        expect(getCamoufoxBinaryPath()).toBe(expected);
     });
 });
