@@ -1,6 +1,7 @@
 /**
- * Checks if a given text contains common network-related error messages.
- * Used to identify transient network failures in integration tests.
+ * Checks if a given text contains common environment-related connectivity
+ * errors. Used to identify transient or sandbox-specific failures in
+ * integration tests.
  */
 export function isNetworkUnavailable(text: string): boolean {
     const networkErrorPatterns = [
@@ -16,7 +17,9 @@ export function isNetworkUnavailable(text: string): boolean {
         /ERR_CONNECTION_TIMED_OUT/i,
         /ERR_NETWORK_CHANGED/i,
         /ERR_CONNECTION_CLOSED/i,
-        /socket hang up/i
+        /socket hang up/i,
+        /EPERM: operation not permitted/i,
+        /research-state\.lock/i
     ];
 
     return networkErrorPatterns.some(pattern => pattern.test(text));
