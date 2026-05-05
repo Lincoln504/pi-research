@@ -98,7 +98,7 @@ export class QuickResearchOrchestrator {
         } else if (event.type === 'tool_execution_start') {
             observer?.onResearcherProgress?.('quick', event.toolName);
             if (event.toolName === 'search') {
-                observer?.onSearchStart?.([]);
+                observer?.onSearchStart?.(event.args.queries || []);
             }
         } else if (event.type === 'tool_execution_end') {
             observer?.onResearcherProgress?.('quick', `done:${event.toolName}`);

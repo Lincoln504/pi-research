@@ -14,6 +14,7 @@ export { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from '
 export { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 export { shutdownManager } from './utils/shutdown-manager.ts';
 export type { ResearchObserver } from './orchestration/research-observer.ts';
+export { normalizeUrl } from './utils/shared-links.ts';
 export { resetConfig, getConfig, setConfig } from './config.ts';
 
 import {
