@@ -250,11 +250,11 @@ function renderPanelBlock(
 
       let topPart;
       if (isEval) {
-        // Eval box: use dashed lines (╌) instead of solid (─)
+        // Eval box: use dotted lines (┄) instead of solid (─)
         if (w >= 2) {
-          topPart = '─' + '╌'.repeat(Math.max(0, w - 2)) + '─';
+          topPart = '─' + '┄'.repeat(Math.max(0, w - 2)) + '─';
         } else {
-          topPart = '╌'.repeat(w);
+          topPart = '┄'.repeat(w);
         }
       } else if (w >= totalLabelWidth) {
         const sideWidth = w - totalLabelWidth;
@@ -298,7 +298,7 @@ function renderPanelBlock(
         tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
 
-      const rightWall12 = isEval ? '┆' : (nextIsEval ? '┆' : '│');
+      const rightWall12 = isEval ? '┊' : (nextIsEval ? '┊' : '│');
       rightRawRows[1]!.push(tokenStr + rightWall12);
       rightColors[1]!.push(slice?.completed ? 'muted' : 'text');
 
@@ -324,11 +324,11 @@ function renderPanelBlock(
       // Bottom Border
       let bottomContent;
       if (isEval) {
-        // Eval box: use dashed lines (╌) instead of solid (─)
+        // Eval box: use dotted lines (┄) instead of solid (─)
         if (w >= 2) {
-          bottomContent = '─' + '╌'.repeat(Math.max(0, w - 2)) + '─';
+          bottomContent = '─' + '┄'.repeat(Math.max(0, w - 2)) + '─';
         } else {
-          bottomContent = '╌'.repeat(w);
+          bottomContent = '┄'.repeat(w);
         }
       } else {
         bottomContent = '─'.repeat(w);
@@ -345,7 +345,7 @@ function renderPanelBlock(
   const firstSlice = firstSliceId ? state.slices.get(firstSliceId) : null;
   const startsWithEval = firstSlice?.label.toLowerCase() === 'eval';
 
-  const leftChars = startsWithEval ? ['╭', '┆', '┆', '╰'] : ['┌', '│', '│', '└'];
+  const leftChars = startsWithEval ? ['╭', '┊', '┊', '╰'] : ['┌', '│', '│', '└'];
 
   for (let rowIdx = 0; rowIdx < 4; rowIdx++) {
     let line = theme.fg('accent', leftChars[rowIdx]!);
