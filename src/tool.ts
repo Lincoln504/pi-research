@@ -325,6 +325,8 @@ export function createResearchTool(): ToolDefinition {
             onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
+              // Clear previous round researchers before starting new round
+              clearCompletedResearchers(panelState);
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
@@ -407,9 +409,11 @@ export function createResearchTool(): ToolDefinition {
             },
             onEvaluationDecision: (action, plan, round) => {
               completeSlice(panelState, 'eval');
-              // Clear completed researchers from previous round when evaluator finishes
-              // This happens whether evaluator synthesizes OR delegates new researchers
-              clearCompletedResearchers(panelState);
+              // Only clear completed researchers when returning final synthesis
+              // On delegation, researchers stay visible while new round researchers are added
+              if (action === 'synthesize') {
+                clearCompletedResearchers(panelState);
+              }
               if (panelState.progress) {
                 const key = `eval.round.${round ?? panelState.slices.size}`;
                 if (!progressCredits.has(key)) {
