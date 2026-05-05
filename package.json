@@ -55,6 +55,7 @@
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
     "postinstall": "node scripts/setup.js",
+    "preuninstall": "node scripts/cleanup.js",
     "setup": "node scripts/setup.js",
     "install:browsers": "node scripts/setup.js",
     "install:system-deps": "node scripts/setup.js --system-deps"
@@ -72,7 +73,8 @@
     "node-html-markdown": "^2.0.0",
     "pdf-oxide-wasm": "^0.3.37",
     "playwright-core": "^1.59.1",
-    "poolifier": "^5.3.2"
+    "poolifier": "^5.3.2",
+    "typebox": "^1.0.0"
   },
   "optionalDependencies": {
     "@kreuzberg/html-to-markdown-node-darwin-arm64": "^2.30.0",
