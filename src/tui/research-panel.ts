@@ -51,6 +51,8 @@ export interface ResearchPanelState {
   waveFrame?: number;
   /** Persistent color codes for wave animation (one per position) */
   waveColors?: string[];
+  /** Track which positions were covered by wave in previous frame */
+  previousWavePositions?: Set<number>;
 }
 
 /**
@@ -331,37 +333,41 @@ function derive256Gradient(baseIndex: number, steps: number): string[] {
   const gradient: string[] = [];
 
   if (baseIndex >= 16 && baseIndex <= 231) {
-    // 6×6×6 color cube
+    // 6×6×6 color cube - scale toward dark grey cube coordinates
     const n = baseIndex - 16;
     const r0 = Math.floor(n / 36);
     const g0 = Math.floor((n % 36) / 6);
     const b0 = n % 6;
 
+    // Dark grey target in cube space (1,1,1)
+    const TARGET_CUBE = 1;
+
     for (let step = 0; step < steps; step++) {
       const factor = 1 - step / steps; // 1.0 to 0.0
 
-      // Scale cube coordinates toward 0
-      const r = Math.round(r0 * factor);
-      const g = Math.round(g0 * factor);
-      const b = Math.round(b0 * factor);
+      // Interpolate toward dark grey (darkens and desaturates)
+      const r = Math.round(TARGET_CUBE + (r0 - TARGET_CUBE) * factor);
+      const g = Math.round(TARGET_CUBE + (g0 - TARGET_CUBE) * factor);
+      const b = Math.round(TARGET_CUBE + (b0 - TARGET_CUBE) * factor);
 
       // Convert back to index
       const newIndex = 16 + 36 * r + 6 * g + b;
       gradient.push(`\x1b[38;5;${newIndex}m`);
     }
   } else if (baseIndex >= 232 && baseIndex <= 255) {
-    // Grayscale ramp
+    // Grayscale ramp - darken toward 236 (dark grey)
     const gray = baseIndex - 232; // 0-23
+    const TARGET_GRAY = 4; // 232 + 4 = 236 (dark grey)
 
     for (let step = 0; step < steps; step++) {
       const factor = 1 - step / steps; // 1.0 to 0.0
-      const scaled = Math.round(gray * factor);
+      const scaled = Math.round(TARGET_GRAY + (gray - TARGET_GRAY) * factor);
       gradient.push(`\x1b[38;5;${232 + scaled}m`);
     }
   } else {
-    // Basic colors or out of range - fallback to gray gradient
-    const GRAY_START = 244;
-    const GRAY_END = 234;
+    // Basic colors or out of range - fallback to dark grey gradient
+    const GRAY_START = 240;
+    const GRAY_END = 236;
 
     for (let step = 0; step < steps; step++) {
       const factor = step / (steps - 1); // 0.0 to 1.0
@@ -374,18 +380,41 @@ function derive256Gradient(baseIndex: number, steps: number): string[] {
 }
 
 /**
+ * Get a random dark-grey color from a small range.
+ * Used for persistent color trail left by the wave.
+ *
+ * Returns: ANSI escape code for a random dark-grey (236-240 range)
+ */
+function getRandomDarkGrey(): string {
+  // Dark-grey range: 236-240 (5 shades)
+  const MIN_GRAY = 236;
+  const MAX_GRAY = 240;
+  const randomGray = MIN_GRAY + Math.floor(Math.random() * (MAX_GRAY - MIN_GRAY + 1));
+  return `\x1b[38;5;${randomGray}m`;
+}
+
+/**
  * Derive gradient colors from RGB values.
  *
- * Scales each channel toward 0 and converts to nearest 256-color.
+ * Applies consistent darkening and desaturation transformation.
+ * Scales toward a dark grey target while reducing saturation.
  */
 function deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
   const gradient: string[] = [];
 
+  // Dark grey target (slightly bluish for better blending)
+  const TARGET_R = 60;
+  const TARGET_G = 60;
+  const TARGET_B = 70;
+
   for (let step = 0; step < steps; step++) {
     const factor = 1 - step / steps; // 1.0 to 0.0
-    const scaledR = Math.round(r * factor);
-    const scaledG = Math.round(g * factor);
-    const scaledB = Math.round(b * factor);
+
+    // Interpolate toward dark grey (darkens and desaturates)
+    const scaledR = Math.round(TARGET_R + (r - TARGET_R) * factor);
+    const scaledG = Math.round(TARGET_G + (g - TARGET_G) * factor);
+    const scaledB = Math.round(TARGET_B + (b - TARGET_B) * factor);
+
     const index = rgbTo256(scaledR, scaledG, scaledB);
     gradient.push(`\x1b[38;5;${index}m`);
   }
@@ -737,6 +766,9 @@ export function createMasterResearchPanel(
               if (!panel.waveColors || panel.waveColors.length !== available) {
                 panel.waveColors = Array(available).fill(bgAnsi) as string[];
               }
+              if (!panel.previousWavePositions) {
+                panel.previousWavePositions = new Set<number>();
+              }
 
               // Calculate peak position
               // peakPos ranges from -TRAIL_LEN to available+TRAIL_LEN
@@ -744,21 +776,30 @@ export function createMasterResearchPanel(
               const cycleLength = Math.max(TRAIL_LEN, available + TRAIL_LEN);
               const peakPos = ((panel.waveFrame ?? 0) % cycleLength) - TRAIL_LEN;
 
+              // Track which positions are covered by the wave in this frame
+              const currentWavePositions = new Set<number>();
+
               // Update persistent colors as wave passes over positions
               const waveColors = panel.waveColors!; // Non-null assertion - we just initialized it above
               for (let i = 0; i < available; i++) {
                 const distFromPeak = peakPos - i;
 
                 if (distFromPeak >= 0 && distFromPeak < TRAIL_LEN) {
-                  // Wave is passing over this position - update its color
+                  // Wave is passing over this position
+                  currentWavePositions.add(i);
                   const gradientIndex = Math.min(distFromPeak, gradient.length - 1);
                   const color = gradient[gradientIndex];
                   if (color) {
                     waveColors[i] = color;
                   }
+                } else if (panel.previousWavePositions.has(i)) {
+                  // Wave has left this position - set to random dark-grey shade
+                  waveColors[i] = getRandomDarkGrey();
                 }
-                // Note: We DON'T reset colors when wave leaves - colors persist!
               }
+
+              // Update previous wave positions for next frame
+              panel.previousWavePositions = currentWavePositions;
 
               // Build wave fill string using persistent colors
               let fill = '';

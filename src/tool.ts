@@ -346,6 +346,7 @@ export function createResearchTool(): ToolDefinition {
               }
               panelState.waveFrame = undefined;
               panelState.waveColors = undefined; // Clear persistent colors for next search
+              panelState.previousWavePositions = undefined; // Clear wave position tracking
 
               if (panelState.slices.has('coord')) {
                 completeSlice(panelState, 'coord');

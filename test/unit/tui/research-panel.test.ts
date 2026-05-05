@@ -293,12 +293,15 @@ describe('TUI Research Panel', () => {
         expect(colorsAfterFrame10).not.toEqual(colorsAfterFrame0);
 
         // Colors should persist (not reset to background)
-        // Some positions should have non-background colors after wave passed
-        const nonBgColors = colorsAfterFrame10.filter(c => !c.includes('237') && c.length > 0);
-        expect(nonBgColors.length).toBeGreaterThan(0);
+        // Some positions should have dark-grey colors (236-240 range) after wave passed
+        const darkGreyColors = colorsAfterFrame10.filter(c => {
+          const match = c.match(/38;5;(\d+)m/);
+          return match && parseInt(match[1], 10) >= 236 && parseInt(match[1], 10) <= 240;
+        });
+        expect(darkGreyColors.length).toBeGreaterThan(0);
       });
 
-      it('should reset waveColors when search completes', () => {
+      it('should reset wave state when search completes', () => {
         const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
         state.isSearching = true;
         state.waveFrame = 10;
@@ -311,13 +314,16 @@ describe('TUI Research Panel', () => {
         component.render(120);
         expect(state.waveColors).toBeDefined();
         expect(state.waveColors?.length).toBeGreaterThan(0);
+        expect(state.previousWavePositions).toBeDefined();
 
         // Simulate search complete (this is what tool.ts does)
         state.waveFrame = undefined;
         state.waveColors = undefined;
+        state.previousWavePositions = undefined;
 
-        // Verify waveColors is cleared
+        // Verify all wave state is cleared
         expect(state.waveColors).toBeUndefined();
+        expect(state.previousWavePositions).toBeUndefined();
       });
 
       it('should increment wave frame correctly', () => {
