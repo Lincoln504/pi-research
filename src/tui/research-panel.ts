@@ -202,7 +202,7 @@ function parseAnsiFgColor(
 
   // Match \x1b[38;5;Nm (256-color)
   // eslint-disable-next-line no-useless-escape
-  const pattern256 = ESC + '\[38;5;(\\d+)m';
+  const pattern256 = ESC + '\\[38;5;(\\d+)m';
   const match256 = ansiCode.match(pattern256);
   if (match256 && match256[1] !== undefined) {
     return { type: '256', index: parseInt(match256[1], 10) };
@@ -210,7 +210,7 @@ function parseAnsiFgColor(
 
   // Match \x1b[38;2;r;g;bm (truecolor)
   // eslint-disable-next-line no-useless-escape
-  const patternRgb = ESC + '\[38;2;(\\d+);(\\d+);(\\d+)m';
+  const patternRgb = ESC + '\\[38;2;(\\d+);(\\d+);(\\d+)m';
   const matchRgb = ansiCode.match(patternRgb);
   if (matchRgb && matchRgb[1] !== undefined && matchRgb[2] !== undefined && matchRgb[3] !== undefined) {
     return {
@@ -223,7 +223,7 @@ function parseAnsiFgColor(
 
   // Match basic colors \x1b[30-37m
   // eslint-disable-next-line no-useless-escape
-  const patternBasic = ESC + '\[3([0-7])m';
+  const patternBasic = ESC + '\\[3([0-7])m';
   const matchBasic = ansiCode.match(patternBasic);
   if (matchBasic && matchBasic[1] !== undefined) {
     return { type: 'basic', index: parseInt(matchBasic[1], 10) };
