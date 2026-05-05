@@ -285,6 +285,10 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onRoundStart: (round) => {
+              // Clear researchers from previous rounds when starting a new round
+              if (round > 1) {
+                clearCompletedResearchers(panelState);
+              }
               currentRoundNumber = round;
             },
             onSearchStart: () => {
@@ -325,12 +329,7 @@ export function createResearchTool(): ToolDefinition {
             onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-              // Only clear completed researchers when moving to a new round.
-              // During concurrent researchers in the same round, keep completed ones visible (greyed).
-              if (_roundNumber !== undefined && _roundNumber > currentRoundNumber) {
-                clearCompletedResearchers(panelState);
-                currentRoundNumber = _roundNumber;
-              }
+              // Researchers from previous rounds are cleared in onRoundStart
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
