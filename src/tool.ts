@@ -160,8 +160,15 @@ export function createResearchTool(): ToolDefinition {
     ): Promise<AgentToolResult<unknown>> {
       const { query, model: modelId, depth } = params as { query: string; depth?: number; model?: string; };
 
-      if (!query || !ctx.model) {
-        return { content: [{ type: 'text', text: 'Error: query and model are required' }], details: {} };
+      if (!query) {
+        return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
+      }
+
+      // If no model ID is provided, use the default from context.
+      const sanitizedModelId = modelId ?? (ctx.model as any)?.id;
+
+      if (!sanitizedModelId) {
+         return { content: [{ type: 'text', text: 'Error: No research model specified or available in context' }], details: {} };
       }
 
       const sanitizedQuery = validateAndSanitizeQuery(query);
@@ -184,7 +191,7 @@ export function createResearchTool(): ToolDefinition {
           validateConfig();
 
           let selectedModel = baseModel;
-          if (modelId) selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
+          if (sanitizedModelId) selectedModel = ctx.modelRegistry.getAll().find(m => m.id === sanitizedModelId) || baseModel;
 
           const typedModel = selectedModel as ModelWithId;
           const modelIdStr = typedModel?.id || 'unknown';

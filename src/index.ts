@@ -51,17 +51,19 @@ export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
 
   // Ensure background resources like browser pools are cleaned up
-  process.on('exit', () => {
-      shutdownManager.runCleanup('process exit').catch(err => logger.error('[pi-research] exit cleanup failed:', err));
-  });
-  process.on('SIGINT', () => {
-      shutdownManager.runCleanup('SIGINT')
-          .then(() => process.exit(0))
-          .catch(err => {
-              logger.error('[pi-research] SIGINT cleanup failed:', err);
-              process.exit(1);
-          });
-  });
+  const handleShutdown = (signal: string) => {
+    logger.log(`[pi-research] Received ${signal}, initiating cleanup...`);
+    shutdownManager.runCleanup(signal)
+      .then(() => process.exit(0))
+      .catch(err => {
+        logger.error(`[pi-research] ${signal} cleanup failed:`, err);
+        process.exit(1);
+      });
+  };
+
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGHUP', () => handleShutdown('SIGHUP'));
 
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();

@@ -125,6 +125,17 @@ class BrowserTaskScheduler implements IScheduler {
         // This allows config changes to be detected and handled
     }
 
+    private idleTimer: NodeJS.Timeout | null = null;
+    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+    private resetIdleTimer() {
+        if (this.idleTimer) clearTimeout(this.idleTimer);
+        this.idleTimer = setTimeout(() => {
+            logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
+            this.shutdown();
+        }, this.IDLE_TIMEOUT_MS);
+    }
+
     async startServer(): Promise<number> {
         this.server = new BrowserServer({
             onSearch: (q) => this.runSearch(q),
@@ -139,6 +150,7 @@ class BrowserTaskScheduler implements IScheduler {
      * Recreates the pool if the worker count has changed.
      */
     private async ensurePool(config?: Config): Promise<any> {
+        this.resetIdleTimer();
         const maxWorkers = getMaxWorkers(config);
         
         // If pool exists and worker count matches, return it immediately
