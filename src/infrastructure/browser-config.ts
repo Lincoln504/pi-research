@@ -16,8 +16,8 @@ export function getBrowserCacheDir(): string {
  * Get environment for spawning browser worker processes.
  * Does not override HOME so camoufox uses its natural install location.
  */
-export function getBrowserEnv(): Record<string, string> {
-    const env: Record<string, string> = { ...process.env } as Record<string, string>;
+export function getBrowserEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
     const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
     if (customPath) {
         env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
