@@ -196,9 +196,9 @@ class BrowserTaskScheduler implements IScheduler {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
         
-        // Timeout should be slightly longer than worker timeout (12s) but not too long
-        // Worker does 2 page loads at 12s each, so 25s provides buffer
-        const timeoutMs = 120000;
+        // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
+        // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
+        const timeoutMs = 30000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -222,7 +222,7 @@ class BrowserTaskScheduler implements IScheduler {
 
     async runScrape(url: string, config?: Config): Promise<any> {
         const pool = await this.ensurePool(config);
-        const timeoutMs = 120000;
+        const timeoutMs = 60000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -245,7 +245,7 @@ class BrowserTaskScheduler implements IScheduler {
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = 120000;
+        const timeoutMs = 45000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
