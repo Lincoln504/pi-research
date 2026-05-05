@@ -329,50 +329,121 @@ function rgbTo256(r: number, g: number, b: number): number {
  *
  * Returns array of ANSI escape codes for foreground colors.
  */
+/**
+ * Smooth exponential falloff function for gradient.
+ * Creates non-linear falloff that stays bright longer.
+ * power = 0.5 gives square root, 0.7 gives slower falloff
+ */
+function smoothFalloff(t: number, power: number = 0.7): number {
+  return Math.pow(1 - t, power);
+}
+
+/**
+ * Add small random variation to a color index.
+ * Used for subtle variation in the tail of the gradient.
+ */
+function addVariation(index: number, maxVariation: number = 1): number {
+  const variation = Math.floor(Math.random() * (maxVariation + 1));
+  return Math.max(0, index - variation);
+}
+
+/**
+ * Add slight variation to an ANSI color code.
+ * Used for subtle variation in left-behind trail.
+ * Extracts color index and adds small +/- 1 variation.
+ */
+function addVariationToColor(ansiCode: string | undefined, maxVariation: number = 1): string {
+  // Return background if undefined
+  if (!ansiCode) {
+    return '\x1b[38;5;237m';
+  }
+
+  // Extract color index from \x1b[38;5;{N}m pattern
+  const match = ansiCode.match(/\\x1b\[38;5;(\\d+)m/);
+  if (!match || !match[1]) {
+    return ansiCode; // Return original if pattern doesn't match
+  }
+
+  const currentIndex = parseInt(match[1], 10);
+  // Add slight variation: -1, 0, or +1
+  const variation = Math.floor(Math.random() * (maxVariation * 2 + 1)) - maxVariation;
+  const newIndex = Math.max(16, Math.min(255, currentIndex + variation));
+  // Clamp variation for grayscale range (232-255)
+  const clampedIndex = newIndex >= 232 ? Math.min(255, newIndex) : newIndex;
+
+  return `\\x1b[38;5;${clampedIndex}m`;
+}
+
 function derive256Gradient(baseIndex: number, steps: number): string[] {
   const gradient: string[] = [];
 
   if (baseIndex >= 16 && baseIndex <= 231) {
-    // 6×6×6 color cube - scale toward dark grey cube coordinates
+    // 6×6×6 color cube - scale toward dimmer version of same color
     const n = baseIndex - 16;
     const r0 = Math.floor(n / 36);
     const g0 = Math.floor((n % 36) / 6);
     const b0 = n % 6;
 
-    // Dark grey target in cube space (1,1,1)
-    const TARGET_CUBE = 1;
+    // Scale toward 25% of original (keeps hue, reduces brightness)
+    const DIM_FACTOR = 0.25;
+    const TARGET_R = Math.round(r0 * DIM_FACTOR);
+    const TARGET_G = Math.round(g0 * DIM_FACTOR);
+    const TARGET_B = Math.round(b0 * DIM_FACTOR);
 
     for (let step = 0; step < steps; step++) {
-      const factor = 1 - step / steps; // 1.0 to 0.0
+      const t = step / (steps - 1);
+      const factor = smoothFalloff(t); // Non-linear falloff
 
-      // Interpolate toward dark grey (darkens and desaturates)
-      const r = Math.round(TARGET_CUBE + (r0 - TARGET_CUBE) * factor);
-      const g = Math.round(TARGET_CUBE + (g0 - TARGET_CUBE) * factor);
-      const b = Math.round(TARGET_CUBE + (b0 - TARGET_CUBE) * factor);
+      // Interpolate toward dimmer version (keeps hue)
+      const r = Math.round(TARGET_R + (r0 - TARGET_R) * factor);
+      const g = Math.round(TARGET_G + (g0 - TARGET_G) * factor);
+      const b = Math.round(TARGET_B + (b0 - TARGET_B) * factor);
 
       // Convert back to index
-      const newIndex = 16 + 36 * r + 6 * g + b;
+      let newIndex = 16 + 36 * r + 6 * g + b;
+
+      // Add small variation to last 4 steps of gradient
+      if (step >= steps - 4) {
+        newIndex = addVariation(newIndex, 1);
+      }
+
       gradient.push(`\x1b[38;5;${newIndex}m`);
     }
   } else if (baseIndex >= 232 && baseIndex <= 255) {
-    // Grayscale ramp - darken toward 236 (dark grey)
+    // Grayscale ramp - darken toward 25% of original
     const gray = baseIndex - 232; // 0-23
-    const TARGET_GRAY = 4; // 232 + 4 = 236 (dark grey)
+    const TARGET_GRAY = Math.round(gray * 0.25); // Dim to 25%
 
     for (let step = 0; step < steps; step++) {
-      const factor = 1 - step / steps; // 1.0 to 0.0
+      const t = step / (steps - 1);
+      const factor = smoothFalloff(t); // Non-linear falloff
       const scaled = Math.round(TARGET_GRAY + (gray - TARGET_GRAY) * factor);
-      gradient.push(`\x1b[38;5;${232 + scaled}m`);
+      let newIndex = 232 + scaled;
+
+      // Add small variation to last 4 steps of gradient
+      if (step >= steps - 4) {
+        newIndex = addVariation(newIndex, 1);
+      }
+
+      gradient.push(`\x1b[38;5;${newIndex}m`);
     }
   } else {
-    // Basic colors or out of range - fallback to dark grey gradient
-    const GRAY_START = 240;
-    const GRAY_END = 236;
+    // Basic colors or out of range - fallback to dimmer gradient
+    const GRAY_START = baseIndex >= 232 && baseIndex <= 255 ? baseIndex : 240;
+    const GRAY_END = Math.round(GRAY_START * 0.25); // Dim to 25%
 
     for (let step = 0; step < steps; step++) {
-      const factor = step / (steps - 1); // 0.0 to 1.0
-      const gray = Math.round(GRAY_START - factor * (GRAY_START - GRAY_END));
-      gradient.push(`\x1b[38;5;${Math.max(GRAY_END, gray)}m`);
+      const t = step / (steps - 1);
+      const factor = smoothFalloff(t); // Non-linear falloff
+      const gray = Math.round(GRAY_END + (GRAY_START - GRAY_END) * factor);
+      let newIndex = Math.max(GRAY_END, gray);
+
+      // Add small variation to last 4 steps of gradient
+      if (step >= steps - 4) {
+        newIndex = addVariation(newIndex, 1);
+      }
+
+      gradient.push(`\x1b[38;5;${newIndex}m`);
     }
   }
 
@@ -380,42 +451,44 @@ function derive256Gradient(baseIndex: number, steps: number): string[] {
 }
 
 /**
- * Get a random dark-grey color from a small range.
- * Used for persistent color trail left by the wave.
- *
- * Returns: ANSI escape code for a random dark-grey (236-240 range)
- */
-function getRandomDarkGrey(): string {
-  // Dark-grey range: 236-240 (5 shades)
-  const MIN_GRAY = 236;
-  const MAX_GRAY = 240;
-  const randomGray = MIN_GRAY + Math.floor(Math.random() * (MAX_GRAY - MIN_GRAY + 1));
-  return `\x1b[38;5;${randomGray}m`;
-}
-
-/**
  * Derive gradient colors from RGB values.
  *
- * Applies consistent darkening and desaturation transformation.
- * Scales toward a dark grey target while reducing saturation.
+ * Applies smooth falloff while keeping hue.
+ * Scales toward dimmer version (25%) of original color.
  */
 function deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
   const gradient: string[] = [];
 
-  // Dark grey target (slightly bluish for better blending)
-  const TARGET_R = 60;
-  const TARGET_G = 60;
-  const TARGET_B = 70;
+  // Scale toward 25% of original (keeps hue, reduces brightness)
+  const DIM_FACTOR = 0.25;
+  const TARGET_R = Math.round(r * DIM_FACTOR);
+  const TARGET_G = Math.round(g * DIM_FACTOR);
+  const TARGET_B = Math.round(b * DIM_FACTOR);
 
   for (let step = 0; step < steps; step++) {
-    const factor = 1 - step / steps; // 1.0 to 0.0
+    const t = step / (steps - 1);
+    const factor = smoothFalloff(t); // Non-linear falloff
 
-    // Interpolate toward dark grey (darkens and desaturates)
+    // Interpolate toward dimmer version (keeps hue)
     const scaledR = Math.round(TARGET_R + (r - TARGET_R) * factor);
     const scaledG = Math.round(TARGET_G + (g - TARGET_G) * factor);
     const scaledB = Math.round(TARGET_B + (b - TARGET_B) * factor);
 
-    const index = rgbTo256(scaledR, scaledG, scaledB);
+    let index = rgbTo256(scaledR, scaledG, scaledB);
+
+    // Add small variation to last 4 steps of gradient
+    if (step >= steps - 4) {
+      // Get RGB components and dim them slightly
+      const n = index - 16;
+      const ri = Math.floor(n / 36);
+      const gi = Math.floor((n % 36) / 6);
+      const bi = n % 6;
+      const dimmedRi = Math.max(0, ri - 1);
+      const dimmedGi = Math.max(0, gi - 1);
+      const dimmedBi = Math.max(0, bi - 1);
+      index = 16 + 36 * dimmedRi + 6 * dimmedGi + dimmedBi;
+    }
+
     gradient.push(`\x1b[38;5;${index}m`);
   }
 
@@ -753,7 +826,7 @@ export function createMasterResearchPanel(
 
             if (available > 0 && panel.waveFrame !== undefined) {
               // Traveling wave animation using lower half block characters
-              const TRAIL_LEN = 8;
+              const TRAIL_LEN = 15; // Longer trail for smoother effect
               const BG_COLOR_INDEX = 237;
               const WAVE_CHAR = '▄'; // Lower half block (U+2584) for half-height effect
 
@@ -793,8 +866,11 @@ export function createMasterResearchPanel(
                     waveColors[i] = color;
                   }
                 } else if (panel.previousWavePositions.has(i)) {
-                  // Wave has left this position - set to random dark-grey shade
-                  waveColors[i] = getRandomDarkGrey();
+                  // Wave has left this position - use last gradient color with slight variation
+                  const lastGradientColor = gradient[gradient.length - 1];
+                  if (lastGradientColor) {
+                    waveColors[i] = addVariationToColor(lastGradientColor, 1);
+                  }
                 }
               }
 
