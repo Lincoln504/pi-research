@@ -34,7 +34,7 @@ export interface Config {
   CONSOLE_RESTORE_DELAY_MS: number;
   /** Default depth for /research command (0-3, default: 0) */
   DEFAULT_RESEARCH_DEPTH: number;
-  /** Maximum scrape batches per researcher (0-16, 0=unlimited, default: 3) */
+  /** Maximum scrape batches per researcher (0-16, 0=unlimited, default: 2) */
   MAX_SCRAPE_BATCHES: number;
   /** Number of parallel browser workers for search and scraping (default: 3) */
   WORKER_THREADS: number;
@@ -50,7 +50,7 @@ export const DEFAULTS: Config = {
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
   DEFAULT_RESEARCH_DEPTH: 0,
-  MAX_SCRAPE_BATCHES: 3,
+  MAX_SCRAPE_BATCHES: 2,
   WORKER_THREADS: 4,
 };
 
