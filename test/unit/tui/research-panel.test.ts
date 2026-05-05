@@ -118,11 +118,11 @@ describe('TUI Research Panel', () => {
         const getActivePanelsMock = vi.fn().mockReturnValue([state]);
         const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
         const component = componentCreator(undefined, mockTheme);
-        const lines = component.render(80);
+        const lines = component.render(120); // Use wider width to ensure wave renders
 
         const headerLine = lines[0];
-        // Should contain wave characters (─) when animation is active
-        expect(headerLine).toContain('─');
+        // Should contain wave characters (▄) when animation is active
+        expect(headerLine).toContain('▄');
       });
 
       it('should render static fill when isSearching but no waveFrame', () => {

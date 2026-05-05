@@ -721,10 +721,10 @@ export function createMasterResearchPanel(
             const available = targetWidth - (currentWidth + 2); // Two spaces of padding
 
             if (available > 0 && panel.waveFrame !== undefined) {
-              // Traveling wave animation
+              // Traveling wave animation using lower half block characters
               const TRAIL_LEN = 8;
               const BG_COLOR_INDEX = 237;
-              const WAVE_CHAR = '─';
+              const WAVE_CHAR = '▄'; // Lower half block (U+2584) for half-height effect
 
               // Build gradient colors from theme accent
               const gradient = buildWaveGradient(theme, TRAIL_LEN);
