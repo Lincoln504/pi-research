@@ -68,4 +68,4 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 
 **Do NOT escalate depth just because a topic is broad or has multiple aspects** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.
 
-**Direct Execution:** `pi-research` (this research tool for web research) should be called directly by you and not embedded in subagent calls. Do not use `invoke_agent` or delegate to subagents to perform research on your behalf.
+`pi-research` (this research tool for web research) should be called directly and not embedded in subagent calls.
