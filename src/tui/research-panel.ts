@@ -963,8 +963,6 @@ export function createMasterResearchPanel(
             if (available > 0 && panel.waveFrame !== undefined) {
               // Wave animation - HSL saturation/lightness cycling with snap-back
               const CYCLE_STEPS = 8;
-              const _BG_COLOR_INDEX = 237; _BG_COLOR_INDEX;
-              _BG_COLOR_INDEX;
 
               // Get accent color to base hue from
               const accentText = theme.fg('accent', '');

@@ -9,11 +9,12 @@ import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
 // Modular Orchestration Exports
-export { runResearch } from './orchestration/research-manager.ts';
-export { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
-export { QuickResearchOrchestrator } from './orchestration/quick-research-orchestrator.ts';
+export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
+export { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
+export { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 export { shutdownManager } from './utils/shutdown-manager.ts';
 export type { ResearchObserver } from './orchestration/research-observer.ts';
+export { resetConfig, getConfig, setConfig } from './config.ts';
 
 import {
   MAX_TEAM_SIZE_LEVEL_1,

@@ -198,7 +198,7 @@ class BrowserTaskScheduler implements IScheduler {
         
         // Timeout should be slightly longer than worker timeout (12s) but not too long
         // Worker does 2 page loads at 12s each, so 25s provides buffer
-        const timeoutMs = 25000;
+        const timeoutMs = 120000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -245,7 +245,7 @@ class BrowserTaskScheduler implements IScheduler {
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
         const pool = await this.ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = 25000;
+        const timeoutMs = 120000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
