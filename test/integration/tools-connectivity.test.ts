@@ -11,9 +11,7 @@ import { createScrapeTool } from '../../src/tools/scrape.ts';
 import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
 import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 
-function isNetworkUnavailable(text: string): boolean {
-  return /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|net::ERR/i.test(text);
-}
+import { isNetworkUnavailable } from './helpers/network.ts';
 
 describe('Search and Scrape Tools Connectivity', () => {
   const mockExtensionCtx = {
@@ -143,9 +141,10 @@ describe('Search and Scrape Tools Connectivity', () => {
       
       if (result.content[0]?.type === 'text') {
         const text = result.content[0].text as string;
-        if (text.includes('**Successful:** 0') || isNetworkUnavailable(text)) {
+        if (isNetworkUnavailable(text)) {
           return;
         }
+        expect(text).not.toContain('**Successful:** 0');
         expect(text).toContain('Python');
         expect(text.length).toBeGreaterThan(1000);
         expect(text).toMatch(/^#+\s/m);

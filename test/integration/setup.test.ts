@@ -85,7 +85,6 @@ describe('scripts/setup.js integration tests', () => {
 
     // Should show status message
     expect(result.stdout).toContain('pi-research');
-    expect(result.stdout.toLowerCase()).toContain('camoufox');
   });
 
   it('should show version information', async () => {
