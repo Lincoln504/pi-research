@@ -46,19 +46,19 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "lint": "npx eslint --config config/tooling/eslint.config.js src/",
-    "lint:fix": "npx eslint --config config/tooling/eslint.config.js src/ --fix",
+    "lint": "npx eslint --config config/tooling/eslint.config.ts src/",
+    "lint:fix": "npx eslint --config config/tooling/eslint.config.ts src/ --fix",
     "type-check": "tsc --noEmit",
     "test": "vitest run --config config/tooling/vitest.config.unit.ts",
     "test:unit": "vitest run --config config/tooling/vitest.config.unit.ts",
     "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
-    "postinstall": "node scripts/setup.js",
-    "preuninstall": "node scripts/cleanup.js",
-    "setup": "node scripts/setup.js",
-    "install:browsers": "node scripts/setup.js",
-    "install:system-deps": "node scripts/setup.js --system-deps"
+    "postinstall": "ts-node scripts/setup.ts",
+    "preuninstall": "ts-node scripts/cleanup.ts",
+    "setup": "ts-node scripts/setup.ts",
+    "install:browsers": "ts-node scripts/setup.ts",
+    "install:system-deps": "ts-node scripts/setup.ts --system-deps"
   },
   "pi": {
     "extensions": [
@@ -99,6 +99,8 @@
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.0",
+    "jiti": "^2.7.0",
+    "ts-node": "^10.9.2",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }
