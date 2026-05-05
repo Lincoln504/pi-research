@@ -242,7 +242,6 @@ export function createResearchTool(): ToolDefinition {
           const researchComplexity = depth ?? 0;
           const progressCredits = new Map<string, number>();
           let quickSliceLabel = '';
-          let lastClearedRound = 0; // Track which round's researchers were last cleared
 
           const observer: ResearchObserver = {
             onStart: (query, complexity) => {
@@ -323,15 +322,7 @@ export function createResearchTool(): ToolDefinition {
               }
               debouncedRefresh();
             },
-            onResearcherStart: (id, _name, _goal, roundNumber) => {
-              const currentRound = roundNumber ?? 1;
-
-              // Clear old researchers and evaluator when a new round's first researcher starts
-              if (currentRound > lastClearedRound) {
-                clearCompletedResearchers(panelState);
-                lastClearedRound = currentRound;
-              }
-
+            onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
               const displayNum = id;
@@ -340,7 +331,7 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherProgress: (id, status, tokens, cost) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
+              const displayNum = id === 'quick' ? quickSliceLabel : id;
               const unitsPerResearcher = getUnitsPerResearcher();
               
               if (status !== undefined) {
@@ -370,7 +361,7 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherComplete: (id) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
+              const displayNum = id === 'quick' ? quickSliceLabel : id;
               if (panelState.progress) {
                 const unitsPerResearcher = getUnitsPerResearcher();
                 const current = progressCredits.get(id) ?? 0;
@@ -384,7 +375,7 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onResearcherFailure: (id) => {
-              const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
+              const displayNum = id === 'quick' ? quickSliceLabel : id;
               if (panelState.progress) {
                 const unitsPerResearcher = getUnitsPerResearcher();
                 const current = progressCredits.get(id) ?? 0;
@@ -416,6 +407,9 @@ export function createResearchTool(): ToolDefinition {
             },
             onEvaluationDecision: (action, plan, round) => {
               completeSlice(panelState, 'eval');
+              // Clear completed researchers from previous round when evaluator finishes
+              // This happens whether evaluator synthesizes OR delegates new researchers
+              clearCompletedResearchers(panelState);
               if (panelState.progress) {
                 const key = `eval.round.${round ?? panelState.slices.size}`;
                 if (!progressCredits.has(key)) {
@@ -425,9 +419,8 @@ export function createResearchTool(): ToolDefinition {
               }
               if (action === 'synthesize') {
                 if (panelState.progress) panelState.progress.made = panelState.progress.expected;
-                setTimeout(() => { clearCompletedResearchers(panelState); debouncedRefresh(); }, 500);
               } else {
-                // Researchers and evaluator will be cleared when next round's first researcher starts
+                // Delegation: prepare for new round's researchers
                 if (plan?.researchers && plan.researchers.length > 0 && panelState.progress) {
                   const unitsPerResearcher = getUnitsPerResearcher();
                   panelState.progress.expected += (plan.researchers.length * unitsPerResearcher) + LEAD_EVAL_UNITS;
