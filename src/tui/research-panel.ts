@@ -717,8 +717,8 @@ export function createMasterResearchPanel(
 
           if (panel.isSearching) {
             const currentWidth = visibleWidth(headerLine);
-            const targetWidth = width - 1;
-            const available = targetWidth - (currentWidth + 2); // Two spaces of padding
+            const targetWidth = Math.max(0, width - 1); // Guard against negative width
+            const available = Math.max(0, targetWidth - (currentWidth + 2)); // Guard against negative available
 
             if (available > 0 && panel.waveFrame !== undefined) {
               // Traveling wave animation using lower half block characters
@@ -733,7 +733,9 @@ export function createMasterResearchPanel(
 
               // Calculate peak position
               // peakPos ranges from -TRAIL_LEN to available+TRAIL_LEN
-              const peakPos = (panel.waveFrame % (available + TRAIL_LEN)) - TRAIL_LEN;
+              // Use Math.max to prevent modulo by zero (though TRAIL_LEN ensures denominator >= 8)
+              const cycleLength = Math.max(TRAIL_LEN, available + TRAIL_LEN);
+              const peakPos = ((panel.waveFrame ?? 0) % cycleLength) - TRAIL_LEN;
 
               // Build wave fill string character by character
               let fill = '';

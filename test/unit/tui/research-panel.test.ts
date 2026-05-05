@@ -178,6 +178,96 @@ describe('TUI Research Panel', () => {
         expect(lines.length).toBeGreaterThan(0);
       });
 
+      it('should handle extremely narrow width (0)', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 5;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should not throw on width 0
+        expect(() => component.render(0)).not.toThrow();
+      });
+
+      it('should handle extremely narrow width (1)', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 5;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should not throw on width 1
+        expect(() => component.render(1)).not.toThrow();
+        const lines = component.render(1);
+        expect(lines.length).toBeGreaterThan(0);
+      });
+
+      it('should handle extremely narrow width (2)', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 5;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should not throw on width 2
+        expect(() => component.render(2)).not.toThrow();
+        const lines = component.render(2);
+        expect(lines.length).toBeGreaterThan(0);
+      });
+
+      it('should handle very wide terminal width', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 5;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should not throw on very wide terminal (1000 columns)
+        expect(() => component.render(1000)).not.toThrow();
+        const lines = component.render(1000);
+        expect(lines.length).toBeGreaterThan(0);
+        expect(lines[0]).toContain('▄'); // Should have wave chars
+      });
+
+      it('should handle wave frame larger than width', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        // Wave frame is much larger than the window width
+        state.waveFrame = 99999;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should not throw even with very large wave frame
+        expect(() => component.render(80)).not.toThrow();
+        const lines = component.render(80);
+        expect(lines.length).toBeGreaterThan(0);
+      });
+
+      it('should handle negative wave frame (undefined)', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        // waveFrame is undefined (equivalent to "negative" for our purposes)
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Should use static pattern instead of wave
+        expect(() => component.render(120)).not.toThrow();
+        const lines = component.render(120);
+        expect(lines.length).toBeGreaterThan(0);
+      });
+
       it('should increment wave frame correctly', () => {
         const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
         state.waveFrame = 0;
