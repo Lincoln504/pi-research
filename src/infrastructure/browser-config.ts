@@ -1,54 +1,32 @@
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
-import { platform } from 'node:os';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { platform, homedir } from 'node:os';
 
 /**
- * Determine the project root directory.
- * Assumes this file is in src/infrastructure/
- */
-export const PROJECT_ROOT = join(__dirname, '..', '..');
-
-/**
- * Determine the browser cache directory.
- * Priority:
- * 1. PLAYWRIGHT_BROWSERS_PATH environment variable
- * 2. Project-local .browser directory
+ * Get the camoufox binary cache directory.
+ * Uses PLAYWRIGHT_BROWSERS_PATH if set, otherwise the standard user cache location
+ * that camoufox uses by default (~/.cache/camoufox on Linux).
+ * We do NOT override HOME — that trick was unreliable and caused install/runtime mismatches.
  */
 export function getBrowserCacheDir(): string {
-    const envPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
-    if (envPath) return envPath;
-    
-    return join(PROJECT_ROOT, '.browser');
+    return process.env['PLAYWRIGHT_BROWSERS_PATH'] || homedir();
 }
 
 /**
- * Get the environment variables required to redirect Camoufox/Playwright 
- * to the local browser cache.
+ * Get environment for spawning browser worker processes.
+ * Does not override HOME so camoufox uses its natural install location.
  */
 export function getBrowserEnv(): Record<string, string> {
-    const cacheDir = getBrowserCacheDir();
-    
-    // Camoufox uses os.homedir() which respects HOME/USERPROFILE
-    const env: Record<string, string> = {
-        ...process.env,
-        'PLAYWRIGHT_BROWSERS_PATH': cacheDir,
-    } as Record<string, string>;
-
-    if (platform() === 'win32') {
-        env['USERPROFILE'] = cacheDir;
-    } else {
-        env['HOME'] = cacheDir;
+    const env: Record<string, string> = { ...process.env } as Record<string, string>;
+    const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
+    if (customPath) {
+        env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
     }
-
     return env;
 }
 
 /**
- * Ensure the browser cache directory exists.
+ * Ensure the browser cache directory exists (only relevant for custom PLAYWRIGHT_BROWSERS_PATH).
  */
 export function ensureBrowserCacheDir(): string {
     const cacheDir = getBrowserCacheDir();
@@ -56,22 +34,24 @@ export function ensureBrowserCacheDir(): string {
         try {
             mkdirSync(cacheDir, { recursive: true });
         } catch (_e) {
-            // Ignore if already exists (race condition)
+            // Ignore race condition
         }
     }
     return cacheDir;
 }
 
 /**
- * Get the expected path for Camoufox binaries within the cache.
+ * Get the expected path where camoufox installs its binaries.
+ * Matches camoufox-js's own resolution logic using homedir() (or custom path).
  */
 export function getCamoufoxBinaryPath(): string {
-    const cacheDir = getBrowserCacheDir();
+    const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
+    const base = customPath || homedir();
     if (platform() === 'win32') {
-        return join(cacheDir, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
+        return join(base, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
     } else if (platform() === 'darwin') {
-        return join(cacheDir, 'Library', 'Caches', 'camoufox');
+        return join(base, 'Library', 'Caches', 'camoufox');
     } else {
-        return join(cacheDir, '.cache', 'camoufox');
+        return join(base, '.cache', 'camoufox');
     }
 }

@@ -27,7 +27,7 @@ import { execSync } from 'child_process';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir, platform } from 'os';
+import { homedir, platform } from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -67,25 +67,8 @@ console.log(`\n📦 Detected platform: ${platform()}`);
 let browsersInstalled = false;
 let systemDepsInstalled = false;
 
-// Determine project root and browser cache directory
+// Project root (used for locating local camoufox-js bin)
 const projectRoot = join(__dirname, '..');
-
-/**
- * Determine the browser cache directory.
- * Priority:
- * 1. PLAYWRIGHT_BROWSERS_PATH environment variable
- * 2. Project-local .browser directory
- */
-const browserCacheDir = process.env.PLAYWRIGHT_BROWSERS_PATH || join(projectRoot, '.browser');
-
-// Ensure browser cache directory exists
-if (!existsSync(browserCacheDir)) {
-  try {
-    execSync(`mkdir -p "${browserCacheDir}"`, { stdio: 'ignore' });
-  } catch (e) {
-    // Ignore if fails, will fall back to default behavior
-  }
-}
 
 // Check if we should skip browser installation
 const skipBrowserDownload = process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1';
@@ -93,16 +76,17 @@ const skipBrowserDownload = process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1'
 if (skipBrowserDownload) {
   console.log('\n⏭️  Skipping browser installation (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1)');
 } else {
-  // Install Camoufox stealth browser
-  console.log(`\n🌐 Installing Camoufox stealth browser to: ${browserCacheDir}`);
+  // Camoufox installs to ~/.cache/camoufox (Linux), ~/Library/Caches/camoufox (macOS) by default
+  console.log(`\n🌐 Installing Camoufox stealth browser...`);
 
   try {
-    // Set HOME/USERPROFILE to our local browser directory to force camoufox to install there
-    const env = { 
-        ...process.env, 
-        PLAYWRIGHT_BROWSERS_PATH: browserCacheDir,
-        HOME: browserCacheDir, 
-        USERPROFILE: browserCacheDir 
+    // Use the real user environment so camoufox installs to its standard location
+    // (~/.cache/camoufox on Linux, ~/Library/Caches/camoufox on macOS).
+    // Overriding HOME caused install/runtime mismatches and silent failures.
+    const env = {
+        ...process.env,
+        // Only forward PLAYWRIGHT_BROWSERS_PATH if the user explicitly set it
+        ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH } : {})
     };
 
     // Check if user wants to install system dependencies
@@ -151,11 +135,12 @@ if (skipBrowserDownload) {
       console.warn(`   ${errorMsg}`);
     }
 
-    // NEVER exit with code 1 - let npm install complete
-    console.log('\n📦 pi-research installation will continue...');
-    console.log('='.repeat(60));
-    console.log('✅ pi-research installed (browsers can be installed later)');
-    console.log('='.repeat(60) + '\n');
+    // Exit 0 so npm install completes, but make the failure impossible to miss
+    console.error('\n' + '!'.repeat(60));
+    console.error('!! CAMOUFOX NOT INSTALLED — pi-research will fail on first use !!');
+    console.error('!! Run this manually to fix it:                               !!');
+    console.error('!!   npx camoufox-js fetch                                    !!');
+    console.error('!'.repeat(60) + '\n');
     process.exit(0);
   }
 }
@@ -163,14 +148,15 @@ if (skipBrowserDownload) {
 // Verify installation
 console.log('\n📋 Verifying browser installation...');
 
-// Camoufox stores binaries in $HOME/.cache/camoufox on Linux/macOS
+// Camoufox installs to the standard user cache (respects PLAYWRIGHT_BROWSERS_PATH if set)
+const camoufoxBase = process.env.PLAYWRIGHT_BROWSERS_PATH || homedir();
 let camoufoxPath;
 if (isWindows) {
-    camoufoxPath = join(browserCacheDir, "AppData", "Local", "camoufox", "camoufox", "Cache");
+    camoufoxPath = join(camoufoxBase, "AppData", "Local", "camoufox", "camoufox", "Cache");
 } else if (isDarwin) {
-    camoufoxPath = join(browserCacheDir, 'Library', 'Caches', 'camoufox');
+    camoufoxPath = join(camoufoxBase, 'Library', 'Caches', 'camoufox');
 } else {
-    camoufoxPath = join(browserCacheDir, '.cache', 'camoufox');
+    camoufoxPath = join(camoufoxBase, '.cache', 'camoufox');
 }
 
 if (existsSync(camoufoxPath)) {
