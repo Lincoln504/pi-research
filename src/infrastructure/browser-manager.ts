@@ -484,29 +484,56 @@ export function isBrowserAvailable(): boolean {
 /**
  * Dispatches a browser task to the unified worker pool.
  */
-export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape', config?: Config): Promise<T> {
-    const scheduler = await getScheduler(config);
-    if (type === 'search') {
-        const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
-        return (await scheduler.runSearch(query, config)) as any;
-    }
-    
-    const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
-    if (url) {
-        return (await scheduler.runScrape(url, config)) as any;
-    }
+export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape', config?: Config, retries = 1): Promise<T> {
+    try {
+        const scheduler = await getScheduler(config);
+        if (type === 'search') {
+            const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
+            return (await scheduler.runSearch(query, config)) as any;
+        }
+        
+        const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
+        if (url) {
+            return (await scheduler.runScrape(url, config)) as any;
+        }
 
-    throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
+        throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
+    } catch (error: any) {
+        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
+            logger.warn(`[BrowserManager] Connection to scheduler failed during task, forcing restart and retrying...`);
+            await forceSchedulerRestart();
+            return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
+        }
+        throw error;
+    }
 }
 
-export async function runBrowserHealthCheck(config?: Config): Promise<{ success: boolean }> {
-    const scheduler = await getScheduler(config);
-    return scheduler.runHealthCheck(config);
+export async function runBrowserHealthCheck(config?: Config, retries = 1): Promise<{ success: boolean }> {
+    try {
+        const scheduler = await getScheduler(config);
+        return await scheduler.runHealthCheck(config);
+    } catch (error: any) {
+        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
+            logger.warn(`[BrowserManager] Connection to scheduler failed during healthcheck, forcing restart and retrying...`);
+            await forceSchedulerRestart();
+            return runBrowserHealthCheck(config, retries - 1);
+        }
+        throw error;
+    }
 }
 
-export async function runWorkerSearch(query: string, config?: Config): Promise<SearchResult[]> {
-    const scheduler = await getScheduler(config);
-    return scheduler.runSearch(query, config);
+export async function runWorkerSearch(query: string, config?: Config, retries = 1): Promise<SearchResult[]> {
+    try {
+        const scheduler = await getScheduler(config);
+        return await scheduler.runSearch(query, config);
+    } catch (error: any) {
+        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
+            logger.warn(`[BrowserManager] Connection to scheduler failed during search, forcing restart and retrying...`);
+            await forceSchedulerRestart();
+            return runWorkerSearch(query, config, retries - 1);
+        }
+        throw error;
+    }
 }
 
 export async function stopBrowserManager(): Promise<void> {

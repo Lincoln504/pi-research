@@ -764,7 +764,7 @@ function renderPanelBlock(
       if (isEval) {
         // Eval box: box-drawing dashes (─) at edges, en dashes (–) in middle
         if (w >= 2) {
-          topPart = '─' + '–'.repeat(Math.max(0, w - 2)) + '─';
+          topPart = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
         } else {
           topPart = '─'.repeat(w);
         }
@@ -838,7 +838,7 @@ function renderPanelBlock(
       if (isEval) {
         // Eval box: box-drawing dashes (─) at edges, en dashes (–) in middle
         if (w >= 2) {
-          bottomContent = '─' + '–'.repeat(Math.max(0, w - 2)) + '─';
+          bottomContent = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
         } else {
           bottomContent = '─'.repeat(w);
         }
