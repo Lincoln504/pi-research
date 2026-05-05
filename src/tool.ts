@@ -327,7 +327,7 @@ export function createResearchTool(): ToolDefinition {
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
               // Only clear completed researchers when moving to a new round.
               // During concurrent researchers in the same round, keep completed ones visible (greyed).
-              if (_roundNumber > currentRoundNumber) {
+              if (_roundNumber !== undefined && _roundNumber > currentRoundNumber) {
                 clearCompletedResearchers(panelState);
                 currentRoundNumber = _roundNumber;
               }
