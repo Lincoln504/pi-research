@@ -250,8 +250,12 @@ function renderPanelBlock(
 
       let topPart;
       if (isEval) {
-        // Eval box: use regular dashes (-)
-        topPart = '-'.repeat(w);
+        // Eval box: box-drawing dashes (─) at edges, regular hyphens (-) in middle
+        if (w >= 2) {
+          topPart = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
+        } else {
+          topPart = '─'.repeat(w);
+        }
       } else if (w >= totalLabelWidth) {
         const sideWidth = w - totalLabelWidth;
         const leftPad = Math.floor(sideWidth / 2);
@@ -318,7 +322,17 @@ function renderPanelBlock(
       rightColors[2]!.push(slice?.completed ? 'muted' : 'text');
 
       // Bottom Border
-      const bottomContent = isEval ? '-'.repeat(w) : '─'.repeat(w);
+      let bottomContent;
+      if (isEval) {
+        // Eval box: box-drawing dashes (─) at edges, regular hyphens (-) in middle
+        if (w >= 2) {
+          bottomContent = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
+        } else {
+          bottomContent = '─'.repeat(w);
+        }
+      } else {
+        bottomContent = '─'.repeat(w);
+      }
       const bottomRightCorner = isEval ? '╯' : (nextIsEval ? '╰' : (isLast ? '┘' : '┴'));
       rightRawRows[3]!.push(bottomContent + bottomRightCorner);
       rightColors[3]!.push('accent');
