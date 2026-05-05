@@ -54,7 +54,7 @@
     "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.ts --coverage",
-    "postinstall": "ts-node scripts/setup.ts",
+    "postinstall": "npx ts-node scripts/setup.ts",
     "preuninstall": "ts-node scripts/cleanup.ts",
     "setup": "ts-node scripts/setup.ts",
     "install:browsers": "ts-node scripts/setup.ts",
