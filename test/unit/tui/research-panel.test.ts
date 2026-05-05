@@ -284,7 +284,7 @@ describe('TUI Research Panel', () => {
         const colorsAfterFrame0 = [...(state.waveColors || [])];
 
         // Move wave forward far enough that it leaves some positions
-        // With TRAIL_LEN = 15 and available ~36, frame 40 ensures wave moves past
+        // With wave position mod (available + 10), frame 40 ensures wave moves past
         state.waveFrame = 40;
         const lines2 = component.render(120);
         expect(lines2.length).toBeGreaterThan(0);
@@ -312,16 +312,13 @@ describe('TUI Research Panel', () => {
         component.render(120);
         expect(state.waveColors).toBeDefined();
         expect(state.waveColors?.length).toBeGreaterThan(0);
-        expect(state.previousWavePositions).toBeDefined();
 
         // Simulate search complete (this is what tool.ts does)
         state.waveFrame = undefined;
         state.waveColors = undefined;
-        state.previousWavePositions = undefined;
 
         // Verify all wave state is cleared
         expect(state.waveColors).toBeUndefined();
-        expect(state.previousWavePositions).toBeUndefined();
       });
 
       it('should increment wave frame correctly', () => {

@@ -51,6 +51,8 @@ export interface ResearchPanelState {
   waveFrame?: number;
   /** Persistent color codes for wave animation (one per position) */
   waveColors?: string[];
+  /** Track which positions were covered by wave in previous frame */
+  previousWavePositions?: Set<number>;
 }
 
 /**
@@ -315,142 +317,6 @@ function rgbTo256(r: number, g: number, b: number): number {
 }
 
 /**
- * 256-color cube level values
- */
-const CUBE_VALUES = [0, 95, 135, 175, 215, 255];
-
-/**
- * Get RGB values for a 256-color cube index
- */
-function indexToRgb(index: number): { r: number; g: number; b: number } | null {
-  if (index >= 16 && index <= 231) {
-    const n = index - 16;
-    const rIdx = Math.floor(n / 36);
-    const gIdx = Math.floor((n % 36) / 6);
-    const bIdx = n % 6;
-    return {
-      r: CUBE_VALUES[rIdx] ?? 0,
-      g: CUBE_VALUES[gIdx] ?? 0,
-      b: CUBE_VALUES[bIdx] ?? 0,
-    };
-  }
-  return null;
-}
-
-/**
- * RGB to HSL conversion
- * H: 0-360, S: 0-1, L: 0-1
- */
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-  const rNorm = r / 255;
-  const gNorm = g / 255;
-  const bNorm = b / 255;
-
-  const max = Math.max(rNorm, gNorm, bNorm);
-  const min = Math.min(rNorm, gNorm, bNorm);
-  const delta = max - min;
-
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (delta !== 0) {
-    s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-
-    if (max === rNorm) {
-      h = ((gNorm - bNorm) / delta + (gNorm < bNorm ? 6 : 0)) / 6;
-    } else if (max === gNorm) {
-      h = ((bNorm - rNorm) / delta + 2) / 6;
-    } else {
-      h = ((rNorm - gNorm) / delta + 4) / 6;
-    }
-  }
-
-  return { h: h * 360, s, l };
-}
-
-/**
- * HSL to RGB conversion
- */
-function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
-  // eslint-disable-next-line no-useless-assignment
-  let r = 0;
-  // eslint-disable-next-line no-useless-assignment
-  let g = 0;
-  // eslint-disable-next-line no-useless-assignment
-  let b = 0;
-
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const hueToRgb = (p: number, q: number, t: number) => {
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-
-    const hNorm = h / 360;
-    r = hueToRgb(p, q, hNorm + 1 / 3);
-    g = hueToRgb(p, q, hNorm);
-    b = hueToRgb(p, q, hNorm - 1 / 3);
-  }
-
-  return {
-    r: Math.max(0, Math.min(255, Math.round(r * 255))),
-    g: Math.max(0, Math.min(255, Math.round(g * 255))),
-    b: Math.max(0, Math.min(255, Math.round(b * 255))),
-  };
-}
-
-/**
- * Cycle HSL S and L channels - hue stays constant
- * Sawtooth wave: smooth DOWN then snap back UP
- */
-/**
- * Apply power curve easing to control decrease shape
- * curve = 1.0 → linear
- * curve < 1.0 → slow start, fast end (easeOut)
- * curve > 1.0 → fast start, slow end (easeIn)
- */
-function applyCurve(t: number, curve: number): number {
-  return Math.pow(t, curve);
-}
-
-function cycleHslSaturationLightness(baseR: number, baseG: number, baseB: number, stepIndex: number, totalSteps: number): { r: number; g: number; b: number } {
-  // Convert to HSL
-  const hsl = rgbToHsl(baseR, baseG, baseB);
-
-  // Progress through cycle (0.0 to 1.0)
-  const cycleIndex = stepIndex % totalSteps;
-  const progress = cycleIndex / totalSteps;
-
-  // Single sawtooth wave: START HIGH (1.0) → smoothly to LOW (0.0) → snap back HIGH (1.0)
-  // This doubles the frames per cycle compared to the dual sawtooth
-  const linearCycleFactor = 1 - progress;
-
-  // Apply non-linear curve: 2.2 gives easeIn (fast start, slow end)
-  // This spreads frames perceptually evenly: bright drops away fast, mid-dark range gets more frames.
-  const curvedFactor = applyCurve(linearCycleFactor, 2.2);
-
-  // Gentle oscillation: same shade range, slightly shallower dip
-  const newSaturation = hsl.s * (0.98 + 0.02 * curvedFactor);
-  const newLightness = hsl.l * (0.65 + 0.35 * curvedFactor);
-
-  // Hue stays constant from original accent color
-  const newHue = hsl.h;
-
-  // Convert back to RGB
-  const newRgb = hslToRgb(newHue, newSaturation, newLightness);
-
-  // Return full-resolution RGB — caller emits truecolor ANSI
-  return { r: newRgb.r, g: newRgb.g, b: newRgb.b };
-}
-
-/**
  * Derive gradient colors from a base 256-color index.
  *
  * For 256-color cube (16-231):
@@ -483,10 +349,10 @@ function addVariation(index: number, maxVariation: number = 1): number {
 
 /**
  * Add slight variation to an ANSI color code.
+ * Used for subtle variation in left-behind trail.
+ * Extracts color index and adds small +/- 1 variation.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// @ts-ignore
-function _addVariationToColor(ansiCode: string | undefined, maxVariation: number = 1): string {
+function addVariationToColor(ansiCode: string | undefined, maxVariation: number = 1): string {
   // Return background if undefined
   if (!ansiCode) {
     return '\x1b[38;5;237m';
@@ -642,20 +508,17 @@ function deriveRgbGradient(r: number, g: number, b: number, steps: number): stri
  *   - last index = dimmest color (tail of wave)
  *
  * Fallback:
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// @ts-ignore
-function _buildWaveGradient(theme: Theme, steps: number): string[] {
-  // Get raw ANSI code for accent color
-  const accentText = theme.fg('accent', '');
-
-  // Parse ANSI code to extract color information
-  const parsed = parseAnsiFgColor(accentText);
+ *   Returns gray gradient (244 down to 234) if accent color cannot be parsed.
+ */
+function buildGradientFromColor(ansiColor: string, steps: number): string[] {
+  // Parse the ANSI color code
+  const parsed = parseAnsiFgColor(ansiColor);
 
   if (!parsed) {
-    // Fallback: gray gradient
+    // Fallback: dim gradient from background
     return Array.from({ length: steps }, (_, i) => {
-      const gray = Math.round(244 - (i / (steps - 1)) * 10);
-      return `\x1b[38;5;${Math.max(234, gray)}m`;
+      const gray = Math.round(240 - (i / (steps - 1)) * 4);
+      return `\x1b[38;5;${Math.max(236, gray)}m`;
     });
   }
 
@@ -667,26 +530,17 @@ function _buildWaveGradient(theme: Theme, steps: number): string[] {
       return deriveRgbGradient(parsed.r!, parsed.g!, parsed.b!, steps);
 
     case 'basic': {
-      // Basic ANSI colors - map to approximate 256-color indices
       const basicTo256: Record<number, number> = {
-        0: 16, // black
-        1: 196, // red
-        2: 46, // green
-        3: 226, // yellow
-        4: 21, // blue
-        5: 201, // magenta
-        6: 51, // cyan
-        7: 231, // white
+        0: 16, 1: 196, 2: 46, 3: 226, 4: 21, 5: 201, 6: 51, 7: 231,
       };
-      const mappedIndex = basicTo256[parsed.index!] ?? 244;
+      const mappedIndex = basicTo256[parsed.index!] ?? 240;
       return derive256Gradient(mappedIndex, steps);
     }
 
     default:
-      // Fallback
       return Array.from({ length: steps }, (_, i) => {
-        const gray = Math.round(244 - (i / (steps - 1)) * 10);
-        return `\x1b[38;5;${Math.max(234, gray)}m`;
+        const gray = Math.round(240 - (i / (steps - 1)) * 4);
+        return `\x1b[38;5;${Math.max(236, gray)}m`;
       });
   }
 }
@@ -762,9 +616,9 @@ function renderPanelBlock(
 
       let topPart;
       if (isEval) {
-        // Eval box: box-drawing dashes (─) at edges, en dashes (–) in middle
+        // Eval box: box-drawing dashes (─) at edges, regular hyphens (-) in middle
         if (w >= 2) {
-          topPart = '─' + '–'.repeat(Math.max(0, w - 2)) + '─';
+          topPart = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
         } else {
           topPart = '─'.repeat(w);
         }
@@ -836,9 +690,9 @@ function renderPanelBlock(
       // Bottom Border
       let bottomContent;
       if (isEval) {
-        // Eval box: box-drawing dashes (─) at edges, en dashes (–) in middle
+        // Eval box: box-drawing dashes (─) at edges, regular hyphens (-) in middle
         if (w >= 2) {
-          bottomContent = '─' + '–'.repeat(Math.max(0, w - 2)) + '─';
+          bottomContent = '─' + '-'.repeat(Math.max(0, w - 2)) + '─';
         } else {
           bottomContent = '─'.repeat(w);
         }
@@ -948,140 +802,96 @@ export function createMasterResearchPanel(
           }
 
           // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
-          // During active search the right side becomes a wave: ━━━━━━┥╼━━━━━━
           const leftDecor = theme.fg('accent', '──');
           const rightDecor = theme.fg('accent', ' ─╮');
 
-          let headerLine = leftDecor + theme.fg('muted', headerText);
+          let headerLine = leftDecor + theme.fg('muted', headerText) + rightDecor;
 
           if (panel.isSearching) {
-            headerLine += ' '; // space between header text and wave
             const currentWidth = visibleWidth(headerLine);
-            const targetWidth = Math.max(0, width - 1);
-            const available = Math.max(0, targetWidth - currentWidth);
+            const targetWidth = Math.max(0, width - 1); // Guard against negative width
+            const available = Math.max(0, targetWidth - (currentWidth + 2)); // Guard against negative available
 
             if (available > 0 && panel.waveFrame !== undefined) {
-              // Wave animation - HSL saturation/lightness cycling with snap-back
-              const CYCLE_STEPS = 8;
+              // Traveling wave animation using lower half block characters
+              const TRAIL_LEN = 15; // Longer trail for smoother effect
               const BG_COLOR_INDEX = 237;
+              const WAVE_CHAR = '▄'; // Lower half block (U+2584) for half-height effect
 
-              // Get accent color to base hue from
-              const accentText = theme.fg('accent', '');
-              const parsed = parseAnsiFgColor(accentText);
+              // Cycle through 256-color cube (16-255) like bash script
+              const CYCLE_START = 16;
+              const CYCLE_END = 255;
+              const cycleColorIndex = CYCLE_START + ((panel.waveFrame ?? 0) % (CYCLE_END - CYCLE_START + 1));
+              const cycleColor = `\x1b[38;5;${cycleColorIndex}m`;
 
-              // Resolve accent to full RGB — avoid any 256-cube quantization
-              let baseAccentRgb: { r: number; g: number; b: number } | null = null;
-
-              if (parsed) {
-                if (parsed.type === 'rgb' && parsed.r !== undefined && parsed.g !== undefined && parsed.b !== undefined) {
-                  baseAccentRgb = { r: parsed.r, g: parsed.g, b: parsed.b };
-                } else if (parsed.type === '256' && parsed.index !== undefined) {
-                  const idx = parsed.index;
-                  if (idx >= 16 && idx <= 231) {
-                    const rgb = indexToRgb(idx);
-                    if (rgb) baseAccentRgb = rgb;
-                  } else if (idx >= 232 && idx <= 255) {
-                    const gray = 8 + (idx - 232) * 10;
-                    baseAccentRgb = { r: gray, g: gray, b: gray };
-                  } else if (idx >= 0 && idx <= 15) {
-                    const ansi16Rgb: Record<number, { r: number; g: number; b: number }> = {
-                      0:  { r: 0,   g: 0,   b: 0   },
-                      1:  { r: 170, g: 0,   b: 0   },
-                      2:  { r: 0,   g: 170, b: 0   },
-                      3:  { r: 170, g: 170, b: 0   },
-                      4:  { r: 0,   g: 0,   b: 170 },
-                      5:  { r: 170, g: 0,   b: 170 },
-                      6:  { r: 0,   g: 170, b: 170 },
-                      7:  { r: 170, g: 170, b: 170 },
-                      8:  { r: 85,  g: 85,  b: 85  },
-                      9:  { r: 255, g: 85,  b: 85  },
-                      10: { r: 85,  g: 255, b: 85  },
-                      11: { r: 255, g: 255, b: 85  },
-                      12: { r: 85,  g: 85,  b: 255 },
-                      13: { r: 255, g: 85,  b: 255 },
-                      14: { r: 85,  g: 255, b: 255 },
-                      15: { r: 255, g: 255, b: 255 },
-                    };
-                    baseAccentRgb = ansi16Rgb[idx] ?? null;
-                  }
-                } else if (parsed.type === 'basic' && parsed.index !== undefined) {
-                  const basicRgb: Record<number, { r: number; g: number; b: number }> = {
-                    0: { r: 0,   g: 0,   b: 0   },
-                    1: { r: 170, g: 0,   b: 0   },
-                    2: { r: 0,   g: 170, b: 0   },
-                    3: { r: 170, g: 170, b: 0   },
-                    4: { r: 0,   g: 0,   b: 170 },
-                    5: { r: 170, g: 0,   b: 170 },
-                    6: { r: 0,   g: 170, b: 170 },
-                    7: { r: 170, g: 170, b: 170 },
-                  };
-                  baseAccentRgb = basicRgb[parsed.index] ?? null;
-                }
-              }
-
-              if (!baseAccentRgb) {
-                baseAccentRgb = { r: 148, g: 148, b: 148 };
-              }
-
+              // Build gradient colors from current cycle color
+              const gradient = buildGradientFromColor(cycleColor, TRAIL_LEN);
+              const bgAnsi = `\x1b[38;5;${BG_COLOR_INDEX}m`;
               const resetFg = '\x1b[39m';
 
-              // Compute brightest/darkest colors before initializing waveColors
-              // so the initial fill is accent-colored, not grey
-              const brightRgb = cycleHslSaturationLightness(baseAccentRgb.r, baseAccentRgb.g, baseAccentRgb.b, 0, CYCLE_STEPS);
-              const brightColor = `\x1b[38;2;${brightRgb.r};${brightRgb.g};${brightRgb.b}m`;
-
-              const darkRgb = cycleHslSaturationLightness(baseAccentRgb.r, baseAccentRgb.g, baseAccentRgb.b, CYCLE_STEPS - 1, CYCLE_STEPS);
-              const darkColor = `\x1b[38;2;${darkRgb.r};${darkRgb.g};${darkRgb.b}m`;
-
+              // Initialize persistent color array if needed
               if (!panel.waveColors || panel.waveColors.length !== available) {
-                panel.waveColors = Array(available).fill(brightColor) as string[];
+                panel.waveColors = Array(available).fill(bgAnsi) as string[];
+              }
+              if (!panel.previousWavePositions) {
+                panel.previousWavePositions = new Set<number>();
               }
 
-              // Dynamic phase distance D in [2,4] chosen so available ≈ 1.5 × k × D
-              const MIN_D = 2, MAX_D = 4;
-              let bestD = MIN_D;
-              let bestError = Infinity;
-              for (let d = MIN_D; d <= MAX_D; d++) {
-                const ratio = available / (1.5 * d);
-                const error = Math.abs(ratio - Math.round(ratio));
-                if (error < bestError) {
-                  bestError = error;
-                  bestD = d;
+              // Calculate peak position
+              // peakPos ranges from -TRAIL_LEN to available+TRAIL_LEN
+              // Use Math.max to prevent modulo by zero (though TRAIL_LEN ensures denominator >= 8)
+              const cycleLength = Math.max(TRAIL_LEN, available + TRAIL_LEN);
+              const peakPos = ((panel.waveFrame ?? 0) % cycleLength) - TRAIL_LEN;
+
+              // Track which positions are covered by the wave in this frame
+              const currentWavePositions = new Set<number>();
+
+              // Update persistent colors as wave passes over positions
+              const waveColors = panel.waveColors!; // Non-null assertion - we just initialized it above
+              for (let i = 0; i < available; i++) {
+                const distFromPeak = peakPos - i;
+
+                if (distFromPeak >= 0 && distFromPeak < TRAIL_LEN) {
+                  // Wave is passing over this position
+                  currentWavePositions.add(i);
+                  const gradientIndex = Math.min(distFromPeak, gradient.length - 1);
+                  const color = gradient[gradientIndex];
+                  if (color) {
+                    waveColors[i] = color;
+                  }
+                } else if (panel.previousWavePositions.has(i)) {
+                  // Wave has left this position - use last gradient color with slight variation
+                  const lastGradientColor = gradient[gradient.length - 1];
+                  if (lastGradientColor) {
+                    waveColors[i] = addVariationToColor(lastGradientColor, 1);
+                  }
                 }
               }
-              const wavePeriod = available + bestD;
-              // 1/3 speed: advance wave position every 3 frames
-              const waveSlowFrame = Math.floor((panel.waveFrame ?? 0) / 3);
-              const waveRawPos = waveSlowFrame % wavePeriod;
 
-              // Paint trail color for current head position (persisted for gradient tail)
-              if (waveRawPos < available) {
-                const stepIndex = waveSlowFrame % CYCLE_STEPS;
-                const waveRgb = cycleHslSaturationLightness(baseAccentRgb.r, baseAccentRgb.g, baseAccentRgb.b, stepIndex, CYCLE_STEPS);
-                panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
-              }
+              // Update previous wave positions for next frame
+              panel.previousWavePositions = currentWavePositions;
 
-              // Build fill: ─ trail | ╼ head | space space | ╶ lag | ─ background
+              // Build wave fill string using persistent colors
               let fill = '';
               for (let i = 0; i < available; i++) {
-                if (i === waveRawPos) {
-                  fill += `${brightColor}╼${resetFg}`;
-                } else if (i === waveRawPos + 1 || i === waveRawPos + 2) {
-                  fill += ' ';
-                } else if (i === waveRawPos + 3) {
-                  fill += `${panel.waveColors[waveRawPos + 3] || darkColor}╶${resetFg}`;
-                } else {
-                  fill += `${panel.waveColors[i] || brightColor}─${resetFg}`;
-                }
+                const color = waveColors[i] || bgAnsi;
+                fill += `${color}${WAVE_CHAR}${resetFg}`;
               }
 
-              headerLine += fill;
+              headerLine += '  ' + fill;
             } else if (available > 0) {
-              // Fallback: fill with ─ before animation starts
-              headerLine += theme.fg('accent', '─'.repeat(available));
+              // Fallback to static pattern (no animation running)
+              const pattern = 'ˍ＿';
+              const pWidth = visibleWidth(pattern);
+              const count = Math.floor(available / pWidth);
+              let fill = pattern.repeat(count);
+
+              // Fill remaining small gap with partial pattern if needed
+              const remaining = available % pWidth;
+              if (remaining >= 1) fill += 'ˍ';
+
+              headerLine += '  ' + theme.fg('accent', fill);
             }
-          } else {
-            headerLine += rightDecor;
           }
 
           allLines.push(headerLine);
