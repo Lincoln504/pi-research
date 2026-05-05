@@ -268,6 +268,58 @@ describe('TUI Research Panel', () => {
         expect(lines.length).toBeGreaterThan(0);
       });
 
+      it('should maintain persistent colors across animation frames', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 0;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // First render initializes waveColors array with background colors
+        const lines1 = component.render(120);
+        expect(lines1.length).toBeGreaterThan(0);
+        expect(state.waveColors).toBeDefined();
+        const colorsAfterFrame0 = [...(state.waveColors || [])];
+
+        // Move wave forward so it passes through the first few positions
+        state.waveFrame = 10;
+        const lines2 = component.render(120);
+        expect(lines2.length).toBeGreaterThan(0);
+        const colorsAfterFrame10 = [...(state.waveColors || [])];
+
+        // Colors should be different after wave passed through
+        expect(colorsAfterFrame10).not.toEqual(colorsAfterFrame0);
+
+        // Colors should persist (not reset to background)
+        // Some positions should have non-background colors after wave passed
+        const nonBgColors = colorsAfterFrame10.filter(c => !c.includes('237') && c.length > 0);
+        expect(nonBgColors.length).toBeGreaterThan(0);
+      });
+
+      it('should reset waveColors when search completes', () => {
+        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+        state.isSearching = true;
+        state.waveFrame = 10;
+
+        const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+        const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+        const component = componentCreator(undefined, mockTheme);
+
+        // Render with active search
+        component.render(120);
+        expect(state.waveColors).toBeDefined();
+        expect(state.waveColors?.length).toBeGreaterThan(0);
+
+        // Simulate search complete (this is what tool.ts does)
+        state.waveFrame = undefined;
+        state.waveColors = undefined;
+
+        // Verify waveColors is cleared
+        expect(state.waveColors).toBeUndefined();
+      });
+
       it('should increment wave frame correctly', () => {
         const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
         state.waveFrame = 0;

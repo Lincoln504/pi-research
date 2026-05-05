@@ -49,6 +49,8 @@ export interface ResearchPanelState {
   statusMessage?: string;
   /** Animation frame counter for traveling wave effect during search */
   waveFrame?: number;
+  /** Persistent color codes for wave animation (one per position) */
+  waveColors?: string[];
 }
 
 /**
@@ -731,25 +733,38 @@ export function createMasterResearchPanel(
               const bgAnsi = `\x1b[38;5;${BG_COLOR_INDEX}m`;
               const resetFg = '\x1b[39m';
 
+              // Initialize persistent color array if needed
+              if (!panel.waveColors || panel.waveColors.length !== available) {
+                panel.waveColors = Array(available).fill(bgAnsi) as string[];
+              }
+
               // Calculate peak position
               // peakPos ranges from -TRAIL_LEN to available+TRAIL_LEN
               // Use Math.max to prevent modulo by zero (though TRAIL_LEN ensures denominator >= 8)
               const cycleLength = Math.max(TRAIL_LEN, available + TRAIL_LEN);
               const peakPos = ((panel.waveFrame ?? 0) % cycleLength) - TRAIL_LEN;
 
-              // Build wave fill string character by character
-              let fill = '';
+              // Update persistent colors as wave passes over positions
+              const waveColors = panel.waveColors!; // Non-null assertion - we just initialized it above
               for (let i = 0; i < available; i++) {
                 const distFromPeak = peakPos - i;
 
                 if (distFromPeak >= 0 && distFromPeak < TRAIL_LEN) {
-                  // Within wave trail - use gradient color
-                  const color = gradient[Math.min(distFromPeak, gradient.length - 1)];
-                  fill += `${color}${WAVE_CHAR}${resetFg}`;
-                } else {
-                  // Background - use dim gray
-                  fill += `${bgAnsi}${WAVE_CHAR}${resetFg}`;
+                  // Wave is passing over this position - update its color
+                  const gradientIndex = Math.min(distFromPeak, gradient.length - 1);
+                  const color = gradient[gradientIndex];
+                  if (color) {
+                    waveColors[i] = color;
+                  }
                 }
+                // Note: We DON'T reset colors when wave leaves - colors persist!
+              }
+
+              // Build wave fill string using persistent colors
+              let fill = '';
+              for (let i = 0; i < available; i++) {
+                const color = waveColors[i] || bgAnsi;
+                fill += `${color}${WAVE_CHAR}${resetFg}`;
               }
 
               headerLine += '  ' + fill;
