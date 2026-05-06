@@ -402,21 +402,6 @@ export default function (pi: ExtensionAPI) {
     return { systemPrompt: event.systemPrompt };
   });
 
-  // Physical Guardrail Bouncer - Blocks local file research only
-  pi.on('tool_call', (event: any, _ctx: any) => {
-    if (event.toolName === 'research') {
-      const query = event.args?.query || '';
-      if (/^(\.\/|\/home|\/tmp|src\/|local files|local codebase)/i.test(query) || /\.(ts|js|md|json)$/i.test(query)) {
-        logger.warn('[pi-research] Blocked local file research attempt.', { query });
-        return {
-          block: true,
-          reason: 'INTERNET ONLY: The research tool is for external web queries ONLY. Use your other native abilities (like grep or read) for local codebase analysis.'
-        };
-      }
-    }
-    return undefined;
-  });
-
   // Monitor provider responses for diagnostics
   pi.on('after_provider_response', async (event: any, ctx: any) => {
     const { status, headers } = event;
