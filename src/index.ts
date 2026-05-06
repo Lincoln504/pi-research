@@ -80,6 +80,7 @@ export default function (pi: ExtensionAPI) {
 4. CAPABILITIES: The \`research\` tool automatically synthesizes web search, scraping, StackExchange, and security databases. Provide a comprehensive \`query\` and let the tool handle the gathering.`;
       
       // Append the injection to the very end of the user's prompt (recency bias)
+      logger.debug('[pi-research] TTSR prompt constraint rule injected based on user input.');
       return { action: 'transform', text: event.text + injection };
     }
     
