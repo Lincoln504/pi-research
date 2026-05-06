@@ -1037,7 +1037,7 @@ export function createMasterResearchPanel(
               }
 
               // Dynamic phase distance D in [2,4] chosen so available ≈ 1.5 × k × D
-              const MIN_D = 6, MAX_D = 12;
+              const MIN_D = 2, MAX_D = 4;
               let bestD = MIN_D;
               let bestError = Infinity;
               for (let d = MIN_D; d <= MAX_D; d++) {
@@ -1060,15 +1060,16 @@ export function createMasterResearchPanel(
                 panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
               }
 
-              // Build fill: ╶ lead-in | ─ trail | ╼ head | space space | ╶ lag | ─ background
+              // Build fill: ╶ lead-in | ─ trail | ╼ head | 6×space wake | ╶ lag | ─ background
+              const WAKE_LEN = 6;
               let fill = '';
               for (let i = 0; i < available; i++) {
                 if (i === waveRawPos) {
                   fill += `${brightColor}╼${resetFg}`;
-                } else if (i === waveRawPos + 1 || i === waveRawPos + 2) {
+                } else if (i > waveRawPos && i <= waveRawPos + WAKE_LEN) {
                   fill += ' ';
-                } else if (i === waveRawPos + 3) {
-                  fill += `${panel.waveColors[waveRawPos + 3] || darkColor}╶${resetFg}`;
+                } else if (i === waveRawPos + WAKE_LEN + 1) {
+                  fill += `${panel.waveColors[waveRawPos + WAKE_LEN + 1] || darkColor}╶${resetFg}`;
                 } else {
                   const bgChar = i === 0 ? '╶' : '─';
                   fill += `${panel.waveColors[i] || brightColor}${bgChar}${resetFg}`;
