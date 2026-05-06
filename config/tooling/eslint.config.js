@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 
-export default [
+const config = [
   // Global ignores
   {
     ignores: [
@@ -18,7 +18,7 @@ export default [
   {
     files: ['**/*.ts'],
     languageOptions: {
-      parser: tsparser,
+      parser: tsparser, // No need for unknown as Linter.Parser cast in JS
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
@@ -71,3 +71,5 @@ export default [
     },
   },
 ];
+
+export default config;
