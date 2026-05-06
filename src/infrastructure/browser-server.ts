@@ -24,7 +24,19 @@ export class BrowserServer {
                 }
 
                 let body = '';
-                req.on('data', chunk => { body += chunk; });
+                const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+
+                req.on('data', chunk => { 
+                    body += chunk; 
+                    if (body.length > MAX_BODY_SIZE) {
+                        req.destroy(new Error('Payload too large'));
+                    }
+                });
+
+                req.on('error', (err) => {
+                    logger.error('[BrowserServer] Request stream error:', err);
+                });
+
                 req.on('end', async () => {
                     try {
                         const data = JSON.parse(body);
