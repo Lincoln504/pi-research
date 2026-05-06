@@ -1037,7 +1037,7 @@ export function createMasterResearchPanel(
               }
 
               // Dynamic phase distance D in [2,4] chosen so available ≈ 1.5 × k × D
-              const MIN_D = 2, MAX_D = 4;
+              const MIN_D = 6, MAX_D = 12;
               let bestD = MIN_D;
               let bestError = Infinity;
               for (let d = MIN_D; d <= MAX_D; d++) {
@@ -1049,8 +1049,8 @@ export function createMasterResearchPanel(
                 }
               }
               const wavePeriod = available + bestD;
-              // 1/3 speed: advance wave position every 3 frames
-              const waveSlowFrame = Math.floor((panel.waveFrame ?? 0) / 3);
+              // 2/3 speed: advance wave position 2 steps every 3 frames (2× original pace)
+              const waveSlowFrame = Math.floor((panel.waveFrame ?? 0) * 2 / 3);
               const waveRawPos = waveSlowFrame % wavePeriod;
 
               // Paint trail color for current head position (persisted for gradient tail)
