@@ -65,8 +65,10 @@ export default function (pi: ExtensionAPI) {
   // Global extension state for smart dual-sided prompt injection
   let currentTurn = 0;
   let lastInjectionTurn = -10;
-  const COOLDOWN_TURNS = 10;
-  const RESEARCH_REGEX = /\b(research|search|web|analyze|investigate)\b/i;
+  // Reduced cooldown for safety constraints (NO SUBAGENTS should be reinforced frequently)
+  const COOLDOWN_TURNS = 3;
+  // Match research keywords including common typos (reserach, reseach, resarch, etc)
+  const RESEARCH_REGEX = /\b(research|reserach|reseach|resarch|search|web|analyze|investigate)\b/i;
 
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
@@ -400,20 +402,48 @@ export default function (pi: ExtensionAPI) {
     return { systemPrompt: event.systemPrompt };
   });
 
-  // Physical Guardrail Bouncer
-  pi.on('tool_call', (event: any) => {
+  // Physical Guardrail Bouncer - Blocks local file research and subagent usage
+  pi.on('tool_call', (event: any, ctx: any) => {
+    // Check if research was requested in current user input or conversation
+    const session = ctx?.sessionManager;
+    const branch = session?.getBranch?.() || [];
+    const recentMessages = [...branch].reverse().slice(0, 5);
+    
+    // Check if any recent message (user or assistant) contains research intent
+    let hasResearchIntent = false;
+    for (const msg of recentMessages) {
+      if (msg.type === 'message') {
+        const content = typeof msg.message.content === 'string' 
+          ? msg.message.content 
+          : JSON.stringify(msg.message.content);
+        if (RESEARCH_REGEX.test(content)) {
+          hasResearchIntent = true;
+          break;
+        }
+      }
+    }
+    
+    // Block subagent tool when research intent is detected
+    if (event.toolName === 'subagent' && hasResearchIntent) {
+      logger.warn('[pi-research] Blocked subagent usage during research context', { toolName: event.toolName });
+      return {
+        block: true,
+        reason: 'Do NOT use subagent for research tasks. Use the `research` tool directly for each query, one at a time. Do not try to "parallelize" research using subagents.'
+      };
+    }
+    
+    // Block local file research via research tool
     if (event.toolName === 'research') {
       const query = event.args?.query || '';
-      
-      // Obvious local codebase investigation check
       if (/^(\.\/|\/home|\/tmp|src\/|local files|local codebase)/i.test(query) || /\.(ts|js|md|json)$/i.test(query)) {
         logger.warn('[pi-research] Blocked local file research attempt.', { query });
-        return { 
-          block: true, 
-          reason: "INTERNET ONLY: The research tool is for external web queries ONLY. Use your other native abilities (like grep or read) for local codebase analysis." 
+        return {
+          block: true,
+          reason: 'INTERNET ONLY: The research tool is for external web queries ONLY. Use your other native abilities (like grep or read) for local codebase analysis.'
         };
       }
     }
+    
     return undefined;
   });
 
