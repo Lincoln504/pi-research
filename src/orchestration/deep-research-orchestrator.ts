@@ -301,7 +301,7 @@ export class DeepResearchOrchestrator {
     } else if (this.options.complexity === 2) {
       return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to {MAX_TEAM_SIZE}) based on topic scope.";
     } else {
-      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.";
+      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.\n\n**ULTRA-SPECIFICITY MANDATE**: Level 3 demands granular, exhaustive detail on every fact that benefits from it — exact figures, dates, names, mechanisms, edge cases, historical context, technical specifics, and primary-source precision. Plan dedicated researchers for drilling into the ultra-specific dimensions of any finding where greater detail adds value. Subsequent rounds SHOULD be delegated specifically to pursue these ultra-specific angles: exact statistics, precise chronologies, technical minutiae, named individuals and their specific roles, verbatim data, and any other granular details that enrich the overall picture.";
     }
   }
 
@@ -333,7 +333,9 @@ Be conservative with delegation. The goal is efficiency — answer the core ques
 4. Comprehensive citations throughout (every major claim supported by multiple sources)
 5. No significant gaps that additional rounds would meaningfully address
 
-Be aggressive with delegation. Level 3 is for exhaustive research — use remaining rounds to drill into specialized details, verify findings with additional sources, or explore nuanced dimensions.`;
+Be aggressive with delegation. Level 3 is for exhaustive research — use remaining rounds to drill into specialized details, verify findings with additional sources, or explore nuanced dimensions.
+
+**ULTRA-SPECIFICITY MANDATE**: For every fact, finding, or topic area where greater granularity adds value, delegate additional researchers to pursue it. This includes: exact figures and statistics, precise dates and timelines, technical mechanisms and processes, named individuals and their specific contributions, primary-source verbatim data, edge cases, exceptions, and any dimension where surface-level coverage would leave the reader with unanswered "but exactly how/when/who/what" questions. If a finding is interesting, assume the ultra-specific details are equally interesting and worth a dedicated delegation round.`;
     }
   }
 
