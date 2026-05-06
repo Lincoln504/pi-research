@@ -123,6 +123,7 @@ export class DeepResearchOrchestrator {
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
+      logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headers=${JSON.stringify(auth.headers)}`);
 
       const historyMessages: any[] = [];
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -133,10 +134,17 @@ export class DeepResearchOrchestrator {
           : historyMessages;
 
         this.options.observer?.onPlanningProgress?.(attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
+        logger.log(`[Orchestrator] Calling complete() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
         const planResponse = await complete(this.options.model, {
           systemPrompt: basePlanningPrompt + retryHint,
           messages,
         }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+
+        if ((planResponse as any).stopReason === 'error' || (planResponse as any).stopReason === 'aborted') {
+          const apiError = (planResponse as any).errorMessage || `Model API returned stop reason: ${(planResponse as any).stopReason}`;
+          logger.error(`[Orchestrator] Coordinator API call failed (attempt ${attempt}): ${apiError}`);
+          throw new Error(`Coordinator model API error: ${apiError}`);
+        }
 
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
         const rawPlanText = textContent?.text || "";
@@ -659,15 +667,23 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
+      logger.log(`[Orchestrator] Evaluator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headers=${JSON.stringify(auth.headers)}`);
 
       const synthOverride = mustSynthesize ? '\n\n**MANDATORY — ABSOLUTE MAXIMUM REACHED**: No further research rounds are permitted. You MUST return `"action": "synthesize"` with a comprehensive synthesis in the `content` field. Do NOT return delegate.' : '';
       const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
       
       let text = "";
       for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
+          logger.log(`[Orchestrator] Calling completeSimple() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
           const response = await completeSimple(this.options.model, {
               messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }]
           }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+
+          if ((response as any).stopReason === 'error' || (response as any).stopReason === 'aborted') {
+              const apiError = (response as any).errorMessage || `Model API returned stop reason: ${(response as any).stopReason}`;
+              logger.error(`[Orchestrator] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
+              throw new Error(`Evaluator model API error: ${apiError}`);
+          }
 
           const textContent = response.content.find((c): c is TextContent => c.type === 'text');
           text = textContent?.text || "";

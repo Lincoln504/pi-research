@@ -18,12 +18,17 @@ const __dirname = dirname(__filename);
 
 /**
  * Global HTTP Agent for high-concurrency client requests
+ * 
+ * IMPORTANT: The socket timeout must be longer than the BrowserClient request timeout (120s)
+ * to prevent premature socket closure when the browser is slow or the queue is deep.
  */
 const clientAgent = new http.Agent({
     keepAlive: true,
     maxSockets: 100, // Allow up to 100 concurrent requests to the leader
     maxFreeSockets: 10,
-    timeout: 60000
+    // Set timeout to 180s (3x the client timeout) to handle slow browser responses
+    // and prevent "socket hang up" errors during peak load
+    timeout: 180000
 });
 
 /**
@@ -342,8 +347,16 @@ class BrowserClient implements IScheduler {
                 if (resolved) return;
                 resolved = true;
                 clearTimeout(timer);
-                logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, err);
-                reject(err);
+                // Enhance error message with socket-specific details
+                const errorMsg = (err as any).code === 'ECONNRESET' || (err as any).code === 'EPIPE' 
+                    ? `Browser pool socket ${path} closed (pool likely busy or restarting) - ${err.message}`
+                    : (err as any).code === 'ECONNREFUSED'
+                    ? `Browser pool ${path} unreachable (server may have crashed) - ${err.message}`
+                    : (err as any).code === 'ETIMEDOUT'
+                    ? `Browser pool ${path} timed out (slow browser response) - ${err.message}`
+                    : `Browser pool ${path} error: ${err.message}`;
+                logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, errorMsg);
+                reject(new Error(errorMsg));
             });
             req.write(JSON.stringify(data));
             req.end();
@@ -511,9 +524,24 @@ export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape
 
         throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
     } catch (error: any) {
-        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
-            logger.warn(`[BrowserManager] Connection to scheduler failed during task, forcing restart and retrying...`);
+        // Check for transient socket/network errors that warrant a retry
+        const isTransientError = error && typeof error.message === 'string' && (
+            error.message.includes('ECONNREFUSED') ||
+            error.message.includes('ECONNRESET') ||
+            error.message.includes('socket hang up') ||
+            error.message.includes('EPIPE') ||
+            error.message.includes('ETIMEDOUT') ||
+            error.message.includes('timed out') ||
+            error.message.includes('pool busy') ||
+            error.message.includes('unreachable')
+        );
+
+        if (retries > 0 && isTransientError) {
+            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart();
+            // Add a small delay before retry to allow ports to free up
+            await new Promise(resolve => setTimeout(resolve, 1000));
             return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
         }
         throw error;
@@ -525,9 +553,22 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
         const scheduler = await getScheduler(config);
         return await scheduler.runHealthCheck(config);
     } catch (error: any) {
-        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
-            logger.warn(`[BrowserManager] Connection to scheduler failed during healthcheck, forcing restart and retrying...`);
+        const isTransientError = error && typeof error.message === 'string' && (
+            error.message.includes('ECONNREFUSED') ||
+            error.message.includes('ECONNRESET') ||
+            error.message.includes('socket hang up') ||
+            error.message.includes('EPIPE') ||
+            error.message.includes('ETIMEDOUT') ||
+            error.message.includes('timed out') ||
+            error.message.includes('pool busy') ||
+            error.message.includes('unreachable')
+        );
+
+        if (retries > 0 && isTransientError) {
+            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart();
+            await new Promise(resolve => setTimeout(resolve, 1000));
             return runBrowserHealthCheck(config, retries - 1);
         }
         throw error;
@@ -539,9 +580,22 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
         const scheduler = await getScheduler(config);
         return await scheduler.runSearch(query, config);
     } catch (error: any) {
-        if (retries > 0 && error && typeof error.message === 'string' && (error.message.includes('ECONNREFUSED') || error.message.includes('ECONNRESET'))) {
-            logger.warn(`[BrowserManager] Connection to scheduler failed during search, forcing restart and retrying...`);
+        const isTransientError = error && typeof error.message === 'string' && (
+            error.message.includes('ECONNREFUSED') ||
+            error.message.includes('ECONNRESET') ||
+            error.message.includes('socket hang up') ||
+            error.message.includes('EPIPE') ||
+            error.message.includes('ETIMEDOUT') ||
+            error.message.includes('timed out') ||
+            error.message.includes('pool busy') ||
+            error.message.includes('unreachable')
+        );
+
+        if (retries > 0 && isTransientError) {
+            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart();
+            await new Promise(resolve => setTimeout(resolve, 1000));
             return runWorkerSearch(query, config, retries - 1);
         }
         throw error;

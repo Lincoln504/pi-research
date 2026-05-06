@@ -164,15 +164,13 @@ export function createResearchTool(): ToolDefinition {
         return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
       }
 
-      // If no model ID is provided, use the default from context.
-      const sanitizedModelId = modelId ?? (ctx.model as any)?.id;
+      const sanitizedQuery = validateAndSanitizeQuery(query);
+      const baseModel = ctx.model;
 
-      if (!sanitizedModelId) {
+      if (!baseModel && !modelId) {
          return { content: [{ type: 'text', text: 'Error: No research model specified or available in context' }], details: {} };
       }
 
-      const sanitizedQuery = validateAndSanitizeQuery(query);
-      const baseModel = ctx.model;
       const researchRunId = createResearchRunId();
       const metadata = getPiSessionMetadata(ctx);
       const piSessionId = metadata.piSessionId;
@@ -190,8 +188,18 @@ export function createResearchTool(): ToolDefinition {
         try {
           validateConfig();
 
+          // When no explicit model parameter is given, use ctx.model directly.
+          // ID-based lookup can match the wrong provider when the same model ID
+          // exists under multiple providers (e.g. built-in "zai/glm-4.7" vs
+          // user-configured "glm-coding/glm-4.7"), causing auth failures.
           let selectedModel = baseModel;
-          if (sanitizedModelId) selectedModel = ctx.modelRegistry.getAll().find(m => m.id === sanitizedModelId) || baseModel;
+          if (modelId && (ctx.model as any)?.id !== modelId) {
+              selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
+          }
+
+          if (!selectedModel) {
+              return { content: [{ type: 'text', text: 'Error: No research model specified or available in context' }], details: {} };
+          }
 
           const typedModel = selectedModel as ModelWithId;
           const modelIdStr = typedModel?.id || 'unknown';
