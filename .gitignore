@@ -80,3 +80,8 @@ testing-results/
 *.testing-results/
 *.testing-results.json
 *.testing-results.log
+
+# Patch and draft files (development artifacts)
+*.patch
+*.diff
+COMMIT_MESSAGE*.txt
