@@ -96,8 +96,8 @@ export function createResearchTool(): ToolDefinition {
     name: 'research',
     label: 'Research',
     description:
-      'Perform web/internet research using a coordinated team of agents. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
-    promptSnippet: 'Conduct multi-agent web/internet research',
+      'Perform web/internet research using an internal multi-source system. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
+    promptSnippet: 'Conduct comprehensive web/internet research',
     parameters: Type.Object({
       query: Type.String({
         description: 'Research query or topic to investigate',
