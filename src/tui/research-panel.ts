@@ -947,10 +947,10 @@ export function createMasterResearchPanel(
             }
           }
 
-          // Render header: ── text ─╮ (straight left, rounded right to connect to box below)
-          // During active search the right side becomes a wave: ━━━━━━┥╼━━━━━━
-          const leftDecor = theme.fg('accent', '──');
-          const rightDecor = theme.fg('accent', ' ─╮');
+          // Render header: ─╴ text ╶╮ (half-endpoint chars give breathing room around text)
+          // During active search the right side becomes a wave: ─╴ text ╶╼──────
+          const leftDecor = theme.fg('accent', '─╴');
+          const rightDecor = theme.fg('accent', ' ╶╮');
 
           let headerLine = leftDecor + theme.fg('muted', headerText);
 
@@ -1060,7 +1060,7 @@ export function createMasterResearchPanel(
                 panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
               }
 
-              // Build fill: ─ trail | ╼ head | space space | ╶ lag | ─ background
+              // Build fill: ╶ lead-in | ─ trail | ╼ head | space space | ╶ lag | ─ background
               let fill = '';
               for (let i = 0; i < available; i++) {
                 if (i === waveRawPos) {
@@ -1070,7 +1070,8 @@ export function createMasterResearchPanel(
                 } else if (i === waveRawPos + 3) {
                   fill += `${panel.waveColors[waveRawPos + 3] || darkColor}╶${resetFg}`;
                 } else {
-                  fill += `${panel.waveColors[i] || brightColor}─${resetFg}`;
+                  const bgChar = i === 0 ? '╶' : '─';
+                  fill += `${panel.waveColors[i] || brightColor}${bgChar}${resetFg}`;
                 }
               }
 
