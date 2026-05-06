@@ -962,7 +962,7 @@ export function createMasterResearchPanel(
 
             if (available > 0 && panel.waveFrame !== undefined) {
               // Wave animation - HSL saturation/lightness cycling with snap-back
-              const CYCLE_STEPS = 24;
+              const CYCLE_STEPS = 16;
 
               // Get accent color to base hue from
               const accentText = theme.fg('accent', '');
