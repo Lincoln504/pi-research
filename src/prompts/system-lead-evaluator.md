@@ -84,6 +84,8 @@ When delegating, ensure:
    - Do NOT include any links within topic sections or subsections.
    - Format: `[1] https://url.com — brief description` on each line.
 
+> **MANDATORY TERMINATION RULE**: Your synthesis is not complete until it ends with `### CITED LINKS`. Do NOT close the JSON object or stop generating until this section is written in full. A synthesis without `### CITED LINKS` is a failed output.
+
 ---
 
 ## Output Requirements

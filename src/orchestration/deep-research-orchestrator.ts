@@ -205,7 +205,7 @@ export class DeepResearchOrchestrator {
           currentPlan = await this.evaluate(signal, mustSynthesize);
 
           if (currentPlan.action === 'synthesize') {
-              const synthesis = currentPlan.content || this.buildFallbackSynthesis();
+              const synthesis = this.ensureCitedLinks(currentPlan.content || this.buildFallbackSynthesis());
               this.options.observer?.onComplete?.(synthesis);
               return synthesis;
           }
@@ -222,6 +222,48 @@ export class DeepResearchOrchestrator {
       if (this.reports.size > 0) return this.buildFallbackSynthesis();
       return "Research failed. Check debug logs for details.";
     }
+  }
+
+  /**
+   * Guarantee the synthesis has a ### CITED LINKS section.
+   * If the evaluator omitted it (LLM non-compliance or output truncation),
+   * extract all URLs from researcher reports and append them.
+   */
+  private ensureCitedLinks(synthesis: string): string {
+    if (/###\s*CITED LINKS/i.test(synthesis)) return synthesis;
+
+    logger.warn('[Orchestrator] Synthesis missing CITED LINKS — rebuilding from researcher reports');
+
+    // Parse each researcher report's CITED LINKS section and collect unique URLs
+    const seen = new Set<string>();
+    const links: { url: string; desc: string }[] = [];
+
+    for (const report of this.reports.values()) {
+      // Find the CITED LINKS block in this report
+      const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
+      if (!sectionMatch) continue;
+      const section = sectionMatch[0];
+
+      // Extract [N] URL — description lines
+      const linePattern = /\[\d+\]\s*(https?:\/\/[^\s\n]+)(?:\s*[—–-]\s*([^\n]*))?/g;
+      let m: RegExpExecArray | null;
+      while ((m = linePattern.exec(section)) !== null) {
+        const url = m[1]!.trim().replace(/[,.)]+$/, ''); // strip trailing punctuation
+        const desc = m[2]?.trim() || '';
+        if (!seen.has(url)) {
+          seen.add(url);
+          links.push({ url, desc });
+        }
+      }
+    }
+
+    if (links.length === 0) return synthesis;
+
+    const linksSection = links
+      .map(({ url, desc }, i) => `[${i + 1}] ${url}${desc ? ` — ${desc}` : ''}`)
+      .join('\n');
+
+    return `${synthesis}\n\n### CITED LINKS\n${linksSection}`;
   }
 
   private buildFallbackSynthesis(): string {
