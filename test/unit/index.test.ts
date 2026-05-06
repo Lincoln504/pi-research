@@ -81,15 +81,26 @@ describe('extension entrypoint', () => {
     );
   });
 
-  it('augments system prompt during before_agent_start', async () => {
+  it('augments system prompt during before_agent_start when research intent detected', async () => {
     const { pi, handlers } = createPiMock();
     await activate(pi as any, {} as any);
 
-    const event = { systemPrompt: 'ORIGINAL' };
-    const result = await handlers.get('before_agent_start')?.(event);
+    const event = { systemPrompt: 'ORIGINAL', prompt: 'research something' };
+    const result = await handlers.get('before_agent_start')?.(event, {});
 
     expect(result.systemPrompt).toContain('ORIGINAL');
     expect(result.systemPrompt).toContain('MOCK_USAGE_PROMPT');
+  });
+
+  it('does not augment system prompt if no research intent detected', async () => {
+    const { pi, handlers } = createPiMock();
+    await activate(pi as any, {} as any);
+
+    const event = { systemPrompt: 'ORIGINAL', prompt: 'just fix code' };
+    const result = await handlers.get('before_agent_start')?.(event, {});
+
+    expect(result.systemPrompt).toBe('ORIGINAL');
+    expect(result.systemPrompt).not.toContain('MOCK_USAGE_PROMPT');
   });
 
   describe('/research slash command', () => {

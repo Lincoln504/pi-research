@@ -62,30 +62,11 @@ export default function (pi: ExtensionAPI) {
   process.once('SIGTERM', () => handleShutdown('SIGTERM'));
   process.once('SIGHUP', () => handleShutdown('SIGHUP'));
 
-  // JIT Context / TTSR style injection via the input hook
-  pi.on('input', (event) => {
-    if (!event.text) return undefined;
-
-    const researchRegex = /\b(research|search|web|analyze|investigate)\b/i;
-    
-    // Only inject if the regex matches, preventing context bloat for unrelated tasks
-    if (researchRegex.test(event.text)) {
-      const injection = `
-
----
-[System Note: RESEARCH TOOL MANDATE]
-1. INTERNET ONLY: The \`research\` tool is strictly for external web searches. NEVER use it to explore local projects or files; use your other abilities for local codebase analysis.
-2. NO SUBAGENTS: Use ONLY the \`research\` tool for internet investigations. Do NOT attempt to invoke external subagents, generalist agents, or manual delegation systems. The \`research\` tool natively orchestrates its own team of researchers.
-3. DEPTH SCALING: 0=Quick (simple facts, ~85% of queries), 1=Normal, 2=Deep, 3=Ultra (exhaustive/very expensive). Note: A request for "deep" research implies depth 2, not 3.
-4. CAPABILITIES: The \`research\` tool automatically synthesizes web search, scraping, StackExchange, and security databases. Provide a comprehensive \`query\` and let the tool handle the gathering.`;
-      
-      // Append the injection to the very end of the user's prompt (recency bias)
-      logger.debug('[pi-research] TTSR prompt constraint rule injected based on user input.');
-      return { action: 'transform', text: event.text + injection };
-    }
-    
-    return undefined;
-  });
+  // Global extension state for smart dual-sided prompt injection
+  let currentTurn = 0;
+  let lastInjectionTurn = -10;
+  const COOLDOWN_TURNS = 10;
+  const RESEARCH_REGEX = /\b(research|search|web|analyze|investigate)\b/i;
 
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
@@ -378,25 +359,62 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Append research tool usage instructions to the system prompt
-  pi.on('before_agent_start', async (event: any, _ctx: any) => {
-    const researchPrompt = loadPrompt('research-tool-usage')
-      .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
-      .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
-      .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
+  // Dual-Sided JIT Prompt Injection (User Input + LLM Output) with Cooldown
+  pi.on('before_agent_start', async (event: any, ctx: any) => {
+    currentTurn++;
     
-    // Check if this is a researcher session by examining the system prompt.
-    // Note: model IDs (e.g., claude-opus-4-7) do not contain 'researcher', so we rely on
-    // the system prompt containing the word 'researcher' to identify researcher sessions.
+    // Do not inject rules into the sub-researchers
     const isResearcher = event.systemPrompt?.toLowerCase().includes('researcher');
-
     if (isResearcher) {
       return { systemPrompt: event.systemPrompt };
     }
 
-    return {
-      systemPrompt: event.systemPrompt + '\n\n' + researchPrompt
-    };
+    // 1. Scan User Input
+    let needsResearch = RESEARCH_REGEX.test(event.prompt || '');
+
+    // 2. Scan LLM Output (if user didn't explicitly ask)
+    if (!needsResearch) {
+      const branch = ctx?.sessionManager?.getBranch?.() || [];
+      // Grab the last assistant message
+      const lastAssistant = [...branch].reverse().find((e: any) => e.type === 'message' && e.message.role === 'assistant');
+      if (lastAssistant) {
+        needsResearch = RESEARCH_REGEX.test(JSON.stringify(lastAssistant.message.content));
+      }
+    }
+
+    // 3. Inject ONLY if matched AND cooldown has passed
+    if (needsResearch && (currentTurn - lastInjectionTurn >= COOLDOWN_TURNS)) {
+      lastInjectionTurn = currentTurn;
+      logger.debug('[pi-research] JIT constraint rule injected (Dual-Scan matched).');
+      
+      const researchPrompt = loadPrompt('research-tool-usage')
+        .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
+        .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
+        .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
+      
+      return {
+        systemPrompt: event.systemPrompt + '\n\n' + researchPrompt
+      };
+    }
+
+    return { systemPrompt: event.systemPrompt };
+  });
+
+  // Physical Guardrail Bouncer
+  pi.on('tool_call', (event: any) => {
+    if (event.toolName === 'research') {
+      const query = event.args?.query || '';
+      
+      // Obvious local codebase investigation check
+      if (/^(\.\/|\/home|\/tmp|src\/|local files|local codebase)/i.test(query) || /\.(ts|js|md|json)$/i.test(query)) {
+        logger.warn('[pi-research] Blocked local file research attempt.', { query });
+        return { 
+          block: true, 
+          reason: "INTERNET ONLY: The research tool is for external web queries ONLY. Use your other native abilities (like grep or read) for local codebase analysis." 
+        };
+      }
+    }
+    return undefined;
   });
 
   // Monitor provider responses for diagnostics

@@ -214,11 +214,13 @@ export function createResearchTool(): ToolDefinition {
             endResearchSession(piSessionId, researchId);
             cleanupSharedLinks(researchId);
             const activePanels = getPiActivePanels(piSessionId);
-            if (activePanels.length === 0) ctx.ui.setWidget(masterWidgetId, undefined);
-            else refreshAllSessions(piSessionId);
-
-            if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
+            if (activePanels.length === 0) {
+              ctx.ui.setWidget(masterWidgetId, undefined);
+              if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
                 (ctx.ui as any).setWorkingVisible(true);
+              }
+            } else {
+              refreshAllSessions(piSessionId);
             }
 
             logger.info('[research] cleanup completed', { piSessionId, researchId });

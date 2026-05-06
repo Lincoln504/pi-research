@@ -62,10 +62,15 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 
 #### MULTIPLE RESEARCH CALLS
 
-**Different/unrelated topics:** Use multiple parallel `research` calls. The research tool can be called simultaneously if required.
+**When to Parallelize:**
+- Only split into simultaneous `research` tool uses if the query scopes are **entirely different and unrelated**.
+- Parallelization is for distinct topics, not for different facets of the same topic.
 
-**One topic with multiple aspects:** Do NOT decompose a single user query into multiple research calls — the coordinator inside the tool handles decomposition into sub-topics internally. A single call with appropriate depth handles multi-faceted topics.
+**When to use a Single Call:**
+- For **multipart, multi-faceted, detailed, or broad queries**, use a **single research call**.
+- The `research` tool's internal coordinator is optimized to handle decomposition of complex, broad, or specific direct queries more effectively than the top-level agent.
+- Trust a single call with appropriate `depth` to handle broad investigations (as judged by complexity).
 
-**Do NOT escalate depth just because a topic is broad or has multiple aspects** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.
+**Do NOT escalate depth just because a topic is broad** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.
 
 `pi-research` (this research tool for web research) should be called directly and not embedded in subagent calls.
