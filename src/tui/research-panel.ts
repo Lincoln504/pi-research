@@ -1029,8 +1029,6 @@ export function createMasterResearchPanel(
               const brightRgb = cycleHslSaturationLightness(baseAccentRgb.r, baseAccentRgb.g, baseAccentRgb.b, 0, CYCLE_STEPS);
               const brightColor = `\x1b[38;2;${brightRgb.r};${brightRgb.g};${brightRgb.b}m`;
 
-              const darkRgb = cycleHslSaturationLightness(baseAccentRgb.r, baseAccentRgb.g, baseAccentRgb.b, CYCLE_STEPS - 1, CYCLE_STEPS);
-              const darkColor = `\x1b[38;2;${darkRgb.r};${darkRgb.g};${darkRgb.b}m`;
 
               if (!panel.waveColors || panel.waveColors.length !== available) {
                 panel.waveColors = Array(available).fill(brightColor) as string[];
@@ -1060,15 +1058,11 @@ export function createMasterResearchPanel(
                 panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
               }
 
-              // Build fill: ╶ lead-in | ─ trail | ╼ head | space space | ╶ lag | ─ background
+              // Build fill: ╶ lead-in | ─ gradient trail | ╼ head | ─ background
               let fill = '';
               for (let i = 0; i < available; i++) {
                 if (i === waveRawPos) {
                   fill += `${brightColor}╼${resetFg}`;
-                } else if (i === waveRawPos + 1 || i === waveRawPos + 2) {
-                  fill += ' ';
-                } else if (i === waveRawPos + 3) {
-                  fill += `${panel.waveColors[waveRawPos + 3] || darkColor}╶${resetFg}`;
                 } else {
                   const bgChar = i === 0 ? '╶' : '─';
                   fill += `${panel.waveColors[i] || brightColor}${bgChar}${resetFg}`;
