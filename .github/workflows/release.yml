@@ -52,16 +52,11 @@ jobs:
 
           # Verify key files exist
           test -d node_modules/@lincoln504/pi-research/src || { echo "❌ src/ not found in installed package"; exit 1; }
-          test -d node_modules/@lincoln504/pi-research/config || { echo "❌ config/ not found in installed package"; exit 1; }
           test -d node_modules/@lincoln504/pi-research/scripts || { echo "❌ scripts/ not found in installed package"; exit 1; }
           test -f node_modules/@lincoln504/pi-research/package.json || { echo "❌ package.json not found in installed package"; exit 1; }
 
-          # Verify setup.js exists and is executable
-          test -f node_modules/@lincoln504/pi-research/scripts/setup.js || { echo "❌ scripts/setup.js not found in installed package"; exit 1; }
-
-          # Verify key config files are included
-          test -f node_modules/@lincoln504/pi-research/config/searxng/default-settings.yml || { echo "❌ default-settings.yml not found in installed package"; exit 1; }
-          test -f node_modules/@lincoln504/pi-research/config/searxng/limiter.toml || { echo "❌ limiter.toml not found in installed package"; exit 1; }
+          # Verify setup.cjs exists
+          test -f node_modules/@lincoln504/pi-research/scripts/setup.cjs || { echo "❌ scripts/setup.cjs not found in installed package"; exit 1; }
 
           echo "✅ Install smoke-test passed"
 

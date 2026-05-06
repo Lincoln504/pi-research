@@ -74,20 +74,13 @@ export async function forceSchedulerRestart(): Promise<void> {
     cachedSchedulerVersion = null;
     initializationPromise = null;
     
-    // Find and kill any stale scheduler processes BEFORE clearing state
+    // Find and clear any stale scheduler processes BEFORE clearing state
     const stateManager = new StateManager();
     const serverInfo = await stateManager.getBrowserServer();
     if (serverInfo) {
         const isAlive = await stateManager.isPidAlive(serverInfo.pid);
         if (isAlive && serverInfo.pid !== process.pid) {
-            try {
-                logger.log(`[Scheduler] Terminating stale scheduler process (PID ${serverInfo.pid})...`);
-                process.kill(serverInfo.pid, 'SIGTERM');
-                // Give it a moment to shutdown gracefully
-                await new Promise<void>(resolve => setTimeout(resolve, 500));
-            } catch (error) {
-                logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
-            }
+            logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
         }
     }
     
@@ -95,19 +88,6 @@ export async function forceSchedulerRestart(): Promise<void> {
     await stateManager.clearBrowserServer().catch((error) => {
         logger.warn('[Scheduler] Failed to clear browser server from state:', error);
     });
-    if (serverInfo) {
-        const isAlive = await stateManager.isPidAlive(serverInfo.pid);
-        if (isAlive && serverInfo.pid !== process.pid) {
-            try {
-                logger.log(`[Scheduler] Terminating stale scheduler process (PID ${serverInfo.pid})...`);
-                process.kill(serverInfo.pid, 'SIGTERM');
-                // Give it a moment to shutdown gracefully
-                await new Promise<void>(resolve => setTimeout(resolve, 500));
-            } catch (error) {
-                logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
-            }
-        }
-    }
     
     logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
 }
@@ -414,14 +394,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                 if (storedVersion && storedVersion !== currentVersion) {
                     logger.log(`[Scheduler] Existing scheduler has stale config (old: ${storedVersion}, new: ${currentVersion}), forcing restart...`);
                     
-                    // Terminate the old scheduler process
-                    try {
-                        if (serverInfo.pid !== process.pid) {
-                            process.kill(serverInfo.pid, 'SIGTERM');
-                            await new Promise<void>(resolve => setTimeout(resolve, 1000));
-                        }
-                    } catch (error) {
-                        logger.warn('[Scheduler] Failed to terminate stale scheduler:', error);
+                    if (serverInfo.pid !== process.pid) {
+                        logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
                     }
                     
                     // Clear server info from state to force a restart
