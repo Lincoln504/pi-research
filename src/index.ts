@@ -62,6 +62,30 @@ export default function (pi: ExtensionAPI) {
   process.once('SIGTERM', () => handleShutdown('SIGTERM'));
   process.once('SIGHUP', () => handleShutdown('SIGHUP'));
 
+  // JIT Context / TTSR style injection via the input hook
+  pi.on('input', (event) => {
+    if (!event.text) return undefined;
+
+    const researchRegex = /\b(research|search|web|analyze|investigate)\b/i;
+    
+    // Only inject if the regex matches, preventing context bloat for unrelated tasks
+    if (researchRegex.test(event.text)) {
+      const injection = `
+
+---
+[System Note: RESEARCH TOOL MANDATE]
+1. INTERNET ONLY: The \`research\` tool is strictly for external web searches. NEVER use it to explore local projects or files; use your native file reading and grep tools for local codebase analysis.
+2. NO SUBAGENTS: Use ONLY the \`research\` tool for internet investigations. Do NOT attempt to invoke external subagents, generalist agents, or manual delegation systems. The \`research\` tool natively orchestrates its own team of researchers.
+3. DEPTH SCALING: 0=Quick (simple facts, ~85% of queries), 1=Normal, 2=Deep, 3=Ultra (exhaustive/very expensive). Note: A request for "deep" research implies depth 2, not 3.
+4. CAPABILITIES: The \`research\` tool automatically synthesizes web search, scraping, StackExchange, and security databases. Provide a comprehensive \`query\` and let the tool handle the gathering.`;
+      
+      // Append the injection to the very end of the user's prompt (recency bias)
+      return { action: 'transform', text: event.text + injection };
+    }
+    
+    return undefined;
+  });
+
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);

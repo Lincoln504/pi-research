@@ -98,14 +98,6 @@ export function createResearchTool(): ToolDefinition {
     description:
       'Perform web/internet research using a coordinated team of agents. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
     promptSnippet: 'Conduct multi-agent web/internet research',
-    promptGuidelines: [
-      'Specifically for web research, not local project exploration.',
-      'Research is organized into Rounds. Each round contains multiple parallel siblings.',
-      'SCRAPE PROTOCOL: Configurable batches (1-16 or unlimited, 4 URLs per batch). Set via /research-config.',
-      'After each round, a Lead Evaluator assesses all findings and decides whether to delegate further or synthesize.',
-      'Use `security_search` for vulnerabilities, CVE IDs, package security, or actively exploited vulnerabilities.',
-      'Use `stackexchange` for technical questions, code solutions, debugging help, and best practices.',
-    ],
     parameters: Type.Object({
       query: Type.String({
         description: 'Research query or topic to investigate',
