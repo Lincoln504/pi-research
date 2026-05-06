@@ -167,7 +167,7 @@ describe('npm pack', () => {
 
   it('should include main entry point', () => {
     const files = getPackFiles();
-    expect(files).toContain('scripts/setup.js');
+    expect(files).toContain('scripts/setup.cjs');
   });
 
   it('should have reasonable total file count', () => {

@@ -1,7 +1,7 @@
 /**
  * Setup Script Integration Tests
  *
- * Tests the scripts/setup.js graceful degradation behavior.
+ * Tests the scripts/setup.cjs graceful degradation behavior.
  * This is an integration test that spawns a separate Node process.
  */
 
@@ -12,9 +12,9 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const setupScriptPath = join(process.cwd(), 'scripts', 'setup.js');
+const setupScriptPath = join(process.cwd(), 'scripts', 'setup.cjs');
 
-describe('scripts/setup.js integration tests', () => {
+describe('scripts/setup.cjs integration tests', () => {
   let testTimeout: NodeJS.Timeout;
 
   beforeEach(() => {
@@ -27,7 +27,7 @@ describe('scripts/setup.js integration tests', () => {
   });
 
   /**
-   * Helper to run setup.js with the given environment variables and args.
+   * Helper to run setup.cjs with the given environment variables and args.
    * Returns a promise that resolves with the result when the process exits.
    */
   function runSetup(env: Record<string, string>, args: string[] = []): Promise<{

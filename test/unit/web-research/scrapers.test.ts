@@ -28,7 +28,7 @@ describe('scrapers', () => {
       
       const fs = require('fs');
       const path = require('path');
-      const setupScriptPath = path.join(process.cwd(), 'scripts', 'setup.js');
+      const setupScriptPath = path.join(process.cwd(), 'scripts', 'setup.cjs');
       expect(fs.existsSync(setupScriptPath)).toBe(true);
     });
   });
