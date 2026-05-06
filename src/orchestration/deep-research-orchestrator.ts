@@ -297,19 +297,31 @@ Be aggressive with delegation. Level 3 is for exhaustive research — use remain
 
   private getRoundPhaseGuidance(maxRounds: number): string {
     const roundRatio = this.currentRound / maxRounds;
-    const isLevel2 = this.options.complexity === 2;
-    
+    const complexity = this.options.complexity;
+
     if (roundRatio <= 0.5) {
-      // Early rounds: be more aggressive with delegation
+      // Early rounds
+      if (complexity === 3) {
+        return `\n\n---\n\n**Round Phase: EARLY (Round ${this.currentRound} of ${maxRounds}) — Level 3 Ultra**\n\n**DELEGATE. Do not synthesize.** You are in the early phase of an exhaustive research effort with ${maxRounds} rounds available.\n- Deploy the MAXIMUM number of researchers across completely distinct angles — leave no major dimension unmapped\n- Fully saturate each researcher's query budget; partial budgets waste available depth\n- Expect to delegate for at least ${Math.ceil(maxRounds * 0.7)} rounds before synthesis is even considered\n- Treat every round as mandatory — this phase exists to establish the broadest possible foundation of sources and findings\n- Do NOT synthesize under any circumstances this early`;
+      }
+      // Level 1 / Level 2 early
       return `\n\n---\n\n**Round Phase: EARLY (Round ${this.currentRound} of ${maxRounds})**\n\nYou are in the early phase of research. Be more permissive with delegation:\n- Deploy researchers to broadly map the landscape\n- Don't worry if findings are incomplete — later rounds can fill gaps\n- Focus on breadth and initial exploration\n- Use available researchers to cover distinct angles in parallel`;
     } else if (roundRatio <= 0.8) {
-      // Middle rounds: balanced approach
-      const guidance = isLevel2 
-        ? `**Level 2 Guidance**: You are in the middle phase of Level 2 research. Continue delegating actively — you should aim for 2-3 total rounds before synthesis. Each round adds value and depth to your findings. Don't hold back when there are still meaningful gaps or areas to explore.\n\n- Synthesize only when findings are comprehensive and no significant gaps remain that warrant another round.\n\n` 
-        : `You are in the middle phase of research. Apply balanced judgment:\n- Synthesize if you have substantial coverage of the key aspects\n- Delegate for significant gaps or to explore specialized sub-topics\n- Consider depth over breadth at this stage\n- Focus on rounding out incomplete areas`;
-      return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\n${guidance}`;
+      // Middle rounds
+      if (complexity === 3) {
+        return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds}) — Level 3 Ultra**\n\n**STRONGLY PREFER DELEGATION.** You are in the middle phase of exhaustive research.\n- With ${maxRounds - this.currentRound} rounds remaining, you have substantial capacity — use it\n- Delegate to sibling researchers covering angles not yet fully explored, deeper sub-topics of what has been found, or cross-cutting themes that span multiple earlier findings\n- Further rounds should drill into specialist detail, verify findings with additional independent sources, and surface nuanced dimensions of the topic\n- Synthesize ONLY if: you have 4+ rounds of findings, 10+ distinct source domains, every major claim is multi-source verified, and you genuinely cannot identify gaps that another round would address\n- If you can name even one meaningful unexplored angle — DELEGATE`;
+      }
+      if (complexity === 2) {
+        return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\n**Level 2 Guidance**: You are in the middle phase of Level 2 research. Continue delegating actively — you should aim for 2-3 total rounds before synthesis. Each round adds value and depth to your findings. Don't hold back when there are still meaningful gaps or areas to explore.\n\n- Synthesize only when findings are comprehensive and no significant gaps remain that warrant another round.\n\n`;
+      }
+      // Level 1 middle
+      return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\nYou are in the middle phase of research. Apply balanced judgment:\n- Synthesize if you have substantial coverage of the key aspects\n- Delegate for significant gaps or to explore specialized sub-topics\n- Consider depth over breadth at this stage\n- Focus on rounding out incomplete areas`;
     } else {
-      // Late rounds: higher threshold for delegation
+      // Late rounds
+      if (complexity === 3) {
+        return `\n\n---\n\n**Round Phase: LATE (Round ${this.currentRound} of ${maxRounds}) — Level 3 Ultra**\n\nYou are in the late phase of exhaustive research. Still prefer delegation over synthesis:\n- Delegate if ANY meaningful dimension remains under-sourced, under-verified, or shallowly covered\n- Use remaining rounds to pursue specialist sub-topics, cross-verify key claims with independent sources, or explore nuanced angles surfaced by earlier rounds\n- Delegate to sibling researchers that go deeper into the most critical findings so far, not just broader coverage\n- Synthesize only when you have genuinely exhausted meaningful research avenues AND have comprehensive multi-source coverage across all major areas`;
+      }
+      // Level 1 / Level 2 late
       return `
 
 ---
