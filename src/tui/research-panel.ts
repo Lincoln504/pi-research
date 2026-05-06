@@ -962,7 +962,7 @@ export function createMasterResearchPanel(
 
             if (available > 0 && panel.waveFrame !== undefined) {
               // Wave animation - HSL saturation/lightness cycling with snap-back
-              const CYCLE_STEPS = 8;
+              const CYCLE_STEPS = 24;
 
               // Get accent color to base hue from
               const accentText = theme.fg('accent', '');
@@ -1060,16 +1060,15 @@ export function createMasterResearchPanel(
                 panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
               }
 
-              // Build fill: ╶ lead-in | ─ trail | ╼ head | 6×space wake | ╶ lag | ─ background
-              const WAKE_LEN = 6;
+              // Build fill: ╶ lead-in | ─ trail | ╼ head | space space | ╶ lag | ─ background
               let fill = '';
               for (let i = 0; i < available; i++) {
                 if (i === waveRawPos) {
                   fill += `${brightColor}╼${resetFg}`;
-                } else if (i > waveRawPos && i <= waveRawPos + WAKE_LEN) {
+                } else if (i === waveRawPos + 1 || i === waveRawPos + 2) {
                   fill += ' ';
-                } else if (i === waveRawPos + WAKE_LEN + 1) {
-                  fill += `${panel.waveColors[waveRawPos + WAKE_LEN + 1] || darkColor}╶${resetFg}`;
+                } else if (i === waveRawPos + 3) {
+                  fill += `${panel.waveColors[waveRawPos + 3] || darkColor}╶${resetFg}`;
                 } else {
                   const bgChar = i === 0 ? '╶' : '─';
                   fill += `${panel.waveColors[i] || brightColor}${bgChar}${resetFg}`;
