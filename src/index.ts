@@ -402,37 +402,8 @@ export default function (pi: ExtensionAPI) {
     return { systemPrompt: event.systemPrompt };
   });
 
-  // Physical Guardrail Bouncer - Blocks local file research and subagent usage
-  pi.on('tool_call', (event: any, ctx: any) => {
-    // Check if research was requested in current user input or conversation
-    const session = ctx?.sessionManager;
-    const branch = session?.getBranch?.() || [];
-    const recentMessages = [...branch].reverse().slice(0, 5);
-    
-    // Check if any recent message (user or assistant) contains research intent
-    let hasResearchIntent = false;
-    for (const msg of recentMessages) {
-      if (msg.type === 'message') {
-        const content = typeof msg.message.content === 'string' 
-          ? msg.message.content 
-          : JSON.stringify(msg.message.content);
-        if (RESEARCH_REGEX.test(content)) {
-          hasResearchIntent = true;
-          break;
-        }
-      }
-    }
-    
-    // Block subagent tool when research intent is detected
-    if (event.toolName === 'subagent' && hasResearchIntent) {
-      logger.warn('[pi-research] Blocked subagent usage during research context', { toolName: event.toolName });
-      return {
-        block: true,
-        reason: 'Do NOT use subagent for research tasks. Use the `research` tool directly for each query, one at a time. Do not try to "parallelize" research using subagents.'
-      };
-    }
-    
-    // Block local file research via research tool
+  // Physical Guardrail Bouncer - Blocks local file research only
+  pi.on('tool_call', (event: any, _ctx: any) => {
     if (event.toolName === 'research') {
       const query = event.args?.query || '';
       if (/^(\.\/|\/home|\/tmp|src\/|local files|local codebase)/i.test(query) || /\.(ts|js|md|json)$/i.test(query)) {
@@ -443,7 +414,6 @@ export default function (pi: ExtensionAPI) {
         };
       }
     }
-    
     return undefined;
   });
 
