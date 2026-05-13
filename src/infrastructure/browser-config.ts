@@ -44,16 +44,25 @@ export function ensureBrowserCacheDir(): string {
 
 /**
  * Get the expected path where camoufox installs its binaries.
- * Matches camoufox-js's own resolution logic using homedir() (or custom path).
+ * Matches camoufox-js's own resolution logic.
  */
 export function getCamoufoxBinaryPath(): string {
     const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
-    const base = customPath || homedir();
-    if (platform() === 'win32') {
+    if (customPath) {
+        // If custom path is set, Playwright/Camoufox usually installs directly there or in a standard subfolder.
+        // We return the custom path itself as the base.
+        return customPath;
+    }
+
+    const base = homedir();
+    const osPlatform = platform();
+
+    if (osPlatform === 'win32') {
         return join(base, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
-    } else if (platform() === 'darwin') {
+    } else if (osPlatform === 'darwin') {
         return join(base, 'Library', 'Caches', 'camoufox');
     } else {
+        // Linux and others
         return join(base, '.cache', 'camoufox');
     }
 }

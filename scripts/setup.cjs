@@ -29,7 +29,10 @@ if (major < 22) {
 }
 
 function camoufoxCachePath() {
-  const base = process.env.PLAYWRIGHT_BROWSERS_PATH || homedir();
+  const customPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (customPath) return customPath;
+
+  const base = homedir();
   if (isWindows) return path.join(base, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
   if (isDarwin) return path.join(base, 'Library', 'Caches', 'camoufox');
   return path.join(base, '.cache', 'camoufox');

@@ -27,20 +27,21 @@ type GrepParamsType = Static<typeof GrepParams>;
 
 function truncateHead(content: string, maxBytes: number, maxLines: number): string {
   const lines = content.split('\n');
+  const encoder = new TextEncoder();
 
-  if (lines.length <= maxLines && Buffer.byteLength(content, 'utf-8') <= maxBytes) {
+  if (lines.length <= maxLines && encoder.encode(content).length <= maxBytes) {
     return content;
   }
 
   const truncatedLines = lines.slice(0, maxLines);
   let result = truncatedLines.join('\n');
 
-  if (Buffer.byteLength(result, 'utf-8') > maxBytes) {
+  if (encoder.encode(result).length > maxBytes) {
     let byteCount = 0;
     const charArray: string[] = [];
 
     for (const char of result) {
-      byteCount += Buffer.byteLength(char, 'utf-8');
+      byteCount += encoder.encode(char).length;
       if (byteCount > maxBytes) break;
       charArray.push(char);
     }

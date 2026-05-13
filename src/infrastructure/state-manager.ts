@@ -1,7 +1,7 @@
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as crypto from 'crypto';
-import * as os from 'os';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
+import * as os from 'node:os';
 import { logger } from '../logger.ts';
 
 /**
@@ -21,7 +21,6 @@ export interface StateMetrics {
  */
 export interface SessionInfo {
   pid: number;
-  processStartTime?: number; // For PID reuse detection
   lastSeen: number;
   connectedAt: number;
 }
@@ -36,7 +35,7 @@ export interface SingletonState {
   port: number;
   sessions: { [sessionId: string]: SessionInfo };
   lastUpdated: number;
-  browserServer?: { port: number; pid: number };
+  browserServer?: { port: number; pid: number; schedulerId?: string };
   schedulerVersion?: string; // Track scheduler config version for detecting changes
 }
 
@@ -89,8 +88,7 @@ function isSessionInfo(value: unknown): value is SessionInfo {
   return (
     typeof session.pid === 'number' &&
     typeof session.lastSeen === 'number' &&
-    typeof session.connectedAt === 'number' &&
-    (session.processStartTime === undefined || typeof session.processStartTime === 'number')
+    typeof session.connectedAt === 'number'
   );
 }
 
@@ -319,7 +317,7 @@ export class StateManager {
    * Add a new session to the state
    * @param sessionId The session ID to add
    * @param param PID (number) or container name (string)
-   * @throws Error if unable to update state or read process start time
+   * @throws Error if unable to update state
    */
   public async addSession(sessionId: string, param: number | string): Promise<void> {
     let pid: number;
@@ -331,11 +329,8 @@ export class StateManager {
     }
 
     await this.updateState(async (state): Promise<SingletonState> => {
-      const processStartTime = await this.getProcessStartTime(pid);
-
       state.sessions[sessionId] = {
         pid,
-        processStartTime,
         lastSeen: Date.now(),
         connectedAt: Date.now(),
       };
@@ -392,7 +387,7 @@ export class StateManager {
       }
 
       // Secondary check: is process still alive?
-      const isAlive = await this.isProcessAlive(sessionInfo.pid, sessionInfo.processStartTime);
+      const isAlive = await this.isProcessAlive(sessionInfo.pid);
 
       if (!isAlive) {
         sessionsToRemove.push(sessionId);
@@ -468,84 +463,19 @@ export class StateManager {
   }
 
   /**
-   * Check if a process is alive (optionally with start time verification)
+   * Check if a process is alive
    * @param pid Process ID to check
-   * @param expectedStartTime Optional expected process start time (for PID reuse detection)
-   * @returns true if process is alive and matches expected start time
+   * @returns true if process is alive
    */
-  private async isProcessAlive(pid: number, expectedStartTime?: number): Promise<boolean> {
+  private async isProcessAlive(pid: number): Promise<boolean> {
     try {
-      // Try to send signal 0 to check if process exists
+      // Try to send signal 0 to check if process exists.
+      // Works on Linux, Mac, and Windows (Node.js implementation).
       process.kill(pid, 0);
-
-      // If expected start time is provided, verify it matches
-      if (expectedStartTime !== undefined) {
-        const currentStartTime = await this.getProcessStartTime(pid);
-        return currentStartTime === expectedStartTime;
-      }
-
       return true;
     } catch {
       // Process doesn't exist or we can't check it
       return false;
-    }
-  }
-
-  /**
-   * Get process start time from /proc/{pid}/stat (Linux only)
-   * This is field 22 (starting after field 22, which starts after 21 spaces)
-   *
-   * Platform limitation: PID reuse detection is only available on Linux.
-   * On macOS and Windows, the /proc filesystem does not exist, so we cannot
-   * detect when a PID has been reused. This means a stale session with a
-   * reused PID could incorrectly appear as still alive. The impact is low:
-   * - On Linux: PIDs are uniquely identified by (pid, startTime) pair
-   * - On macOS/Windows: Only pid is used, so reuse detection is not possible
-   *
-   * @param pid Process ID
-   * @returns Process start time in jiffies (clock ticks since boot) or undefined
-   */
-  private async getProcessStartTime(pid: number): Promise<number | undefined> {
-    if (process.platform !== 'linux') {
-      return undefined;
-    }
-
-    try {
-      const statContent = await fs.readFile(`/proc/${pid}/stat`, 'utf-8');
-
-      // The stat file format is: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice num_threads itrealvalue starttime vsize rss rsslim startcode endcode startstack kstkesp kstkeip signal blocked sigignore sigcatch wchan nswap cnswap exit_signal processor rt_priority policy delayacct_blkio_ticks guest_time cguest_time start_data end_data start_brk arg_start arg_end env_start env_end exit_code
-      // Field 22 is starttime (process start time in jiffies)
-
-      // Split by space, but need to handle the comm field which can contain spaces
-      const parts = statContent.split(' ');
-
-      // Find the closing parenthesis of the comm field
-      let commEndIndex = 0;
-      for (let i = 1; i < parts.length; i++) {
-        const part = parts[i];
-        if (part?.includes(')')) {
-          commEndIndex = i;
-          break;
-        }
-      }
-
-      // Field 22 is at index (2 + 20) = 22 (0-indexed after comm)
-      // After comm (field 1), we skip to field 22
-      const startIndex = commEndIndex + 20;
-
-      if (startIndex < parts.length) {
-        const part = parts[startIndex];
-        if (part !== undefined) {
-          const starttimeStr = part.replace(')', '');
-          const starttime = parseInt(starttimeStr, 10);
-          return isNaN(starttime) ? undefined : starttime;
-        }
-      }
-
-      return undefined;
-    } catch {
-      // Can't read process stat file
-      return undefined;
     }
   }
 
@@ -762,7 +692,7 @@ export class StateManager {
 /**
  * Get the current browser server information
  */
-public async getBrowserServer(): Promise<{ port: number; pid: number } | null> {
+public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
   const state = await this.readState();
   return state.browserServer ?? null;
 }
@@ -770,9 +700,9 @@ public async getBrowserServer(): Promise<{ port: number; pid: number } | null> {
 /**
  * Set the current browser server information (atomic: only overwrites if no live server exists)
  */
-public async setBrowserServer(port: number, pid: number): Promise<void> {
+public async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
   await this.updateState((state) => {
-    state.browserServer = { port, pid };
+    state.browserServer = { port, pid, schedulerId };
     return state;
   });
 }
@@ -790,8 +720,16 @@ public async clearBrowserServer(): Promise<void> {
 /**
  * Check if a process is alive
  */
-public async isPidAlive(pid: number): Promise<boolean> {
-  return this.isProcessAlive(pid);
+public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<boolean> {
+  const alive = await this.isProcessAlive(pid);
+  if (!alive) return false;
+
+  if (expectedSchedulerId) {
+    const state = await this.readState();
+    return state.browserServer?.schedulerId === expectedSchedulerId;
+  }
+
+  return true;
 }
 
 /**
@@ -843,10 +781,6 @@ public async isPidAlive(pid: number): Promise<boolean> {
 
       if (sessionData.pid < 0) {
         throw new Error(`Invalid state: pid for ${sessionId} must be a non-negative number, got ${sessionData.pid}`);
-      }
-
-      if (sessionData.processStartTime !== undefined && sessionData.processStartTime < 0) {
-        throw new Error(`Invalid state: processStartTime for ${sessionId} must be a non-negative number or undefined, got ${sessionData.processStartTime}`);
       }
 
       if (sessionData.lastSeen < 0) {

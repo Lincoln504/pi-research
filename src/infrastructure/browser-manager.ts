@@ -3,7 +3,8 @@ import { shutdownManager } from '../utils/shutdown-manager.ts';
 import { StateManager } from './state-manager.ts';
 import { BrowserServer } from './browser-server.ts';
 import { getBrowserEnv, ensureBrowserCacheDir, getCamoufoxBinaryPath } from './browser-config.ts';
-import { createRequire } from 'module';
+import { createRequire } from 'node:module';
+import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -78,7 +79,7 @@ export async function forceSchedulerRestart(): Promise<void> {
     const stateManager = new StateManager();
     const serverInfo = await stateManager.getBrowserServer();
     if (serverInfo) {
-        const isAlive = await stateManager.isPidAlive(serverInfo.pid);
+        const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
         if (isAlive && serverInfo.pid !== process.pid) {
             logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
         }
@@ -104,13 +105,28 @@ class BrowserTaskScheduler implements IScheduler {
     private poolInitializationPromise: Promise<any> | null = null;
     private server: BrowserServer | null = null;
     private currentWorkerCount: number | null = null;
+    private leadershipTimer: any = null;
 
-    constructor() {
+    constructor(private readonly schedulerId: string) {
         // Pool initialization is deferred to first use via ensurePool()
         // This allows config changes to be detected and handled
+        this.startLeadershipCheck();
     }
 
-    private idleTimer: NodeJS.Timeout | null = null;
+    private startLeadershipCheck() {
+        if (this.leadershipTimer) return;
+        this.leadershipTimer = setInterval(async () => {
+            const stateManager = new StateManager();
+            const serverInfo = await stateManager.getBrowserServer();
+            // If the state file now points to a different schedulerId, we have lost leadership
+            if (serverInfo?.schedulerId !== this.schedulerId) {
+                logger.warn(`[Scheduler] Leadership lost (ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}). Shutting down pool...`);
+                await this.shutdown();
+            }
+        }, 60000); // Check leadership every 60 seconds
+    }
+
+    private idleTimer: any = null;
     private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
     private resetIdleTimer() {
@@ -119,6 +135,10 @@ class BrowserTaskScheduler implements IScheduler {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
             this.shutdown();
         }, this.IDLE_TIMEOUT_MS);
+    }
+
+    public resetIdleTimerOnActivity(): void {
+        this.resetIdleTimer();
     }
 
     async startServer(): Promise<number> {
@@ -136,6 +156,10 @@ class BrowserTaskScheduler implements IScheduler {
      */
     private async ensurePool(config?: Config): Promise<any> {
         this.resetIdleTimer();
+        
+        // Background cleanup of stale profiles (fire and forget)
+        cleanupStaleProfiles().catch(() => {});
+
         const maxWorkers = getMaxWorkers(config);
         
         // If pool exists and worker count matches, return it immediately
@@ -265,13 +289,56 @@ class BrowserTaskScheduler implements IScheduler {
     }
 
     async shutdown() {
-        if (this.server) await this.server.stop();
+        if (this.idleTimer) {
+            clearTimeout(this.idleTimer);
+            this.idleTimer = null;
+        }
+
+        if (this.leadershipTimer) {
+            clearInterval(this.leadershipTimer);
+            this.leadershipTimer = null;
+        }
+
+        // Clear global reference immediately to prevent new tasks from using this scheduler
+        if ((globalThis as any).__PI_RESEARCH_SCHEDULER__ === this) {
+            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
+            cachedSchedulerVersion = null;
+            initializationPromise = null;
+        }
+
+        const stateManager = new StateManager();
+        const serverInfo = await stateManager.getBrowserServer();
+        if (serverInfo?.pid === process.pid) {
+            await stateManager.clearBrowserServer().catch(() => {});
+        }
+
+        if (this.server) {
+            try {
+                // Use a timeout for server shutdown
+                await Promise.race([
+                    this.server.stop(),
+                    new Promise(resolve => setTimeout(resolve, 2000))
+                ]);
+            } catch (e) {
+                logger.warn('[Scheduler] Server shutdown error:', e);
+            }
+            this.server = null;
+        }
+
         if (this.pool) {
-            await this.pool.destroy();
+            try {
+                // Use a timeout for pool destruction
+                await Promise.race([
+                    this.pool.destroy(),
+                    new Promise(resolve => setTimeout(resolve, 5000))
+                ]);
+            } catch (e) {
+                logger.warn('[Scheduler] Pool destruction error:', e);
+            }
             // Allow time for IPC channels to close gracefully
             await new Promise(resolve => setTimeout(resolve, 200));
+            this.pool = null;
         }
-        this.pool = null;
     }
 }
 
@@ -373,18 +440,26 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         existing = null; // Clear reference after restart
     }
     
-    if (existing) return existing;
+    if (existing) {
+        if (existing instanceof BrowserTaskScheduler) {
+            existing.resetIdleTimerOnActivity();
+        }
+        return existing;
+    }
 
     if (initializationPromise) return initializationPromise;
 
     initializationPromise = (async () => {
         const schedulerVersion = currentVersion;
+        // Generate a unique ID for this scheduler instance to prevent PID reuse issues
+        const schedulerId = crypto.randomUUID();
+        
         const stateManager = new StateManager();
         const serverInfo = await stateManager.getBrowserServer();
         
         // Check if existing scheduler has different config version
         if (serverInfo) {
-            const isAlive = await stateManager.isPidAlive(serverInfo.pid);
+            const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
             if (isAlive) {
                 // Get the stored version from state
                 const state = await stateManager.readState();
@@ -414,7 +489,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         }
 
         // Slow path: start a server then atomically claim leadership via compare-and-set.
-        const scheduler = new BrowserTaskScheduler();
+        const scheduler = new BrowserTaskScheduler(schedulerId);
         let port: number;
         try {
             port = await scheduler.startServer();
@@ -430,14 +505,14 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         try {
             await stateManager.updateState(async (state) => {
                 if (state.browserServer) {
-                    const alive = await stateManager.isPidAlive(state.browserServer.pid);
+                    const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId);
                     if (alive) {
                         winnerPort = state.browserServer.port;
                         wonElection = false;
                         return state;
                     }
                 }
-                state.browserServer = { port, pid: process.pid };
+                state.browserServer = { port, pid: process.pid, schedulerId };
                 state.schedulerVersion = schedulerVersion; // Store current version in state
                 wonElection = true;
                 return state;

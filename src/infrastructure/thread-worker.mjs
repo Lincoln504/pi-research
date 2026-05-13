@@ -6,7 +6,7 @@
 
 /* global document, URL, setTimeout */
 import { ClusterWorker } from 'poolifier';
-import { createRequire } from 'module';
+import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import process from 'node:process';
 import cluster from 'node:cluster';
@@ -25,6 +25,23 @@ if (cluster.isWorker && cluster.worker) {
 
 // Generate a random ID for this worker process to track distribution in logs
 const workerId = Math.random().toString(36).substring(2, 6);
+
+// Orphaned worker protection: If parent dies, kill the worker.
+// This works cross-platform (Linux, Mac, Windows) in Node.js.
+if (process.ppid) {
+    setInterval(() => {
+        try {
+            // signal 0 checks if the process is alive
+            process.kill(process.ppid, 0);
+        } catch (e) {
+            // If error is thrown, the parent process is likely dead or unreachable
+            logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
+            if (context) context.close().catch(() => {});
+            if (browser) browser.close().catch(() => {});
+            process.exit(1);
+        }
+    }, 10000);
+}
 
 /**
  * File-based logger for workers that mirrors the main process format
