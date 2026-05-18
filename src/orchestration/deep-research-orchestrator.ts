@@ -186,7 +186,8 @@ export class DeepResearchOrchestrator {
           currentPlan.allQueries = currentPlan.researchers.flatMap(r => r.queries);
       }
       currentPlan = this.capResearcherQueries(currentPlan);
-      
+      this.totalResearchersPlanned += currentPlan.researchers?.length ?? 0;
+
       logger.log(`[Orchestrator] ${this.elapsed()} Coordinator done in ${((Date.now() - coordStartMs) / 1000).toFixed(1)}s — planned ${currentPlan.researchers?.length || 0} researcher(s)`);
 
       const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
@@ -196,7 +197,7 @@ export class DeepResearchOrchestrator {
       while (this.currentRound < maxRounds + MAX_EXTRA_ROUNDS) {
           if (signal?.aborted) throw new Error("Research aborted.");
           this.currentRound++;
-          if (!currentPlan || !currentPlan.researchers) break;
+          if (!currentPlan || !currentPlan.researchers || currentPlan.researchers.length === 0) break;
           
           this.options.observer?.onRoundStart?.(this.currentRound);
           // 2. Search Burst
@@ -754,7 +755,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
 
       let extracted = extractJson<ResearchPlan>(text, 'any');
-      if (!extracted.success && text.trim()) {
+      const correctionSafe = evalUserMessage.length + text.length < 120_000;
+      if (!extracted.success && text.trim() && correctionSafe) {
           logger.warn('[Orchestrator] Evaluator JSON parse failed; attempting self-correction');
           const correctionMsg = `${evalUserMessage}\n\n---\n\nYOUR PREVIOUS RESPONSE (not valid JSON):\n${text}\n\n---\n\nReturn ONLY a valid JSON object now. No prose before or after.`;
           const corrResponse = await completeSimple(this.options.model, {
