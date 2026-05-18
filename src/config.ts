@@ -40,6 +40,16 @@ export interface Config {
   WORKER_THREADS: number;
   /** Number of concurrent tasks per pool worker process (default: 3, range: 1–10) */
   WORKER_CONCURRENCY: number;
+  /** Whether the local knowledge store is enabled (default: true) */
+  KNOWLEDGE_STORE_ENABLED: boolean;
+  /** Embedding model to use for the knowledge store */
+  EMBEDDING_MODEL: string;
+  /** Target chunk size for text splitting (default: 3000) */
+  CHUNK_SIZE_CHARS: number;
+  /** Overlap between chunks (default: 512) */
+  CHUNK_OVERLAP_CHARS: number;
+  /** How long to keep cached scrapes in the knowledge store (default: 30 days) */
+  KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
 }
 
 export const DEFAULTS: Config = {
@@ -55,6 +65,11 @@ export const DEFAULTS: Config = {
   MAX_SCRAPE_BATCHES: 2,
   WORKER_THREADS: 4,
   WORKER_CONCURRENCY: 3,
+  KNOWLEDGE_STORE_ENABLED: true,
+  EMBEDDING_MODEL: 'jinaai/jina-embeddings-v5-text-nano-retrieval',
+  CHUNK_SIZE_CHARS: 3000,
+  CHUNK_OVERLAP_CHARS: 512,
+  KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
 };
 
 // ============================================================================
@@ -107,6 +122,11 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
+    PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: String(config.KNOWLEDGE_STORE_ENABLED),
+    PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
+    PI_RESEARCH_CHUNK_SIZE_CHARS: String(config.CHUNK_SIZE_CHARS),
+    PI_RESEARCH_CHUNK_OVERLAP_CHARS: String(config.CHUNK_OVERLAP_CHARS),
+    PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -194,9 +214,24 @@ function parseEnvNumber(
 function parseEnvString(
   env: Record<string, string | undefined>,
   key: string,
+  defaultValue?: string,
 ): string | undefined {
   const value = env[key];
-  return value === undefined || value === '' ? undefined : value;
+  return value === undefined || value === '' ? defaultValue : value;
+}
+
+function parseEnvBool(
+  env: Record<string, string | undefined>,
+  key: string,
+  defaultValue: boolean,
+): boolean {
+  const value = env[key];
+  if (value === undefined || value === '') return defaultValue;
+  const normalized = value.toLowerCase().trim();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  logger.warn(`[config] Invalid boolean for ${key}: "${value}", using default ${defaultValue}`);
+  return defaultValue;
 }
 
 // ============================================================================
@@ -236,6 +271,11 @@ export function createConfig(
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
+    KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_STORE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
+    EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
+    CHUNK_SIZE_CHARS: parseEnvNumber(e, 'PI_RESEARCH_CHUNK_SIZE_CHARS', DEFAULTS.CHUNK_SIZE_CHARS),
+    CHUNK_OVERLAP_CHARS: parseEnvNumber(e, 'PI_RESEARCH_CHUNK_OVERLAP_CHARS', DEFAULTS.CHUNK_OVERLAP_CHARS),
+    KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
   };
 }
 
@@ -302,6 +342,21 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.WORKER_CONCURRENCY < 1 || config.WORKER_CONCURRENCY > 10) {
     throw new Error(
       `PI_RESEARCH_WORKER_CONCURRENCY must be 1–10, got ${config.WORKER_CONCURRENCY}`,
+    );
+  }
+  if (config.CHUNK_SIZE_CHARS < 500 || config.CHUNK_SIZE_CHARS > 10000) {
+    throw new Error(
+      `PI_RESEARCH_CHUNK_SIZE_CHARS must be 500–10000, got ${config.CHUNK_SIZE_CHARS}`,
+    );
+  }
+  if (config.CHUNK_OVERLAP_CHARS < 0 || config.CHUNK_OVERLAP_CHARS > config.CHUNK_SIZE_CHARS / 2) {
+    throw new Error(
+      `PI_RESEARCH_CHUNK_OVERLAP_CHARS must be 0–${config.CHUNK_SIZE_CHARS / 2}, got ${config.CHUNK_OVERLAP_CHARS}`,
+    );
+  }
+  if (config.KNOWLEDGE_STORE_CACHE_TTL_DAYS < 1 || config.KNOWLEDGE_STORE_CACHE_TTL_DAYS > 365) {
+    throw new Error(
+      `PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS must be 1–365, got ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS}`,
     );
   }
   if (

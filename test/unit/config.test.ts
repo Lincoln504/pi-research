@@ -71,6 +71,31 @@ describe('config (refactored)', () => {
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
         expect(config.PROXY_URL).toBe('socks5://127.0.0.1:9050');
       });
+
+      it('should parse knowledge store configuration from env', () => {
+        const env = {
+          PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'false',
+          PI_RESEARCH_EMBEDDING_MODEL: 'custom-model',
+          PI_RESEARCH_CHUNK_SIZE_CHARS: '1500',
+          PI_RESEARCH_CHUNK_OVERLAP_CHARS: '256',
+          PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '15',
+        };
+        const config = createConfig(env, {});
+
+        expect(config.KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(config.EMBEDDING_MODEL).toBe('custom-model');
+        expect(config.CHUNK_SIZE_CHARS).toBe(1500);
+        expect(config.CHUNK_OVERLAP_CHARS).toBe(256);
+        expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(15);
+      });
+
+      it('should handle boolean variations in env for KNOWLEDGE_STORE_ENABLED', () => {
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'TRUE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'FALSE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: '' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true); // default
+      });
     });
   });
 
