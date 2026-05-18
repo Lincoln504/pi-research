@@ -27,6 +27,9 @@ dist/
 build/
 out/
 
+# Claude Code project config
+.claude/
+
 # Editor directories and files
 .vscode/
 !.vscode/extensions.json

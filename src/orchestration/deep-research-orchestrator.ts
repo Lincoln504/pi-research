@@ -560,9 +560,12 @@ You are in the late phase of research. Set a higher threshold for delegation:
         : '';
 
     const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
-    // CRITICAL: initialLinks are ALWAYS provided - orchestrator guarantees search results for all delegated researchers
+    // Warn and skip researchers that received no links after distribution — the
+    // evaluator/synthesis code only iterates this.reports, so a missing entry is
+    // handled gracefully (empty reportsText contribution for that researcher).
     if (initialLinks.length === 0) {
-        throw new Error(`[Orchestrator] Researcher ${id} has no initial search results. Orchestrator guarantee violated: researchers must always receive search results.`);
+        logger.warn(`[Orchestrator] Researcher ${id} has no initial search results after distribution; skipping.`);
+        return;
     }
     const evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
     const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')

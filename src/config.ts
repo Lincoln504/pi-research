@@ -38,6 +38,8 @@ export interface Config {
   MAX_SCRAPE_BATCHES: number;
   /** Number of parallel browser workers for search and scraping (default: 3) */
   WORKER_THREADS: number;
+  /** Number of concurrent tasks per pool worker process (default: 3, range: 1–10) */
+  WORKER_CONCURRENCY: number;
 }
 
 export const DEFAULTS: Config = {
@@ -52,6 +54,7 @@ export const DEFAULTS: Config = {
   DEFAULT_RESEARCH_DEPTH: 0,
   MAX_SCRAPE_BATCHES: 2,
   WORKER_THREADS: 4,
+  WORKER_CONCURRENCY: 3,
 };
 
 // ============================================================================
@@ -103,6 +106,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_DEFAULT_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
+    PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -231,6 +235,7 @@ export function createConfig(
     DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
+    WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
   };
 }
 
@@ -292,6 +297,11 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.WORKER_THREADS < 1 || config.WORKER_THREADS > 16) {
     throw new Error(
       `PI_RESEARCH_WORKER_THREADS must be 1–16, got ${config.WORKER_THREADS}`,
+    );
+  }
+  if (config.WORKER_CONCURRENCY < 1 || config.WORKER_CONCURRENCY > 10) {
+    throw new Error(
+      `PI_RESEARCH_WORKER_CONCURRENCY must be 1–10, got ${config.WORKER_CONCURRENCY}`,
     );
   }
   if (

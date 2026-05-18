@@ -27,7 +27,7 @@ export async function cleanupStaleProfiles(): Promise<{ removed: number; errors:
                         await fs.rm(fullPath, { recursive: true, force: true });
                         removed++;
                     }
-                } catch (e) {
+                } catch (_e) {
                     errors++;
                     // Ignore errors for individual directories (might be in use)
                 }

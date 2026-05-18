@@ -74,6 +74,12 @@ export async function forceSchedulerRestart(): Promise<void> {
     (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
     cachedSchedulerVersion = null;
     initializationPromise = null;
+
+    // Clear the health check singleton cache so the next research run re-validates the
+    // browser. The scheduler restart means the pool is being torn down; a cached
+    // "health OK" result would be stale and could let a dead pool go undetected.
+    // Cleared via globalThis directly to avoid a circular import with healthcheck/index.ts.
+    (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = null;
     
     // Find and clear any stale scheduler processes BEFORE clearing state
     const stateManager = new StateManager();
@@ -106,6 +112,7 @@ class BrowserTaskScheduler implements IScheduler {
     private server: BrowserServer | null = null;
     private currentWorkerCount: number | null = null;
     private leadershipTimer: any = null;
+    private consecutiveErrors: number = 0;
 
     constructor(private readonly schedulerId: string) {
         // Pool initialization is deferred to first use via ensurePool()
@@ -192,13 +199,20 @@ class BrowserTaskScheduler implements IScheduler {
                     browserEnv['PI_RESEARCH_LOG_FILE'] = logFilePath;
                 }
 
+                const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
                 this.pool = new FixedClusterPool(maxWorkers, join(__dirname, 'thread-worker.mjs'), {
                     env: browserEnv,
-                    errorHandler: (e: Error) => logger.error('[Scheduler] Cluster Error:', e),
+                    errorHandler: (e: Error) => {
+                        this.consecutiveErrors++;
+                        logger.error('[Scheduler] Cluster Error:', e);
+                        if (this.consecutiveErrors >= 3) {
+                            logger.error(`[Scheduler] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
+                        }
+                    },
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
                     enableTasksQueue: true,
                     tasksQueueOptions: {
-                        concurrency: 3, // 3 concurrent tasks per process; safe with page-level isolation
+                        concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
                         taskStealing: true,
                         tasksStealingOnBackPressure: true
                     }
@@ -238,6 +252,7 @@ class BrowserTaskScheduler implements IScheduler {
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) throw new Error(result.error);
+        this.consecutiveErrors = 0;
         return result.results;
     }
 
@@ -260,6 +275,7 @@ class BrowserTaskScheduler implements IScheduler {
         }
         
         if (result.error) throw new Error(result.error);
+        this.consecutiveErrors = 0;
         return result;
     }
 
@@ -285,6 +301,7 @@ class BrowserTaskScheduler implements IScheduler {
         const duration = Date.now() - startTime;
         logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         if (result.error) throw new Error(result.error);
+        this.consecutiveErrors = 0;
         return result;
     }
 
@@ -308,7 +325,10 @@ class BrowserTaskScheduler implements IScheduler {
 
         const stateManager = new StateManager();
         const serverInfo = await stateManager.getBrowserServer();
-        if (serverInfo?.pid === process.pid) {
+        // Only clear state if this scheduler still owns it — same pid AND same schedulerId.
+        // Checking pid alone is wrong when a new scheduler wins election in the same process:
+        // the old scheduler's shutdown would wipe the new leader's registration.
+        if (serverInfo?.pid === process.pid && serverInfo?.schedulerId === this.schedulerId) {
             await stateManager.clearBrowserServer().catch(() => {});
         }
 
