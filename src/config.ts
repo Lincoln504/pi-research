@@ -36,7 +36,7 @@ export interface Config {
   DEFAULT_RESEARCH_DEPTH: number;
   /** Maximum scrape batches per researcher (0-16, 0=unlimited, default: 2) */
   MAX_SCRAPE_BATCHES: number;
-  /** Number of parallel browser workers for search and scraping (default: 3) */
+  /** Number of parallel browser workers for search and scraping (default: 4) */
   WORKER_THREADS: number;
   /** Number of concurrent tasks per pool worker process (default: 3, range: 1–10) */
   WORKER_CONCURRENCY: number;
@@ -317,14 +317,3 @@ export function validateConfig(config: Config = getConfig()): void {
   }
 }
 
-// ============================================================================
-// Backward compatibility
-// ============================================================================
-
-/** @deprecated Use getConfig().RESEARCHER_TIMEOUT_MS */
-export function getResearcherTimeoutMs(): number { return getConfig().RESEARCHER_TIMEOUT_MS; }
-/** @deprecated Use getConfig().PROXY_URL */
-export function getProxyUrl(): string | undefined { return getConfig().PROXY_URL; }
-
-export const RESEARCHER_TIMEOUT_MS = getResearcherTimeoutMs();
-export const PROXY_URL = getProxyUrl();

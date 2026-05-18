@@ -33,7 +33,6 @@ export interface ResearchObserver {
   onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: any, round?: number): void;
   
   // Synthesis/Completion
-  onSynthesisStart?(): void;
   onComplete?(result: string): void;
   onError?(error: Error): void;
   

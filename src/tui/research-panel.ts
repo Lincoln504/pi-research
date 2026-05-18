@@ -1084,6 +1084,10 @@ export function createMasterResearchPanel(
           allLines.push(...blockLines);
         }
 
+        if (panels.length > 0) {
+          allLines.push(theme.fg('muted', ' esc to cancel'));
+        }
+
         return allLines.map(line => {
           const w = visibleWidth(line);
           if (w > width) {

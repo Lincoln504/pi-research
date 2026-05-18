@@ -45,6 +45,8 @@ import {
   refreshAllSessions,
   onSessionOrderChange,
   getPiActivePanels,
+  registerSessionAbort,
+  abortAllSessions,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
@@ -72,7 +74,18 @@ async function ensureFunctionalHealth(
   try {
     const health = await runHealthCheck();
     if (!health.success) {
-      throw new Error(`Functional health check failed: ${health.error || 'Unknown error'}.`);
+      const raw = health.error || '';
+      let msg: string;
+      if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
+        msg = 'Browser engine not installed. Run `npm run setup` to install it.';
+      } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
+        msg = 'Unable to reach the web (connection timed out). Check your internet connection, or set SEARXNG_URL to use an external search instance.';
+      } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {
+        msg = 'Unable to reach the web (network error). Check your internet connection.';
+      } else {
+        msg = `Browser readiness check failed. Run with PI_RESEARCH_VERBOSE=1 for details. (${raw || 'unknown error'})`;
+      }
+      throw new Error(msg);
     }
   } finally {
     removeSlice(panelState, sliceLabel);
@@ -197,6 +210,7 @@ export function createResearchTool(): ToolDefinition {
           const modelIdStr = typedModel?.id || 'unknown';
 
           const researchId = startResearchSession(piSessionId);
+          registerSessionAbort(piSessionId, researchId, internalAbort);
           const masterWidgetId = `pi-research-master-${piSessionId}`;
 
           cleanup = () => {
@@ -252,7 +266,7 @@ export function createResearchTool(): ToolDefinition {
 
           unsubInput = ctx.ui.onTerminalInput((data: string) => {
             if (data !== '\x1b' && data !== '\x03') return undefined;
-            internalAbort.abort();
+            abortAllSessions(piSessionId);
             return { consume: true };
           });
 
@@ -306,7 +320,7 @@ export function createResearchTool(): ToolDefinition {
                 clearCompletedResearchers(panelState);
               }
             },
-            onSearchStart: () => {
+            onSearchStart: (queries) => {
               let sliceId = 'coord';
               if (!panelState.slices.has('coord') && !quickSliceLabel) {
                  sliceId = 'eval';
@@ -317,7 +331,7 @@ export function createResearchTool(): ToolDefinition {
                  sliceId = quickSliceLabel;
               }
               if (panelState.slices.has(sliceId)) reactivateSlice(panelState, sliceId);
-              updateSliceStatus(panelState, sliceId, '0 Results');
+              updateSliceStatus(panelState, sliceId, queries.length > 0 ? `${queries.length} queries` : '...');
               panelState.isSearching = true;
 
               // Start wave animation timer
@@ -345,7 +359,7 @@ export function createResearchTool(): ToolDefinition {
               updateSliceStatus(panelState, sliceId, `${count} Results`);
               debouncedRefresh();
             },
-            onSearchComplete: () => {
+            onSearchComplete: (_count) => {
               panelState.isSearching = false;
 
               // Stop wave animation timer
@@ -403,7 +417,7 @@ export function createResearchTool(): ToolDefinition {
               }
               debouncedRefresh();
             },
-            onResearcherComplete: (id) => {
+            onResearcherComplete: (id, _report) => {
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               if (panelState.progress) {
                 const unitsPerResearcher = getUnitsPerResearcher();
@@ -432,10 +446,10 @@ export function createResearchTool(): ToolDefinition {
               completeSlice(panelState, displayNum);
               debouncedRefresh();
             },
-            onEvaluationStart: () => {
+            onEvaluationStart: (round) => {
               addSlice(panelState, 'eval', 'eval', false);
               activateSlice(panelState, 'eval');
-              updateSliceStatus(panelState, 'eval', 'Assessing...');
+              updateSliceStatus(panelState, 'eval', `Round ${round}`);
               debouncedRefresh();
             },
             onEvaluationProgress: (status) => {

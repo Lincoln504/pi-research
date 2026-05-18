@@ -75,6 +75,8 @@ vi.mock('../../src/utils/session-state.ts', () => ({
   refreshAllSessions: vi.fn(),
   clearPendingRefresh: vi.fn(),
   getPiActivePanels: vi.fn(() => []),
+  registerSessionAbort: vi.fn(),
+  abortAllSessions: vi.fn(),
 }));
 
 vi.mock('../../src/utils/shared-links.ts', () => ({

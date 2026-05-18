@@ -20,6 +20,8 @@ interface PiSessionState {
   order: string[];
   /** Registry of panel states for each research run */
   panels: Map<string, ResearchPanelState>;
+  /** Registry of abort controllers for each active research run */
+  aborts: Map<string, AbortController>;
   /** Subscribers for order changes in this Pi session */
   subscribers: Array<() => void>;
   /** Global debounce timer for this specific Pi session */
@@ -43,6 +45,7 @@ function getPiState(piSessionId: string): PiSessionState {
       failures: new Map(),
       order: [],
       panels: new Map(),
+      aborts: new Map(),
       subscribers: [],
       refreshTimeout: null,
       masterUpdate: null,
@@ -129,9 +132,7 @@ export function refreshAllSessions(piSessionId: string): void {
   state.refreshTimeout = setTimeout(() => {
     try {
       // Validate order integrity
-      const validIds = state.order.filter(id =>
-        state.panels.has(id) && state.failures.has(id)
-      );
+      const validIds = state.order.filter(id => state.panels.has(id));
 
       if (validIds.length !== state.order.length) {
         for (const id of state.order) {
@@ -180,6 +181,25 @@ export function clearPendingRefresh(piSessionId: string): void {
 }
 
 /**
+ * Register an abort controller for a research run so Esc can cancel all active runs at once.
+ */
+export function registerSessionAbort(piSessionId: string, researchId: string, controller: AbortController): void {
+  getPiState(piSessionId).aborts.set(researchId, controller);
+}
+
+/**
+ * Abort every active research run in a Pi session.
+ * Called when the user presses Esc — cancels all concurrent sessions with a single keypress.
+ */
+export function abortAllSessions(piSessionId: string): void {
+  const state = piSessions.get(piSessionId);
+  if (!state) return;
+  for (const controller of state.aborts.values()) {
+    controller.abort();
+  }
+}
+
+/**
  * End a research run
  */
 export function endResearchSession(piSessionId: string, researchId: string): void {
@@ -188,6 +208,7 @@ export function endResearchSession(piSessionId: string, researchId: string): voi
 
   state.failures.delete(researchId);
   state.panels.delete(researchId);
+  state.aborts.delete(researchId);
 
   const index = state.order.indexOf(researchId);
   if (index !== -1) {
@@ -257,7 +278,7 @@ export function getResearchStopMessage(piSessionId: string, researchId: string):
     '• Verify network connection is active',
     '• Check browser logs for automation detection signals',
     '• Verify PROXY_URL if configured (optional): should be socks5://host:port or http://host:port',
-    '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 4 minutes)',
+    '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 6 minutes)',
     '',
     'Partial results may be available below.',
   ].join('\n');

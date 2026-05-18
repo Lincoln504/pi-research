@@ -63,6 +63,8 @@ vi.mock('../../src/utils/session-state.ts', () => ({
   refreshAllSessions: vi.fn(),
   onSessionOrderChange: vi.fn((_psid, _cb) => vi.fn()),
   getPiActivePanels: vi.fn(), // We will control this in tests
+  registerSessionAbort: vi.fn(),
+  abortAllSessions: vi.fn(),
 }));
 
 vi.mock('../../src/utils/shared-links.ts', () => ({

@@ -30,7 +30,8 @@ Pick the 4 most promising URLs from your source list and scrape them.
 Prioritize primary sources, authoritative references, and pages likely to contain dense, relevant, citable information. Pay close attention to pages with original data, research, or authoritative documentation.
 
 ### Step 3: Discover and Scrape Round 2 (if needed)
-After Round 1, identify up to 4 additional high-value links from what you scraped.
+After Round 1, call `links` to see URLs collected by sibling researchers — they may have surfaced sources your initial evidence missed.
+Then identify up to 4 additional high-value links from what you scraped and from the shared pool.
 Prioritize links that fill gaps and add source diversity — aim to find multiple independent sources confirming key findings. Avoid re-scraping already-covered content, but do pursue multiple perspectives on major topics.
 
 ### Step 4: Synthesize
@@ -48,7 +49,7 @@ Make no further tool calls after beginning synthesis.
 
 - **Available Tools**:
   - `scrape`: Fetch and read web pages (your primary tool)
-  - `stackexchange`: Get technical Q&A from Stack Exchange network
+  - `stackexchange`: Get technical Q&A from Stack Exchange network — **use this for any Stack Exchange / Stack Overflow URL** (stackoverflow.com, *.stackexchange.com); do NOT scrape those domains directly, they are Cloudflare-blocked
   - `links`: View all collected URLs
   - `security_search`: Query security databases (CVE, NVD, OSV, CISA)
   - `grep`: Search the local codebase using Ripgrep

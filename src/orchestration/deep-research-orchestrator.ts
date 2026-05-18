@@ -89,6 +89,7 @@ export class DeepResearchOrchestrator {
   private config: Config;
   private allQueriesHistory: string[] = [];
   private totalResearchersPlanned: number = 0;
+  private activeSessions = new Map<string, { abort(): Promise<void> }>();
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig();
@@ -126,10 +127,11 @@ export class DeepResearchOrchestrator {
       logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headers=${JSON.stringify(auth.headers)}`);
 
       const historyMessages: any[] = [];
+      let lastRawPlanText = '';
       for (let attempt = 1; attempt <= 3; attempt++) {
         if (attempt > 1) this.options.observer?.onPlanningStart?.(attempt);
         const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
-        const messages = attempt === 1 
+        const messages = attempt === 1
           ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${this.options.query}"` }] }]
           : historyMessages;
 
@@ -148,7 +150,8 @@ export class DeepResearchOrchestrator {
 
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
         const rawPlanText = textContent?.text || "";
-        
+        lastRawPlanText = rawPlanText;
+
         try {
           currentPlan = this.parseJsonPlan(rawPlanText);
 
@@ -161,9 +164,14 @@ export class DeepResearchOrchestrator {
               this.options.observer?.onTokensConsumed?.(tokens, cost);
           }
           this.options.observer?.onPlanningSuccess?.(currentPlan);
-          break; 
+          break;
         } catch (err) {
-          if (attempt >= 3) throw err;
+          if (attempt >= 3) {
+            logger.warn(`[Orchestrator] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
+            currentPlan = this.buildFallbackCoordinatorPlan(lastRawPlanText);
+            this.options.observer?.onPlanningSuccess?.(currentPlan);
+            break;
+          }
           if (attempt === 1) historyMessages.push(messages[0]);
           historyMessages.push({ role: 'assistant', content: planResponse.content });
           historyMessages.push({ role: 'user', content: [{ type: 'text', text: retryHint }] });
@@ -226,8 +234,13 @@ export class DeepResearchOrchestrator {
     } catch (error) {
       if (error instanceof Error && error.message === 'Research aborted.') throw error;
       logger.error('[Orchestrator] Run failed:', error);
+      if (this.reports.size > 0) {
+        const partial = this.buildFallbackSynthesis();
+        this.options.observer?.onComplete?.(partial);
+        this.options.observer?.onError?.(error as Error);
+        return partial;
+      }
       this.options.observer?.onError?.(error as Error);
-      if (this.reports.size > 0) return this.buildFallbackSynthesis();
       return "Research failed. Check debug logs for details.";
     }
   }
@@ -475,6 +488,18 @@ You are in the late phase of research. Set a higher threshold for delegation:
     }
   }
 
+  private buildFallbackCoordinatorPlan(_rawText: string): ResearchPlan {
+    const query = this.options.query;
+    const words = query.split(/\s+/).slice(0, 6).join(' ');
+    const queries = [query, `${words} overview`, `${words} latest`].filter(Boolean).slice(0, 3);
+    logger.warn(`[Orchestrator] Coordinator fallback: single researcher for "${query.slice(0, 80)}"`);
+    return {
+      action: 'delegate',
+      researchers: [{ id: '1', name: 'General Researcher', goal: `Research the following query comprehensively: ${query}`, queries }],
+      allQueries: queries,
+    };
+  }
+
   private distributeResults(plan: ResearchPlan, results: QueryResultWithError[]): Map<string, string[]> {
     const startTime = Date.now();
     const linkMap = new Map<string, string[]>();
@@ -536,7 +561,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
               const links = linksMap.get(String(config.id)) || [];
               const p = this.runResearcher(config, links, signal)
                   .catch((err) => {
-                      this.options.observer?.onResearcherFailure?.(String(config.id), err.message || String(err));
+                      const errMsg = err.message || String(err);
+                      logger.error(`[Orchestrator] Researcher ${config.id} failed: ${errMsg}`);
+                      this.options.observer?.onResearcherFailure?.(String(config.id), errMsg);
                       recordResearcherFailure(this.options.sessionId, this.options.researchId, String(config.id));
                   })
                   .finally(() => { active.delete(p); });
@@ -545,6 +572,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
           if (active.size > 0) {
               await Promise.race(active);
               if (shouldStopResearch(this.options.sessionId, this.options.researchId)) {
+                  for (const sess of this.activeSessions.values()) {
+                      sess.abort().catch(() => {});
+                  }
                   throw new Error("Research stopped due to excessive infrastructure failures. Multiple researchers failed.");
               }
           }
@@ -560,11 +590,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
         : '';
 
     const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
-    // Warn and skip researchers that received no links after distribution — the
-    // evaluator/synthesis code only iterates this.reports, so a missing entry is
-    // handled gracefully (empty reportsText contribution for that researcher).
     if (initialLinks.length === 0) {
         logger.warn(`[Orchestrator] Researcher ${id} has no initial search results after distribution; skipping.`);
+        this.options.observer?.onResearcherComplete?.(id, '');
         return;
     }
     const evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
@@ -575,64 +603,88 @@ You are in the late phase of research. Set a higher threshold for delegation:
       .replace('{{extra_tool_guidelines}}', '');
 
     const extendedCtx = this.options.ctx as any;
-    const session = await createResearcherSession({
-      cwd: this.options.ctx.cwd,
-      ctxModel: this.options.model,
-      modelRegistry: this.options.ctx.modelRegistry,
-      settingsManager: extendedCtx.settingsManager,
-      systemPrompt: prompt,
-      extensionCtx: this.options.ctx,
-      noSearch: true,
-      getGlobalState: () => ({ researchId: this.options.researchId } as any),
-      onSearchProgress: (links) => {
-          this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
-      },
-    });
+    const maxAttempts = this.config.RESEARCHER_MAX_RETRIES + 1;
+    let lastError: unknown;
 
-    const subscription = session.subscribe((event: AgentSessionEvent) => {
-        if (event.type === 'message_end') {
-            const msg = event.message as any;
-            if (msg?.role !== 'assistant') return;
-            const rawUsage = msg.usage;
-            if (rawUsage) {
-                const parsed = parseTokenUsage(rawUsage);
-                const tokens = calculateTotalTokens(parsed);
-                const cost: number = (rawUsage as any).cost?.total ?? 0;
-                if (tokens > 0 || cost > 0) {
-                    this.options.observer?.onResearcherProgress?.(id, undefined, tokens, cost);
-                    this.options.observer?.onTokensConsumed?.(tokens, cost);
-                }
-            }
-        } else if (event.type === 'tool_execution_start') {
-            this.options.observer?.onResearcherProgress?.(id, `${event.toolName}`);
-        } else if (event.type === 'tool_execution_end') {
-            this.options.observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
-        }
-    });
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 2), this.config.RESEARCHER_MAX_RETRY_DELAY_MS);
+        logger.warn(`[Orchestrator] Researcher ${id} retry ${attempt - 1}/${this.config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
+        this.options.observer?.onResearcherProgress?.(id, `Retry ${attempt - 1}...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
 
-    try {
-      let timeoutId: NodeJS.Timeout;
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Researcher ${id} timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`)), this.config.RESEARCHER_TIMEOUT_MS);
+      const session = await createResearcherSession({
+        cwd: this.options.ctx.cwd,
+        ctxModel: this.options.model,
+        modelRegistry: this.options.ctx.modelRegistry,
+        settingsManager: extendedCtx.settingsManager,
+        systemPrompt: prompt,
+        extensionCtx: this.options.ctx,
+        noSearch: true,
+        getGlobalState: () => ({ researchId: this.options.researchId } as any),
+        onSearchProgress: (links) => {
+            this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
+        },
+      });
+      this.activeSessions.set(id, session);
+
+      const subscription = session.subscribe((event: AgentSessionEvent) => {
+          if (event.type === 'message_end') {
+              const msg = event.message as any;
+              if (msg?.role !== 'assistant') return;
+              const rawUsage = msg.usage;
+              if (rawUsage) {
+                  const parsed = parseTokenUsage(rawUsage);
+                  const tokens = calculateTotalTokens(parsed);
+                  const cost: number = (rawUsage as any).cost?.total ?? 0;
+                  if (tokens > 0 || cost > 0) {
+                      this.options.observer?.onResearcherProgress?.(id, undefined, tokens, cost);
+                      this.options.observer?.onTokensConsumed?.(tokens, cost);
+                  }
+              }
+          } else if (event.type === 'tool_execution_start') {
+              this.options.observer?.onResearcherProgress?.(id, `${event.toolName}`);
+          } else if (event.type === 'tool_execution_end') {
+              this.options.observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
+          }
       });
 
       try {
-        // Race the researcher session against timeout. If timeout fires first, session will be aborted
-        // in the finally block below. If session completes first, we clear timeout and return result.
-        await Promise.race([
-          session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
-          timeoutPromise
-        ]);
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<void>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            const msg = `Researcher ${id} (${config.name}) timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
+            session.abort().catch(() => {}).finally(() => reject(new Error(msg)));
+          }, this.config.RESEARCHER_TIMEOUT_MS);
+        });
+
+        try {
+          await Promise.race([
+            session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
+            timeoutPromise
+          ]);
+        } finally {
+          clearTimeout(timeoutId!);
+        }
+        const responseText = ensureAssistantResponse(session, id);
+        this.reports.set(`${this.currentRound}.${id}`, responseText);
+        this.options.observer?.onResearcherComplete?.(id, responseText);
+        return;
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxAttempts) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.warn(`[Orchestrator] Researcher ${id} attempt ${attempt} failed: ${errMsg}; will retry`);
+          session.abort().catch(() => {});
+        }
       } finally {
-        // Ensure timeout is always cleared, regardless of which promise won the race
-        clearTimeout(timeoutId!);
+        subscription();
+        this.activeSessions.delete(id);
       }
-      const responseText = ensureAssistantResponse(session, id);
-      this.reports.set(`${this.currentRound}.${id}`, responseText);
-      this.options.observer?.onResearcherComplete?.(id, responseText);
-    } finally {
-      subscription();
     }
+
+    throw lastError;
   }
 
   private async evaluate(signal?: AbortSignal, mustSynthesize = false): Promise<ResearchPlan> {
@@ -701,7 +753,20 @@ You are in the late phase of research. Set a higher threshold for delegation:
           if (text.trim()) break;
       }
 
-      const extracted = extractJson<ResearchPlan>(text, 'any');
+      let extracted = extractJson<ResearchPlan>(text, 'any');
+      if (!extracted.success && text.trim()) {
+          logger.warn('[Orchestrator] Evaluator JSON parse failed; attempting self-correction');
+          const correctionMsg = `${evalUserMessage}\n\n---\n\nYOUR PREVIOUS RESPONSE (not valid JSON):\n${text}\n\n---\n\nReturn ONLY a valid JSON object now. No prose before or after.`;
+          const corrResponse = await completeSimple(this.options.model, {
+              messages: [{ role: 'user', content: [{ type: 'text', text: correctionMsg }], timestamp: Date.now() }]
+          }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+          const corrText = corrResponse.content.find((c): c is TextContent => c.type === 'text');
+          if (corrText?.text?.trim()) {
+              extracted = extractJson<ResearchPlan>(corrText.text, 'any');
+              if (extracted.success) text = corrText.text;
+          }
+      }
+
       let plan: ResearchPlan;
       if (extracted.success && extracted.value) {
           plan = extracted.value;

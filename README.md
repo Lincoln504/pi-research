@@ -83,13 +83,16 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_MAX_CONCURRENT` | `3` | Max concurrent researchers (1-10). |
-| `PI_RESEARCH_BROWSER_HEADLESS` | `true` | Run research browser in headless mode. |
-| `PI_RESEARCH_EXPORT_DIR` | `cwd` | Directory for final research reports. |
+| `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Max concurrent researchers (1-5). |
+| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `360000` | Per-researcher timeout in ms (default 6m). |
+| `PI_RESEARCH_WORKER_CONCURRENCY` | `3` | Browser worker processes for search and scraping (1-10). |
+| `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | Per-page scrape navigation timeout in ms. |
+| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `30000` | Browser health check timeout in ms (valid range: 20000–120000). |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
 | `PROXY_URL` | — | Proxy for outgoing requests (e.g., `socks5://127.0.0.1:9050`). |
-| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases limit). |
-| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `240000` | Per-researcher timeout (default 4m). |
+| `BRAVE_SEARCH_API_KEY` | — | Brave Search API key (enables paid API engine). |
+| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases rate limit). |
+| `SEARXNG_URL` | — | External SearXNG URL — skips Docker container management entirely. |
 
 ---
 

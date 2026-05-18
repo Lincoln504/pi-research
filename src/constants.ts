@@ -36,13 +36,13 @@ export const MAX_SCRAPE_URLS = 4;
 /**
  * Get the units per researcher for the progress bar.
  * Units = 1 (for start/search) + number of scrape batches.
+ * When batches are unlimited (MAX_SCRAPE_BATCHES=0), caps at 4 for a sane progress estimate.
  */
 export function getUnitsPerResearcher(config?: Config): number {
-  return 1 + getMaxScrapeBatches(config);
+  const batches = getMaxScrapeBatches(config);
+  return 1 + Math.min(batches, 4);
 }
 
-/** Progress bar weight per individual researcher (Legacy, use getUnitsPerResearcher) */
-export const UNITS_PER_RESEARCHER = 10;
 /** Progress bar weight per lead evaluator round */
 export const LEAD_EVAL_UNITS = 2;
 
