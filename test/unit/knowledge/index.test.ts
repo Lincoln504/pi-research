@@ -41,8 +41,6 @@ vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn().mockReturnValue({
     KNOWLEDGE_STORE_ENABLED: true,
     EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
-    CHUNK_SIZE_CHARS: 3000,
-    CHUNK_OVERLAP_CHARS: 512,
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   }),
 }));
@@ -51,7 +49,7 @@ vi.mock('../../../src/logger.ts', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
 }));
 
-import { getModelEmbedderConfig } from '../../../src/knowledge/index.ts';
+import { getModelEmbedderConfig, getModelChunkConfig } from '../../../src/knowledge/index.ts';
 
 describe('getModelEmbedderConfig', () => {
   it('returns mean pooling and no prefix for unknown models', () => {
@@ -105,5 +103,67 @@ describe('getModelEmbedderConfig', () => {
     const b = getModelEmbedderConfig('Xenova/bge-m3');
     expect(a.pooling).toBe(b.pooling);
     expect(a.queryPrefix).toBe(b.queryPrefix);
+  });
+});
+
+describe('getModelChunkConfig', () => {
+  it('unknown model gets safe fallback values', () => {
+    const cfg = getModelChunkConfig('some/unknown-model');
+    expect(cfg.chunkSize).toBeGreaterThan(0);
+    expect(cfg.overlapPct).toBeGreaterThan(0);
+    expect(cfg.overlapPct).toBeLessThan(0.5);
+  });
+
+  it('MiniLM has a smaller chunk size than Qwen3 (respects training context)', () => {
+    const mini = getModelChunkConfig('Xenova/all-MiniLM-L6-v2');
+    const qwen = getModelChunkConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX');
+    expect(mini.chunkSize).toBeLessThan(qwen.chunkSize);
+  });
+
+  it('all listed models have chunk size within safe char range (500–5000)', () => {
+    const models = [
+      'Xenova/all-MiniLM-L6-v2',
+      'Xenova/bge-small-en-v1.5',
+      'Xenova/all-mpnet-base-v2',
+      'Xenova/multilingual-e5-small',
+      'Xenova/multilingual-e5-base',
+      'Xenova/bge-m3',
+      'onnx-community/embeddinggemma-300m-ONNX',
+      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+    ];
+    for (const m of models) {
+      const cfg = getModelChunkConfig(m);
+      expect(cfg.chunkSize, `${m} chunkSize`).toBeGreaterThanOrEqual(500);
+      expect(cfg.chunkSize, `${m} chunkSize`).toBeLessThanOrEqual(5000);
+    }
+  });
+
+  it('overlap percentage is 15% for all listed models', () => {
+    const models = [
+      'Xenova/all-MiniLM-L6-v2',
+      'Xenova/bge-m3',
+      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+    ];
+    for (const m of models) {
+      expect(getModelChunkConfig(m).overlapPct, `${m} overlapPct`).toBe(0.15);
+    }
+  });
+
+  it('derived overlap chars are strictly less than chunk size (no infinite loop)', () => {
+    const models = [
+      'Xenova/all-MiniLM-L6-v2',
+      'Xenova/bge-small-en-v1.5',
+      'Xenova/all-mpnet-base-v2',
+      'Xenova/multilingual-e5-small',
+      'Xenova/multilingual-e5-base',
+      'Xenova/bge-m3',
+      'onnx-community/embeddinggemma-300m-ONNX',
+      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+    ];
+    for (const m of models) {
+      const { chunkSize, overlapPct } = getModelChunkConfig(m);
+      const overlap = Math.round(chunkSize * overlapPct);
+      expect(overlap, `${m} overlap < chunkSize`).toBeLessThan(chunkSize);
+    }
   });
 });

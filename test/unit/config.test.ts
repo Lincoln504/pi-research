@@ -76,16 +76,12 @@ describe('config (refactored)', () => {
         const env = {
           PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'false',
           PI_RESEARCH_EMBEDDING_MODEL: 'custom-model',
-          PI_RESEARCH_CHUNK_SIZE_CHARS: '1500',
-          PI_RESEARCH_CHUNK_OVERLAP_CHARS: '256',
           PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '15',
         };
         const config = createConfig(env, {});
 
         expect(config.KNOWLEDGE_STORE_ENABLED).toBe(false);
         expect(config.EMBEDDING_MODEL).toBe('custom-model');
-        expect(config.CHUNK_SIZE_CHARS).toBe(1500);
-        expect(config.CHUNK_OVERLAP_CHARS).toBe(256);
         expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(15);
       });
 

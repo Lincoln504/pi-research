@@ -5,13 +5,18 @@ export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
-    // Integration tests
     include: ['test/integration/**/*.test.ts'],
     setupFiles: [],
-    testTimeout: 180000, // 180 second timeout for integration tests
-    maxConcurrency: 1, // Only one integration test at a time (shared browser resources)
-    fileParallelism: false,
+    testTimeout: 180000,
+    // Each integration test file uses its own /tmp dir — files can run in parallel.
+    // Tests within a single file share LanceDB instances, so they run sequentially.
+    fileParallelism: true,
     pool: 'forks',
+    forks: {
+      maxForks: 4,
+      minForks: 1,
+    },
     hookTimeout: 60000,
+    teardownTimeout: 30000,
   },
 });

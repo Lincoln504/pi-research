@@ -11,21 +11,51 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXTENSION_DIR = path.join(__dirname, '..', '..');
 
-// Per-model pooling and query-prefix overrides.
-// Mean pooling is assumed for any model not listed here.
-// BGE-M3: trained with CLS pooling (not mean).
-// Qwen3-Embedding: decoder-based, requires last-token pooling + instruction prefix for queries.
-const MODEL_CONFIG: Record<string, { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string }> = {
-  'Xenova/bge-m3': { pooling: 'cls' },
+interface ModelConfig {
+  pooling: 'mean' | 'cls' | 'last_token';
+  queryPrefix?: string;
+  // Target chunk size in characters. Derived from each model's training context and
+  // empirical RAG benchmarks — not just the hard token limit but the retrieval sweet spot.
+  chunkSize: number;
+  // Overlap fraction (0–0.5). 0.15 is the empirically best single value.
+  overlapPct: number;
+}
+
+// All-MiniLM-L6-v2: trained at 128 tokens — stay near that distribution (~200 tokens × 4 chars).
+// bge-small-en / ml-e5-*: 512-token max, trained at 512 — 375 tokens × 4 chars is a safe sweet spot.
+// all-mpnet-base-v2: fine-tuned at 128 tokens, truncates at 384 — 300 tokens × 4 chars.
+// bge-m3: 8192-token max, but dense retrieval peaks at 256-512 tokens, same practical sweet spot.
+// embeddinggemma-300m: 2048-token max, evaluated at 512 — 450 tokens × 4 chars.
+// Qwen3-Embedding-0.6B: 32768-token max, production sweet spot 512-768 tokens — 625 tokens × 4 chars.
+const MODEL_CONFIG: Record<string, ModelConfig> = {
+  'Xenova/all-MiniLM-L6-v2':             { pooling: 'mean', chunkSize: 800,  overlapPct: 0.15 },
+  'Xenova/bge-small-en-v1.5':            { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
+  'Xenova/all-mpnet-base-v2':            { pooling: 'mean', chunkSize: 1200, overlapPct: 0.15 },
+  'Xenova/multilingual-e5-small':        { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
+  'Xenova/multilingual-e5-base':         { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
+  'Xenova/bge-m3':                       { pooling: 'cls',  chunkSize: 1500, overlapPct: 0.15 },
+  'onnx-community/embeddinggemma-300m-ONNX': { pooling: 'mean', chunkSize: 1800, overlapPct: 0.15 },
   'onnx-community/Qwen3-Embedding-0.6B-ONNX': {
     pooling: 'last_token',
     queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages.\nQuery: ',
+    chunkSize: 2500,
+    overlapPct: 0.15,
   },
 };
 
-/** Returns the embedder configuration for a given model ID. Pure — safe to call any time. */
+const DEFAULT_CHUNK_SIZE = 1200;
+const DEFAULT_OVERLAP_PCT = 0.15;
+
+/** Returns embedder configuration (pooling + query prefix) for a model. Pure — safe to call any time. */
 export function getModelEmbedderConfig(modelId: string): { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string } {
-  return MODEL_CONFIG[modelId] ?? { pooling: 'mean' };
+  const cfg = MODEL_CONFIG[modelId];
+  return cfg ? { pooling: cfg.pooling, queryPrefix: cfg.queryPrefix } : { pooling: 'mean' };
+}
+
+/** Returns chunk size and overlap fraction for a model. Pure — safe to call any time. */
+export function getModelChunkConfig(modelId: string): { chunkSize: number; overlapPct: number } {
+  const cfg = MODEL_CONFIG[modelId];
+  return cfg ? { chunkSize: cfg.chunkSize, overlapPct: cfg.overlapPct } : { chunkSize: DEFAULT_CHUNK_SIZE, overlapPct: DEFAULT_OVERLAP_PCT };
 }
 
 let embedder: Embedder | null = null;
@@ -63,9 +93,10 @@ export async function initKnowledgeStore(): Promise<void> {
           modelName: config.EMBEDDING_MODEL,
         });
 
+        const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);
         chunker = new Chunker({
-          targetSize: config.CHUNK_SIZE_CHARS,
-          overlap: config.CHUNK_OVERLAP_CHARS,
+          targetSize: chunkCfg.chunkSize,
+          overlap: Math.round(chunkCfg.chunkSize * chunkCfg.overlapPct),
         });
 
         writerQueue = new WriterQueue({ store: store, chunker: chunker });

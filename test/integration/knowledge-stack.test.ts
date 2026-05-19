@@ -17,7 +17,7 @@ import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { WriterQueue } from '../../src/knowledge/writer-queue.ts';
 import { Chunker } from '../../src/knowledge/chunker.ts';
 import { Embedder } from '../../src/knowledge/embedder.ts';
-import { getModelEmbedderConfig } from '../../src/knowledge/index.ts';
+import { getModelEmbedderConfig, getModelChunkConfig } from '../../src/knowledge/index.ts';
 
 // ---------------------------------------------------------------------------
 // Synthetic embedder — returns deterministic vectors without downloading models
@@ -240,7 +240,7 @@ describe('Knowledge stack integration', () => {
   // ── MODEL_CONFIG / getModelEmbedderConfig ─────────────────────────────────
 
   describe('getModelEmbedderConfig', () => {
-    it('mean pooling is the default for unlisted models', () => {
+    it('mean-pooling models all return pooling: mean', () => {
       expect(getModelEmbedderConfig('Xenova/all-MiniLM-L6-v2').pooling).toBe('mean');
       expect(getModelEmbedderConfig('Xenova/bge-small-en-v1.5').pooling).toBe('mean');
       expect(getModelEmbedderConfig('Xenova/all-mpnet-base-v2').pooling).toBe('mean');
@@ -270,6 +270,34 @@ describe('Knowledge stack integration', () => {
     it('bge-m3 has no queryPrefix', () => {
       const { queryPrefix } = getModelEmbedderConfig('Xenova/bge-m3');
       expect(queryPrefix).toBeUndefined();
+    });
+  });
+
+  describe('getModelChunkConfig', () => {
+    it('all supported models return chunk size in valid range and 15% overlap', () => {
+      const models = [
+        'Xenova/all-MiniLM-L6-v2',
+        'Xenova/bge-small-en-v1.5',
+        'Xenova/all-mpnet-base-v2',
+        'Xenova/multilingual-e5-small',
+        'Xenova/multilingual-e5-base',
+        'Xenova/bge-m3',
+        'onnx-community/embeddinggemma-300m-ONNX',
+        'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+      ];
+      for (const m of models) {
+        const cfg = getModelChunkConfig(m);
+        expect(cfg.chunkSize, `${m} chunkSize`).toBeGreaterThanOrEqual(500);
+        expect(cfg.chunkSize, `${m} chunkSize`).toBeLessThanOrEqual(5000);
+        expect(cfg.overlapPct, `${m} overlapPct`).toBe(0.15);
+        const overlap = Math.round(cfg.chunkSize * cfg.overlapPct);
+        expect(overlap, `${m} overlap < chunkSize`).toBeLessThan(cfg.chunkSize);
+      }
+    });
+
+    it('MiniLM chunk size is smaller than Qwen3 (training context difference)', () => {
+      expect(getModelChunkConfig('Xenova/all-MiniLM-L6-v2').chunkSize)
+        .toBeLessThan(getModelChunkConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX').chunkSize);
     });
   });
 });
