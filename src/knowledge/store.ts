@@ -133,6 +133,56 @@ export class KnowledgeStore {
     }));
   }
 
+  /**
+   * Rebuild a full document from its chunks.
+   */
+  async rebuildDocument(url: string): Promise<string | null> {
+    if (!this.table) throw new Error('Store not open');
+
+    // Query all chunks for this URL, ordered by chunkIndex
+    const results = await this.table
+      .query()
+      .where(`url = '${url}'`)
+      .limit(1000) // reasonable limit
+      .toArray();
+
+    if (results.length === 0) return null;
+
+    const chunks = results.map(r => ({
+      text: r.text as string,
+      index: JSON.parse(r.metadata as string).chunkIndex as number,
+      overlap: JSON.parse(r.metadata as string).actualOverlap as number,
+    })).sort((a, b) => a.index - b.index);
+
+    if (chunks.length === 0) return null;
+
+    let fullText = chunks[0].text;
+    for (let i = 1; i < chunks.length; i++) {
+      fullText += chunks[i].text.slice(chunks[i].overlap);
+    }
+
+    return fullText;
+  }
+
+  /**
+   * Find unique URLs relevant to a query.
+   */
+  async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<string[]> {
+    if (!this.table) throw new Error('Store not open');
+
+    const vector = await this.options.embedder.embed(query);
+    
+    const results = await this.table
+      .query()
+      .nearestTo(Array.from(vector))
+      .fullTextSearch(query)
+      .limit(options.limit ?? 20)
+      .toArray();
+
+    const urls = results.map(r => r.url as string);
+    return Array.from(new Set(urls));
+  }
+
   async close(): Promise<void> {
     this.db = null;
     this.table = null;

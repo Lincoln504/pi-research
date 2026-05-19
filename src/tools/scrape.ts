@@ -12,13 +12,14 @@ import { Value } from 'typebox/value';
 import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { deduplicateUrls } from '../utils/shared-links.ts';
+import { deduplicateUrls, normalizeUrl } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
   getMaxScrapeBatches,
 } from '../constants.ts';
 import type { Config } from '../config.ts';
+import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
 
 export function createScrapeTool(options: {
   ctx: ExtensionContext;
@@ -80,13 +81,10 @@ export function createScrapeTool(options: {
       const p = params as Static<typeof ScrapeParams>;
       let rawUrls = p.urls;
       
-      // Sanitization: Handle LLM errors where it passes an array-like string
-      // or a single string instead of an array (though typebox should catch latter)
       let urls: string[] = [];
       if (Array.isArray(rawUrls)) {
           rawUrls.forEach(u => {
               if (typeof u === 'string') {
-                  // If the string contains [ ] or commas, it's likely a malformed array-as-string
                   if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
                       const cleaned = u.replace(/[[]]/g, '').split(',').map(s => s.trim());
                       urls.push(...cleaned);
@@ -96,12 +94,10 @@ export function createScrapeTool(options: {
               }
           });
       } else if (typeof rawUrls === 'string') {
-          // Fallback for extreme LLM hallucination
           const s = rawUrls as string;
           urls = s.replace(/[[]]/g, '').split(',').map(u => u.trim());
       }
       
-      // Deduplicate and filter out empty
       urls = Array.from(new Set(urls)).filter(u => u.startsWith('http'));
 
       if (urls.length === 0) {
@@ -110,7 +106,7 @@ export function createScrapeTool(options: {
 
       const batchLabel = `Batch ${callCount + 1}`;
 
-      // Record call BEFORE checking batch limit
+      // Record call BEFORE checking batch limit (as per mandate)
       options.tracker.recordCall('scrape');
       const scrapeStartTime = Date.now();
       
@@ -126,33 +122,82 @@ export function createScrapeTool(options: {
       options.updateGlobalLinks(finalUrls);
 
       const defaultConcurrency = callCount >= 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;
-      const scrapeResults = await scrape(finalUrls, p['maxConcurrency'] || defaultConcurrency, signal);
-      const results = Array.isArray(scrapeResults) ? scrapeResults : [];
-      const successful = results.filter(r => r.success);
-      const failed = results.filter(r => !r.success);
+
+      // Cache Lookup
+      const cachedResults: { url: string; markdown: string }[] = [];
+      const urlsToFetch: string[] = [];
       
-      if (successful.length > 0 && options.onLinksScraped) {
-          options.onLinksScraped(successful.map(r => r.url));
+      if (isKnowledgeStoreReady()) {
+        const store = getStore();
+        for (const url of finalUrls) {
+          const normalized = normalizeUrl(url);
+          const fullDoc = await store.rebuildDocument(normalized);
+          
+          if (fullDoc) {
+            cachedResults.push({ url: url, markdown: fullDoc });
+          } else {
+            urlsToFetch.push(url);
+          }
+        }
+      } else {
+        urlsToFetch.push(...finalUrls);
+      }
+
+      let freshResults: any[] = [];
+      if (urlsToFetch.length > 0) {
+        const scrapeResults = await scrape(urlsToFetch, p['maxConcurrency'] || defaultConcurrency, signal);
+        freshResults = Array.isArray(scrapeResults) ? scrapeResults : [];
+      }
+
+      const successfulFresh = freshResults.filter(r => r.success);
+      const failedFresh = freshResults.filter(r => !r.success);
+      
+      // Background Ingestion
+      if (isKnowledgeStoreReady() && successfulFresh.length > 0) {
+        const writer = getWriterQueue();
+        for (const res of successfulFresh) {
+          writer.enqueue({ url: normalizeUrl(res.url), markdown: res.markdown || '' });
+        }
+      }
+
+      // Merge results
+      const allSuccessful = [
+        ...cachedResults.map(r => ({ ...r, success: true as const })),
+        ...successfulFresh
+      ];
+
+      if (allSuccessful.length > 0 && options.onLinksScraped) {
+          options.onLinksScraped(allSuccessful.map(r => r.url));
       }
 
       let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
-      markdown += `**Successful:** ${successful.length}, **Failed:** ${failed.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
+      if (cachedResults.length > 0) {
+        markdown += `**Cache Hits:** ${cachedResults.length} (retrieved from local knowledge store)\n`;
+      }
+      markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
 
-      for (const res of successful) {
+      for (const res of allSuccessful) {
           const content = res.markdown || '';
           markdown += `### ${res.url}\n${content}\n\n---\n\n`;
       }
 
-      if (failed.length > 0) {
+      if (failedFresh.length > 0) {
           markdown += `## Failed URLs\n\n`;
-          for (const res of failed) {
+          for (const res of failedFresh) {
               const error = typeof res.error === 'string' && res.error.length > 0 ? res.error : 'Unknown error';
               markdown += `- ${res.url}: ${error}\n`;
           }
           markdown += '\n';
       }
       
-      return { content: [{ type: 'text', text: markdown }], details: { batch: callCount + 1, count: successful.length } };
+      return { 
+        content: [{ type: 'text', text: markdown }], 
+        details: { 
+          batch: callCount + 1, 
+          count: allSuccessful.length,
+          cacheHits: cachedResults.length 
+        } 
+      };
     },
   };
 }

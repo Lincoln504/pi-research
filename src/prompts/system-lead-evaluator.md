@@ -10,6 +10,8 @@ You orchestrate the next phase of research.
 - **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Prioritize queries that uncover authoritative sources and citable evidence.
 {{previous_queries_section}}
 
+{{historical_links_section}}
+
 ---
 
 ## Complexity-Aware Decision Thresholds
@@ -44,7 +46,13 @@ Use unique, targeted queries for any new researchers.
 {
   "action": "delegate",
   "researchers": [
-    { "id": "{NEXT_ID}", "name": "Specialty", "goal": "Goal", "queries": ["query 1", "query 2", "query 3", ... (up to QUERY_BUDGET queries)] }
+    { 
+      "id": "{NEXT_ID}", 
+      "name": "Specialty", 
+      "goal": "Goal", 
+      "historicalLinks": ["url 1", "url 2"],
+      "queries": ["query 1", "query 2", "query 3", ... (up to QUERY_BUDGET queries)] 
+    }
   ],
   "allQueries": ["query 1", "query 2", "query 3", ... (all queries across all researchers)]
 }
@@ -53,6 +61,7 @@ Use unique, targeted queries for any new researchers.
 **DELEGATION REQUIREMENTS**:
 - **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
+- **Historical Links**: Distribute all relevant historical links provided to the appropriate researchers. Include them in the `historicalLinks` array for each researcher.
 - **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps and topic scope.
 - **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
 - **DEFAULT TO DELEGATE**: When in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.

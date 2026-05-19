@@ -21,6 +21,7 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
+import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,6 +48,22 @@ export class QuickResearchOrchestrator {
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
 
+    // Knowledge Store Context Injection
+    let storeSection = '';
+    if (isKnowledgeStoreReady()) {
+      try {
+        const store = getStore();
+        const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
+        if (historicalUrls.length > 0) {
+          storeSection = '\n## Historical Knowledge Store\n' +
+            'The following URLs were found in your local knowledge store. Scrape them to retrieve relevant historical information immediately.\n' +
+            historicalUrls.map(u => `- ${u}`).join('\n');
+        }
+      } catch (err) {
+        logger.warn('[QuickOrchestrator] Failed to fetch historical URLs:', err);
+      }
+    }
+
     const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
     const maxScrapeBatches = getMaxScrapeBatches(this.config);
     const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
@@ -63,6 +80,7 @@ export class QuickResearchOrchestrator {
     
     const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
         .replace('{{goal}}', query)
+        .replace('{{store_section}}', storeSection)
         .replace('{{evidence_section}}', quickEvidenceSection)
         .replace('{{coordination_section}}', '')
         .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');

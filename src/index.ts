@@ -7,6 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
+import { initKnowledgeStore, shutdownKnowledgeStore } from './knowledge/index.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -50,13 +51,22 @@ function extractResultText(result: AgentToolResult<unknown>): string {
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
 
-  // Ensure background resources like browser pools are cleaned up
+  // Initialize knowledge store (non-blocking)
+  initKnowledgeStore().catch(err => {
+    logger.error('[pi-research] Knowledge store initialization failed:', err);
+  });
+
+  // Ensure background resources like browser pools and knowledge store are cleaned up
   const handleShutdown = (signal: string) => {
     logger.log(`[pi-research] Received ${signal}, initiating cleanup...`);
     shutdownManager.runCleanup(signal).catch(err => {
       logger.error(`[pi-research] ${signal} cleanup failed:`, err);
     });
   };
+
+  shutdownManager.register(async () => {
+    await shutdownKnowledgeStore();
+  });
 
   process.once('SIGINT', () => handleShutdown('SIGINT'));
   process.once('SIGTERM', () => handleShutdown('SIGTERM'));
@@ -142,24 +152,50 @@ export default function (pi: ExtensionAPI) {
         ? envFilePath.replace(homeDir, '~') 
         : envFilePath;
 
-      // Define configuration items with their bounds, step values, and formatters
+      // Define configuration items with their types and handlers
       type ConfigKey = keyof typeof config;
-      interface ConfigItem {
-        key: ConfigKey;
+      
+      interface BaseConfigItem {
+        key?: ConfigKey;
         label: string;
         description: string;
+      }
+
+      interface NumberConfigItem extends BaseConfigItem {
+        type: 'number';
+        key: ConfigKey;
         min: number;
         max: number;
         step: number;
-        displayMin: number;  // Display value for min (different units)
-        displayMax: number;  // Display value for max (different units)
-        toDisplay: (value: number) => number;  // Convert stored value to display value
-        fromDisplay: (display: number) => number;  // Convert display value to stored value
+        displayMin: number;
+        displayMax: number;
+        toDisplay: (value: number) => number;
+        fromDisplay: (display: number) => number;
         format: (value: number) => string;
       }
 
+      interface BooleanConfigItem extends BaseConfigItem {
+        type: 'boolean';
+        key: ConfigKey;
+      }
+
+      interface StringConfigItem extends BaseConfigItem {
+        type: 'string';
+        key: ConfigKey;
+        options?: string[]; // For selectors
+        warning?: string;
+      }
+
+      interface ActionConfigItem extends BaseConfigItem {
+        type: 'action';
+        action: () => Promise<void>;
+      }
+
+      type ConfigItem = NumberConfigItem | BooleanConfigItem | StringConfigItem | ActionConfigItem;
+
       const configItems: ConfigItem[] = [
         {
+          type: 'number',
           key: 'MAX_CONCURRENT_RESEARCHERS',
           label: 'Max Concurrent',
           description: '(Researchers)',
@@ -173,6 +209,7 @@ export default function (pi: ExtensionAPI) {
           format: (v) => v.toString(),
         },
         {
+          type: 'number',
           key: 'DEFAULT_RESEARCH_DEPTH',
           label: 'Default Depth',
           description: '(0=quick 1-3=deep)',
@@ -186,43 +223,73 @@ export default function (pi: ExtensionAPI) {
           format: (v) => v.toString(),
         },
         {
-          key: 'RESEARCHER_TIMEOUT_MS',
-          label: 'Researcher Timeout',
-          description: '(3-30 min)',
-          min: 180000,   // Stored in milliseconds (3 min = 180000ms)
-          max: 1800000,  // Stored in milliseconds (30 min = 1800000ms)
-          displayMin: 180,   // Displayed in seconds (3 min)
-          displayMax: 1800,  // Displayed in seconds (30 min)
-          step: 30,  // Adjust in 30 second increments (display units = seconds)
-          toDisplay: (v) => v / 1000,  // ms to seconds
-          fromDisplay: (v) => v * 1000,  // seconds to ms
-          format: (v) => `${v}s`,
+          type: 'boolean',
+          key: 'KNOWLEDGE_STORE_ENABLED',
+          label: 'Knowledge Store',
+          description: '(Persistent memory)',
         },
         {
-          key: 'WORKER_THREADS',
-          label: 'Worker Threads',
-          description: '(Playwright Search)',
-          min: 1,
-          max: 16,
-          displayMin: 1,
-          displayMax: 16,
-          step: 1,
+          type: 'string',
+          key: 'EMBEDDING_MODEL',
+          label: 'Embedding Model',
+          description: '(Local vector space)',
+          warning: '(Warning: Changing models permanently clears the database)',
+        },
+        {
+          type: 'number',
+          key: 'CHUNK_SIZE_CHARS',
+          label: 'Chunk Size',
+          description: '(Characters)',
+          min: 500,
+          max: 10000,
+          displayMin: 500,
+          displayMax: 10000,
+          step: 100,
           toDisplay: (v) => v,
           fromDisplay: (v) => v,
           format: (v) => v.toString(),
         },
         {
-          key: 'MAX_SCRAPE_BATCHES',
-          label: 'Max Scrape Batches',
-          description: '(1-16, Unlimited)',
-          min: 0,
-          max: 16,
-          displayMin: 0,
-          displayMax: 16,
+          type: 'number',
+          key: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
+          label: 'Cache TTL',
+          description: '(Days)',
+          min: 1,
+          max: 365,
+          displayMin: 1,
+          displayMax: 365,
           step: 1,
           toDisplay: (v) => v,
           fromDisplay: (v) => v,
-          format: (v) => v === 0 ? 'Unlimited' : v.toString(),
+          format: (v) => `${v}d`,
+        },
+        {
+          type: 'number',
+          key: 'RESEARCHER_TIMEOUT_MS',
+          label: 'Researcher Timeout',
+          description: '(3-30 min)',
+          min: 180000,
+          max: 1800000,
+          displayMin: 180,
+          displayMax: 1800,
+          step: 30,
+          toDisplay: (v) => v / 1000,
+          fromDisplay: (v) => v * 1000,
+          format: (v) => `${v}s`,
+        },
+        {
+          type: 'action',
+          label: 'Clear DB Cache',
+          description: '(Delete all knowledge)',
+          action: async () => {
+            const { getEnvFilePath } = await import('./config.ts');
+            const path = await import('node:path');
+            const fs = await import('node:fs');
+            const dbDir = path.join(path.dirname(getEnvFilePath()), 'knowledge_db');
+            if (fs.existsSync(dbDir)) {
+              fs.rmSync(dbDir, { recursive: true, force: true });
+            }
+          },
         },
       ];
 
@@ -236,9 +303,10 @@ export default function (pi: ExtensionAPI) {
             private cachedWidth = 0;
             private cachedVersion = -1;
             private version = 0;
+            private statusMsg = '';
 
             constructor() {
-              this.selectedIndex = 0; // Start on first item (Max Concurrent)
+              this.selectedIndex = 0;
             }
 
             render(width: number): string[] {
@@ -251,19 +319,35 @@ export default function (pi: ExtensionAPI) {
               const lines = [theme.fg('accent', ' pi-research Configuration'), sep];
 
               configItems.forEach((item, idx) => {
-                const value = config[item.key] as number;
-                const displayValue = item.format(item.toDisplay(value));
                 const isSelected = idx === this.selectedIndex;
                 const prefix = isSelected ? theme.fg('accent', '► ') : '  ';
-                const valueDisplay = isSelected
-                  ? theme.fg('accent', displayValue.padStart(6))
-                  : displayValue.padStart(6);
-                lines.push(theme.fg('text', `${prefix}${item.label.padEnd(20)} ${valueDisplay} ${item.description}`));
+                
+                let valueDisplay = '';
+                let desc = item.description;
+
+                if (item.type === 'number') {
+                  const value = config[item.key] as number;
+                  valueDisplay = item.format(item.toDisplay(value)).padStart(10);
+                } else if (item.type === 'boolean') {
+                  const value = config[item.key] as boolean;
+                  valueDisplay = (value ? '[ON]' : '[OFF]').padStart(10);
+                } else if (item.type === 'string') {
+                  const value = config[item.key] as string;
+                  valueDisplay = (value.length > 10 ? '...' + value.slice(-7) : value).padStart(10);
+                  if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
+                } else if (item.type === 'action') {
+                  valueDisplay = '[EXECUTE]'.padStart(10);
+                }
+
+                const line = `${prefix}${item.label.padEnd(20)} ${isSelected ? theme.fg('accent', valueDisplay) : valueDisplay} ${desc}`;
+                lines.push(theme.fg('text', line));
               });
 
               lines.push(sep);
-              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust  [Enter] Save  [Esc] Cancel'));
-              lines.push(theme.fg('muted', ` Additional configuration options found in ${displayEnvPath}`));
+              if (this.statusMsg) {
+                lines.push(theme.fg('success', ` ${this.statusMsg}`));
+              }
+              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
 
               // Truncate lines to fit within width
               this.cachedLines = lines.map(line => {
@@ -276,28 +360,38 @@ export default function (pi: ExtensionAPI) {
               return this.cachedLines;
             }
 
-            handleInput(key: string): void {
-              // Escape - cancel (must check before arrow keys, matchesKey properly distinguishes)
+            async handleInput(key: string): Promise<void> {
+              // Escape - cancel
               if (matchesKey(key, 'escape')) {
                 done({ type: 'cancel' });
                 return;
               }
 
-              // Enter - save (handle both CR and LF)
+              // Enter - save or execute action
               if (key === '\r' || key === '\n') {
+                const item = configItems[this.selectedIndex];
+                if (item.type === 'action') {
+                  this.statusMsg = 'Executing...';
+                  this.version++;
+                  tui.requestRender();
+                  await item.action();
+                  this.statusMsg = 'Action completed';
+                  this.version++;
+                  tui.requestRender();
+                  setTimeout(() => { this.statusMsg = ''; this.version++; tui.requestRender(); }, 2000);
+                  return;
+                }
                 done({ type: 'submit', data: config });
                 return;
               }
 
-              // Up arrow - move selection up (wraps to bottom)
+              // Up/Down arrows
               if (matchesKey(key, 'up')) {
                 this.selectedIndex = this.selectedIndex > 0 ? this.selectedIndex - 1 : configItems.length - 1;
                 this.version++;
                 tui.requestRender();
                 return;
               }
-
-              // Down arrow - move selection down (wraps to top)
               if (matchesKey(key, 'down')) {
                 this.selectedIndex = this.selectedIndex < configItems.length - 1 ? this.selectedIndex + 1 : 0;
                 this.version++;
@@ -305,34 +399,40 @@ export default function (pi: ExtensionAPI) {
                 return;
               }
 
-              // Left arrow - decrease value
-              if (matchesKey(key, 'left')) {
+              // Left/Right arrows
+              if (matchesKey(key, 'left') || matchesKey(key, 'right')) {
                 const item = configItems[this.selectedIndex];
                 if (!item) return;
-                const currentValue = config[item.key] as number;
-                const currentDisplay = item.toDisplay(currentValue);
-                const newDisplay = Math.max(item.displayMin, currentDisplay - item.step);
-                const newValue = item.fromDisplay(newDisplay);
-                if (newValue !== currentValue) {
-                  (config[item.key] as any) = newValue;
-                  this.version++;
-                  tui.requestRender();
-                }
-                return;
-              }
 
-              // Right arrow - increase value
-              if (matchesKey(key, 'right')) {
-                const item = configItems[this.selectedIndex];
-                if (!item) return;
-                const currentValue = config[item.key] as number;
-                const currentDisplay = item.toDisplay(currentValue);
-                const newDisplay = Math.min(item.displayMax, currentDisplay + item.step);
-                const newValue = item.fromDisplay(newDisplay);
-                if (newValue !== currentValue) {
-                  (config[item.key] as any) = newValue;
+                if (item.type === 'number') {
+                  const currentValue = config[item.key] as number;
+                  const currentDisplay = item.toDisplay(currentValue);
+                  const isRight = matchesKey(key, 'right');
+                  const newDisplay = isRight 
+                    ? Math.min(item.displayMax, currentDisplay + item.step)
+                    : Math.max(item.displayMin, currentDisplay - item.step);
+                  const newValue = item.fromDisplay(newDisplay);
+                  if (newValue !== currentValue) {
+                    (config[item.key] as any) = newValue;
+                    this.version++;
+                    tui.requestRender();
+                  }
+                } else if (item.type === 'boolean') {
+                  (config[item.key] as any) = !config[item.key];
                   this.version++;
                   tui.requestRender();
+                } else if (item.type === 'string') {
+                  // For now, strings are just informational or toggled if options exist
+                  if (item.options) {
+                    const currentIdx = item.options.indexOf(config[item.key] as string);
+                    const isRight = matchesKey(key, 'right');
+                    const nextIdx = isRight 
+                      ? (currentIdx + 1) % item.options.length
+                      : (currentIdx - 1 + item.options.length) % item.options.length;
+                    (config[item.key] as any) = item.options[nextIdx];
+                    this.version++;
+                    tui.requestRender();
+                  }
                 }
                 return;
               }

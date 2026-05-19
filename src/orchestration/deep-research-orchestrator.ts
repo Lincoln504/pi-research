@@ -39,6 +39,7 @@ import { injectCurrentDate } from '../utils/inject-date.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
+import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,7 +58,8 @@ const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
     name: Type.String(),
     goal: Type.String(),
-    queries: Type.Array(Type.String())
+    queries: Type.Array(Type.String()),
+    historicalLinks: Type.Optional(Type.Array(Type.String()))
 });
 
 const ResearchPlanSchema = Type.Object({
@@ -107,13 +109,30 @@ export class DeepResearchOrchestrator {
     logger.log(`[Orchestrator] Starting deep research with complexity ${this.options.complexity}`);
     this.options.observer?.onStart?.(this.options.query, this.options.complexity);
 
+    // Knowledge Store Context Injection
+    let historicalLinksSection = '';
+    if (isKnowledgeStoreReady()) {
+      try {
+        const store = getStore();
+        const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
+        if (historicalUrls.length > 0) {
+          historicalLinksSection = '\n\n## Historical Knowledge Store (Local Context)\n' +
+            'The following relevant URLs were found in your local knowledge store from previous research sessions:\n\n' +
+            historicalUrls.map(u => `- ${u}`).join('\n') +
+            '\n\nDistribute these historical links among your researchers as appropriate. Researchers can scrape these to retrieve the full content instantly from the local cache.';
+        }
+      } catch (err) {
+        logger.warn('[Orchestrator] Failed to fetch historical context:', err);
+      }
+    }
+
     const basePlanningPrompt = injectCurrentDate(loadPrompt('system-coordinator'), 'coordinator')
       .replace(/\{ROOT_QUERY\}/g, this.options.query)
       .replace('{MAX_TEAM_SIZE}', this.getTeamSize().toString())
       .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
       .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Quick' : this.options.complexity === 2 ? 'Normal' : 'Deep')
       .replace('{COMPLEXITY_GUIDANCE}', this.getComplexityGuidance())
-      .replace('{{local_context_section}}', '');
+      .replace('{{historical_links_section}}', historicalLinksSection);
 
     let currentPlan: ResearchPlan | null = null;
     const coordStartMs = Date.now();
@@ -560,7 +579,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
               if (active.size > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
               const config = queue.shift()!;
               const links = linksMap.get(String(config.id)) || [];
-              const p = this.runResearcher(config, links, signal)
+              const histLinks = config.historicalLinks || [];
+              const p = this.runResearcher(config, links, histLinks, signal)
                   .catch((err) => {
                       const errMsg = err.message || String(err);
                       logger.error(`[Orchestrator] Researcher ${config.id} failed: ${errMsg}`);
@@ -582,7 +602,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
   }
 
-  private async runResearcher(config: ResearcherConfig, initialLinks: string[], _signal?: AbortSignal): Promise<void> {
+  private async runResearcher(config: ResearcherConfig, initialLinks: string[], historicalUrls: string[], _signal?: AbortSignal): Promise<void> {
     const id = String(config.id);
     this.options.observer?.onResearcherStart?.(id, config.name, config.goal, this.currentRound);
 
@@ -590,15 +610,28 @@ You are in the late phase of research. Set a higher threshold for delegation:
         ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
         : '';
 
+    let storeSection = '';
+    if (historicalUrls.length > 0) {
+      storeSection = '\n## Historical Knowledge Store\n' +
+        'The following URLs were found in your local knowledge store. Scrape them to retrieve relevant historical information immediately.\n' +
+        historicalUrls.map(u => `- ${u}`).join('\n');
+    }
+
     const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
-    if (initialLinks.length === 0) {
-        logger.warn(`[Orchestrator] Researcher ${id} has no initial search results after distribution; skipping.`);
+    if (initialLinks.length === 0 && historicalUrls.length === 0) {
+        logger.warn(`[Orchestrator] Researcher ${id} has no initial search results or historical links; skipping.`);
         this.options.observer?.onResearcherComplete?.(id, '');
         return;
     }
-    const evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
+    
+    let evidenceSection = '';
+    if (initialLinks.length > 0) {
+      evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
+    }
+
     const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
       .replace('{{goal}}', config.goal)
+      .replace('{{store_section}}', storeSection)
       .replace('{{evidence_section}}', evidenceSection)
       .replace('{{coordination_section}}', previousQueriesSection)
       .replace('{{extra_tool_guidelines}}', '');
@@ -623,6 +656,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         systemPrompt: prompt,
         extensionCtx: this.options.ctx,
         noSearch: true,
+        noStoredSearch: true,
         getGlobalState: () => ({ researchId: this.options.researchId } as any),
         onSearchProgress: (links) => {
             this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
@@ -702,6 +736,23 @@ You are in the late phase of research. Set a higher threshold for delegation:
                            this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 :
                            MAX_ROUNDS_LEVEL_3;
 
+      // Knowledge Store Context Injection for Evaluator
+      let historicalLinksSection = '';
+      if (isKnowledgeStoreReady()) {
+        try {
+          const store = getStore();
+          const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
+          if (historicalUrls.length > 0) {
+            historicalLinksSection = '\n\n## Historical Knowledge Store (Local Context)\n' +
+              'The following relevant URLs were found in your local knowledge store from previous research sessions:\n\n' +
+              historicalUrls.map(u => `- ${u}`).join('\n') +
+              '\n\nDistribute these historical links among your newly delegated researchers as appropriate. Researchers can scrape these to retrieve the full content instantly from the local cache.';
+          }
+        } catch (err) {
+          logger.warn('[Orchestrator] Failed to fetch historical context for evaluation:', err);
+        }
+      }
+
       const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator'), 'evaluator')
           .replace(/\{ROOT_QUERY\}/g, this.options.query)
           .replace('{ROUND_NUMBER}', this.currentRound.toString())
@@ -712,6 +763,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
           .replace('{COMPLEXITY_GUIDANCE}', this.getEvaluatorComplexityGuidance())
           .replace('{ROUND_PHASE_GUIDANCE}', this.getRoundPhaseGuidance(maxRounds))
           .replace('{{previous_queries_section}}', previousQueriesSection)
+          .replace('{{historical_links_section}}', historicalLinksSection)
           .replace('{NEXT_ID}', `${nextId}`);
 
       const reportsText = Array.from(this.reports.entries())

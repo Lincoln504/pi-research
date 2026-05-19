@@ -8,6 +8,7 @@
  * - Security vulnerability database queries (NVD, CISA, OSV)
  * - Technical Q&A retrieval from Stack Exchange
  * - Local code search via Ripgrep
+ * - Knowledge store search for historical data
  */
 
 import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@mariozechner/pi-coding-agent';
@@ -35,6 +36,8 @@ export interface CreateResearcherSessionOptions {
   onSearchProgress?: (links: number) => void;
   /** If true, the researcher will not be given the search tool. */
   noSearch?: boolean;
+  /** If true, the researcher will not be given the stored_search tool. */
+  noStoredSearch?: boolean;
   /** If true, the researcher will not be given the grep tool. Defaults to false. */
   noGrep?: boolean;
   config?: Config;
@@ -53,6 +56,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     onLinksScraped,
     onSearchProgress,
     noSearch,
+    noStoredSearch,
     noGrep = false,
     config,
   } = options;
@@ -90,6 +94,9 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     if (noSearch) {
         customTools = customTools.filter(t => t.name !== 'search');
     }
+    if (noStoredSearch) {
+        customTools = customTools.filter(t => t.name !== 'stored_search');
+    }
     if (noGrep) {
         customTools = customTools.filter(t => t.name !== 'grep');
     }
@@ -108,8 +115,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
       // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
-      // Inheriting the user's default thinking level (often 'medium') causes every turn
-      // to burn minutes on internal thinking, compounding to 15-25 min per researcher.
       thinkingLevel: 'off',
     });
 
