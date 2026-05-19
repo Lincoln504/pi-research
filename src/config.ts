@@ -66,7 +66,7 @@ export const DEFAULTS: Config = {
   WORKER_THREADS: 4,
   WORKER_CONCURRENCY: 3,
   KNOWLEDGE_STORE_ENABLED: true,
-  EMBEDDING_MODEL: 'jinaai/jina-embeddings-v5-text-nano-retrieval',
+  EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
   CHUNK_SIZE_CHARS: 3000,
   CHUNK_OVERLAP_CHARS: 512,
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,

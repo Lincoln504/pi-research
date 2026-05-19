@@ -3,16 +3,23 @@ import { logger } from '../logger.ts';
 
 export interface EmbedderOptions {
   model: string;
+  pooling?: 'mean' | 'cls' | 'last_token';
+  // Prepended to embed() (query) calls only; embedMany() (document) calls are unprefixed.
+  queryPrefix?: string;
 }
 
 export class Embedder {
   private pipeline: FeatureExtractionPipeline | null = null;
   private initializing: Promise<void> | null = null;
   private model: string;
+  private poolingMode: 'mean' | 'cls' | 'last_token';
+  private queryPrefix: string;
   private dimension: number | null = null;
 
   constructor(options: EmbedderOptions) {
     this.model = options.model;
+    this.poolingMode = options.pooling ?? 'mean';
+    this.queryPrefix = options.queryPrefix ?? '';
   }
 
   async initialize(): Promise<void> {
@@ -27,8 +34,8 @@ export class Embedder {
         });
         
         // Warm up and determine dimension
-        const dummy = await this.pipeline('warmup');
-        this.dimension = dummy.dims[dummy.dims.length - 1];
+        const dummy = await this.pipeline('warmup', { pooling: this.poolingMode, normalize: false });
+        this.dimension = dummy.dims[dummy.dims.length - 1] ?? null;
         
         logger.info(`[embedder] Ready. Dimension: ${this.dimension}`);
       } catch (err) {
@@ -57,8 +64,9 @@ export class Embedder {
       throw new Error('Embedder not initialized');
     }
 
-    const output = await this.pipeline(text, {
-      pooling: 'mean',
+    const input = this.queryPrefix ? this.queryPrefix + text : text;
+    const output = await this.pipeline(input, {
+      pooling: this.poolingMode,
       normalize: true,
     });
 
@@ -71,7 +79,7 @@ export class Embedder {
     }
 
     const output = await this.pipeline(texts, {
-      pooling: 'mean',
+      pooling: this.poolingMode,
       normalize: true,
     });
 
