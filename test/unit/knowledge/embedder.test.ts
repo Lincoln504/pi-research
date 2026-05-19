@@ -1,23 +1,44 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Embedder } from '../../../src/knowledge/embedder.ts';
 
-// Accessible mock pipeline function — allows inspection of call arguments
-const mockPipelineFn = vi.fn(async (text: string | string[], _options: any) => {
-  const dimensions = 384;
-  if (Array.isArray(text)) {
-    // Each text's embedding has its 0-index set to its 1-based position
-    // so slicing correctness can be verified
-    const data = new Float32Array(text.length * dimensions);
-    for (let i = 0; i < text.length; i++) {
-      data[i * dimensions] = i + 1;
+// vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
+const { mockPipelineFn, mockEnv, mockAccess } = vi.hoisted(() => {
+  const mockPipelineFn = vi.fn(async (text: string | string[], _options: any) => {
+    const dimensions = 384;
+    if (Array.isArray(text)) {
+      // Each text's embedding has its 0-index set to its 1-based position
+      // so slicing correctness can be verified
+      const data = new Float32Array(text.length * dimensions);
+      for (let i = 0; i < text.length; i++) {
+        data[i * dimensions] = i + 1;
+      }
+      return { data, dims: [text.length, dimensions] };
     }
-    return { data, dims: [text.length, dimensions] };
-  }
-  return { data: new Float32Array(dimensions).fill(1), dims: [1, dimensions] };
+    return { data: new Float32Array(dimensions).fill(1), dims: [1, dimensions] };
+  });
+
+  // Mutable env object — embedder code mutates env.allowRemoteModels directly,
+  // so we need a real object rather than a spy wrapper.
+  const mockEnv = {
+    allowRemoteModels: true,
+    cacheDir: '/fake/cache',
+    allowLocalModels: true,
+    useFSCache: true,
+  };
+
+  // Mock fs/promises.access — default resolves (model is cached)
+  const mockAccess = vi.fn().mockResolvedValue(undefined);
+
+  return { mockPipelineFn, mockEnv, mockAccess };
 });
 
 vi.mock('@huggingface/transformers', () => ({
   pipeline: vi.fn().mockImplementation(async () => mockPipelineFn),
+  env: mockEnv,
+}));
+
+vi.mock('node:fs/promises', () => ({
+  access: (...args: unknown[]) => mockAccess(...args),
 }));
 
 describe('Embedder', () => {
@@ -210,3 +231,174 @@ describe('Embedder', () => {
     expect(freshEmbedder.isInitialized()).toBe(true);
   });
 });
+
+/**
+ * Timeout Tests
+ * 
+ * These tests verify that the embedder initialization timeout works correctly.
+ * The timeout prevents the process from hanging indefinitely when model
+ * downloads stall or fail.
+ */
+describe('Embedder timeout behavior', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Simulate model not cached so initializationTimeoutMs (100ms in tests) governs
+    // pipeline load timeout instead of the fixed 30s cached-path timeout.
+    mockAccess.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should fail initialization when timeout is exceeded', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    // Mock pipeline to hang indefinitely (never resolve)
+    vi.mocked(pipeline).mockReturnValue(
+      new Promise(() => {
+        // Never resolve - simulates a stuck download
+      })
+    );
+
+    const embedder = new Embedder({
+      model: 'test/model',
+      initializationTimeoutMs: 100, // 100ms timeout
+    });
+
+    await expect(embedder.initialize()).rejects.toThrow(
+      /timed out after 100ms/
+    );
+
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not create duplicate initialization promises during a timeout', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    // Mock pipeline to hang indefinitely
+    vi.mocked(pipeline).mockReturnValue(
+      new Promise(() => {
+        // Never resolve
+      })
+    );
+
+    const embedder = new Embedder({
+      model: 'test/model',
+      initializationTimeoutMs: 100,
+    });
+
+    const init1 = embedder.initialize();
+    const init2 = embedder.initialize();
+
+    // Both should reject with the same error
+    await expect(init1).rejects.toThrow(/timed out/);
+    await expect(init2).rejects.toThrow(/timed out/);
+
+    // Pipeline should only be called once
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+  });
+
+  it('should reset initialization after timeout error, allowing retry', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    let callCount = 0;
+    vi.mocked(pipeline).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: hang
+        return new Promise(() => {});
+      } else {
+        // Second call: return a callable mock pipeline
+        return mockPipelineFn as any;
+      }
+    });
+
+    const embedder = new Embedder({
+      model: 'test/model',
+      initializationTimeoutMs: 100,
+    });
+
+    // First attempt: timeout
+    await expect(embedder.initialize()).rejects.toThrow(/timed out/);
+
+    // Second attempt: should succeed
+    await expect(embedder.initialize()).resolves.not.toThrow();
+    expect(embedder.isInitialized()).toBe(true);
+
+    // Pipeline should be called twice (once per attempt)
+    expect(callCount).toBe(2);
+  });
+
+});
+
+describe('cache-aware initialization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset env to defaults before each test
+    mockEnv.allowRemoteModels = true;
+    mockEnv.cacheDir = '/fake/cache';
+    // Default: model is cached
+    mockAccess.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sets allowRemoteModels=false when model is cached', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    let allowRemoteAtCallTime: boolean | undefined;
+
+    vi.mocked(pipeline).mockImplementationOnce(async () => {
+      allowRemoteAtCallTime = mockEnv.allowRemoteModels;
+      return mockPipelineFn;
+    });
+
+    const embedder = new Embedder({ model: 'test-model' });
+    await embedder.initialize();
+
+    expect(allowRemoteAtCallTime).toBe(false);
+  });
+
+  it('restores allowRemoteModels after successful init', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    vi.mocked(pipeline).mockImplementationOnce(async () => mockPipelineFn);
+
+    mockEnv.allowRemoteModels = true;
+    const embedder = new Embedder({ model: 'test-model' });
+    await embedder.initialize();
+
+    expect(mockEnv.allowRemoteModels).toBe(true);
+  });
+
+  it('restores allowRemoteModels even if pipeline throws', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    vi.mocked(pipeline).mockRejectedValueOnce(new Error('load failure'));
+
+    mockEnv.allowRemoteModels = true;
+    const embedder = new Embedder({ model: 'test-model' });
+    await expect(embedder.initialize()).rejects.toThrow('load failure');
+
+    expect(mockEnv.allowRemoteModels).toBe(true);
+  });
+
+  it('does NOT set allowRemoteModels=false when model is not cached', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    let allowRemoteAtCallTime: boolean | undefined;
+
+    // Simulate missing model file
+    mockAccess.mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    vi.mocked(pipeline).mockImplementationOnce(async () => {
+      allowRemoteAtCallTime = mockEnv.allowRemoteModels;
+      return mockPipelineFn;
+    });
+
+    const embedder = new Embedder({ model: 'test-model' });
+    await embedder.initialize();
+
+    expect(allowRemoteAtCallTime).toBe(true);
+  });
+});
+

@@ -65,6 +65,11 @@ let chunker: Chunker | null = null;
 
 let initializationPromise: Promise<void> | null = null;
 
+// Tracks the embedder instance that currently has an in-flight pipeline load.
+// Prevents concurrent pipeline() calls when retries create new Embedder instances
+// while the previous one's orphaned pipeline() is still running.
+let inflightEmbedder: Embedder | null = null;
+
 const MAX_INIT_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
@@ -80,11 +85,20 @@ export async function initKnowledgeStore(): Promise<void> {
         logger.info(`[knowledge] Initializing Knowledge Store (attempt ${attempt}/${MAX_INIT_RETRIES})...`);
 
         const modelCfg = getModelEmbedderConfig(config.EMBEDDING_MODEL);
-        embedder = new Embedder({
-          model: config.EMBEDDING_MODEL,
-          pooling: modelCfg.pooling,
-          queryPrefix: modelCfg.queryPrefix,
-        });
+
+        // Reuse the in-flight embedder if a previous pipeline() load is still running
+        // (orphaned by a withTimeout race). This prevents concurrent pipeline() calls.
+        if (inflightEmbedder !== null) {
+          embedder = inflightEmbedder;
+        } else {
+          embedder = new Embedder({
+            model: config.EMBEDDING_MODEL,
+            pooling: modelCfg.pooling,
+            queryPrefix: modelCfg.queryPrefix,
+            initializationTimeoutMs: config.EMBEDDING_MODEL_INIT_TIMEOUT_MS,
+          });
+          inflightEmbedder = embedder;
+        }
         const embedInit = embedder.initialize();
 
         store = new KnowledgeStore({
@@ -104,10 +118,17 @@ export async function initKnowledgeStore(): Promise<void> {
         await embedInit;
         await store.open();
 
+        inflightEmbedder = null;
         logger.info('[knowledge] Knowledge Store ready.');
         return;
       } catch (err) {
-        // Null all singletons to prevent leaking partially-constructed instances
+        // Null all singletons to prevent leaking partially-constructed instances.
+        // Clear inflightEmbedder only if the embedder's pipeline load has already
+        // settled (error path in initialize() nulls this.initializing), so the next
+        // retry can start a fresh load rather than re-awaiting a failed promise.
+        if (inflightEmbedder !== null && inflightEmbedder.isInitialized() === false) {
+          inflightEmbedder = null;
+        }
         embedder = null;
         store = null;
         chunker = null;
@@ -115,6 +136,7 @@ export async function initKnowledgeStore(): Promise<void> {
 
         if (attempt >= MAX_INIT_RETRIES) {
           logger.error(`[knowledge] Initialization failed after ${MAX_INIT_RETRIES} attempts. Giving up.`, err);
+          inflightEmbedder = null;
           initializationPromise = null;
           throw err;
         }

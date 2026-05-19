@@ -39,6 +39,59 @@ function extractResultText(result: AgentToolResult<unknown>): string {
 export default function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
 
+  // Global uncaught exception handler to catch synchronous errors that escape all promise handlers.
+  // This is a last-resort guard for things like undici's EventEmitter-based socket close errors.
+  let uncaughtExceptionCount = 0;
+  const MAX_UNCAUGHT_EXCEPTIONS = 3;
+
+  process.on('uncaughtException', (err: Error, origin: string) => {
+    uncaughtExceptionCount++;
+    const errorMsg = `[pi-research] Uncaught exception #${uncaughtExceptionCount}/${MAX_UNCAUGHT_EXCEPTIONS}: ${err.message}`;
+    const errorOrigin = `[origin: ${origin}]`;
+    
+    logger.error(`${errorMsg} ${errorOrigin}`, err);
+    
+    // Log stack trace for debugging
+    if (err.stack) {
+      logger.error(`[pi-research] Stack trace:\n${err.stack}`);
+    }
+
+    // If we've hit too many uncaught exceptions, let the process exit to prevent infinite loops
+    if (uncaughtExceptionCount >= MAX_UNCAUGHT_EXCEPTIONS) {
+      logger.error('[pi-research] Too many uncaught exceptions. Exiting process to prevent infinite loop.');
+      process.exit(1);
+    }
+
+    // For common recoverable errors (like undici socket timeouts), don't crash the process.
+    // These can happen during network operations and are handled at a higher level via retries.
+    const isNetworkError = 
+      err.message.includes('ETIMEDOUT') ||
+      err.message.includes('ECONNRESET') ||
+      err.message.includes('ECONNREFUSED') ||
+      err.message.includes('ENOTFOUND') ||
+      err.message.includes('terminated') ||
+      err.message.includes('socket');
+
+    if (isNetworkError) {
+      logger.warn('[pi-research] Network error caught by uncaught exception handler. Continuing...');
+      return; // Don't crash on network errors
+    }
+
+    // For unknown error types, log a warning but continue
+    logger.warn('[pi-research] Continuing after uncaught exception. Application state may be corrupted.');
+  });
+
+  // Also handle unhandled promise rejections
+  process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+    logger.error('[pi-research] Unhandled promise rejection:', error.message, error);
+    
+    // Log stack trace if available
+    if (error.stack) {
+      logger.error(`[pi-research] Rejection stack trace:\n${error.stack}`);
+    }
+  });
+
   // Initialize knowledge store (non-blocking)
   initKnowledgeStore().catch(err => {
     logger.error('[pi-research] Knowledge store initialization failed:', err);

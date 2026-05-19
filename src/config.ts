@@ -46,6 +46,8 @@ export interface Config {
   EMBEDDING_MODEL: string;
   /** How long to keep cached scrapes in the knowledge store (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
+  /** Timeout for embedding model initialization in milliseconds (default: 300000) */
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: number;
 }
 
 export const DEFAULTS: Config = {
@@ -64,6 +66,7 @@ export const DEFAULTS: Config = {
   KNOWLEDGE_STORE_ENABLED: true,
   EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: 300_000, // 5 minutes
 };
 
 // ============================================================================
@@ -119,6 +122,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: String(config.KNOWLEDGE_STORE_ENABLED),
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -266,6 +270,7 @@ export function createConfig(
     KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_STORE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
   };
 }
 
@@ -345,6 +350,11 @@ export function validateConfig(config: Config = getConfig()): void {
   ) {
     throw new Error(
       `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS must be 20000–120000ms, got ${config.HEALTH_CHECK_TIMEOUT_MS}`,
+    );
+  }
+  if (config.EMBEDDING_MODEL_INIT_TIMEOUT_MS < 30000 || config.EMBEDDING_MODEL_INIT_TIMEOUT_MS > 1_800_000) {
+    throw new Error(
+      `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS must be 30000–1800000ms (30s–30min), got ${config.EMBEDDING_MODEL_INIT_TIMEOUT_MS}`,
     );
   }
   if (config.PROXY_URL) {
