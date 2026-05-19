@@ -87,7 +87,7 @@ export function createScrapeTool(options: {
           rawUrls.forEach(u => {
               if (typeof u === 'string') {
                   if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
-                      const cleaned = u.replace(/[\[\]]/g, '').split(',').map(s => s.trim());
+                      const cleaned = u.replace(/[[\]]/g, '').split(',').map(s => s.trim());
                       urls.push(...cleaned);
                   } else {
                       urls.push(u.trim());
@@ -96,7 +96,7 @@ export function createScrapeTool(options: {
           });
       } else if (typeof rawUrls === 'string') {
           const s = rawUrls as string;
-          urls = s.replace(/[\[\]]/g, '').split(',').map(u => u.trim());
+          urls = s.replace(/[[\]]/g, '').split(',').map(u => u.trim());
       }
       
       urls = Array.from(new Set(urls)).filter(u => u.startsWith('http'));
