@@ -217,7 +217,13 @@ export function endResearchSession(piSessionId: string, researchId: string): voi
   }
 
   // If this was the last research run in the Pi session, clean up the state
-  if (state.order.length === 0 && state.panels.size === 0 && state.subscribers.length === 0) {
+  // Clear subscribers to prevent memory leak if they weren't properly unsubscribed
+  if (state.order.length === 0 && state.panels.size === 0) {
+    // Clear any remaining subscribers to allow cleanup
+    if (state.subscribers.length > 0) {
+      logger.warn(`[session-state] Clearing ${state.subscribers.length} remaining subscribers for ${piSessionId} during session end`);
+      state.subscribers = [];
+    }
     clearPendingRefresh(piSessionId);
     piSessions.delete(piSessionId);
   }

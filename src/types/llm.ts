@@ -109,3 +109,28 @@ export function calculateTotalTokens(usage: Partial<TokenUsage>): number {
     (usage.cacheWrite ?? 0)
   );
 }
+
+/**
+ * Estimate token count for a text string
+ * 
+ * This is a rough approximation. Actual tokenization varies by model,
+ * but this provides a reasonable upper bound for most modern LLMs.
+ * 
+ * - English text: ~4 characters per token on average
+ * - Code/text with symbols: ~3-4 characters per token
+ * - Numbers/math: ~2-3 characters per token
+ * 
+ * We use a conservative estimate of ~3.5 characters per token to ensure
+ * we don't underestimate and exceed context limits.
+ * 
+ * @param text - Text to estimate tokens for
+ * @returns Estimated token count
+ */
+export function estimateTokenCount(text: string): number {
+  if (!text || text.length === 0) return 0;
+  
+  // Use a conservative estimate: ~3.5 characters per token
+  // This accounts for code, symbols, and mixed content which tend to have more tokens per character
+  const CHARACTERS_PER_TOKEN = 3.5;
+  return Math.ceil(text.length / CHARACTERS_PER_TOKEN);
+}

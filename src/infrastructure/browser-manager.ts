@@ -347,16 +347,21 @@ class BrowserTaskScheduler implements IScheduler {
 
         if (this.pool) {
             try {
-                // Use a timeout for pool destruction
+                // Use a timeout for pool destruction. Workers run async browser teardown
+                // in their killHandler (context.close / browser.close via Playwright), so
+                // allow enough time for those to complete before the IPC channel closes.
                 await Promise.race([
                     this.pool.destroy(),
-                    new Promise(resolve => setTimeout(resolve, 5000))
+                    new Promise(resolve => setTimeout(resolve, 10000))
                 ]);
             } catch (e) {
                 logger.warn('[Scheduler] Pool destruction error:', e);
             }
-            // Allow time for IPC channels to close gracefully
-            await new Promise(resolve => setTimeout(resolve, 200));
+            // Allow time for IPC channels and worker browser teardown to complete.
+            // 200ms was insufficient: Playwright browser.close() in killed workers can
+            // take >500ms, and a new pool started immediately could inherit a partially-
+            // torn-down context.
+            await new Promise(resolve => setTimeout(resolve, 1500));
             this.pool = null;
         }
     }

@@ -10,7 +10,7 @@ import {
     type AgentSessionEvent 
 } from '@mariozechner/pi-coding-agent';
 import { complete, completeSimple, type Model, type TextContent } from '@mariozechner/pi-ai';
-import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
+import { calculateTotalTokens, parseTokenUsage, estimateTokenCount } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
@@ -32,27 +32,13 @@ import {
     RESEARCHER_LAUNCH_DELAY_MS,
     MAX_EXTRA_ROUNDS,
 } from '../constants.ts';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { loadPrompt } from '../utils/prompts.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
 import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-function loadPrompt(name: string): string {
-  try {
-    const path = join(__dirname, '..', 'prompts', `${name}.md`);
-    return readFileSync(path, 'utf-8');
-  } catch (err) {
-    logger.error(`[Orchestrator] Failed to load prompt: ${name}`, err);
-    return '';
-  }
-}
+import { registerScrapedLinks } from '../utils/shared-links.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -126,7 +112,7 @@ export class DeepResearchOrchestrator {
       }
     }
 
-    const basePlanningPrompt = injectCurrentDate(loadPrompt('system-coordinator'), 'coordinator')
+    const basePlanningPrompt = injectCurrentDate(loadPrompt('system-coordinator', '..'), 'coordinator')
       .replace(/\{ROOT_QUERY\}/g, this.options.query)
       .replace('{MAX_TEAM_SIZE}', this.getTeamSize().toString())
       .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
@@ -184,7 +170,7 @@ export class DeepResearchOrchestrator {
           }
           this.options.observer?.onPlanningSuccess?.(currentPlan);
           break;
-        } catch (err) {
+        } catch (_err) {
           if (attempt >= 3) {
             logger.warn(`[Orchestrator] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
             currentPlan = this.buildFallbackCoordinatorPlan(lastRawPlanText);
@@ -337,12 +323,17 @@ export class DeepResearchOrchestrator {
   }
 
   private getComplexityGuidance(): string {
+    const maxTeamSize = this.getTeamSize();
+    const queryBudget = this.getQueryBudget();
+
     if (this.options.complexity === 1) {
       return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts.";
     } else if (this.options.complexity === 2) {
-      return "**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to {MAX_TEAM_SIZE}) based on topic scope.";
+      return `**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to ${maxTeamSize}) based on topic scope.`;
     } else {
-      return "**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers ({MAX_TEAM_SIZE}) and fully utilize each researcher's query budget ({QUERY_BUDGET}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.\n\n**ULTRA-SPECIFICITY MANDATE**: Level 3 demands granular, exhaustive detail on every fact that benefits from it — exact figures, dates, names, mechanisms, edge cases, historical context, technical specifics, and primary-source precision. Plan dedicated researchers for drilling into the ultra-specific dimensions of any finding where greater detail adds value. Subsequent rounds SHOULD be delegated specifically to pursue these ultra-specific angles: exact statistics, precise chronologies, technical minutiae, named individuals and their specific roles, verbatim data, and any other granular details that enrich the overall picture.";
+      return `**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers (${maxTeamSize}) and fully utilize each researcher's query budget (${queryBudget}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.
+
+**ULTRA-SPECIFICITY MANDATE**: Level 3 demands granular, exhaustive detail on every fact that benefits from it — exact figures, dates, names, mechanisms, edge cases, historical context, technical specifics, and primary-source precision. Plan dedicated researchers for drilling into the ultra-specific dimensions of any finding where greater detail adds value. Subsequent rounds SHOULD be delegated specifically to pursue these ultra-specific angles: exact statistics, precise chronologies, technical minutiae, named individuals and their specific roles, verbatim data, and any other granular details that enrich the overall picture.`;
     }
   }
 
@@ -617,7 +608,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         historicalUrls.map(u => `- ${u}`).join('\n');
     }
 
-    const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+    const researcherPromptTemplate = loadPrompt('researcher', '..');
     if (initialLinks.length === 0 && historicalUrls.length === 0) {
         logger.warn(`[Orchestrator] Researcher ${id} has no initial search results or historical links; skipping.`);
         this.options.observer?.onResearcherComplete?.(id, '');
@@ -658,6 +649,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         noSearch: true,
         noStoredSearch: true,
         getGlobalState: () => ({ researchId: this.options.researchId } as any),
+        updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
         onSearchProgress: (links) => {
             this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
         },
@@ -753,7 +745,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         }
       }
 
-      const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator'), 'evaluator')
+      const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator', '..'), 'evaluator')
           .replace(/\{ROOT_QUERY\}/g, this.options.query)
           .replace('{ROUND_NUMBER}', this.currentRound.toString())
           .replace('{MAX_ROUNDS}', maxRounds.toString())
@@ -807,7 +799,11 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
 
       let extracted = extractJson<ResearchPlan>(text, 'any');
-      const correctionSafe = evalUserMessage.length + text.length < 120_000;
+      // Estimate token count for context-length safety check
+      // Use conservative token estimation to avoid exceeding model context windows
+      const estimatedTokens = estimateTokenCount(evalUserMessage) + estimateTokenCount(text);
+      // Most modern models support 100k-200k tokens; use 100k as a safe threshold
+      const correctionSafe = estimatedTokens < 100_000;
       if (!extracted.success && text.trim() && correctionSafe) {
           logger.warn('[Orchestrator] Evaluator JSON parse failed; attempting self-correction');
           const correctionMsg = `${evalUserMessage}\n\n---\n\nYOUR PREVIOUS RESPONSE (not valid JSON):\n${text}\n\n---\n\nReturn ONLY a valid JSON object now. No prose before or after.`;
