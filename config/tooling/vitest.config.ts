@@ -27,7 +27,7 @@ export default defineConfig({
     testTimeout: 60000,
     hookTimeout: 30000,
     teardownTimeout: 10000,
-    pool: 'threads',
+    pool: 'forks',
     includeSource: ['src/**/*.ts'],
     setupFiles: ['./test/setup/unit.ts'],
   },

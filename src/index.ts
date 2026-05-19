@@ -2,12 +2,13 @@ import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@mariozechne
 import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
 import { createResearchTool } from './tool.ts';
 import { logger } from './logger.ts';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
+import * as fss from 'node:fs';
+import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { initKnowledgeStore, shutdownKnowledgeStore } from './knowledge/index.ts';
+import { loadPrompt } from './utils/prompts.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -23,19 +24,6 @@ import {
   MAX_TEAM_SIZE_LEVEL_2,
   MAX_TEAM_SIZE_LEVEL_3,
 } from './constants.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-function loadPrompt(name: string): string {
-  try {
-    const promptPath = join(__dirname, 'prompts', `${name}.md`);
-    return readFileSync(promptPath, 'utf-8');
-  } catch (err) {
-    logger.error(`[pi-research] Failed to load prompt: ${name}`, err);
-    return '';
-  }
-}
 
 // Extract the text content from a research tool result
 function extractResultText(result: AgentToolResult<unknown>): string {
@@ -144,13 +132,42 @@ export default function (pi: ExtensionAPI) {
       const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } = await import('./config.ts');
       const config = { ...getConfig() }; // Work on a copy
 
-      // Get .env file location for help text
-      const envFilePath = getEnvFilePath();
-      // Make the path more user-friendly by using ~ for home directory
-      const homeDir = process.env['HOME'] || '';
-      const displayEnvPath = envFilePath.startsWith(homeDir) 
-        ? envFilePath.replace(homeDir, '~') 
-        : envFilePath;
+      // Supported embedding models for the model selector.
+      // short: ≤9 chars — combined with 1-char status symbol it fills the 10-char value column.
+      // multilingual: true  → supports 100+ languages (cross-lingual retrieval works)
+      //              false  → English-only (cross-lingual R@1 < 0.20 in benchmarks)
+      const SUPPORTED_MODELS = [
+        // ── Multilingual ────────────────────────────────────────────────────────
+        // Microsoft multilingual-e5-small, ~118MB, MIT. Smallest confirmed multilingual ONNX option.
+        { id: 'Xenova/multilingual-e5-small',                  short: 'ml-e5-sm',   multilingual: true  },
+        // Microsoft multilingual-e5-base, ~560MB, MIT. Encoder, better quality than small.
+        { id: 'Xenova/multilingual-e5-base',                   short: 'ml-e5-base', multilingual: true  },
+        // BAAI BGE-M3, ~568MB (quantized), Apache 2.0, 100+ languages, 8192 ctx. Uses CLS pooling.
+        { id: 'Xenova/bge-m3',                                 short: 'bge-m3',     multilingual: true  },
+        // Google EmbeddingGemma-300M. Mean pooling. Top-ranked open multilingual <500M on MTEB (2025).
+        { id: 'onnx-community/embeddinggemma-300m-ONNX',       short: 'emb-gemma',  multilingual: true  },
+        // Qwen3-Embedding-0.6B. 0.6B params, last-token pooling + query prefix. ONNX community port.
+        { id: 'onnx-community/Qwen3-Embedding-0.6B-ONNX',     short: 'qwen3-emb',  multilingual: true  },
+        // ── English-only ────────────────────────────────────────────────────────
+        // MiniLM-L6, ~23MB, Apache 2.0. Smallest/fastest; no meaningful cross-lingual capability.
+        { id: 'Xenova/all-MiniLM-L6-v2',                       short: 'MiniLM-L6',  multilingual: false },
+        // BGE-small-en, ~120MB, MIT. English retrieval quality above its size class.
+        { id: 'Xenova/bge-small-en-v1.5',                      short: 'bge-sm-en',  multilingual: false },
+        // all-mpnet-base-v2, ~420MB, Apache 2.0. Highest English quality in the local lineup.
+        { id: 'Xenova/all-mpnet-base-v2',                      short: 'mpnet-v2',   multilingual: false },
+      ];
+
+      // HF model cache directory (follows Python HF convention, respects HF_HOME env var)
+      const hfCacheDir = process.env['HF_HOME'] ?? pathmod.join(os.homedir(), '.cache', 'huggingface');
+      const hfHubDir = pathmod.join(hfCacheDir, 'hub');
+
+      function isModelCached(modelId: string): boolean {
+        const dirName = 'models--' + modelId.replace('/', '--');
+        return fss.existsSync(pathmod.join(hfHubDir, dirName, 'snapshots'));
+      }
+
+      // Config file path for display (home dir replaced with ~)
+      const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
 
       // Define configuration items with their types and handlers
       type ConfigKey = keyof typeof config;
@@ -199,13 +216,8 @@ export default function (pi: ExtensionAPI) {
           key: 'MAX_CONCURRENT_RESEARCHERS',
           label: 'Max Concurrent',
           description: '(Researchers)',
-          min: 1,
-          max: 5,
-          displayMin: 1,
-          displayMax: 5,
-          step: 1,
-          toDisplay: (v) => v,
-          fromDisplay: (v) => v,
+          min: 1, max: 5, displayMin: 1, displayMax: 5, step: 1,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
           format: (v) => v.toString(),
         },
         {
@@ -213,13 +225,26 @@ export default function (pi: ExtensionAPI) {
           key: 'DEFAULT_RESEARCH_DEPTH',
           label: 'Default Depth',
           description: '(0=quick 1-3=deep)',
-          min: 0,
-          max: 3,
-          displayMin: 0,
-          displayMax: 3,
-          step: 1,
-          toDisplay: (v) => v,
-          fromDisplay: (v) => v,
+          min: 0, max: 3, displayMin: 0, displayMax: 3, step: 1,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
+          format: (v) => v.toString(),
+        },
+        {
+          type: 'number',
+          key: 'MAX_SCRAPE_BATCHES',
+          label: 'Scrape Batches',
+          description: '(0=unlimited)',
+          min: 0, max: 99, displayMin: 0, displayMax: 99, step: 1,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
+          format: (v) => v === 0 ? 'Unlimited' : v.toString(),
+        },
+        {
+          type: 'number',
+          key: 'WORKER_THREADS',
+          label: 'Worker Threads',
+          description: '(Browser pool)',
+          min: 1, max: 16, displayMin: 1, displayMax: 16, step: 1,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
           format: (v) => v.toString(),
         },
         {
@@ -231,22 +256,27 @@ export default function (pi: ExtensionAPI) {
         {
           type: 'string',
           key: 'EMBEDDING_MODEL',
-          label: 'Embedding Model',
-          description: '(Local vector space)',
-          warning: '(Warning: Changing models permanently clears the database)',
+          label: 'Embed Model',
+          description: '(←→ cycle models)',
+          options: SUPPORTED_MODELS.map(m => m.id),
+          warning: '⚠ Changing model clears DB',
         },
         {
           type: 'number',
           key: 'CHUNK_SIZE_CHARS',
           label: 'Chunk Size',
           description: '(Characters)',
-          min: 500,
-          max: 10000,
-          displayMin: 500,
-          displayMax: 10000,
-          step: 100,
-          toDisplay: (v) => v,
-          fromDisplay: (v) => v,
+          min: 500, max: 10000, displayMin: 500, displayMax: 10000, step: 100,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
+          format: (v) => v.toString(),
+        },
+        {
+          type: 'number',
+          key: 'CHUNK_OVERLAP_CHARS',
+          label: 'Chunk Overlap',
+          description: '(0–50% of chunk)',
+          min: 0, max: 4999, displayMin: 0, displayMax: 4999, step: 128,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
           format: (v) => v.toString(),
         },
         {
@@ -254,13 +284,8 @@ export default function (pi: ExtensionAPI) {
           key: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
           label: 'Cache TTL',
           description: '(Days)',
-          min: 1,
-          max: 365,
-          displayMin: 1,
-          displayMax: 365,
-          step: 1,
-          toDisplay: (v) => v,
-          fromDisplay: (v) => v,
+          min: 1, max: 365, displayMin: 1, displayMax: 365, step: 1,
+          toDisplay: (v) => v, fromDisplay: (v) => v,
           format: (v) => `${v}d`,
         },
         {
@@ -268,11 +293,7 @@ export default function (pi: ExtensionAPI) {
           key: 'RESEARCHER_TIMEOUT_MS',
           label: 'Researcher Timeout',
           description: '(3-30 min)',
-          min: 180000,
-          max: 1800000,
-          displayMin: 180,
-          displayMax: 1800,
-          step: 30,
+          min: 180000, max: 1800000, displayMin: 180, displayMax: 1800, step: 30,
           toDisplay: (v) => v / 1000,
           fromDisplay: (v) => v * 1000,
           format: (v) => `${v}s`,
@@ -282,12 +303,9 @@ export default function (pi: ExtensionAPI) {
           label: 'Clear DB Cache',
           description: '(Delete all knowledge)',
           action: async () => {
-            const { getEnvFilePath } = await import('./config.ts');
-            const path = await import('node:path');
-            const fs = await import('node:fs');
-            const dbDir = path.join(path.dirname(getEnvFilePath()), 'knowledge_db');
-            if (fs.existsSync(dbDir)) {
-              fs.rmSync(dbDir, { recursive: true, force: true });
+            const dbDir = pathmod.join(pathmod.dirname(getEnvFilePath()), 'knowledge_db');
+            if (fss.existsSync(dbDir)) {
+              fss.rmSync(dbDir, { recursive: true, force: true });
             }
           },
         },
@@ -333,8 +351,37 @@ export default function (pi: ExtensionAPI) {
                   valueDisplay = (value ? '[ON]' : '[OFF]').padStart(10);
                 } else if (item.type === 'string') {
                   const value = config[item.key] as string;
-                  valueDisplay = (value.length > 10 ? '...' + value.slice(-7) : value).padStart(10);
-                  if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
+                  if (item.options && item.options.length > 0) {
+                    const modelInfo = SUPPORTED_MODELS.find(m => m.id === value);
+                    const cached = isModelCached(value);
+                    const langTag = modelInfo
+                      ? (modelInfo.multilingual ? '[multi-lang]' : '[EN]')
+                      : '';
+
+                    // Value column: cache status (7 chars, padded to 10)
+                    valueDisplay = (cached ? '[local]' : '[fetch]').padStart(10);
+
+                    // Description: full model ID truncated to available terminal width,
+                    // followed by the lang tag.
+                    // Available visible chars = width − fixed layout prefix (2+20+1+10+1 = 34)
+                    const available = Math.max(20, width - 34);
+                    const tail = langTag ? ` ${langTag}` : '';
+                    const nameMax = Math.max(5, available - tail.length);
+                    const displayName = value.length <= nameMax
+                      ? value
+                      : value.slice(0, nameMax - 3) + '...';
+
+                    if (isSelected) {
+                      const langColor = modelInfo?.multilingual ? 'accent' : 'muted';
+                      desc = displayName
+                        + (langTag ? ' ' + theme.fg(langColor, langTag) : '');
+                    } else {
+                      desc = displayName + tail;
+                    }
+                  } else {
+                    valueDisplay = (value.length > 10 ? '...' + value.slice(-7) : value).padStart(10);
+                    if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
+                  }
                 } else if (item.type === 'action') {
                   valueDisplay = '[EXECUTE]'.padStart(10);
                 }
@@ -347,7 +394,14 @@ export default function (pi: ExtensionAPI) {
               if (this.statusMsg) {
                 lines.push(theme.fg('success', ` ${this.statusMsg}`));
               }
+              // Contextual info lines when Embed Model row is focused
+              const selKey = configItems[this.selectedIndex]?.key;
+              if (selKey === 'EMBEDDING_MODEL') {
+                lines.push(theme.fg('muted',    ` Model dir: ${hfHubDir}`));
+                lines.push(theme.fg('warning',  ` ⚠ Changing model permanently clears the knowledge DB`));
+              }
               lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
+              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
 
               // Truncate lines to fit within width
               this.cachedLines = lines.map(line => {
@@ -370,7 +424,7 @@ export default function (pi: ExtensionAPI) {
               // Enter - save or execute action
               if (key === '\r' || key === '\n') {
                 const item = configItems[this.selectedIndex];
-                if (item.type === 'action') {
+                if (item && item.type === 'action' && 'action' in item) {
                   this.statusMsg = 'Executing...';
                   this.version++;
                   tui.requestRender();
