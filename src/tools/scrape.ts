@@ -20,6 +20,7 @@ import {
 } from '../constants.ts';
 import type { Config } from '../config.ts';
 import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { logger } from '../logger.ts';
 
 export function createScrapeTool(options: {
   ctx: ExtensionContext;
@@ -86,7 +87,7 @@ export function createScrapeTool(options: {
           rawUrls.forEach(u => {
               if (typeof u === 'string') {
                   if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
-                      const cleaned = u.replace(/[[]]/g, '').split(',').map(s => s.trim());
+                      const cleaned = u.replace(/[\[\]]/g, '').split(',').map(s => s.trim());
                       urls.push(...cleaned);
                   } else {
                       urls.push(u.trim());
@@ -95,7 +96,7 @@ export function createScrapeTool(options: {
           });
       } else if (typeof rawUrls === 'string') {
           const s = rawUrls as string;
-          urls = s.replace(/[[]]/g, '').split(',').map(u => u.trim());
+          urls = s.replace(/[\[\]]/g, '').split(',').map(u => u.trim());
       }
       
       urls = Array.from(new Set(urls)).filter(u => u.startsWith('http'));
@@ -106,7 +107,7 @@ export function createScrapeTool(options: {
 
       const batchLabel = `Batch ${callCount + 1}`;
 
-      // Record call BEFORE checking batch limit (as per mandate)
+      // Record scrape call AFTER limit check (effective limit = limit calls)
       options.tracker.recordCall('scrape');
       const scrapeStartTime = Date.now();
       
@@ -132,12 +133,15 @@ export function createScrapeTool(options: {
         for (const url of finalUrls) {
           const normalized = normalizeUrl(url);
           const fullDoc = await store.rebuildDocument(normalized);
-          
+
           if (fullDoc) {
             cachedResults.push({ url: url, markdown: fullDoc });
           } else {
             urlsToFetch.push(url);
           }
+        }
+        if (cachedResults.length > 0) {
+          logger.log(`[scrape] Cache: ${cachedResults.length} hit(s), ${urlsToFetch.length} miss(es) out of ${finalUrls.length} URLs`);
         }
       } else {
         urlsToFetch.push(...finalUrls);
@@ -158,6 +162,7 @@ export function createScrapeTool(options: {
         for (const res of successfulFresh) {
           writer.enqueue({ url: normalizeUrl(res.url), markdown: res.markdown || '' });
         }
+        logger.log(`[scrape] Enqueued ${successfulFresh.length} fresh result(s) for background ingestion`);
       }
 
       // Merge results

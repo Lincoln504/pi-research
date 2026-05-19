@@ -26,7 +26,10 @@ export class WriterQueue {
 
   enqueue(item: IngestionItem): void {
     this.queue.push(item);
-    this.process();
+    // Handle errors from fire-and-forget process() call to avoid unhandled rejections
+    this.process().catch(err => {
+      logger.error('[writer-queue] Error in process():', err);
+    });
   }
 
   private async process(): Promise<void> {
@@ -53,15 +56,18 @@ export class WriterQueue {
   private async ingest(item: IngestionItem): Promise<void> {
     const hash = createHash('sha256').update(item.markdown).digest('hex');
     
-    // Check for deduplication
-    // We can use a bloom filter or just query the DB.
-    // The mandate says "Content hash is checked against the DB to prevent duplicate ingestion."
-    // For now, let's search for the URL and check timestamp or hash in metadata.
-    
-    const existing = await this.options.store.search(item.url, { limit: 1 });
-    if (existing.length > 0 && existing[0].url === item.url && existing[0].metadata.contentHash === hash) {
-      // logger.debug(`[writer-queue] Skipping ${item.url}, content unchanged.`);
+    // Check for deduplication using exact URL match (not semantic search)
+    // Content hash is checked against the DB to prevent duplicate ingestion.
+    const existing = await this.options.store.findByUrl(item.url);
+    const firstExisting = existing[0];
+    if (firstExisting && firstExisting.metadata['contentHash'] === hash) {
+      logger.log(`[writer-queue] Skipping ${item.url} — content unchanged.`);
       return;
+    }
+
+    // Delete stale chunks before re-ingesting so old and new chunks don't mix
+    if (firstExisting) {
+      await this.options.store.deleteByUrl(item.url);
     }
 
     const chunks = this.options.chunker.chunk(item.markdown);

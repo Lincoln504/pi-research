@@ -13,6 +13,12 @@ export class Chunker {
   private overlap: number;
 
   constructor(options: ChunkerOptions) {
+    if (options.overlap >= options.targetSize) {
+      throw new Error(
+        `Chunker: overlap (${options.overlap}) must be less than targetSize (${options.targetSize}). ` +
+        `This prevents infinite loops during chunking.`
+      );
+    }
     this.targetSize = options.targetSize;
     this.overlap = options.overlap;
   }
@@ -60,13 +66,26 @@ export class Chunker {
           if (lastHeading !== -1 && lastHeading > this.targetSize * 0.4) {
             end = start + lastHeading + 1;
           } else {
-            const lastNL = slice.lastIndexOf('\n');
-            if (lastNL !== -1 && lastNL > this.targetSize * 0.7) {
-              end = start + lastNL + 1;
+            const sentenceMatches = [...slice.matchAll(/[.!?](?=\s|\n)/g)];
+            let lastSentencePos = -1;
+            if (sentenceMatches.length > 0) {
+              const lastMatch = sentenceMatches[sentenceMatches.length - 1];
+              if (lastMatch && lastMatch.index !== undefined) {
+                lastSentencePos = lastMatch.index + 1;
+              }
+            }
+
+            if (lastSentencePos !== -1 && lastSentencePos > this.targetSize * 0.6) {
+              end = start + lastSentencePos;
             } else {
-              const lastSpace = slice.lastIndexOf(' ');
-              if (lastSpace !== -1 && lastSpace > this.targetSize * 0.8) {
-                end = start + lastSpace + 1;
+              const lastNL = slice.lastIndexOf('\n');
+              if (lastNL !== -1 && lastNL > this.targetSize * 0.7) {
+                end = start + lastNL + 1;
+              } else {
+                const lastSpace = slice.lastIndexOf(' ');
+                if (lastSpace !== -1 && lastSpace > this.targetSize * 0.8) {
+                  end = start + lastSpace + 1;
+                }
               }
             }
           }

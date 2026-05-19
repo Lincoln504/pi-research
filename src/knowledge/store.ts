@@ -10,7 +10,7 @@ import {
 import { logger } from '../logger.ts';
 import type { Embedder } from './embedder.ts';
 import * as fs from 'node:fs';
-import { getActiveSessionCount } from '../utils/session-state.ts';
+import { getConfig } from '../config.ts';
 
 export interface StoreOptions {
   dbDir: string;
@@ -30,8 +30,8 @@ export class KnowledgeStore {
   private table: lancedb.Table | null = null;
   private options: StoreOptions;
   private tableName = 'knowledge';
-  private lastIndexRebuild = 0;
-  private readonly INDEX_REBUILD_DEBOUNCE_MS = 60000;
+  private isClosing = false;
+  private pendingOperations = 0;
 
   constructor(options: StoreOptions) {
     this.options = options;
@@ -56,8 +56,8 @@ export class KnowledgeStore {
         let storedModel = schema.metadata.get('embedding_model');
         
         // Arrow metadata might be returned as Uint8Array
-        if (storedModel instanceof Uint8Array) {
-          storedModel = new TextDecoder().decode(storedModel);
+        if ((storedModel as any) instanceof Uint8Array) {
+          storedModel = new TextDecoder().decode(storedModel as unknown as Uint8Array);
         }
         
         if (storedModel !== this.options.modelName) {
@@ -68,6 +68,9 @@ export class KnowledgeStore {
       } else {
         this.table = await this.createTable();
       }
+      
+      // Evict old records based on TTL
+      await this.evictOldRecords();
     } catch (err) {
       logger.error('[store] Failed to open database:', err);
       throw err;
@@ -95,35 +98,38 @@ export class KnowledgeStore {
     
     // Initial FTS index creation
     await table.createIndex('text', { config: lancedb.Index.fts() });
-    this.lastIndexRebuild = Date.now();
-    
+
     return table;
   }
 
   async addDocuments(docs: StoreDocument[]): Promise<void> {
     if (!this.table) throw new Error('Store not open');
+    if (docs.length === 0) return;
+    if (this.isClosing) {
+      logger.warn('[store] Ignoring addDocuments during close');
+      return;
+    }
 
-    const vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
-    
-    const data = docs.map((doc, i) => ({
-      vector: Array.from(vectors[i]),
-      url: doc.url,
-      text: doc.text,
-      metadata: JSON.stringify(doc.metadata),
-      timestamp: BigInt(doc.timestamp),
-    }));
+    this.pendingOperations++;
 
-    await this.table.add(data);
+    try {
+      const vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
 
-    // FTS Lock Mitigation: Debounce FTS rebuilds and gate behind activeSessionCount === 0
-    const now = Date.now();
-    if (now - this.lastIndexRebuild > this.INDEX_REBUILD_DEBOUNCE_MS && getActiveSessionCount() === 0) {
-      logger.info('[store] System idle, optimizing FTS index...');
-      await this.table.createIndex('text', { 
-        config: lancedb.Index.fts(),
-        replace: true 
-      });
-      this.lastIndexRebuild = now;
+      const data = docs.map((doc, i) => ({
+        vector: Array.from(vectors[i]!),
+        url: doc.url,
+        text: doc.text,
+        metadata: JSON.stringify(doc.metadata),
+        timestamp: BigInt(doc.timestamp),
+      }));
+
+      await this.table.add(data);
+      logger.log(`[store] Added ${docs.length} chunk(s) for ${docs[0]?.url}`);
+    } catch (err) {
+      logger.error('[store] Failed to add documents:', err);
+      throw err;
+    } finally {
+      this.pendingOperations--;
     }
   }
 
@@ -150,33 +156,80 @@ export class KnowledgeStore {
   }
 
   /**
+   * Delete all chunks for a URL. Called before re-ingesting changed content.
+   */
+  async deleteByUrl(url: string): Promise<void> {
+    if (!this.table) throw new Error('Store not open');
+    const escapedUrl = url.replace(/'/g, "''");
+    await this.table.delete(`url = '${escapedUrl}'`);
+    logger.log(`[store] Deleted chunks for ${url}`);
+  }
+
+  /**
+   * Find documents by exact URL match.
+   * Used for deduplication - returns all chunks for the given URL.
+   */
+  async findByUrl(url: string): Promise<StoreDocument[]> {
+    if (!this.table) throw new Error('Store not open');
+
+    // Escape single quotes in URL to prevent SQL injection
+    const escapedUrl = url.replace(/'/g, "''");
+
+    const results = await this.table
+      .query()
+      .where(`url = '${escapedUrl}'`)
+      .limit(1000)
+      .toArray();
+
+    return results.map(r => ({
+      url: r.url as string,
+      text: r.text as string,
+      metadata: JSON.parse(r.metadata as string),
+      timestamp: Number(r.timestamp),
+    }));
+  }
+
+  /**
    * Rebuild a full document from its chunks.
    */
   async rebuildDocument(url: string): Promise<string | null> {
     if (!this.table) throw new Error('Store not open');
 
+    // Escape URL to prevent SQL injection
+    const escapedUrl = url.replace(/'/g, "''");
+
     // Query all chunks for this URL, ordered by chunkIndex
     const results = await this.table
       .query()
-      .where(`url = '${url}'`)
+      .where(`url = '${escapedUrl}'`)
       .limit(1000) // reasonable limit
       .toArray();
 
     if (results.length === 0) return null;
 
-    const chunks = results.map(r => ({
-      text: r.text as string,
-      index: JSON.parse(r.metadata as string).chunkIndex as number,
-      overlap: JSON.parse(r.metadata as string).actualOverlap as number,
-    })).sort((a, b) => a.index - b.index);
+    const chunks = results.map(r => {
+      const metadata = JSON.parse(r.metadata as string);
+      return {
+        text: r.text as string,
+        index: metadata.chunkIndex as number,
+        overlap: metadata.actualOverlap as number,
+      };
+    }).sort((a, b) => a.index - b.index);
 
     if (chunks.length === 0) return null;
 
-    let fullText = chunks[0].text;
+    const firstChunk = chunks[0];
+    if (!firstChunk) return null;
+
+    let fullText = firstChunk.text;
     for (let i = 1; i < chunks.length; i++) {
-      fullText += chunks[i].text.slice(chunks[i].overlap);
+      const chunk = chunks[i];
+      if (chunk) {
+        fullText += chunk.text.slice(chunk.overlap);
+      }
     }
 
+    logger.log(`[store] Cache hit: rebuilt ${chunks.length} chunk(s) for ${url} (${fullText.length} chars)`);
     return fullText;
   }
 
@@ -188,10 +241,12 @@ export class KnowledgeStore {
 
     const vector = await this.options.embedder.embed(query);
     
+    // Hybrid Search with RRF Reranker for proper merging of vector and FTS results
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
       .fullTextSearch(query)
+      .rerank(await lancedb.rerankers.RRFReranker.create())
       .limit(options.limit ?? 20)
       .toArray();
 
@@ -199,8 +254,71 @@ export class KnowledgeStore {
     return Array.from(new Set(urls));
   }
 
+  /**
+   * Rebuild the FTS index. Called after a research session ends so new documents
+   * are visible to full-text search on the next session.
+   */
+  async rebuildFtsIndex(): Promise<void> {
+    if (!this.table) return;
+    try {
+      logger.info('[store] Rebuilding FTS index...');
+      await this.table.createIndex('text', {
+        config: lancedb.Index.fts(),
+        replace: true,
+      });
+      logger.info('[store] FTS index rebuilt.');
+    } catch (err) {
+      logger.warn('[store] FTS index rebuild failed:', err);
+    }
+  }
+
+  /**
+   * Evict records older than the configured TTL.
+   */
+  private async evictOldRecords(): Promise<void> {
+    if (!this.table) return;
+
+    try {
+      const config = getConfig();
+      const ttlDays = config.KNOWLEDGE_STORE_CACHE_TTL_DAYS;
+      if (ttlDays <= 0) return; // TTL disabled or invalid
+
+      const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
+      
+      // Delete records older than TTL
+      await this.table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
+      logger.info(`[store] Evicted records older than ${ttlDays} days`);
+    } catch (err) {
+      // Don't fail initialization if eviction fails
+      logger.warn('[store] Failed to evict old records:', err);
+    }
+  }
+
   async close(): Promise<void> {
-    this.db = null;
-    this.table = null;
+    this.isClosing = true;
+    
+    // Wait for pending operations to complete
+    const maxWaitMs = 10000; // 10 second timeout
+    const startTime = Date.now();
+    while (this.pendingOperations > 0 && (Date.now() - startTime) < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    if (this.pendingOperations > 0) {
+      logger.warn(`[store] Closing with ${this.pendingOperations} pending operations`);
+    }
+
+    try {
+      if (this.table) {
+        // LanceDB tables are automatically flushed, but we can ensure cleanup
+        this.table = null;
+      }
+      if (this.db) {
+        // LanceDB connection cleanup
+        this.db = null;
+      }
+    } catch (err) {
+      logger.error('[store] Error during close:', err);
+    }
   }
 }
