@@ -303,6 +303,17 @@ export function getPiActiveSessionOrder(piSessionId: string): string[] {
 }
 
 /**
+ * Get the total count of all active research sessions across all Pi sessions.
+ */
+export function getActiveSessionCount(): number {
+  let count = 0;
+  for (const state of piSessions.values()) {
+    count += state.order.length;
+  }
+  return count;
+}
+
+/**
  * Reset all state (for testing only)
  */
 export function resetAllPiSessions(): void {

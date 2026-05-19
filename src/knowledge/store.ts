@@ -5,12 +5,12 @@ import {
   Float32, 
   FixedSizeList, 
   Utf8, 
-  Int64,
-  tableFromArrays 
+  Int64 
 } from 'apache-arrow';
 import { logger } from '../logger.ts';
 import type { Embedder } from './embedder.ts';
 import * as fs from 'node:fs';
+import { getActiveSessionCount } from '../utils/session-state.ts';
 
 export interface StoreOptions {
   dbDir: string;
@@ -30,6 +30,8 @@ export class KnowledgeStore {
   private table: lancedb.Table | null = null;
   private options: StoreOptions;
   private tableName = 'knowledge';
+  private lastIndexRebuild = 0;
+  private readonly INDEX_REBUILD_DEBOUNCE_MS = 60000;
 
   constructor(options: StoreOptions) {
     this.options = options;
@@ -91,8 +93,9 @@ export class KnowledgeStore {
       schema: schema,
     });
     
-    // Create FTS index
+    // Initial FTS index creation
     await table.createIndex('text', { config: lancedb.Index.fts() });
+    this.lastIndexRebuild = Date.now();
     
     return table;
   }
@@ -111,6 +114,17 @@ export class KnowledgeStore {
     }));
 
     await this.table.add(data);
+
+    // FTS Lock Mitigation: Debounce FTS rebuilds and gate behind activeSessionCount === 0
+    const now = Date.now();
+    if (now - this.lastIndexRebuild > this.INDEX_REBUILD_DEBOUNCE_MS && getActiveSessionCount() === 0) {
+      logger.info('[store] System idle, optimizing FTS index...');
+      await this.table.createIndex('text', { 
+        config: lancedb.Index.fts(),
+        replace: true 
+      });
+      this.lastIndexRebuild = now;
+    }
   }
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
@@ -118,10 +132,12 @@ export class KnowledgeStore {
 
     const vector = await this.options.embedder.embed(query);
     
+    // Hybrid Search with RRFReranker as mandated
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
       .fullTextSearch(query)
+      .rerank(await lancedb.rerankers.RRFReranker.create())
       .limit(options.limit ?? 5)
       .toArray();
 
