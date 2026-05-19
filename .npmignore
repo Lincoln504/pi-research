@@ -26,7 +26,7 @@ build/
 out/
 *.tsbuildinfo
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 *.swp
@@ -54,5 +54,18 @@ yarn-error.log*
 *.diff
 COMMIT_MESSAGE*.txt
 
+# Runtime generated files (never publish)
+knowledge_db/
+shared-links-pool-*.json
+pi-research-*.md
+
+# Session / planning artifacts
+planchat.txt
+AUDIT_FIXES_SUMMARY.md
+*_PLAN_FINAL.md
+
 # Browser cache
 .browser/
+
+# Playwright
+.playwright/

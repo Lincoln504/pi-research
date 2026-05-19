@@ -88,3 +88,11 @@ testing-results/
 *.patch
 *.diff
 COMMIT_MESSAGE*.txt
+
+# Runtime knowledge store database (generated at runtime)
+knowledge_db/
+
+# Session planning / chat artifacts (never belong in source history)
+planchat.txt
+AUDIT_FIXES_SUMMARY.md
+*_PLAN_FINAL.md
