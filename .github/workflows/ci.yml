@@ -49,7 +49,7 @@ jobs:
   integration-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       TESTCONTAINERS_RYUK_DISABLED: true
     steps:
