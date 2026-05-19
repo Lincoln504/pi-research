@@ -34,7 +34,7 @@ jobs:
       - run: npm ci
       - run: npm run type-check
 
-  test:
+  unit-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +46,7 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
 
-  integration:
+  integration-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
