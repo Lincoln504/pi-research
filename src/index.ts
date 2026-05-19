@@ -398,6 +398,7 @@ export default function (pi: ExtensionAPI) {
               const selKey = configItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
                 lines.push(theme.fg('muted',    ` Model dir: ${hfHubDir}`));
+                lines.push(theme.fg('muted',    ` [fetch] = not yet downloaded. Model auto-downloads on next research session start.`));
                 lines.push(theme.fg('warning',  ` ⚠ Changing model permanently clears the knowledge DB`));
               }
               lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
