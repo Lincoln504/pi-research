@@ -226,7 +226,17 @@ describe('createResearchTool', () => {
     });
   });
 
-  describe('Deep Mode Branching (complexity 2, 3, or 4)', () => {
+  describe('depth → complexity mapping passed to runResearch', () => {
+    it.each([0, 1, 2, 3] as const)('passes depth %i directly as complexity', async (depth) => {
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', depth }, undefined, undefined, createMockContext());
+
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ depth }),
+        expect.any(AbortSignal),
+      );
+    });
+
     it('initializes research when depth=1', async () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
@@ -234,7 +244,7 @@ describe('createResearchTool', () => {
       expect(runResearch).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'research result' }));
     });
-    
+
     it('initializes research when depth=2', async () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 2 }, undefined, undefined, createMockContext());
@@ -242,7 +252,7 @@ describe('createResearchTool', () => {
       expect(runResearch).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'research result' }));
     });
-    
+
     it('initializes research when depth=3', async () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 3 }, undefined, undefined, createMockContext());

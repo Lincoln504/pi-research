@@ -98,7 +98,7 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledTimes(3);
   });
 
-  it('should use 2-character hash', async () => {
+  it('should use 2-character hash suffix in filename', async () => {
     const mockWriteFile = await getMockWriteFile();
     mockWriteFile.mockResolvedValue(undefined);
 
@@ -106,6 +106,18 @@ describe('exportResearchReport', () => {
 
     const callArgs = mockWriteFile.mock.calls[0]?.[0] as string;
     expect(callArgs).toMatch(/-([a-z0-9]{2})\.md$/);
+  });
+
+  it('different queries produce different filenames', async () => {
+    const mockWriteFile = await getMockWriteFile();
+    mockWriteFile.mockResolvedValue(undefined);
+
+    await exportResearchReport('query one', 'content', 'quick');
+    await exportResearchReport('query two different', 'content', 'quick');
+
+    const first = mockWriteFile.mock.calls[0]?.[0] as string;
+    const second = mockWriteFile.mock.calls[1]?.[0] as string;
+    expect(first).not.toBe(second);
   });
 });
 

@@ -103,13 +103,16 @@ describe('GitHub Advisories Client', () => {
     });
 
     it('should handle errors in repo search', async () => {
-      // 403 Rate Limit
-      vi.mocked(fetch).mockImplementationOnce(async () => ({ ok: false, status: 403 } as Response));
-      // retryWithBackoff will call it again
-      vi.mocked(fetch).mockImplementationOnce(async () => ({ ok: false, status: 403 } as Response));
-      vi.mocked(fetch).mockImplementationOnce(async () => ({ ok: false, status: 403 } as Response));
-      
-      const res1 = await searchGitHubAdvisories([], { repo: 'a/b' });
+      vi.useFakeTimers();
+      // 403 Rate Limit — retryWithBackoff will attempt maxRetries+1 = 3 calls total
+      vi.mocked(fetch).mockResolvedValue({ ok: false, status: 403 } as Response);
+
+      const promise = searchGitHubAdvisories([], { repo: 'a/b' });
+      // Advance past all retry delays (initialDelay=1000, maxRetries=2 → up to ~4s total)
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res1 = await promise;
+      vi.useRealTimers();
+
       expect(res1.error).toContain('rate limit exceeded');
     });
 

@@ -56,9 +56,22 @@ describe('search orchestrator', () => {
     vi.mocked(performSearch).mockRejectedValue(new Error('Search failed'));
 
     const result = await search(['error query']);
-    
+
     expect(result).toHaveLength(1);
     expect(result[0]!.error?.type).toBe('unknown');
     expect(result[0]!.error?.message).toBe('Search failed');
+  });
+
+  it('returns empty array immediately for empty query list without calling performSearch', async () => {
+    const result = await search([]);
+    expect(result).toEqual([]);
+    expect(performSearch).not.toHaveBeenCalled();
+  });
+
+  it('forwards onProgress callback to performSearch', async () => {
+    vi.mocked(performSearch).mockResolvedValue(new Map([['q', []]]));
+    const onProgress = vi.fn();
+    await search(['q'], undefined, undefined, onProgress);
+    expect(vi.mocked(performSearch).mock.calls[0]![3]).toBe(onProgress);
   });
 });

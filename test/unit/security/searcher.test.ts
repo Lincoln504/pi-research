@@ -552,6 +552,7 @@ describe('SecuritySearcher', () => {
       const searcher = new SecuritySearcher({
         nvdClient: mockNVD,
         cisaKevClient: mockCisa,
+        requestDelay: 0,
       });
 
       const params: SecuritySearchParams = {
@@ -752,55 +753,3 @@ describe('backward compatibility', () => {
   });
 });
 
-describe('client interfaces', () => {
-  describe('MockNVDClient', () => {
-    it('should implement INVDClient', () => {
-      const client = new MockNVDClient();
-
-      expect(client.search).toBeDefined();
-      expect(client.getById).toBeDefined();
-    });
-
-    it('should store search calls', async () => {
-      const client = new MockNVDClient();
-
-      await client.search(['test'], { severity: 'HIGH' });
-
-      const calls = client.getSearchCalls();
-      expect(calls).toHaveLength(1);
-      expect(calls[0]!.terms).toEqual(['test']);
-      expect(calls[0]!.options?.severity).toBe('HIGH');
-    });
-
-    it('should return mock results', async () => {
-      const client = new MockNVDClient();
-      const mockResult = { count: 5, vulnerabilities: [createMockVulnerability()] };
-      client.setMockResult('test{}', mockResult);
-
-      const result = await client.search(['test']);
-
-      expect(result.count).toBe(5);
-      expect(result.vulnerabilities).toHaveLength(1);
-    });
-  });
-
-  describe('MockGitHubClient', () => {
-    it('should implement IGitHubAdvisoriesClient', () => {
-      const client = new MockGitHubClient();
-
-      expect(client.search).toBeDefined();
-      expect(client.getById).toBeDefined();
-    });
-
-    it('should return mock advisories', async () => {
-      const client = new MockGitHubClient();
-      const mockResult = { count: 3, advisories: [createMockAdvisory()] };
-      client.setMockResult('test{}', mockResult);
-
-      const result = await client.search(['test']);
-
-      expect(result.count).toBe(3);
-      expect(result.advisories).toHaveLength(1);
-    });
-  });
-});

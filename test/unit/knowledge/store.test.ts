@@ -27,11 +27,14 @@ describe('KnowledgeStore', () => {
   });
 
   afterEach(async () => {
-    await store.close();
-    if (fs.existsSync(testDbDir)) {
-      fs.rmSync(testDbDir, { recursive: true, force: true });
+    try {
+      await store.close();
+    } finally {
+      if (fs.existsSync(testDbDir)) {
+        fs.rmSync(testDbDir, { recursive: true, force: true });
+      }
+      vi.clearAllMocks();
     }
-    vi.clearAllMocks();
   });
 
   it('should open and initialize a table', async () => {
@@ -41,11 +44,12 @@ describe('KnowledgeStore', () => {
 
   it('should insert and search documents', async () => {
     await store.open();
+    const timestamp = Date.now();
     const doc = {
       url: 'https://example.com',
       text: 'Hello world',
-      metadata: { title: 'Test' },
-      timestamp: Date.now(),
+      metadata: { title: 'Test', chunkIndex: 0, totalChunks: 1 },
+      timestamp: timestamp,
     };
     
     await store.addDocuments([doc]);
@@ -53,10 +57,162 @@ describe('KnowledgeStore', () => {
     const results = await store.search('hello', { limit: 1 });
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe('https://example.com');
+    expect(results[0].text).toBe('Hello world');
+    expect(results[0].metadata.title).toBe('Test');
+    expect(results[0].metadata.chunkIndex).toBe(0);
+    expect(results[0].timestamp).toBe(timestamp);
+  });
+
+  it('should throw when addDocuments is called before open()', async () => {
+    await expect(store.addDocuments([{
+      url: 'https://example.com',
+      text: 'test',
+      metadata: {},
+      timestamp: Date.now(),
+    }])).rejects.toThrow('Store not open');
+  });
+
+  it('addDocuments with empty array returns without calling embedMany', async () => {
+    await store.open();
+    vi.mocked(mockEmbedder.embedMany).mockClear();
+    await expect(store.addDocuments([])).resolves.toBeUndefined();
+    expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
+  });
+
+  it('findByUrl returns only documents for the exact URL', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/a', text: 'page A', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/b', text: 'page B', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+    ]);
+
+    const results = await store.findByUrl('https://example.com/a');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every(r => r.url === 'https://example.com/a')).toBe(true);
+  });
+
+  it('findByUrl returns empty array for URL with no documents', async () => {
+    await store.open();
+    const results = await store.findByUrl('https://nonexistent.example.com');
+    expect(results).toEqual([]);
+  });
+
+  it('findByUrl handles URLs containing single quotes without throwing', async () => {
+    await store.open();
+    // This would break if SQL escaping is not applied
+    await expect(store.findByUrl("https://example.com/it's-a-test")).resolves.toBeDefined();
+  });
+
+  it('deleteByUrl removes all chunks for a URL and leaves others intact', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/target', text: 'chunk 1', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/target', text: 'chunk 2', metadata: { chunkIndex: 1 }, timestamp: Date.now() },
+      { url: 'https://example.com/other', text: 'other page', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+    ]);
+
+    await store.deleteByUrl('https://example.com/target');
+
+    const deleted = await store.findByUrl('https://example.com/target');
+    expect(deleted).toHaveLength(0);
+
+    const remaining = await store.findByUrl('https://example.com/other');
+    expect(remaining.length).toBeGreaterThan(0);
+  });
+
+  it('rebuildDocument reconstructs text from overlapping chunks', async () => {
+    await store.open();
+    const original = 'Hello world this is the full document content.';
+    // Simulate 3 chunks with overlap, as the Chunker would produce
+    const overlap = 5;
+    const c0 = original.slice(0, 20);
+    const c1 = original.slice(20 - overlap, 35);
+    const c2 = original.slice(35 - overlap);
+
+    await store.addDocuments([
+      { url: 'https://example.com/doc', text: c0, metadata: { chunkIndex: 0, actualOverlap: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/doc', text: c1, metadata: { chunkIndex: 1, actualOverlap: overlap }, timestamp: Date.now() },
+      { url: 'https://example.com/doc', text: c2, metadata: { chunkIndex: 2, actualOverlap: overlap }, timestamp: Date.now() },
+    ]);
+
+    const rebuilt = await store.rebuildDocument('https://example.com/doc');
+    expect(rebuilt).toBe(original);
+  });
+
+  it('rebuildDocument returns null for unknown URL', async () => {
+    await store.open();
+    const result = await store.rebuildDocument('https://nonexistent.example.com');
+    expect(result).toBeNull();
+  });
+
+  it('findRelevantUrls deduplicates URLs across multiple chunks from the same source', async () => {
+    await store.open();
+    // Insert two chunks from the same URL
+    await store.addDocuments([
+      { url: 'https://example.com/dedup', text: 'first chunk of the document', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/dedup', text: 'second chunk of the document', metadata: { chunkIndex: 1 }, timestamp: Date.now() },
+      { url: 'https://example.com/other', text: 'a different document entirely', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+    ]);
+
+    const urls = await store.findRelevantUrls('document chunk', { limit: 10 });
+
+    // Result is an array of unique URLs — no duplicates
+    const unique = new Set(urls);
+    expect(unique.size).toBe(urls.length);
+    // Both source URLs should appear
+    expect(urls).toContain('https://example.com/dedup');
+  });
+
+  it('rebuildFtsIndex resolves without error after documents are added', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com', text: 'test document', metadata: {}, timestamp: Date.now() },
+    ]);
+    await expect(store.rebuildFtsIndex()).resolves.toBeUndefined();
+  });
+
+  it('evictOldRecords removes documents older than the TTL on open()', async () => {
+    await store.open();
+    // Insert document with timestamp at epoch (definitely older than 30-day default TTL)
+    await store.addDocuments([
+      { url: 'https://example.com/old', text: 'old content', metadata: {}, timestamp: 1 },
+    ]);
+    const beforeClose = await store.findByUrl('https://example.com/old');
+    expect(beforeClose.length).toBeGreaterThan(0);
+
+    await store.close();
+
+    // Re-open — evictOldRecords runs during open(), epoch record is evicted
+    const newStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'test-model',
+    });
+    await newStore.open();
+    try {
+      const afterEviction = await newStore.findByUrl('https://example.com/old');
+      expect(afterEviction).toHaveLength(0);
+    } finally {
+      await newStore.close();
+    }
   });
 
   it('should invalidate table if model changes', async () => {
     await store.open();
+    
+    // Add a document first to make the test meaningful
+    const doc = {
+      url: 'https://example.com',
+      text: 'Hello world',
+      metadata: { title: 'Test' },
+      timestamp: Date.now(),
+    };
+    await store.addDocuments([doc]);
+    
+    // Verify document exists before model change
+    const resultsBefore = await store.search('hello', { limit: 1 });
+    expect(resultsBefore).toHaveLength(1);
+    
     await store.close();
     
     // Re-open with different model
@@ -65,12 +221,12 @@ describe('KnowledgeStore', () => {
       embedder: mockEmbedder,
       modelName: 'different-model',
     });
-    
-    // We should detect that it was recreated or at least handle the mismatch
-    // Actually, we can check if the old data is gone.
     await newStore.open();
-    const results = await newStore.search('hello', { limit: 1 });
-    expect(results).toHaveLength(0);
-    await newStore.close();
+    try {
+      const results = await newStore.search('hello', { limit: 1 });
+      expect(results).toHaveLength(0);
+    } finally {
+      await newStore.close();
+    }
   });
 });

@@ -17,6 +17,8 @@ import {
   onSessionOrderChange,
   resetAllPiSessions,
   registerMasterUpdate,
+  registerSessionAbort,
+  abortAllSessions,
 } from '../../../src/utils/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
@@ -203,6 +205,39 @@ describe('utils/session-state', () => {
       expect(masterUpdate2).not.toHaveBeenCalled(); 
       
       vi.useRealTimers();
+    });
+  });
+
+  describe('registerSessionAbort / abortAllSessions', () => {
+    it('abortAllSessions calls abort on all registered controllers for that Pi session', () => {
+      const c1 = new AbortController();
+      const c2 = new AbortController();
+      registerSessionAbort(piSessionId, 'r1', c1);
+      registerSessionAbort(piSessionId, 'r2', c2);
+
+      abortAllSessions(piSessionId);
+
+      expect(c1.signal.aborted).toBe(true);
+      expect(c2.signal.aborted).toBe(true);
+    });
+
+    it('abortAllSessions does not affect controllers in other Pi sessions', () => {
+      const other = 'other-pi-session';
+      const s2 = startResearchSession(other);
+      void s2;
+      const c1 = new AbortController();
+      const c2 = new AbortController();
+      registerSessionAbort(piSessionId, 'r1', c1);
+      registerSessionAbort(other, 'r2', c2);
+
+      abortAllSessions(piSessionId);
+
+      expect(c1.signal.aborted).toBe(true);
+      expect(c2.signal.aborted).toBe(false);
+    });
+
+    it('abortAllSessions is a no-op for unknown Pi session', () => {
+      expect(() => abortAllSessions('nonexistent-pi-session')).not.toThrow();
     });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { retryWithBackoff, createTimeoutSignal } from '../../../src/web-research/retry-utils.ts';
+import { retryWithBackoff, createTimeoutSignal, withTimeout, isTransientError } from '../../../src/web-research/retry-utils.ts';
 
 vi.mock('../../../src/logger.ts');
 
@@ -52,6 +52,54 @@ describe('retry-utils', () => {
       expect(fn).toHaveBeenCalledTimes(3); 
       // Should have taken at least 10ms + 20ms = 30ms (roughly)
       expect(duration).toBeGreaterThanOrEqual(20);
+    });
+  });
+
+  describe('isTransientError', () => {
+    it('returns true for 429 rate limit errors', () => {
+      expect(isTransientError(new Error('HTTP 429: Too Many Requests'))).toBe(true);
+    });
+
+    it('returns true for 503 service unavailable', () => {
+      expect(isTransientError(new Error('503 Service Unavailable'))).toBe(true);
+    });
+
+    it('returns true for ECONNREFUSED network errors', () => {
+      expect(isTransientError(new Error('connect ECONNREFUSED 127.0.0.1:8080'))).toBe(true);
+    });
+
+    it('returns false for 404 not found', () => {
+      expect(isTransientError(new Error('HTTP 404: Not Found'))).toBe(false);
+    });
+
+    it('returns false for non-Error values', () => {
+      expect(isTransientError('string error')).toBe(false);
+      expect(isTransientError(null)).toBe(false);
+      expect(isTransientError(42)).toBe(false);
+    });
+  });
+
+  describe('withTimeout', () => {
+    it('resolves with the promise value when it completes in time', async () => {
+      const result = await withTimeout(Promise.resolve('done'), 1000, 'test-op');
+      expect(result).toBe('done');
+    });
+
+    it('rejects when the promise exceeds the timeout', async () => {
+      const never = new Promise<never>(() => {});
+      await expect(withTimeout(never, 30, 'slow-op')).rejects.toThrow('slow-op cancelled or timed out');
+    });
+
+    it('rejects immediately if the provided signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(withTimeout(Promise.resolve('x'), 1000, 'op', controller.signal))
+        .rejects.toThrow('op cancelled or timed out');
+    });
+
+    it('passes through the original rejection error', async () => {
+      const failing = Promise.reject(new Error('upstream failure'));
+      await expect(withTimeout(failing, 1000, 'op')).rejects.toThrow('upstream failure');
     });
   });
 

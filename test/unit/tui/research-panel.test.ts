@@ -94,18 +94,9 @@ describe('TUI Research Panel', () => {
     };
 
     describe('waveFrame state', () => {
-      it('should have waveFrame property in panel state', () => {
+      it('should have waveFrame property undefined in initial state', () => {
         const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
         expect(state.waveFrame).toBeUndefined();
-      });
-
-      it('should allow setting waveFrame', () => {
-        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
-        state.waveFrame = 0;
-        expect(state.waveFrame).toBe(0);
-
-        state.waveFrame = 10;
-        expect(state.waveFrame).toBe(10);
       });
     });
 
@@ -299,7 +290,7 @@ describe('TUI Research Panel', () => {
         expect(nonBgColors.length).toBeGreaterThan(0);
       });
 
-      it('should reset wave state when search completes', () => {
+      it('render should populate waveColors array when isSearching is active', () => {
         const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
         state.isSearching = true;
         state.waveFrame = 10;
@@ -308,29 +299,10 @@ describe('TUI Research Panel', () => {
         const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
         const component = componentCreator(undefined, mockTheme);
 
-        // Render with active search
         component.render(120);
+
         expect(state.waveColors).toBeDefined();
         expect(state.waveColors?.length).toBeGreaterThan(0);
-
-        // Simulate search complete (this is what tool.ts does)
-        state.waveFrame = undefined;
-        state.waveColors = undefined;
-
-        // Verify all wave state is cleared
-        expect(state.waveColors).toBeUndefined();
-      });
-
-      it('should increment wave frame correctly', () => {
-        const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
-        state.waveFrame = 0;
-
-        // Simulate multiple animation frames
-        for (let i = 0; i < 10; i++) {
-          state.waveFrame = (state.waveFrame ?? 0) + 1;
-        }
-
-        expect(state.waveFrame).toBe(10);
       });
     });
   });

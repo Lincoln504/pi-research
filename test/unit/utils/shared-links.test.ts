@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   generateSessionId,
   formatSharedLinksFromState,
+  formatLightweightLinkUpdate,
   registerScrapedLinks,
   getScrapedLinks,
   deduplicateUrls,
@@ -99,6 +100,34 @@ describe('shared-links', () => {
       expect(result).toContain('Aspect: q1 (ID: 1.1)');
       expect(result).toContain('https://example.com/1');
       expect(result).toContain('https://example.com/2');
+    });
+  });
+
+  describe('formatLightweightLinkUpdate', () => {
+    it('returns empty string for empty URL list', () => {
+      expect(formatLightweightLinkUpdate([], 'r1', 'Researcher 1')).toBe('');
+    });
+
+    it('returns formatted advisory with researcher ID and URL list', () => {
+      const result = formatLightweightLinkUpdate(
+        ['https://a.com', 'https://b.com'],
+        'r2',
+        'Researcher 2',
+      );
+      expect(result).toContain('Researcher r2');
+      expect(result).toContain('https://a.com');
+      expect(result).toContain('https://b.com');
+    });
+
+    it('each URL appears on its own line', () => {
+      const result = formatLightweightLinkUpdate(
+        ['https://x.com', 'https://y.com'],
+        'r3',
+        'Researcher 3',
+      );
+      const lines = result.split('\n');
+      expect(lines.some(l => l.includes('https://x.com'))).toBe(true);
+      expect(lines.some(l => l.includes('https://y.com'))).toBe(true);
     });
   });
 });

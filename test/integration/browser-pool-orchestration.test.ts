@@ -43,8 +43,12 @@ describe('Browser Pool Orchestration', () => {
       await stopBrowserManager().catch(() => {
         // Ignore errors during cleanup
       });
-      // Small delay to allow cleanup to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Additional delay after stopBrowserManager to allow worker processes to
+      // finish their Playwright browser/context teardown before the next test
+      // starts a fresh pool. stopBrowserManager already waits for pool.destroy()
+      // (up to 10s) + 1.5s IPC drain, but an extra buffer guards against any
+      // residual OS-level process cleanup.
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
   });
 

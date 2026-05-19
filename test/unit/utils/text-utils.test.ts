@@ -100,6 +100,25 @@ describe('text-utils', () => {
       expect(ensureAssistantResponse(session, 'Test')).toBe('aborted findings');
     });
 
+    it('should return partial text when stopReason is length and text is present', () => {
+      const session = {
+        messages: [
+          { role: 'assistant', content: [{ type: 'text', text: 'Partial answer before cutoff' }], stopReason: 'length' },
+        ],
+      } as any;
+      expect(ensureAssistantResponse(session, 'Test')).toBe('Partial answer before cutoff');
+    });
+
+    it('should throw when stopReason is length and text is empty', () => {
+      const session = {
+        messages: [
+          { role: 'assistant', content: [], stopReason: 'length' },
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test'))
+        .toThrow('truncated by token limit and produced no usable text');
+    });
+
     it('should throw if last assistant message has zero text blocks', () => {
       const session = {
         messages: [

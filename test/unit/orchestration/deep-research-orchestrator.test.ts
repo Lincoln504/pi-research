@@ -31,7 +31,9 @@ vi.mock('../../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: vi.fn(async () => ({
     prompt: vi.fn(async () => {}),
     subscribe: vi.fn(() => () => {}),
+    abort: vi.fn(async () => {}),
     getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report content' }] }],
+    messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Report content' }] }],
   })),
 }));
 

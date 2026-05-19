@@ -32,12 +32,11 @@ describe('tools/scrape', () => {
     tracker = new ToolUsageTracker({ scrape: 2 });
   });
 
-  it('should have correct metadata and protocol in guidelines', () => {
+  it('should have correct name and batch protocol in guidelines', () => {
     const tool = createScrapeTool({ ...mockOptions, tracker });
     expect(tool.name).toBe('scrape');
-    // Check that protocol guidelines are present (may be unlimited)
-    expect(tool.promptGuidelines.some(function(g) { return g.includes('PROTOCOL: Batch 1 → Batch 2'); }));
-    expect(tool.promptGuidelines.some(function(g) { return g.includes('up to 4 URLs each'); }));
+    expect(tool.promptGuidelines.some(g => g.includes('Batch 1'))).toBe(true);
+    expect(tool.promptGuidelines.some(g => g.includes('4 URLs'))).toBe(true);
   });
 
   it('should perform Batch 1 on first call', async () => {
@@ -54,6 +53,20 @@ describe('tools/scrape', () => {
     const result = await tool.execute('call-2', { urls: ['https://example.com/2'] }, undefined, () => {}, {} as any);
     
     expect(result.details).toMatchObject({ batch: 2 });
+  });
+
+  it('result should include scraped markdown content in text output', async () => {
+    const { scrape } = await import('../../../src/web-research/scrapers.ts');
+    vi.mocked(scrape).mockResolvedValueOnce([
+      { url: 'https://example.com', success: true, markdown: 'scraped page content here', source: 'fetch' },
+    ]);
+
+    const tool = createScrapeTool({ ...mockOptions, tracker });
+    const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
+
+    const textContent = result.content.find(c => c.type === 'text')?.text ?? '';
+    expect(textContent).toContain('scraped page content here');
+    expect(textContent).toContain('https://example.com');
   });
 
   it('should fail on third call (limit 2)', async () => {
