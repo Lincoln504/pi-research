@@ -26,7 +26,7 @@ export async function performSearch(
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 
-    const filteredQueries = queries.filter(q => q);
+    const filteredQueries = queries.filter(q => q.trim());
     const searchTasks = filteredQueries.map(async (query) => {
         if (signal?.aborted) {
             resultMap.set(query, []);
@@ -51,11 +51,11 @@ export async function performSearch(
 
     await Promise.all(searchTasks);
 
-    // Detect total failure: if every query returned empty, the worker pool is likely dead.
+    // Detect total failure: if every valid query returned empty, the worker pool is likely dead.
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);
-    if (totalResults === 0 && queries.length > 0) {
+    if (totalResults === 0 && filteredQueries.length > 0) {
         throw new Error(
-            `Search completely failed: all ${queries.length} queries returned no results. ` +
+            `Search completely failed: all ${filteredQueries.length} queries returned no results. ` +
             `Browser workers may be unavailable or DuckDuckGo is unreachable.`
         );
     }

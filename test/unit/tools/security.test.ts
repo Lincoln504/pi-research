@@ -59,4 +59,65 @@ describe('tools/security', () => {
       expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
     });
   });
+
+  describe('execute - validation', () => {
+    it('should return error for invalid parameters', async () => {
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      // Missing required `terms` field
+      const result = await tool.execute('test-id', {} as any, undefined, undefined, undefined as any);
+      expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+      expect(result.content[0].text).toContain('Invalid parameters');
+    });
+  });
+
+  describe('execute - success path', () => {
+    it('should format successful results with vulnerability header and counts', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      vi.mocked(searchSecurityDatabases).mockResolvedValue({
+        totalVulnerabilities: 3,
+        totalDatabases: 2,
+        results: {
+          nvd: { vulnerabilities: [], count: 2, duration: 100, error: null },
+          osv: { vulnerabilities: [], count: 1, duration: 50, error: null },
+        },
+        duration: 150,
+      });
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { terms: ['CVE-2024-1234'] }, undefined, undefined, undefined as any);
+
+      expect(result.content[0].text).toContain('Security Vulnerability Search Results');
+      expect(result.content[0].text).toContain('Total Vulnerabilities Found:**');
+      expect(result.content[0].text).toContain('CVE-2024-1234');
+    });
+
+    it('should return formatted error when searchSecurityDatabases throws', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      vi.mocked(searchSecurityDatabases).mockRejectedValue(new Error('API unavailable'));
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
+
+      expect(result.content[0].text).toContain('Security Vulnerability Search Failed');
+      expect(result.content[0].text).toContain('API unavailable');
+      expect(result.details).toMatchObject({ error: 'API unavailable' });
+    });
+
+    it('should default to all 4 databases when none specified', async () => {
+      const { searchSecurityDatabases } = await import('../../../src/security/index.ts');
+      vi.mocked(searchSecurityDatabases).mockResolvedValue({
+        totalVulnerabilities: 0,
+        totalDatabases: 4,
+        results: {},
+        duration: 0,
+      });
+
+      const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
+
+      expect(searchSecurityDatabases).toHaveBeenCalledWith(
+        expect.objectContaining({ databases: ['nvd', 'cisa_kev', 'github', 'osv'] })
+      );
+    });
+  });
 });

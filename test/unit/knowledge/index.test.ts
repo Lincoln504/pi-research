@@ -141,7 +141,12 @@ describe('getModelChunkConfig', () => {
   it('overlap percentage is 15% for all listed models', () => {
     const models = [
       'Xenova/all-MiniLM-L6-v2',
+      'Xenova/bge-small-en-v1.5',
+      'Xenova/all-mpnet-base-v2',
+      'Xenova/multilingual-e5-small',
+      'Xenova/multilingual-e5-base',
       'Xenova/bge-m3',
+      'onnx-community/embeddinggemma-300m-ONNX',
       'onnx-community/Qwen3-Embedding-0.6B-ONNX',
     ];
     for (const m of models) {

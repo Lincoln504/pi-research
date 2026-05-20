@@ -65,4 +65,55 @@ describe('tools/stackexchange', () => {
       expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
     });
   });
+
+  describe('execute - validation', () => {
+    it('should return error for invalid parameters', async () => {
+      const tool = createStackexchangeTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      // Missing required `command` field
+      const result = await tool.execute('test-id', {} as any, undefined, undefined, undefined as any);
+      expect(result.details).toMatchObject({ error: 'invalid_parameters' });
+      expect(result.content[0].text).toContain('Invalid parameters');
+    });
+  });
+
+  describe('execute - success path', () => {
+    it('should proxy stackexchangeCommand result through', async () => {
+      const { stackexchangeCommand } = await import('../../../src/stackexchange/index.ts');
+      vi.mocked(stackexchangeCommand).mockResolvedValue({
+        content: [{ type: 'text', text: '## Questions\nResult text here' }],
+        details: { count: 5 },
+      });
+
+      const tool = createStackexchangeTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { command: 'search', query: 'async await' }, undefined, undefined, undefined as any);
+
+      expect(result.content[0].text).toContain('Result text here');
+    });
+
+    it('should return formatted error when stackexchangeCommand throws', async () => {
+      const { stackexchangeCommand } = await import('../../../src/stackexchange/index.ts');
+      vi.mocked(stackexchangeCommand).mockRejectedValue(new Error('Rate limit exceeded'));
+
+      const tool = createStackexchangeTool({ ctx: createMockContext(), tracker: createMockTracker() });
+      const result = await tool.execute('test-id', { command: 'search', query: 'test' }, undefined, undefined, undefined as any);
+
+      expect(result.content[0].text).toContain('Stack Exchange Search Failed');
+      expect(result.content[0].text).toContain('Rate limit exceeded');
+      expect(result.details).toMatchObject({ command: 'search', error: 'Rate limit exceeded' });
+    });
+
+    it('should pass signal and context through to stackexchangeCommand', async () => {
+      const { stackexchangeCommand } = await import('../../../src/stackexchange/index.ts');
+      vi.mocked(stackexchangeCommand).mockResolvedValue({ content: [], details: {} });
+
+      const ctx = createMockContext();
+      const tool = createStackexchangeTool({ ctx, tracker: createMockTracker() });
+      const signal = new AbortController().signal;
+      await tool.execute('test-id', { command: 'search', query: 'test' }, signal, undefined, ctx);
+
+      expect(stackexchangeCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'search', signal })
+      );
+    });
+  });
 });

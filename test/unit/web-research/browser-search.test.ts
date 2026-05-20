@@ -68,18 +68,23 @@ describe('browser-search', () => {
       expect(result.get('query 3')).toHaveLength(3);
     });
 
-    it('should filter out empty queries', async () => {
+    it('should filter out empty and whitespace-only queries', async () => {
       const queries = ['valid query 1', '', '  ', 'valid query 2'];
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
-        return mockSearchResults.filter(r => r.url.includes(q.replace(/\s/g, '')));
+        // Valid queries get a result; empty/whitespace never reach the worker (filtered before dispatch)
+        return [{ title: 'Result', url: `https://example.com/${encodeURIComponent(q)}`, snippet: 'test' }];
       });
 
       const result = await performSearch(queries);
 
-      // Empty queries still create entries but with empty results
-      expect(result.size).toBeGreaterThanOrEqual(2);
+      // Empty string and whitespace-only queries are filtered before dispatch — not in result Map
+      expect(result.size).toBe(2);
       expect(result.has('valid query 1')).toBe(true);
       expect(result.has('valid query 2')).toBe(true);
+      expect(result.has('')).toBe(false);
+      expect(result.has('  ')).toBe(false);
+      // Worker was only called for the 2 valid queries
+      expect(runWorkerSearch).toHaveBeenCalledTimes(2);
     });
 
     it('should return Map with query strings as keys', async () => {

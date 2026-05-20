@@ -199,6 +199,7 @@ describe('KnowledgeStore', () => {
     expect(unique.size).toBe(urls.length);
     // Both source URLs should appear
     expect(urls).toContain('https://example.com/dedup');
+    expect(urls).toContain('https://example.com/other');
   });
 
   it('count() returns 0 before open and the number of documents after insertion', async () => {
