@@ -37,7 +37,7 @@ import { injectCurrentDate } from '../utils/inject-date.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
-import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { registerScrapedLinks, normalizeUrl } from '../utils/shared-links.ts';
 
 const ResearcherConfigSchema = Type.Object({
@@ -129,7 +129,7 @@ export class DeepResearchOrchestrator {
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
-      logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headers=${JSON.stringify(auth.headers)}`);
+      logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
 
       const historyMessages: any[] = [];
       let lastRawPlanText = '';
@@ -141,7 +141,7 @@ export class DeepResearchOrchestrator {
           : historyMessages;
 
         this.options.observer?.onPlanningProgress?.(attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
-        logger.log(`[Orchestrator] Calling complete() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
+        logger.log(`[Orchestrator] Calling complete() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
         logger.debug(`[Orchestrator] Coordinator System Prompt:\n${basePlanningPrompt + retryHint}`);
         logger.debug(`[Orchestrator] Coordinator Messages:\n${JSON.stringify(messages, null, 2)}`);
         
@@ -257,8 +257,13 @@ export class DeepResearchOrchestrator {
                   }
                 }
               }
-              // Drain before evaluate() so findRelevantUrls() sees this round's new entries
-              if (enqueued > 0) await writer.drain();
+              // Drain and rebuild FTS before evaluate() so findRelevantUrls() sees this round's
+              // new entries via both vector and full-text search paths.
+              if (enqueued > 0) {
+                await writer.drain();
+                const store = await getStore();
+                await store.rebuildFtsIndex();
+              }
             } catch (err) {
               logger.warn('[Orchestrator] Failed to store link descriptions (non-fatal):', err);
             }
@@ -282,7 +287,10 @@ export class DeepResearchOrchestrator {
       return finalSynthesis;
 
     } catch (error) {
-      if (error instanceof Error && error.message === 'Research aborted.') throw error;
+      if (error instanceof Error && error.message === 'Research aborted.') {
+        this.cleanup();
+        throw error;
+      }
       logger.error('[Orchestrator] Run failed:', error);
       if (this.reports.size > 0) {
         const partial = this.buildFallbackSynthesis();
@@ -643,7 +651,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
   }
 
-  private async runResearcher(config: ResearcherConfig, initialLinks: string[], historicalUrls: string[], _signal?: AbortSignal): Promise<void> {
+  private async runResearcher(config: ResearcherConfig, initialLinks: string[], historicalUrls: string[], signal?: AbortSignal): Promise<void> {
     const id = String(config.id);
     this.options.observer?.onResearcherStart?.(id, config.name, config.goal, this.currentRound);
 
@@ -843,14 +851,14 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
-      logger.log(`[Orchestrator] Evaluator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headers=${JSON.stringify(auth.headers)}`);
+      logger.log(`[Orchestrator] Evaluator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
 
       const synthOverride = mustSynthesize ? '\n\n**MANDATORY — ABSOLUTE MAXIMUM REACHED**: No further research rounds are permitted. You MUST return `"action": "synthesize"` with a comprehensive synthesis in the `content` field. Do NOT return delegate.' : '';
       const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
       
       let text = "";
       for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
-          logger.log(`[Orchestrator] Calling completeSimple() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
+          logger.log(`[Orchestrator] Calling completeSimple() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
           logger.debug(`[Orchestrator] Evaluator Prompt:\n${evalUserMessage}`);
 
           const response = await completeSimple(this.options.model, {

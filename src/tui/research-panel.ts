@@ -632,69 +632,6 @@ export function _deriveRgbGradient(r: number, g: number, b: number, steps: numbe
 }
 
 /**
- * Build wave gradient colors from theme accent color.
- *
- * Parameters:
- *   theme - Theme interface with fg() method
- *   steps - Number of gradient steps (brightest to dimmest)
- *
- * Returns:
- *   Array of ANSI foreground escape codes, where:
- *   - index 0 = brightest color (peak of wave)
- *   - last index = dimmest color (tail of wave)
- *
- * Fallback:
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-// @ts-ignore
-function _buildWaveGradient(theme: Theme, steps: number): string[] {
-  // Get raw ANSI code for accent color
-  const accentText = theme.fg('accent', '');
-
-  // Parse ANSI code to extract color information
-  const parsed = parseAnsiFgColor(accentText);
-
-  if (!parsed) {
-    if (steps <= 1) return steps === 1 ? ['\x1b[38;5;244m'] : [];
-    // Fallback: gray gradient
-    return Array.from({ length: steps }, (_, i) => {
-      const gray = Math.round(244 - (i / (steps - 1)) * 10);
-      return `\x1b[38;5;${Math.max(234, gray)}m`;
-    });
-  }
-
-  switch (parsed.type) {
-    case '256':
-      return _derive256Gradient(parsed.index!, steps);
-
-    case 'rgb':
-      return _deriveRgbGradient(parsed.r!, parsed.g!, parsed.b!, steps);
-
-    case 'basic': {
-      // Basic ANSI colors - map to approximate 256-color indices
-      const basicTo256: Record<number, number> = {
-        0: 16, // black
-        1: 196, // red
-        2: 46, // green
-        3: 226, // yellow
-        4: 21, // blue
-        5: 201, // magenta
-        6: 51, // cyan
-        7: 231, // white
-      };
-      const mappedIndex = basicTo256[parsed.index!] ?? 244;
-      return _derive256Gradient(mappedIndex, steps);
-    }
-
-    default:
-      if (steps <= 1) return steps === 1 ? ['\x1b[38;5;244m'] : [];
-      return Array.from({ length: steps }, (_, i) => {
-        const gray = Math.round(244 - (i / (steps - 1)) * 10);
-        return `\x1b[38;5;${Math.max(234, gray)}m`;
-      });
-  }
-}
-
-/**
  * Internal rendering logic for a single research panel block.
  * Returns lines of TUI content with side-by-side researcher columns.
  */

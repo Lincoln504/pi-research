@@ -10,6 +10,7 @@ const mockStore = {
   findByUrl: vi.fn().mockResolvedValue([]),
   deleteByUrl: vi.fn().mockResolvedValue(undefined),
   deleteByUrlAndType: vi.fn().mockResolvedValue(undefined),
+  isStoreClosed: vi.fn().mockReturnValue(false),
 } as any;
 
 // Mock Chunker
@@ -26,6 +27,7 @@ describe('WriterQueue', () => {
     mockStore.findByUrl.mockResolvedValue([]);
     mockStore.deleteByUrl.mockResolvedValue(undefined);
     mockStore.deleteByUrlAndType.mockResolvedValue(undefined);
+    mockStore.isStoreClosed.mockReturnValue(false);
     queue = new WriterQueue({
       store: mockStore,
       chunker: mockChunker,

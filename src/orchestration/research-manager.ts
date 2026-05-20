@@ -12,6 +12,7 @@ import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import type { Config } from '../config.ts';
 import { initKnowledgeStore } from '../knowledge/index.ts';
+import { logger } from '../logger.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;

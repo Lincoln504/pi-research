@@ -58,6 +58,21 @@ export class WriterQueue {
     const hash = createHash('sha256').update(item.markdown).digest('hex');
     const incomingType = (item.metadata?.['ingestionType'] as string | undefined) ?? 'raw-content';
 
+    // Validate type before it reaches any SQL filter to prevent injection via metadata.
+    const ALLOWED_INGESTION_TYPES = new Set(['raw-content', 'synthesis-description']);
+    if (!ALLOWED_INGESTION_TYPES.has(incomingType)) {
+      logger.error(`[writer-queue] Rejecting ingest for ${item.url}: unknown ingestionType "${incomingType}"`);
+      return;
+    }
+
+    // Check closing state before the findByUrl round-trip to avoid silent data loss:
+    // addDocuments() guards isClosing but findByUrl does not, so without this check
+    // dedup succeeds, addDocuments bails, and the document is silently dropped.
+    if (this.options.store.isStoreClosed()) {
+      logger.warn(`[writer-queue] Skipping ingest for ${item.url} — store is closing`);
+      return;
+    }
+
     const existing = await this.options.store.findByUrl(item.url);
 
     // Scope dedup to same ingestionType — raw-content and synthesis-description
@@ -100,6 +115,16 @@ export class WriterQueue {
     this.drainPromise = new Promise<void>((resolve) => {
       this.drainResolver = resolve;
     });
+
+    // Close the race: if process() completed between the first isEmpty check above and
+    // setting drainResolver just now, it won't have resolved us — resolve immediately.
+    if (!this.processing && this.queue.length === 0) {
+      this.drainResolver!();
+      this.drainResolver = null;
+      this.drainPromise = null;
+      return;
+    }
+
     return this.drainPromise;
   }
 }

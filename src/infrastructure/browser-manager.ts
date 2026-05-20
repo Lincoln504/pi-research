@@ -530,7 +530,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
 
     if (initializationPromise) return initializationPromise;
 
-    initializationPromise = (async () => {
+    const p: Promise<IScheduler> = (async () => {
         const schedulerVersion = currentVersion;
         // Generate a unique ID for this scheduler instance to prevent PID reuse issues
         const schedulerId = crypto.randomUUID();
@@ -621,7 +621,13 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         return scheduler;
     })();
 
-    return initializationPromise;
+    initializationPromise = p;
+    // Clear on rejection so the next caller retries rather than receiving the same
+    // rejected promise forever.
+    p.catch(() => {
+        if (initializationPromise === p) initializationPromise = null;
+    });
+    return p;
 }
 
 const require = createRequire(import.meta.url);
@@ -747,6 +753,9 @@ export async function stopBrowserManager(): Promise<void> {
       }
       await globalScheduler.shutdown();
   }
+
+  // Destroy the keep-alive HTTP agent so its open sockets don't block process exit.
+  clientAgent.destroy();
 }
 
 shutdownManager.register(stopBrowserManager);

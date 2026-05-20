@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { initKnowledgeStore, shutdownKnowledgeStore } from './knowledge/index.ts';
+import { shutdownKnowledgeStore } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 

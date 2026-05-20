@@ -357,6 +357,10 @@ export class KnowledgeStore {
     }
   }
 
+  isStoreClosed(): boolean {
+    return this.isClosing;
+  }
+
   async close(): Promise<void> {
     this.isClosing = true;
     

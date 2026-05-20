@@ -368,7 +368,14 @@ export function validateConfig(config: Config = getConfig()): void {
     );
   }
   if (config.PROXY_URL) {
-    logger.warn('[config] Proxy configured:', config.PROXY_URL);
+    try {
+      const u = new URL(config.PROXY_URL);
+      if (u.username) u.username = '***';
+      if (u.password) u.password = '***';
+      logger.warn('[config] Proxy configured:', u.toString());
+    } catch {
+      logger.warn('[config] Proxy configured (URL not parseable — check format)');
+    }
   }
 }
 

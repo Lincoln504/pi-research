@@ -4,10 +4,12 @@
  * Query the local knowledge store for information across sessions.
  */
 
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { isKnowledgeStoreReady, getStore, initKnowledgeStore } from '../knowledge/index.ts';
 import { getConfig } from '../config.ts';
+import { logger } from '../logger.ts';
 
 export function createStoredSearchTool(_options: {
   ctx: ExtensionContext;
@@ -23,7 +25,7 @@ export function createStoredSearchTool(_options: {
     description: 'Query the local knowledge store for summaries of findings from previous research sessions. Use this for discovery and to find URLs that were relevant in the past.',
     promptSnippet: 'Search historical knowledge store for summaries',
     parameters: StoredSearchParams,
-    async execute(_callId, params, _signal): Promise<AgentToolResult<unknown>> {
+    async execute(_callId: string, params: unknown, _signal: AbortSignal): Promise<AgentToolResult<unknown>> {
       if (!Value.Check(StoredSearchParams, params)) {
         return {
           content: [{ type: 'text', text: 'Invalid parameters for stored_search.' }],
@@ -35,7 +37,9 @@ export function createStoredSearchTool(_options: {
         const config = getConfig();
         if (config.KNOWLEDGE_STORE_ENABLED) {
           // Trigger lazy initialization in background
-          initKnowledgeStore().catch(() => {});
+          initKnowledgeStore().catch(err => {
+            logger.warn('[stored-search] Background knowledge store initialization failed:', err);
+          });
           return {
             content: [{ type: 'text', text: 'Knowledge store is initializing, try again shortly.' }],
             details: { status: 'initializing' },

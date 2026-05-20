@@ -19,7 +19,7 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
-import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { normalizeUrl } from '../utils/shared-links.ts';
 
 export interface QuickResearchOrchestratorOptions {
@@ -175,6 +175,7 @@ export class QuickResearchOrchestrator {
           if (citations.length === 0) {
             logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
           }
+          let enqueued = 0;
           for (const cit of citations) {
             if (cit.url && cit.description) {
               writer.enqueue({
@@ -186,8 +187,12 @@ export class QuickResearchOrchestrator {
                   synthesizedAt: new Date().toISOString()
                 }
               });
+              enqueued++;
             }
           }
+          // Drain so concurrent or subsequent sessions see these entries immediately
+          // rather than relying solely on shutdownKnowledgeStore's drain.
+          if (enqueued > 0) await writer.drain();
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
         }

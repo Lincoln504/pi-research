@@ -151,6 +151,9 @@ let writerQueue: WriterQueue | null = null;
 let chunker: Chunker | null = null;
 
 let initializationPromise: Promise<void> | null = null;
+// Set to true after all retries are exhausted so subsequent calls fail fast
+// without spawning new concurrent init attempts.
+let initializationPermanentlyFailed = false;
 
 // Tracks the embedder instance that currently has an in-flight pipeline load.
 // Prevents concurrent pipeline() calls when retries create new Embedder instances
@@ -165,6 +168,7 @@ export async function initKnowledgeStore(): Promise<void> {
   const config = getConfig();
   if (!config.KNOWLEDGE_STORE_ENABLED) return;
   validateConfig(config);
+  if (initializationPermanentlyFailed) throw new Error('Knowledge store initialization previously failed permanently after all retries');
   if (initializationPromise) return initializationPromise;
 
   initializationPromise = (async () => {
@@ -230,6 +234,7 @@ export async function initKnowledgeStore(): Promise<void> {
         if (attempt >= MAX_INIT_RETRIES) {
           logger.error(`[knowledge] Initialization failed after ${MAX_INIT_RETRIES} attempts. Giving up.`, err);
           inflightEmbedder = null;
+          initializationPermanentlyFailed = true;
           initializationPromise = null;
           throw err;
         }
@@ -314,4 +319,5 @@ export async function shutdownKnowledgeStore(): Promise<void> {
   }
 
   initializationPromise = null;
+  initializationPermanentlyFailed = false;
 }
