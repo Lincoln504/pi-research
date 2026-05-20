@@ -481,32 +481,6 @@ function addVariation(index: number, maxVariation: number = 1): number {
   return Math.max(0, index - variation);
 }
 
-/**
- * Add slight variation to an ANSI color code.
- */
- 
-// @ts-ignore
-function _addVariationToColor(ansiCode: string | undefined, maxVariation: number = 1): string {
-  // Return background if undefined
-  if (!ansiCode) {
-    return '\x1b[38;5;237m';
-  }
-
-  // Extract color index from \x1b[38;5;{N}m pattern
-  const match = ansiCode.match(/\\x1b\[38;5;(\\d+)m/);
-  if (!match || !match[1]) {
-    return ansiCode; // Return original if pattern doesn't match
-  }
-
-  const currentIndex = parseInt(match[1], 10);
-  // Add slight variation: -1, 0, or +1
-  const variation = Math.floor(Math.random() * (maxVariation * 2 + 1)) - maxVariation;
-  const newIndex = Math.max(16, Math.min(255, currentIndex + variation));
-  // Clamp variation for grayscale range (232-255)
-  const clampedIndex = newIndex >= 232 ? Math.min(255, newIndex) : newIndex;
-
-  return `\\x1b[38;5;${clampedIndex}m`;
-}
 
 export function _formatTokens(tokens: number): string { return formatTokens(tokens); }
 export function _renderProgressPct(progress: ResearchProgress | undefined): string { return renderProgressPct(progress); }
