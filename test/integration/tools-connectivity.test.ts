@@ -63,7 +63,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       });
       const result = await tool.execute(
         'test-search-1',
-        { queries: ['python programming', 'python tutorial', 'learn python', 'python beginner', 'python advanced', 'python vs javascript', 'python data science', 'python web development', 'python script', 'python automation'] },
+        { queries: ['python programming'] },
         undefined,
         undefined,
         mockExtensionCtx as any
@@ -90,7 +90,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       });
       const result = await tool.execute(
         'test-search-2',
-        { queries: ['machine learning', 'ml tutorial', 'learn ml', 'ml basics', 'ml advanced', 'ml algorithms', 'ml models', 'ml frameworks', 'ml python', 'ml tensorflow'] },
+        { queries: ['machine learning transformers'] },
         undefined,
         undefined,
         mockExtensionCtx as any

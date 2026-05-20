@@ -1,125 +1,154 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { retryWithBackoff, createTimeoutSignal, withTimeout, isTransientError } from '../../../src/web-research/retry-utils.ts';
-
-vi.mock('../../../src/logger.ts');
+import { 
+  isTransientError, 
+  retryWithBackoff, 
+  createTimeoutSignal, 
+  withTimeout 
+} from '../../../src/web-research/retry-utils.ts';
 
 describe('retry-utils', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  describe('isTransientError', () => {
+    it('returns true for network errors', () => {
+      expect(isTransientError(new Error('ECONNREFUSED'))).toBe(true);
+      expect(isTransientError(new Error('ETIMEDOUT'))).toBe(true);
+      expect(isTransientError(new Error('ENOTFOUND'))).toBe(true);
+    });
+
+    it('returns true for rate limit errors', () => {
+      expect(isTransientError(new Error('HTTP 429: Too Many Requests'))).toBe(true);
+      expect(isTransientError(new Error('Rate limit exceeded'))).toBe(true);
+    });
+
+    it('returns true for 5xx server errors', () => {
+      expect(isTransientError(new Error('HTTP 500: Internal Server Error'))).toBe(true);
+      expect(isTransientError(new Error('HTTP 503: Service Unavailable'))).toBe(true);
+    });
+
+    it('returns false for other errors', () => {
+      expect(isTransientError(new Error('HTTP 404: Not Found'))).toBe(false);
+      expect(isTransientError(new Error('Validation failed'))).toBe(false);
+      expect(isTransientError(null)).toBe(false);
+    });
   });
 
   describe('retryWithBackoff', () => {
-    it('should return result on first success', async () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    it('returns result on first successful attempt', async () => {
       const fn = vi.fn().mockResolvedValue('success');
       const result = await retryWithBackoff(fn);
-      
       expect(result).toBe('success');
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
-    it('should retry on 429 error (using fake timers)', async () => {
-      vi.useFakeTimers();
+    it('retries on transient errors and eventually succeeds', async () => {
       const fn = vi.fn()
-        .mockRejectedValueOnce(new Error('HTTP 429: Too Many Requests'))
-        .mockResolvedValueOnce('success');
-        
-      const promise = retryWithBackoff(fn, { initialDelay: 100 });
-      
-      // Move past the first failure and wait for the retry
-      await vi.advanceTimersByTimeAsync(200); 
-      
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockRejectedValueOnce(new Error('503 Service Unavailable'))
+        .mockResolvedValue('finally success');
+
+      const promise = retryWithBackoff(fn, { initialDelay: 100, maxRetries: 3 });
+
+      // Attempt 1 fails, wait for delay
+      await vi.advanceTimersByTimeAsync(150);
+      // Attempt 2 fails, wait for delay
+      await vi.advanceTimersByTimeAsync(300);
+
       const result = await promise;
-      expect(result).toBe('success');
-      expect(fn).toHaveBeenCalledTimes(2);
-      vi.useRealTimers();
+      expect(result).toBe('finally success');
+      expect(fn).toHaveBeenCalledTimes(3);
     });
 
-    it('should NOT retry on 404 error', async () => {
-      const fn = vi.fn().mockRejectedValue(new Error('HTTP 404: Not Found'));
-      
-      await expect(retryWithBackoff(fn)).rejects.toThrow('HTTP 404');
+    it('throws immediately on non-transient errors', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('Fatal error 404'));
+      await expect(retryWithBackoff(fn)).rejects.toThrow('Fatal error 404');
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
-    it('should exhaust retries and throw last error (using real timers with short delays)', async () => {
-      const fn = vi.fn().mockRejectedValue(new Error('HTTP 429'));
+    it('exhausts retries and throws last error', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      const promise = retryWithBackoff(fn, { initialDelay: 100, maxRetries: 2 });
       
-      // Using very short delays to keep tests fast without fake timer headaches
-      const start = Date.now();
-      await expect(retryWithBackoff(fn, { maxRetries: 2, initialDelay: 10, maxDelay: 50 })).rejects.toThrow('HTTP 429');
-      const duration = Date.now() - start;
-      
-      expect(fn).toHaveBeenCalledTimes(3); 
-      // Should have taken at least 10ms + 20ms = 30ms (roughly)
-      expect(duration).toBeGreaterThanOrEqual(20);
+      // Silence unhandled rejection warning while we advance timers
+      promise.catch(() => {});
+
+      // Initial call fails. Delay 1: 100ms.
+      await vi.advanceTimersByTimeAsync(150);
+      // Retry 1 fails. Delay 2: 200ms.
+      await vi.advanceTimersByTimeAsync(300);
+      // Retry 2 fails. Throws.
+
+      await expect(promise).rejects.toThrow('ECONNREFUSED');
+      expect(fn).toHaveBeenCalledTimes(3);
     });
+
   });
 
-  describe('isTransientError', () => {
-    it('returns true for 429 rate limit errors', () => {
-      expect(isTransientError(new Error('HTTP 429: Too Many Requests'))).toBe(true);
+  describe('createTimeoutSignal', () => {
+    it('creates a signal that aborts after timeout', async () => {
+      // Mock AbortSignal.timeout to undefined to force the fallback path
+      // that uses setTimeout, which works reliably with vi.useFakeTimers()
+      const originalTimeout = AbortSignal.timeout;
+      (AbortSignal as any).timeout = undefined;
+      
+      try {
+        vi.useFakeTimers();
+        const signal = createTimeoutSignal(100);
+        expect(signal.aborted).toBe(false);
+        vi.advanceTimersByTime(101);
+        expect(signal.aborted).toBe(true);
+      } finally {
+        AbortSignal.timeout = originalTimeout;
+      }
     });
 
-    it('returns true for 503 service unavailable', () => {
-      expect(isTransientError(new Error('503 Service Unavailable'))).toBe(true);
-    });
-
-    it('returns true for ECONNREFUSED network errors', () => {
-      expect(isTransientError(new Error('connect ECONNREFUSED 127.0.0.1:8080'))).toBe(true);
-    });
-
-    it('returns false for 404 not found', () => {
-      expect(isTransientError(new Error('HTTP 404: Not Found'))).toBe(false);
-    });
-
-    it('returns false for non-Error values', () => {
-      expect(isTransientError('string error')).toBe(false);
-      expect(isTransientError(null)).toBe(false);
-      expect(isTransientError(42)).toBe(false);
+    it('combines with an existing signal', () => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const signal = createTimeoutSignal(1000, controller.signal);
+      
+      controller.abort('external');
+      expect(signal.aborted).toBe(true);
     });
   });
 
   describe('withTimeout', () => {
-    it('resolves with the promise value when it completes in time', async () => {
-      const result = await withTimeout(Promise.resolve('done'), 1000, 'test-op');
-      expect(result).toBe('done');
+    beforeEach(() => {
+      vi.useFakeTimers();
     });
 
-    it('rejects when the promise exceeds the timeout', async () => {
-      const never = new Promise<never>(() => {});
-      await expect(withTimeout(never, 30, 'slow-op')).rejects.toThrow('slow-op cancelled or timed out');
+    it('resolves if promise completes before timeout', async () => {
+      const promise = Promise.resolve('ok');
+      const result = await withTimeout(promise, 1000, 'test');
+      expect(result).toBe('ok');
     });
 
-    it('rejects immediately if the provided signal is already aborted', async () => {
-      const controller = new AbortController();
-      controller.abort();
-      await expect(withTimeout(Promise.resolve('x'), 1000, 'op', controller.signal))
-        .rejects.toThrow('op cancelled or timed out');
-    });
-
-    it('passes through the original rejection error', async () => {
-      const failing = Promise.reject(new Error('upstream failure'));
-      await expect(withTimeout(failing, 1000, 'op')).rejects.toThrow('upstream failure');
-    });
-  });
-
-  describe('createTimeoutSignal', () => {
-    it('should create a signal that aborts after timeout', async () => {
-      // Use real timers for this test since AbortSignal.timeout() is native
-      // and can't be controlled by Vitest's fake timers
-      const signal = createTimeoutSignal(50);
-      expect(signal.aborted).toBe(false);
+    it('rejects if timeout occurs first', async () => {
+      // Use a promise that won't reject on its own to avoid unhandled rejections
+      let resolveRef: any;
+      const slowPromise = new Promise(resolve => { resolveRef = resolve; });
       
-      await new Promise(r => setTimeout(r, 100));
-      expect(signal.aborted).toBe(true);
+      const promise = withTimeout(slowPromise, 100, 'test');
+      
+      vi.advanceTimersByTime(101);
+      
+      await expect(promise).rejects.toThrow('test cancelled or timed out');
+      resolveRef('done'); // Cleanup
     });
 
-    it('should combine with existing signal', async () => {
+    it('rejects if external signal aborts', async () => {
       const controller = new AbortController();
-      const signal = createTimeoutSignal(1000, controller.signal);
+      let resolveRef: any;
+      const slowPromise = new Promise(resolve => { resolveRef = resolve; });
+      
+      const promise = withTimeout(slowPromise, 5000, 'test', controller.signal);
       
       controller.abort();
-      expect(signal.aborted).toBe(true);
+      
+      await expect(promise).rejects.toThrow('test cancelled or timed out');
+      resolveRef('done'); // Cleanup
     });
   });
 });

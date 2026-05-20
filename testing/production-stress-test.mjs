@@ -235,7 +235,6 @@ async function runTask(data) {
         await page.close();
 
         const allResults = [...p1Results, ...p2Results];
-        const relevance = this.calculateRelevance ? this.calculateRelevance(query, allResults) : null;
 
         return {
             taskId,
@@ -244,7 +243,7 @@ async function runTask(data) {
             results: allResults.length,
             page1Results: p1Results.length,
             page2Results: p2Results.length,
-            relevance,
+            allResults, // Pass back to main thread for relevance calculation
             duration: Date.now() - startTime,
             workerId: process.pid
         };
@@ -316,6 +315,12 @@ export default new ThreadWorker(runTask, {
     }
     
     saveResult(result) {
+        // Calculate relevance in main thread
+        if (result.allResults) {
+            result.relevance = this.calculateRelevance(result.query, result.allResults);
+            delete result.allResults; // Clean up large result sets
+        }
+
         this.results.push(result);
         appendFileSync(
             join(outputDir, 'results.json'),

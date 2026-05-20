@@ -1,11 +1,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { 
-  createInitialPanelState, 
-  addSlice, 
-  activateSlice, 
+import {
+  createInitialPanelState,
+  addSlice,
+  activateSlice,
   completeSlice,
   createMasterResearchPanel,
+  _formatTokens,
+  _renderProgressPct,
+  _formatCost,
   type Theme
 } from '../../../src/tui/research-panel.ts';
 
@@ -284,10 +287,10 @@ describe('TUI Research Panel', () => {
         // Colors should be different after wave passed through
         expect(colorsAfterFrame40).not.toEqual(colorsAfterFrame0);
 
-        // Colors should persist (not reset to background)
-        // Some positions should have variation (different from background) after wave passed
-        const nonBgColors = colorsAfterFrame40.filter(c => !c.includes('237') && c.length > 0);
-        expect(nonBgColors.length).toBeGreaterThan(0);
+        // Colors should persist (not reset to a single uniform value)
+        // The wave leaves behind varied color trail, so the array must contain at least 2 distinct values
+        const distinctColors = new Set(colorsAfterFrame40);
+        expect(distinctColors.size).toBeGreaterThan(1);
       });
 
       it('render should populate waveColors array when isSearching is active', () => {
@@ -304,6 +307,150 @@ describe('TUI Research Panel', () => {
         expect(state.waveColors).toBeDefined();
         expect(state.waveColors?.length).toBeGreaterThan(0);
       });
+    });
+  });
+
+  describe('slice management', () => {
+    it('should add and activate slices', () => {
+      const state = createInitialPanelState('s', 'q', 'm');
+      addSlice(state, 'r1', '1');
+      expect(state.slices.has('r1')).toBe(true);
+      expect(state.slices.get('r1')?.queued).toBe(false);
+      
+      addSlice(state, 'r2', '2', true);
+      expect(state.slices.get('r2')?.queued).toBe(true);
+      
+      activateSlice(state, 'r2');
+      expect(state.slices.get('r2')?.queued).toBe(false);
+    });
+
+    it('should update tokens with non-decreasing guard and accumulate cost', () => {
+      const { updateSliceTokens } = require('../../../src/tui/research-panel.ts');
+      const state = createInitialPanelState('s', 'q', 'm');
+      addSlice(state, 'r1', '1');
+      
+      updateSliceTokens(state, 'r1', 100, 0.05);
+      expect(state.slices.get('r1')?.tokens).toBe(100);
+      expect(state.slices.get('r1')?.cost).toBe(0.05);
+      
+      // Update with lower tokens should be ignored
+      updateSliceTokens(state, 'r1', 50, 0.05);
+      expect(state.slices.get('r1')?.tokens).toBe(100);
+      expect(state.slices.get('r1')?.cost).toBe(0.10); // Cost still accumulates
+    });
+
+    it('should complete and clear slices', () => {
+      const { clearCompletedResearchers } = require('../../../src/tui/research-panel.ts');
+      const state = createInitialPanelState('s', 'q', 'm');
+      addSlice(state, 'r1', '1');
+      addSlice(state, 'r2', '2');
+      
+      completeSlice(state, 'r1');
+      expect(state.slices.get('r1')?.completed).toBe(true);
+      
+      clearCompletedResearchers(state);
+      expect(state.slices.has('r1')).toBe(false);
+      expect(state.slices.has('r2')).toBe(true);
+    });
+  });
+
+  describe('layout and sorting', () => {
+    it('should sort slices correctly: Planning -> Numerical -> Eval', () => {
+      const state = createInitialPanelState('s', 'q', 'm');
+      addSlice(state, 'eval', 'eval');
+      addSlice(state, 'plan', 'planning');
+      addSlice(state, 'r2', '2');
+      addSlice(state, 'r1', '1');
+
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+      const component = componentCreator(undefined, mockTheme);
+      
+      // We'll check the top border line to verify order
+      const lines = component.render(100);
+      const topBorder = lines[1]; // Index 0 is header, 1 is top border of block
+      
+      // The labels should appear in order: planning, 1, 2, eval
+      const planIdx = topBorder.indexOf('planning');
+      const r1Idx = topBorder.indexOf(' 1 ');
+      const r2Idx = topBorder.indexOf(' 2 ');
+      const evalIdx = topBorder.indexOf('╮'); // Eval box is decorative, header is different
+      
+      // Eval box top part is '─-─' or '─--─' and corner '╮'
+      // We can check positions
+      expect(planIdx).toBeLessThan(r1Idx);
+      expect(r1Idx).toBeLessThan(r2Idx);
+      // Eval is always last in sliceIds.sort
+    });
+  });
+
+  describe('_formatTokens', () => {
+    it('returns raw number below 1000', () => {
+      expect(_formatTokens(0)).toBe('0');
+      expect(_formatTokens(999)).toBe('999');
+    });
+
+    it('uses 1 decimal place for 1000-9999', () => {
+      expect(_formatTokens(1000)).toBe('1.0k');
+      expect(_formatTokens(1500)).toBe('1.5k');
+      expect(_formatTokens(9999)).toBe('10.0k');
+    });
+
+    it('rounds to nearest k for 10k-999k', () => {
+      expect(_formatTokens(10000)).toBe('10k');
+      expect(_formatTokens(25400)).toBe('25k');
+    });
+
+    it('uses M suffix above 1 million', () => {
+      expect(_formatTokens(1_000_000)).toBe('1.0M');
+      expect(_formatTokens(2_500_000)).toBe('2.5M');
+    });
+  });
+
+  describe('_renderProgressPct', () => {
+    it('returns empty string for undefined', () => {
+      expect(_renderProgressPct(undefined)).toBe('');
+    });
+
+    it('returns empty string when expected is 0', () => {
+      expect(_renderProgressPct({ expected: 0, made: 0 })).toBe('');
+    });
+
+    it('rounds to nearest 10%', () => {
+      expect(_renderProgressPct({ expected: 10, made: 5 })).toBe('50%');
+      expect(_renderProgressPct({ expected: 10, made: 1 })).toBe('10%');
+      expect(_renderProgressPct({ expected: 10, made: 3 })).toBe('30%');
+    });
+
+    it('clamps at 100%', () => {
+      expect(_renderProgressPct({ expected: 10, made: 15 })).toBe('100%');
+    });
+
+    it('returns 100% at completion', () => {
+      expect(_renderProgressPct({ expected: 5, made: 5 })).toBe('100%');
+    });
+  });
+
+  describe('_formatCost', () => {
+    it('formats zero as $0.00', () => {
+      expect(_formatCost(0)).toBe('$0.00');
+    });
+
+    it('formats very small amount as <$0.01', () => {
+      expect(_formatCost(0.000001)).toBe('<$0.01');
+    });
+
+    it('formats sub-dollar amounts with 4 decimal places', () => {
+      expect(_formatCost(0.0023)).toBe('$0.0023');
+    });
+
+    it('formats dollar amounts with 2 decimal places', () => {
+      expect(_formatCost(1.5)).toBe('$1.50');
+      expect(_formatCost(99.99)).toBe('$99.99');
+    });
+
+    it('rounds large amounts to nearest dollar', () => {
+      expect(_formatCost(150.7)).toBe('$151');
     });
   });
 });

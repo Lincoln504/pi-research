@@ -357,6 +357,11 @@ export class KnowledgeStore {
     }
   }
 
+  async count(): Promise<number> {
+    if (!this.table) return 0;
+    return this.table.countRows();
+  }
+
   isStoreClosed(): boolean {
     return this.isClosing;
   }

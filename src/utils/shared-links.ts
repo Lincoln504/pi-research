@@ -70,6 +70,10 @@ export function normalizeUrl(url: string): string {
         if (normalized.endsWith('/')) {
             normalized = normalized.slice(0, -1);
         }
+        // Remove trailing question mark if present (no query params)
+        if (normalized.endsWith('?')) {
+            normalized = normalized.slice(0, -1);
+        }
         return normalized;
     } catch (_e) {
         // If it's an invalid URL, return it as-is or cleaned up slightly

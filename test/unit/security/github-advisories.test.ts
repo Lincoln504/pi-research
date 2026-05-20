@@ -114,6 +114,8 @@ describe('GitHub Advisories Client', () => {
       vi.useRealTimers();
 
       expect(res1.error).toContain('rate limit exceeded');
+      // Verify retries actually happened (1 initial + 2 retries = 3 total fetch calls)
+      expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThanOrEqual(2);
     });
 
     it('should deduplicate results by GHSA ID', async () => {

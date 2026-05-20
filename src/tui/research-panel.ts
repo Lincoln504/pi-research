@@ -508,6 +508,10 @@ function _addVariationToColor(ansiCode: string | undefined, maxVariation: number
   return `\\x1b[38;5;${clampedIndex}m`;
 }
 
+export function _formatTokens(tokens: number): string { return formatTokens(tokens); }
+export function _renderProgressPct(progress: ResearchProgress | undefined): string { return renderProgressPct(progress); }
+export function _formatCost(cost: number): string { return formatCost(cost); }
+
 export function _derive256Gradient(baseIndex: number, steps: number): string[] {
   if (steps <= 1) return steps === 1 ? [`\x1b[38;5;${baseIndex}m`] : [];
   const gradient: string[] = [];

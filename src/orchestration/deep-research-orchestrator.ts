@@ -116,7 +116,7 @@ export class DeepResearchOrchestrator {
       .replace(/\{ROOT_QUERY\}/g, this.options.query)
       .replace('{MAX_TEAM_SIZE}', this.getTeamSize().toString())
       .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
-      .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Quick' : this.options.complexity === 2 ? 'Normal' : 'Deep')
+      .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Normal' : this.options.complexity === 2 ? 'Deep' : 'Ultra')
       .replace('{COMPLEXITY_GUIDANCE}', this.getComplexityGuidance())
       .replace('{{historical_links_section}}', historicalLinksSection);
 
@@ -383,9 +383,9 @@ export class DeepResearchOrchestrator {
     const queryBudget = this.getQueryBudget();
 
     if (this.options.complexity === 1) {
-      return "**Complexity: Level 1 (Quick)**. Aim for a focused, direct investigation of the primary facts.";
+      return "**Complexity: Level 1 (Normal)**. Conduct a thorough, well-rounded investigation of the topic covering the primary angles with adequate citations. Plan multiple researchers for distinct aspects and aim for solid multi-source coverage.";
     } else if (this.options.complexity === 2) {
-      return `**Complexity: Level 2 (Normal)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to ${maxTeamSize}) based on topic scope.`;
+      return `**Complexity: Level 2 (Deep)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (up to ${maxTeamSize}) based on topic scope.`;
     } else {
       return `**Complexity: Level 3 (Ultra)**. Perform an exhaustive, deep-dive research effort, leaving no stone unturned. **IMPORTANT**: Plan aggressively for multiple research rounds with comprehensive citation throughout. In your initial planning, deploy the maximum number of researchers (${maxTeamSize}) and fully utilize each researcher's query budget (${queryBudget}). Think in terms of a multi-phase investigation: plan Round 1 to broadly map the landscape with parallel specialists, anticipating that subsequent rounds will cover remaining gaps. Don't hold back — leverage all available researchers and queries in Round 1 to maximize initial coverage and source diversity.
 
@@ -395,14 +395,14 @@ export class DeepResearchOrchestrator {
 
   private getEvaluatorComplexityGuidance(): string {
     if (this.options.complexity === 1) {
-      return `**Level 1 (Quick)** - Focused, direct investigation.
+      return `**Level 1 (Normal)** - Thorough, well-rounded investigation with solid multi-source coverage.
 
-- **SYNTHESIZE when**: Primary facts are established, core question is answerable with multiple cited sources
-- **DELEGATE only when**: Essential information missing, critical gaps that prevent answering
+- **SYNTHESIZE when**: The primary topic is covered from multiple angles with evidence from diverse sources and no significant gaps remain that would prevent a complete answer.
+- **DELEGATE when**: Coverage is incomplete, important angles are missing, or additional sources would meaningfully strengthen the findings.
 
-Be conservative with delegation. The goal is efficiency — answer the core question directly with adequate citations without exhaustive coverage.`;
+Use both available rounds when the topic warrants it. Delegate for a second round if the initial findings are narrow, lack source diversity, or leave key angles unexplored. The goal is thorough coverage, not just bare minimum facts.`;
     } else if (this.options.complexity === 2) {
-      return `**Level 2 (Normal)** - Thorough, multi-phase investigation with comprehensive citations.
+      return `**Level 2 (Deep)** - Thorough, multi-phase investigation with comprehensive citations.
 
 - **SYNTHESIZE when**: Multiple angles covered with substantial findings across all major topics, diverse sources cited throughout, and no significant gaps in coverage.
 - **DELEGATE when**: ANY gaps remain in major topics, insufficient source diversity, missing details, or areas that need deeper exploration. Don't synthesize prematurely.
@@ -444,7 +444,7 @@ Be aggressive with delegation. Level 3 is for exhaustive research — use remain
         return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds}) — Level 3 Ultra**\n\n**STRONGLY PREFER DELEGATION.** You are in the middle phase of exhaustive research.\n- With ${maxRounds - this.currentRound} rounds remaining, you have substantial capacity — use it\n- Delegate to sibling researchers covering angles not yet fully explored, deeper sub-topics of what has been found, or cross-cutting themes that span multiple earlier findings\n- Further rounds should drill into specialist detail, verify findings with additional independent sources, and surface nuanced dimensions of the topic\n- Synthesize ONLY if: you have 4+ rounds of findings, 10+ distinct source domains, every major claim is multi-source verified, and you genuinely cannot identify gaps that another round would address\n- If you can name even one meaningful unexplored angle — DELEGATE`;
       }
       if (complexity === 2) {
-        return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\n**Level 2 Guidance**: You are in the middle phase of Level 2 research. Continue delegating actively — you should aim for 2-3 total rounds before synthesis. Each round adds value and depth to your findings. Don't hold back when there are still meaningful gaps or areas to explore.\n\n- Synthesize only when findings are comprehensive and no significant gaps remain that warrant another round.\n\n`;
+        return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\n**Level 2 (Deep) Guidance**: You are in the middle phase of deep research. Continue delegating actively — you should aim for 2-3 total rounds before synthesis. Each round adds value and depth to your findings. Don't hold back when there are still meaningful gaps or areas to explore.\n\n- Synthesize only when findings are comprehensive and no significant gaps remain that warrant another round.\n\n`;
       }
       // Level 1 middle
       return `\n\n---\n\n**Round Phase: MIDDLE (Round ${this.currentRound} of ${maxRounds})**\n\nYou are in the middle phase of research. Apply balanced judgment:\n- Synthesize if you have substantial coverage of the key aspects\n- Delegate for significant gaps or to explore specialized sub-topics\n- Consider depth over breadth at this stage\n- Focus on rounding out incomplete areas`;
@@ -835,7 +835,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
           .replace('{MAX_ROUNDS}', maxRounds.toString())
           .replace('{MAX_TEAM_SIZE}', maxTeamSize.toString())
           .replace('{QUERY_BUDGET}', this.getQueryBudget().toString())
-          .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Level 1 (Quick)' : this.options.complexity === 2 ? 'Level 2 (Normal)' : 'Level 3 (Ultra)')
+          .replace('{COMPLEXITY_LABEL}', this.options.complexity === 1 ? 'Level 1 (Normal)' : this.options.complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)')
           .replace('{COMPLEXITY_GUIDANCE}', this.getEvaluatorComplexityGuidance())
           .replace('{ROUND_PHASE_GUIDANCE}', this.getRoundPhaseGuidance(maxRounds))
           .replace('{{previous_queries_section}}', previousQueriesSection)

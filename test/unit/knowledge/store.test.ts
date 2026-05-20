@@ -201,6 +201,17 @@ describe('KnowledgeStore', () => {
     expect(urls).toContain('https://example.com/dedup');
   });
 
+  it('count() returns 0 before open and the number of documents after insertion', async () => {
+    expect(await store.count()).toBe(0);
+    await store.open();
+    expect(await store.count()).toBe(0);
+    await store.addDocuments([
+      { url: 'https://example.com/a', text: 'doc a', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/b', text: 'doc b', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+    ]);
+    expect(await store.count()).toBe(2);
+  });
+
   it('rebuildFtsIndex resolves without error after documents are added', async () => {
     await store.open();
     await store.addDocuments([

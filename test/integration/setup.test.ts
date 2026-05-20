@@ -62,62 +62,23 @@ describe('scripts/setup.cjs integration tests', () => {
     });
   }
 
-  it('should complete successfully with PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1', async () => {
+  it('should complete successfully and show expected output', async () => {
     const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
 
-    // Exit code should be 0
     expect(result.exitCode).toBe(0);
-
-    // Should contain expected markers
     expect(result.stdout).toContain('pi-research');
     expect(result.stdout).toContain('skipping browser download');
-
-    // Should NOT have errors in stderr
+    expect(result.stdout).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1');
     expect(result.stderr).not.toContain('Error');
   });
 
-  it('should complete successfully when browser installation is skipped', async () => {
-    // Set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD to skip actual browser install
-    // and simulate a successful install scenario that still completes
-    const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
-
-    expect(result.exitCode).toBe(0);
-
-    // Should show status message
-    expect(result.stdout).toContain('pi-research');
-  });
-
-  it('should show version information', async () => {
-    const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
-
-    // Should show pi-research version info
-    expect(result.stdout).toContain('pi-research');
-  });
-
-  it('should show setup status information', async () => {
-    const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
-
-    // Should show setup status without relying on platform-specific paths.
-    expect(result.stdout).toContain('pi-research');
-    expect(result.stdout).toContain('PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1');
-  });
-
-  it('should gracefully handle missing npx (simulated via SKIP)', async () => {
-    // In reality, we can't easily remove npx from the path, but we can
-    // test that the script completes with skip flag
-    const result = await runSetup({ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
-
-    // Should still complete successfully
-    expect(result.exitCode).toBe(0);
-  });
-
-  it('should handle --system-deps flag', async () => {
-    // Even with --system-deps, we skip actual installation with SKIP flag
+  it('should handle --system-deps flag without error', async () => {
     const result = await runSetup(
       { PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' },
       ['--system-deps']
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('pi-research');
   });
 });

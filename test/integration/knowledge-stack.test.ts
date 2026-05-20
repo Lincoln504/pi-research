@@ -136,13 +136,13 @@ describe('Knowledge stack integration', () => {
       chunks.map((c, i) => ({
         url: 'https://rebuild.example.com',
         text: c.text,
-        metadata: { chunkIndex: i, totalChunks: chunks.length, actualOverlap: c.actual_overlap },
+        metadata: { chunkIndex: i, totalChunks: chunks.length, actualOverlap: c.actual_overlap, ingestionType: 'raw-content' },
         timestamp: Date.now(),
       })),
     );
 
     const rebuilt = await store.rebuildDocument('https://rebuild.example.com');
-    expect(rebuilt).toBe(original);
+    expect(rebuilt?.text).toBe(original);
   });
 
   it('rebuildDocument returns null for an unknown URL', async () => {
@@ -152,7 +152,7 @@ describe('Knowledge stack integration', () => {
 
   it('search returns results after ingestion', async () => {
     await store.addDocuments([
-      { url: 'https://search.example.com', text: 'machine learning transformers', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://search.example.com', text: 'machine learning transformers', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
     ]);
     const results = await store.search('transformer model', { limit: 5 });
     expect(results.length).toBeGreaterThan(0);
@@ -234,7 +234,7 @@ describe('Knowledge stack integration', () => {
     await queue.drain();
 
     const rebuilt = await store.rebuildDocument('https://cache.example.com');
-    expect(rebuilt).toBe(originalMarkdown);
+    expect(rebuilt?.text).toBe(originalMarkdown);
   });
 
   // ── MODEL_CONFIG / getModelEmbedderConfig ─────────────────────────────────
@@ -242,16 +242,16 @@ describe('Knowledge stack integration', () => {
   describe('getModelEmbedderConfig', () => {
     it('mean-pooling models all return pooling: mean', () => {
       expect(getModelEmbedderConfig('Xenova/all-MiniLM-L6-v2').pooling).toBe('mean');
-      expect(getModelEmbedderConfig('Xenova/bge-small-en-v1.5').pooling).toBe('mean');
       expect(getModelEmbedderConfig('Xenova/all-mpnet-base-v2').pooling).toBe('mean');
       expect(getModelEmbedderConfig('Xenova/multilingual-e5-small').pooling).toBe('mean');
       expect(getModelEmbedderConfig('Xenova/multilingual-e5-base').pooling).toBe('mean');
       expect(getModelEmbedderConfig('onnx-community/embeddinggemma-300m-ONNX').pooling).toBe('mean');
     });
 
-    it('bge-m3 returns cls pooling — it is CLS-trained, not mean-pooling', () => {
-      const cfg = getModelEmbedderConfig('Xenova/bge-m3');
-      expect(cfg.pooling).toBe('cls');
+    it('cls-pooling models return pooling: cls', () => {
+      expect(getModelEmbedderConfig('Xenova/bge-small-en-v1.5').pooling).toBe('cls');
+      expect(getModelEmbedderConfig('Xenova/bge-m3').pooling).toBe('cls');
+      expect(getModelEmbedderConfig('onnx-community/granite-embedding-small-english-r2-ONNX').pooling).toBe('cls');
     });
 
     it('Qwen3-Embedding returns last_token pooling', () => {

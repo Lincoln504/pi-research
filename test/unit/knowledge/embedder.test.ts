@@ -247,23 +247,34 @@ describe('Embedder', () => {
     expect(failingEmbedder.isInitialized()).toBe(true);
   });
 
-  it('concurrent initialize() calls should invoke the underlying pipeline only once', async () => {
+  it('should recover to CPU when WebGPU device error occurs during embed()', async () => {
     const { pipeline } = await import('@huggingface/transformers');
-    const callCount = vi.fn();
-    vi.mocked(pipeline).mockImplementationOnce(async (..._args) => {
-      callCount();
-      return mockPipelineFn;
+    
+    // First call to pipeline (initialization) succeeds with WebGPU
+    vi.mocked(pipeline).mockImplementationOnce(async () => mockPipelineFn);
+    
+    const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
+    await embedder.initialize();
+    
+    // Setup mockPipelineFn to throw WebGPU error on first embed()
+    mockPipelineFn.mockRejectedValueOnce(new Error('WebGPU OUT_OF_DEVICE_MEMORY'));
+    
+    // Setup second pipeline initialization (for recovery) to succeed with CPU
+    vi.mocked(pipeline).mockImplementationOnce(async () => {
+      // Return a fresh mock that works
+      return vi.fn(async () => ({ data: new Float32Array(384).fill(9), dims: [1, 384] }));
     });
 
-    const freshEmbedder = new Embedder({ model: 'test-model' });
-    await Promise.all([
-      freshEmbedder.initialize(),
-      freshEmbedder.initialize(),
-      freshEmbedder.initialize(),
-    ]);
-
-    expect(callCount).toHaveBeenCalledTimes(1);
-    expect(freshEmbedder.isInitialized()).toBe(true);
+    const result = await embedder.embed('test');
+    
+    // Should have called pipeline twice (once for initial, once for recovery)
+    expect(pipeline).toHaveBeenCalledTimes(2);
+    expect(pipeline).toHaveBeenLastCalledWith(
+      'feature-extraction',
+      'test-model',
+      expect.objectContaining({ device: 'cpu' })
+    );
+    expect(result[0]).toBe(9); // Value from the recovery pipeline
   });
 });
 

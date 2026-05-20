@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { shutdownKnowledgeStore } from './knowledge/index.ts';
+import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 
@@ -255,6 +255,16 @@ export default function (pi: ExtensionAPI) {
       // Config file path for display (home dir replaced with ~)
       const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
 
+      // Fetch knowledge store entry count if already initialized (non-blocking, best-effort)
+      let storeCountLabel = '';
+      if (config.KNOWLEDGE_STORE_ENABLED && isKnowledgeStoreReady()) {
+        try {
+          const st = await getStore();
+          const n = await st.count();
+          storeCountLabel = ` (${n} entries)`;
+        } catch { /* non-fatal */ }
+      }
+
       // Define configuration items with their types and handlers
       type ConfigKey = keyof typeof config;
       
@@ -376,12 +386,13 @@ export default function (pi: ExtensionAPI) {
         {
           type: 'action',
           label: 'Clear DB Cache',
-          description: '(Delete all knowledge)',
+          get description() { return `(Delete all knowledge${storeCountLabel})`; },
           action: async () => {
             const dbDir = pathmod.join(pathmod.dirname(getEnvFilePath()), 'knowledge_db');
             if (fss.existsSync(dbDir)) {
               fss.rmSync(dbDir, { recursive: true, force: true });
             }
+            storeCountLabel = ' (0 entries)';
           },
         },
       ];

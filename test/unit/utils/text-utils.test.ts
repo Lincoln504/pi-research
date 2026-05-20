@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractText, ensureAssistantResponse } from '../../../src/utils/text-utils';
+import { extractText, ensureAssistantResponse, parseCitations } from '../../../src/utils/text-utils';
 
 describe('text-utils', () => {
   describe('extractText', () => {
@@ -142,6 +142,75 @@ describe('text-utils', () => {
       } as any;
       expect(() => ensureAssistantResponse(session, 'Test'))
         .toThrow('Test: Researcher produced no text output');
+    });
+  });
+
+  describe('parseCitations', () => {
+    it('returns empty array when no CITED LINKS section', () => {
+      expect(parseCitations('No citations here.')).toEqual([]);
+    });
+
+    it('parses inline format [N] URL — description', () => {
+      const report = `### CITED LINKS\n[1] https://example.com — A great source\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('A great source');
+    });
+
+    it('parses multi-line Description: format', () => {
+      const report = `### CITED LINKS\n[1] https://example.com\nDescription: Detailed description here\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('Detailed description here');
+    });
+
+    it('parses URL with no description', () => {
+      const report = `### CITED LINKS\n[1] https://example.com\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('');
+    });
+
+    it('parses multiple citations', () => {
+      const report = [
+        '### CITED LINKS',
+        '[1] https://example.com — First source',
+        '[2] https://other.org — Second source',
+      ].join('\n');
+      const result = parseCitations(report);
+      expect(result).toHaveLength(2);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[1]!.url).toBe('https://other.org');
+    });
+
+    it('strips trailing punctuation from URL', () => {
+      const report = `### CITED LINKS\n[1] https://example.com.\n`;
+      const result = parseCitations(report);
+      expect(result[0]!.url).toBe('https://example.com');
+    });
+
+    it('parses bold **[N]** format', () => {
+      const report = `### CITED LINKS\n**[1]** https://example.com — Bold citation\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('Bold citation');
+    });
+
+    it('skips entries without a valid http URL', () => {
+      const report = `### CITED LINKS\n[1] not-a-url\n[2] https://valid.com — Valid\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://valid.com');
+    });
+
+    it('is case-insensitive for section header', () => {
+      const report = `### cited links\n[1] https://example.com — Found\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
     });
   });
 });

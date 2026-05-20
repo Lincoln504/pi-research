@@ -43,7 +43,8 @@ export function formatUsersCompact(users: User[]): string {
   const lines: string[] = [];
   let index = 1;
   for (const u of users) {
-    lines.push(`${index}. ${u.display_name} (rep: ${u.reputation}, 🥇${u.badge_counts.gold} 🥈${u.badge_counts.silver} 🥉${u.badge_counts.bronze})`);
+    const bc = u.badge_counts ?? { gold: 0, silver: 0, bronze: 0 };
+    lines.push(`${index}. ${u.display_name} (rep: ${u.reputation}, 🥇${bc.gold} 🥈${bc.silver} 🥉${bc.bronze})`);
     index++;
   }
   return lines.join('\n');

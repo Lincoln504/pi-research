@@ -126,4 +126,66 @@ describe('Chunker', () => {
       new Chunker({ targetSize: 50, overlap: 75 });
     }).toThrow('overlap (75) must be less than targetSize (50)');
   });
+
+  describe('Property-based lossless reconstruction', () => {
+    const generateRandomText = (length: number) => {
+      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n#.`';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        const r = Math.random();
+        if (r < 0.05) result += '\n# '; // Headings
+        else if (r < 0.1) result += '\n```\ncode\n```\n'; // Code blocks
+        else if (r < 0.15) result += '. '; // Sentences
+        else result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
+
+    it('should always allow lossless reconstruction regardless of text content or chunker settings', () => {
+      const seedTexts = [
+        generateRandomText(100),
+        generateRandomText(1000),
+        generateRandomText(5000),
+      ];
+
+      const configs = [
+        { targetSize: 50, overlap: 10 },
+        { targetSize: 200, overlap: 50 },
+        { targetSize: 1000, overlap: 200 },
+        { targetSize: 100, overlap: 0 },
+      ];
+
+      for (const text of seedTexts) {
+        for (const config of configs) {
+          const c = new Chunker(config);
+          const chunks = c.chunk(text);
+          
+          if (chunks.length === 0) {
+            expect(text).toBe('');
+            continue;
+          }
+
+          let reconstructed = chunks[0].text;
+          for (let i = 1; i < chunks.length; i++) {
+            reconstructed += chunks[i].text.slice(chunks[i].actual_overlap);
+          }
+          
+          if (reconstructed !== text) {
+            console.log(`FAILED CONFIG: targetSize=${config.targetSize}, overlap=${config.overlap}`);
+            console.log(`CHUNKS:`, chunks.map(c => ({ len: c.text.length, overlap: c.actual_overlap, text: c.text.slice(0, 20) + '...' })));
+            // Find first mismatch for debugging
+            for (let j = 0; j < Math.max(text.length, reconstructed.length); j++) {
+                if (text[j] !== reconstructed[j]) {
+                    console.log(`Mismatch at index ${j}: expected ${JSON.stringify(text[j])}, got ${JSON.stringify(reconstructed[j])}`);
+                    console.log(`Context Expected: ...${text.slice(Math.max(0, j-20), j+20)}...`);
+                    console.log(`Context Received: ...${reconstructed.slice(Math.max(0, j-20), j+20)}...`);
+                    break;
+                }
+            }
+          }
+          expect(reconstructed).toBe(text);
+        }
+      }
+    });
+  });
 });

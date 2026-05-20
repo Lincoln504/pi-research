@@ -3,10 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { search } from '../../../src/web-research/search.ts';
 
 // Mock dependencies
-vi.mock('../../../src/web-research/utils.ts', () => ({
-  filterRelevantResults: vi.fn().mockImplementation((_query, results) => results)
-}));
-
 vi.mock('../../../src/web-research/browser-search.ts', () => ({
   performSearch: vi.fn()
 }));

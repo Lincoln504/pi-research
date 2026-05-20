@@ -57,7 +57,6 @@ Make no further tool calls after beginning synthesis.
   - `stackexchange`: Get technical Q&A from Stack Exchange network — **use this for any Stack Exchange / Stack Overflow URL** (stackoverflow.com, *.stackexchange.com); do NOT scrape those domains directly, they are Cloudflare-blocked
   - `links`: View all collected URLs
   - `security_search`: Query security databases (CVE, NVD, OSV, CISA)
-  - `stored_search`: Query the local knowledge store for summaries of findings from previous research sessions
   - `grep`: Search the local codebase using Ripgrep
   - `read`: Read files from the local filesystem
 {{extra_tool_guidelines}}

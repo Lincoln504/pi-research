@@ -130,18 +130,32 @@ describe('validateAndSanitizeQuery', () => {
   });
 });
 
-describe('validateComplexity', () => {
-  it('should accept valid complexity levels', () => {
-    expect(validateComplexity(0)).toBe(true);
-    expect(validateComplexity(1)).toBe(true);
-    expect(validateComplexity(2)).toBe(true);
-    expect(validateComplexity(3)).toBe(true);
-  });
+describe('validateQuery — Property-based tests', () => {
+  it('should handle arbitrary strings safely', () => {
+    const generateRandomString = (length: number) => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 <>/="\'';
+      let result = '';
+      for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
 
-  it('should reject invalid complexity levels', () => {
-    expect(validateComplexity(4)).toBe(false);
-    expect(validateComplexity(5)).toBe(false);
-    expect(validateComplexity(-1)).toBe(false);
-    expect(validateComplexity(100)).toBe(false);
+    for (let i = 0; i < 100; i++) {
+      const len = Math.floor(Math.random() * 1000);
+      const query = generateRandomString(len);
+      const result = validateQuery(query);
+      
+      if (result.isValid) {
+        expect(query.length).toBeGreaterThanOrEqual(3);
+        expect(query.length).toBeLessThanOrEqual(12000);
+        expect(query).not.toMatch(/<script/i);
+        expect(query).not.toMatch(/javascript:/i);
+        expect(query).not.toMatch(/onclick/i);
+      } else {
+        // If invalid, there must be a reason
+        expect(result.error).toBeDefined();
+      }
+    }
   });
 });

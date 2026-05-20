@@ -20,7 +20,7 @@ import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts'
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getStore, getWriterQueue } from '../knowledge/index.ts';
-import { normalizeUrl } from '../utils/shared-links.ts';
+import { normalizeUrl, registerScrapedLinks } from '../utils/shared-links.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -80,7 +80,7 @@ export class QuickResearchOrchestrator {
         .replace('{{store_section}}', storeSection)
         .replace('{{evidence_section}}', quickEvidenceSection)
         .replace('{{coordination_section}}', '')
-        .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
+        .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).\n- `stored_search`: Query the local knowledge store for summaries of findings from previous research sessions.');
 
     logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
@@ -93,6 +93,7 @@ export class QuickResearchOrchestrator {
       systemPrompt: prompt,
       extensionCtx: ctx,
       getGlobalState: () => ({ researchId: this.options.researchId } as any),
+      updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
       onSearchProgress: (links) => {
         observer?.onSearchProgress?.(links);
       },

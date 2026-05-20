@@ -572,7 +572,7 @@ describe('stackexchange/output/compact', () => {
         expect(result).toContain('rep: 1000'); // No parentheses
       });
 
-      it('should handle null badge_counts (BUG: crashes)', () => {
+      it('should handle null badge_counts gracefully', () => {
         const users = [
           {
             display_name: 'TestUser',
@@ -580,9 +580,9 @@ describe('stackexchange/output/compact', () => {
             badge_counts: null as any,
           } as any,
         ];
-        // This will crash with "Cannot read properties of null"
-        // Documented as a bug
-        expect(() => formatUsersCompact(users)).toThrow();
+        const result = formatUsersCompact(users);
+        expect(result).toContain('TestUser');
+        expect(result).toContain('🥇0');
       });
     });
 

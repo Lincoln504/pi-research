@@ -102,13 +102,13 @@ export class Chunker {
       if (end <= start) end = Math.min(start + this.targetSize, text.length);
 
       const chunkText = text.slice(start, end);
-      const actual_overlap = chunks.length === 0 ? 0 : Math.max(0, prevEnd - start);
+      const actual_overlap = chunks.length === 0 ? 0 : Math.max(0, Math.min(chunkText.length, prevEnd - start));
       
       chunks.push({ text: chunkText, actual_overlap });
       
       if (end >= text.length) break;
       
-      prevEnd = end;
+      prevEnd = Math.max(prevEnd, end);
       start = end - this.overlap;
       if (start <= (end - chunkText.length)) {
         start = end - Math.min(this.overlap, chunkText.length - 1);

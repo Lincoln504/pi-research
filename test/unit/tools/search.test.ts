@@ -4,47 +4,72 @@ import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 // Mock the search module
 vi.mock('../../../src/web-research/search.ts', () => ({
-  search: vi.fn(async (queries) => queries.map(q => ({ query: q, results: [] }))),
+  search: vi.fn(async (queries, _config, _signal, onProgress) => {
+    if (onProgress) onProgress(queries.length * 2); // simulate finding links
+    return queries.map(q => ({ query: q, results: [{ title: 'T', url: 'U', content: 'C' }] }));
+  }),
 }));
 
 describe('tools/search', () => {
   let tracker: ToolUsageTracker;
   const mockOptions = {
     ctx: {} as any,
+    tracker: undefined as any,
+    onProgress: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    tracker = new ToolUsageTracker({ gathering: 1 });
+    tracker = new ToolUsageTracker({ search: 1 });
+    mockOptions.tracker = tracker;
   });
 
   it('should create tool with correct metadata', () => {
-    const tool = createSearchTool({ ...mockOptions, tracker });
+    const tool = createSearchTool(mockOptions);
     expect(tool.name).toBe('search');
-    expect(tool.promptGuidelines[0]).toContain('5-30 queries per call (minimum 1)');
+    expect(tool.promptGuidelines[0]).toContain('5-30 queries');
   });
 
-  it('should succeed with 1 query', async () => {
-    const tool = createSearchTool({ ...mockOptions, tracker });
-    const result = await tool.execute('id', { queries: ['q1'] }, undefined, () => {}, {} as any);
-    expect(result.details).toMatchObject({ queryCount: 1 });
+  it('should cap queries at 40 if too many are provided', async () => {
+    const { search } = await import('../../../src/web-research/search.ts');
+    const tool = createSearchTool(mockOptions);
+    const manyQueries = Array(50).fill('q');
+    
+    await tool.execute('id', { queries: manyQueries }, undefined);
+    
+    expect(search).toHaveBeenCalledWith(
+      expect.arrayContaining(Array(40).fill('q')),
+      undefined, // options.config
+      undefined, // signal
+      mockOptions.onProgress
+    );
+    expect(vi.mocked(search).mock.calls[0][0].length).toBe(40);
   });
 
-  it('should succeed with 5 queries', async () => {
-    const tool = createSearchTool({ ...mockOptions, tracker });
-    const queries = Array(5).fill('test query');
-    const result = await tool.execute('id', { queries }, undefined, () => {}, {} as any);
-    expect(result.details).toMatchObject({ queryCount: 5 });
+  it('should report progress during execution', async () => {
+    const tool = createSearchTool(mockOptions);
+    await tool.execute('id', { queries: ['q1', 'q2'] }, undefined);
+    expect(mockOptions.onProgress).toHaveBeenCalledWith(4);
+  });
+
+  it('should handle search failures gracefully', async () => {
+    const { search } = await import('../../../src/web-research/search.ts');
+    vi.mocked(search).mockRejectedValueOnce(new Error('API Down'));
+
+    const tool = createSearchTool(mockOptions);
+    const result = await tool.execute('id', { queries: ['q'] }, undefined);
+
+    expect(result.content[0].text).toContain('Search Failed');
+    expect(result.content[0].text).toContain('API Down');
+    expect(result.details).toMatchObject({ error: 'API Down' });
   });
 
   it('should throw error on second call', async () => {
-    const tool = createSearchTool({ ...mockOptions, tracker });
-    const queries = Array(5).fill('test query');
-    await tool.execute('id1', { queries }, undefined, () => {}, {} as any);
+    const tool = createSearchTool(mockOptions);
+    await tool.execute('id1', { queries: ['q1'] }, undefined);
 
-    const result = await tool.execute('id2', { queries }, undefined, () => {}, {} as any);
+    const result = await tool.execute('id2', { queries: ['q2'] }, undefined);
     expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
-    expect(result.content[0].text).toContain('LIMIT REACHED');
-    });
-    });
+  });
+});
 

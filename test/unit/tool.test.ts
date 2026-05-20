@@ -281,5 +281,303 @@ describe('createResearchTool', () => {
       expect(console.warn).toBe(originalConsole.warn);
       expect(console.debug).toBe(originalConsole.debug);
     });
+
+    it('passes whitespace-only query through sanitization to runResearch', async () => {
+      const tool = createResearchTool();
+      // validateAndSanitizeQuery is mocked to return input unchanged; whitespace is a non-empty string
+      // so the tool does not short-circuit and reaches runResearch
+      await tool.execute('id', { query: '   ' }, undefined, undefined, createMockContext());
+      expect(runResearch).toHaveBeenCalled();
+    });
+
+    it('returns error when no model available', async () => {
+      const context = createMockContext();
+      context.model = undefined as any;
+      
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test' }, undefined, undefined, context);
+
+      expect((result.content[0] as any).text).toContain('No research model specified');
+    });
+
+    it('handles research errors gracefully', async () => {
+      vi.mocked(runResearch).mockRejectedValue(new Error('Research failed'));
+      
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect((result.content[0] as any).text).toContain('Research failed');
+    });
+
+    it('handles aborted research', async () => {
+      const controller = new AbortController();
+      const signal = controller.signal;
+      controller.abort();
+      
+      vi.mocked(runResearch).mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+      
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 0 }, signal, undefined, createMockContext());
+
+      // The actual error message from the implementation
+      expect((result.content[0] as any).text).toContain('Aborted');
+    });
+  });
+
+  describe('prepareArguments', () => {
+    it('normalizes string depth to number', () => {
+      const tool = createResearchTool();
+      const args = tool.prepareArguments!({ query: 'test', depth: '2' } as any);
+
+      expect(args.depth).toBe(2);
+    });
+
+    it('clamps depth to maximum of 3', () => {
+      const tool = createResearchTool();
+      const args = tool.prepareArguments!({ query: 'test', depth: 5 } as any);
+
+      expect(args.depth).toBe(3);
+    });
+
+    it('clamps depth to minimum of 0', () => {
+      const tool = createResearchTool();
+      const args = tool.prepareArguments!({ query: 'test', depth: -1 } as any);
+
+      expect(args.depth).toBe(0);
+    });
+
+    it('defaults depth to 0 when not provided', () => {
+      const tool = createResearchTool();
+      const args = tool.prepareArguments!({ query: 'test' });
+
+      expect(args.depth).toBe(0);
+    });
+
+    it('handles invalid string depth', () => {
+      const tool = createResearchTool();
+      const args = tool.prepareArguments!({ query: 'test', depth: 'invalid' } as any);
+
+      expect(args.depth).toBe(0);
+    });
+  });
+
+  describe('Tool Definition', () => {
+    it('has correct tool name', () => {
+      const tool = createResearchTool();
+
+      expect(tool.name).toBe('research');
+      expect(tool.label).toBe('Research');
+    });
+
+    it('has meaningful description', () => {
+      const tool = createResearchTool();
+
+      expect(tool.description).toContain('web/internet research');
+      expect(tool.description).toContain('multi-source');
+    });
+
+    it('has required parameters', () => {
+      const tool = createResearchTool();
+
+      expect(tool.parameters).toBeDefined();
+      expect(tool.parameters.properties).toHaveProperty('query');
+      expect(tool.parameters.properties).toHaveProperty('depth');
+      expect(tool.parameters.properties).toHaveProperty('model');
+    });
+
+    it('has prompt snippet', () => {
+      const tool = createResearchTool();
+
+      expect(tool.promptSnippet).toContain('comprehensive web/internet research');
+    });
+  });
+
+  describe('Model Selection', () => {
+    it('uses context model when no explicit model parameter', async () => {
+      const context = createMockContext();
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ model: context.model }),
+        expect.any(AbortSignal)
+      );
+    });
+
+    it('respects explicit model parameter', async () => {
+      const customModel = { id: 'custom-model' };
+      const context = createMockContext();
+      context.modelRegistry = {
+        ...context.modelRegistry,
+        getAll: vi.fn(() => [{ id: 'test-model' }, customModel]),
+      };
+
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', depth: 0, model: 'custom-model' }, undefined, undefined, context);
+
+      // The tool should have looked up and passed the explicit model object to runResearch
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ model: customModel }),
+        expect.any(AbortSignal),
+      );
+    });
+
+    it('falls back to context model when explicit model not found in registry', async () => {
+      const context = createMockContext();
+      context.modelRegistry = {
+        ...context.modelRegistry,
+        getAll: vi.fn(() => [{ id: 'test-model' }]),
+      };
+
+      const tool = createResearchTool();
+      await tool.execute('id', { query: 'test', depth: 0, model: 'nonexistent' }, undefined, undefined, context);
+
+      // Registry lookup fails; tool falls back to ctx.model
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ model: context.model }),
+        expect.any(AbortSignal),
+      );
+    });
+  });
+
+  describe('Abort Handling', () => {
+    it('respects abort signal during research', async () => {
+      const controller = new AbortController();
+      const tool = createResearchTool();
+
+      controller.abort();
+
+      await tool.execute('id', { query: 'test', depth: 0 }, controller.signal, undefined, createMockContext());
+
+      // Should complete without throwing even when signal is already aborted
+      expect(runResearch).toHaveBeenCalled();
+    });
+  });
+
+  describe('Terminal Input Handling', () => {
+    it('registers an onTerminalInput handler during research', async () => {
+      const context = createMockContext();
+      const tool = createResearchTool();
+
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+
+      // The tool installs a terminal input listener for escape/Ctrl+C abort
+      expect(context.ui.onTerminalInput).toHaveBeenCalledWith(expect.any(Function));
+    });
+  });
+
+  describe('Session Management', () => {
+    it('starts research session', async () => {
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      // Session management functions should be called
+      // Note: These are mocked but we can verify the flow
+      expect(panel.createInitialPanelState).toHaveBeenCalled();
+    });
+
+    it('registers session panel', async () => {
+      const context = createMockContext();
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+
+      expect(panel.createInitialPanelState).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        'test-model'
+      );
+    });
+  });
+
+  describe('TUI Integration', () => {
+    it('creates initial panel state', async () => {
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect(panel.createInitialPanelState).toHaveBeenCalled();
+    });
+
+    it('sets working visible to false during research', async () => {
+      const context = createMockContext();
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+
+      expect(context.ui.setWorkingVisible).toHaveBeenCalledWith(false);
+    });
+
+    it('registers a master update handler keyed to the pi session', async () => {
+      const { registerMasterUpdate } = await import('../../src/utils/session-state.ts');
+      const context = createMockContext();
+      const tool = createResearchTool();
+
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+
+      // The tool registers a function that will refresh the master widget whenever sessions change
+      expect(registerMasterUpdate).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Function),
+      );
+    });
+  });
+
+
+  describe('Query Validation', () => {
+    it('sanitizes query using validation function', async () => {
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test<script>alert(1)</script>', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ query: expect.any(String) }),
+        expect.any(AbortSignal)
+      );
+    });
+  });
+
+  describe('Health Check Integration', () => {
+    it('performs health check before research', async () => {
+      const { isHealthCheckSuccessful } = await import('../../src/healthcheck/index.ts');
+      vi.mocked(isHealthCheckSuccessful).mockResolvedValueOnce(false);
+      
+      const { runHealthCheck } = await import('../../src/healthcheck/index.ts');
+      vi.mocked(runHealthCheck).mockResolvedValueOnce({ success: true, details: {} });
+      
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect(runHealthCheck).toHaveBeenCalled();
+    });
+  });
+
+  describe('Observer Pattern', () => {
+    it('passes observer to runResearch', async () => {
+      const tool = createResearchTool();
+      
+      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect(runResearch).toHaveBeenCalledWith(
+        expect.objectContaining({ observer: expect.any(Object) }),
+        expect.any(AbortSignal)
+      );
+    });
+  });
+
+  describe('Result Structure', () => {
+    it('returns proper result structure', async () => {
+      const tool = createResearchTool();
+      const result = await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+
+      expect(result).toHaveProperty('content');
+      expect(result).toHaveProperty('details');
+      expect(Array.isArray(result.content)).toBe(true);
+      expect(result.content[0]).toHaveProperty('type', 'text');
+    });
+
   });
 });

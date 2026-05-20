@@ -564,6 +564,32 @@ describe('SecuritySearcher', () => {
 
       expect(result.totalVulnerabilities).toBe(8);
     });
+
+    it('should NOT deduplicate vulnerabilities across different databases in the current implementation', async () => {
+      const mockNVD = new MockNVDClient();
+      const mockOSV = new MockOSVClient();
+      const sharedCVE = createMockVulnerability({ id: 'CVE-SHARED' });
+      
+      mockNVD.setMockResult('CVE-SHARED', { count: 1, vulnerabilities: [sharedCVE] });
+      mockOSV.setMockResult('CVE-SHARED{}', { count: 1, vulnerabilities: [sharedCVE] });
+
+      const searcher = createFastSearcher({
+        nvdClient: mockNVD,
+        osvClient: mockOSV,
+      });
+
+      const params: SecuritySearchParams = {
+        terms: ['CVE-SHARED'],
+        databases: ['nvd', 'osv'],
+      };
+
+      const result = await searcher.search(params);
+
+      // Current behavior: sum of counts
+      expect(result.totalVulnerabilities).toBe(2);
+      expect(result.results.nvd?.vulnerabilities[0]?.id).toBe('CVE-SHARED');
+      expect(result.results.osv?.vulnerabilities[0]?.id).toBe('CVE-SHARED');
+    });
   });
 
   describe('severity filtering', () => {
