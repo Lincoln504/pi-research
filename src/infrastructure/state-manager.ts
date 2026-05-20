@@ -294,7 +294,9 @@ export class StateManager {
       throw new Error(`Failed to write state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     } finally {
       if (tempFilePath) {
-        await fs.unlink(tempFilePath).catch(() => {});
+        await fs.unlink(tempFilePath).catch((err) => {
+          logger.warn('[StateManager] Failed to clean up temp file:', err);
+        });
       }
     }
   }
@@ -373,7 +375,9 @@ export class StateManager {
    */
   public async cleanupStaleSessions(timeoutMs: number): Promise<number> {
     const now = Date.now();
-    const sessionsToRemove: string[] = [];
+    // Map sessionId -> lastSeen snapshot at classify time, used to detect
+    // concurrent updates between the read-lock and the write-lock.
+    const sessionsToRemove = new Map<string, number>();
 
     const state = await this.readState();
 
@@ -382,7 +386,7 @@ export class StateManager {
       const lastSeenAge = now - sessionInfo.lastSeen;
 
       if (lastSeenAge > timeoutMs) {
-        sessionsToRemove.push(sessionId);
+        sessionsToRemove.set(sessionId, sessionInfo.lastSeen);
         continue;
       }
 
@@ -390,21 +394,26 @@ export class StateManager {
       const isAlive = await this.isProcessAlive(sessionInfo.pid);
 
       if (!isAlive) {
-        sessionsToRemove.push(sessionId);
+        sessionsToRemove.set(sessionId, sessionInfo.lastSeen);
       }
     }
 
-    // Remove stale sessions
-    if (sessionsToRemove.length > 0) {
+    // Remove stale sessions under a fresh lock. Re-validate lastSeen so a
+    // session that received a heartbeat between the two lock acquisitions is
+    // not accidentally deleted (TOCTOU guard).
+    if (sessionsToRemove.size > 0) {
       await this.updateState((state): SingletonState => {
-        for (const sessionId of sessionsToRemove) {
-          delete state.sessions[sessionId];
+        for (const [sessionId, lastSeenAtClassify] of sessionsToRemove) {
+          const current = state.sessions[sessionId];
+          if (current && current.lastSeen === lastSeenAtClassify) {
+            delete state.sessions[sessionId];
+          }
         }
         return state;
       });
     }
 
-    return sessionsToRemove.length;
+    return sessionsToRemove.size;
   }
 
   /**
@@ -670,22 +679,13 @@ export class StateManager {
     // 1. Acquire lock with timeout
     await this.acquireLock();
     
-    let lockReleased = false;
     try {
-      // 2. Execute callback. 
-      // Note: We don't use Promise.race(callback, timeout) here anymore for the execution phase.
-      // Releasing a lock while the callback is still running is a race condition.
-      // Instead, we rely on the callback to finish, or the external signal to abort.
-      // If we REALLY want an execution timeout, the callback MUST support AbortSignal.
       return await callback();
     } finally {
-      if (!lockReleased) {
-        try {
-          await this.releaseLock();
-          lockReleased = true;
-        } catch (error: unknown) {
-          logger.error('[StateManager] Failed to release lock:', error);
-        }
+      try {
+        await this.releaseLock();
+      } catch (error: unknown) {
+        logger.error('[StateManager] Failed to release lock:', error);
       }
     }
   }
@@ -725,7 +725,10 @@ public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<bool
   if (!alive) return false;
 
   if (expectedSchedulerId) {
-    const state = await this.readState();
+    // Use _readState() (no lock) because this method may be called from inside a
+    // withLock callback (e.g. updateState in browser-manager). Re-entering withLock
+    // from the same single-threaded execution path would spin until lockTimeout (10s).
+    const state = await this._readState();
     return state.browserServer?.schedulerId === expectedSchedulerId;
   }
 
@@ -733,8 +736,7 @@ public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<bool
 }
 
 /**
- * Validate the structure and version of a state object
-...
+   * Validate the structure and version of a state object
    * @param state The state object to validate
    * @throws Error if state structure or version is invalid
    */

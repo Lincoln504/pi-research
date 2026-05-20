@@ -94,10 +94,10 @@ describe('Embedder', () => {
 
     await embedder.embed('test text');
 
-    expect(mockPipelineFn).toHaveBeenCalledWith('test text', {
-      pooling: 'mean',
-      normalize: true,
-    });
+    expect(mockPipelineFn).toHaveBeenCalledWith(
+      'test text',
+      expect.objectContaining({ pooling: 'mean', normalize: true }),
+    );
   });
 
   it('should pass cls pooling to the pipeline when configured', async () => {
@@ -107,10 +107,10 @@ describe('Embedder', () => {
 
     await clsEmbedder.embed('test text');
 
-    expect(mockPipelineFn).toHaveBeenCalledWith('test text', {
-      pooling: 'cls',
-      normalize: true,
-    });
+    expect(mockPipelineFn).toHaveBeenCalledWith(
+      'test text',
+      expect.objectContaining({ pooling: 'cls', normalize: true }),
+    );
   });
 
   it('should pass last_token pooling to the pipeline when configured', async () => {
@@ -120,10 +120,10 @@ describe('Embedder', () => {
 
     await ltEmbedder.embed('test text');
 
-    expect(mockPipelineFn).toHaveBeenCalledWith('test text', {
-      pooling: 'last_token',
-      normalize: true,
-    });
+    expect(mockPipelineFn).toHaveBeenCalledWith(
+      'test text',
+      expect.objectContaining({ pooling: 'last_token', normalize: true }),
+    );
   });
 
   it('embed() prepends queryPrefix to the input text', async () => {
@@ -142,7 +142,7 @@ describe('Embedder', () => {
     );
   });
 
-  it('embedMany() does NOT prepend queryPrefix — document ingestion is unprefixed', async () => {
+  it('embedMany() does NOT prepend queryPrefix — query prefix is query-side only', async () => {
     const prefixEmbedder = new Embedder({
       model: 'test-model',
       queryPrefix: 'Instruct: retrieve\nQuery: ',
@@ -152,8 +152,43 @@ describe('Embedder', () => {
 
     await prefixEmbedder.embedMany(['doc one', 'doc two']);
 
-    // Raw text passed through — no prefix prepended
-    expect(mockPipelineFn).toHaveBeenCalledWith(['doc one', 'doc two'], expect.any(Object));
+    // queryPrefix must not be prepended to document embeddings
+    const calls = mockPipelineFn.mock.calls;
+    const inputArgs = calls.map((c: any[]) => c[0]);
+    expect(inputArgs.some((arg: any) => Array.isArray(arg) && arg.includes('doc one'))).toBe(true);
+  });
+
+  it('embedMany() prepends documentPrefix when configured (e.g. E5 "passage: ")', async () => {
+    const e5Embedder = new Embedder({
+      model: 'multilingual-e5-small',
+      queryPrefix: 'query: ',
+      documentPrefix: 'passage: ',
+    });
+    await e5Embedder.initialize();
+    mockPipelineFn.mockClear();
+
+    await e5Embedder.embedMany(['hello world', 'foo bar']);
+
+    const calls = mockPipelineFn.mock.calls;
+    const inputArgs = calls.map((c: any[]) => c[0]);
+    expect(inputArgs.some((arg: any) => Array.isArray(arg) && arg.includes('passage: hello world'))).toBe(true);
+  });
+
+  it('embed() does NOT prepend documentPrefix — document prefix is document-side only', async () => {
+    const e5Embedder = new Embedder({
+      model: 'multilingual-e5-small',
+      queryPrefix: 'query: ',
+      documentPrefix: 'passage: ',
+    });
+    await e5Embedder.initialize();
+    mockPipelineFn.mockClear();
+
+    await e5Embedder.embed('what is AI?');
+
+    expect(mockPipelineFn).toHaveBeenCalledWith(
+      'query: what is AI?',
+      expect.objectContaining({ pooling: 'mean' }),
+    );
   });
 
   it('should call the pipeline with correct options for embedMany', async () => {
@@ -162,10 +197,10 @@ describe('Embedder', () => {
 
     await embedder.embedMany(['a', 'b']);
 
-    expect(mockPipelineFn).toHaveBeenCalledWith(['a', 'b'], {
-      pooling: 'mean',
-      normalize: true,
-    });
+    expect(mockPipelineFn).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ pooling: 'mean', normalize: true }),
+    );
   });
 
   it('warm-up call uses the configured pooling mode', async () => {

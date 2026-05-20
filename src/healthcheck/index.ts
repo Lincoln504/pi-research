@@ -101,9 +101,13 @@ async function performActualCheck(): Promise<HealthCheckResult> {
   };
 
   let timeoutId: NodeJS.Timeout;
-  const timeoutPromise = new Promise<HealthCheckResult>((_, reject) =>
-    timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs)
-  );
+  const timeoutPromise = new Promise<HealthCheckResult>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+    // unref() to allow clean exit if this is the only timer keeping the event loop alive
+    if (timeoutId.unref) {
+        timeoutId.unref();
+    }
+  });
 
   try {
     try {

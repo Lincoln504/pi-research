@@ -24,7 +24,7 @@ You are being provided with the conversation history for context only.
 
 1. **Decomposition**: Break the root query into distinct sub-topics, each assigned to a specialized researcher.
 2. **Assign Goals**: Each researcher gets a focused goal covering a specific angle or time period.
-3. **Distribute Historical Links**: If any historical links are provided in the section above, assign them to the most relevant researchers. Each link should be assigned to ONLY ONE researcher.
+3. **Distribute Historical Links**: If any historical links are provided in the section above, assign them to the most relevant researchers. These links represent "system memory" — they contain summaries of previous findings. Researchers should re-scrape these URLs to retrieve the full, fresh content while using the historical summary as a guide. Each link should be assigned to ONLY ONE researcher.
 4. **Query Planning**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget.
 5. **Seed Search Burst**: All queries across all researchers are combined into a single pre-search pass that seeds the global link pool.
 

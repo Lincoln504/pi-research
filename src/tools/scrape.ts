@@ -12,7 +12,7 @@ import { Value } from 'typebox/value';
 import { scrape } from '../web-research/scrapers.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { deduplicateUrls, normalizeUrl } from '../utils/shared-links.ts';
+import { deduplicateUrls, normalizeUrl, cacheScrapedContent } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
@@ -86,7 +86,7 @@ export function createScrapeTool(options: {
       if (Array.isArray(rawUrls)) {
           rawUrls.forEach(u => {
               if (typeof u === 'string') {
-                  if ((u.includes('[') || u.includes(']')) && u.includes(',')) {
+                  if (u.startsWith('[') && u.endsWith(']') && u.includes(',')) {
                       const cleaned = u.replace(/[[\]]/g, '').split(',').map(s => s.trim());
                       urls.push(...cleaned);
                   } else {
@@ -124,46 +124,104 @@ export function createScrapeTool(options: {
 
       const defaultConcurrency = callCount >= 1 ? BATCH_2_DEFAULT_CONCURRENCY : 10;
 
-      // Cache Lookup
+      // Cache Lookup (Historical Summaries)
+      const summaries: { url: string; text: string }[] = [];
       const cachedResults: { url: string; markdown: string }[] = [];
-      const urlsToFetch: string[] = [];
+      const urlsToFetch: string[] = [...finalUrls];
       
       if (isKnowledgeStoreReady()) {
         const store = getStore();
         for (const url of finalUrls) {
           const normalized = normalizeUrl(url);
-          const fullDoc = await store.rebuildDocument(normalized);
+          const cacheHit = await store.rebuildDocument(normalized);
 
-          if (fullDoc) {
-            cachedResults.push({ url: url, markdown: fullDoc });
-          } else {
-            urlsToFetch.push(url);
+          if (cacheHit) {
+            const ingestionType = cacheHit.metadata['ingestionType'];
+            // Handle different ingestion types:
+            // - raw-content: clean markdown for retrieval (primary use case)
+            // - synthesis-description: agent description for vector search (used in RAG context)
+            // - summary/legacy formats: backward compatibility
+            if (ingestionType === 'raw-content') {
+              // Raw markdown content for retrieval
+              cachedResults.push({ url, markdown: cacheHit.text });
+              const idx = urlsToFetch.indexOf(url);
+              if (idx !== -1) urlsToFetch.splice(idx, 1);
+            } else if (ingestionType === 'synthesis-description') {
+              // Agent-synthesized description for vector search
+              // This is used by RAG system for finding relevant sources
+              summaries.push({ url, text: cacheHit.text });
+              const idx = urlsToFetch.indexOf(url);
+              if (idx !== -1) urlsToFetch.splice(idx, 1);
+            } else if (ingestionType === 'summary') {
+              // Legacy format: rawText is in metadata, text contains agent description
+              const rawText = cacheHit.metadata['rawText'];
+              if (rawText) {
+                cachedResults.push({ url, markdown: rawText });
+                summaries.push({ url, text: cacheHit.text });
+                const idx = urlsToFetch.indexOf(url);
+                if (idx !== -1) urlsToFetch.splice(idx, 1);
+              } else {
+                summaries.push({ url, text: cacheHit.text });
+              }
+            } else {
+              // Legacy formats for backward compatibility
+              const rawText = cacheHit.metadata['rawText'];
+              if (rawText) {
+                cachedResults.push({ url, markdown: rawText });
+              }
+              const agentDescription = cacheHit.metadata['agentDescription'];
+              if (agentDescription) {
+                summaries.push({ url, text: agentDescription });
+              }
+              const idx = urlsToFetch.indexOf(url);
+              if (idx !== -1) urlsToFetch.splice(idx, 1);
+            }
           }
         }
-        if (cachedResults.length > 0) {
-          logger.log(`[scrape] Cache: ${cachedResults.length} hit(s), ${urlsToFetch.length} miss(es) out of ${finalUrls.length} URLs`);
+        if (cachedResults.length > 0 || summaries.length > 0) {
+          logger.log(`[scrape] Cache: ${cachedResults.length} full-text hits, ${summaries.length} summary hints out of ${finalUrls.length} URLs`);
         }
-      } else {
-        urlsToFetch.push(...finalUrls);
       }
 
       let freshResults: any[] = [];
       if (urlsToFetch.length > 0) {
-        const scrapeResults = await scrape(urlsToFetch, p['maxConcurrency'] || defaultConcurrency, signal);
+        const scrapeResults = await scrape(urlsToFetch, p['maxConcurrency'] || defaultConcurrency, signal, options.config);
         freshResults = Array.isArray(scrapeResults) ? scrapeResults : [];
+        
+        // Store clean scraped markdown as raw content (for retrieval, NOT for vector search)
+        if (isKnowledgeStoreReady()) {
+          const writer = getWriterQueue();
+          for (const res of freshResults) {
+            if (res.success && res.markdown) {
+              cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);
+              // Store raw markdown with 'raw-content' type - for retrieval only, vector search uses descriptions
+              writer.enqueue({ 
+                url: normalizeUrl(res.url), 
+                markdown: res.markdown,
+                metadata: { 
+                  ingestionType: 'raw-content', 
+                  source: 'scrape-tool',
+                  scrapedAt: new Date().toISOString()
+                }
+              });
+            }
+          }
+        } else {
+          // Fallback to caching only if knowledge store is not ready
+          for (const res of freshResults) {
+            if (res.success && res.markdown) {
+              cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);
+            }
+          }
+        }
       }
 
       const successfulFresh = freshResults.filter(r => r.success);
       const failedFresh = freshResults.filter(r => !r.success);
       
-      // Background Ingestion
-      if (isKnowledgeStoreReady() && successfulFresh.length > 0) {
-        const writer = getWriterQueue();
-        for (const res of successfulFresh) {
-          writer.enqueue({ url: normalizeUrl(res.url), markdown: res.markdown || '' });
-        }
-        logger.log(`[scrape] Enqueued ${successfulFresh.length} fresh result(s) for background ingestion`);
-      }
+      // Clean scraped markdown is stored with ingestionType: 'raw-content'.
+      // The orchestrator creates separate entries with ingestionType: 'synthesis-description'
+      // during final synthesis evaluation for vector/semantic search.
 
       // Merge results
       const allSuccessful = [
@@ -176,14 +234,19 @@ export function createScrapeTool(options: {
       }
 
       let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
-      if (cachedResults.length > 0) {
-        markdown += `**Cache Hits:** ${cachedResults.length} (retrieved from local knowledge store)\n`;
+      if (summaries.length > 0) {
+        markdown += `**Historical Summaries:** ${summaries.length} (found in knowledge store, fresh content also fetched below)\n`;
       }
       markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
 
       for (const res of allSuccessful) {
           const content = res.markdown || '';
-          markdown += `### ${res.url}\n${content}\n\n---\n\n`;
+          const summary = summaries.find(s => normalizeUrl(s.url) === normalizeUrl(res.url));
+          markdown += `### ${res.url}\n`;
+          if (summary) {
+            markdown += `> **Historical Summary (Previous Finding):** ${summary.text}\n\n`;
+          }
+          markdown += `${content}\n\n---\n\n`;
       }
 
       if (failedFresh.length > 0) {
@@ -200,7 +263,7 @@ export function createScrapeTool(options: {
         details: { 
           batch: callCount + 1, 
           count: allSuccessful.length,
-          cacheHits: cachedResults.length 
+          summaryHints: summaries.length 
         } 
       };
     },

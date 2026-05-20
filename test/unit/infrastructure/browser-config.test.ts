@@ -9,8 +9,14 @@ describe('browser-config', () => {
         delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     });
 
-    it('should return the user home directory by default', () => {
-        expect(getBrowserCacheDir()).toBe(homedir());
+    it('should return the platform-specific camoufox cache directory by default', () => {
+        const base = homedir();
+        const expected = platform() === 'win32'
+            ? join(base, 'AppData', 'Local', 'camoufox', 'Cache')
+            : platform() === 'darwin'
+                ? join(base, 'Library', 'Caches', 'camoufox')
+                : join(base, '.cache', 'camoufox');
+        expect(getBrowserCacheDir()).toBe(expected);
     });
 
     it('should respect PLAYWRIGHT_BROWSERS_PATH environment variable', () => {

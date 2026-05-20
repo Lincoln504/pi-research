@@ -16,11 +16,9 @@
 import { promises as fs } from 'node:fs';
 import { homedir, tmpdir, platform } from 'node:os';
 import { join, resolve, normalize, sep } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { logger } from '../logger.ts';
 import { MAX_FILENAME_QUERY_LENGTH, MAX_EXPORT_RETRIES } from '../constants.ts';
-
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-const DIGITS = '0123456789';
 
 // Subdirectory names to probe, in priority order. Matched case-insensitively.
 const PREFERRED_SUBDIRS = [
@@ -147,9 +145,7 @@ function sanitizeQuery(query: string): string {
  * Format: letter + number (e.g., a3, b7, x9)
  */
 function generateHash(): string {
-  const letter = LETTERS[Math.floor(Math.random() * LETTERS.length)]!;
-  const digit = DIGITS[Math.floor(Math.random() * DIGITS.length)]!;
-  return letter + digit;
+  return randomBytes(3).toString('hex'); // 6 hex chars ≈ 16M combinations
 }
 
 /**
@@ -197,7 +193,7 @@ export async function exportResearchReport(
 export function appendExportMessage(result: string, filepath: string, totalCost?: number): string {
   let footer = `\n\n---\n\nResearch report saved to: ${filepath}`;
   if (totalCost !== undefined) {
-    const costStr = totalCost < 0.0001 ? '<$0.01' : `$${totalCost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
+    const costStr = totalCost < 0.01 ? '<$0.01' : `$${totalCost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
     footer += `\nTotal cost: ${costStr}`;
   }
   return result + footer;

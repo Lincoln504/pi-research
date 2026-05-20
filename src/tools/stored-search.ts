@@ -6,6 +6,7 @@
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
 
 export function createStoredSearchTool(_options: {
@@ -19,10 +20,17 @@ export function createStoredSearchTool(_options: {
   return {
     name: 'stored_search',
     label: 'Stored Search',
-    description: 'Query the local knowledge store for information from previous research sessions.',
-    promptSnippet: 'Search historical knowledge store',
+    description: 'Query the local knowledge store for summaries of findings from previous research sessions. Use this for discovery and to find URLs that were relevant in the past.',
+    promptSnippet: 'Search historical knowledge store for summaries',
     parameters: StoredSearchParams,
     async execute(_callId, params, _signal): Promise<AgentToolResult<unknown>> {
+      if (!Value.Check(StoredSearchParams, params)) {
+        return {
+          content: [{ type: 'text', text: 'Invalid parameters for stored_search.' }],
+          details: { error: 'invalid_params' },
+        };
+      }
+
       if (!isKnowledgeStoreReady()) {
         return {
           content: [{ type: 'text', text: 'Knowledge store is initializing, try again shortly.' }],
@@ -46,8 +54,13 @@ export function createStoredSearchTool(_options: {
         let markdown = `# Stored Search Results for "${p.query}"\n\n`;
         for (let i = 0; i < results.length; i++) {
           const res = results[i]!;
+          const chunkIndex = res.metadata['chunkIndex'];
+          const totalChunks = res.metadata['totalChunks'];
+          const chunkLabel = typeof chunkIndex === 'number' && typeof totalChunks === 'number'
+            ? ` (chunk ${chunkIndex + 1} of ${totalChunks})`
+            : '';
           markdown += `### ${res.url}\n`;
-          markdown += `*Result ${i + 1} of ${results.length} (chunk ${res.metadata['chunkIndex'] + 1} of ${res.metadata['totalChunks']})*\n\n`;
+          markdown += `*Result ${i + 1} of ${results.length}${chunkLabel}*\n\n`;
           markdown += `${res.text}\n\n---\n\n`;
         }
 

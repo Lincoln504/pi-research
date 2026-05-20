@@ -199,6 +199,7 @@ async function executeScrapeTask(browser, context, url) {
         const contentType = (await response?.headerValue('content-type')) || '';
         
         if (contentType.includes('application/pdf')) {
+            if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
             const buffer = await response.body();
             await page.close();
             return { contentType, buffer };
@@ -333,5 +334,8 @@ export default new ClusterWorker(runTask, {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
         if (context) await context.close().catch(() => {});
         if (browser) await browser.close().catch(() => {});
+        // Force process exit — without this, the orphan-detection setInterval keeps
+        // the event loop alive indefinitely after the IPC channel is disconnected.
+        process.exit(0);
     }
 });

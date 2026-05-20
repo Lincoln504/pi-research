@@ -9,7 +9,7 @@ vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  logger: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock('@kreuzberg/html-to-markdown-node', () => ({

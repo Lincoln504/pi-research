@@ -44,6 +44,8 @@ export interface Config {
   KNOWLEDGE_STORE_ENABLED: boolean;
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: string;
+  /** Inference backend for embeddings: 'webgpu' (Dawn/Vulkan/Metal/D3D12, 3–9× faster) or 'cpu' */
+  EMBEDDING_DEVICE: string;
   /** How long to keep cached scrapes in the knowledge store (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
   /** Timeout for embedding model initialization in milliseconds (default: 300000) */
@@ -65,6 +67,7 @@ export const DEFAULTS: Config = {
   WORKER_CONCURRENCY: 3,
   KNOWLEDGE_STORE_ENABLED: true,
   EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
+  EMBEDDING_DEVICE: 'webgpu',
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   EMBEDDING_MODEL_INIT_TIMEOUT_MS: 300_000, // 5 minutes
 };
@@ -85,7 +88,7 @@ function parseDotEnv(content: string): Record<string, string> {
     const eq = line.indexOf('=');
     if (eq < 1) continue;
     const key = line.slice(0, eq).trim();
-    const val = line.slice(eq + 1); // preserve value as-is (no extra trim)
+    const val = line.slice(eq + 1).replace(/\r$/, ''); // strip Windows \r, preserve leading spaces
     if (key) out[key] = val;
   }
   return out;
@@ -121,6 +124,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
     PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: String(config.KNOWLEDGE_STORE_ENABLED),
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
+    PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     // Always include PROXY_URL - empty string means "clear this value"
@@ -269,6 +273,7 @@ export function createConfig(
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
     KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_STORE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
+    EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE)!,
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
   };
@@ -342,6 +347,11 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.KNOWLEDGE_STORE_CACHE_TTL_DAYS < 1 || config.KNOWLEDGE_STORE_CACHE_TTL_DAYS > 365) {
     throw new Error(
       `PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS must be 1–365, got ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS}`,
+    );
+  }
+  if (['webgpu', 'cpu'].indexOf(config.EMBEDDING_DEVICE) === -1) {
+    throw new Error(
+      `PI_RESEARCH_EMBEDDING_DEVICE must be one of: webgpu, cpu. Got: ${config.EMBEDDING_DEVICE}`,
     );
   }
   if (

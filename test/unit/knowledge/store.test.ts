@@ -48,7 +48,7 @@ describe('KnowledgeStore', () => {
     const doc = {
       url: 'https://example.com',
       text: 'Hello world',
-      metadata: { title: 'Test', chunkIndex: 0, totalChunks: 1 },
+      metadata: { title: 'Test', chunkIndex: 0, totalChunks: 1, ingestionType: 'synthesis-description' },
       timestamp: timestamp,
     };
     
@@ -130,13 +130,13 @@ describe('KnowledgeStore', () => {
     const c2 = original.slice(35 - overlap);
 
     await store.addDocuments([
-      { url: 'https://example.com/doc', text: c0, metadata: { chunkIndex: 0, actualOverlap: 0 }, timestamp: Date.now() },
-      { url: 'https://example.com/doc', text: c1, metadata: { chunkIndex: 1, actualOverlap: overlap }, timestamp: Date.now() },
-      { url: 'https://example.com/doc', text: c2, metadata: { chunkIndex: 2, actualOverlap: overlap }, timestamp: Date.now() },
+      { url: 'https://example.com/doc', text: c0, metadata: { chunkIndex: 0, actualOverlap: 0, ingestionType: 'raw-content' }, timestamp: Date.now() },
+      { url: 'https://example.com/doc', text: c1, metadata: { chunkIndex: 1, actualOverlap: overlap, ingestionType: 'raw-content' }, timestamp: Date.now() },
+      { url: 'https://example.com/doc', text: c2, metadata: { chunkIndex: 2, actualOverlap: overlap, ingestionType: 'raw-content' }, timestamp: Date.now() },
     ]);
 
     const rebuilt = await store.rebuildDocument('https://example.com/doc');
-    expect(rebuilt).toBe(original);
+    expect(rebuilt?.text).toBe(original);
   });
 
   it('rebuildDocument returns null for unknown URL', async () => {
@@ -147,11 +147,11 @@ describe('KnowledgeStore', () => {
 
   it('findRelevantUrls deduplicates URLs across multiple chunks from the same source', async () => {
     await store.open();
-    // Insert two chunks from the same URL
+    // Insert two synthesis-description chunks from the same URL (these are what findRelevantUrls returns)
     await store.addDocuments([
-      { url: 'https://example.com/dedup', text: 'first chunk of the document', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
-      { url: 'https://example.com/dedup', text: 'second chunk of the document', metadata: { chunkIndex: 1 }, timestamp: Date.now() },
-      { url: 'https://example.com/other', text: 'a different document entirely', metadata: { chunkIndex: 0 }, timestamp: Date.now() },
+      { url: 'https://example.com/dedup', text: 'first chunk of the document', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+      { url: 'https://example.com/dedup', text: 'second chunk of the document', metadata: { chunkIndex: 1, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+      { url: 'https://example.com/other', text: 'a different document entirely', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
     ]);
 
     const urls = await store.findRelevantUrls('document chunk', { limit: 10 });
@@ -204,7 +204,7 @@ describe('KnowledgeStore', () => {
     const doc = {
       url: 'https://example.com',
       text: 'Hello world',
-      metadata: { title: 'Test' },
+      metadata: { title: 'Test', ingestionType: 'synthesis-description' },
       timestamp: Date.now(),
     };
     await store.addDocuments([doc]);

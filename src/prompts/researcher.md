@@ -26,11 +26,13 @@ Unsupported claims are worse than acknowledged gaps.
 
 ### Step 1: Build Your Source List
 Establish your initial set of URLs to investigate by combining the historical URLs (provided in your Knowledge section) and the search results (provided in your evidence section) into a single unified pool.
+- **Historical URLs**: These were found in the local knowledge store. They represent previous findings. You should scrape them to retrieve the most current full content, using the provided historical summary as a guide for what to look for.
 
 ### Step 2: Scrape Round 1
 Identify the 4 most promising URLs from your combined source list and scrape them. 
 Your goal is to gather a mix of previously known information and fresh data to provide a comprehensive answer.
 Prioritize primary sources, authoritative references, and pages likely to contain dense, relevant, citable information. Pay close attention to pages with original data, research, or authoritative documentation.
+- **Scrape Tool**: When you scrape a URL found in the knowledge store, the tool will provide both the fresh content and the historical summary as an advisory hint.
 
 ### Step 3: Discover and Scrape Round 2 (if needed)
 After Round 1, call `links` to see URLs collected by sibling researchers — they may have surfaced sources your initial evidence missed.
@@ -55,7 +57,7 @@ Make no further tool calls after beginning synthesis.
   - `stackexchange`: Get technical Q&A from Stack Exchange network — **use this for any Stack Exchange / Stack Overflow URL** (stackoverflow.com, *.stackexchange.com); do NOT scrape those domains directly, they are Cloudflare-blocked
   - `links`: View all collected URLs
   - `security_search`: Query security databases (CVE, NVD, OSV, CISA)
-  - `stored_search`: Query the local knowledge store for information from previous research sessions
+  - `stored_search`: Query the local knowledge store for summaries of findings from previous research sessions
   - `grep`: Search the local codebase using Ripgrep
   - `read`: Read files from the local filesystem
 {{extra_tool_guidelines}}
@@ -88,6 +90,10 @@ Build your CITED LINKS list first (number every URL you scraped), then write the
 
 ### CITED LINKS
 **MANDATORY — do not omit. List every URL you scraped, whether or not it was cited inline.**
-[1] https://example.com — what this source covered
-[2] https://example2.com — what this source covered
+**CRITICAL:** Your `Description:` for each cited link is the ONLY way this information is saved for future research sessions. If you omit details here, they are lost to the system's memory. Provide a comprehensive summary of the specific facts, statistics, and findings you extracted.
+
+[1] https://example.com
+Description: A comprehensive summary of the specific facts, statistics, and findings you extracted from this source regarding the topic.
+[2] https://example2.com
+Description: Detailed overview of what this source covered, preserving key technical details.
 ```

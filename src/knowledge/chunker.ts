@@ -42,9 +42,14 @@ export class Chunker {
         const codeBlockMatchesBefore = textBefore.match(/```/g);
         const startsInCodeBlock = codeBlockMatchesBefore && codeBlockMatchesBefore.length % 2 !== 0;
 
+        // Hard cap: never extend a chunk beyond 4× targetSize (min 2000 chars) for code blocks.
+        // A very large code block (e.g. a package compatibility table) can otherwise
+        // produce chunks of 12000+ tokens that OOM the embedding model at inference time.
+        const MAX_CHUNK_CHARS = Math.max(this.targetSize * 4, 2000);
+
         if (startsInCodeBlock) {
           const nextEnd = text.indexOf('```', start);
-          if (nextEnd !== -1) {
+          if (nextEnd !== -1 && nextEnd + 3 - start <= MAX_CHUNK_CHARS) {
             end = nextEnd + 3;
             slice = text.slice(start, end);
             extendedForCodeBlock = true;
@@ -52,8 +57,8 @@ export class Chunker {
         } else {
           const codeBlockMatchesInSlice = slice.match(/```/g);
           if (codeBlockMatchesInSlice && codeBlockMatchesInSlice.length % 2 !== 0) {
-            const nextEnd = text.indexOf('```', start + slice.lastIndexOf('```') + 1);
-            if (nextEnd !== -1) {
+            const nextEnd = text.indexOf('```', start + slice.lastIndexOf('```') + 3);
+            if (nextEnd !== -1 && nextEnd + 3 - start <= MAX_CHUNK_CHARS) {
               end = nextEnd + 3;
               slice = text.slice(start, end);
               extendedForCodeBlock = true;

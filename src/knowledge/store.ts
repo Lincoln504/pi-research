@@ -32,6 +32,7 @@ export class KnowledgeStore {
   private tableName = 'knowledge';
   private isClosing = false;
   private pendingOperations = 0;
+  private rrfReranker: lancedb.rerankers.RRFReranker | null = null;
 
   constructor(options: StoreOptions) {
     this.options = options;
@@ -133,26 +134,38 @@ export class KnowledgeStore {
     }
   }
 
+  private async getReranker(): Promise<lancedb.rerankers.RRFReranker> {
+    if (!this.rrfReranker) {
+      this.rrfReranker = await lancedb.rerankers.RRFReranker.create();
+    }
+    return this.rrfReranker;
+  }
+
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
     if (!this.table) throw new Error('Store not open');
 
     const vector = await this.options.embedder.embed(query);
-    
-    // Hybrid Search with RRFReranker as mandated
+
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
       .fullTextSearch(query)
-      .rerank(await lancedb.rerankers.RRFReranker.create())
+      .rerank(await this.getReranker())
       .limit(options.limit ?? 5)
       .toArray();
 
-    return results.map(r => ({
-      url: r.url as string,
-      text: r.text as string,
-      metadata: JSON.parse(r.metadata as string),
-      timestamp: Number(r.timestamp),
-    }));
+    // Filter to only return synthesis-description entries for vector/semantic search
+    // Raw-content entries are for retrieval only, not search
+    const filteredResults = results
+      .map(r => ({
+        url: r.url as string,
+        text: r.text as string,
+        metadata: JSON.parse(r.metadata as string),
+        timestamp: Number(r.timestamp),
+      }))
+      .filter(doc => doc.metadata.ingestionType === 'synthesis-description');
+
+    return filteredResults;
   }
 
   /**
@@ -181,6 +194,10 @@ export class KnowledgeStore {
       .limit(1000)
       .toArray();
 
+    if (results.length === 1000) {
+      logger.warn(`[store] findByUrl hit 1000-chunk cap for ${url} — some chunks may be missing`);
+    }
+
     return results.map(r => ({
       url: r.url as string,
       text: r.text as string,
@@ -192,7 +209,7 @@ export class KnowledgeStore {
   /**
    * Rebuild a full document from its chunks.
    */
-  async rebuildDocument(url: string): Promise<string | null> {
+  async rebuildDocument(url: string): Promise<{ text: string; metadata: Record<string, any> } | null> {
     if (!this.table) throw new Error('Store not open');
 
     // Escape URL to prevent SQL injection
@@ -202,17 +219,31 @@ export class KnowledgeStore {
     const results = await this.table
       .query()
       .where(`url = '${escapedUrl}'`)
-      .limit(1000) // reasonable limit
+      .limit(1000)
       .toArray();
+
+    if (results.length === 1000) {
+      logger.warn(`[store] rebuildDocument hit 1000-chunk cap for ${url} — document reconstruction is incomplete`);
+    }
 
     if (results.length === 0) return null;
 
-    const chunks = results.map(r => {
+    // Filter to only retrieve raw-content entries (for retrieval)
+    // Description entries (synthesis-description) are for search only
+    const filteredResults = results.filter(r => {
+      const metadata = JSON.parse(r.metadata as string);
+      return metadata.ingestionType === 'raw-content';
+    });
+
+    if (filteredResults.length === 0) return null;
+
+    const chunks = filteredResults.map(r => {
       const metadata = JSON.parse(r.metadata as string);
       return {
         text: r.text as string,
         index: metadata.chunkIndex as number,
         overlap: metadata.actualOverlap as number,
+        fullMetadata: metadata,
       };
     }).sort((a, b) => a.index - b.index);
 
@@ -230,7 +261,7 @@ export class KnowledgeStore {
     }
 
     logger.log(`[store] Cache hit: rebuilt ${chunks.length} chunk(s) for ${url} (${fullText.length} chars)`);
-    return fullText;
+    return { text: fullText, metadata: firstChunk.fullMetadata };
   }
 
   /**
@@ -240,17 +271,20 @@ export class KnowledgeStore {
     if (!this.table) throw new Error('Store not open');
 
     const vector = await this.options.embedder.embed(query);
-    
-    // Hybrid Search with RRF Reranker for proper merging of vector and FTS results
+
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
       .fullTextSearch(query)
-      .rerank(await lancedb.rerankers.RRFReranker.create())
+      .rerank(await this.getReranker())
       .limit(options.limit ?? 20)
       .toArray();
 
-    const urls = results.map(r => r.url as string);
+    const urls = results
+      .filter(r => {
+        try { return JSON.parse(r.metadata as string).ingestionType === 'synthesis-description'; } catch { return false; }
+      })
+      .map(r => r.url as string);
     return Array.from(new Set(urls));
   }
 
@@ -287,7 +321,7 @@ export class KnowledgeStore {
       
       // Delete records older than TTL
       await this.table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
-      logger.info(`[store] Evicted records older than ${ttlDays} days`);
+      logger.log(`[store] Ran eviction for records older than ${ttlDays} days`);
     } catch (err) {
       // Don't fail initialization if eviction fails
       logger.warn('[store] Failed to evict old records:', err);

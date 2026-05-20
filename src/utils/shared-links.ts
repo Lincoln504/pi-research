@@ -6,14 +6,34 @@
  */
 
 import { logger } from '../logger.ts';
+import { randomUUID } from 'node:crypto';
 
 const sessionLinks = new Map<string, Set<string>>();
+const sessionScrapedContent = new Map<string, Map<string, string>>();
+
+/**
+ * Cache the raw markdown of a scraped URL during a research session.
+ * This is used later to embed the raw text alongside the agent's summary.
+ */
+export function cacheScrapedContent(researchId: string, url: string, content: string) {
+    if (!sessionScrapedContent.has(researchId)) {
+        sessionScrapedContent.set(researchId, new Map());
+    }
+    sessionScrapedContent.get(researchId)!.set(normalizeUrl(url), content);
+}
+
+/**
+ * Retrieve the cached raw markdown for a scraped URL.
+ */
+export function getCachedScrapedContent(researchId: string, url: string): string | undefined {
+    return sessionScrapedContent.get(researchId)?.get(normalizeUrl(url));
+}
 
 /**
  * Generate a unique research ID based on the parent Pi session.
  */
 export function generateSessionId(piSessionId: string): string {
-    return `${piSessionId}-${Math.random().toString(36).substring(2, 9)}`;
+    return `${piSessionId}-${randomUUID().replace(/-/g, '').substring(0, 8)}`;
 }
 
 /**
@@ -152,5 +172,6 @@ export function resetScrapedLinks(researchId: string) {
  */
 export function cleanupSharedLinks(researchId: string) {
     sessionLinks.delete(researchId);
+    sessionScrapedContent.delete(researchId);
     logger.debug(`[Shared Links] Cleaned up session: ${researchId}`);
 }

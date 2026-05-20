@@ -1,15 +1,14 @@
 /**
  * Logger — scoped file-based diagnostics
  *
- * Silent by default. When --verbose or PI_RESEARCH_VERBOSE=1 is set,
- * writes timestamped lines to {tmpdir}/pi-research-debug-{hash}.log where {hash}
- * is a random 4-character alphanumeric suffix (a-z, 0-9) to keep logs separate per run.
+ * Writes timestamped lines to ~/.pi/pi-research.log (or {tmpdir}/pi-research.log).
+ * ERROR and WARN levels are always logged.
+ * INFO and DEBUG levels are only logged when --verbose or PI_RESEARCH_VERBOSE=1 is set.
  *
- * When NOT verbose: logFile is null, preventing all temp-dir writes.
  * This module never patches process-global console.* methods.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
@@ -56,24 +55,16 @@ export interface LogContext {
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
 
-/**
- * Generate a 4-character alphanumeric hash for uniqueness
- */
-function generateHash(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let hash = '';
-  for (let i = 0; i < 4; i++) {
-    hash += chars.charAt(Math.floor(Math.random() * chars.length));
+function buildDefaultDebugLogPath(): string {
+  const piDir = path.join(os.homedir(), '.pi');
+  if (existsSync(piDir)) {
+    return path.join(piDir, 'pi-research.log');
   }
-  return hash;
-}
-
-function buildDefaultDebugLogPath(hash: string): string {
-  return path.join(os.tmpdir(), `pi-research-debug-${hash}.log`);
+  return path.join(os.tmpdir(), 'pi-research.log');
 }
 
 export function getDefaultDebugLogPathTemplate(): string {
-  return buildDefaultDebugLogPath('{hash}');
+  return buildDefaultDebugLogPath();
 }
 
 /**
@@ -122,30 +113,36 @@ function formatArg(arg: unknown): string {
 }
 
 /**
- * Logger implementation — writes to file when verbose, silent otherwise
+ * Logger implementation — writes to file, filters based on verbosity
  */
 export class Logger implements ILogger {
   private verbose: boolean;
-  private logFile: string | null;
+  private logFile: string;
+  private isCapturingStderr = false;
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
-    // Only set logFile path if verbose mode is enabled
-    if (this.verbose) {
-      const hash = generateHash();
-      this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(hash);
-    } else {
-      this.logFile = null;
+    this.logFile = options.logFilePath ?? buildDefaultDebugLogPath();
+    
+    // Ensure parent directory exists
+    try {
+      const dir = path.dirname(this.logFile);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+    } catch {
+      // Ignore if we can't create dir
     }
   }
 
   /**
-   * Emit a log message to file (if verbose) or nowhere (if silent)
+   * Emit a log message to file
    * @param level - Log level (INFO, ERROR, WARN, DEBUG)
    * @param args - Arguments to log
    */
   private emit(level: string, ...args: unknown[]): void {
-    if (!this.verbose || !this.logFile) {
+    // Only filter INFO and DEBUG if not verbose
+    if (!this.verbose && (level === LogLevel.INFO || level === LogLevel.DEBUG)) {
       return;
     }
 
@@ -167,6 +164,51 @@ export class Logger implements ILogger {
       appendFileSync(this.logFile, line);
     } catch {
       // Silently ignore file write errors
+    }
+  }
+
+  /**
+   * Run a task while capturing its stderr and redirecting it to the log file.
+   * This is useful for capturing logs from native libraries like ONNX Runtime.
+   */
+  async runCapturingStderr<T>(task: () => Promise<T>): Promise<T> {
+    if (!this.verbose || !this.logFile) {
+        return await task();
+    }
+    // If already capturing (concurrent re-entry), run task without re-patching
+    if (this.isCapturingStderr) {
+        return await task();
+    }
+
+    this.isCapturingStderr = true;
+    const originalWrite = process.stderr.write;
+    const logFile = this.logFile;
+
+    // Patch stderr.write — handles write(chunk), write(chunk, cb), write(chunk, encoding, cb)
+    (process.stderr.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
+        const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
+        const message = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+
+        const timestamp = new Date().toISOString();
+        const entry = {
+            timestamp,
+            level: 'STDERR',
+            ...getLogContext(),
+            message: message.trim(),
+        };
+        try {
+            appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
+        } catch { /* log file write failure is non-fatal during stderr capture */ }
+
+        if (typeof cb === 'function') cb();
+        return true;
+    };
+
+    try {
+        return await task();
+    } finally {
+        process.stderr.write = originalWrite;
+        this.isCapturingStderr = false;
     }
   }
 

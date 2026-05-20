@@ -2,7 +2,7 @@ import { Embedder } from './embedder.ts';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
 import { Chunker } from './chunker.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, validateConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,37 +19,121 @@ interface ModelConfig {
   chunkSize: number;
   // Overlap fraction (0–0.5). 0.15 is the empirically best single value.
   overlapPct: number;
+  // Maximum tokens passed to the ONNX session per sequence. Truncation is applied if
+  // the tokenized length exceeds this. Lower values dramatically reduce VRAM usage for
+  // decoder models: 512 tokens vs 1042 tokens is 4x less attention tensor memory.
+  maxTokens?: number;
+  // Sequences per pipeline call. Decoder models scale quadratically with batch×seq_len,
+  // so batchSize=1 is safest on 6GB cards when using Qwen3-0.6B-ONNX.
+  batchSize?: number;
+  // Characters per token for pre-truncation. BERT/WordPiece encoder models: ~4.
+  // XLM-RoBERTa SentencePiece / Gemma SentencePiece: ~3.5. Qwen2 tiktoken: ~2.5. Default: 4.
+  charsPerToken?: number;
+  // Prefix prepended to document embeddings (embedMany). For asymmetric models like E5
+  // that require "passage: " on the document side. Omit for symmetric models.
+  documentPrefix?: string;
 }
 
-// All-MiniLM-L6-v2: trained at 128 tokens — stay near that distribution (~200 tokens × 4 chars).
-// bge-small-en / ml-e5-*: 512-token max, trained at 512 — 375 tokens × 4 chars is a safe sweet spot.
-// all-mpnet-base-v2: fine-tuned at 128 tokens, truncates at 384 — 300 tokens × 4 chars.
-// bge-m3: 8192-token max, but dense retrieval peaks at 256-512 tokens, same practical sweet spot.
-// embeddinggemma-300m: 2048-token max, evaluated at 512 — 450 tokens × 4 chars.
-// Qwen3-Embedding-0.6B: 32768-token max, production sweet spot 512-768 tokens — 625 tokens × 4 chars.
+// charsPerToken per tokenizer family (chars/token on typical web content):
+//   BERT WordPiece (MiniLM, MPNet)      : ~4.0 — English-optimized vocab, safe floor
+//   RoBERTa BPE (bge-small)             : ~4.0 — similar to BERT on English
+//   XLM-RoBERTa SentencePiece (E5, BGE-M3): ~3.5 — multilingual vocab, lower English density
+//   Gemma SentencePiece (embeddinggemma): ~3.5 — large vocab but SentencePiece BPE
+//   Qwen2 tiktoken (Qwen3-Embedding)    : ~2.5 — measured at 2.68 chars/tok on web content
+//   BPE 50k vocab (IBM Granite ModernBERT): ~4.0 — English-only BPE, similar density to BERT
+//
+// Rule: chunkSize must be ≤ maxTokens * charsPerToken (= maxChars) so the full chunk is embedded.
 const MODEL_CONFIG: Record<string, ModelConfig> = {
-  'Xenova/all-MiniLM-L6-v2':             { pooling: 'mean', chunkSize: 800,  overlapPct: 0.15 },
-  'Xenova/bge-small-en-v1.5':            { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
-  'Xenova/all-mpnet-base-v2':            { pooling: 'mean', chunkSize: 1200, overlapPct: 0.15 },
-  'Xenova/multilingual-e5-small':        { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
-  'Xenova/multilingual-e5-base':         { pooling: 'mean', chunkSize: 1500, overlapPct: 0.15 },
-  'Xenova/bge-m3':                       { pooling: 'cls',  chunkSize: 1500, overlapPct: 0.15 },
-  'onnx-community/embeddinggemma-300m-ONNX': { pooling: 'mean', chunkSize: 1800, overlapPct: 0.15 },
+  // all-MiniLM-L6-v2: trained at 256 tokens, 384-dim. chunkSize 800 = 200 tok ≤ 256 ✓
+  'Xenova/all-MiniLM-L6-v2': {
+    pooling: 'mean',
+    chunkSize: 800,
+    overlapPct: 0.15,
+    maxTokens: 256,  // hard training window; prevent position OOB on long queries
+  },
+  // bge-small-en-v1.5: CLS pooling (not mean — BGE uses CLS for dense retrieval). 512-tok max.
+  // chunkSize 1500 = 375 tok ≤ 512 ✓
+  'Xenova/bge-small-en-v1.5': {
+    pooling: 'cls',
+    chunkSize: 1500,
+    overlapPct: 0.15,
+  },
+  // all-mpnet-base-v2: mean pooling, fine-tuned at 384 tokens. chunkSize 1200 = 300 tok ≤ 384 ✓
+  'Xenova/all-mpnet-base-v2': {
+    pooling: 'mean',
+    chunkSize: 1200,
+    overlapPct: 0.15,
+    maxTokens: 384,
+  },
+  // multilingual-e5-*: asymmetric — requires "query: " / "passage: " prefixes.
+  // Without them, query and doc vectors land in different sub-spaces → retrieval collapse.
+  // XLM-RoBERTa SentencePiece, charsPerToken=3.5. maxChars = 512*3.5 = 1792. chunkSize 1500 ≤ 1792 ✓
+  'Xenova/multilingual-e5-small': {
+    pooling: 'mean',
+    chunkSize: 1500,
+    overlapPct: 0.15,
+    queryPrefix: 'query: ',
+    documentPrefix: 'passage: ',
+    charsPerToken: 3.5,
+  },
+  'Xenova/multilingual-e5-base': {
+    pooling: 'mean',
+    chunkSize: 1500,
+    overlapPct: 0.15,
+    queryPrefix: 'query: ',
+    documentPrefix: 'passage: ',
+    charsPerToken: 3.5,
+  },
+  // bge-m3: symmetric dense retrieval (no prefix), CLS pooling, 8192-tok max.
+  // XLM-RoBERTa SentencePiece, charsPerToken=3.5. maxChars = 512*3.5 = 1792. chunkSize 1500 ≤ 1792 ✓
+  'Xenova/bge-m3': {
+    pooling: 'cls',
+    chunkSize: 1500,
+    overlapPct: 0.15,
+    charsPerToken: 3.5,
+  },
+  // embeddinggemma-300m: Gemma SentencePiece, mean pooling. charsPerToken=3.5.
+  // maxChars = 512*3.5 = 1792. chunkSize 1600 ≤ 1792 ✓  (was 1800 > 1792 — off-by-one bug fixed)
+  'onnx-community/embeddinggemma-300m-ONNX': {
+    pooling: 'mean',
+    chunkSize: 1600,
+    overlapPct: 0.15,
+    charsPerToken: 3.5,
+  },
+  // Qwen3-Embedding-0.6B: decoder model (last_token pooling), asymmetric instruction prefix.
+  // Qwen2 tiktoken measures ~2.68 chars/tok on web content — use 2.5 for headroom.
+  // maxChars = 512*2.5 = 1280. chunkSize 1200 ≤ 1280 ✓  (was 2500 → only 40% embedded — fixed)
+  // O(seq²) attention: batchSize=2 keeps VRAM at ~500MB overhead on 6GB cards.
   'onnx-community/Qwen3-Embedding-0.6B-ONNX': {
     pooling: 'last_token',
     queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages.\nQuery: ',
-    chunkSize: 2500,
+    chunkSize: 1200,
     overlapPct: 0.15,
+    maxTokens: 512,
+    batchSize: 2,
+    charsPerToken: 2.5,
+  },
+  // IBM Granite small-english-r2: ModernBERT-based, 47M params, 384-dim, 8192-tok max.
+  // BPE (vocab 50k, English-only), mean pooling, symmetric (no prefix). MTEB-v2: 61.1.
+  // maxChars = 512*4 = 2048. chunkSize 1800 ≤ 2048 ✓
+  'onnx-community/granite-embedding-small-english-r2-ONNX': {
+    pooling: 'mean',
+    chunkSize: 1800,
+    overlapPct: 0.15,
+    maxTokens: 512,
+    batchSize: 8,
   },
 };
 
 const DEFAULT_CHUNK_SIZE = 1200;
 const DEFAULT_OVERLAP_PCT = 0.15;
 
-/** Returns embedder configuration (pooling + query prefix) for a model. Pure — safe to call any time. */
-export function getModelEmbedderConfig(modelId: string): { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string } {
+/** Returns embedder configuration for a model. Pure — safe to call any time. */
+export function getModelEmbedderConfig(modelId: string): { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string; documentPrefix?: string; maxTokens?: number; batchSize?: number; charsPerToken?: number } {
   const cfg = MODEL_CONFIG[modelId];
-  return cfg ? { pooling: cfg.pooling, queryPrefix: cfg.queryPrefix } : { pooling: 'mean' };
+  return cfg
+    ? { pooling: cfg.pooling, queryPrefix: cfg.queryPrefix, documentPrefix: cfg.documentPrefix, maxTokens: cfg.maxTokens, batchSize: cfg.batchSize, charsPerToken: cfg.charsPerToken }
+    : { pooling: 'mean' };
 }
 
 /** Returns chunk size and overlap fraction for a model. Pure — safe to call any time. */
@@ -77,6 +161,7 @@ const MAX_RETRY_DELAY_MS = 30000;
 export async function initKnowledgeStore(): Promise<void> {
   const config = getConfig();
   if (!config.KNOWLEDGE_STORE_ENABLED) return;
+  validateConfig(config);
   if (initializationPromise) return initializationPromise;
 
   initializationPromise = (async () => {
@@ -96,6 +181,11 @@ export async function initKnowledgeStore(): Promise<void> {
             pooling: modelCfg.pooling,
             queryPrefix: modelCfg.queryPrefix,
             initializationTimeoutMs: config.EMBEDDING_MODEL_INIT_TIMEOUT_MS,
+            device: config.EMBEDDING_DEVICE,
+            maxTokens: modelCfg.maxTokens,
+            batchSize: modelCfg.batchSize,
+            charsPerToken: modelCfg.charsPerToken,
+            documentPrefix: modelCfg.documentPrefix,
           });
           inflightEmbedder = embedder;
         }
@@ -174,13 +264,29 @@ export function isKnowledgeStoreReady(): boolean {
 const DRAIN_TIMEOUT_MS = 30_000;
 
 export async function shutdownKnowledgeStore(): Promise<void> {
-  if (!store && !writerQueue) return;
+  if (!store && !writerQueue && !embedder) return;
 
   if (writerQueue) {
     logger.info('[knowledge] Draining writer queue...');
-    const timeout = new Promise<void>(resolve => setTimeout(resolve, DRAIN_TIMEOUT_MS));
-    await Promise.race([writerQueue.drain(), timeout]);
-    logger.info('[knowledge] Writer queue drained.');
+    const start = Date.now();
+    const timeout = new Promise<void>((_resolve, reject) => {
+      const timer = setTimeout(() => {
+        const elapsed = Date.now() - start;
+        logger.warn(`[knowledge] Writer queue drain timed out after ${elapsed}ms`);
+        reject(new Error(`Writer queue drain timeout after ${elapsed}ms`));
+      }, DRAIN_TIMEOUT_MS);
+      timer.unref(); // Allow exit if this is the only timer
+    });
+    
+    try {
+      await Promise.race([writerQueue.drain(), timeout]);
+      const elapsed = Date.now() - start;
+      logger.info(`[knowledge] Writer queue drained in ${elapsed}ms.`);
+    } catch (err) {
+      logger.warn('[knowledge] Writer queue drain did not complete:', err);
+    } finally {
+      writerQueue = null;
+    }
   }
 
   if (store) {
@@ -189,5 +295,17 @@ export async function shutdownKnowledgeStore(): Promise<void> {
     await store.rebuildFtsIndex();
     await store.close();
     logger.info('[knowledge] Knowledge store closed.');
+    store = null;
   }
+
+  // Must dispose embedder (ORT sessions) AFTER store is closed.
+  // Releasing ORT sessions before process exit prevents the DefaultLogger crash
+  // caused by C++ destructors firing after ORT's LoggingManager is torn down.
+  if (embedder) {
+    await embedder.dispose();
+    embedder = null;
+    logger.info('[knowledge] Embedder disposed.');
+  }
+
+  initializationPromise = null;
 }

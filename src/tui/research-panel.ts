@@ -509,6 +509,7 @@ function _addVariationToColor(ansiCode: string | undefined, maxVariation: number
 }
 
 export function _derive256Gradient(baseIndex: number, steps: number): string[] {
+  if (steps <= 1) return steps === 1 ? [`\x1b[38;5;${baseIndex}m`] : [];
   const gradient: string[] = [];
 
   if (baseIndex >= 16 && baseIndex <= 231) {
@@ -591,6 +592,7 @@ export function _derive256Gradient(baseIndex: number, steps: number): string[] {
  * Scales toward dimmer version (25%) of original color.
  */
 export function _deriveRgbGradient(r: number, g: number, b: number, steps: number): string[] {
+  if (steps <= 1) return steps === 1 ? [`\x1b[38;2;${r};${g};${b}m`] : [];
   const gradient: string[] = [];
 
   // Scale toward 25% of original (keeps hue, reduces brightness)
@@ -652,6 +654,7 @@ function _buildWaveGradient(theme: Theme, steps: number): string[] {
   const parsed = parseAnsiFgColor(accentText);
 
   if (!parsed) {
+    if (steps <= 1) return steps === 1 ? ['\x1b[38;5;244m'] : [];
     // Fallback: gray gradient
     return Array.from({ length: steps }, (_, i) => {
       const gray = Math.round(244 - (i / (steps - 1)) * 10);
@@ -661,10 +664,10 @@ function _buildWaveGradient(theme: Theme, steps: number): string[] {
 
   switch (parsed.type) {
     case '256':
-      return derive256Gradient(parsed.index!, steps);
+      return _derive256Gradient(parsed.index!, steps);
 
     case 'rgb':
-      return deriveRgbGradient(parsed.r!, parsed.g!, parsed.b!, steps);
+      return _deriveRgbGradient(parsed.r!, parsed.g!, parsed.b!, steps);
 
     case 'basic': {
       // Basic ANSI colors - map to approximate 256-color indices
@@ -679,11 +682,11 @@ function _buildWaveGradient(theme: Theme, steps: number): string[] {
         7: 231, // white
       };
       const mappedIndex = basicTo256[parsed.index!] ?? 244;
-      return derive256Gradient(mappedIndex, steps);
+      return _derive256Gradient(mappedIndex, steps);
     }
 
     default:
-      // Fallback
+      if (steps <= 1) return steps === 1 ? ['\x1b[38;5;244m'] : [];
       return Array.from({ length: steps }, (_, i) => {
         const gray = Math.round(244 - (i / (steps - 1)) * 10);
         return `\x1b[38;5;${Math.max(234, gray)}m`;
@@ -706,8 +709,36 @@ function renderPanelBlock(
   const sliceIds = Array.from(state.slices.keys()).filter(id => {
     const s = state.slices.get(id);
     if (!s || s.queued) return false;
-    // Completed slices stay visible (rendered as grey) until cleared
     return true;
+  });
+
+  // Stable sort: Planning/Coordinator first, Researchers numerically, Eval last
+  sliceIds.sort((a, b) => {
+    const sa = state.slices.get(a)!;
+    const sb = state.slices.get(b)!;
+    const la = sa.label.toLowerCase();
+    const lb = sb.label.toLowerCase();
+
+    // Priority 1: Planning/Coordinator
+    const isPlanA = la.includes('plan') || la.includes('coord');
+    const isPlanB = lb.includes('plan') || lb.includes('coord');
+    if (isPlanA && !isPlanB) return -1;
+    if (!isPlanA && isPlanB) return 1;
+
+    // Priority 3: Eval (Last)
+    const isEvalA = la === 'eval';
+    const isEvalB = lb === 'eval';
+    if (isEvalA && !isEvalB) return 1;
+    if (!isEvalA && isEvalB) return -1;
+
+    // Priority 2: Numerical researchers
+    const numA = parseInt(la, 10);
+    const numB = parseInt(lb, 10);
+    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+    if (!isNaN(numA)) return -1;
+    if (!isNaN(numB)) return 1;
+
+    return la.localeCompare(lb);
   });
 
   const numSlices = sliceIds.length;

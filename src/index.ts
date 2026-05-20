@@ -9,6 +9,7 @@ import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { initKnowledgeStore, shutdownKnowledgeStore } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
+import { clearAllSessionState } from './utils/session-state.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -44,13 +45,20 @@ export default function (pi: ExtensionAPI) {
   let uncaughtExceptionCount = 0;
   const MAX_UNCAUGHT_EXCEPTIONS = 3;
 
-  process.on('uncaughtException', (err: Error, origin: string) => {
+  shutdownManager.registerEventListener(process, 'uncaughtException', (err: Error, origin: string) => {
+    // EPIPE = pi closed its stdout/stderr pipe before we finished writing (normal at shutdown).
+    // Check before incrementing so it never contributes to the crash threshold.
+    if (err.message.includes('EPIPE') || (err as any).code === 'EPIPE') {
+      logger.warn('[pi-research] EPIPE — pipe closed (normal at shutdown), ignoring.');
+      return;
+    }
+
     uncaughtExceptionCount++;
     const errorMsg = `[pi-research] Uncaught exception #${uncaughtExceptionCount}/${MAX_UNCAUGHT_EXCEPTIONS}: ${err.message}`;
     const errorOrigin = `[origin: ${origin}]`;
-    
+
     logger.error(`${errorMsg} ${errorOrigin}`, err);
-    
+
     // Log stack trace for debugging
     if (err.stack) {
       logger.error(`[pi-research] Stack trace:\n${err.stack}`);
@@ -64,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 
     // For common recoverable errors (like undici socket timeouts), don't crash the process.
     // These can happen during network operations and are handled at a higher level via retries.
-    const isNetworkError = 
+    const isNetworkError =
       err.message.includes('ETIMEDOUT') ||
       err.message.includes('ECONNRESET') ||
       err.message.includes('ECONNREFUSED') ||
@@ -82,7 +90,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Also handle unhandled promise rejections
-  process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
+  shutdownManager.registerEventListener(process, 'unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
     const error = reason instanceof Error ? reason : new Error(String(reason));
     logger.error('[pi-research] Unhandled promise rejection:', error.message, error);
     
@@ -100,8 +108,14 @@ export default function (pi: ExtensionAPI) {
   // Ensure background resources like browser pools and knowledge store are cleaned up
   const handleShutdown = (signal: string) => {
     logger.log(`[pi-research] Received ${signal}, initiating cleanup...`);
-    shutdownManager.runCleanup(signal).catch(err => {
+    shutdownManager.runCleanup(signal).then(() => {
+      logger.log(`[pi-research] Cleanup complete, exiting...`);
+      // Clean exit after successful cleanup
+      process.exit(0);
+    }).catch(err => {
       logger.error(`[pi-research] ${signal} cleanup failed:`, err);
+      // Force exit after 2 seconds if cleanup hangs
+      shutdownManager.forceExitAfter(2000, 1);
     });
   };
 
@@ -109,9 +123,33 @@ export default function (pi: ExtensionAPI) {
     await shutdownKnowledgeStore();
   });
 
-  process.once('SIGINT', () => handleShutdown('SIGINT'));
-  process.once('SIGTERM', () => handleShutdown('SIGTERM'));
-  process.once('SIGHUP', () => handleShutdown('SIGHUP'));
+  // Clear all session state on shutdown to ensure timeouts are cleared
+  shutdownManager.register(() => {
+    clearAllSessionState();
+  });
+
+  // Primary cleanup path for pi -p (print mode) and normal session end.
+  // Pi fires session_shutdown from disposeRuntime() before process.exit() so this
+  // reliably drains the writer queue and disposes the embedder even in non-signal exits.
+  pi.on('session_shutdown', async () => {
+    try {
+      await shutdownManager.runCleanup('session_shutdown');
+    } catch (err) {
+      logger.error('[pi-research] session_shutdown cleanup failed:', err);
+    }
+    // Force exit after 5 seconds if cleanup hangs (shouldn't happen normally)
+    shutdownManager.forceExitAfter(5000);
+  });
+
+  // Signal handlers as a secondary path (interactive mode, external kill, SIGHUP).
+  // Use shutdownManager.registerEventListener for proper cleanup
+  const handleSIGINT = () => handleShutdown('SIGINT');
+  const handleSIGTERM = () => handleShutdown('SIGTERM');
+  const handleSIGHUP = () => handleShutdown('SIGHUP');
+
+  process.once('SIGINT', handleSIGINT);
+  process.once('SIGTERM', handleSIGTERM);
+  process.once('SIGHUP', handleSIGHUP);
 
   // Global extension state for smart dual-sided prompt injection
   let currentTurn = 0;
@@ -313,6 +351,13 @@ export default function (pi: ExtensionAPI) {
           description: '(←→ cycle models)',
           options: SUPPORTED_MODELS.map(m => m.id),
           warning: '⚠ Changing model clears DB',
+        },
+        {
+          type: 'string',
+          key: 'EMBEDDING_DEVICE',
+          label: 'Embed Device',
+          description: '(←→ webgpu/cpu)',
+          options: ['webgpu', 'cpu'],
         },
         {
           type: 'number',

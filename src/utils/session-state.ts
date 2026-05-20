@@ -230,6 +230,30 @@ export function endResearchSession(piSessionId: string, researchId: string): voi
 }
 
 /**
+ * Clear all session state (for shutdown)
+ */
+export function clearAllSessionState(): void {
+  for (const [, state] of piSessions.entries()) {
+    // Clear all pending refreshes
+    if (state.refreshTimeout) {
+      clearTimeout(state.refreshTimeout);
+      state.refreshTimeout = null;
+    }
+    // Clear all abort controllers
+    for (const abort of state.aborts.values()) {
+      try {
+        abort.abort();
+      } catch (e) {
+        logger.error(`[session-state] Error aborting session:`, e);
+      }
+    }
+  }
+  // Clear all sessions
+  piSessions.clear();
+  logger.log('[session-state] All session state cleared');
+}
+
+/**
  * Check if a research run is the bottom-most in its Pi session
  */
 export function isBottomMostSession(piSessionId: string, researchId: string): boolean {

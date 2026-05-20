@@ -10,6 +10,9 @@ vi.mock('node:fs', async () => ({
   promises: {
     writeFile: vi.fn(),
   },
+  existsSync: vi.fn().mockReturnValue(true),
+  mkdirSync: vi.fn(),
+  appendFileSync: vi.fn(),
 }));
 
 describe('exportResearchReport', () => {
@@ -43,7 +46,7 @@ describe('exportResearchReport', () => {
     await exportResearchReport(longQuery, 'result', 'quick');
 
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringMatching(/pi-research-[^\/]+-[a-z0-9]{2}\.md/),
+      expect.stringMatching(/pi-research-[^\/]+-[a-f0-9]{6}\.md/),
       'result',
       { flag: 'wx' }
     );
@@ -98,14 +101,14 @@ describe('exportResearchReport', () => {
     expect(mockWriteFile).toHaveBeenCalledTimes(3);
   });
 
-  it('should use 2-character hash suffix in filename', async () => {
+  it('should use 6-character hex hash suffix in filename', async () => {
     const mockWriteFile = await getMockWriteFile();
     mockWriteFile.mockResolvedValue(undefined);
 
     await exportResearchReport('test', 'content', 'quick');
 
     const callArgs = mockWriteFile.mock.calls[0]?.[0] as string;
-    expect(callArgs).toMatch(/-([a-z0-9]{2})\.md$/);
+    expect(callArgs).toMatch(/-([a-f0-9]{6})\.md$/);
   });
 
   it('different queries produce different filenames', async () => {

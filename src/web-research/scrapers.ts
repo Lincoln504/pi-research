@@ -206,6 +206,10 @@ function validateContent(html: string, markdown: string, url: string): void {
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PRIMARY_SCRAPER_TIMEOUT);
+  // unref() to allow clean exit if this is the only timer keeping the event loop alive
+  if (timeoutId.unref) {
+      timeoutId.unref();
+  }
   const onAbort = () => {
     clearTimeout(timeoutId);
     controller.abort();
@@ -227,6 +231,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
       const buffer = await response.arrayBuffer();
       const markdown = await extractPdfToMarkdown(new Uint8Array(buffer));
+      validateContent('', markdown, url);
       return { source: 'fetch', layer: 'fetch', markdown };
     }
 
@@ -275,16 +280,25 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
       return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
   }
   
+  const start = Date.now();
   try {
     const res = await scrapeWithFetch(url, signal);
+    const duration = Date.now() - start;
+    logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
     return { ...res, url, success: true };
   } catch (e1) {
+    const fetchDuration = Date.now() - start;
+    logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${String(e1)}`);
+    
     if (playwrightAvailable) {
       try {
+        const browserStart = Date.now();
         const res = await scrapeWithStealthBrowser(url, config);
+        const browserDuration = Date.now() - browserStart;
+        logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${Date.now() - start}ms)`);
         return { ...res, url, success: true };
       } catch (e2) {
-        logger.error(`[Scrapers] Browser fallback failed for ${url}:`, e2);
+        logger.error(`[Scrapers] Browser fallback failed for ${url} in ${Date.now() - start}ms:`, e2);
         return { url, success: false, error: String(e2), markdown: '' };
       }
     }

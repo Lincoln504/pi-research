@@ -67,6 +67,10 @@ async function execCommand(
         child.kill();
         logger.warn(`[grep] Command ${command} timed out after 30s`);
     }, 30000);
+    // unref() to allow clean exit if this is the only timer keeping the event loop alive
+    if (timeout.unref) {
+        timeout.unref();
+    }
 
     child.stdout?.on('data', (data) => {
       // Check if adding this chunk would exceed stream limit

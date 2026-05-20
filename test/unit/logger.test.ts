@@ -152,17 +152,17 @@ describe('logger', () => {
       expect(silent.isVerbose()).toBe(false);
     });
 
-    it('should have default log file path with hash suffix', () => {
+    it('should have default log file path', () => {
       const logger = new Logger({ verbose: true });
       const logPath = logger.getLogFilePath();
       expect(logPath).not.toBeNull();
-      expect(path.dirname(logPath!)).toBe(os.tmpdir());
-      expect(path.basename(logPath!)).toMatch(/^pi-research-debug-[a-z0-9]{4}\.log$/);
+      expect(logPath).toContain('pi-research.log');
     });
 
-    it('should have null log file path when not verbose', () => {
+    it('should still have a log file path when not verbose (for ERROR/WARN logs)', () => {
       const logger = new Logger({ verbose: false });
-      expect(logger.getLogFilePath()).toBeNull();
+      expect(logger.getLogFilePath()).not.toBeNull();
+      expect(logger.getLogFilePath()).toContain('pi-research.log');
     });
   });
 

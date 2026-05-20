@@ -102,3 +102,63 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
   }
   return text;
 }
+
+export interface Citation {
+  url: string;
+  description: string;
+}
+
+/**
+ * Parses the CITED LINKS section from a researcher report, extracting URLs and their descriptions.
+ * Handles both single-line 'URL - description' and multi-line 'Description:' formats.
+ */
+export function parseCitations(report: string): Citation[] {
+  const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
+  if (!sectionMatch) return [];
+  const section = sectionMatch[0];
+
+  const citations: Citation[] = [];
+  const blocks = section.split(/\[\d+\]/).slice(1);
+  
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    if (lines.length === 0) continue;
+    
+    const firstLine = lines[0]!.trim();
+    let url: string;
+    let desc = '';
+    
+    const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
+    if (inlineMatch) {
+      url = inlineMatch[1]!.trim().replace(/[,.)]+$/, '');
+      desc = inlineMatch[2]?.trim() || '';
+    } else {
+      const candidateUrl = firstLine.split(/\s+/)[0]!.trim().replace(/[,.)]+$/, '');
+      if (!candidateUrl.startsWith('http')) continue;
+      url = candidateUrl;
+    }
+    
+    const descLines = [];
+    let foundDescTag = false;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]!.trim();
+      if (!foundDescTag) {
+        if (line.match(/^Description:/i)) {
+          foundDescTag = true;
+          descLines.push(line.replace(/^Description:\s*/i, ''));
+        }
+      } else {
+        descLines.push(line);
+      }
+    }
+    
+    if (descLines.length > 0) {
+      desc = descLines.join('\n').trim();
+    }
+    
+    if (url) {
+      citations.push({ url, description: desc });
+    }
+  }
+  return citations;
+}

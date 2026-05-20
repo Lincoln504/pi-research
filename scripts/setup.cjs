@@ -32,10 +32,14 @@ function camoufoxCachePath() {
   const customPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (customPath) return customPath;
 
-  const base = homedir();
-  if (isWindows) return path.join(base, 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
-  if (isDarwin) return path.join(base, 'Library', 'Caches', 'camoufox');
-  return path.join(base, '.cache', 'camoufox');
+  if (isWindows) {
+    const localAppData = process.env.LOCALAPPDATA || path.join(homedir(), 'AppData', 'Local');
+    return path.join(localAppData, 'camoufox', 'Cache');
+  }
+  if (isDarwin) return path.join(homedir(), 'Library', 'Caches', 'camoufox');
+  
+  const cacheHome = process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache');
+  return path.join(cacheHome, 'camoufox');
 }
 
 let browsersInstalled = false;
@@ -85,6 +89,7 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     browsersInstalled = true;
   }
 }
+
 
 // Verify
 const cachePath = camoufoxCachePath();

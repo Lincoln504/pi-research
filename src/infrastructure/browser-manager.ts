@@ -47,6 +47,16 @@ function generateSchedulerVersion(config?: Config): string {
  */
 let cachedSchedulerVersion: string | null = null;
 
+// Module-level singleton so cleanupStaleLocksOnStartup() fires exactly once per process.
+// Creating new StateManager() on every forceSchedulerRestart() call would re-trigger the
+// cleanup side-effect concurrently, which can delete locks held by other live processes.
+// Lazy to avoid running before Vitest mocks are installed at test startup.
+let _sharedStateManager: StateManager | null = null;
+function getSharedStateManager(): StateManager {
+    if (!_sharedStateManager) _sharedStateManager = new StateManager();
+    return _sharedStateManager;
+}
+
 /**
  * Get the current number of worker threads from config.
  * This is a function instead of a constant to allow config changes to take effect
@@ -63,14 +73,32 @@ export function getSchedulerVersion(config?: Config): string {
     return generateSchedulerVersion(config);
 }
 
+// Prevents concurrent forceSchedulerRestart() calls from each clearing
+// initializationPromise and spawning multiple competing FixedClusterPool instances.
+// Without this guard, N simultaneous task timeouts spawn N pools but only one
+// wins the state-manager election — the other N-1 pools are orphaned forever.
+let isRestartInProgress = false;
+
 /**
  * Force a restart of the scheduler by clearing the global cache and state.
  * This should be called when configuration changes are detected.
  */
 export async function forceSchedulerRestart(): Promise<void> {
+    if (isRestartInProgress) {
+        logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
+        return;
+    }
+    isRestartInProgress = true;
+    try {
     logger.log('[Scheduler] Forcing scheduler restart due to config change...');
-    
-    // Clear global cache
+
+    // Grab the current scheduler BEFORE clearing the global reference so we can
+    // shut it down properly. Without this, the old scheduler's leadership-check
+    // timer keeps firing for up to 60s after the restart, and its pool workers
+    // keep running until the leadership loss is detected.
+    const oldScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+
+    // Clear global cache immediately so new requests spawn a fresh scheduler.
     (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
     cachedSchedulerVersion = null;
     initializationPromise = null;
@@ -80,23 +108,39 @@ export async function forceSchedulerRestart(): Promise<void> {
     // "health OK" result would be stale and could let a dead pool go undetected.
     // Cleared via globalThis directly to avoid a circular import with healthcheck/index.ts.
     (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = null;
-    
-    // Find and clear any stale scheduler processes BEFORE clearing state
-    const stateManager = new StateManager();
-    const serverInfo = await stateManager.getBrowserServer();
+
+    // Find and clear any stale scheduler processes BEFORE clearing state.
+    // Only clear if the registered PID is dead or belongs to this process — never
+    // wipe state owned by a live remote leader (that would cause split-brain).
+    const serverInfo = await getSharedStateManager().getBrowserServer();
+    let shouldClearState = true;
     if (serverInfo) {
-        const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
+        const isAlive = await getSharedStateManager().isPidAlive(serverInfo.pid, serverInfo.schedulerId);
         if (isAlive && serverInfo.pid !== process.pid) {
-            logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
+            logger.log(`[Scheduler] Skipping clearBrowserServer — live scheduler (PID ${serverInfo.pid}) owns state.`);
+            shouldClearState = false;
         }
     }
-    
-    // Clear browser server from state
-    await stateManager.clearBrowserServer().catch((error) => {
-        logger.warn('[Scheduler] Failed to clear browser server from state:', error);
-    });
-    
+
+    if (shouldClearState) {
+        await getSharedStateManager().clearBrowserServer().catch((error) => {
+            logger.warn('[Scheduler] Failed to clear browser server from state:', error);
+        });
+    }
+
+    // Shut down the old scheduler in the background so its timers and pool are
+    // cleaned up promptly. Fire-and-forget: a restart means the caller already
+    // triggered a retry, so we do not block on the old scheduler's teardown.
+    if (oldScheduler instanceof BrowserTaskScheduler) {
+        oldScheduler.shutdown().catch((err) => {
+            logger.warn('[Scheduler] Error during old scheduler shutdown after restart:', err);
+        });
+    }
+
     logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
+    } finally {
+        isRestartInProgress = false;
+    }
 }
 
 interface IScheduler {
@@ -113,6 +157,7 @@ class BrowserTaskScheduler implements IScheduler {
     private currentWorkerCount: number | null = null;
     private leadershipTimer: any = null;
     private consecutiveErrors: number = 0;
+    private readonly stateManager = getSharedStateManager();
 
     constructor(private readonly schedulerId: string) {
         // Pool initialization is deferred to first use via ensurePool()
@@ -123,14 +168,17 @@ class BrowserTaskScheduler implements IScheduler {
     private startLeadershipCheck() {
         if (this.leadershipTimer) return;
         this.leadershipTimer = setInterval(async () => {
-            const stateManager = new StateManager();
-            const serverInfo = await stateManager.getBrowserServer();
+            const serverInfo = await this.stateManager.getBrowserServer();
             // If the state file now points to a different schedulerId, we have lost leadership
             if (serverInfo?.schedulerId !== this.schedulerId) {
                 logger.warn(`[Scheduler] Leadership lost (ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}). Shutting down pool...`);
                 await this.shutdown();
             }
         }, 60000); // Check leadership every 60 seconds
+        // unref() to allow process to exit cleanly even if this timer is the only thing keeping it alive
+        if (this.leadershipTimer.unref) {
+            this.leadershipTimer.unref();
+        }
     }
 
     private idleTimer: any = null;
@@ -142,6 +190,10 @@ class BrowserTaskScheduler implements IScheduler {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
             this.shutdown();
         }, this.IDLE_TIMEOUT_MS);
+        // unref() to allow process to exit cleanly even if this timer is the only thing keeping it alive
+        if (this.idleTimer.unref) {
+            this.idleTimer.unref();
+        }
     }
 
     public resetIdleTimerOnActivity(): void {
@@ -323,13 +375,14 @@ class BrowserTaskScheduler implements IScheduler {
             initializationPromise = null;
         }
 
-        const stateManager = new StateManager();
-        const serverInfo = await stateManager.getBrowserServer();
+        const serverInfo = await this.stateManager.getBrowserServer();
         // Only clear state if this scheduler still owns it — same pid AND same schedulerId.
         // Checking pid alone is wrong when a new scheduler wins election in the same process:
         // the old scheduler's shutdown would wipe the new leader's registration.
         if (serverInfo?.pid === process.pid && serverInfo?.schedulerId === this.schedulerId) {
-            await stateManager.clearBrowserServer().catch(() => {});
+            await this.stateManager.clearBrowserServer().catch((err) => {
+                logger.warn('[Scheduler] Failed to clear browser server state during shutdown:', err);
+            });
         }
 
         if (this.server) {
@@ -479,7 +532,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         // Generate a unique ID for this scheduler instance to prevent PID reuse issues
         const schedulerId = crypto.randomUUID();
         
-        const stateManager = new StateManager();
+        const stateManager = getSharedStateManager();
         const serverInfo = await stateManager.getBrowserServer();
         
         // Check if existing scheduler has different config version
@@ -685,10 +738,9 @@ export async function stopBrowserManager(): Promise<void> {
   initializationPromise = null;
 
   if (globalScheduler instanceof BrowserTaskScheduler) {
-      const stateManager = new StateManager();
-      const serverInfo = await stateManager.getBrowserServer();
+      const serverInfo = await getSharedStateManager().getBrowserServer();
       if (serverInfo?.pid === process.pid) {
-          await stateManager.clearBrowserServer();
+          await getSharedStateManager().clearBrowserServer();
       }
       await globalScheduler.shutdown();
   }

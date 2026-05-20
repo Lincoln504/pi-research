@@ -18,7 +18,7 @@ import { search } from '../web-research/search.ts';
 import { recordResearcherFailure, shouldStopResearch } from '../utils/session-state.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import { extractJson } from '../utils/json-utils.ts';
-import { ensureAssistantResponse } from '../utils/text-utils.ts';
+import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import {
     MAX_TEAM_SIZE_LEVEL_1,
     MAX_TEAM_SIZE_LEVEL_2,
@@ -37,8 +37,8 @@ import { injectCurrentDate } from '../utils/inject-date.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
-import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
-import { registerScrapedLinks } from '../utils/shared-links.ts';
+import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { registerScrapedLinks, normalizeUrl } from '../utils/shared-links.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -102,10 +102,10 @@ export class DeepResearchOrchestrator {
         const store = getStore();
         const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
         if (historicalUrls.length > 0) {
-          historicalLinksSection = '\n\n## Historical Knowledge Store (Local Context)\n' +
-            'The following relevant URLs were found in your local knowledge store from previous research sessions:\n\n' +
+          historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
+            'The following relevant URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n\n' +
             historicalUrls.map(u => `- ${u}`).join('\n') +
-            '\n\nDistribute these historical links among your researchers as appropriate. Researchers can scrape these to retrieve the full content instantly from the local cache.';
+            '\n\nDistribute these historical links among your researchers for re-investigation. Researchers will retrieve a historical summary hint and the fresh full content when scraping.';
         }
       } catch (err) {
         logger.warn('[Orchestrator] Failed to fetch historical context:', err);
@@ -142,6 +142,9 @@ export class DeepResearchOrchestrator {
 
         this.options.observer?.onPlanningProgress?.(attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
         logger.log(`[Orchestrator] Calling complete() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
+        logger.debug(`[Orchestrator] Coordinator System Prompt:\n${basePlanningPrompt + retryHint}`);
+        logger.debug(`[Orchestrator] Coordinator Messages:\n${JSON.stringify(messages, null, 2)}`);
+        
         const planResponse = await complete(this.options.model, {
           systemPrompt: basePlanningPrompt + retryHint,
           messages,
@@ -156,6 +159,8 @@ export class DeepResearchOrchestrator {
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
         const rawPlanText = textContent?.text || "";
         lastRawPlanText = rawPlanText;
+        
+        logger.debug(`[Orchestrator] Coordinator Response:\n${rawPlanText}`);
 
         try {
           currentPlan = this.parseJsonPlan(rawPlanText);
@@ -228,13 +233,38 @@ export class DeepResearchOrchestrator {
 
           if (currentPlan.action === 'synthesize') {
               const synthesis = this.ensureCitedLinks(currentPlan.content || this.buildFallbackSynthesis());
+              
+              // Extract citations and store agent-synthesized descriptions for vector/semantic search
+              // These descriptions are what will be searched, not the raw markdown
+              if (isKnowledgeStoreReady()) {
+                const writer = getWriterQueue();
+                const citations = parseCitations(synthesis);
+                for (const cit of citations) {
+                  if (cit.url && cit.description) {
+                    // Store the agent-synthesized description as the searchable text field
+                    // This description is used for vector/semantic search
+                    writer.enqueue({ 
+                      url: normalizeUrl(cit.url), 
+                      markdown: cit.description,
+                      metadata: { 
+                        ingestionType: 'synthesis-description',
+                        source: 'final-synthesis-evaluator',
+                        synthesizedAt: new Date().toISOString()
+                      }
+                    });
+                  }
+                }
+              }
+              
               this.options.observer?.onComplete?.(synthesis);
+              this.cleanup();
               return synthesis;
           }
       }
 
       const finalSynthesis = this.buildFallbackSynthesis();
       this.options.observer?.onComplete?.(finalSynthesis);
+      this.cleanup();
       return finalSynthesis;
 
     } catch (error) {
@@ -244,11 +274,24 @@ export class DeepResearchOrchestrator {
         const partial = this.buildFallbackSynthesis();
         this.options.observer?.onComplete?.(partial);
         this.options.observer?.onError?.(error as Error);
+        this.cleanup();
         return partial;
       }
       this.options.observer?.onError?.(error as Error);
+      this.cleanup();
       return "Research failed. Check debug logs for details.";
     }
+  }
+
+  /**
+   * Clean up internal state to release memory
+   */
+  private cleanup(): void {
+    for (const session of this.activeSessions.values()) {
+      session.abort().catch(() => {});
+    }
+    this.activeSessions.clear();
+    this.reports.clear();
   }
 
   /**
@@ -266,20 +309,11 @@ export class DeepResearchOrchestrator {
     const links: { url: string; desc: string }[] = [];
 
     for (const report of this.reports.values()) {
-      // Find the CITED LINKS block in this report
-      const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
-      if (!sectionMatch) continue;
-      const section = sectionMatch[0];
-
-      // Extract [N] URL — description lines
-      const linePattern = /\[\d+\]\s*(https?:\/\/[^\s\n]+)(?:\s*[—–-]\s*([^\n]*))?/g;
-      let m: RegExpExecArray | null;
-      while ((m = linePattern.exec(section)) !== null) {
-        const url = m[1]!.trim().replace(/[,.)]+$/, ''); // strip trailing punctuation
-        const desc = m[2]?.trim() || '';
-        if (!seen.has(url)) {
-          seen.add(url);
-          links.push({ url, desc });
+      const citations = parseCitations(report);
+      for (const cit of citations) {
+        if (!seen.has(cit.url)) {
+          seen.add(cit.url);
+          links.push({ url: cit.url, desc: cit.description });
         }
       }
     }
@@ -585,7 +619,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
               await Promise.race(active);
               if (shouldStopResearch(this.options.sessionId, this.options.researchId)) {
                   for (const sess of this.activeSessions.values()) {
-                      sess.abort().catch(() => {});
+                      sess.abort().catch((err) => {
+                          logger.warn('[Orchestrator] Failed to abort researcher session:', err);
+                      });
                   }
                   throw new Error("Research stopped due to excessive infrastructure failures. Multiple researchers failed.");
               }
@@ -604,7 +640,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
     let storeSection = '';
     if (historicalUrls.length > 0) {
       storeSection = '\n## Historical Knowledge Store\n' +
-        'The following URLs were found in your local knowledge store. Scrape them to retrieve relevant historical information immediately.\n' +
+        'The following URLs were found in your local knowledge store. Scrape them to retrieve a historical summary and the full content.\n' +
         historicalUrls.map(u => `- ${u}`).join('\n');
     }
 
@@ -626,6 +662,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
       .replace('{{evidence_section}}', evidenceSection)
       .replace('{{coordination_section}}', previousQueriesSection)
       .replace('{{extra_tool_guidelines}}', '');
+
+    logger.debug(`[Orchestrator] Researcher ${id} System Prompt:\n${prompt}`);
 
     const extendedCtx = this.options.ctx as any;
     const maxAttempts = this.config.RESEARCHER_MAX_RETRIES + 1;
@@ -682,7 +720,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
         const timeoutPromise = new Promise<void>((_, reject) => {
           timeoutId = setTimeout(() => {
             const msg = `Researcher ${id} (${config.name}) timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
-            session.abort().catch(() => {}).finally(() => reject(new Error(msg)));
+            session.abort().catch((err) => {
+                logger.warn('[Orchestrator] Failed to abort timed-out researcher session:', err);
+            }).finally(() => reject(new Error(msg)));
           }, this.config.RESEARCHER_TIMEOUT_MS);
         });
 
@@ -695,6 +735,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
           clearTimeout(timeoutId!);
         }
         const responseText = ensureAssistantResponse(session, id);
+        logger.debug(`[Orchestrator] Researcher ${id} Final Response:\n${responseText}`);
+        
         this.reports.set(`${this.currentRound}.${id}`, responseText);
         this.options.observer?.onResearcherComplete?.(id, responseText);
         return;
@@ -703,7 +745,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
         if (attempt < maxAttempts) {
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn(`[Orchestrator] Researcher ${id} attempt ${attempt} failed: ${errMsg}; will retry`);
-          session.abort().catch(() => {});
+          session.abort().catch((err) => {
+              logger.warn('[Orchestrator] Failed to abort researcher session after run completed:', err);
+          });
         }
       } finally {
         subscription();
@@ -735,10 +779,10 @@ You are in the late phase of research. Set a higher threshold for delegation:
           const store = getStore();
           const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
           if (historicalUrls.length > 0) {
-            historicalLinksSection = '\n\n## Historical Knowledge Store (Local Context)\n' +
-              'The following relevant URLs were found in your local knowledge store from previous research sessions:\n\n' +
+            historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
+              'The following relevant URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n\n' +
               historicalUrls.map(u => `- ${u}`).join('\n') +
-              '\n\nDistribute these historical links among your newly delegated researchers as appropriate. Researchers can scrape these to retrieve the full content instantly from the local cache.';
+              '\n\nDistribute these historical links among your newly delegated researchers for re-investigation. Researchers will retrieve a historical summary hint and the fresh full content when scraping.';
           }
         } catch (err) {
           logger.warn('[Orchestrator] Failed to fetch historical context for evaluation:', err);
@@ -775,6 +819,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
       let text = "";
       for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
           logger.log(`[Orchestrator] Calling completeSimple() with model=${this.options.model.id}, apiKey=${auth.apiKey ? 'PRESENT' : 'MISSING'}, headers=${JSON.stringify(auth.headers)}`);
+          logger.debug(`[Orchestrator] Evaluator Prompt:\n${evalUserMessage}`);
+
           const response = await completeSimple(this.options.model, {
               messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }]
           }, { apiKey: auth.apiKey, headers: auth.headers, signal });
@@ -787,7 +833,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
           const textContent = response.content.find((c): c is TextContent => c.type === 'text');
           text = textContent?.text || "";
-          const evalUsageObj = (response as any).usage;
+          logger.debug(`[Orchestrator] Evaluator Response:\n${text}`);          const evalUsageObj = (response as any).usage;
           if (evalUsageObj) {
               const evalUsage = parseTokenUsage(evalUsageObj);
               const tokens = calculateTotalTokens(evalUsage);
@@ -827,8 +873,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
                   if (plan.researchers.length === 0) plan.action = 'synthesize';
                   else this.totalResearchersPlanned += plan.researchers.length;
               }
-              if (!Array.isArray(plan.allQueries)) plan.allQueries = plan.researchers ? plan.researchers.flatMap(r => r.queries) : [];
-              else plan.allQueries = plan.allQueries.filter(q => typeof q === 'string');
+              plan.allQueries = (plan.researchers ?? []).flatMap(r => r.queries);
           }
           if (plan.action === 'synthesize' && !plan.content) plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       } else {

@@ -23,7 +23,7 @@ export function extractProcessNotes(
 
     // Extract notes section (case-insensitive, allows ### or ####)
     // Use [^#]*? to match content up to next # heading (not across newlines)
-    const match = report.match(/###?\s*Research\s*Process\s*Notes\s*\n([^#]*?)(?=\n###|$)/i);
+    const match = report.match(/###?\s*Research\s*Process\s*Notes[^\S\n]*\n([\s\S]*?)(?=\n###|$)/i);
     
     // Check if match exists and content is non-empty after trimming whitespace
     const notesContent = match ? match[1]?.trim() : '';

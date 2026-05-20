@@ -2,8 +2,21 @@ import { logger } from '../logger.ts';
 
 export type CleanupTask = () => Promise<void> | void;
 
+interface EventListenerCleanup {
+  target: EventEmitter | typeof process;
+  event: string;
+  listener: (...args: any[]) => void;
+}
+
+// Type for EventEmitter target
+interface EventEmitter {
+  on(event: string, listener: (...args: any[]) => void): this;
+  off(event: string, listener: (...args: any[]) => void): this;
+}
+
 export class ShutdownManager {
   private tasks: CleanupTask[] = [];
+  private eventListeners: EventListenerCleanup[] = [];
   private cleanupPromise: Promise<void> | null = null;
 
   register(task: CleanupTask) {
@@ -12,6 +25,28 @@ export class ShutdownManager {
     }
 
     this.tasks.push(task);
+  }
+
+  registerEventListener<T extends EventEmitter | typeof process>(
+    target: T,
+    event: string,
+    listener: (...args: any[]) => void
+  ) {
+    // @ts-ignore - EventEmitter API
+    target.on(event, listener);
+    this.eventListeners.push({ target, event, listener });
+  }
+
+  unregisterEventListener<T extends EventEmitter | typeof process>(
+    target: T,
+    event: string,
+    listener: (...args: any[]) => void
+  ) {
+    // @ts-ignore - EventEmitter API
+    target.off(event, listener);
+    this.eventListeners = this.eventListeners.filter(
+      el => el.target !== target || el.event !== event || el.listener !== listener
+    );
   }
 
   async runCleanup(reason: string): Promise<void> {
@@ -46,8 +81,30 @@ export class ShutdownManager {
     try {
       await this.cleanupPromise;
     } finally {
+      // Remove all registered event listeners to allow clean process exit
+      for (const { target, event, listener } of this.eventListeners) {
+        try {
+          // @ts-ignore - EventEmitter API
+          target.off(event, listener);
+        } catch (error) {
+          logger.error('[ShutdownManager] Error removing event listener:', error);
+        }
+      }
+      this.eventListeners = [];
       this.cleanupPromise = null;
     }
+  }
+
+  /**
+   * Force exit the process after a timeout if shutdown is hanging
+   * This should be called after runCleanup() with a short delay
+   */
+  forceExitAfter(timeoutMs: number, code = 0) {
+    const timer = setTimeout(() => {
+      logger.warn(`[ShutdownManager] Forcing exit after ${timeoutMs}ms timeout`);
+      process.exit(code);
+    }, timeoutMs);
+    timer.unref(); // unref() allows Node.js to exit if this is the only timer
   }
 }
 

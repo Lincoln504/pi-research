@@ -81,11 +81,15 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 
 ## Configuration
 
+The extension is highly configurable via environment variables in your `.env` file or the `/research-config` TUI dashboard.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Max concurrent researchers (1-5). |
 | `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `360000` | Per-researcher timeout in ms (default 6m). |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `3` | Browser worker processes for search and scraping (1-10). |
+| `PI_RESEARCH_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | Model for local knowledge store/RAG. |
+| `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` (Dawn/Vulkan/Metal/D3D12, 3–9× faster than CPU) or `cpu`. |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | Per-page scrape navigation timeout in ms. |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `30000` | Browser health check timeout in ms (valid range: 20000–120000). |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
@@ -93,6 +97,8 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 | `BRAVE_SEARCH_API_KEY` | — | Brave Search API key (enables paid API engine). |
 | `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases rate limit). |
 | `SEARXNG_URL` | — | External SearXNG URL — skips Docker container management entirely. |
+
+Run `/research-config` in pi to edit these settings interactively.
 
 ---
 

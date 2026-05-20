@@ -10,21 +10,17 @@ import {
     type AgentSessionEvent 
 } from '@mariozechner/pi-coding-agent';
 import { type Model } from '@mariozechner/pi-ai';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { injectCurrentDate } from '../utils/inject-date.ts';
+import { loadPrompt } from '../utils/prompts.ts';
 import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
-import { ensureAssistantResponse } from '../utils/text-utils.ts';
+import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
-import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { normalizeUrl } from '../utils/shared-links.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -55,16 +51,17 @@ export class QuickResearchOrchestrator {
         const store = getStore();
         const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
         if (historicalUrls.length > 0) {
-          storeSection = '\n## Historical Knowledge Store\n' +
-            'The following URLs were found in your local knowledge store. Scrape them to retrieve relevant historical information immediately.\n' +
-            historicalUrls.map(u => `- ${u}`).join('\n');
+          storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
+            'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
+            historicalUrls.map(u => `- ${u}`).join('\n') +
+            '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
         }
       } catch (err) {
         logger.warn('[QuickOrchestrator] Failed to fetch historical URLs:', err);
       }
     }
 
-    const researcherPromptTemplate = readFileSync(join(__dirname, '..', 'prompts', 'researcher.md'), 'utf-8');
+    const researcherPromptTemplate = loadPrompt('researcher', '..');
     const maxScrapeBatches = getMaxScrapeBatches(this.config);
     const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
@@ -84,6 +81,8 @@ export class QuickResearchOrchestrator {
         .replace('{{evidence_section}}', quickEvidenceSection)
         .replace('{{coordination_section}}', '')
         .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
+
+    logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
     const extendedCtx = ctx as any;
     const session = await createResearcherSession({
@@ -131,7 +130,9 @@ export class QuickResearchOrchestrator {
       const timeoutPromise = new Promise<void>((_, reject) => {
           timeoutId = setTimeout(() => {
               const msg = `Quick research timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
-              session.abort().catch(() => {}).finally(() => reject(new Error(msg)));
+              session.abort().catch((err) => {
+                  logger.warn('[QuickOrchestrator] Failed to abort timed-out session:', err);
+              }).finally(() => reject(new Error(msg)));
           }, this.config.RESEARCHER_TIMEOUT_MS);
       });
 
@@ -141,10 +142,14 @@ export class QuickResearchOrchestrator {
           timeoutPromise,
           ...(signal ? [
             new Promise<never>((_, reject) => {
-              if (signal.aborted) {
+              const onAbort = () => {
+                session.abort().catch(err => logger.warn('[QuickOrchestrator] Failed to abort session on signal:', err));
                 reject(new Error('Aborted'));
+              };
+              if (signal.aborted) {
+                onAbort();
               } else {
-                signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+                signal.addEventListener('abort', onAbort, { once: true });
               }
             })
           ] : []),
@@ -154,6 +159,30 @@ export class QuickResearchOrchestrator {
       }
       
       const result = ensureAssistantResponse(session, 'Quick');
+      logger.debug(`[QuickOrchestrator] Researcher Final Response:\n${result}`);
+      
+      // Extract citations and store agent-synthesized descriptions for vector/semantic search
+      // Quick research is single-pass, so this is the final synthesis point
+      if (isKnowledgeStoreReady()) {
+        const writer = getWriterQueue();
+        const citations = parseCitations(result);
+        for (const cit of citations) {
+          if (cit.url && cit.description) {
+            // Store the agent-synthesized description as the searchable text field
+            // This description is used for vector/semantic search
+            writer.enqueue({ 
+              url: normalizeUrl(cit.url), 
+              markdown: cit.description,
+              metadata: { 
+                ingestionType: 'synthesis-description',
+                source: 'quick-synthesis-evaluator',
+                synthesizedAt: new Date().toISOString()
+              }
+            });
+          }
+        }
+      }
+
       observer?.onComplete?.(result);
       return result;
     } finally {
