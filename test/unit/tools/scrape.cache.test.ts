@@ -11,6 +11,7 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 vi.mock('../../../src/knowledge/index.ts', () => ({
   isKnowledgeStoreReady: vi.fn(),
   getStore: vi.fn(),
+  initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
   getWriterQueue: vi.fn(() => ({
     enqueue: vi.fn(),
   })),
@@ -19,7 +20,11 @@ vi.mock('../../../src/knowledge/index.ts', () => ({
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({
     MAX_SCRAPE_BATCHES: 2,
+    KNOWLEDGE_STORE_ENABLED: true,
   })),
+  DEFAULTS: {
+    KNOWLEDGE_STORE_ENABLED: true,
+  },
 }));
 
 describe('tools/scrape cache integration', () => {

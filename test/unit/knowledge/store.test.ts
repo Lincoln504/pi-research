@@ -79,6 +79,30 @@ describe('KnowledgeStore', () => {
     expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
   });
 
+  it('addDocuments with raw-content type skips the embedder (zero vectors used)', async () => {
+    await store.open();
+    vi.mocked(mockEmbedder.embedMany).mockClear();
+    await store.addDocuments([{
+      url: 'https://example.com/raw',
+      text: 'full scraped page content',
+      metadata: { ingestionType: 'raw-content', chunkIndex: 0 },
+      timestamp: Date.now(),
+    }]);
+    expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
+  });
+
+  it('addDocuments with synthesis-description type calls the embedder', async () => {
+    await store.open();
+    vi.mocked(mockEmbedder.embedMany).mockClear();
+    await store.addDocuments([{
+      url: 'https://example.com/desc',
+      text: 'researcher description of the page',
+      metadata: { ingestionType: 'synthesis-description', chunkIndex: 0 },
+      timestamp: Date.now(),
+    }]);
+    expect(mockEmbedder.embedMany).toHaveBeenCalledOnce();
+  });
+
   it('findByUrl returns only documents for the exact URL', async () => {
     await store.open();
     await store.addDocuments([
@@ -117,6 +141,20 @@ describe('KnowledgeStore', () => {
     expect(deleted).toHaveLength(0);
 
     const remaining = await store.findByUrl('https://example.com/other');
+    expect(remaining.length).toBeGreaterThan(0);
+  });
+
+  it('deleteByUrlAndType removes only chunks of the specified type and leaves the other type intact', async () => {
+    await store.open();
+    await store.addDocuments([
+      { url: 'https://example.com/page', text: 'full page raw content', metadata: { chunkIndex: 0, ingestionType: 'raw-content' }, timestamp: Date.now() },
+      { url: 'https://example.com/page', text: 'researcher description', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+    ]);
+
+    await store.deleteByUrlAndType('https://example.com/page', 'synthesis-description');
+
+    const remaining = await store.findByUrl('https://example.com/page');
+    expect(remaining.every(r => r.metadata['ingestionType'] === 'raw-content')).toBe(true);
     expect(remaining.length).toBeGreaterThan(0);
   });
 

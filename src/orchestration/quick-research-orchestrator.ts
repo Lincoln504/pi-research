@@ -46,9 +46,9 @@ export class QuickResearchOrchestrator {
 
     // Knowledge Store Context Injection
     let storeSection = '';
-    if (isKnowledgeStoreReady()) {
+    if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const store = getStore();
+        const store = await getStore();
         const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
         if (historicalUrls.length > 0) {
           storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
@@ -57,7 +57,7 @@ export class QuickResearchOrchestrator {
             '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
         }
       } catch (err) {
-        logger.warn('[QuickOrchestrator] Failed to fetch historical URLs:', err);
+        logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
       }
     }
 
@@ -136,6 +136,9 @@ export class QuickResearchOrchestrator {
           }, this.config.RESEARCHER_TIMEOUT_MS);
       });
 
+      // Keep onAbort in outer scope so the listener can be removed in finally
+      // whether the race resolves via session.prompt, timeout, or abort.
+      let abortCleanup: (() => void) | undefined;
       try {
         await Promise.race([
           session.prompt(query),
@@ -150,12 +153,14 @@ export class QuickResearchOrchestrator {
                 onAbort();
               } else {
                 signal.addEventListener('abort', onAbort, { once: true });
+                (abortCleanup as any) = () => signal.removeEventListener('abort', onAbort);
               }
             })
           ] : []),
         ]);
       } finally {
         clearTimeout(timeoutId!);
+        if (abortCleanup) (abortCleanup as () => void)();
       }
       
       const result = ensureAssistantResponse(session, 'Quick');
@@ -163,23 +168,28 @@ export class QuickResearchOrchestrator {
       
       // Extract citations and store agent-synthesized descriptions for vector/semantic search
       // Quick research is single-pass, so this is the final synthesis point
-      if (isKnowledgeStoreReady()) {
-        const writer = getWriterQueue();
-        const citations = parseCitations(result);
-        for (const cit of citations) {
-          if (cit.url && cit.description) {
-            // Store the agent-synthesized description as the searchable text field
-            // This description is used for vector/semantic search
-            writer.enqueue({ 
-              url: normalizeUrl(cit.url), 
-              markdown: cit.description,
-              metadata: { 
-                ingestionType: 'synthesis-description',
-                source: 'quick-synthesis-evaluator',
-                synthesizedAt: new Date().toISOString()
-              }
-            });
+      if (this.config.KNOWLEDGE_STORE_ENABLED) {
+        try {
+          const writer = await getWriterQueue();
+          const citations = parseCitations(result);
+          if (citations.length === 0) {
+            logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
           }
+          for (const cit of citations) {
+            if (cit.url && cit.description) {
+              writer.enqueue({
+                url: normalizeUrl(cit.url),
+                markdown: cit.description,
+                metadata: {
+                  ingestionType: 'synthesis-description',
+                  source: 'researcher',
+                  synthesizedAt: new Date().toISOString()
+                }
+              });
+            }
+          }
+        } catch (err) {
+          logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
         }
       }
 

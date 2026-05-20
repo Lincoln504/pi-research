@@ -14,7 +14,22 @@ vi.mock('../../../src/config.ts', () => ({
     MAX_SCRAPE_BATCHES: 2,
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 1.0, // 100% threshold - never triggers
     AVG_TOKENS_PER_SCRAPE: 10000,
+    KNOWLEDGE_STORE_ENABLED: true,
   })),
+  DEFAULTS: {
+    KNOWLEDGE_STORE_ENABLED: true,
+  },
+}));
+
+// Mock knowledge module
+vi.mock('../../../src/knowledge/index.ts', () => ({
+  isKnowledgeStoreReady: vi.fn().mockReturnValue(true),
+  getStore: vi.fn().mockResolvedValue({
+    rebuildDocument: vi.fn().mockResolvedValue(null),
+  }),
+  getWriterQueue: vi.fn().mockResolvedValue({
+    enqueue: vi.fn(),
+  }),
 }));
 
 describe('tools/scrape', () => {

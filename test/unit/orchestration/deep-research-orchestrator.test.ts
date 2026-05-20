@@ -32,9 +32,22 @@ vi.mock('../../../src/orchestration/researcher.ts', () => ({
     prompt: vi.fn(async () => {}),
     subscribe: vi.fn(() => () => {}),
     abort: vi.fn(async () => {}),
-    getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report content' }] }],
-    messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Report content' }] }],
+    getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report content\n\n### CITED LINKS\n[1] https://example.com\nDescription: Test description' }] }],
+    messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Report content\n\n### CITED LINKS\n[1] https://example.com\nDescription: Test description' }] }],
   })),
+}));
+
+// Mock knowledge module
+vi.mock('../../../src/knowledge/index.ts', () => ({
+  isKnowledgeStoreReady: vi.fn().mockReturnValue(true),
+  getStore: vi.fn().mockResolvedValue({
+    findRelevantUrls: vi.fn().mockResolvedValue([]),
+    close: vi.fn(),
+  }),
+  getWriterQueue: vi.fn().mockResolvedValue({
+    enqueue: vi.fn(),
+    drain: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 describe('DeepResearchOrchestrator', () => {

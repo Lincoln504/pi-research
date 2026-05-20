@@ -100,11 +100,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Initialize knowledge store (non-blocking)
-  initKnowledgeStore().catch(err => {
-    logger.error('[pi-research] Knowledge store initialization failed:', err);
-  });
-
   // Ensure background resources like browser pools and knowledge store are cleaned up
   const handleShutdown = (signal: string) => {
     logger.log(`[pi-research] Received ${signal}, initiating cleanup...`);

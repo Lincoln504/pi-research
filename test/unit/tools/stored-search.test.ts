@@ -6,6 +6,7 @@ const mockSearch = vi.fn();
 vi.mock('../../../src/knowledge/index.ts', () => ({
   isKnowledgeStoreReady: vi.fn(),
   getStore: vi.fn(() => ({ search: mockSearch })),
+  initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { isKnowledgeStoreReady, getStore } from '../../../src/knowledge/index.ts';

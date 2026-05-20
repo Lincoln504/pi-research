@@ -118,7 +118,8 @@ export function parseCitations(report: string): Citation[] {
   const section = sectionMatch[0];
 
   const citations: Citation[] = [];
-  const blocks = section.split(/\[\d+\]/).slice(1);
+  // Match [N] or **[N]** with optional whitespace
+  const blocks = section.split(/(?:\*\*|)\s*\[\d+\]\s*(?:\*\*|)/).slice(1);
   
   for (const block of blocks) {
     const lines = block.trim().split('\n');

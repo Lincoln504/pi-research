@@ -18,8 +18,8 @@ import {
   BATCH_2_DEFAULT_CONCURRENCY,
   getMaxScrapeBatches,
 } from '../constants.ts';
-import type { Config } from '../config.ts';
-import { isKnowledgeStoreReady, getStore, getWriterQueue } from '../knowledge/index.ts';
+import { type Config, DEFAULTS } from '../config.ts';
+import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
 
 export function createScrapeTool(options: {
@@ -129,57 +129,53 @@ export function createScrapeTool(options: {
       const cachedResults: { url: string; markdown: string }[] = [];
       const urlsToFetch: string[] = [...finalUrls];
       
-      if (isKnowledgeStoreReady()) {
-        const store = getStore();
-        for (const url of finalUrls) {
-          const normalized = normalizeUrl(url);
-          const cacheHit = await store.rebuildDocument(normalized);
+      const knowledgeStoreEnabled = options.config?.KNOWLEDGE_STORE_ENABLED ?? DEFAULTS.KNOWLEDGE_STORE_ENABLED;
+      if (knowledgeStoreEnabled) {
+        try {
+          const store = await getStore();
+          for (const url of finalUrls) {
+            const normalized = normalizeUrl(url);
+            const cacheHit = await store.rebuildDocument(normalized);
 
-          if (cacheHit) {
-            const ingestionType = cacheHit.metadata['ingestionType'];
-            // Handle different ingestion types:
-            // - raw-content: clean markdown for retrieval (primary use case)
-            // - synthesis-description: agent description for vector search (used in RAG context)
-            // - summary/legacy formats: backward compatibility
-            if (ingestionType === 'raw-content') {
-              // Raw markdown content for retrieval
-              cachedResults.push({ url, markdown: cacheHit.text });
-              const idx = urlsToFetch.indexOf(url);
-              if (idx !== -1) urlsToFetch.splice(idx, 1);
-            } else if (ingestionType === 'synthesis-description') {
-              // Agent-synthesized description for vector search
-              // This is used by RAG system for finding relevant sources
-              summaries.push({ url, text: cacheHit.text });
-              const idx = urlsToFetch.indexOf(url);
-              if (idx !== -1) urlsToFetch.splice(idx, 1);
-            } else if (ingestionType === 'summary') {
-              // Legacy format: rawText is in metadata, text contains agent description
-              const rawText = cacheHit.metadata['rawText'];
-              if (rawText) {
-                cachedResults.push({ url, markdown: rawText });
-                summaries.push({ url, text: cacheHit.text });
+            if (cacheHit) {
+              const ingestionType = cacheHit.metadata['ingestionType'];
+              // rebuildDocument filters to raw-content only; synthesis-description entries
+              // are never returned here (they are for vector search, not cache retrieval).
+              if (ingestionType === 'raw-content') {
+                cachedResults.push({ url, markdown: cacheHit.text });
                 const idx = urlsToFetch.indexOf(url);
                 if (idx !== -1) urlsToFetch.splice(idx, 1);
+              } else if (ingestionType === 'summary') {
+                // Legacy format: rawText is in metadata, text contains agent description
+                const rawText = cacheHit.metadata['rawText'];
+                if (rawText) {
+                  cachedResults.push({ url, markdown: rawText });
+                  summaries.push({ url, text: cacheHit.text });
+                  const idx = urlsToFetch.indexOf(url);
+                  if (idx !== -1) urlsToFetch.splice(idx, 1);
+                } else {
+                  summaries.push({ url, text: cacheHit.text });
+                }
               } else {
-                summaries.push({ url, text: cacheHit.text });
+                // Legacy formats for backward compatibility
+                const rawText = cacheHit.metadata['rawText'];
+                if (rawText) {
+                  cachedResults.push({ url, markdown: rawText });
+                }
+                const agentDescription = cacheHit.metadata['agentDescription'];
+                if (agentDescription) {
+                  summaries.push({ url, text: agentDescription });
+                }
+                const idx = urlsToFetch.indexOf(url);
+                if (idx !== -1) urlsToFetch.splice(idx, 1);
               }
-            } else {
-              // Legacy formats for backward compatibility
-              const rawText = cacheHit.metadata['rawText'];
-              if (rawText) {
-                cachedResults.push({ url, markdown: rawText });
-              }
-              const agentDescription = cacheHit.metadata['agentDescription'];
-              if (agentDescription) {
-                summaries.push({ url, text: agentDescription });
-              }
-              const idx = urlsToFetch.indexOf(url);
-              if (idx !== -1) urlsToFetch.splice(idx, 1);
             }
           }
-        }
-        if (cachedResults.length > 0 || summaries.length > 0) {
-          logger.log(`[scrape] Cache: ${cachedResults.length} full-text hits, ${summaries.length} summary hints out of ${finalUrls.length} URLs`);
+          if (cachedResults.length > 0 || summaries.length > 0) {
+            logger.log(`[scrape] Cache: ${cachedResults.length} full-text hits, ${summaries.length} summary hints out of ${finalUrls.length} URLs`);
+          }
+        } catch (err) {
+          logger.warn('[scrape] Knowledge store cache lookup failed (non-fatal):', err);
         }
       }
 
@@ -189,25 +185,35 @@ export function createScrapeTool(options: {
         freshResults = Array.isArray(scrapeResults) ? scrapeResults : [];
         
         // Store clean scraped markdown as raw content (for retrieval, NOT for vector search)
-        if (isKnowledgeStoreReady()) {
-          const writer = getWriterQueue();
-          for (const res of freshResults) {
-            if (res.success && res.markdown) {
-              cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);
-              // Store raw markdown with 'raw-content' type - for retrieval only, vector search uses descriptions
-              writer.enqueue({ 
-                url: normalizeUrl(res.url), 
-                markdown: res.markdown,
-                metadata: { 
-                  ingestionType: 'raw-content', 
-                  source: 'scrape-tool',
-                  scrapedAt: new Date().toISOString()
-                }
-              });
+        if (knowledgeStoreEnabled) {
+          try {
+            const writer = await getWriterQueue();
+            for (const res of freshResults) {
+              if (res.success && res.markdown) {
+                cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);
+                // Store raw markdown with 'raw-content' type - for retrieval only, vector search uses descriptions
+                writer.enqueue({ 
+                  url: normalizeUrl(res.url), 
+                  markdown: res.markdown,
+                  metadata: { 
+                    ingestionType: 'raw-content', 
+                    source: 'scrape-tool',
+                    scrapedAt: new Date().toISOString()
+                  }
+                });
+              }
+            }
+          } catch (err) {
+            logger.warn('[scrape] Knowledge store ingestion failed (non-fatal):', err);
+            // Fallback to memory cache
+            for (const res of freshResults) {
+              if (res.success && res.markdown) {
+                cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);
+              }
             }
           }
         } else {
-          // Fallback to caching only if knowledge store is not ready
+          // Fallback to caching only if knowledge store is not enabled
           for (const res of freshResults) {
             if (res.success && res.markdown) {
               cacheScrapedContent(options.getGlobalState().researchId, res.url, res.markdown);

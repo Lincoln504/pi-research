@@ -56,22 +56,21 @@ export class WriterQueue {
 
   private async ingest(item: IngestionItem): Promise<void> {
     const hash = createHash('sha256').update(item.markdown).digest('hex');
-    
-    // Check for deduplication using exact URL match (not semantic search).
-    // Must filter to raw-content chunks: ALL chunks store contentHash (set by ingest()),
-    // but synthesis-description chunks hash their description text, not the raw page content.
-    // Using existing[0] unfiltered could compare against a synthesis-description hash and
-    // find a false mismatch → spurious deleteByUrl wipes synthesis entries unnecessarily.
+    const incomingType = (item.metadata?.['ingestionType'] as string | undefined) ?? 'raw-content';
+
     const existing = await this.options.store.findByUrl(item.url);
-    const rawChunk = existing.find(c => c.metadata['ingestionType'] !== 'synthesis-description');
-    if (rawChunk && rawChunk.metadata['contentHash'] === hash) {
-      logger.log(`[writer-queue] Skipping ${item.url} — content unchanged.`);
+
+    // Scope dedup to same ingestionType — raw-content and synthesis-description
+    // serve different purposes and must coexist independently for the same URL.
+    const sameType = existing.filter(c => c.metadata['ingestionType'] === incomingType);
+    if (sameType.length > 0 && sameType[0]!.metadata['contentHash'] === hash) {
+      logger.log(`[writer-queue] Skipping ${item.url} (${incomingType}) — content unchanged.`);
       return;
     }
 
-    // Delete stale chunks before re-ingesting so old and new chunks don't mix
-    if (existing.length > 0) {
-      await this.options.store.deleteByUrl(item.url);
+    // Delete only same-type stale chunks; preserve the other type.
+    if (sameType.length > 0) {
+      await this.options.store.deleteByUrlAndType(item.url, incomingType);
     }
 
     const chunks = this.options.chunker.chunk(item.markdown);
@@ -85,6 +84,7 @@ export class WriterQueue {
         totalChunks: chunks.length,
         actualOverlap: chunk.actual_overlap,
         contentHash: hash,
+        ingestionType: incomingType, // Ensure this is always set for embedder-skip logic
         ...(item.metadata || {}),
       },
       timestamp: timestamp,

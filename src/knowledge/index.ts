@@ -93,9 +93,12 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     charsPerToken: 3.5,
   },
   // embeddinggemma-300m: Gemma SentencePiece, mean pooling. charsPerToken=3.5.
-  // maxChars = 512*3.5 = 1792. chunkSize 1600 ≤ 1792 ✓  (was 1800 > 1792 — off-by-one bug fixed)
+  // Requires specific task prefixes for queries and titles/none for documents.
+  // maxChars = 512*3.5 = 1792. chunkSize 1600 ≤ 1792 ✓
   'onnx-community/embeddinggemma-300m-ONNX': {
     pooling: 'mean',
+    queryPrefix: 'task: search result | query: ',
+    documentPrefix: 'title: none | text: ',
     chunkSize: 1600,
     overlapPct: 0.15,
     charsPerToken: 3.5,
@@ -114,10 +117,10 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     charsPerToken: 2.5,
   },
   // IBM Granite small-english-r2: ModernBERT-based, 47M params, 384-dim, 8192-tok max.
-  // BPE (vocab 50k, English-only), mean pooling, symmetric (no prefix). MTEB-v2: 61.1.
+  // BPE (vocab 50k, English-only), CLS pooling, symmetric (no prefix). MTEB-v2: 61.1.
   // maxChars = 512*4 = 2048. chunkSize 1800 ≤ 2048 ✓
   'onnx-community/granite-embedding-small-english-r2-ONNX': {
-    pooling: 'mean',
+    pooling: 'cls',
     chunkSize: 1800,
     overlapPct: 0.15,
     maxTokens: 512,
@@ -242,18 +245,21 @@ export async function initKnowledgeStore(): Promise<void> {
   return initializationPromise;
 }
 
-export function getEmbedder(): Embedder {
-  if (!embedder) throw new Error('Knowledge store not initialized');
+export async function getEmbedder(): Promise<Embedder> {
+  await initKnowledgeStore();
+  if (!embedder) throw new Error('Knowledge store not enabled or failed to initialize');
   return embedder;
 }
 
-export function getStore(): KnowledgeStore {
-  if (!store) throw new Error('Knowledge store not initialized');
+export async function getStore(): Promise<KnowledgeStore> {
+  await initKnowledgeStore();
+  if (!store) throw new Error('Knowledge store not enabled or failed to initialize');
   return store;
 }
 
-export function getWriterQueue(): WriterQueue {
-  if (!writerQueue) throw new Error('Knowledge store not initialized');
+export async function getWriterQueue(): Promise<WriterQueue> {
+  await initKnowledgeStore();
+  if (!writerQueue) throw new Error('Knowledge store not enabled or failed to initialize');
   return writerQueue;
 }
 

@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const EXTENSION_DIR = path.dirname(__filename);
 
 export interface Config {
-  /** Per-researcher timeout in milliseconds (default: 360000) */
+  /** Per-researcher timeout in milliseconds (default: 600000) */
   RESEARCHER_TIMEOUT_MS: number;
   /** Maximum researchers allowed to run simultaneously (default: 3, max: 5) */
   MAX_CONCURRENT_RESEARCHERS: number;
@@ -53,7 +53,7 @@ export interface Config {
 }
 
 export const DEFAULTS: Config = {
-  RESEARCHER_TIMEOUT_MS: 360000,
+  RESEARCHER_TIMEOUT_MS: 600000,
   MAX_CONCURRENT_RESEARCHERS: 3,
   RESEARCHER_MAX_RETRIES: 3,
   RESEARCHER_MAX_RETRY_DELAY_MS: 5000,

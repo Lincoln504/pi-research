@@ -4,10 +4,10 @@
  * Query the local knowledge store for information across sessions.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { isKnowledgeStoreReady, getStore } from '../knowledge/index.ts';
+import { isKnowledgeStoreReady, getStore, initKnowledgeStore } from '../knowledge/index.ts';
+import { getConfig } from '../config.ts';
 
 export function createStoredSearchTool(_options: {
   ctx: ExtensionContext;
@@ -32,16 +32,26 @@ export function createStoredSearchTool(_options: {
       }
 
       if (!isKnowledgeStoreReady()) {
-        return {
-          content: [{ type: 'text', text: 'Knowledge store is initializing, try again shortly.' }],
-          details: { status: 'initializing' },
-        };
+        const config = getConfig();
+        if (config.KNOWLEDGE_STORE_ENABLED) {
+          // Trigger lazy initialization in background
+          initKnowledgeStore().catch(() => {});
+          return {
+            content: [{ type: 'text', text: 'Knowledge store is initializing, try again shortly.' }],
+            details: { status: 'initializing' },
+          };
+        } else {
+           return {
+            content: [{ type: 'text', text: 'Knowledge store is disabled in settings.' }],
+            details: { error: 'disabled' },
+          };
+        }
       }
 
       const p = params as Static<typeof StoredSearchParams>;
-      const store = getStore();
       
       try {
+        const store = await getStore();
         const results = await store.search(p.query, { limit: p.limit });
         
         if (results.length === 0) {

@@ -97,9 +97,9 @@ export class DeepResearchOrchestrator {
 
     // Knowledge Store Context Injection
     let historicalLinksSection = '';
-    if (isKnowledgeStoreReady()) {
+    if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const store = getStore();
+        const store = await getStore();
         const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
         if (historicalUrls.length > 0) {
           historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
@@ -108,7 +108,7 @@ export class DeepResearchOrchestrator {
             '\n\nDistribute these historical links among your researchers for re-investigation. Researchers will retrieve a historical summary hint and the fresh full content when scraping.';
         }
       } catch (err) {
-        logger.warn('[Orchestrator] Failed to fetch historical context:', err);
+        logger.warn('[Orchestrator] Failed to fetch historical context (non-fatal):', err);
       }
     }
 
@@ -227,35 +227,49 @@ export class DeepResearchOrchestrator {
           logger.info(`[Orchestrator] Starting ${currentPlan.researchers.length} researchers in parallel with search results...`);
           await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
 
+          // Store researcher-generated link descriptions for vector search.
+          // Researchers read the full scraped content and write comprehensive descriptions;
+          // the evaluator only receives summaries so its descriptions are far less detailed.
+          // Only process the current round's reports (keyed as "<round>.<id>").
+          if (this.config.KNOWLEDGE_STORE_ENABLED) {
+            try {
+              const writer = await getWriterQueue();
+              const roundPrefix = `${this.currentRound}.`;
+              let enqueued = 0;
+              for (const [key, report] of this.reports.entries()) {
+                if (!key.startsWith(roundPrefix)) continue;
+                const citations = parseCitations(report);
+                if (citations.length === 0) {
+                  logger.warn(`[Orchestrator] Researcher ${key} produced no parseable CITED LINKS — no descriptions stored for this report`);
+                }
+                for (const cit of citations) {
+                  if (cit.url && cit.description) {
+                    writer.enqueue({
+                      url: normalizeUrl(cit.url),
+                      markdown: cit.description,
+                      metadata: {
+                        ingestionType: 'synthesis-description',
+                        source: 'researcher',
+                        synthesizedAt: new Date().toISOString(),
+                      }
+                    });
+                    enqueued++;
+                  }
+                }
+              }
+              // Drain before evaluate() so findRelevantUrls() sees this round's new entries
+              if (enqueued > 0) await writer.drain();
+            } catch (err) {
+              logger.warn('[Orchestrator] Failed to store link descriptions (non-fatal):', err);
+            }
+          }
+
           const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
           this.plan = currentPlan;
           currentPlan = await this.evaluate(signal, mustSynthesize);
 
           if (currentPlan.action === 'synthesize') {
               const synthesis = this.ensureCitedLinks(currentPlan.content || this.buildFallbackSynthesis());
-              
-              // Extract citations and store agent-synthesized descriptions for vector/semantic search
-              // These descriptions are what will be searched, not the raw markdown
-              if (isKnowledgeStoreReady()) {
-                const writer = getWriterQueue();
-                const citations = parseCitations(synthesis);
-                for (const cit of citations) {
-                  if (cit.url && cit.description) {
-                    // Store the agent-synthesized description as the searchable text field
-                    // This description is used for vector/semantic search
-                    writer.enqueue({ 
-                      url: normalizeUrl(cit.url), 
-                      markdown: cit.description,
-                      metadata: { 
-                        ingestionType: 'synthesis-description',
-                        source: 'final-synthesis-evaluator',
-                        synthesizedAt: new Date().toISOString()
-                      }
-                    });
-                  }
-                }
-              }
-              
               this.options.observer?.onComplete?.(synthesis);
               this.cleanup();
               return synthesis;
@@ -726,13 +740,31 @@ You are in the late phase of research. Set a higher threshold for delegation:
           }, this.config.RESEARCHER_TIMEOUT_MS);
         });
 
+        // Keep onAbort in outer scope so the listener can be removed in finally
+        // whether the race resolves via session.prompt, timeout, or abort.
+        let abortCleanup: (() => void) | undefined;
         try {
           await Promise.race([
             session.prompt(`Topic: ${config.name}\nGoal: ${config.goal}\n\nPerform your research and submit your full report now.`),
-            timeoutPromise
+            timeoutPromise,
+            ...(signal ? [
+              new Promise<never>((_, reject) => {
+                const onAbort = () => {
+                  session.abort().catch(err => logger.warn('[Orchestrator] Failed to abort session on signal:', err));
+                  reject(new Error('Aborted'));
+                };
+                if (signal.aborted) {
+                  onAbort();
+                } else {
+                  signal.addEventListener('abort', onAbort, { once: true });
+                  (abortCleanup as any) = () => signal.removeEventListener('abort', onAbort);
+                }
+              })
+            ] : []),
           ]);
         } finally {
           clearTimeout(timeoutId!);
+          abortCleanup?.();
         }
         const responseText = ensureAssistantResponse(session, id);
         logger.debug(`[Orchestrator] Researcher ${id} Final Response:\n${responseText}`);
@@ -774,9 +806,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
       // Knowledge Store Context Injection for Evaluator
       let historicalLinksSection = '';
-      if (isKnowledgeStoreReady()) {
+      if (this.config.KNOWLEDGE_STORE_ENABLED) {
         try {
-          const store = getStore();
+          const store = await getStore();
           const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
           if (historicalUrls.length > 0) {
             historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
@@ -785,7 +817,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
               '\n\nDistribute these historical links among your newly delegated researchers for re-investigation. Researchers will retrieve a historical summary hint and the fresh full content when scraping.';
           }
         } catch (err) {
-          logger.warn('[Orchestrator] Failed to fetch historical context for evaluation:', err);
+          logger.warn('[Orchestrator] Failed to fetch historical context for evaluation (non-fatal):', err);
         }
       }
 
@@ -833,7 +865,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
           const textContent = response.content.find((c): c is TextContent => c.type === 'text');
           text = textContent?.text || "";
-          logger.debug(`[Orchestrator] Evaluator Response:\n${text}`);          const evalUsageObj = (response as any).usage;
+          logger.debug(`[Orchestrator] Evaluator Response:\n${text}`);
+          const evalUsageObj = (response as any).usage;
           if (evalUsageObj) {
               const evalUsage = parseTokenUsage(evalUsageObj);
               const tokens = calculateTotalTokens(evalUsage);

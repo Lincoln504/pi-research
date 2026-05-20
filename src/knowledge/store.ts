@@ -114,7 +114,17 @@ export class KnowledgeStore {
     this.pendingOperations++;
 
     try {
-      const vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
+      // Raw-content docs are full-page cache for retrieval only — never searched by vector.
+      // Use zero vectors to avoid GPU load during the scraping phase.
+      const allRawContent = docs.every(d => d.metadata['ingestionType'] === 'raw-content');
+      let vectors: Float32Array[];
+      if (allRawContent) {
+        logger.debug(`[store] Skipping embedder for ${docs.length} raw-content chunk(s) (using zero vectors)`);
+        const dim = this.options.embedder.getDimension();
+        vectors = docs.map(() => new Float32Array(dim));
+      } else {
+        vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
+      }
 
       const data = docs.map((doc, i) => ({
         vector: Array.from(vectors[i]!),
@@ -176,6 +186,20 @@ export class KnowledgeStore {
     const escapedUrl = url.replace(/'/g, "''");
     await this.table.delete(`url = '${escapedUrl}'`);
     logger.log(`[store] Deleted chunks for ${url}`);
+  }
+
+  /**
+   * Delete only chunks of a specific ingestionType for a URL.
+   * Allows raw-content and synthesis-description to coexist independently
+   * so updating one type does not evict the other.
+   */
+  async deleteByUrlAndType(url: string, ingestionType: string): Promise<void> {
+    if (!this.table) throw new Error('Store not open');
+    const escapedUrl = url.replace(/'/g, "''");
+    const escapedType = ingestionType.replace(/'/g, "''");
+    // metadata is stored as a JSON string — match the ingestionType value within it
+    await this.table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
+    logger.log(`[store] Deleted ${ingestionType} chunks for ${url}`);
   }
 
   /**
@@ -295,6 +319,11 @@ export class KnowledgeStore {
   async rebuildFtsIndex(): Promise<void> {
     if (!this.table) return;
     try {
+      const count = await this.table.countRows();
+      if (count === 0) {
+        logger.debug('[store] Skipping FTS index rebuild (table is empty)');
+        return;
+      }
       logger.info('[store] Rebuilding FTS index...');
       await this.table.createIndex('text', {
         config: lancedb.Index.fts(),

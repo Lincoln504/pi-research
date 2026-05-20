@@ -170,7 +170,7 @@ export class Embedder {
   }
 
   isInitialized(): boolean {
-    return this.pipeline !== null;
+    return this.pipeline !== null && this.dimension !== null;
   }
 
   getDimension(): number {

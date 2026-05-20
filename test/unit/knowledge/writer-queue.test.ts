@@ -9,6 +9,7 @@ const mockStore = {
   addDocuments: vi.fn().mockResolvedValue(undefined),
   findByUrl: vi.fn().mockResolvedValue([]),
   deleteByUrl: vi.fn().mockResolvedValue(undefined),
+  deleteByUrlAndType: vi.fn().mockResolvedValue(undefined),
 } as any;
 
 // Mock Chunker
@@ -24,6 +25,7 @@ describe('WriterQueue', () => {
     mockStore.addDocuments.mockResolvedValue(undefined);
     mockStore.findByUrl.mockResolvedValue([]);
     mockStore.deleteByUrl.mockResolvedValue(undefined);
+    mockStore.deleteByUrlAndType.mockResolvedValue(undefined);
     queue = new WriterQueue({
       store: mockStore,
       chunker: mockChunker,
@@ -47,20 +49,19 @@ describe('WriterQueue', () => {
     expect(docs[0].metadata.contentHash).toBe(expectedHash);
   });
 
-  it('should deduplicate same content', async () => {
+  it('should deduplicate same content for matching ingestionType', async () => {
     const hash = createHash('sha256').update('content').digest('hex');
-    
+
     mockStore.findByUrl.mockResolvedValue([{
       url: 'https://test.com',
       text: 'content',
-      metadata: { contentHash: hash, chunkIndex: 0, totalChunks: 1 },
+      metadata: { contentHash: hash, chunkIndex: 0, totalChunks: 1, ingestionType: 'raw-content' },
       timestamp: Date.now(),
     }]);
-    
-    queue.enqueue({ url: 'https://test.com', markdown: 'content' });
+
+    queue.enqueue({ url: 'https://test.com', markdown: 'content', metadata: { ingestionType: 'raw-content' } });
     await queue.drain();
-    
-    // Should NOT have called addDocuments if content hash matches
+
     expect(mockStore.addDocuments).not.toHaveBeenCalled();
   });
 
@@ -121,22 +122,44 @@ describe('WriterQueue', () => {
     expect(mockStore.addDocuments).toHaveBeenCalledTimes(2);
   });
 
-  it('should delete old chunks and re-add when hash differs', async () => {
+  it('should delete same-type chunks and re-add when hash differs', async () => {
     mockStore.addDocuments.mockClear();
-    mockStore.deleteByUrl.mockClear();
+    mockStore.deleteByUrlAndType.mockClear();
 
     const differentHash = createHash('sha256').update('different').digest('hex');
     vi.mocked(mockStore.findByUrl).mockResolvedValueOnce([{
       url: 'https://test.com',
       text: 'different content',
-      metadata: { contentHash: differentHash, chunkIndex: 0, totalChunks: 1 },
+      metadata: { contentHash: differentHash, chunkIndex: 0, totalChunks: 1, ingestionType: 'raw-content' },
       timestamp: Date.now(),
     }]);
 
-    queue.enqueue({ url: 'https://test.com', markdown: 'content' });
+    queue.enqueue({ url: 'https://test.com', markdown: 'content', metadata: { ingestionType: 'raw-content' } });
     await queue.drain();
 
-    expect(mockStore.deleteByUrl).toHaveBeenCalledWith('https://test.com');
+    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith('https://test.com', 'raw-content');
+    expect(mockStore.addDocuments).toHaveBeenCalled();
+  });
+
+  it('stores synthesis-description without touching existing raw-content for same URL', async () => {
+    const rawHash = createHash('sha256').update('full page').digest('hex');
+    vi.mocked(mockStore.findByUrl).mockResolvedValue([{
+      url: 'https://test.com',
+      text: 'full page',
+      metadata: { contentHash: rawHash, chunkIndex: 0, totalChunks: 1, ingestionType: 'raw-content' },
+      timestamp: Date.now(),
+    }]);
+
+    queue.enqueue({
+      url: 'https://test.com',
+      markdown: 'researcher description',
+      metadata: { ingestionType: 'synthesis-description' },
+    });
+    await queue.drain();
+
+    // Should NOT delete raw-content when storing synthesis-description
+    expect(mockStore.deleteByUrlAndType).not.toHaveBeenCalledWith('https://test.com', 'raw-content');
+    // Should add the new synthesis-description doc
     expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 });

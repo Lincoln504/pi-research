@@ -289,6 +289,7 @@ class BrowserTaskScheduler implements IScheduler {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: { results: SearchResult[], error?: string };
@@ -314,6 +315,7 @@ class BrowserTaskScheduler implements IScheduler {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: any;
@@ -338,6 +340,7 @@ class BrowserTaskScheduler implements IScheduler {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: { success: boolean; error?: string };

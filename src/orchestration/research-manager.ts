@@ -11,6 +11,7 @@ import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import type { Config } from '../config.ts';
+import { initKnowledgeStore } from '../knowledge/index.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;
@@ -33,6 +34,12 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
   if (!selectedModel) {
     throw new Error('No model provided for research.');
   }
+
+  // Non-blocking initialization of the knowledge store (embedding model) 
+  // only when research is actually invoked.
+  initKnowledgeStore().catch(err => {
+    logger.warn('[ResearchManager] Lazy knowledge store initialization failed (non-fatal):', err);
+  });
 
   if (depth === 0) {
     const orchestrator = new QuickResearchOrchestrator({
