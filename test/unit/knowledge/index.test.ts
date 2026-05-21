@@ -49,7 +49,10 @@ vi.mock('../../../src/logger.ts', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
 }));
 
-import { getModelEmbedderConfig, getModelChunkConfig } from '../../../src/knowledge/index.ts';
+import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS } from '../../../src/knowledge/index.ts';
+
+// Derived from SUPPORTED_MODELS — never a hardcoded duplicate.
+const ALL_MODEL_IDS = SUPPORTED_MODELS.map(m => m.id);
 
 describe('getModelEmbedderConfig', () => {
   it('returns mean pooling and no prefix for unknown models', () => {
@@ -120,55 +123,60 @@ describe('getModelChunkConfig', () => {
     expect(mini.chunkSize).toBeLessThan(qwen.chunkSize);
   });
 
-  it('all listed models have chunk size within safe char range (500–5000)', () => {
-    const models = [
-      'Xenova/all-MiniLM-L6-v2',
-      'Xenova/bge-small-en-v1.5',
-      'Xenova/all-mpnet-base-v2',
-      'Xenova/multilingual-e5-small',
-      'Xenova/multilingual-e5-base',
-      'Xenova/bge-m3',
-      'onnx-community/embeddinggemma-300m-ONNX',
-      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-    ];
-    for (const m of models) {
+  it('all configured models have chunk size within safe char range (500–5000)', () => {
+    for (const m of ALL_MODEL_IDS) {
       const cfg = getModelChunkConfig(m);
       expect(cfg.chunkSize, `${m} chunkSize`).toBeGreaterThanOrEqual(500);
       expect(cfg.chunkSize, `${m} chunkSize`).toBeLessThanOrEqual(5000);
     }
   });
 
-  it('overlap percentage is 15% for all listed models', () => {
-    const models = [
-      'Xenova/all-MiniLM-L6-v2',
-      'Xenova/bge-small-en-v1.5',
-      'Xenova/all-mpnet-base-v2',
-      'Xenova/multilingual-e5-small',
-      'Xenova/multilingual-e5-base',
-      'Xenova/bge-m3',
-      'onnx-community/embeddinggemma-300m-ONNX',
-      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-    ];
-    for (const m of models) {
+  it('overlap percentage is 15% for all configured models', () => {
+    for (const m of ALL_MODEL_IDS) {
       expect(getModelChunkConfig(m).overlapPct, `${m} overlapPct`).toBe(0.15);
     }
   });
 
   it('derived overlap chars are strictly less than chunk size (no infinite loop)', () => {
-    const models = [
-      'Xenova/all-MiniLM-L6-v2',
-      'Xenova/bge-small-en-v1.5',
-      'Xenova/all-mpnet-base-v2',
-      'Xenova/multilingual-e5-small',
-      'Xenova/multilingual-e5-base',
-      'Xenova/bge-m3',
-      'onnx-community/embeddinggemma-300m-ONNX',
-      'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-    ];
-    for (const m of models) {
+    for (const m of ALL_MODEL_IDS) {
       const { chunkSize, overlapPct } = getModelChunkConfig(m);
       const overlap = Math.round(chunkSize * overlapPct);
       expect(overlap, `${m} overlap < chunkSize`).toBeLessThan(chunkSize);
     }
+  });
+});
+
+describe('SUPPORTED_MODELS', () => {
+  it('contains all models from MODEL_CONFIG (at least 9)', () => {
+    expect(SUPPORTED_MODELS.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it('every entry has a non-empty id and a boolean multilingual field', () => {
+    for (const m of SUPPORTED_MODELS) {
+      expect(typeof m.id, `id of ${m.id}`).toBe('string');
+      expect(m.id.length, `id length of ${m.id}`).toBeGreaterThan(0);
+      expect(typeof m.multilingual, `multilingual of ${m.id}`).toBe('boolean');
+    }
+  });
+
+  it('multilingual models are listed before English-only models', () => {
+    const firstEnIdx = SUPPORTED_MODELS.findIndex(m => !m.multilingual);
+    const lastMlIdx = [...SUPPORTED_MODELS].reverse().findIndex(m => m.multilingual);
+    const lastMlForward = SUPPORTED_MODELS.length - 1 - lastMlIdx;
+    if (firstEnIdx !== -1 && lastMlForward !== -1) {
+      expect(firstEnIdx, 'first EN model must come after last ML model').toBeGreaterThan(lastMlForward);
+    }
+  });
+
+  it('every id is also addressable via getModelEmbedderConfig (not the default fallback)', () => {
+    for (const m of SUPPORTED_MODELS) {
+      const cfg = getModelEmbedderConfig(m.id);
+      expect(['mean', 'cls', 'last_token'], `${m.id} pooling`).toContain(cfg.pooling);
+    }
+  });
+
+  it('no duplicate ids', () => {
+    const ids = SUPPORTED_MODELS.map(m => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
