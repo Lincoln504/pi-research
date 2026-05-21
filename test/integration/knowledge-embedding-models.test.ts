@@ -14,23 +14,12 @@ import { createHash } from 'node:crypto';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { WriterQueue } from '../../src/knowledge/writer-queue.ts';
 import { Chunker } from '../../src/knowledge/chunker.ts';
-import { getModelEmbedderConfig, getModelChunkConfig } from '../../src/knowledge/index.ts';
+import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS as SOURCE_MODELS } from '../../src/knowledge/index.ts';
 import { Embedder, getModelCacheDir } from '../../src/knowledge/embedder.ts';
 
-// ---------------------------------------------------------------------------
-// All 9 supported models
-// ---------------------------------------------------------------------------
-const SUPPORTED_MODELS = [
-  'Xenova/all-MiniLM-L6-v2',
-  'Xenova/bge-small-en-v1.5',
-  'Xenova/all-mpnet-base-v2',
-  'Xenova/multilingual-e5-small',
-  'Xenova/multilingual-e5-base',
-  'Xenova/bge-m3',
-  'onnx-community/embeddinggemma-300m-ONNX',
-  'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-  'onnx-community/granite-embedding-small-english-r2-ONNX',
-] as const;
+// Derived from the authoritative MODEL_CONFIG in knowledge/index.ts — not a duplicate.
+// Any model added to MODEL_CONFIG is automatically covered here.
+const SUPPORTED_MODELS = SOURCE_MODELS.map(m => m.id);
 
 // Known-correct expectations for each model
 const MODEL_EXPECTATIONS: Record<string, {
