@@ -21,6 +21,7 @@ export interface StoreOptions {
 export interface StoreDocument {
   url: string;
   text: string;
+  content?: string;
   metadata: Record<string, any>;
   timestamp: number;
 }
@@ -86,6 +87,7 @@ export class KnowledgeStore {
       new Field('vector', new FixedSizeList(dim, new Field('item', new Float32())), false),
       new Field('url', new Utf8(), false),
       new Field('text', new Utf8(), false),
+      new Field('content', new Utf8(), true), // full page markdown, nullable
       new Field('metadata', new Utf8(), false), // JSON stringified
       new Field('timestamp', new Int64(), false),
     ], new Map([['embedding_model', this.options.modelName]]));
@@ -130,6 +132,7 @@ export class KnowledgeStore {
         vector: Array.from(vectors[i]!),
         url: doc.url,
         text: doc.text,
+        content: doc.content ?? null,
         metadata: JSON.stringify(doc.metadata),
         timestamp: BigInt(doc.timestamp),
       }));
@@ -170,6 +173,7 @@ export class KnowledgeStore {
       .map(r => ({
         url: r.url as string,
         text: r.text as string,
+        content: (r.content as string | null) ?? undefined,
         metadata: JSON.parse(r.metadata as string),
         timestamp: Number(r.timestamp),
       }))
@@ -225,67 +229,41 @@ export class KnowledgeStore {
     return results.map(r => ({
       url: r.url as string,
       text: r.text as string,
+      content: (r.content as string | null) ?? undefined,
       metadata: JSON.parse(r.metadata as string),
       timestamp: Number(r.timestamp),
     }));
   }
 
   /**
-   * Rebuild a full document from its chunks.
+   * Return the cached full-page content for a URL.
+   * Looks for a synthesis-description row that has a populated content field.
    */
   async rebuildDocument(url: string): Promise<{ text: string; metadata: Record<string, any> } | null> {
     if (!this.table) throw new Error('Store not open');
 
-    // Escape URL to prevent SQL injection
     const escapedUrl = url.replace(/'/g, "''");
 
-    // Query all chunks for this URL, ordered by chunkIndex
     const results = await this.table
       .query()
       .where(`url = '${escapedUrl}'`)
-      .limit(1000)
+      .limit(10)
       .toArray();
-
-    if (results.length === 1000) {
-      logger.warn(`[store] rebuildDocument hit 1000-chunk cap for ${url} — document reconstruction is incomplete`);
-    }
 
     if (results.length === 0) return null;
 
-    // Filter to only retrieve raw-content entries (for retrieval)
-    // Description entries (synthesis-description) are for search only
-    const filteredResults = results.filter(r => {
-      const metadata = JSON.parse(r.metadata as string);
-      return metadata.ingestionType === 'raw-content';
-    });
-
-    if (filteredResults.length === 0) return null;
-
-    const chunks = filteredResults.map(r => {
-      const metadata = JSON.parse(r.metadata as string);
-      return {
-        text: r.text as string,
-        index: metadata.chunkIndex as number,
-        overlap: metadata.actualOverlap as number,
-        fullMetadata: metadata,
-      };
-    }).sort((a, b) => a.index - b.index);
-
-    if (chunks.length === 0) return null;
-
-    const firstChunk = chunks[0];
-    if (!firstChunk) return null;
-
-    let fullText = firstChunk.text;
-    for (let i = 1; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      if (chunk) {
-        fullText += chunk.text.slice(chunk.overlap);
-      }
+    // Find the first synthesis-description row that has a populated content field.
+    for (const r of results) {
+      try {
+        const metadata = JSON.parse(r.metadata as string);
+        if (metadata.ingestionType === 'synthesis-description' && r.content) {
+          logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
+          return { text: r.content as string, metadata };
+        }
+      } catch { /* skip malformed row */ }
     }
 
-    logger.log(`[store] Cache hit: rebuilt ${chunks.length} chunk(s) for ${url} (${fullText.length} chars)`);
-    return { text: fullText, metadata: firstChunk.fullMetadata };
+    return null;
   }
 
   /**

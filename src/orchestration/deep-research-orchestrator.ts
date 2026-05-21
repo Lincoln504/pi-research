@@ -38,7 +38,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
 import { getStore, getWriterQueue } from '../knowledge/index.ts';
-import { registerScrapedLinks, normalizeUrl } from '../utils/shared-links.ts';
+import { registerScrapedLinks, normalizeUrl, getCachedScrapedContent } from '../utils/shared-links.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -247,6 +247,7 @@ export class DeepResearchOrchestrator {
                     writer.enqueue({
                       url: normalizeUrl(cit.url),
                       markdown: cit.description,
+                      content: getCachedScrapedContent(this.options.researchId, cit.url),
                       metadata: {
                         ingestionType: 'synthesis-description',
                         source: 'researcher',

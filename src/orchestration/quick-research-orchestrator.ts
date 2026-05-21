@@ -20,7 +20,7 @@ import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts'
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getStore, getWriterQueue } from '../knowledge/index.ts';
-import { normalizeUrl, registerScrapedLinks } from '../utils/shared-links.ts';
+import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -182,6 +182,7 @@ export class QuickResearchOrchestrator {
               writer.enqueue({
                 url: normalizeUrl(cit.url),
                 markdown: cit.description,
+                content: getCachedScrapedContent(this.options.researchId, cit.url),
                 metadata: {
                   ingestionType: 'synthesis-description',
                   source: 'researcher',

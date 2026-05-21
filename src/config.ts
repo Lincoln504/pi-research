@@ -80,6 +80,10 @@ export function getEnvFilePath(): string {
   return path.join(EXTENSION_DIR, '.env');
 }
 
+export function getDbDir(): string {
+  return path.join(EXTENSION_DIR, 'knowledge_db');
+}
+
 function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const raw of content.split('\n')) {

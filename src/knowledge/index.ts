@@ -1,15 +1,8 @@
 import { Embedder } from './embedder.ts';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
-import { Chunker } from './chunker.ts';
-import { getConfig, validateConfig } from '../config.ts';
+import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const EXTENSION_DIR = path.join(__dirname, '..', '..');
 
 interface ModelConfig {
   pooling: 'mean' | 'cls' | 'last_token';
@@ -148,7 +141,6 @@ export function getModelChunkConfig(modelId: string): { chunkSize: number; overl
 let embedder: Embedder | null = null;
 let store: KnowledgeStore | null = null;
 let writerQueue: WriterQueue | null = null;
-let chunker: Chunker | null = null;
 
 let initializationPromise: Promise<void> | null = null;
 // Set to true after all retries are exhausted so subsequent calls fail fast
@@ -199,18 +191,12 @@ export async function initKnowledgeStore(): Promise<void> {
         const embedInit = embedder.initialize();
 
         store = new KnowledgeStore({
-          dbDir: path.join(EXTENSION_DIR, 'knowledge_db'),
+          dbDir: getDbDir(),
           embedder: embedder,
           modelName: config.EMBEDDING_MODEL,
         });
 
-        const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);
-        chunker = new Chunker({
-          targetSize: chunkCfg.chunkSize,
-          overlap: Math.round(chunkCfg.chunkSize * chunkCfg.overlapPct),
-        });
-
-        writerQueue = new WriterQueue({ store: store, chunker: chunker });
+        writerQueue = new WriterQueue({ store: store });
 
         await embedInit;
         await store.open();
@@ -228,7 +214,6 @@ export async function initKnowledgeStore(): Promise<void> {
         }
         embedder = null;
         store = null;
-        chunker = null;
         writerQueue = null;
 
         if (attempt >= MAX_INIT_RETRIES) {

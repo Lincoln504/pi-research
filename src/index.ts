@@ -215,7 +215,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } = await import('./config.ts');
+      const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath, getDbDir } = await import('./config.ts');
       const config = { ...getConfig() }; // Work on a copy
 
       // Supported embedding models for the model selector.
@@ -255,14 +255,32 @@ export default function (pi: ExtensionAPI) {
       // Config file path for display (home dir replaced with ~)
       const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
 
-      // Fetch knowledge store entry count if already initialized (non-blocking, best-effort)
+      // Fetch knowledge store entry count (non-blocking, best-effort)
       let storeCountLabel = '';
-      if (config.KNOWLEDGE_STORE_ENABLED && isKnowledgeStoreReady()) {
-        try {
-          const st = await getStore();
-          const n = await st.count();
-          storeCountLabel = ` (${n} entries)`;
-        } catch { /* non-fatal */ }
+      if (config.KNOWLEDGE_STORE_ENABLED) {
+        const dbDir = getDbDir();
+        if (isKnowledgeStoreReady()) {
+          try {
+            const st = await getStore();
+            const n = await st.count();
+            storeCountLabel = ` (${n} entries)`;
+          } catch { /* non-fatal */ }
+        } else if (fss.existsSync(dbDir)) {
+          try {
+            const lancedb = await import('@lancedb/lancedb');
+            const db = await lancedb.connect(dbDir);
+            const tableNames = await db.tableNames();
+            if (tableNames.includes('knowledge')) {
+              const table = await db.openTable('knowledge');
+              const n = await table.countRows();
+              storeCountLabel = ` (${n} entries)`;
+            } else {
+              storeCountLabel = ' (0 entries)';
+            }
+          } catch { storeCountLabel = ' (? entries)'; }
+        } else {
+          storeCountLabel = ' (0 entries)';
+        }
       }
 
       // Define configuration items with their types and handlers
@@ -388,7 +406,7 @@ export default function (pi: ExtensionAPI) {
           label: 'Clear DB Cache',
           get description() { return `(Delete all knowledge${storeCountLabel})`; },
           action: async () => {
-            const dbDir = pathmod.join(pathmod.dirname(getEnvFilePath()), 'knowledge_db');
+            const dbDir = getDbDir();
             if (fss.existsSync(dbDir)) {
               fss.rmSync(dbDir, { recursive: true, force: true });
             }

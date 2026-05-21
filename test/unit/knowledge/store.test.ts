@@ -48,18 +48,19 @@ describe('KnowledgeStore', () => {
     const doc = {
       url: 'https://example.com',
       text: 'Hello world',
-      metadata: { title: 'Test', chunkIndex: 0, totalChunks: 1, ingestionType: 'synthesis-description' },
+      content: 'full page content here',
+      metadata: { title: 'Test', ingestionType: 'synthesis-description' },
       timestamp: timestamp,
     };
-    
+
     await store.addDocuments([doc]);
-    
+
     const results = await store.search('hello', { limit: 1 });
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe('https://example.com');
     expect(results[0].text).toBe('Hello world');
+    expect(results[0].content).toBe('full page content here');
     expect(results[0].metadata.title).toBe('Test');
-    expect(results[0].metadata.chunkIndex).toBe(0);
     expect(results[0].timestamp).toBe(timestamp);
   });
 
@@ -85,7 +86,7 @@ describe('KnowledgeStore', () => {
     await store.addDocuments([{
       url: 'https://example.com/raw',
       text: 'full scraped page content',
-      metadata: { ingestionType: 'raw-content', chunkIndex: 0 },
+      metadata: { ingestionType: 'raw-content' },
       timestamp: Date.now(),
     }]);
     expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
@@ -158,23 +159,33 @@ describe('KnowledgeStore', () => {
     expect(remaining.length).toBeGreaterThan(0);
   });
 
-  it('rebuildDocument reconstructs text from overlapping chunks', async () => {
+  it('rebuildDocument returns the content field from a synthesis-description row', async () => {
     await store.open();
-    const original = 'Hello world this is the full document content.';
-    // Simulate 3 chunks with overlap, as the Chunker would produce
-    const overlap = 5;
-    const c0 = original.slice(0, 20);
-    const c1 = original.slice(20 - overlap, 35);
-    const c2 = original.slice(35 - overlap);
+    const fullPageContent = 'Hello world this is the full document content.';
 
-    await store.addDocuments([
-      { url: 'https://example.com/doc', text: c0, metadata: { chunkIndex: 0, actualOverlap: 0, ingestionType: 'raw-content' }, timestamp: Date.now() },
-      { url: 'https://example.com/doc', text: c1, metadata: { chunkIndex: 1, actualOverlap: overlap, ingestionType: 'raw-content' }, timestamp: Date.now() },
-      { url: 'https://example.com/doc', text: c2, metadata: { chunkIndex: 2, actualOverlap: overlap, ingestionType: 'raw-content' }, timestamp: Date.now() },
-    ]);
+    await store.addDocuments([{
+      url: 'https://example.com/doc',
+      text: 'researcher description of the page',
+      content: fullPageContent,
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
 
     const rebuilt = await store.rebuildDocument('https://example.com/doc');
-    expect(rebuilt?.text).toBe(original);
+    expect(rebuilt?.text).toBe(fullPageContent);
+  });
+
+  it('rebuildDocument returns null when synthesis-description row has no content field', async () => {
+    await store.open();
+    await store.addDocuments([{
+      url: 'https://example.com/desc-only',
+      text: 'researcher description',
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
+
+    const result = await store.rebuildDocument('https://example.com/desc-only');
+    expect(result).toBeNull();
   });
 
   it('rebuildDocument returns null for unknown URL', async () => {

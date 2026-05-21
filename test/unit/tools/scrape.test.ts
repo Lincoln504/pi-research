@@ -115,19 +115,18 @@ describe('tools/scrape', () => {
     expect(result.details).toMatchObject({ count: 1 });
   });
 
-  it('should handle legacy summary cache hits with rawText metadata', async () => {
+  it('serves cached content directly from rebuildDocument result', async () => {
     const { getStore } = await import('../../../src/knowledge/index.ts');
     const store = await getStore();
     vi.mocked(store.rebuildDocument).mockResolvedValueOnce({
-      text: 'agent summary',
-      metadata: { ingestionType: 'summary', rawText: 'original raw markdown' }
+      text: 'full cached page content',
+      metadata: { ingestionType: 'synthesis-description' },
     });
 
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/legacy'] }, undefined);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/cached-desc'] }, undefined);
 
-    expect(result.content[0].text).toContain('original raw markdown');
-    expect(result.content[0].text).toContain('> **Historical Summary (Previous Finding):** agent summary');
+    expect(result.content[0].text).toContain('full cached page content');
   });
 
   it('should change default concurrency for Batch 2+', async () => {

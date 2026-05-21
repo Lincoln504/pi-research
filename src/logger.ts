@@ -56,10 +56,6 @@ export interface LogContext {
 const logContextStorage = new AsyncLocalStorage<LogContext>();
 
 function buildDefaultDebugLogPath(): string {
-  const piDir = path.join(os.homedir(), '.pi');
-  if (existsSync(piDir)) {
-    return path.join(piDir, 'pi-research.log');
-  }
   return path.join(os.tmpdir(), 'pi-research.log');
 }
 
