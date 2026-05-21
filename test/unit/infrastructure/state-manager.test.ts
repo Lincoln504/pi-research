@@ -134,9 +134,64 @@ describe('StateManager Integration-style Tests', () => {
   it('should provide metrics', async () => {
     await manager.addSession('s1', 'c1');
     await manager.addSession('s2', 'c2');
-    
+
     const metrics = await manager.getMetrics();
     expect(metrics.totalSessions).toBe(2);
     expect(metrics.activeSessions).toBe(2);
+  });
+});
+
+describe('StateManager GPU lock', () => {
+  const testDir = path.join(os.tmpdir(), `pi-test-gpu-lock-${Date.now()}`);
+  let manager: StateManager;
+
+  beforeEach(async () => {
+    await fs.mkdir(testDir, { recursive: true });
+    manager = new StateManager(testDir);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(testDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  });
+
+  it('acquireGpuLock returns true and persists owner to state', async () => {
+    const acquired = await manager.acquireGpuLock('session-1', 5000);
+    expect(acquired).toBe(true);
+    const owner = await manager.getGpuOwner();
+    expect(owner).not.toBeNull();
+    expect(owner!.pid).toBe(process.pid);
+    expect(owner!.sessionId).toBe('session-1');
+  });
+
+  it('releaseGpuLock clears the owner', async () => {
+    await manager.acquireGpuLock(undefined, 5000);
+    await manager.releaseGpuLock();
+    const owner = await manager.getGpuOwner();
+    expect(owner).toBeNull();
+  });
+
+  it('re-entrant acquire by same PID refreshes startedAt and returns true', async () => {
+    await manager.acquireGpuLock(undefined, 5000);
+    const before = (await manager.getGpuOwner())!.startedAt;
+    await new Promise(r => setTimeout(r, 5));
+    const acquired = await manager.acquireGpuLock(undefined, 5000);
+    expect(acquired).toBe(true);
+    const after = (await manager.getGpuOwner())!.startedAt;
+    expect(after).toBeGreaterThanOrEqual(before);
+  });
+
+  it('releaseGpuLock is a no-op when called by a non-owner PID', async () => {
+    await manager.acquireGpuLock(undefined, 5000);
+    await manager.releaseGpuLock(process.pid + 9999); // different PID
+    const owner = await manager.getGpuOwner();
+    expect(owner).not.toBeNull(); // still held
+  });
+
+  it('state validates gpuOwner shape — rejects invalid pid type', async () => {
+    const state = await manager.readState();
+    (state as any).gpuOwner = { pid: 'not-a-number', startedAt: Date.now() };
+    await expect(manager.writeState(state)).rejects.toThrow('gpuOwner');
   });
 });

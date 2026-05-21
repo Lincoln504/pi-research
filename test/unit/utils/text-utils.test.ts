@@ -200,6 +200,22 @@ describe('text-utils', () => {
       expect(result[0]!.description).toBe('Bold citation');
     });
 
+    it('parses numbered list N. format', () => {
+      const report = `### CITED LINKS\n1. https://example.com — N. format citation\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('N. format citation');
+    });
+
+    it('parses numbered list **N.** format', () => {
+      const report = `### CITED LINKS\n**1.** https://example.com\nDescription: Bold N. format citation\n`;
+      const result = parseCitations(report);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://example.com');
+      expect(result[0]!.description).toBe('Bold N. format citation');
+    });
+
     it('skips entries without a valid http URL', () => {
       const report = `### CITED LINKS\n[1] not-a-url\n[2] https://valid.com — Valid\n`;
       const result = parseCitations(report);

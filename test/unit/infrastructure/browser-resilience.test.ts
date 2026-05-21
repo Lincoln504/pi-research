@@ -16,15 +16,23 @@ vi.mock('poolifier', () => {
     };
 });
 
-vi.mock('../../../src/infrastructure/state-manager.ts', () => ({
-    StateManager: class {
+vi.mock('../../../src/infrastructure/state-manager.ts', () => {
+    let _instance: any = null;
+    class MockStateManager {
         getBrowserServer = vi.fn(async () => null);
         updateState = vi.fn(async (fn: any) => fn({ browserServer: null }));
         isPidAlive = vi.fn(async () => false);
         clearBrowserServer = vi.fn(async () => {});
         readState = vi.fn(async () => ({ sessions: {} }));
-    },
-}));
+    }
+    return {
+        StateManager: MockStateManager,
+        getSharedStateManager: () => {
+            if (!_instance) _instance = new MockStateManager();
+            return _instance;
+        },
+    };
+});
 
 vi.mock('../../../src/config.ts', () => ({
     getConfig: vi.fn(() => ({

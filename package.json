@@ -19,6 +19,7 @@
     "docs/CRITICAL_FIXES.md",
     "docs/assets/",
     "scripts/",
+    "!scripts/download-models.mjs",
     "LICENSE",
     "README.md"
   ],
@@ -64,7 +65,9 @@
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
     "install:browsers": "node scripts/setup.cjs",
-    "install:system-deps": "node scripts/setup.cjs --system-deps"
+    "install:system-deps": "node scripts/setup.cjs --system-deps",
+    "models:download": "node scripts/download-models.mjs",
+    "models:download:force": "node scripts/download-models.mjs --force"
   },
   "pi": {
     "extensions": [

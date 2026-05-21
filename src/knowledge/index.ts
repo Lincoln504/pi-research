@@ -1,8 +1,10 @@
 import { Embedder } from './embedder.ts';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
+import { Chunker } from './chunker.ts';
 import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
+import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 
 interface ModelConfig {
   pooling: 'mean' | 'cls' | 'last_token';
@@ -25,6 +27,8 @@ interface ModelConfig {
   // Prefix prepended to document embeddings (embedMany). For asymmetric models like E5
   // that require "passage: " on the document side. Omit for symmetric models.
   documentPrefix?: string;
+  // true = supports 100+ languages; false = English-only. Required so new entries are explicit.
+  multilingual: boolean;
 }
 
 // charsPerToken per tokenizer family (chars/token on typical web content):
@@ -36,28 +40,9 @@ interface ModelConfig {
 //   BPE 50k vocab (IBM Granite ModernBERT): ~4.0 — English-only BPE, similar density to BERT
 //
 // Rule: chunkSize must be ≤ maxTokens * charsPerToken (= maxChars) so the full chunk is embedded.
+// Ordering: multilingual models first, then English-only. This order is reflected in the TUI.
 const MODEL_CONFIG: Record<string, ModelConfig> = {
-  // all-MiniLM-L6-v2: trained at 256 tokens, 384-dim. chunkSize 800 = 200 tok ≤ 256 ✓
-  'Xenova/all-MiniLM-L6-v2': {
-    pooling: 'mean',
-    chunkSize: 800,
-    overlapPct: 0.15,
-    maxTokens: 256,  // hard training window; prevent position OOB on long queries
-  },
-  // bge-small-en-v1.5: CLS pooling (not mean — BGE uses CLS for dense retrieval). 512-tok max.
-  // chunkSize 1500 = 375 tok ≤ 512 ✓
-  'Xenova/bge-small-en-v1.5': {
-    pooling: 'cls',
-    chunkSize: 1500,
-    overlapPct: 0.15,
-  },
-  // all-mpnet-base-v2: mean pooling, fine-tuned at 384 tokens. chunkSize 1200 = 300 tok ≤ 384 ✓
-  'Xenova/all-mpnet-base-v2': {
-    pooling: 'mean',
-    chunkSize: 1200,
-    overlapPct: 0.15,
-    maxTokens: 384,
-  },
+  // ── Multilingual ─────────────────────────────────────────────────────────────
   // multilingual-e5-*: asymmetric — requires "query: " / "passage: " prefixes.
   // Without them, query and doc vectors land in different sub-spaces → retrieval collapse.
   // XLM-RoBERTa SentencePiece, charsPerToken=3.5. maxChars = 512*3.5 = 1792. chunkSize 1500 ≤ 1792 ✓
@@ -68,6 +53,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     queryPrefix: 'query: ',
     documentPrefix: 'passage: ',
     charsPerToken: 3.5,
+    multilingual: true,
   },
   'Xenova/multilingual-e5-base': {
     pooling: 'mean',
@@ -76,6 +62,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     queryPrefix: 'query: ',
     documentPrefix: 'passage: ',
     charsPerToken: 3.5,
+    multilingual: true,
   },
   // bge-m3: symmetric dense retrieval (no prefix), CLS pooling, 8192-tok max.
   // XLM-RoBERTa SentencePiece, charsPerToken=3.5. maxChars = 512*3.5 = 1792. chunkSize 1500 ≤ 1792 ✓
@@ -84,6 +71,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     chunkSize: 1500,
     overlapPct: 0.15,
     charsPerToken: 3.5,
+    multilingual: true,
   },
   // embeddinggemma-300m: Gemma SentencePiece, mean pooling. charsPerToken=3.5.
   // Requires specific task prefixes for queries and titles/none for documents.
@@ -95,6 +83,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     chunkSize: 1600,
     overlapPct: 0.15,
     charsPerToken: 3.5,
+    multilingual: true,
   },
   // Qwen3-Embedding-0.6B: decoder model (last_token pooling), asymmetric instruction prefix.
   // Qwen2 tiktoken measures ~2.68 chars/tok on web content — use 2.5 for headroom.
@@ -108,6 +97,32 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     maxTokens: 512,
     batchSize: 2,
     charsPerToken: 2.5,
+    multilingual: true,
+  },
+  // ── English-only ─────────────────────────────────────────────────────────────
+  // all-MiniLM-L6-v2: trained at 256 tokens, 384-dim. chunkSize 800 = 200 tok ≤ 256 ✓
+  'Xenova/all-MiniLM-L6-v2': {
+    pooling: 'mean',
+    chunkSize: 800,
+    overlapPct: 0.15,
+    maxTokens: 256,  // hard training window; prevent position OOB on long queries
+    multilingual: false,
+  },
+  // bge-small-en-v1.5: CLS pooling (not mean — BGE uses CLS for dense retrieval). 512-tok max.
+  // chunkSize 1500 = 375 tok ≤ 512 ✓
+  'Xenova/bge-small-en-v1.5': {
+    pooling: 'cls',
+    chunkSize: 1500,
+    overlapPct: 0.15,
+    multilingual: false,
+  },
+  // all-mpnet-base-v2: mean pooling, fine-tuned at 384 tokens. chunkSize 1200 = 300 tok ≤ 384 ✓
+  'Xenova/all-mpnet-base-v2': {
+    pooling: 'mean',
+    chunkSize: 1200,
+    overlapPct: 0.15,
+    maxTokens: 384,
+    multilingual: false,
   },
   // IBM Granite small-english-r2: ModernBERT-based, 47M params, 384-dim, 8192-tok max.
   // BPE (vocab 50k, English-only), CLS pooling, symmetric (no prefix). MTEB-v2: 61.1.
@@ -118,8 +133,13 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     overlapPct: 0.15,
     maxTokens: 512,
     batchSize: 8,
+    multilingual: false,
   },
 };
+
+/** Ordered list of all supported embedding models, derived directly from MODEL_CONFIG. */
+export const SUPPORTED_MODELS: ReadonlyArray<{ id: string; multilingual: boolean }> =
+  Object.entries(MODEL_CONFIG).map(([id, cfg]) => ({ id, multilingual: cfg.multilingual }));
 
 const DEFAULT_CHUNK_SIZE = 1200;
 const DEFAULT_OVERLAP_PCT = 0.15;
@@ -185,6 +205,7 @@ export async function initKnowledgeStore(): Promise<void> {
             batchSize: modelCfg.batchSize,
             charsPerToken: modelCfg.charsPerToken,
             documentPrefix: modelCfg.documentPrefix,
+            stateManager: getSharedStateManager(),
           });
           inflightEmbedder = embedder;
         }
@@ -196,7 +217,10 @@ export async function initKnowledgeStore(): Promise<void> {
           modelName: config.EMBEDDING_MODEL,
         });
 
-        writerQueue = new WriterQueue({ store: store });
+        const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);
+        const chunkOverlap = Math.round(chunkCfg.chunkSize * chunkCfg.overlapPct);
+        const chunker = new Chunker({ targetSize: chunkCfg.chunkSize, overlap: chunkOverlap });
+        writerQueue = new WriterQueue({ store: store, chunker });
 
         await embedInit;
         await store.open();

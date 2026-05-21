@@ -7,9 +7,10 @@ import * as os from 'node:os';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore } from './knowledge/index.ts';
+import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODELS } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
+import { stopBrowserManager } from './infrastructure/browser-manager.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -109,10 +110,18 @@ export default function (pi: ExtensionAPI) {
       process.exit(0);
     }).catch(err => {
       logger.error(`[pi-research] ${signal} cleanup failed:`, err);
-      // Force exit after 2 seconds if cleanup hangs
-      shutdownManager.forceExitAfter(2000, 1);
+      // Force exit after 10 seconds if cleanup hangs (browser pool can take up to 10s)
+      shutdownManager.forceExitAfter(10000, 1);
     });
   };
+
+  // Register cleanup tasks in the order they should run in reverse:
+  // 1. stopBrowserManager (runs last - slow, up to 10s for pool destruction)
+  // 2. shutdownKnowledgeStore (runs second - disposes embedder to prevent DefaultLogger crash)
+  // 3. clearAllSessionState (runs first - fast)
+  shutdownManager.register(async () => {
+    await stopBrowserManager();
+  });
 
   shutdownManager.register(async () => {
     await shutdownKnowledgeStore();
@@ -218,38 +227,21 @@ export default function (pi: ExtensionAPI) {
       const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath, getDbDir } = await import('./config.ts');
       const config = { ...getConfig() }; // Work on a copy
 
-      // Supported embedding models for the model selector.
-      // short: ≤9 chars — combined with 1-char status symbol it fills the 10-char value column.
-      // multilingual: true  → supports 100+ languages (cross-lingual retrieval works)
-      //              false  → English-only (cross-lingual R@1 < 0.20 in benchmarks)
-      const SUPPORTED_MODELS = [
-        // ── Multilingual ────────────────────────────────────────────────────────
-        // Microsoft multilingual-e5-small, ~118MB, MIT. Smallest confirmed multilingual ONNX option.
-        { id: 'Xenova/multilingual-e5-small',                  short: 'ml-e5-sm',   multilingual: true  },
-        // Microsoft multilingual-e5-base, ~560MB, MIT. Encoder, better quality than small.
-        { id: 'Xenova/multilingual-e5-base',                   short: 'ml-e5-base', multilingual: true  },
-        // BAAI BGE-M3, ~568MB (quantized), Apache 2.0, 100+ languages, 8192 ctx. Uses CLS pooling.
-        { id: 'Xenova/bge-m3',                                 short: 'bge-m3',     multilingual: true  },
-        // Google EmbeddingGemma-300M. Mean pooling. Top-ranked open multilingual <500M on MTEB (2025).
-        { id: 'onnx-community/embeddinggemma-300m-ONNX',       short: 'emb-gemma',  multilingual: true  },
-        // Qwen3-Embedding-0.6B. 0.6B params, last-token pooling + query prefix. ONNX community port.
-        { id: 'onnx-community/Qwen3-Embedding-0.6B-ONNX',     short: 'qwen3-emb',  multilingual: true  },
-        // ── English-only ────────────────────────────────────────────────────────
-        // MiniLM-L6, ~23MB, Apache 2.0. Smallest/fastest; no meaningful cross-lingual capability.
-        { id: 'Xenova/all-MiniLM-L6-v2',                       short: 'MiniLM-L6',  multilingual: false },
-        // BGE-small-en, ~120MB, MIT. English retrieval quality above its size class.
-        { id: 'Xenova/bge-small-en-v1.5',                      short: 'bge-sm-en',  multilingual: false },
-        // all-mpnet-base-v2, ~420MB, Apache 2.0. Highest English quality in the local lineup.
-        { id: 'Xenova/all-mpnet-base-v2',                      short: 'mpnet-v2',   multilingual: false },
-      ];
 
-      // HF model cache directory (follows Python HF convention, respects HF_HOME env var)
-      const hfCacheDir = process.env['HF_HOME'] ?? pathmod.join(os.homedir(), '.cache', 'huggingface');
-      const hfHubDir = pathmod.join(hfCacheDir, 'hub');
+      // pi-research model cache directory — matches the env.cacheDir set in embedder.ts
+      const xdgCacheBase = process.env['XDG_CACHE_HOME'];
+      const piModelCache = pathmod.join(
+        xdgCacheBase ?? pathmod.join(os.homedir(), '.cache'),
+        'pi-research', 'models'
+      );
 
       function isModelCached(modelId: string): boolean {
-        const dirName = 'models--' + modelId.replace('/', '--');
-        return fss.existsSync(pathmod.join(hfHubDir, dirName, 'snapshots'));
+        const onnxDir = pathmod.join(piModelCache, ...modelId.split('/'), 'onnx');
+        try {
+          return fss.readdirSync(onnxDir).some(f => f.endsWith('.onnx'));
+        } catch {
+          return false;
+        }
       }
 
       // Config file path for display (home dir replaced with ~)
@@ -501,7 +493,7 @@ export default function (pi: ExtensionAPI) {
               // Contextual info lines when Embed Model row is focused
               const selKey = configItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
-                lines.push(theme.fg('muted',    ` Model dir: ${hfHubDir}`));
+                lines.push(theme.fg('muted',    ` Model dir: ${piModelCache}`));
                 lines.push(theme.fg('muted',    ` [fetch] = not yet downloaded. Model auto-downloads on next research task start.`));
                 lines.push(theme.fg('warning',  ` ⚠ Changing model permanently clears the knowledge DB`));
               }

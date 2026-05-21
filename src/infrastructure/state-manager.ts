@@ -37,6 +37,7 @@ export interface SingletonState {
   lastUpdated: number;
   browserServer?: { port: number; pid: number; schedulerId?: string };
   schedulerVersion?: string; // Track scheduler config version for detecting changes
+  gpuOwner?: { pid: number; startedAt: number; sessionId?: string };
 }
 
 /**
@@ -720,19 +721,97 @@ public async clearBrowserServer(): Promise<void> {
 /**
  * Check if a process is alive
  */
-public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<boolean> {
+public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock: boolean = false): Promise<boolean> {
   const alive = await this.isProcessAlive(pid);
   if (!alive) return false;
 
   if (expectedSchedulerId) {
-    // Use _readState() (no lock) because this method may be called from inside a
-    // withLock callback (e.g. updateState in browser-manager). Re-entering withLock
-    // from the same single-threaded execution path would spin until lockTimeout (10s).
-    const state = await this._readState();
+    // Use _readState() if skipLock is true to prevent deadlocks when called inside updateState.
+    const state = skipLock ? await this._readState() : await this.readState();
     return state.browserServer?.schedulerId === expectedSchedulerId;
   }
 
   return true;
+}
+
+/**
+ * Acquire the global GPU resource lock.
+ * Only one process can hold the GPU lock at a time.
+ * @param sessionId Optional session ID for tracking
+ * @param timeoutMs Maximum time to wait for the lock
+ * @returns true if lock was acquired, false if timed out
+ */
+public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Promise<boolean> {
+  const startTime = Date.now();
+  const retryDelay = 500;
+
+  while (Date.now() - startTime < timeoutMs) {
+    let acquired = false;
+    await this.updateState(async (state) => {
+      const now = Date.now();
+      const currentOwner = state.gpuOwner;
+
+      if (currentOwner) {
+        // If we are already the owner, just update startedAt (re-entrant/heartbeat)
+        if (currentOwner.pid === process.pid) {
+          currentOwner.startedAt = now;
+          if (sessionId) currentOwner.sessionId = sessionId;
+          acquired = true;
+          return state;
+        }
+
+        const isAlive = await this.isProcessAlive(currentOwner.pid);
+        if (isAlive) {
+          // GPU is busy with a live process
+          return state;
+        }
+        
+        // Owner is dead, reclaim
+        logger.warn(`[StateManager] GPU owner PID ${currentOwner.pid} is dead. Reclaiming GPU lock.`);
+      }
+
+      // Acquire lock
+      state.gpuOwner = {
+        pid: process.pid,
+        startedAt: now,
+        sessionId
+      };
+      acquired = true;
+      return state;
+    });
+
+    if (acquired) return true;
+    
+    // Check if we still have time to wait
+    if (Date.now() - startTime + retryDelay < timeoutMs) {
+      await this.sleep(retryDelay);
+    } else {
+      break;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Release the global GPU resource lock if held by this process.
+ * @param pid Optional PID to release for (defaults to current process)
+ */
+public async releaseGpuLock(pid: number = process.pid): Promise<void> {
+  await this.updateState((state) => {
+    if (state.gpuOwner?.pid === pid) {
+      delete state.gpuOwner;
+    }
+    return state;
+  });
+}
+
+/**
+ * Get information about the current GPU owner
+ */
+public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
+  const state = await this.readState();
+  return state.gpuOwner ?? null;
 }
 
 /**
@@ -770,6 +849,13 @@ public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<bool
 
     if ((state as any).schedulerVersion !== undefined && typeof (state as any).schedulerVersion !== 'string') {
       throw new Error('Invalid state: schedulerVersion must be a string');
+    }
+
+    if (state.gpuOwner !== undefined) {
+      const go = state.gpuOwner as any;
+      if (typeof go.pid !== 'number' || typeof go.startedAt !== 'number') {
+        throw new Error('Invalid state: gpuOwner must have numeric pid and startedAt fields');
+      }
     }
 
     for (const [sessionId, sessionData] of Object.entries(state.sessions)) {
@@ -889,4 +975,20 @@ public async isPidAlive(pid: number, expectedSchedulerId?: string): Promise<bool
   public getBackupDirPath(): string {
     return this.backupDirPath;
   }
+}
+
+/**
+ * Global singleton StateManager instance
+ */
+let _sharedStateManager: StateManager | null = null;
+
+/**
+ * Get the shared StateManager instance for this process.
+ * Module-level singleton so cleanupStaleLocksOnStartup() fires exactly once.
+ */
+export function getSharedStateManager(): StateManager {
+  if (!_sharedStateManager) {
+    _sharedStateManager = new StateManager();
+  }
+  return _sharedStateManager;
 }

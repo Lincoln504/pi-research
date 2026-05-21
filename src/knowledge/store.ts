@@ -116,17 +116,7 @@ export class KnowledgeStore {
     this.pendingOperations++;
 
     try {
-      // Raw-content docs are full-page cache for retrieval only — never searched by vector.
-      // Use zero vectors to avoid GPU load during the scraping phase.
-      const allRawContent = docs.every(d => d.metadata['ingestionType'] === 'raw-content');
-      let vectors: Float32Array[];
-      if (allRawContent) {
-        logger.debug(`[store] Skipping embedder for ${docs.length} raw-content chunk(s) (using zero vectors)`);
-        const dim = this.options.embedder.getDimension();
-        vectors = docs.map(() => new Float32Array(dim));
-      } else {
-        vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
-      }
+      const vectors = await this.options.embedder.embedMany(docs.map(d => d.text));
 
       const data = docs.map((doc, i) => ({
         vector: Array.from(vectors[i]!),

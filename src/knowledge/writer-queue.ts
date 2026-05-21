@@ -1,9 +1,11 @@
 import { logger } from '../logger.ts';
 import type { KnowledgeStore, StoreDocument } from './store.ts';
+import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
 
 export interface WriterQueueOptions {
   store: KnowledgeStore;
+  chunker?: Chunker;
 }
 
 export interface IngestionItem {
@@ -76,19 +78,27 @@ export class WriterQueue {
       await this.options.store.deleteByUrlAndType(item.url, incomingType);
     }
 
-    const doc: StoreDocument = {
+    const rawChunks = this.options.chunker
+      ? this.options.chunker.chunk(item.markdown)
+      : [{ text: item.markdown, actual_overlap: 0 }];
+
+    if (rawChunks.length === 0) return;
+
+    const docs: StoreDocument[] = rawChunks.map((chunk, i) => ({
       url: item.url,
-      text: item.markdown,
-      content: item.content,
+      text: chunk.text,
+      content: i === 0 ? (item.content ?? undefined) : undefined,
       metadata: {
+        ...(item.metadata || {}),
         contentHash: hash,
         ingestionType: incomingType,
-        ...(item.metadata || {}),
+        chunkIndex: i,
+        totalChunks: rawChunks.length,
       },
       timestamp: Date.now(),
-    };
+    }));
 
-    await this.options.store.addDocuments([doc]);
+    await this.options.store.addDocuments(docs);
   }
 
   async drain(): Promise<void> {

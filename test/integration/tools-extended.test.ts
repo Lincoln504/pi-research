@@ -256,6 +256,120 @@ describe('Extended Tools Integration', () => {
     }, 30000);
   });
 
+  describe('Security Search Tool - Advanced Parameters', () => {
+    it('should handle severity parameter for filtering', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createSecuritySearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      const result = await tool.execute(
+        'sec-severity-test',
+        { terms: ['vulnerability'], databases: ['cisa'], severity: ['HIGH', 'CRITICAL'] },
+        new AbortController().signal,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (!isNetworkUnavailable(text)) {
+          expect(text).toBeDefined();
+        }
+      }
+    }, 30000);
+
+    it('should handle maxResults parameter', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createSecuritySearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      const result = await tool.execute(
+        'sec-maxresults-test',
+        { terms: ['security'], databases: ['nvd'], maxResults: 5 },
+        new AbortController().signal,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (!isNetworkUnavailable(text)) {
+          expect(text.length).toBeGreaterThan(50);
+        }
+      }
+    }, 30000);
+
+    it('should handle includeExploited parameter', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createSecuritySearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      const result = await tool.execute(
+        'sec-exploited-test',
+        { terms: ['exploit'], databases: ['cisa'], includeExploited: true },
+        new AbortController().signal,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (!isNetworkUnavailable(text)) {
+          expect(text.length).toBeGreaterThan(50);
+        }
+      }
+    }, 30000);
+
+    it('should handle githubRepo parameter for package vulnerabilities', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createSecuritySearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      const result = await tool.execute(
+        'sec-githubrepo-test',
+        { terms: ['express'], databases: ['osv'], ecosystem: 'npm', githubRepo: 'expressjs/express' },
+        new AbortController().signal,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (!isNetworkUnavailable(text)) {
+          expect(text.length).toBeGreaterThan(50);
+        }
+      }
+    }, 30000);
+  });
+
   describe('Stack Exchange Tool - Structure and Setup', () => {
     it('should instantiate stackexchange tool with correct properties', () => {
       const tracker = new ToolUsageTracker({ gathering: 6 });
@@ -341,6 +455,65 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Stack Exchange Tool - Error Handling', () => {
+    it('should handle tags parameter for filtered search', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createStackexchangeTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      const result = await tool.execute(
+        'se-tags-test-1',
+        { command: 'search', query: 'async', site: 'stackoverflow.com', limit: 3, tags: ['javascript'] },
+        new AbortController().signal,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (isNetworkUnavailable(text)) {
+          return;
+        }
+        expect(text).toBeDefined();
+      }
+    }, 30000);
+
+    it('should handle format parameter for different output formats', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ gathering: 6 });
+      const tool = createStackexchangeTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker 
+      });
+      
+      for (const format of ['compact', 'table', 'json'] as const) {
+        const result = await tool.execute(
+          `se-format-${format}`,
+          { command: 'search', query: 'array methods', site: 'stackoverflow.com', limit: 2, format },
+          new AbortController().signal,
+          undefined,
+          mockExtensionCtx as any
+        );
+
+        expect(result).toBeDefined();
+        if (result.content[0]?.type === 'text') {
+          const text = result.content[0].text as string;
+          if (!isNetworkUnavailable(text)) {
+            expect(text.length).toBeGreaterThan(50);
+          }
+        }
+      }
+    }, 30000);
+
     it('should handle invalid site names gracefully', async () => {
       if (testContext.skipTests()) {
         return;

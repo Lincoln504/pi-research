@@ -104,18 +104,23 @@ async function initBrowser() {
                 // temp profile per instance. This avoids persistent-context semantics
                 // (where context.browser() returns null) and the profile-lock contention
                 // that came with sharing a single user_data_dir path.
-                browser = await Camoufox({
+                const launchedBrowser = await Camoufox({
                     headless: true,
                     humanize: true,
                 });
 
-                context = await browser.newContext({
+                context = await launchedBrowser.newContext({
                     viewport: { width: 1280, height: 800 },
                 });
 
+                browser = launchedBrowser;
                 logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
             }
         } catch (e) {
+            // Close any partially-launched browser to avoid orphaning the process.
+            if (browser && typeof browser.close === 'function') {
+                browser.close().catch(() => {});
+            }
             browser = null;
             context = null;
             const msg = e instanceof Error ? e.message : String(e);
@@ -273,9 +278,21 @@ async function executeHealthCheck(browser, context) {
 }
 
 async function runTask(data) {
-    const { type, query, url } = data;
+    const { type, query, url, queuedAt, taskTimeoutMs } = data;
     const startTime = Date.now();
         logToDebugFile('DEBUG', `[Worker-${workerId}] Received task: ${type}`);
+
+    // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
+    // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
+    // We should immediately drop it to prevent queue congestion.
+    if (queuedAt && taskTimeoutMs) {
+        const queueTime = startTime - queuedAt;
+        // Add a 5% buffer to ensure we only drop tasks the orchestrator definitely abandoned
+        if (queueTime > taskTimeoutMs * 1.05) {
+            logToDebugFile('WARN', `[Worker-${workerId}] Dropping zombie task ${type} (queued for ${queueTime}ms, timeout was ${taskTimeoutMs}ms)`);
+            return { error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)` };
+        }
+    }
 
     try {
         await initBrowser();

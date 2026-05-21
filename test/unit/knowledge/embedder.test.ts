@@ -378,6 +378,97 @@ describe('Embedder timeout behavior', () => {
 
 });
 
+describe('GPU lock behavior', () => {
+  const makeStateManager = () => ({
+    acquireGpuLock: vi.fn().mockResolvedValue(true),
+    releaseGpuLock: vi.fn().mockResolvedValue(undefined),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAccess.mockResolvedValue(undefined);
+  });
+
+  it('acquires GPU init lock and releases it after initialization completes', async () => {
+    const sm = makeStateManager();
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await e.initialize();
+    expect(sm.acquireGpuLock).toHaveBeenCalledTimes(1);
+    // Lock must be released after init, before any inference
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to CPU when GPU init lock cannot be acquired', async () => {
+    const sm = makeStateManager();
+    sm.acquireGpuLock.mockResolvedValue(false);
+    const { pipeline } = await import('@huggingface/transformers');
+    let deviceUsed: string | undefined;
+    vi.mocked(pipeline).mockImplementationOnce(async (_task, _model, opts: any) => {
+      deviceUsed = opts?.device;
+      return mockPipelineFn;
+    });
+
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await e.initialize();
+    expect(deviceUsed).toBe('cpu');
+    expect(sm.releaseGpuLock).not.toHaveBeenCalled();
+  });
+
+  it('acquires and releases GPU lock per embed() call', async () => {
+    const sm = makeStateManager();
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await e.initialize();
+    sm.acquireGpuLock.mockClear();
+    sm.releaseGpuLock.mockClear();
+
+    await e.embed('hello');
+    expect(sm.acquireGpuLock).toHaveBeenCalledTimes(1);
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('acquires and releases GPU lock per batch in embedMany()', async () => {
+    const sm = makeStateManager();
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', batchSize: 2, stateManager: sm as any });
+    await e.initialize();
+    sm.acquireGpuLock.mockClear();
+    sm.releaseGpuLock.mockClear();
+
+    await e.embedMany(['a', 'b', 'c', 'd']); // 2 batches of 2
+    expect(sm.acquireGpuLock).toHaveBeenCalledTimes(2);
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases GPU lock even when embed() pipeline throws', async () => {
+    const sm = makeStateManager();
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await e.initialize();
+    sm.acquireGpuLock.mockClear();
+    sm.releaseGpuLock.mockClear();
+
+    mockPipelineFn.mockRejectedValueOnce(new Error('non-gpu pipeline error'));
+    await expect(e.embed('hello')).rejects.toThrow('non-gpu pipeline error');
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases GPU init lock even when initialization fails', async () => {
+    const sm = makeStateManager();
+    const { pipeline } = await import('@huggingface/transformers');
+    vi.mocked(pipeline).mockRejectedValueOnce(new Error('init failure'));
+
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await expect(e.initialize()).rejects.toThrow('init failure');
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no GPU lock calls when stateManager is not provided', async () => {
+    const e = new Embedder({ model: 'test-model', device: 'webgpu' });
+    await e.initialize();
+    // No stateManager — no lock calls, no crash
+    await e.embed('hello');
+    await e.embedMany(['a', 'b']);
+  });
+});
+
 describe('cache-aware initialization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -445,6 +536,67 @@ describe('cache-aware initialization', () => {
     await embedder.initialize();
 
     expect(allowRemoteAtCallTime).toBe(true);
+  });
+});
+
+describe('Embedder disposal', () => {
+  let embedder: Embedder;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAccess.mockResolvedValue(undefined);
+    embedder = new Embedder({ model: 'test-model' });
+  });
+
+  it('should dispose pipeline and set isInitialized to false', async () => {
+    await embedder.initialize();
+    expect(embedder.isInitialized()).toBe(true);
+
+    await embedder.dispose();
+
+    expect(embedder.isInitialized()).toBe(false);
+  });
+
+  it('should handle dispose when not initialized', async () => {
+    await expect(embedder.dispose()).resolves.not.toThrow();
+    expect(embedder.isInitialized()).toBe(false);
+  });
+
+  it('should throw when calling embed after dispose', async () => {
+    await embedder.initialize();
+    await embedder.dispose();
+
+    await expect(embedder.embed('test')).rejects.toThrow('Embedder not initialized');
+  });
+
+  it('should throw when calling embedMany after dispose', async () => {
+    await embedder.initialize();
+    await embedder.dispose();
+
+    await expect(embedder.embedMany(['test'])).rejects.toThrow('Embedder not initialized');
+  });
+
+  it('should throw when calling getDimension after dispose', async () => {
+    await embedder.initialize();
+    await embedder.dispose();
+
+    expect(() => embedder.getDimension()).toThrow('Embedder not initialized');
+  });
+
+  it('should release GPU lock when disposing with stateManager', async () => {
+    const sm = {
+      acquireGpuLock: vi.fn().mockResolvedValue(true),
+      releaseGpuLock: vi.fn().mockResolvedValue(undefined),
+    };
+    const e = new Embedder({ model: 'test-model', device: 'webgpu', stateManager: sm as any });
+    await e.initialize();
+
+    // Clear calls from initialization
+    sm.releaseGpuLock.mockClear();
+
+    await e.dispose();
+
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
   });
 });
 

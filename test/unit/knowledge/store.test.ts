@@ -80,18 +80,6 @@ describe('KnowledgeStore', () => {
     expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
   });
 
-  it('addDocuments with raw-content type skips the embedder (zero vectors used)', async () => {
-    await store.open();
-    vi.mocked(mockEmbedder.embedMany).mockClear();
-    await store.addDocuments([{
-      url: 'https://example.com/raw',
-      text: 'full scraped page content',
-      metadata: { ingestionType: 'raw-content' },
-      timestamp: Date.now(),
-    }]);
-    expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
-  });
-
   it('addDocuments with synthesis-description type calls the embedder', async () => {
     await store.open();
     vi.mocked(mockEmbedder.embedMany).mockClear();

@@ -258,12 +258,11 @@ export class DeepResearchOrchestrator {
                   }
                 }
               }
-              // Drain and rebuild FTS before evaluate() so findRelevantUrls() sees this round's
-              // new entries via both vector and full-text search paths.
+              // Drain before evaluate() so findRelevantUrls() sees this round's
+              // new entries via vector search. Full-text search index is rebuilt
+              // asynchronously at session end/shutdown.
               if (enqueued > 0) {
                 await writer.drain();
-                const store = await getStore();
-                await store.rebuildFtsIndex();
               }
             } catch (err) {
               logger.warn('[Orchestrator] Failed to store link descriptions (non-fatal):', err);
@@ -277,19 +276,19 @@ export class DeepResearchOrchestrator {
           if (currentPlan.action === 'synthesize') {
               const synthesis = this.ensureCitedLinks(currentPlan.content || this.buildFallbackSynthesis());
               this.options.observer?.onComplete?.(synthesis);
-              this.cleanup();
+              await this.cleanup();
               return synthesis;
           }
       }
 
       const finalSynthesis = this.buildFallbackSynthesis();
       this.options.observer?.onComplete?.(finalSynthesis);
-      this.cleanup();
+      await this.cleanup();
       return finalSynthesis;
 
     } catch (error) {
       if (error instanceof Error && error.message === 'Research aborted.') {
-        this.cleanup();
+        await this.cleanup();
         throw error;
       }
       logger.error('[Orchestrator] Run failed:', error);
@@ -297,22 +296,23 @@ export class DeepResearchOrchestrator {
         const partial = this.buildFallbackSynthesis();
         this.options.observer?.onComplete?.(partial);
         this.options.observer?.onError?.(error as Error);
-        this.cleanup();
+        await this.cleanup();
         return partial;
       }
       this.options.observer?.onError?.(error as Error);
-      this.cleanup();
+      await this.cleanup();
       return "Research failed. Check debug logs for details.";
     }
   }
 
   /**
-   * Clean up internal state to release memory
+   * Clean up internal state and abort all active researcher sessions.
    */
-  private cleanup(): void {
-    for (const session of this.activeSessions.values()) {
-      session.abort().catch(() => {});
-    }
+  private async cleanup(): Promise<void> {
+    const aborts = Array.from(this.activeSessions.values()).map(s =>
+      s.abort().catch(() => {})
+    );
+    await Promise.all(aborts);
     this.activeSessions.clear();
     this.reports.clear();
   }

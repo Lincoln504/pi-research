@@ -1,6 +1,5 @@
 import { logger, getLogger } from '../logger.ts';
-import { shutdownManager } from '../utils/shutdown-manager.ts';
-import { StateManager } from './state-manager.ts';
+import { getSharedStateManager } from './state-manager.ts';
 import { BrowserServer } from './browser-server.ts';
 import { getBrowserEnv, ensureBrowserCacheDir, getCamoufoxBinaryPath } from './browser-config.ts';
 import { createRequire } from 'node:module';
@@ -46,16 +45,6 @@ function generateSchedulerVersion(config?: Config): string {
  * Store the current scheduler version globally for quick invalidation checks.
  */
 let cachedSchedulerVersion: string | null = null;
-
-// Module-level singleton so cleanupStaleLocksOnStartup() fires exactly once per process.
-// Creating new StateManager() on every forceSchedulerRestart() call would re-trigger the
-// cleanup side-effect concurrently, which can delete locks held by other live processes.
-// Lazy to avoid running before Vitest mocks are installed at test startup.
-let _sharedStateManager: StateManager | null = null;
-function getSharedStateManager(): StateManager {
-    if (!_sharedStateManager) _sharedStateManager = new StateManager();
-    return _sharedStateManager;
-}
 
 /**
  * Get the current number of worker threads from config.
@@ -346,7 +335,7 @@ class BrowserTaskScheduler implements IScheduler {
         let result: { success: boolean; error?: string };
         try {
             result = await Promise.race([
-                pool.execute({ type: 'healthcheck' }),
+                pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]) as { success: boolean; error?: string };
         } finally {
@@ -469,6 +458,12 @@ class BrowserClient implements IScheduler {
                         reject(new Error(`Failed to parse response: ${body}`));
                     }
                 });
+                res.on('error', (err) => {
+                    if (resolved) return;
+                    resolved = true;
+                    clearTimeout(timer);
+                    reject(new Error(`[BrowserClient] Response stream error on ${path}: ${err.message}`));
+                });
             });
 
             req.on('error', (err) => {
@@ -586,7 +581,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         try {
             await stateManager.updateState(async (state) => {
                 if (state.browserServer) {
-                    const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId);
+                    const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId, true);
                     if (alive) {
                         winnerPort = state.browserServer.port;
                         wonElection = false;
@@ -758,4 +753,6 @@ export async function stopBrowserManager(): Promise<void> {
   clientAgent.destroy();
 }
 
-shutdownManager.register(stopBrowserManager);
+// Note: stopBrowserManager is registered in src/index.ts to ensure proper
+// shutdown order (browser pool stops BEFORE knowledge store shuts down).
+

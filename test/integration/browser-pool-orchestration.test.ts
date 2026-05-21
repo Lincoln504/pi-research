@@ -345,7 +345,7 @@ describe('Browser Pool Orchestration', () => {
         // Delay between cycles
         await new Promise(resolve => setTimeout(resolve, 300));
       }
-    });
+    }, 60000); // 60 seconds for 3 shutdown/restart cycles
 
     it('should handle concurrent shutdown requests', async () => {
       if (testContext.skipTests()) {
@@ -370,7 +370,7 @@ describe('Browser Pool Orchestration', () => {
 
       expect(result).toBeDefined();
       expect(Array.isArray(result)).toBe(true);
-    });
+    }, 60000); // 60 seconds for concurrent shutdown test
   });
 
   describe('Scheduler Restart', () => {

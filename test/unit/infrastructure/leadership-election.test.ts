@@ -47,14 +47,20 @@ const mockIsPidAlive = vi.fn(async () => false);
 const mockClearBrowserServer = vi.fn(async () => {});
 const mockReadState = vi.fn(async () => ({ sessions: {} } as any));
 
+let _mockStateManagerInstance: any = null;
 vi.mock('../../../src/infrastructure/state-manager.ts', () => {
+  class MockStateManager {
+    getBrowserServer = mockGetBrowserServer;
+    updateState = mockUpdateState;
+    isPidAlive = mockIsPidAlive;
+    clearBrowserServer = mockClearBrowserServer;
+    readState = mockReadState;
+  }
   return {
-    StateManager: class {
-      getBrowserServer = mockGetBrowserServer;
-      updateState = mockUpdateState;
-      isPidAlive = mockIsPidAlive;
-      clearBrowserServer = mockClearBrowserServer;
-      readState = mockReadState;
+    StateManager: MockStateManager,
+    getSharedStateManager: () => {
+      if (!_mockStateManagerInstance) _mockStateManagerInstance = new MockStateManager();
+      return _mockStateManagerInstance;
     },
   };
 });

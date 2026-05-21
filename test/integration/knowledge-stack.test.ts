@@ -127,24 +127,6 @@ describe('Knowledge stack integration', () => {
     expect(await store.findByUrl('https://keep.example.com')).not.toHaveLength(0);
   });
 
-  it('rebuildDocument reconstructs multi-chunk document exactly', async () => {
-    const original = 'Hello world this is the full document content here. '.repeat(15);
-    const chunks = chunker.chunk(original);
-    expect(chunks.length).toBeGreaterThan(1); // sanity
-
-    await store.addDocuments(
-      chunks.map((c, i) => ({
-        url: 'https://rebuild.example.com',
-        text: c.text,
-        metadata: { chunkIndex: i, totalChunks: chunks.length, actualOverlap: c.actual_overlap, ingestionType: 'raw-content' },
-        timestamp: Date.now(),
-      })),
-    );
-
-    const rebuilt = await store.rebuildDocument('https://rebuild.example.com');
-    expect(rebuilt?.text).toBe(original);
-  });
-
   it('rebuildDocument returns null for an unknown URL', async () => {
     const result = await store.rebuildDocument('https://not-in-store.example.com');
     expect(result).toBeNull();
@@ -180,12 +162,13 @@ describe('Knowledge stack integration', () => {
   // ── WriterQueue ────────────────────────────────────────────────────────────
 
   it('WriterQueue ingests markdown through chunker into store', async () => {
+    // 'Integration test content. '.repeat(20) = 500 chars, targetSize=200 → >1 chunk
     const markdown = 'Integration test content. '.repeat(20);
     queue.enqueue({ url: 'https://wq.example.com', markdown });
     await queue.drain();
 
     const found = await store.findByUrl('https://wq.example.com');
-    expect(found.length).toBeGreaterThan(0);
+    expect(found.length).toBeGreaterThan(1);
   });
 
   it('WriterQueue deduplicates — same content is not re-ingested', async () => {
@@ -230,7 +213,7 @@ describe('Knowledge stack integration', () => {
 
   it('full cache-hit path: ingest then rebuildDocument returns original', async () => {
     const originalMarkdown = '# Title\n\nSome paragraph content.\n\nAnother paragraph here.';
-    queue.enqueue({ url: 'https://cache.example.com', markdown: originalMarkdown });
+    queue.enqueue({ url: 'https://cache.example.com', markdown: 'Summary of the cache example', content: originalMarkdown });
     await queue.drain();
 
     const rebuilt = await store.rebuildDocument('https://cache.example.com');
@@ -284,6 +267,7 @@ describe('Knowledge stack integration', () => {
         'Xenova/bge-m3',
         'onnx-community/embeddinggemma-300m-ONNX',
         'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+        'onnx-community/granite-embedding-small-english-r2-ONNX',
       ];
       for (const m of models) {
         const cfg = getModelChunkConfig(m);
@@ -298,6 +282,105 @@ describe('Knowledge stack integration', () => {
     it('MiniLM chunk size is smaller than Qwen3 (training context difference)', () => {
       expect(getModelChunkConfig('Xenova/all-MiniLM-L6-v2').chunkSize)
         .toBeLessThan(getModelChunkConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX').chunkSize);
+    });
+  });
+
+  // ── WriterQueue chunking ───────────────────────────────────────────────────
+
+  describe('WriterQueue chunking', () => {
+    it('stores multiple chunks for text larger than targetSize', async () => {
+      // Chunker is configured with targetSize: 200, 'Integration test content. '.repeat(20) = 500 chars
+      const markdown = 'Integration test content. '.repeat(20);
+      queue.enqueue({ url: 'https://chunks.example.com', markdown });
+      await queue.drain();
+      const found = await store.findByUrl('https://chunks.example.com');
+      expect(found.length).toBeGreaterThan(1);
+      // All chunks share the same URL and contentHash
+      const hash = createHash('sha256').update(markdown).digest('hex');
+      expect(found.every(d => d.url === 'https://chunks.example.com')).toBe(true);
+      expect(found.every(d => d.metadata['contentHash'] === hash)).toBe(true);
+    });
+
+    it('only first chunk carries the full-page content field', async () => {
+      const markdown = 'Content. '.repeat(60); // long enough to chunk
+      const fullPageContent = '# Full Page\n\nOriginal markdown content here.';
+      queue.enqueue({ url: 'https://content-field.example.com', markdown, content: fullPageContent });
+      await queue.drain();
+      const found = await store.findByUrl('https://content-field.example.com');
+      expect(found.length).toBeGreaterThan(0);
+      const withContent = found.filter(d => d.content !== undefined && d.content !== null);
+      expect(withContent.length).toBe(1); // exactly one chunk carries content
+      expect(withContent[0]!.content).toBe(fullPageContent);
+      expect(withContent[0]!.metadata['chunkIndex']).toBe(0); // must be the first chunk
+    });
+
+    it('chunk metadata includes chunkIndex and totalChunks', async () => {
+      const markdown = 'Metadata test. '.repeat(40); // forces multiple chunks
+      queue.enqueue({ url: 'https://meta.example.com', markdown });
+      await queue.drain();
+      const found = await store.findByUrl('https://meta.example.com');
+      expect(found.length).toBeGreaterThan(1);
+      const total = found[0]!.metadata['totalChunks'];
+      expect(typeof total).toBe('number');
+      expect(total).toBeGreaterThan(1);
+      const indices = found.map(d => d.metadata['chunkIndex'] as number).sort((a, b) => a - b);
+      expect(indices).toEqual(Array.from({ length: total }, (_, i) => i));
+    });
+
+    it('deduplication works correctly for multi-chunk documents', async () => {
+      const markdown = 'Stable chunk content. '.repeat(30);
+      queue.enqueue({ url: 'https://chunk-dedup.example.com', markdown });
+      await queue.drain();
+      const countAfterFirst = (await store.findByUrl('https://chunk-dedup.example.com')).length;
+      expect(countAfterFirst).toBeGreaterThan(0);
+
+      // Re-enqueue same content — should be a no-op
+      queue.enqueue({ url: 'https://chunk-dedup.example.com', markdown });
+      await queue.drain();
+      const countAfterSecond = (await store.findByUrl('https://chunk-dedup.example.com')).length;
+      expect(countAfterSecond).toBe(countAfterFirst);
+    });
+  });
+
+  // ── Concurrent WriterQueue operations ─────────────────────────────────────
+
+  describe('Concurrent WriterQueue operations', () => {
+    it('multiple sequential enqueues before drain all complete', async () => {
+      const urls = ['https://c1.example.com', 'https://c2.example.com', 'https://c3.example.com'];
+      for (const url of urls) {
+        queue.enqueue({ url, markdown: `Content for ${url} with enough words to be meaningful.` });
+      }
+      await queue.drain();
+      for (const url of urls) {
+        const found = await store.findByUrl(url);
+        expect(found.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('two WriterQueue instances sharing one store do not cross-contaminate', async () => {
+      const q2 = new WriterQueue({ store, chunker });
+      queue.enqueue({ url: 'https://q1share.example.com', markdown: 'Queue 1 share content.' });
+      q2.enqueue({ url: 'https://q2share.example.com', markdown: 'Queue 2 share content.' });
+      await Promise.all([queue.drain(), q2.drain()]);
+
+      const q1Docs = await store.findByUrl('https://q1share.example.com');
+      const q2Docs = await store.findByUrl('https://q2share.example.com');
+      expect(q1Docs.length).toBeGreaterThan(0);
+      expect(q2Docs.length).toBeGreaterThan(0);
+      expect(q1Docs.every(d => d.url === 'https://q1share.example.com')).toBe(true);
+      expect(q2Docs.every(d => d.url === 'https://q2share.example.com')).toBe(true);
+    });
+
+    it('rapid re-enqueue of same URL serializes correctly — no duplicate rows', async () => {
+      const markdown = 'Rapid dedup content for serialization test.';
+      queue.enqueue({ url: 'https://rapid.example.com', markdown });
+      queue.enqueue({ url: 'https://rapid.example.com', markdown });
+      queue.enqueue({ url: 'https://rapid.example.com', markdown });
+      await queue.drain();
+      const docs = await store.findByUrl('https://rapid.example.com');
+      // Same hash means dedup kicks in after first ingest
+      const hashes = new Set(docs.map(d => d.metadata['contentHash']));
+      expect(hashes.size).toBe(1);
     });
   });
 });

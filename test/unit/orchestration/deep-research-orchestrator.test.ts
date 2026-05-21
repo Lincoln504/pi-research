@@ -443,4 +443,57 @@ describe('DeepResearchOrchestrator', () => {
       expect(map.size).toBe(0);
     });
   });
+
+  describe('cleanup behavior', () => {
+    it('should abort all active sessions on cleanup', async () => {
+      const orchestrator = new DeepResearchOrchestrator(options);
+      const mockAbort = vi.fn().mockResolvedValue(undefined);
+      const mockSession = {
+        abort: mockAbort,
+        getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report\n\n### CITED LINKS\n[1] https://example.com\nDescription: Test' }] }],
+      };
+
+      // Add two active sessions
+      (orchestrator as any).activeSessions.set('session1', mockSession);
+      (orchestrator as any).activeSessions.set('session2', mockSession);
+
+      await (orchestrator as any).cleanup();
+
+      expect(mockAbort).toHaveBeenCalledTimes(2);
+      expect((orchestrator as any).activeSessions.size).toBe(0);
+    });
+
+    it('should clear reports on cleanup', async () => {
+      const orchestrator = new DeepResearchOrchestrator(options);
+      (orchestrator as any).reports.set('report1', 'Test report content');
+      (orchestrator as any).reports.set('report2', 'Another report');
+
+      await (orchestrator as any).cleanup();
+
+      expect((orchestrator as any).reports.size).toBe(0);
+    });
+
+    it('should handle abort errors gracefully during cleanup', async () => {
+      const orchestrator = new DeepResearchOrchestrator(options);
+      const mockAbort1 = vi.fn().mockRejectedValue(new Error('abort failed'));
+      const mockAbort2 = vi.fn().mockResolvedValue(undefined);
+      const mockSession1 = {
+        abort: mockAbort1,
+        getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report' }] }],
+      };
+      const mockSession2 = {
+        abort: mockAbort2,
+        getHistory: () => [{ role: 'assistant', content: [{ type: 'text', text: 'Report' }] }],
+      };
+
+      (orchestrator as any).activeSessions.set('session1', mockSession1);
+      (orchestrator as any).activeSessions.set('session2', mockSession2);
+
+      await expect((orchestrator as any).cleanup()).resolves.not.toThrow();
+
+      expect(mockAbort1).toHaveBeenCalled();
+      expect(mockAbort2).toHaveBeenCalled();
+      expect((orchestrator as any).activeSessions.size).toBe(0);
+    });
+  });
 });

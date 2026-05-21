@@ -89,10 +89,10 @@ Build your CITED LINKS list first (number every URL you scraped), then write the
 
 ### CITED LINKS
 **MANDATORY — do not omit. List every URL you scraped, whether or not it was cited inline.**
-**CRITICAL:** Your `Description:` for each cited link is the ONLY way this information is saved for future research sessions. If you omit details here, they are lost to the system's memory. Provide a comprehensive summary of the specific facts, statistics, and findings you extracted.
+**CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content: include specific numbers, dates, names, version strings, benchmark scores, code patterns, or any other concrete detail from the page. Do NOT write a vague one-liner — a sparse description is a failed memory entry.
 
 [1] https://example.com
-Description: A comprehensive summary of the specific facts, statistics, and findings you extracted from this source regarding the topic.
+Description: Covers the v4.2 release of LibX, which introduced async pipeline support and reduced p99 latency from 240 ms to 18 ms under 500 concurrent connections. The changelog lists 14 breaking API changes, including removal of the synchronous `connect()` method and renaming `RetryPolicy` to `BackoffPolicy`. Benchmarks were run on AWS c6g.4xlarge (16 vCPU, 32 GB RAM) with PostgreSQL 15.3. The migration guide recommends running the provided codemods before upgrading and notes that the old config format is unsupported after 2025-01-01.
 [2] https://example2.com
-Description: Detailed overview of what this source covered, preserving key technical details.
+Description: Academic paper (Chen et al., 2023, NeurIPS) proposing a sparse attention mechanism that reduces transformer memory from O(n²) to O(n log n) by restricting each token to attend only to its 64 nearest neighbours in learned embedding space. Evaluated on LongBench (128k context), achieving 91.3 F1 vs 89.7 for full attention at 3.2× lower memory. Limitations: degrades on tasks requiring global context; not yet tested beyond English. Code released at github.com/example/sparse-attn under Apache 2.0.
 ```
