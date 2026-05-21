@@ -282,6 +282,7 @@ export default function (pi: ExtensionAPI) {
         key?: ConfigKey;
         label: string;
         description: string;
+        hidden?: () => boolean;
       }
 
       interface NumberConfigItem extends BaseConfigItem {
@@ -366,6 +367,7 @@ export default function (pi: ExtensionAPI) {
           description: '(←→ cycle models)',
           options: SUPPORTED_MODELS.map(m => m.id),
           warning: '⚠ Changing model clears DB',
+          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
         },
         {
           type: 'string',
@@ -373,6 +375,7 @@ export default function (pi: ExtensionAPI) {
           label: 'Embed Device',
           description: '(←→ webgpu/cpu)',
           options: ['webgpu', 'cpu'],
+          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
         },
         {
           type: 'number',
@@ -382,6 +385,7 @@ export default function (pi: ExtensionAPI) {
           min: 1, max: 365, displayMin: 1, displayMax: 365, step: 1,
           toDisplay: (v) => v, fromDisplay: (v) => v,
           format: (v) => `${v}d`,
+          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
         },
         {
           type: 'number',
@@ -404,6 +408,7 @@ export default function (pi: ExtensionAPI) {
             }
             storeCountLabel = ' (0 entries)';
           },
+          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
         },
       ];
 
@@ -425,6 +430,15 @@ export default function (pi: ExtensionAPI) {
               this.originalModel = config['EMBEDDING_MODEL'] as string;
             }
 
+            private get visibleItems() {
+              return configItems.filter(item => !item.hidden?.());
+            }
+
+            private clampSelection(): void {
+              const len = this.visibleItems.length;
+              if (this.selectedIndex >= len) this.selectedIndex = Math.max(0, len - 1);
+            }
+
             render(width: number): string[] {
               // Check cache
               if (this.cachedWidth === width && this.cachedVersion === this.version) {
@@ -434,7 +448,8 @@ export default function (pi: ExtensionAPI) {
               const sep = theme.fg('accent', '─'.repeat(Math.max(0, width - 2)));
               const lines = [theme.fg('accent', ' pi-research Configuration'), sep];
 
-              configItems.forEach((item, idx) => {
+              const visibleItems = this.visibleItems;
+              visibleItems.forEach((item, idx) => {
                 const isSelected = idx === this.selectedIndex;
                 const prefix = isSelected ? theme.fg('accent', '► ') : '  ';
                 
@@ -495,7 +510,7 @@ export default function (pi: ExtensionAPI) {
               }
               lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
               lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
-              const selKey = configItems[this.selectedIndex]?.key;
+              const selKey = visibleItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
                 const currentModel = config['EMBEDDING_MODEL'] as string;
                 const modelReady = isModelCached(currentModel);
@@ -527,7 +542,7 @@ export default function (pi: ExtensionAPI) {
 
               // Enter - save or execute action
               if (key === '\r' || key === '\n') {
-                const item = configItems[this.selectedIndex];
+                const item = this.visibleItems[this.selectedIndex];
                 if (item && item.type === 'action' && 'action' in item) {
                   this.statusMsg = 'Executing...';
                   this.version++;
@@ -545,13 +560,15 @@ export default function (pi: ExtensionAPI) {
 
               // Up/Down arrows
               if (matchesKey(key, 'up')) {
-                this.selectedIndex = this.selectedIndex > 0 ? this.selectedIndex - 1 : configItems.length - 1;
+                const len = this.visibleItems.length;
+                this.selectedIndex = this.selectedIndex > 0 ? this.selectedIndex - 1 : len - 1;
                 this.version++;
                 tui.requestRender();
                 return;
               }
               if (matchesKey(key, 'down')) {
-                this.selectedIndex = this.selectedIndex < configItems.length - 1 ? this.selectedIndex + 1 : 0;
+                const len = this.visibleItems.length;
+                this.selectedIndex = this.selectedIndex < len - 1 ? this.selectedIndex + 1 : 0;
                 this.version++;
                 tui.requestRender();
                 return;
@@ -559,7 +576,7 @@ export default function (pi: ExtensionAPI) {
 
               // Left/Right arrows
               if (matchesKey(key, 'left') || matchesKey(key, 'right')) {
-                const item = configItems[this.selectedIndex];
+                const item = this.visibleItems[this.selectedIndex];
                 if (!item) return;
 
                 if (item.type === 'number') {
@@ -577,6 +594,7 @@ export default function (pi: ExtensionAPI) {
                   }
                 } else if (item.type === 'boolean') {
                   (config[item.key] as any) = !config[item.key];
+                  this.clampSelection();
                   this.version++;
                   tui.requestRender();
                 } else if (item.type === 'string') {

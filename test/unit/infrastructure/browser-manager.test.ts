@@ -127,7 +127,7 @@ describe('BrowserManager', () => {
       vi.useRealTimers();
     });
 
-    it('should lose leadership if schedulerId changes in state', async () => {
+  it('should lose leadership if schedulerId changes in state', async () => {
       await runBrowserTask('q1', 'search');
       const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
       const shutdownSpy = vi.spyOn(scheduler, 'shutdown');
