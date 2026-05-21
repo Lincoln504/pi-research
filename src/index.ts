@@ -503,13 +503,13 @@ export default function (pi: ExtensionAPI) {
                 lines.push(theme.fg(modelReady ? 'muted' : 'warning', ` Model: ${statusText}`));
                 lines.push(theme.fg('muted', ` Dir:   ${piModelCache}`));
               }
-              // Warning persists for the whole session once a different model is selected,
+              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
+              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
+              // Warning at the very bottom — persists once a different model is selected,
               // disappears only if the user returns to the original model within this session.
               if ((config['EMBEDDING_MODEL'] as string) !== this.originalModel) {
                 lines.push(theme.fg('warning', ` ⚠ Changing model permanently clears the knowledge DB`));
               }
-              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
-              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
 
               // Truncate lines to fit within width
               this.cachedLines = lines.map(line => {
