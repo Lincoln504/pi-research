@@ -447,33 +447,35 @@ export default function (pi: ExtensionAPI) {
                   valueDisplay = (value ? '[ON]' : '[OFF]').padStart(10);
                 } else if (item.type === 'string') {
                   const value = config[item.key] as string;
-                  if (item.options && item.options.length > 0) {
+                  if (item.key === 'EMBEDDING_MODEL' && item.options && item.options.length > 0) {
                     const modelInfo = SUPPORTED_MODELS.find(m => m.id === value);
                     const cached = isModelCached(value);
-                    const langTag = modelInfo
-                      ? (modelInfo.multilingual ? '[multi-lang]' : '[EN]')
-                      : '';
+                    const langLabel = modelInfo?.multilingual ? '[multi]' : '[EN]';
 
-                    // Value column: cache status (7 chars, padded to 10)
-                    valueDisplay = (cached ? '[local]' : '[fetch]').padStart(10);
+                    // Value column: lang capability when ready, download notice when not.
+                    // [local]/[fetch] removed — lang tag is more informative at a glance.
+                    valueDisplay = (cached ? langLabel : '[auto-dl]').padStart(10);
 
-                    // Description: full model ID truncated to available terminal width,
-                    // followed by the lang tag.
-                    // Available visible chars = width − fixed layout prefix (2+20+1+10+1 = 34)
+                    // Description: model ID truncated to fit.
+                    // When not cached, append lang tag here since value col is taken by [auto-dl].
+                    // Available visible chars = width − fixed prefix (2+20+1+10+1 = 34)
                     const available = Math.max(20, width - 34);
-                    const tail = langTag ? ` ${langTag}` : '';
-                    const nameMax = Math.max(5, available - tail.length);
+                    const suffix = !cached ? ` ${langLabel}` : '';
+                    const nameMax = Math.max(5, available - suffix.length);
                     const displayName = value.length <= nameMax
                       ? value
                       : value.slice(0, nameMax - 3) + '...';
 
                     if (isSelected) {
                       const langColor = modelInfo?.multilingual ? 'accent' : 'muted';
-                      desc = displayName
-                        + (langTag ? ' ' + theme.fg(langColor, langTag) : '');
+                      desc = displayName + (!cached ? ' ' + theme.fg(langColor, langLabel) : '');
                     } else {
-                      desc = displayName + tail;
+                      desc = displayName + suffix;
                     }
+                  } else if (item.options && item.options.length > 0) {
+                    // Generic option selector (e.g. Embed Device): show the selected value directly.
+                    valueDisplay = value.padStart(10);
+                    if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
                   } else {
                     valueDisplay = (value.length > 10 ? '...' + value.slice(-7) : value).padStart(10);
                     if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
@@ -494,7 +496,7 @@ export default function (pi: ExtensionAPI) {
               const selKey = configItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
                 lines.push(theme.fg('muted',    ` Model dir: ${piModelCache}`));
-                lines.push(theme.fg('muted',    ` [fetch] = not yet downloaded. Model auto-downloads on next research task start.`));
+                lines.push(theme.fg('muted',    ` [auto-dl] = not yet downloaded, will auto-download on first use.`));
                 lines.push(theme.fg('warning',  ` ⚠ Changing model permanently clears the knowledge DB`));
               }
               lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
