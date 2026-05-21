@@ -494,7 +494,8 @@ export default function (pi: ExtensionAPI) {
               if (this.statusMsg) {
                 lines.push(theme.fg('success', ` ${this.statusMsg}`));
               }
-              // Contextual lines — ordered: actionable status → location → warning → controls
+              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
+              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
               const selKey = configItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
                 const currentModel = config['EMBEDDING_MODEL'] as string;
@@ -503,10 +504,6 @@ export default function (pi: ExtensionAPI) {
                 lines.push(theme.fg(modelReady ? 'muted' : 'warning', ` Model: ${statusText}`));
                 lines.push(theme.fg('muted', ` Dir:   ${piModelCache}`));
               }
-              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
-              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
-              // Warning at the very bottom — persists once a different model is selected,
-              // disappears only if the user returns to the original model within this session.
               if ((config['EMBEDDING_MODEL'] as string) !== this.originalModel) {
                 lines.push(theme.fg('warning', ` ⚠ Changing model permanently clears the knowledge DB`));
               }
