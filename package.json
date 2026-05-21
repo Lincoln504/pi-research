@@ -11,6 +11,10 @@
   },
   "files": [
     "src/",
+    "!src/.env",
+    "!src/.env.local",
+    "!src/.env.*.local",
+    "!src/knowledge_db/",
     "docs/ARCHITECTURE.md",
     "docs/CRITICAL_FIXES.md",
     "docs/assets/",
