@@ -418,9 +418,11 @@ export default function (pi: ExtensionAPI) {
             private cachedVersion = -1;
             private version = 0;
             private statusMsg = '';
+            private readonly originalModel: string;
 
             constructor() {
               this.selectedIndex = 0;
+              this.originalModel = config['EMBEDDING_MODEL'] as string;
             }
 
             render(width: number): string[] {
@@ -492,12 +494,19 @@ export default function (pi: ExtensionAPI) {
               if (this.statusMsg) {
                 lines.push(theme.fg('success', ` ${this.statusMsg}`));
               }
-              // Contextual info lines when Embed Model row is focused
+              // Contextual lines — ordered: actionable status → location → warning → controls
               const selKey = configItems[this.selectedIndex]?.key;
               if (selKey === 'EMBEDDING_MODEL') {
-                lines.push(theme.fg('muted',    ` Model dir: ${piModelCache}`));
-                lines.push(theme.fg('muted',    ` [auto-dl] = not yet downloaded, will auto-download on first use.`));
-                lines.push(theme.fg('warning',  ` ⚠ Changing model permanently clears the knowledge DB`));
+                const currentModel = config['EMBEDDING_MODEL'] as string;
+                const modelReady = isModelCached(currentModel);
+                const statusText = modelReady ? 'downloaded' : 'not downloaded — auto-downloads on first use';
+                lines.push(theme.fg(modelReady ? 'muted' : 'warning', ` Model: ${statusText}`));
+                lines.push(theme.fg('muted', ` Dir:   ${piModelCache}`));
+              }
+              // Warning persists for the whole session once a different model is selected,
+              // disappears only if the user returns to the original model within this session.
+              if ((config['EMBEDDING_MODEL'] as string) !== this.originalModel) {
+                lines.push(theme.fg('warning', ` ⚠ Changing model permanently clears the knowledge DB`));
               }
               lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
               lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
