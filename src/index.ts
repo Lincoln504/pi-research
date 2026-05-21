@@ -446,17 +446,16 @@ export default function (pi: ExtensionAPI) {
                   valueDisplay = item.format(item.toDisplay(value)).padStart(10);
                 } else if (item.type === 'boolean') {
                   const value = config[item.key] as boolean;
-                  valueDisplay = (value ? '[ON]' : '[OFF]').padStart(10);
+                  valueDisplay = (value ? 'ON' : 'OFF').padStart(10);
                 } else if (item.type === 'string') {
                   const value = config[item.key] as string;
                   if (item.key === 'EMBEDDING_MODEL' && item.options && item.options.length > 0) {
                     const modelInfo = SUPPORTED_MODELS.find(m => m.id === value);
                     const cached = isModelCached(value);
-                    const langLabel = modelInfo?.multilingual ? '[multi]' : '[EN]';
+                    const langLabel = modelInfo?.multilingual ? 'multi' : 'EN';
 
                     // Value column: lang capability when ready, download notice when not.
-                    // [local]/[fetch] removed — lang tag is more informative at a glance.
-                    valueDisplay = (cached ? langLabel : '[auto-dl]').padStart(10);
+                    valueDisplay = (cached ? langLabel : 'auto-dl').padStart(10);
 
                     // Description: model ID truncated to fit.
                     // When not cached, append lang tag here since value col is taken by [auto-dl].
