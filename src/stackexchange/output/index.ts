@@ -3,5 +3,4 @@
  */
 
 export * from './table.ts';
-export * from './json.ts';
 export * from './compact.ts';
