@@ -221,6 +221,35 @@ describe('logger', () => {
       const logger = createLogger({ verbose: true });
       expect(logger.isVerbose()).toBe(true);
     });
+
+    it('should create per-run log file when researchRunId is provided', () => {
+      const runId = 'run-a1b2c3d4';
+      const logger = createLogger({ verbose: true, researchRunId: runId });
+      
+      const logPath = logger.getLogFilePath();
+      expect(logPath).toContain(runId);
+      expect(logPath).toMatch(/pi-research-run-a1b2c3d4\.log$/);
+    });
+
+    it('should create default log file when no researchRunId is provided', () => {
+      const logger = createLogger({ verbose: true });
+      
+      const logPath = logger.getLogFilePath();
+      expect(logPath).toBe(path.join(os.tmpdir(), 'pi-research.log'));
+    });
+
+    it('should write to per-run log file', () => {
+      const runId = 'run-test1234';
+      const logger = createLogger({ verbose: true, researchRunId: runId });
+      
+      runWithLogContext({ researchRunId: runId, toolName: 'test' }, () => {
+        logger.info('test message for per-run log');
+      });
+      
+      const content = readFileSync(logger.getLogFilePath()!, 'utf-8');
+      expect(content).toContain('test message for per-run log');
+      expect(content).toContain(`"researchRunId":"${runId}"`);
+    });
   });
 
   describe('logger singleton', () => {

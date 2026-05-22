@@ -22,6 +22,16 @@ vi.mock('../../src/logger.ts', () => ({
   createResearchRunId: vi.fn(() => 'run-test'),
   runWithLogContext: vi.fn((_context, callback) => callback()),
   isVerboseFromEnv: vi.fn(() => false),
+  createLogger: vi.fn(() => ({
+    log: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    isVerbose: vi.fn(() => false),
+    getLogFilePath: vi.fn(() => '/tmp/pi-research.log'),
+  })),
+  setLogger: vi.fn(),
 }));
 
 vi.mock('../../src/config.ts', () => ({

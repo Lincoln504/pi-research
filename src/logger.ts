@@ -1,7 +1,8 @@
 /**
  * Logger — scoped file-based diagnostics
  *
- * Writes timestamped lines to ~/.pi/pi-research.log (or {tmpdir}/pi-research.log).
+ * Writes timestamped lines to {tmpdir}/pi-research-{researchRunId}.log when a researchRunId is provided.
+ * Falls back to {tmpdir}/pi-research.log when no researchRunId.
  * ERROR and WARN levels are always logged.
  * INFO and DEBUG levels are only logged when --verbose or PI_RESEARCH_VERBOSE=1 is set.
  *
@@ -41,6 +42,7 @@ export interface ILogger {
 export interface LoggerOptions {
   verbose: boolean;
   logFilePath?: string;
+  researchRunId?: string;  // Optional: use to create per-run log files
 }
 
 export interface LogContext {
@@ -55,12 +57,15 @@ export interface LogContext {
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
 
-function buildDefaultDebugLogPath(): string {
+function buildDefaultDebugLogPath(researchRunId?: string): string {
+  if (researchRunId) {
+    return path.join(os.tmpdir(), `pi-research-${researchRunId}.log`);
+  }
   return path.join(os.tmpdir(), 'pi-research.log');
 }
 
 export function getDefaultDebugLogPathTemplate(): string {
-  return buildDefaultDebugLogPath();
+  return buildDefaultDebugLogPath('{researchRunId}');
 }
 
 /**
@@ -118,7 +123,7 @@ export class Logger implements ILogger {
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
-    this.logFile = options.logFilePath ?? buildDefaultDebugLogPath();
+    this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(options.researchRunId);
     
     // Ensure parent directory exists
     try {

@@ -34,7 +34,7 @@ import {
 } from './tui/research-panel.ts';
 import { runResearch } from './orchestration/research-manager.ts';
 import { type ResearchObserver } from './orchestration/research-observer.ts';
-import { createResearchRunId, logger, runWithLogContext } from './logger.ts';
+import { createResearchRunId, logger, runWithLogContext, setLogger, createLogger, isVerboseFromEnv } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import {
@@ -179,6 +179,11 @@ export function createResearchTool(): ToolDefinition {
       const researchRunId = createResearchRunId();
       const metadata = getPiSessionMetadata(ctx);
       const piSessionId = metadata.piSessionId;
+
+      // Create a per-run logger with unique file path
+      const previousLogger = logger;
+      const runLogger = createLogger({ verbose: isVerboseFromEnv(), researchRunId });
+      setLogger(runLogger);
 
       return runWithLogContext({ ...metadata, researchRunId, toolName: 'research' }, async () => {
         let aborted = false;
@@ -521,6 +526,9 @@ export function createResearchTool(): ToolDefinition {
           cleanup?.();
           logger.error('[research] run failed', error);
           return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
+        } finally {
+          // Restore previous logger
+          setLogger(previousLogger as any);
         }
       });
     },
