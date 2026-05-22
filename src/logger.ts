@@ -308,6 +308,7 @@ export class Logger implements ILogger {
         // TUI check: complex escape codes (cursor movement, screen clear, alternative screen)
         // are almost certainly TUI. Simple color codes (30-37, 90-97) are also often TUI.
         const hasAnsi = message.includes('\x1b[');
+        /* eslint-disable no-control-regex */
         const isComplexTui = 
             message.includes('\x1b[H') ||   // Home
             message.includes('\x1b[2J') ||  // Clear screen
@@ -316,6 +317,7 @@ export class Logger implements ILogger {
             message.includes('\x1b[?25') || // Cursor visibility
             /\x1b\[\d+;\d+H/.test(message) || // Move to (row, col)
             /\x1b\[\d+[ABCD]/.test(message);   // Relative move
+        /* eslint-enable no-control-regex */
         
         // Box-drawing characters are a definitive TUI marker
         const isBoxDrawing = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╴╵╶╷╭╮╯╰╱╲╳]/.test(message);
@@ -391,10 +393,13 @@ export class Logger implements ILogger {
 
                     const hasAnsi = message.includes('\x1b[');
                     const isBoxDrawing = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╴╵╶╷╭╮╯╰╱╲╳]/.test(message);
+                    /* eslint-disable no-control-regex */
                     const isComplexTui = hasAnsi && (
                         message.includes('\x1b[H') || message.includes('\x1b[2J') || 
-                        /\x1b\[\d+;\d+H/.test(message) || /\x1b\[\d+[ABCD]/.test(message)
+                        /\x1b\[\d+;\d+H/.test(message) || 
+                        /\x1b\[\d+[ABCD]/.test(message)
                     );
+                    /* eslint-enable no-control-regex */
 
                     // 100% of stderr is diverted
                     // 100% of plain text stdout is diverted
@@ -420,7 +425,7 @@ export class Logger implements ILogger {
                 return (originalFsWriteSync as any).apply(fs, [fd, chunk, ...args]);
             };
         }
-    } catch (e) { /* ignore */ }
+    } catch (_e) { /* ignore */ }
 
     try {
         return await task();
