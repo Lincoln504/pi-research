@@ -163,11 +163,21 @@ export class Embedder {
             ? `Model load timed out after ${timeoutMs}ms. The cached model at ${env.cacheDir ?? 'local cache'} may be corrupted.`
             : `Model download timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
 
+          const pipelinePromise = Promise.resolve(pipeline('feature-extraction', this.model, {
+            device: (this.device as any),
+          }));
+
+          // Dispose of orphaned pipelines if they complete AFTER the timeout
+          pipelinePromise.then((p: any) => {
+            if (this.pipeline !== p) {
+              logger.warn('[embedder] Disposing orphaned pipeline that resolved after timeout');
+              try { p.dispose(); } catch { /* ignore */ }
+            }
+          }).catch(() => {});
+
           this.pipeline = await getLogger().runCapturingStderr(async () => {
             return await withTimeout(
-              pipeline('feature-extraction', this.model, {
-                device: (this.device as any),
-              }),
+              pipelinePromise,
               timeoutMs,
               errorMessage
             );

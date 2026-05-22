@@ -230,20 +230,24 @@ export async function initKnowledgeStore(): Promise<void> {
         logger.info('[knowledge] Knowledge Store ready.');
         return;
       } catch (err) {
+        const givingUp = attempt >= MAX_INIT_RETRIES;
+
         // Null all singletons to prevent leaking partially-constructed instances.
-        // Clear inflightEmbedder only if the embedder's pipeline load has already
-        // settled (error path in initialize() nulls this.initializing), so the next
-        // retry can start a fresh load rather than re-awaiting a failed promise.
-        if (inflightEmbedder !== null && inflightEmbedder.isInitialized() === false) {
-          inflightEmbedder = null;
+        // If we are giving up permanently, or the embedder failed to initialize,
+        // dispose it to free any loaded ONNX sessions (VRAM).
+        if (inflightEmbedder !== null) {
+          if (givingUp || !inflightEmbedder.isInitialized()) {
+            inflightEmbedder.dispose().catch(() => {});
+            inflightEmbedder = null;
+          }
         }
+        
         embedder = null;
         store = null;
         writerQueue = null;
 
-        if (attempt >= MAX_INIT_RETRIES) {
+        if (givingUp) {
           logger.error(`[knowledge] Initialization failed after ${MAX_INIT_RETRIES} attempts. Giving up.`, err);
-          inflightEmbedder = null;
           initializationPermanentlyFailed = true;
           initializationPromise = null;
           throw err;
