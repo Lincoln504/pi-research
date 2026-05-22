@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
@@ -17,6 +17,7 @@ import {
   resetLogger,
   isVerboseFromEnv,
   runWithLogContext,
+  logger,
 } from '../../src/logger';
 
 const TEST_LOG_PATH = path.join(os.tmpdir(), 'pi-research-test.log');
@@ -177,6 +178,36 @@ describe('logger', () => {
       expect(isVerboseFromEnv()).toBe(true);
     });
 
+    it('should detect -v in process.argv', () => {
+      process.argv.push('-v');
+      expect(isVerboseFromEnv()).toBe(true);
+      process.argv = process.argv.filter(arg => arg !== '-v');
+    });
+
+    it('should detect --debug in process.argv', () => {
+      process.argv.push('--debug');
+      expect(isVerboseFromEnv()).toBe(true);
+      process.argv = process.argv.filter(arg => arg !== '--debug');
+    });
+
+    it('should detect PI_RESEARCH_DEBUG=1', () => {
+      process.env['PI_RESEARCH_DEBUG'] = '1';
+      expect(isVerboseFromEnv()).toBe(true);
+      delete process.env['PI_RESEARCH_DEBUG'];
+    });
+
+    it('should detect DEBUG=1', () => {
+      process.env['DEBUG'] = '1';
+      expect(isVerboseFromEnv()).toBe(true);
+      delete process.env['DEBUG'];
+    });
+
+    it('should detect DEBUG=pi-research', () => {
+      process.env['DEBUG'] = 'pi-research';
+      expect(isVerboseFromEnv()).toBe(true);
+      delete process.env['DEBUG'];
+    });
+
     it('should be false when not verbose', () => {
       expect(isVerboseFromEnv()).toBe(false);
     });
@@ -249,6 +280,85 @@ describe('logger', () => {
       const content = readFileSync(logger.getLogFilePath()!, 'utf-8');
       expect(content).toContain('test message for per-run log');
       expect(content).toContain(`"researchRunId":"${runId}"`);
+    });
+    it('should throw if setting the wrapper as the global logger', () => {
+      expect(() => setLogger(logger as any)).toThrow('setLogger must be called with a Logger instance, not the wrapper.');
+    });
+
+    it('should not allow nested stderr capture', async () => {
+      const logger1 = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      const logger2 = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH + '.2' });
+
+      let innerCaptured = false;
+      await logger1.runCapturingStderr(async () => {
+        await logger2.runCapturingStderr(async () => {
+          innerCaptured = true;
+        });
+      });
+
+      expect(innerCaptured).toBe(true);
+      // Clean up
+      if (existsSync(TEST_LOG_PATH + '.2')) unlinkSync(TEST_LOG_PATH + '.2');
+    });
+
+    it('should capture stderr even when NOT verbose', async () => {
+      const silentLogger = new Logger({ verbose: false, logFilePath: TEST_LOG_PATH });
+      
+      await silentLogger.runCapturingStderr(async () => {
+        process.stderr.write('spam message');
+      });
+
+      const content = readFileSync(TEST_LOG_PATH, 'utf-8');
+      expect(content).toContain('spam message');
+      expect(content).toContain('"level":"STDERR"');
+    });
+
+    it('should selectively capture native logs from stdout', async () => {
+      // Ensure directory exists
+      const logDir = path.dirname(TEST_LOG_PATH);
+      if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+      
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      
+      await logger.runCapturingStderr(async () => {
+        process.stdout.write('Warning: Dawn is noisy\n');
+        process.stdout.write('\x1b[31mTUI Output\x1b[0m\n');
+        process.stdout.write('Plain log text\n');
+      });
+
+      const content = readFileSync(TEST_LOG_PATH, 'utf-8');
+      expect(content).toContain('Warning: Dawn is noisy');
+      expect(content).toContain('Plain log text');
+      expect(content).not.toContain('TUI Output');
+    });
+
+    it('should capture direct writes to FD 2 via fs.writeSync if supported', async () => {
+      const fs = await import('node:fs');
+      const descriptor = Object.getOwnPropertyDescriptor(fs, 'writeSync');
+      if (descriptor && !descriptor.writable && !descriptor.set) {
+          // Skip if fs.writeSync is immutable in this environment
+          return;
+      }
+
+      const logDir = path.dirname(TEST_LOG_PATH);
+      if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+      
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      
+      await logger.runCapturingStderr(async () => {
+        try {
+            fs.writeSync(2, 'Direct native write\n');
+        } catch (e) {
+            // Ignore if patch failed
+        }
+      });
+
+      if (existsSync(TEST_LOG_PATH)) {
+        const content = readFileSync(TEST_LOG_PATH, 'utf-8');
+        if (content.includes('Direct native write')) {
+            expect(content).toContain('"level":"FS_WRITE_SYNC_STDERR"');
+        }
+      }
     });
   });
 

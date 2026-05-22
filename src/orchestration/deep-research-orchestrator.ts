@@ -620,12 +620,19 @@ You are in the late phase of research. Set a higher threshold for delegation:
       const queue = [...configs];
       const active = new Set<Promise<void>>();
       const { MAX_CONCURRENT_RESEARCHERS } = this.config;
+      let lastLaunchTime = 0;
 
       while (queue.length > 0 || active.size > 0) {
           if (signal?.aborted) throw new Error("Research aborted.");
           while (active.size < MAX_CONCURRENT_RESEARCHERS && queue.length > 0) {
-              if (active.size > 0) await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
+              const now = Date.now();
+              const timeSinceLastLaunch = now - lastLaunchTime;
+              if (lastLaunchTime > 0 && timeSinceLastLaunch < RESEARCHER_LAUNCH_DELAY_MS) {
+                  await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS - timeSinceLastLaunch));
+              }
+              
               const config = queue.shift()!;
+              lastLaunchTime = Date.now();
               const links = linksMap.get(String(config.id)) || [];
               const histLinks = config.historicalLinks || [];
               const p = this.runResearcher(config, links, histLinks, signal)
@@ -783,15 +790,17 @@ You are in the late phase of research. Set a higher threshold for delegation:
         return;
       } catch (err) {
         lastError = err;
+        const errMsg = err instanceof Error ? err.message : String(err);
         if (attempt < maxAttempts) {
-          const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn(`[Orchestrator] Researcher ${id} attempt ${attempt} failed: ${errMsg}; will retry`);
-          session.abort().catch((err) => {
-              logger.warn('[Orchestrator] Failed to abort researcher session after run completed:', err);
-          });
+        } else {
+          logger.error(`[Orchestrator] Researcher ${id} failed all ${maxAttempts} attempts: ${errMsg}`);
         }
       } finally {
         subscription();
+        session.abort().catch((err) => {
+            logger.warn(`[Orchestrator] Failed to abort researcher session ${id}:`, err);
+        });
         this.activeSessions.delete(id);
       }
     }
@@ -801,7 +810,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
   private async evaluate(signal?: AbortSignal, mustSynthesize = false): Promise<ResearchPlan> {
       this.options.observer?.onEvaluationStart?.(this.currentRound);
-      this.options.observer?.onEvaluationProgress?.('Assessing...');
+      this.options.observer?.onEvaluationProgress?.('eval');
 
       const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
           ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
@@ -923,6 +932,14 @@ You are in the late phase of research. Set a higher threshold for delegation:
       }
 
       this.options.observer?.onEvaluationDecision?.(plan.action as any, plan, this.currentRound);
+
+      if (mustSynthesize && plan.action !== 'synthesize') {
+          logger.warn('[Orchestrator] Evaluator tried to delegate despite reaching max rounds; forcing synthesis.');
+          plan.action = 'synthesize';
+          // When forcing synthesis from a delegation plan, the model hasn't produced
+          // a synthesis report, so we must use the fallback.
+          plan.content = this.buildFallbackSynthesis();
+      }
 
       return plan.action !== 'synthesize' && Array.isArray(plan.researchers) && plan.researchers.length > 0 && !mustSynthesize 
           ? this.capResearcherQueries(plan) : plan;

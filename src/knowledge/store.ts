@@ -330,6 +330,23 @@ export class KnowledgeStore {
     return this.table.countRows();
   }
 
+  /**
+   * Clear all data from the store by dropping and recreating the table.
+   */
+  async clear(): Promise<void> {
+    if (!this.db) throw new Error('Store not open');
+    
+    try {
+      this.table = null;
+      await this.db.dropTable(this.tableName);
+      this.table = await this.createTable();
+      logger.info('[store] Knowledge store cleared.');
+    } catch (err) {
+      logger.error('[store] Failed to clear knowledge store:', err);
+      throw err;
+    }
+  }
+
   isStoreClosed(): boolean {
     return this.isClosing;
   }

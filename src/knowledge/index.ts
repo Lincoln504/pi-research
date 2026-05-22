@@ -5,6 +5,7 @@ import { Chunker } from './chunker.ts';
 import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
+import * as fs from 'node:fs';
 
 interface ModelConfig {
   pooling: 'mean' | 'cls' | 'last_token';
@@ -275,6 +276,31 @@ export async function getWriterQueue(): Promise<WriterQueue> {
   await initKnowledgeStore();
   if (!writerQueue) throw new Error('Knowledge store not enabled or failed to initialize');
   return writerQueue;
+}
+
+export async function clearKnowledgeStore(): Promise<void> {
+  const dbDir = getDbDir();
+  
+  if (store) {
+    try {
+      await store.clear();
+      return;
+    } catch (err) {
+      logger.warn('[knowledge] Failed to clear store via active connection, falling back to FS deletion:', err);
+      await shutdownKnowledgeStore();
+    }
+  }
+
+  // Fallback to direct FS deletion if no active store or clear() failed
+  if (fs.existsSync(dbDir)) {
+    try {
+      fs.rmSync(dbDir, { recursive: true, force: true });
+      logger.info('[knowledge] Knowledge store cleared via filesystem deletion.');
+    } catch (err) {
+      logger.error('[knowledge] Failed to delete knowledge_db directory:', err);
+      throw err;
+    }
+  }
 }
 
 export function isKnowledgeStoreReady(): boolean {

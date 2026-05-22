@@ -278,4 +278,23 @@ describe('KnowledgeStore', () => {
       await newStore.close();
     }
   });
+
+  it('should clear all data', async () => {
+    await store.open();
+    const doc = {
+      url: 'https://example.com/clear',
+      text: 'Clear me',
+      metadata: { title: 'Clear', ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    };
+    await store.addDocuments([doc]);
+    expect(await store.count()).toBe(1);
+
+    await store.clear();
+    expect(await store.count()).toBe(0);
+    
+    // Should still be able to add documents after clearing
+    await store.addDocuments([doc]);
+    expect(await store.count()).toBe(1);
+  });
 });

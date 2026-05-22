@@ -1,5 +1,6 @@
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { access } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import * as os from 'node:os';
 import { logger, getLogger } from '../logger.ts';
@@ -57,6 +58,22 @@ export function getModelCacheDir(): string {
 // models survive npm install/update. Must run at module-load time, before pipeline().
 env.cacheDir = getModelCacheDir();
 
+// Suppress ORT C++ native WARNING-level messages (e.g. the Dawn WebGPU
+// "maxDynamicStorageBuffersPerPipelineLayout artificially reduced" warning) that write
+// directly to FD2 via libonnxruntime.so, completely bypassing JS-level stderr patches.
+// onnxruntime-node's initOrtOnce() reads env.logLevel from onnxruntime-common exactly
+// once on first session creation; must be set here, at module load, before any session.
+// Setting 'error' (ORT level 3) suppresses WARNING (level 2) and below; ERROR/FATAL
+// still surface. Session-level logSeverityLevel is already 3 but only covers the
+// per-session logger, not the global env logger that the WebGPU EP device init uses.
+// onnxruntime-node is CJS, so we must use createRequire to get the same CJS instance
+// (ESM import would produce a separate instance that onnxruntime-node would not see).
+try {
+  const _nodeRequire = createRequire(import.meta.url);
+  const { env: ortEnv } = _nodeRequire('onnxruntime-common') as { env: { logLevel?: string } };
+  if (ortEnv) ortEnv.logLevel = 'error';
+} catch { /* onnxruntime-common not resolvable — skip */ }
+
 export class Embedder {
   private pipeline: FeatureExtractionPipeline | null = null;
   private initializing: Promise<void> | null = null;
@@ -87,7 +104,7 @@ export class Embedder {
     this.documentPrefix = options.documentPrefix ?? '';
     this.stateManager = options.stateManager ?? null;
 
-    // Suppress ONNX Runtime native log spam; real errors surface via try/catch
+    // Suppress ONNX Runtime native log spam (WASM path); real errors surface via try/catch
     try {
       const onnxEnv = (env as any).onnx;
       if (onnxEnv) {
@@ -185,7 +202,9 @@ export class Embedder {
             this.device = 'cpu';
             this.pipeline = await getLogger().runCapturingStderr(async () => {
               return await withTimeout(
-                pipeline('feature-extraction', this.model, { device: 'cpu' as any }),
+                pipeline('feature-extraction', this.model, {
+                  device: 'cpu' as any,
+                }),
                 this.initializationTimeoutMs,
                 'CPU fallback model load timed out'
               );
@@ -195,7 +214,7 @@ export class Embedder {
               20_000,
               'CPU warmup timed out after 20000ms.'
             );
-            logger.info('[embedder] CPU fallback ready after WebGPU warmup OOM.');
+            logger.warn('[embedder] CPU fallback ready after WebGPU warmup OOM.');
           } else {
             throw warmupErr;
           }
@@ -265,7 +284,7 @@ export class Embedder {
     }
     this.device = 'cpu';
     await this.initialize();
-    logger.info('[embedder] CPU fallback ready.');
+    logger.warn('[embedder] CPU fallback ready.');
   }
 
   private pipelineOpts() {
@@ -299,7 +318,9 @@ export class Embedder {
       }
     }
     try {
-      const output = await this.pipeline(input, this.pipelineOpts());
+      const output = await getLogger().runCapturingStderr(async () => {
+        return await this.pipeline!(input, this.pipelineOpts());
+      });
       return output.data as Float32Array;
     } catch (err) {
       if (this.isWebGpuDeviceError(err)) {
@@ -308,7 +329,9 @@ export class Embedder {
           lockAcquired = false;
         }
         await this.recoverToCpu();
-        const output = await this.pipeline!(input, this.pipelineOpts());
+        const output = await getLogger().runCapturingStderr(async () => {
+          return await this.pipeline!(input, this.pipelineOpts());
+        });
         return output.data as Float32Array;
       }
       throw err;
@@ -344,7 +367,9 @@ export class Embedder {
 
       let output: any;
       try {
-        output = await this.pipeline(batch, this.pipelineOpts());
+        output = await getLogger().runCapturingStderr(async () => {
+          return await this.pipeline!(batch, this.pipelineOpts());
+        });
       } catch (err) {
         if (this.isWebGpuDeviceError(err)) {
           if (lockAcquired && this.stateManager) {
@@ -352,7 +377,9 @@ export class Embedder {
             lockAcquired = false;
           }
           await this.recoverToCpu();
-          output = await this.pipeline!(batch, this.pipelineOpts());
+          output = await getLogger().runCapturingStderr(async () => {
+            return await this.pipeline!(batch, this.pipelineOpts());
+          });
         } else {
           throw err;
         }

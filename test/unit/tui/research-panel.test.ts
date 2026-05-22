@@ -116,7 +116,7 @@ describe('TUI Research Panel', () => {
 
         const headerLine = lines[0];
         // Should contain wave characters (▄) when animation is active
-        expect(headerLine).toContain('╼');
+        expect(headerLine).toContain('┄');
       });
 
       it('should render static fill when isSearching but no waveFrame', () => {
@@ -228,7 +228,7 @@ describe('TUI Research Panel', () => {
         expect(() => component.render(1000)).not.toThrow();
         const lines = component.render(1000);
         expect(lines.length).toBeGreaterThan(0);
-        expect(lines[0]).toContain('╼'); // Should have wave chars
+        expect(lines[0]).toContain('┄'); // Should have wave chars
       });
 
       it('should handle wave frame larger than width', () => {

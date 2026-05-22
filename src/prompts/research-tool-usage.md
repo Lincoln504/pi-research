@@ -7,10 +7,10 @@ argument-hint: <query> [depth:0|1|2|3] [model:<id>]
 **For any web/internet research questions, use the `research` tool.**
 
 **CRITICAL: NO SUBAGENTS OR EXTERNAL DELEGATION**
-- Use ONLY the `research` tool for internet investigations
-- NEVER invoke `subagent`, delegate to other agents, or use any manual delegation system
-- The `research` tool has its own internal research system that handles all coordination
-- Do NOT try to "parallelize" by using subagents
+- Use ONLY the `research` tool for internet investigations.
+- NEVER invoke `subagent`, delegate to other agents, or use any manual delegation system.
+- The `research` tool has its own internal research system that handles all coordination.
+- Do NOT try to "parallelize" by using subagents — if you have multiple unrelated topics, call the `research` tool multiple times **simultaneously** in a single turn instead.
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
@@ -69,12 +69,13 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 #### MULTIPLE RESEARCH CALLS
 
 **One Topic, One Call:**
-- Use a **single `research` call** for each topic
-- Do NOT split a single topic into multiple calls
-- Do NOT use subagents to make multiple simultaneous calls
+- Use a **single `research` call** for each topic.
+- Do NOT split a single topic into multiple manual calls — the tool handles its own internal decomposition and parallelization.
+- Do NOT use subagents to make multiple simultaneous calls.
 
 **Multiple Topics:**
-- If you need to research multiple unrelated topics, call the `research` tool once for each topic, one after another (one call per turn)
-- Example: First call `research("bananas")`, get results, then call `research("oranges")`
+- If you need to research multiple unrelated topics, you can emit multiple `research` calls **simultaneously in a single turn**.
+- Example: You can call `research("bananas")` and `research("oranges")` in the same response.
+- Emitting multiple calls in parallel is preferred over sequential turns for distinct topics.
 
 **Do NOT escalate depth just because a topic is broad** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.

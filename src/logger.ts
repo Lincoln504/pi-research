@@ -10,6 +10,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import * as fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
@@ -56,6 +57,18 @@ export interface LogContext {
 }
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
+
+/**
+ * Symbol used to identify real Logger instances to prevent infinite recursion
+ * when the wrapper object is accidentally set as the global logger.
+ */
+const LOGGER_BRAND = Symbol.for('pi-research.Logger');
+
+/**
+ * Global flag to prevent concurrent or nested output capture, as process.stderr
+ * and process.stdout are shared global resources.
+ */
+let isAnyLoggerCapturingOutput = false;
 
 function buildDefaultDebugLogPath(researchRunId?: string): string {
   if (researchRunId) {
@@ -119,12 +132,12 @@ function formatArg(arg: unknown): string {
 export class Logger implements ILogger {
   private verbose: boolean;
   private logFile: string;
-  private isCapturingStderr = false;
+  readonly [LOGGER_BRAND] = true;
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
     this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(options.researchRunId);
-    
+
     // Ensure parent directory exists
     try {
       const dir = path.dirname(this.logFile);
@@ -169,23 +182,92 @@ export class Logger implements ILogger {
   }
 
   /**
-   * Run a task while capturing its stderr and redirecting it to the log file.
-   * This is useful for capturing logs from native libraries like ONNX Runtime.
+   * Run a task while capturing its stderr and stdout, redirecting native logs to the log file.
+   * This is useful for capturing logs from native libraries like ONNX Runtime and Dawn.
    */
   async runCapturingStderr<T>(task: () => Promise<T>): Promise<T> {
-    if (!this.verbose || !this.logFile) {
-        return await task();
-    }
-    // If already capturing (concurrent re-entry), run task without re-patching
-    if (this.isCapturingStderr) {
+    if (!this.logFile || isAnyLoggerCapturingOutput) {
         return await task();
     }
 
-    this.isCapturingStderr = true;
-    const originalWrite = process.stderr.write;
+    isAnyLoggerCapturingOutput = true;
+
+    // Redirect FD 2 at the OS level so native C++ writes (e.g. Dawn's
+    // "maxDynamicStorageBuffersPerPipelineLayout artificially reduced" from
+    // libonnxruntime.so via fprintf(stderr,...)) are captured instead of leaking
+    // to the terminal. JS-level patches below don't intercept these writes because
+    // C++ skips Node.js's process.stderr and fs.writeSync entirely.
+    //
+    // Strategy (Linux + macOS): fstatSync(2) determines whether FD 2 is a tty or
+    // regular file (redirect-worthy) vs. a pipe/socket (skip — FD 2 is owned by
+    // the caller, e.g. Pi's --mode rpc where stdout→stderr carries JSON-RPC output,
+    // or any programmatic/library use where the parent process reads stderr).
+    // open('/dev/fd/2') acts as dup(2), saving a reference to the original target.
+    // close(2) + open(logFile) lets the OS assign FD 2 (lowest available) to the
+    // log file. Restored in finally via open('/dev/fd/<savedFd>').
+    // /dev/fd/N is POSIX — Linux (symlink to /proc/self/fd) and macOS (native).
+    // Skipped on Windows where POSIX fd semantics don't apply.
+    let savedFd2: number = -1;
+    let fd2Redirected = false;
+    if (process.platform !== 'win32') {
+        try {
+            const stat = fs.fstatSync(2);
+            // Only redirect when FD 2 is a tty or regular file, not a pipe/socket (MCP mode)
+            if (!stat.isFIFO() && !stat.isSocket()) {
+                savedFd2 = fs.openSync('/dev/fd/2', 'a');
+                fs.closeSync(2);
+                const newFd = fs.openSync(this.logFile, 'a');
+                if (newFd === 2) {
+                    fd2Redirected = true;
+                } else {
+                    // Didn't get FD 2 — some other FD was released first; undo and skip.
+                    if (newFd >= 0) fs.closeSync(newFd);
+                    try {
+                        const r = fs.openSync(`/dev/fd/${savedFd2}`, 'a');
+                        if (r !== 2 && r >= 0) fs.closeSync(r);
+                    } catch { /* best-effort restore */ }
+                    try { fs.closeSync(savedFd2); } catch { /* ignore */ }
+                    savedFd2 = -1;
+                }
+            }
+        } catch { /* fstat failed or /dev/fd unavailable */ }
+    }
+
+    const originalStderrWrite = process.stderr.write;
+    const originalStdoutWrite = process.stdout.write;
+    const originalFsWriteSync = fs.writeSync;
+    const originalConsole = {
+        log: console.log,
+        info: console.info,
+        warn: console.warn,
+        error: console.error,
+        debug: console.debug,
+    };
     const logFile = this.logFile;
 
-    // Patch stderr.write — handles write(chunk), write(chunk, cb), write(chunk, encoding, cb)
+    // Patch console methods — redirect all application/library logs to the log file
+    const patchConsole = (level: string) => {
+        return (...args: unknown[]) => {
+            const timestamp = new Date().toISOString();
+            const entry = {
+                timestamp,
+                level: `CONSOLE_${level.toUpperCase()}`,
+                ...getLogContext(),
+                message: args.map(formatArg).join(' '),
+            };
+            try {
+                appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+            } catch { /* ignore */ }
+        };
+    };
+
+    console.log = patchConsole('log');
+    console.info = patchConsole('info');
+    console.warn = patchConsole('warn');
+    console.error = patchConsole('error');
+    console.debug = patchConsole('debug');
+
+    // Patch stderr.write — capture everything (TUI rarely uses stderr)
     (process.stderr.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
         const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
         const message = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
@@ -198,21 +280,177 @@ export class Logger implements ILogger {
             message: message.trim(),
         };
         try {
-            appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
-        } catch { /* log file write failure is non-fatal during stderr capture */ }
+            appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+        } catch { /* ignore */ }
 
         if (typeof cb === 'function') cb();
         return true;
     };
 
+    // Patch stdout.write — selectively capture native logs, preserving TUI output
+    (process.stdout.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
+        const message = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+        
+        // Native log patterns or plain text that we want to divert from TUI
+        const isNativeLog = 
+            message.includes('Warning:') || 
+            message.includes('Error:') || 
+            message.includes('Dawn') || 
+            message.includes('ONNX') || 
+            message.includes('ort') ||
+            message.includes('maxDynamicStorageBuffersPerPipelineLayout') ||
+            message.includes('maxComputeWorkgroupStorageSize') ||
+            message.includes('allocation limit') ||
+            message.includes('artificially') ||
+            message.includes('reduced from') ||
+            message.includes('dynamic offset allocation limit');
+
+        // TUI check: complex escape codes (cursor movement, screen clear, alternative screen)
+        // are almost certainly TUI. Simple color codes (30-37, 90-97) are also often TUI.
+        const hasAnsi = message.includes('\x1b[');
+        const isComplexTui = 
+            message.includes('\x1b[H') ||   // Home
+            message.includes('\x1b[2J') ||  // Clear screen
+            message.includes('\x1b[J') ||   // Clear to end
+            message.includes('\x1b[K') ||   // Clear line
+            message.includes('\x1b[?25') || // Cursor visibility
+            /\x1b\[\d+;\d+H/.test(message) || // Move to (row, col)
+            /\x1b\[\d+[ABCD]/.test(message);   // Relative move
+        
+        // Box-drawing characters are a definitive TUI marker
+        const isBoxDrawing = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╴╵╶╷╭╮╯╰╱╲╳]/.test(message);
+
+        // If it's a known native log, divert it regardless of colors/TUI markers
+        // (Native logs sometimes use simple colors, but rarely box-drawing)
+        if (isNativeLog && !isBoxDrawing) {
+            const timestamp = new Date().toISOString();
+            const entry = {
+                timestamp,
+                level: 'STDOUT_NATIVE',
+                ...getLogContext(),
+                message: message.trim(),
+            };
+            try {
+                appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+            } catch { /* ignore */ }
+
+            const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
+            if (typeof cb === 'function') cb();
+            return true;
+        }
+
+        // If it's complex TUI or box-drawing, it's "proper tui" — PASS THROUGH (don't log, don't block)
+        if (isComplexTui || isBoxDrawing) {
+            return originalStdoutWrite.call(process.stdout, chunk, encodingOrCb, callback);
+        }
+
+        // If it's plain text (no ANSI) and non-empty, it's likely a leaked log — divert and log
+        if (!hasAnsi && message.trim().length > 0) {
+            const timestamp = new Date().toISOString();
+            const entry = {
+                timestamp,
+                level: 'STDOUT_PLAIN',
+                ...getLogContext(),
+                message: message.trim(),
+            };
+            try {
+                appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+            } catch { /* ignore */ }
+
+            const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
+            if (typeof cb === 'function') cb();
+            return true;
+        }
+
+        // Everything else (colored text without keywords, empty strings, simple ANSI) goes to stdout
+        return originalStdoutWrite.call(process.stdout, chunk, encodingOrCb, callback);
+    };
+
+    // Patch fs.writeSync for FD 1 and 2 to catch direct writes from native-adjacent layers.
+    // We use a try-catch and check property descriptors for safety across Node.js versions.
+    try {
+        const descriptor = Object.getOwnPropertyDescriptor(fs, 'writeSync');
+        if (!descriptor || (descriptor.writable || descriptor.set)) {
+            (fs as any).writeSync = (fd: number, chunk: any, ...args: any[]) => {
+                if (fd === 1 || fd === 2) {
+                    const message = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+                    
+                    // Native log patterns
+                    const isNativeLog = 
+                        message.includes('Warning:') || 
+                        message.includes('Error:') || 
+                        message.includes('Dawn') || 
+                        message.includes('ONNX') || 
+                        message.includes('ort') ||
+                        message.includes('maxDynamicStorageBuffersPerPipelineLayout') ||
+                        message.includes('maxComputeWorkgroupStorageSize') ||
+                        message.includes('allocation limit') ||
+                        message.includes('artificially') ||
+                        message.includes('reduced from') ||
+                        message.includes('dynamic offset allocation limit');
+
+                    const hasAnsi = message.includes('\x1b[');
+                    const isBoxDrawing = /[─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╴╵╶╷╭╮╯╰╱╲╳]/.test(message);
+                    const isComplexTui = hasAnsi && (
+                        message.includes('\x1b[H') || message.includes('\x1b[2J') || 
+                        /\x1b\[\d+;\d+H/.test(message) || /\x1b\[\d+[ABCD]/.test(message)
+                    );
+
+                    // 100% of stderr is diverted
+                    // 100% of plain text stdout is diverted
+                    // Native keywords on stdout are diverted (unless they have TUI markers)
+                    const shouldDivert = fd === 2 || 
+                        (isNativeLog && !isBoxDrawing && !isComplexTui) || 
+                        (!hasAnsi && !isBoxDrawing && message.trim().length > 0);
+
+                    if (shouldDivert) {
+                        const timestamp = new Date().toISOString();
+                        const entry = {
+                            timestamp,
+                            level: fd === 1 ? 'FS_WRITE_SYNC_STDOUT' : 'FS_WRITE_SYNC_STDERR',
+                            ...getLogContext(),
+                            message: message.trim(),
+                        };
+                        try {
+                            appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+                        } catch { /* ignore */ }
+                        return (typeof chunk === 'string' ? Buffer.from(chunk).length : (chunk as any).length);
+                    }
+                }
+                return (originalFsWriteSync as any).apply(fs, [fd, chunk, ...args]);
+            };
+        }
+    } catch (e) { /* ignore */ }
+
     try {
         return await task();
     } finally {
-        process.stderr.write = originalWrite;
-        this.isCapturingStderr = false;
+        process.stderr.write = originalStderrWrite;
+        process.stdout.write = originalStdoutWrite;
+        try {
+            (fs as any).writeSync = originalFsWriteSync;
+        } catch { /* ignore */ }
+        console.log = originalConsole.log;
+        console.info = originalConsole.info;
+        console.warn = originalConsole.warn;
+        console.error = originalConsole.error;
+        console.debug = originalConsole.debug;
+        isAnyLoggerCapturingOutput = false;
+
+        // Restore FD 2 to its original target (terminal or pipe)
+        if (fd2Redirected && savedFd2 >= 0) {
+            try {
+                fs.closeSync(2);
+                const r = fs.openSync(`/dev/fd/${savedFd2}`, 'a');
+                if (r !== 2 && r >= 0) {
+                    // Didn't recover FD 2 — leave restored FD open so at least
+                    // something is on FD 2; the process will likely exit soon anyway.
+                }
+                try { fs.closeSync(savedFd2); } catch { /* ignore */ }
+            } catch { /* ignore restore errors */ }
+        }
     }
   }
-
   log(...args: unknown[]): void {
     this.emit(LogLevel.INFO, ...args);
   }
@@ -273,8 +511,13 @@ export function getLogger(): Logger {
 /**
  * Set the global logger instance (for testing)
  */
-export function setLogger(logger: Logger): void {
-  globalLogger = logger;
+export function setLogger(loggerInstance: Logger): void {
+  // Prevent setting the wrapper object which causes infinite recursion.
+  // We use a Symbol-based brand check for robustness against multiple module instances.
+  if (loggerInstance && !(loggerInstance as any)[LOGGER_BRAND]) {
+    throw new Error('setLogger must be called with a Logger instance, not the wrapper.');
+  }
+  globalLogger = loggerInstance;
 }
 
 /**

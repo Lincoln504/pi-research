@@ -204,6 +204,9 @@ export class QuickResearchOrchestrator {
       return result;
     } finally {
       subscription();
+      session.abort().catch((err) => {
+          logger.warn('[QuickOrchestrator] Failed to abort session during cleanup:', err);
+      });
     }
   }
 }

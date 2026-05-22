@@ -730,9 +730,10 @@ function renderPanelBlock(
       // Token Row (row 1)
       let tokenStr: string;
       if (isEval) {
-        // Eval label display: ╷ eval ╷ with decorative borders
+        // Eval label display: ╷ eval ╷ or ╷ status ╷ with decorative borders
         const innerWidth = Math.max(0, w - 2);
-        const evalLabel = 'eval';
+        // Prioritize status if it exists, otherwise use 'eval'
+        const evalLabel = slice?.status || 'eval';
         const labelDisplay = evalLabel.length > innerWidth ? evalLabel.slice(0, innerWidth) : evalLabel;
         const padding = innerWidth - labelDisplay.length;
         const leftPad = Math.floor(padding / 2);
@@ -763,9 +764,15 @@ function renderPanelBlock(
       // Cost Row (row 2)
       let costStr: string;
       if (isEval) {
-        // Eval cost row: ╵ (empty space) ╵ with decorative borders
+        // Eval cost row: ╵ (empty space) or ╵ cost ╵ with decorative borders
         const innerWidth = Math.max(0, w - 2);
-        costStr = '╵' + ' '.repeat(innerWidth) + '╵';
+        const cost = slice?.cost || 0;
+        const raw = cost === 0 ? '' : formatCost(cost);
+        const labelDisplay = raw.length > innerWidth ? raw.slice(0, innerWidth) : raw;
+        const padding = innerWidth - labelDisplay.length;
+        const leftPad = Math.floor(padding / 2);
+        const rightPad = padding - leftPad;
+        costStr = '╵' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╵';
       } else if (isIndicator) {
         const display = '...'.length > w ? '...'.slice(0, w) : '...';
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
@@ -993,8 +1000,8 @@ export function createMasterResearchPanel(
                 }
               }
               const wavePeriod = available + bestD;
-              // 2/3 speed: advance wave position 2 steps every 3 frames (2× original pace)
-              const waveSlowFrame = Math.floor((panel.waveFrame ?? 0) * 2 / 3);
+              // ~87% speed: 30% faster than 2/3 pace (advance wave position 0.87 steps every frame)
+              const waveSlowFrame = Math.floor((panel.waveFrame ?? 0) * 0.87);
               const waveRawPos = waveSlowFrame % wavePeriod;
 
               // Paint trail color for current head position (persisted for gradient tail)
@@ -1004,11 +1011,11 @@ export function createMasterResearchPanel(
                 panel.waveColors[waveRawPos] = `\x1b[38;2;${waveRgb.r};${waveRgb.g};${waveRgb.b}m`;
               }
 
-              // Build fill: ╶ lead-in | ─ gradient trail | ╼ head | ─ background
+              // Build fill: ╶ lead-in | ─ trail | ┄ head | ─ background
               let fill = '';
               for (let i = 0; i < available; i++) {
                 if (i === waveRawPos) {
-                  fill += `${brightColor}╼${resetFg}`;
+                  fill += `${panel.waveColors[i] || brightColor}┄${resetFg}`;
                 } else {
                   const bgChar = i === 0 ? '╶' : '─';
                   fill += `${panel.waveColors[i] || brightColor}${bgChar}${resetFg}`;

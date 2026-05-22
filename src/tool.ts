@@ -34,7 +34,7 @@ import {
 } from './tui/research-panel.ts';
 import { runResearch } from './orchestration/research-manager.ts';
 import { type ResearchObserver } from './orchestration/research-observer.ts';
-import { createResearchRunId, logger, runWithLogContext, setLogger, createLogger, isVerboseFromEnv } from './logger.ts';
+import { createResearchRunId, logger, runWithLogContext, setLogger, createLogger, isVerboseFromEnv, getLogger } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { validateAndSanitizeQuery } from './utils/input-validation.ts';
 import {
@@ -181,24 +181,24 @@ export function createResearchTool(): ToolDefinition {
       const piSessionId = metadata.piSessionId;
 
       // Create a per-run logger with unique file path
-      const previousLogger = logger;
+      const previousLogger = getLogger();
       const runLogger = createLogger({ verbose: isVerboseFromEnv(), researchRunId });
       setLogger(runLogger);
 
       return runWithLogContext({ ...metadata, researchRunId, toolName: 'research' }, async () => {
         let aborted = false;
-        let cleanup: (() => void) | null = null;
+        let cleanup: any = null;
         let unsubOrder: (() => void) | null = null;
         let unsubInput: (() => void) | null = null;
         let panelState: any = null;
-        let waveTimer: ReturnType<typeof setInterval> | null = null;
-
+        let waveTimer: any = null;
         const internalAbort = new AbortController();
 
         try {
-          validateConfig();
+          return await runLogger.runCapturingStderr(async () => {
+            validateConfig();
 
-          // When no explicit model parameter is given, use ctx.model directly.
+            // When no explicit model parameter is given, use ctx.model directly.
           // ID-based lookup can match the wrong provider when the same model ID
           // exists under multiple providers (e.g. built-in "zai/glm-4.7" vs
           // user-configured "glm-coding/glm-4.7"), causing auth failures.
@@ -320,23 +320,32 @@ export function createResearchTool(): ToolDefinition {
               debouncedRefresh();
             },
             onRoundStart: (round) => {
-              // Clear researchers from previous rounds when starting a new round
+              // Mark that we need to clear completed slices once the next round's researchers start.
+              // This keeps previous round findings visible during the evaluation and search burst phases.
               if (round > 1) {
-                clearCompletedResearchers(panelState);
+                (panelState as any).needsClear = true;
               }
             },
             onSearchStart: (queries) => {
               let sliceId = 'coord';
-              if (!panelState.slices.has('coord') && !quickSliceLabel) {
-                 sliceId = 'eval';
-                 if (!panelState.slices.has('eval')) {
-                    addSlice(panelState, 'eval', 'eval', false);
-                 }
-              } else if (quickSliceLabel) {
+              const hasEval = panelState.slices.has('eval');
+              const hasCoord = panelState.slices.has('coord');
+              
+              if (quickSliceLabel) {
                  sliceId = quickSliceLabel;
+              } else if (hasEval || !hasCoord) {
+                 // Use eval if it already exists (from a previous round's evaluation)
+                 // or if coord is missing (removed after Round 1 started).
+                 sliceId = 'eval';
+                 // Always add/reset slice to ensure it's fresh (clear previous round tokens/cost)
+                 addSlice(panelState, 'eval', 'eval', false);
               }
-              if (panelState.slices.has(sliceId)) reactivateSlice(panelState, sliceId);
-              updateSliceStatus(panelState, sliceId, queries.length > 0 ? `${queries.length} queries` : '...');
+
+              if (panelState.slices.has(sliceId)) {
+                  reactivateSlice(panelState, sliceId);
+                  activateSlice(panelState, sliceId); // Ensure not queued
+              }
+              updateSliceStatus(panelState, sliceId, 'Searching...');
               panelState.isSearching = true;
 
               // Start wave animation timer
@@ -356,15 +365,19 @@ export function createResearchTool(): ToolDefinition {
             },
             onSearchProgress: (count) => {
               let sliceId = 'coord';
-              if (!panelState.slices.has('coord') && !quickSliceLabel) {
-                  sliceId = 'eval';
-              } else if (quickSliceLabel) {
+              const hasEval = panelState.slices.has('eval');
+              const hasCoord = panelState.slices.has('coord');
+
+              if (quickSliceLabel) {
                   sliceId = quickSliceLabel;
+              } else if (hasEval || !hasCoord) {
+                  sliceId = 'eval';
               }
+              
               updateSliceStatus(panelState, sliceId, `${count} Results`);
               debouncedRefresh();
             },
-            onSearchComplete: (_count) => {
+            onSearchComplete: (count) => {
               panelState.isSearching = false;
 
               // Stop wave animation timer
@@ -374,6 +387,17 @@ export function createResearchTool(): ToolDefinition {
               }
               panelState.waveFrame = undefined;
               panelState.waveColors = undefined; // Clear persistent colors for next search
+
+              let sliceId = 'coord';
+              const hasEval = panelState.slices.has('eval');
+              const hasCoord = panelState.slices.has('coord');
+              if (quickSliceLabel) {
+                  sliceId = quickSliceLabel;
+              } else if (hasEval || !hasCoord) {
+                  sliceId = 'eval';
+              }
+              
+              updateSliceStatus(panelState, sliceId, `${count} Results`);
 
               if (panelState.slices.has('coord')) {
                 completeSlice(panelState, 'coord');
@@ -386,7 +410,15 @@ export function createResearchTool(): ToolDefinition {
             onResearcherStart: (id, _name, _goal, _roundNumber) => {
               if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
               if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-              // Researchers from previous rounds are cleared in onRoundStart
+
+              // Deferred clearing: remove researchers from previous rounds only when the
+              // first researcher of the current round starts.
+              if ((panelState as any).needsClear) {
+                clearCompletedResearchers(panelState);
+                (panelState as any).needsClear = false;
+              }
+
+              // Researchers from previous rounds are cleared above
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
               addSlice(panelState, displayNum, displayNum, true);
               activateSlice(panelState, displayNum);
@@ -399,6 +431,8 @@ export function createResearchTool(): ToolDefinition {
               if (status !== undefined) {
                 if (status.startsWith('done:')) {
                     const toolName = status.slice(5);
+                    // Only clear status if it matches the current tool or if it's the specific tool that finished
+                    // For now, we clear it to signal progress, but preserve it if it's null
                     updateSliceStatus(panelState, displayNum, undefined);
                     if (panelState.progress) {
                         const current = progressCredits.get(id) ?? 0;
@@ -411,8 +445,6 @@ export function createResearchTool(): ToolDefinition {
                     }
                 } else if (status) {
                     updateSliceStatus(panelState, displayNum, status);
-                } else {
-                    updateSliceStatus(panelState, displayNum, undefined);
                 }
               }
               if (tokens !== undefined && cost !== undefined) {
@@ -451,10 +483,10 @@ export function createResearchTool(): ToolDefinition {
               completeSlice(panelState, displayNum);
               debouncedRefresh();
             },
-            onEvaluationStart: (round) => {
+            onEvaluationStart: (_round) => {
               addSlice(panelState, 'eval', 'eval', false);
               activateSlice(panelState, 'eval');
-              updateSliceStatus(panelState, 'eval', `Round ${round}`);
+              updateSliceStatus(panelState, 'eval', 'eval');
               debouncedRefresh();
             },
             onEvaluationProgress: (status) => {
@@ -517,20 +549,20 @@ export function createResearchTool(): ToolDefinition {
 
           cleanup?.();
           return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
-
-        } catch (error) {
-          if (aborted || internalAbort.signal.aborted) {
-            cleanup?.();
-            return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
-          }
+        });
+      } catch (error) {
+        if (aborted || internalAbort.signal.aborted) {
           cleanup?.();
-          logger.error('[research] run failed', error);
-          return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
-        } finally {
-          // Restore previous logger
-          setLogger(previousLogger as any);
+          return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
-      });
-    },
-  };
+        cleanup?.();
+        logger.error('[research] run failed', error);
+        return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
+      } finally {
+        // Restore previous logger
+        setLogger(previousLogger);
+      }
+    });
+  },
+};
 }

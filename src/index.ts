@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODELS } from './knowledge/index.ts';
+import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 import { stopBrowserManager } from './infrastructure/browser-manager.ts';
@@ -402,10 +402,7 @@ export default function (pi: ExtensionAPI) {
           label: 'Clear DB Cache',
           get description() { return `(Delete all knowledge${storeCountLabel})`; },
           action: async () => {
-            const dbDir = getDbDir();
-            if (fss.existsSync(dbDir)) {
-              fss.rmSync(dbDir, { recursive: true, force: true });
-            }
+            await clearKnowledgeStore();
             storeCountLabel = ' (0 entries)';
           },
           hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
