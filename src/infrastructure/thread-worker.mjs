@@ -28,8 +28,9 @@ const workerId = Math.random().toString(36).substring(2, 6);
 
 // Orphaned worker protection: If parent dies, kill the worker.
 // This works cross-platform (Linux, Mac, Windows) in Node.js.
+let orphanCheckTimer = null;
 if (process.ppid) {
-    setInterval(() => {
+    orphanCheckTimer = setInterval(() => {
         try {
             // signal 0 checks if the process is alive
             process.kill(process.ppid, 0);
@@ -287,8 +288,8 @@ async function runTask(data) {
     // We should immediately drop it to prevent queue congestion.
     if (queuedAt && taskTimeoutMs) {
         const queueTime = startTime - queuedAt;
-        // Add a 5% buffer to ensure we only drop tasks the orchestrator definitely abandoned
-        if (queueTime > taskTimeoutMs * 1.05) {
+        // Add a 20% buffer to reduce false positives from clock drift and deep queue conditions
+        if (queueTime > taskTimeoutMs * 1.20) {
             logToDebugFile('WARN', `[Worker-${workerId}] Dropping zombie task ${type} (queued for ${queueTime}ms, timeout was ${taskTimeoutMs}ms)`);
             return { error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)` };
         }
@@ -351,6 +352,11 @@ export default new ClusterWorker(runTask, {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
         if (context) await context.close().catch(() => {});
         if (browser) await browser.close().catch(() => {});
+        // Clear the orphan check timer to prevent it from keeping the event loop alive
+        if (orphanCheckTimer) {
+            clearInterval(orphanCheckTimer);
+            orphanCheckTimer = null;
+        }
         // Force process exit — without this, the orphan-detection setInterval keeps
         // the event loop alive indefinitely after the IPC channel is disconnected.
         process.exit(0);

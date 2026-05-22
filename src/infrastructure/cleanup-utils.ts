@@ -36,6 +36,15 @@ export async function cleanupStaleProfiles(
         const stats = await fs.stat(fullPath);
         if (!stats.isDirectory()) continue;
         if (now - stats.mtimeMs > staleMs) {
+          // Check if profile is locked (Camoufox may leave .lock files for active profiles)
+          const lockFile = path.join(fullPath, '.lock');
+          const isLocked = await fs.access(lockFile).then(() => true).catch(() => false);
+          
+          if (isLocked) {
+            logger.debug(`[Cleanup] Skipping profile ${entry} - locked (in use)`);
+            continue;
+          }
+          
           await fs.rm(fullPath, { recursive: true, force: true });
           removed++;
         }

@@ -62,6 +62,14 @@ export function getSchedulerVersion(config?: Config): string {
     return generateSchedulerVersion(config);
 }
 
+/**
+ * Get the global HTTP agent for client requests.
+ * This is used by shutdownManager to properly destroy the agent on shutdown.
+ */
+export function getClientAgent(): http.Agent {
+    return clientAgent;
+}
+
 // Prevents concurrent forceSchedulerRestart() calls from each clearing
 // initializationPromise and spawning multiple competing FixedClusterPool instances.
 // Without this guard, N simultaneous task timeouts spawn N pools but only one
@@ -165,7 +173,11 @@ class BrowserTaskScheduler implements IScheduler {
                 logger.warn(`[Scheduler] Leadership lost (ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}). Shutting down pool...`);
                 await this.shutdown();
             }
-        }, 60000); // Check leadership every 60 seconds
+            // Decay the consecutive error counter to allow recovery after transient errors
+            if (this.consecutiveErrors > 0) {
+                this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
+            }
+        }, 30000); // Check leadership every 30 seconds (reduced from 60s for faster failover)
         // unref() to allow process to exit cleanly even if this timer is the only thing keeping it alive
         if (this.leadershipTimer.unref) {
             this.leadershipTimer.unref();
@@ -410,6 +422,16 @@ class BrowserTaskScheduler implements IScheduler {
             // torn-down context.
             await new Promise(resolve => setTimeout(resolve, 1500));
             this.pool = null;
+
+            // Clean up any orphaned Camoufox browser processes that may have been left behind
+            // This handles edge cases where workers were force-killed or hung during teardown
+            try {
+                const { cleanupOrphanedCamoufoxProcesses } = await import('./browser-cleanup.ts');
+                await cleanupOrphanedCamoufoxProcesses();
+            } catch (cleanupError) {
+                const msg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+                logger.warn('[Scheduler] Failed to cleanup orphaned browsers:', msg);
+            }
         }
     }
 }
@@ -425,10 +447,11 @@ class BrowserClient implements IScheduler {
             // Increased timeout to 120s to allow for shared pool queuing delays
             const timeoutMs = 120000;
             let resolved = false;
+            const controller = new AbortController();
             const timer = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
-                    req.destroy();
+                    controller.abort();
                     reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`));
                 }
             }, timeoutMs);
@@ -439,6 +462,7 @@ class BrowserClient implements IScheduler {
                 path,
                 method: 'POST',
                 agent: clientAgent, // Use high-concurrency agent
+                signal: controller.signal,
                 headers: { 'Content-Type': 'application/json' }
             }, (res) => {
                 clearTimeout(timer);

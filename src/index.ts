@@ -10,7 +10,7 @@ import { shutdownManager } from './utils/shutdown-manager.ts';
 import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
-import { stopBrowserManager } from './infrastructure/browser-manager.ts';
+import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -130,6 +130,15 @@ export default function (pi: ExtensionAPI) {
   // Clear all session state on shutdown to ensure timeouts are cleared
   shutdownManager.register(() => {
     clearAllSessionState();
+  });
+
+  // Destroy HTTP agent to prevent socket leaks on all shutdown paths
+  shutdownManager.register(() => {
+    const clientAgent = getClientAgent();
+    if (clientAgent) {
+      clientAgent.destroy();
+      logger.log('[pi-research] HTTP agent destroyed');
+    }
   });
 
   // Primary cleanup path for pi -p (print mode) and normal session end.

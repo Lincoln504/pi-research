@@ -26,6 +26,10 @@ function setPendingCheck(val: Promise<HealthCheckResult> | null) {
   (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = val;
 }
 
+// Backoff state to prevent retry storms on transient failures
+let healthCheckFailureCount = 0;
+let healthCheckBackoffUntil = 0;
+
 /**
  * Execute a simplified health check verifying browser-based research readiness.
  * Thread-safe singleton pattern to ensure multiple concurrent research sessions
@@ -43,6 +47,17 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
     // If the check failed, clear the cache so the next request can try again
     if (!result.success) {
       setPendingCheck(null);
+      // Increment failure count and set backoff
+      healthCheckFailureCount++;
+      healthCheckBackoffUntil = Date.now() + Math.min(30000, 2000 * Math.pow(2, healthCheckFailureCount - 1));
+      logger.warn(`[healthcheck] Check failed, backoff set for ${healthCheckBackoffUntil - Date.now()}ms (failure #${healthCheckFailureCount})`);
+    } else {
+      // Success - reset failure count and backoff
+      if (healthCheckFailureCount > 0) {
+        logger.log(`[healthcheck] Check succeeded after ${healthCheckFailureCount} failures, resetting backoff`);
+      }
+      healthCheckFailureCount = 0;
+      healthCheckBackoffUntil = 0;
     }
     return result;
   } catch (error) {
@@ -55,6 +70,14 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
  * The actual check logic
  */
 async function performActualCheck(): Promise<HealthCheckResult> {
+  // Apply backoff if previous check failed
+  const now = Date.now();
+  if (now < healthCheckBackoffUntil) {
+    const waitMs = healthCheckBackoffUntil - now;
+    logger.warn(`[healthcheck] Backing off for ${waitMs}ms due to previous failure(s)`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+
   const timeoutMs = getConfig().HEALTH_CHECK_TIMEOUT_MS ?? 30000;
 
   const check = async (): Promise<HealthCheckResult> => {

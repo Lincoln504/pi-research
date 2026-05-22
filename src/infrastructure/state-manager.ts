@@ -113,6 +113,10 @@ export class StateManager {
   // Backup configuration
   private readonly maxBackups: number = 5;
 
+  // GPU lock staleness threshold: if lock is older than this, reclaim it even if owner is alive
+  // 3 minutes balances responsiveness with tolerance for slow operations
+  private readonly gpuLockStaleThresholdMs: number = 180000; // 3 minutes
+
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
 
@@ -761,13 +765,19 @@ public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Prom
         }
 
         const isAlive = await this.isProcessAlive(currentOwner.pid);
-        if (isAlive) {
-          // GPU is busy with a live process
+        const lockAge = now - currentOwner.startedAt;
+        
+        if (isAlive && lockAge < this.gpuLockStaleThresholdMs) {
+          // GPU is busy with a live process and lock is not stale
           return state;
         }
         
-        // Owner is dead, reclaim
-        logger.warn(`[StateManager] GPU owner PID ${currentOwner.pid} is dead. Reclaiming GPU lock.`);
+        // Either owner is dead OR lock is stale - reclaim
+        if (!isAlive) {
+          logger.warn(`[StateManager] GPU owner PID ${currentOwner.pid} is dead. Reclaiming GPU lock.`);
+        } else {
+          logger.warn(`[StateManager] GPU lock is stale (${lockAge}ms old, threshold is ${this.gpuLockStaleThresholdMs}ms). Reclaiming GPU lock.`);
+        }
       }
 
       // Acquire lock

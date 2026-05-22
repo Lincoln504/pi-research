@@ -46,6 +46,16 @@ interface NativeHtmlToMarkdownModule {
  * Robustly extract text from PDF bytes using pdf-oxide-wasm.
  */
 async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
+    // Validate PDF size to prevent unbounded memory usage during parsing
+    // Note: pdf-oxide-wasm loads the entire PDF into memory for text extraction,
+    // so we limit to prevent pathological cases while allowing most web PDFs
+    const MAX_PDF_SIZE = 100 * 1024 * 1024; // 100MB
+    if (bytes.length > MAX_PDF_SIZE) {
+        const sizeMB = Math.round(bytes.length / 1024 / 1024);
+        logger.warn(`[Scrapers] PDF too large (${sizeMB}MB, max 100MB), skipping extraction`);
+        return `*Error: PDF too large (${sizeMB}MB, max 100MB).*`;
+    }
+
     try {
         const { WasmPdfDocument } = await import('pdf-oxide-wasm');
         const doc = new WasmPdfDocument(bytes);
