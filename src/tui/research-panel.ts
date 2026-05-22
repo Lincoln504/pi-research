@@ -592,15 +592,17 @@ export function _deriveRgbGradient(r: number, g: number, b: number, steps: numbe
 
     // Add small variation to last 4 steps of gradient
     if (step >= steps - 4) {
-      // Get RGB components and dim them slightly
-      const n = index - 16;
-      const ri = Math.floor(n / 36);
-      const gi = Math.floor((n % 36) / 6);
-      const bi = n % 6;
-      const dimmedRi = Math.max(0, ri - 1);
-      const dimmedGi = Math.max(0, gi - 1);
-      const dimmedBi = Math.max(0, bi - 1);
-      index = 16 + 36 * dimmedRi + 6 * dimmedGi + dimmedBi;
+      if (index >= 16 && index <= 231) {
+        // Cube index: dim each channel by 1 step
+        const n = index - 16;
+        const ri = Math.floor(n / 36);
+        const gi = Math.floor((n % 36) / 6);
+        const bi = n % 6;
+        index = 16 + 36 * Math.max(0, ri - 1) + 6 * Math.max(0, gi - 1) + Math.max(0, bi - 1);
+      } else if (index >= 232 && index <= 255) {
+        // Grayscale: dim by 1 ramp step
+        index = Math.max(232, index - 1);
+      }
     }
 
     gradient.push(`\x1b[38;5;${index}m`);

@@ -48,14 +48,17 @@ export async function search(
       return result;
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Re-throw total search failure so the orchestrator can surface a clear error
+    // rather than silently producing an empty synthesis with zero links.
+    if (message.includes('Search completely failed')) {
+      throw error;
+    }
     logger.error(`[Search] Orchestration failed:`, error);
     return queries.map(q => ({
       query: q,
       results: [],
-      error: { 
-        type: 'unknown', 
-        message: error instanceof Error ? error.message : String(error) 
-      }
+      error: { type: 'unknown', message }
     }));
   }
 }

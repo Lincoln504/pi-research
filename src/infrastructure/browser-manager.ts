@@ -627,6 +627,19 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
     return p;
 }
 
+function isTransientSocketError(error: any): boolean {
+    return error && typeof error.message === 'string' && (
+        error.message.includes('ECONNREFUSED') ||
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('socket hang up') ||
+        error.message.includes('EPIPE') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('timed out') ||
+        error.message.includes('pool busy') ||
+        error.message.includes('unreachable')
+    );
+}
+
 const require = createRequire(import.meta.url);
 
 export function isBrowserAvailable(): boolean {
@@ -657,19 +670,7 @@ export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape
 
         throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
     } catch (error: any) {
-        // Check for transient socket/network errors that warrant a retry
-        const isTransientError = error && typeof error.message === 'string' && (
-            error.message.includes('ECONNREFUSED') ||
-            error.message.includes('ECONNRESET') ||
-            error.message.includes('socket hang up') ||
-            error.message.includes('EPIPE') ||
-            error.message.includes('ETIMEDOUT') ||
-            error.message.includes('timed out') ||
-            error.message.includes('pool busy') ||
-            error.message.includes('unreachable')
-        );
-
-        if (retries > 0 && isTransientError) {
+        if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
@@ -686,18 +687,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
         const scheduler = await getScheduler(config);
         return await scheduler.runHealthCheck(config);
     } catch (error: any) {
-        const isTransientError = error && typeof error.message === 'string' && (
-            error.message.includes('ECONNREFUSED') ||
-            error.message.includes('ECONNRESET') ||
-            error.message.includes('socket hang up') ||
-            error.message.includes('EPIPE') ||
-            error.message.includes('ETIMEDOUT') ||
-            error.message.includes('timed out') ||
-            error.message.includes('pool busy') ||
-            error.message.includes('unreachable')
-        );
-
-        if (retries > 0 && isTransientError) {
+        if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
@@ -713,18 +703,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
         const scheduler = await getScheduler(config);
         return await scheduler.runSearch(query, config);
     } catch (error: any) {
-        const isTransientError = error && typeof error.message === 'string' && (
-            error.message.includes('ECONNREFUSED') ||
-            error.message.includes('ECONNRESET') ||
-            error.message.includes('socket hang up') ||
-            error.message.includes('EPIPE') ||
-            error.message.includes('ETIMEDOUT') ||
-            error.message.includes('timed out') ||
-            error.message.includes('pool busy') ||
-            error.message.includes('unreachable')
-        );
-
-        if (retries > 0 && isTransientError) {
+        if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
@@ -744,10 +723,9 @@ export async function stopBrowserManager(): Promise<void> {
   initializationPromise = null;
 
   if (globalScheduler instanceof BrowserTaskScheduler) {
-      const serverInfo = await getSharedStateManager().getBrowserServer();
-      if (serverInfo?.pid === process.pid) {
-          await getSharedStateManager().clearBrowserServer();
-      }
+      // Do not call clearBrowserServer() here — BrowserTaskScheduler.shutdown() already
+      // does it with the proper pid+schedulerId dual-check to avoid wiping state owned
+      // by a newer scheduler that won election in the same process.
       await globalScheduler.shutdown();
   }
 

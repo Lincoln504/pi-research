@@ -147,6 +147,9 @@ export class KnowledgeStore {
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
     if (!this.table) throw new Error('Store not open');
 
+    const rowCount = await this.table.countRows();
+    if (rowCount === 0) return [];
+
     const vector = await this.options.embedder.embed(query);
 
     const results = await this.table
@@ -258,6 +261,9 @@ export class KnowledgeStore {
    */
   async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<string[]> {
     if (!this.table) throw new Error('Store not open');
+
+    const rowCount = await this.table.countRows();
+    if (rowCount === 0) return [];
 
     const vector = await this.options.embedder.embed(query);
 
