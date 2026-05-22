@@ -66,6 +66,7 @@ export function createStoredSearchTool(_options: {
         }
 
         let markdown = `# Stored Search Results for "${p.query}"\n\n`;
+        markdown += `**Source: Knowledge Store (Historical Search)**\n\n`;
         for (let i = 0; i < results.length; i++) {
           const res = results[i]!;
           const chunkIndex = res.metadata['chunkIndex'];
@@ -74,6 +75,10 @@ export function createStoredSearchTool(_options: {
             ? ` (chunk ${chunkIndex + 1} of ${totalChunks})`
             : '';
           markdown += `### ${res.url}\n`;
+          const sourceOrigin = res.metadata['sourceOrigin'];
+          if (sourceOrigin) {
+            markdown += `**Original Source:** ${sourceOrigin}\n`;
+          }
           markdown += `*Result ${i + 1} of ${results.length}${chunkLabel}*\n\n`;
           markdown += `${res.text}\n\n---\n\n`;
         }

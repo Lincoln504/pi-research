@@ -83,7 +83,7 @@ When delegating, ensure:
 
 1. **Organization**: Organize the report logically **BY TOPIC**. Do NOT structure it by researcher or round.
 2. **Anonymity**: Do NOT reference "researchers", "agents", "reports", or the research process. Present the findings as a direct, unified knowledge base.
-3. **Master Links List**: Deduplicate ALL URLs from ALL researcher "CITED LINKS" sections. Create a single master list with sequential numbers [1], [2], [3], etc.
+3. **Master Links List**: Deduplicate ALL URLs from ALL researcher "CITED LINKS" sections. Create a single master list with sequential numbers [1], [2], [3], etc. **Preserve the `Source:` information for each entry.**
 4. **Exhaustive Synthesis**: Use ALL findings from ALL reports. Include every fact, date, name, and statistic verbatim. Longer is better.
 5. **Strict Grounding**: Every sentence must come from a report. Use [N] inline citations. No prior knowledge.
 6. **CRITICAL — Links at Bottom Only**: 
@@ -91,7 +91,7 @@ When delegating, ensure:
    - Place exactly ONE `### CITED LINKS` section at the VERY END of the entire synthesis.
    - This section must contain the complete master list of all unique URLs.
    - Do NOT include any links within topic sections or subsections.
-   - Format: `[1] https://url.com — brief description` on each line.
+   - Format: `[1] https://url.com [Source: ...] — brief description` on each line.
 
 > **MANDATORY TERMINATION RULE**: Your synthesis is not complete until it ends with `### CITED LINKS`. Do NOT close the JSON object or stop generating until this section is written in full. A synthesis without `### CITED LINKS` is a failed output.
 

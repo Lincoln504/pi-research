@@ -124,9 +124,9 @@ export async function stackexchangeCommand(options: {
       output = formatTable(result);
     }
 
-    // Add quota info
+    // Add source and quota info
     const quota = client.getQuotaInfo();
-    output += `\n---\n**API Quota:** ${quota.remaining}/${quota.max} remaining\n`;
+    output += `\n---\n**Source: Stack Exchange**\n**API Quota:** ${quota.remaining}/${quota.max} remaining\n`;
 
     return {
       content: [{ type: 'text', text: output }],

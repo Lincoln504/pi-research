@@ -67,13 +67,26 @@ Make no further tool calls after beginning synthesis.
 
 ---
 
+## SOURCE ATTRIBUTION MANDATE
+
+You MUST track the origin of every piece of information you gather.
+- **Web Search**: Information from fresh searches or fresh scrapes.
+- **Knowledge Store**: Information from historical URLs or `stored_search`.
+- **Stack Exchange**: Information from the `stackexchange` tool.
+- **Security Databases**: Information from the `security_search` tool.
+- **Local Files**: Information from `grep` or `read` tools.
+
+**ENFORCEMENT**: Every entry in your `CITED LINKS` section MUST include a `Source:` field identifying its origin.
+
+---
+
 ## Report Format
 
-Build your CITED LINKS list first (number every URL you scraped), then write the report using [N] inline citations.
+Build your CITED LINKS list first (number every URL you scraped or tool result you used), then write the report using [N] inline citations.
 
 **CRITICAL — Report Completeness**: Your report MUST be maximally detailed. Include every fact, figure, date, name, statistic, quote, and piece of information you found. Do NOT summarize or compress findings — include everything. A longer, more detailed report is always better. Omitting information is a failure.
 
-**CRITICAL — Sources Only**: Every piece of information must come from a page you scraped. Do not add context, background, or elaboration from your prior knowledge. If you did not read it in this session, it does not go in the report.
+**CRITICAL — Sources Only**: Every piece of information must come from a page you scraped or a tool result. Do not add context, background, or elaboration from your prior knowledge. If you did not read it in this session, it does not go in the report.
 
 ```markdown
 ## [Topic Title]
@@ -88,11 +101,13 @@ Build your CITED LINKS list first (number every URL you scraped), then write the
 - **[Another Finding]**: [Complete detail — never truncate or compress] [N]
 
 ### CITED LINKS
-**MANDATORY — do not omit. List every URL you scraped, whether or not it was cited inline.**
-**CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content: include specific numbers, dates, names, version strings, benchmark scores, code patterns, or any other concrete detail from the page. Do NOT write a vague one-liner — a sparse description is a failed memory entry.
+**MANDATORY — do not omit. List every URL you scraped or tool result you cited.**
+**CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content.
 
 [1] https://example.com
-Description: Covers the v4.2 release of LibX, which introduced async pipeline support and reduced p99 latency from 240 ms to 18 ms under 500 concurrent connections. The changelog lists 14 breaking API changes, including removal of the synchronous `connect()` method and renaming `RetryPolicy` to `BackoffPolicy`. Benchmarks were run on AWS c6g.4xlarge (16 vCPU, 32 GB RAM) with PostgreSQL 15.3. The migration guide recommends running the provided codemods before upgrading and notes that the old config format is unsupported after 2025-01-01.
-[2] https://example2.com
-Description: Academic paper (Chen et al., 2023, NeurIPS) proposing a sparse attention mechanism that reduces transformer memory from O(n²) to O(n log n) by restricting each token to attend only to its 64 nearest neighbours in learned embedding space. Evaluated on LongBench (128k context), achieving 91.3 F1 vs 89.7 for full attention at 3.2× lower memory. Limitations: degrades on tasks requiring global context; not yet tested beyond English. Code released at github.com/example/sparse-attn under Apache 2.0.
+Source: Fresh Scrape (Web Search)
+Description: Covers the v4.2 release of LibX...
+[2] CVE-2024-1234
+Source: Security Databases (NVD)
+Description: Critical overflow in libcurl...
 ```

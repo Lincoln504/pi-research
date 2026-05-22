@@ -11,6 +11,7 @@ import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODE
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
+import { resetTerminalState } from './utils/terminal-state.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -118,7 +119,8 @@ export default function (pi: ExtensionAPI) {
   // Register cleanup tasks in the order they should run in reverse:
   // 1. stopBrowserManager (runs last - slow, up to 10s for pool destruction)
   // 2. shutdownKnowledgeStore (runs second - disposes embedder to prevent DefaultLogger crash)
-  // 3. clearAllSessionState (runs first - fast)
+  // 3. clearAllSessionState (runs third - fast)
+  // 4. resetTerminalState (runs first - fast, prevents ghost character leaks on reload)
   shutdownManager.register(async () => {
     await stopBrowserManager();
   });
@@ -138,6 +140,18 @@ export default function (pi: ExtensionAPI) {
     if (clientAgent) {
       clientAgent.destroy();
       logger.log('[pi-research] HTTP agent destroyed');
+    }
+  });
+
+  // FIX #4: Reset terminal state on shutdown to prevent ghost character leaks
+  // This is crucial for /reload scenarios where terminal protocol responses
+  // might arrive after the extension stops but before the new instance starts.
+  shutdownManager.register(async () => {
+    try {
+      await resetTerminalState();
+      logger.debug('[pi-research] Terminal state reset on shutdown');
+    } catch (error) {
+      // Ignore terminal reset errors - stdout might be closed
     }
   });
 

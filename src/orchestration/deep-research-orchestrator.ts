@@ -251,6 +251,7 @@ export class DeepResearchOrchestrator {
                       metadata: {
                         ingestionType: 'synthesis-description',
                         source: 'researcher',
+                        sourceOrigin: cit.source,
                         synthesizedAt: new Date().toISOString(),
                       }
                     });
@@ -329,14 +330,14 @@ export class DeepResearchOrchestrator {
 
     // Parse each researcher report's CITED LINKS section and collect unique URLs
     const seen = new Set<string>();
-    const links: { url: string; desc: string }[] = [];
+    const links: { url: string; desc: string; source?: string }[] = [];
 
     for (const report of this.reports.values()) {
       const citations = parseCitations(report);
       for (const cit of citations) {
         if (!seen.has(cit.url)) {
           seen.add(cit.url);
-          links.push({ url: cit.url, desc: cit.description });
+          links.push({ url: cit.url, desc: cit.description, source: cit.source });
         }
       }
     }
@@ -344,7 +345,10 @@ export class DeepResearchOrchestrator {
     if (links.length === 0) return synthesis;
 
     const linksSection = links
-      .map(({ url, desc }, i) => `[${i + 1}] ${url}${desc ? ` — ${desc}` : ''}`)
+      .map(({ url, desc, source }, i) => {
+        const sourcePart = source ? ` [Source: ${source}]` : '';
+        return `[${i + 1}] ${url}${sourcePart}${desc ? ` — ${desc}` : ''}`;
+      })
       .join('\n');
 
     return `${synthesis}\n\n### CITED LINKS\n${linksSection}`;

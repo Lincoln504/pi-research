@@ -124,6 +124,7 @@ export function createSecuritySearchTool(options: {
       const elapsed = Date.now() - startTime;
 
       let markdown = '# Security Vulnerability Search Results\n\n';
+      markdown += `**Source: Security Databases**\n\n`;
       markdown += `**Searched:** ${databases.join(', ')}\n`;
       markdown += `**Terms:** ${terms.join(', ')}\n`;
       markdown += `**Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;

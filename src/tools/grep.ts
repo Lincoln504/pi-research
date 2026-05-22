@@ -200,6 +200,7 @@ export function createGrepTool(options: {
         const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
         let markdown = '# Search Results (rg)\n\n';
+        markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
         markdown += `**Pattern:** \`${pattern}\`\n`;
         markdown += `**Path:** \`${path}\`\n`;
         if (flags) markdown += `**Flags:** \`${flags}\`\n`;
@@ -237,6 +238,7 @@ export function createGrepTool(options: {
           const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
           let markdown = '# Search Results (grep)\n\n';
+          markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
           markdown += `**Pattern:** \`${pattern}\`\n`;
           markdown += `**Path:** \`${path}\`\n`;
           if (flags) markdown += `**Flags:** \`${flags}\`\n`;
@@ -299,6 +301,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
 
     let markdown = '# Search Results (rg)\n\n';
+    markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
     markdown += `**Pattern:** \`${pattern}\`\n`;
     markdown += `**Path:** \`${resolvedPath}\`\n`;
     if (flags) markdown += `**Flags:** \`${flags}\`\n`;
@@ -328,6 +331,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
       const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
 
       let markdown = '# Search Results (grep)\n\n';
+      markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
       markdown += `**Pattern:** \`${pattern}\`\n`;
       markdown += `**Path:** \`${resolvedPath}\`\n`;
       if (flags) markdown += `**Flags:** \`${flags}\`\n`;

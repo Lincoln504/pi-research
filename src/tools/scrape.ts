@@ -181,7 +181,10 @@ export function createScrapeTool(options: {
       markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
 
       for (const res of allSuccessful) {
+          const isCached = cachedResults.some(c => c.url === res.url);
+          const sourceLabel = isCached ? 'Source: Knowledge Store (Cache)' : 'Source: Fresh Scrape';
           markdown += `### ${res.url}\n`;
+          markdown += `**${sourceLabel}**\n\n`;
           markdown += `${res.markdown || ''}\n\n---\n\n`;
       }
 

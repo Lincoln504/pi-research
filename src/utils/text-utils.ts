@@ -106,11 +106,12 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
 export interface Citation {
   url: string;
   description: string;
+  source?: string;
 }
 
 /**
- * Parses the CITED LINKS section from a researcher report, extracting URLs and their descriptions.
- * Handles both single-line 'URL - description' and multi-line 'Description:' formats.
+ * Parses the CITED LINKS section from a researcher report, extracting URLs, sources, and their descriptions.
+ * Handles both single-line 'URL - description' and multi-line 'Source:'/'Description:' formats.
  */
 export function parseCitations(report: string): Citation[] {
   const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
@@ -128,6 +129,7 @@ export function parseCitations(report: string): Citation[] {
     const firstLine = lines[0]!.trim();
     let url: string;
     let desc = '';
+    let source = '';
     
     const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
     if (inlineMatch) {
@@ -143,6 +145,10 @@ export function parseCitations(report: string): Citation[] {
     let foundDescTag = false;
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]!.trim();
+      if (line.match(/^Source:/i)) {
+        source = line.replace(/^Source:\s*/i, '').trim();
+        continue;
+      }
       if (!foundDescTag) {
         if (line.match(/^Description:/i)) {
           foundDescTag = true;
@@ -158,7 +164,7 @@ export function parseCitations(report: string): Citation[] {
     }
     
     if (url) {
-      citations.push({ url, description: desc });
+      citations.push({ url, description: desc, source });
     }
   }
   return citations;

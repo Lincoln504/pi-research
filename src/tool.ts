@@ -50,10 +50,14 @@ import {
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
 import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
-import { 
+import {
   getUnitsPerResearcher,
-  LEAD_EVAL_UNITS 
+  LEAD_EVAL_UNITS
 } from './constants.ts';
+import {
+  shouldConsumeForCleanup,
+  resetTerminalState,
+} from './utils/terminal-state.ts';
 
 /**
  * Functional Health Check for Tool Start
@@ -218,9 +222,24 @@ export function createResearchTool(): ToolDefinition {
           registerSessionAbort(piSessionId, researchId, internalAbort);
           const masterWidgetId = `pi-research-master-${piSessionId}`;
 
-          cleanup = () => {
+          cleanup = async () => {
             if (cleanup === null) return;
             cleanup = null;
+
+            // FIX #1: Drain terminal input to consume any pending protocol responses
+            // This prevents Kitty protocol responses (like \x1b[?4;1;3u) from leaking to the shell
+            try {
+              const tuiTerminal = (ctx.ui as any).tui?.terminal;
+              if (tuiTerminal && typeof tuiTerminal.drainInput === 'function') {
+                // Use pi-tui's built-in drainInput if available
+                await tuiTerminal.drainInput(100, 20);
+              } else if (process.stdin.isTTY) {
+                // Fallback: ensure terminal is in a safe state and drain input
+                await resetTerminalState();
+              }
+            } catch (error) {
+              logger.warn('[research] Failed to drain terminal input:', error);
+            }
 
             // Clear wave animation timer
             if (waveTimer) {
@@ -263,16 +282,27 @@ export function createResearchTool(): ToolDefinition {
 
           await ensureFunctionalHealth(panelState, debouncedRefresh);
 
-          signal?.addEventListener('abort', () => {
+          signal?.addEventListener('abort', async () => {
             aborted = true;
             internalAbort.abort();
-            cleanup?.();
+            await cleanup?.();
           }, { once: true });
 
           unsubInput = ctx.ui.onTerminalInput((data: string) => {
-            if (data !== '\x1b' && data !== '\x03') return undefined;
-            abortAllSessions(piSessionId);
-            return { consume: true };
+            // Check for specific cancel keys (Escape and Ctrl+C)
+            if (data === '\x1b' || data === '\x03') {
+              abortAllSessions(piSessionId);
+              return { consume: true };
+            }
+
+            // FIX #2: Consume all escape sequences to prevent terminal state leaks
+            // This includes Kitty protocol responses, CSI sequences, OSC sequences, etc.
+            // Without this, late-arriving protocol responses leak to the shell after tool exit.
+            if (shouldConsumeForCleanup(data)) {
+              return { consume: true };
+            }
+
+            return undefined;
           });
 
           const researchComplexity = depth ?? 0;
@@ -420,7 +450,11 @@ export function createResearchTool(): ToolDefinition {
 
               // Researchers from previous rounds are cleared above
               const displayNum = id === 'quick' ? quickSliceLabel : id.replace(/^r/, '');
-              addSlice(panelState, displayNum, displayNum, true);
+              
+              // FIX: Prevent overwriting existing slice (prevents status flicker in Quick Research)
+              if (!panelState.slices.has(displayNum)) {
+                addSlice(panelState, displayNum, displayNum, true);
+              }
               activateSlice(panelState, displayNum);
               debouncedRefresh();
             },
@@ -547,15 +581,15 @@ export function createResearchTool(): ToolDefinition {
           const exportPath = await exportResearchReport(sanitizedQuery, result, researchComplexity === 0 ? 'quick' : 'deep', ctx.cwd);
           const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
 
-          cleanup?.();
+          await cleanup?.();
           return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
         });
       } catch (error) {
         if (aborted || internalAbort.signal.aborted) {
-          cleanup?.();
+          await cleanup?.();
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
-        cleanup?.();
+        await cleanup?.();
         logger.error('[research] run failed', error);
         return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
       } finally {

@@ -76,6 +76,7 @@ export function createSearchTool(options: {
         const elapsed = Date.now() - startTime;
 
         let markdown = `# Web Search Results (${queries.length} queries)\n\n`;
+        markdown += `**Source: Web Search**\n\n`;
         results.forEach((r, i) => {
           markdown += `## Query ${i + 1}: ${r.query}\n`;
           if (r.results.length === 0) {

@@ -73,6 +73,17 @@ Research reports are saved as Markdown files with a collision-guarded naming sch
 
 ---
 
+## Terminal Stability & Integrity
+
+To provide a modern, high-fidelity experience, `pi-research` utilizes advanced terminal features such as the **Kitty Keyboard Protocol**, bracketed paste mode, and mouse tracking. Managing these features safely is critical to preventing "terminal leakage" (ghost characters appearing in the shell).
+
+1.  **Terminal Mode Management**: The extension uses a specialized `terminal-state` utility to reset all terminal modes upon exit, reload, or crash. This ensures the terminal is returned to a "plain" state before the shell resumes control.
+2.  **Input Draining**: During shutdown or reload, the extension actively "drains" the terminal's input buffer for 100ms. This consumes any unhandled escape sequences (like protocol responses from the terminal) that would otherwise be interpreted as user input by the shell.
+3.  **Safe Input Handlers**: All terminal input is processed through a filter that identifies and consumes escape sequences (CSI, OSC, APC) to prevent them from interfering with the research session or leaking during transitions.
+4.  **Logging Redirection Integrity**: The system-level logger (see `logger.ts`) redirects `stdout` and `stderr` to a file to capture native logs from browser engines and AI libraries. This redirection is carefully guarded to ensure TUI escape sequences are passed through to the terminal while "noisy" diagnostic output is diverted.
+
+---
+
 ## Project Structure
 
 - `src/orchestration/`: Multi-agent coordination and evaluation logic.
