@@ -152,13 +152,13 @@ export class KnowledgeStore {
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
+      .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
       .fullTextSearch(query)
       .rerank(await this.getReranker())
       .limit(options.limit ?? 5)
       .toArray();
 
-    // Filter to only return synthesis-description entries for vector/semantic search
-    // Raw-content entries are for retrieval only, not search
+    // The LanceDB where clause ensures we only get synthesis-description entries.
     const filteredResults = results
       .map(r => ({
         url: r.url as string,
@@ -167,6 +167,7 @@ export class KnowledgeStore {
         metadata: JSON.parse(r.metadata as string),
         timestamp: Number(r.timestamp),
       }))
+      // Double check just in case the LIKE matched something unexpectedly
       .filter(doc => doc.metadata.ingestionType === 'synthesis-description');
 
     return filteredResults;
@@ -236,24 +237,20 @@ export class KnowledgeStore {
 
     const results = await this.table
       .query()
-      .where(`url = '${escapedUrl}'`)
-      .limit(10)
+      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND content IS NOT NULL`)
+      .limit(1)
       .toArray();
 
     if (results.length === 0) return null;
 
-    // Find the first synthesis-description row that has a populated content field.
-    for (const r of results) {
-      try {
-        const metadata = JSON.parse(r.metadata as string);
-        if (metadata.ingestionType === 'synthesis-description' && r.content) {
-          logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
-          return { text: r.content as string, metadata };
-        }
-      } catch { /* skip malformed row */ }
+    const r = results[0];
+    try {
+      const metadata = JSON.parse(r.metadata as string);
+      logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
+      return { text: r.content as string, metadata };
+    } catch { 
+      return null;
     }
-
-    return null;
   }
 
   /**
@@ -267,6 +264,7 @@ export class KnowledgeStore {
     const results = await this.table
       .query()
       .nearestTo(Array.from(vector))
+      .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
       .fullTextSearch(query)
       .rerank(await this.getReranker())
       .limit(options.limit ?? 20)

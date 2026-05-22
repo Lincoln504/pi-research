@@ -326,7 +326,7 @@ export function createResearchTool(): ToolDefinition {
                 (panelState as any).needsClear = true;
               }
             },
-            onSearchStart: (queries) => {
+            onSearchStart: (_queries) => {
               let sliceId = 'coord';
               const hasEval = panelState.slices.has('eval');
               const hasCoord = panelState.slices.has('coord');

@@ -72,7 +72,7 @@ let isRestartInProgress = false;
  * Force a restart of the scheduler by clearing the global cache and state.
  * This should be called when configuration changes are detected.
  */
-export async function forceSchedulerRestart(): Promise<void> {
+export async function forceSchedulerRestart(forceClearRemoteState: boolean = false): Promise<void> {
     if (isRestartInProgress) {
         logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
         return;
@@ -105,9 +105,11 @@ export async function forceSchedulerRestart(): Promise<void> {
     let shouldClearState = true;
     if (serverInfo) {
         const isAlive = await getSharedStateManager().isPidAlive(serverInfo.pid, serverInfo.schedulerId);
-        if (isAlive && serverInfo.pid !== process.pid) {
+        if (isAlive && serverInfo.pid !== process.pid && !forceClearRemoteState) {
             logger.log(`[Scheduler] Skipping clearBrowserServer — live scheduler (PID ${serverInfo.pid}) owns state.`);
             shouldClearState = false;
+        } else if (forceClearRemoteState) {
+            logger.log(`[Scheduler] Force clearing remote state for PID ${serverInfo.pid} due to unreachability.`);
         }
     }
 
@@ -670,7 +672,7 @@ export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape
         if (retries > 0 && isTransientError) {
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart();
+            await forceSchedulerRestart(true);
             // Add a small delay before retry to allow ports to free up
             await new Promise(resolve => setTimeout(resolve, 1000));
             return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
@@ -698,7 +700,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
         if (retries > 0 && isTransientError) {
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart();
+            await forceSchedulerRestart(true);
             await new Promise(resolve => setTimeout(resolve, 1000));
             return runBrowserHealthCheck(config, retries - 1);
         }
@@ -725,7 +727,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
         if (retries > 0 && isTransientError) {
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart();
+            await forceSchedulerRestart(true);
             await new Promise(resolve => setTimeout(resolve, 1000));
             return runWorkerSearch(query, config, retries - 1);
         }
