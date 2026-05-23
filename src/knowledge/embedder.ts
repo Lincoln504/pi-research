@@ -231,7 +231,7 @@ export class Embedder {
         this.gpuLockHeld = false;
       }
       if (this.pipeline) {
-        try { await (this.pipeline as any).dispose(); } catch {}
+        try { await (this.pipeline as any).dispose(); } catch (_e) { /* ignore */ }
         this.pipeline = null;
       }
       logger.error(`[embedder] Failed to initialize:`, err);
@@ -270,7 +270,7 @@ export class Embedder {
     }
     this.state = 'initializing';
     if (this.pipeline) {
-      try { await (this.pipeline as any).dispose(); } catch { }
+      try { await (this.pipeline as any).dispose(); } catch (_e) { /* ignore */ }
       this.pipeline = null;
     }
     this.device = 'cpu';
@@ -410,7 +410,7 @@ export class Embedder {
       if (this.initializingPromise) {
         try {
           await this.initializingPromise;
-        } catch (e) {
+        } catch (_e) {
           // Initialize failed, which is fine, we just need it to finish
         }
       }

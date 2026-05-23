@@ -150,7 +150,7 @@ export default function (pi: ExtensionAPI) {
     try {
       await resetTerminalState();
       logger.debug('[pi-research] Terminal state reset on shutdown');
-    } catch (error) {
+    } catch (_error) {
       // Ignore terminal reset errors - stdout might be closed
     }
   });
@@ -161,8 +161,8 @@ export default function (pi: ExtensionAPI) {
   pi.on('session_shutdown', async () => {
     try {
       await shutdownManager.runCleanup('session_shutdown');
-    } catch (err) {
-      logger.error('[pi-research] session_shutdown cleanup failed:', err);
+    } catch (_err) {
+      logger.error('[pi-research] session_shutdown cleanup failed:', _err);
     }
     // Force exit after 5 seconds if cleanup hangs (shouldn't happen normally)
     shutdownManager.forceExitAfter(5000);

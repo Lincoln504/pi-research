@@ -11,7 +11,7 @@ import type { MigrationStrategy } from './migration.ts';
 
 /** Migration strategy for model changes (read from env or config) */
 function getMigrationStrategy(): MigrationStrategy | undefined {
-  const strategy = process.env.PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY;
+  const strategy = process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
   if (!strategy) return undefined;
   
   const validStrategies: MigrationStrategy[] = ['drop', 're-embed', 'continue', 'error'];

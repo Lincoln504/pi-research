@@ -55,8 +55,8 @@ class MockNvdClient {
   async getCve(cveId: string): Promise<any> {
     this.requestCount++;
     
-    // Simulate rate limit after 50 requests
-    if (this.requestCount > 50 && !this.rateLimitTriggered) {
+    // Simulate rate limit after 45 requests
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -77,7 +77,7 @@ class MockNvdClient {
     this.requestCount++;
     
     // Simulate rate limit
-    if (this.requestCount > 50 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -112,7 +112,7 @@ class MockGitHubAdvisoryClient {
     this.requestCount++;
 
     // Simulate GitHub rate limits (more strict)
-    if (this.requestCount > 40 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -130,7 +130,7 @@ class MockGitHubAdvisoryClient {
   async searchAdvisories(query: string): Promise<any[]> {
     this.requestCount++;
 
-    if (this.requestCount > 40 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -163,7 +163,7 @@ class MockOsvClient {
   async getVulnerability(vulnId: string): Promise<any> {
     this.requestCount++;
 
-    if (this.requestCount > 60 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -180,7 +180,7 @@ class MockOsvClient {
   async queryVulnerabilities(packageName: string): Promise<any[]> {
     this.requestCount++;
 
-    if (this.requestCount > 60 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -213,7 +213,7 @@ class MockCisaKevClient {
   async getKevList(): Promise<any[]> {
     this.requestCount++;
 
-    if (this.requestCount > 70 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -230,7 +230,7 @@ class MockCisaKevClient {
   async checkCve(cveId: string): Promise<boolean> {
     this.requestCount++;
 
-    if (this.requestCount > 70 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(60);
     }
@@ -262,7 +262,7 @@ class MockStackExchangeClient {
     this.requestCount++;
 
     // Stack Exchange has more lenient rate limits
-    if (this.requestCount > 300 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(30);
     }
@@ -280,7 +280,7 @@ class MockStackExchangeClient {
   async getQuestion(questionId: number): Promise<any> {
     this.requestCount++;
 
-    if (this.requestCount > 300 && !this.rateLimitTriggered) {
+    if (this.requestCount > 30 && !this.rateLimitTriggered) {
       this.rateLimitTriggered = true;
       throw simulateRateLimitError(30);
     }
@@ -433,31 +433,29 @@ describe('API Concurrency Load Test', () => {
     }));
 
     const results = await executeBurst(
-      requests.map(req =>
-        measureTime(async () => {
-          const start = Date.now();
-          try {
-            await req.operation();
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: true,
-              durationMs: duration,
-            };
-          } catch (error) {
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: false,
-              durationMs: duration,
-              error: error as Error,
-              wasRateLimited: (error as any).statusCode === 429,
-            };
-          }
-        })
-      )
+      requests.map(req => async () => {
+        const start = Date.now();
+        try {
+          await req.operation();
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: true,
+            durationMs: duration,
+          };
+        } catch (error) {
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: false,
+            durationMs: duration,
+            error: error as Error,
+            wasRateLimited: (error as any).statusCode === 429,
+          };
+        }
+      })
     );
 
     const metrics = calculateApiMetrics(results);
@@ -484,31 +482,29 @@ describe('API Concurrency Load Test', () => {
     }));
 
     const results = await executeBurst(
-      requests.map(req =>
-        measureTime(async () => {
-          const start = Date.now();
-          try {
-            await req.operation();
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: true,
-              durationMs: duration,
-            };
-          } catch (error) {
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: false,
-              durationMs: duration,
-              error: error as Error,
-              wasRateLimited: (error as any).statusCode === 429,
-            };
-          }
-        })
-      )
+      requests.map(req => async () => {
+        const start = Date.now();
+        try {
+          await req.operation();
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: true,
+            durationMs: duration,
+          };
+        } catch (error) {
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: false,
+            durationMs: duration,
+            error: error as Error,
+            wasRateLimited: (error as any).statusCode === 429,
+          };
+        }
+      })
     );
 
     const metrics = calculateApiMetrics(results);
@@ -537,31 +533,29 @@ describe('API Concurrency Load Test', () => {
     }));
 
     const results = await executeBurst(
-      requests.map(req =>
-        measureTime(async () => {
-          const start = Date.now();
-          try {
-            await req.operation();
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: true,
-              durationMs: duration,
-            };
-          } catch (error) {
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: false,
-              durationMs: duration,
-              error: error as Error,
-              wasRateLimited: (error as any).statusCode === 429,
-            };
-          }
-        })
-      )
+      requests.map(req => async () => {
+        const start = Date.now();
+        try {
+          await req.operation();
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: true,
+            durationMs: duration,
+          };
+        } catch (error) {
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: false,
+            durationMs: duration,
+            error: error as Error,
+            wasRateLimited: (error as any).statusCode === 429,
+          };
+        }
+      })
     );
 
     const metrics = calculateApiMetrics(results);
@@ -616,31 +610,29 @@ describe('API Concurrency Load Test', () => {
     ];
 
     const results = await executeBurst(
-      allRequests.map(req =>
-        measureTime(async () => {
-          const start = Date.now();
-          try {
-            await req.operation();
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: true,
-              durationMs: duration,
-            };
-          } catch (error) {
-            const duration = Date.now() - start;
-            return {
-              apiName: req.apiName,
-              endpoint: req.endpoint,
-              success: false,
-              durationMs: duration,
-              error: error as Error,
-              wasRateLimited: (error as any).statusCode === 429,
-            };
-          }
-        })
-      )
+      allRequests.map(req => async () => {
+        const start = Date.now();
+        try {
+          await req.operation();
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: true,
+            durationMs: duration,
+          };
+        } catch (error) {
+          const duration = Date.now() - start;
+          return {
+            apiName: req.apiName,
+            endpoint: req.endpoint,
+            success: false,
+            durationMs: duration,
+            error: error as Error,
+            wasRateLimited: (error as any).statusCode === 429,
+          };
+        }
+      })
     );
 
     const metrics = calculateApiMetrics(results);
@@ -698,16 +690,15 @@ describe('API Concurrency Load Test', () => {
       ];
 
       const results = await executeBurst(
-        requests.map(req =>
-          measureTime(async () => {
-            try {
-              await req.operation();
-              return { apiName: req.apiName, success: true };
-            } catch (error) {
-              return { apiName: req.apiName, success: false };
-            }
-          })
-        )
+        requests.map(req => async () => {
+          const start = Date.now();
+          try {
+            await req.operation();
+            return { apiName: req.apiName, success: true, durationMs: Date.now() - start };
+          } catch (error) {
+            return { apiName: req.apiName, success: false, durationMs: Date.now() - start };
+          }
+        })
       );
 
       results.forEach(r => {
@@ -767,31 +758,29 @@ describe('API Concurrency Load Test', () => {
       ];
 
       const burstResults = await executeBurst(
-        requests.map(req =>
-          measureTime(async () => {
-            const start = Date.now();
-            try {
-              await req.operation();
-              const duration = Date.now() - start;
-              return {
-                apiName: req.apiName,
-                endpoint: '',
-                success: true,
-                durationMs: duration,
-              };
-            } catch (error) {
-              const duration = Date.now() - start;
-              return {
-                apiName: req.apiName,
-                endpoint: '',
-                success: false,
-                durationMs: duration,
-                error: error as Error,
-                wasRateLimited: (error as any).statusCode === 429,
-              };
-            }
-          })
-        )
+        requests.map(req => async () => {
+          const start = Date.now();
+          try {
+            await req.operation();
+            const duration = Date.now() - start;
+            return {
+              apiName: req.apiName,
+              endpoint: '',
+              success: true,
+              durationMs: duration,
+            };
+          } catch (error) {
+            const duration = Date.now() - start;
+            return {
+              apiName: req.apiName,
+              endpoint: '',
+              success: false,
+              durationMs: duration,
+              error: error as Error,
+              wasRateLimited: (error as any).statusCode === 429,
+            };
+          }
+        })
       );
 
       allResults.push(...burstResults);

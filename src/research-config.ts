@@ -107,27 +107,44 @@ async function routeDirectAction(
   const action = parsed.action;
   const params = parsed.params || [];
 
+  // New section-based routing (Preferred)
+  const knownSections = ['health', 'errors', 'knowledge', 'settings', 'metrics'];
+  
+  if (section && knownSections.includes(section)) {
+    switch (section) {
+      case 'health':
+        await handleHealthAction(action, params, ctx, pi);
+        break;
+      case 'errors':
+        await handleErrorsAction(action, params, ctx, pi);
+        break;
+      case 'knowledge':
+        await handleKnowledgeAction(action, params, ctx, pi);
+        break;
+      case 'settings':
+        await handleSettingsAction(action, params, ctx, pi);
+        break;
+      case 'metrics':
+        await handleMetricsAction(action, params, ctx, pi);
+        break;
+    }
+    return;
+  }
+
   // Map old command names to new equivalents (backward compatibility)
   const commandMap: Record<string, () => Promise<void>> = {
-    // Old health commands
-    'health': () => handleHealthAction(action, params, ctx, pi),
     'health-clear': () => {
       clearHealthCheckCache();
       ctx.ui.notify('Health check cache cleared', 'info');
       return Promise.resolve();
     },
     'health-history': () => showHealthHistory(ctx, pi),
-    
-    // Old error commands
-    'errors': () => showErrorReport(ctx, pi),
     'errors-clear': () => {
       errorTracker.clear();
       ctx.ui.notify('Error history cleared', 'info');
       return Promise.resolve();
     },
     'errors-export': () => exportErrorReport(params[0], ctx),
-    
-    // Old knowledge commands
     'knowledge-migrate': () => handleKnowledgeMigration(params[0], ctx),
   };
 
@@ -137,29 +154,8 @@ async function routeDirectAction(
     return;
   }
 
-  // New section-based routing
-  if (!section) {
-    return; // Will be handled by showing interactive menu
-  }
-  
-  switch (section) {
-    case 'health':
-      await handleHealthAction(action, params, ctx, pi);
-      break;
-    case 'errors':
-      await handleErrorsAction(action, params, ctx, pi);
-      break;
-    case 'knowledge':
-      await handleKnowledgeAction(action, params, ctx, pi);
-      break;
-    case 'settings':
-      await handleSettingsAction(action, params, ctx, pi);
-      break;
-    case 'metrics':
-      await handleMetricsAction(action, params, ctx, pi);
-      break;
-    default:
-      ctx.ui.notify(`Unknown section: ${section}. Use /research-config for help.`, 'error');
+  if (section) {
+    ctx.ui.notify(`Unknown section: ${section}. Use /research-config for help.`, 'error');
   }
 }
 
@@ -169,7 +165,7 @@ async function routeDirectAction(
 
 async function handleHealthAction(
   action: string | undefined,
-  params: string[],
+  _params: string[],
   ctx: any,
   pi: ExtensionAPI
 ): Promise<void> {
@@ -299,7 +295,7 @@ async function showHealthHistory(ctx: any, pi: ExtensionAPI): Promise<void> {
   ctx.ui.notify(`Health history: ${summary.total} checks recorded`, 'info');
 }
 
-async function showHealthSummary(ctx: any, pi: ExtensionAPI): Promise<void> {
+async function showHealthSummary(_ctx: any, pi: ExtensionAPI): Promise<void> {
   const summary = getHealthSummary();
 
   const outputLines: string[] = [];
@@ -329,7 +325,7 @@ async function showHealthSummary(ctx: any, pi: ExtensionAPI): Promise<void> {
 
 async function handleErrorsAction(
   action: string | undefined,
-  params: string[],
+  _params: string[],
   ctx: any,
   pi: ExtensionAPI
 ): Promise<void> {
@@ -343,7 +339,7 @@ async function handleErrorsAction(
       ctx.ui.notify('Error history cleared', 'info');
       break;
     case 'export':
-      await exportErrorReport(params[0], ctx);
+      await exportErrorReport(_params[0], ctx);
       break;
     case 'patterns':
       showErrorPatterns(ctx, pi);
@@ -396,7 +392,7 @@ async function showErrorReport(ctx: any, pi: ExtensionAPI): Promise<void> {
   ctx.ui.notify(`Error report: ${report.totalErrors} errors, ${report.uniquePatterns} patterns`, 'info');
 }
 
-async function showErrorPatterns(ctx: any, pi: ExtensionAPI): Promise<void> {
+async function showErrorPatterns(_ctx: any, pi: ExtensionAPI): Promise<void> {
   const report = errorTracker.getReport();
 
   const outputLines: string[] = [];
@@ -484,7 +480,7 @@ async function exportErrorReport(customPath: string | undefined, ctx: any): Prom
 
 async function handleKnowledgeAction(
   action: string | undefined,
-  params: string[],
+  _params: string[],
   ctx: any,
   pi: ExtensionAPI
 ): Promise<void> {
@@ -494,7 +490,7 @@ async function handleKnowledgeAction(
       showKnowledgeStatus(ctx, pi);
       break;
     case 'migrate':
-      await handleKnowledgeMigration(params[0], ctx);
+      await handleKnowledgeMigration(_params[0], ctx);
       break;
     case 'clear':
       await clearKnowledgeStore();
@@ -529,7 +525,7 @@ async function showKnowledgeStatus(ctx: any, pi: ExtensionAPI): Promise<void> {
         const store = await getStore();
         const count = await store.count();
         outputLines.push(`**Entries:** ${count}`);
-      } catch (error) {
+      } catch (_error) {
         outputLines.push(`**Entries:** Error retrieving count`);
       }
     }
@@ -558,12 +554,12 @@ async function handleKnowledgeMigration(strategy: string | undefined, ctx: any):
   ctx.ui.notify(`Starting knowledge store migration with strategy: ${strategy}...`, 'info');
   
   try {
-    process.env.PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY = strategy;
+    process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'] = strategy;
     
     await shutdownKnowledgeStore();
     await initKnowledgeStore();
     
-    delete process.env.PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY;
+    delete process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
     
     ctx.ui.notify(`Knowledge store migration complete: ${strategy}`, 'info');
   } catch (error: unknown) {
@@ -658,7 +654,7 @@ async function showSettings(ctx: any, pi: ExtensionAPI): Promise<void> {
   ctx.ui.notify('Settings displayed', 'info');
 }
 
-async function showSettingsEditor(ctx: any, pi: ExtensionAPI): Promise<void> {
+async function showSettingsEditor(ctx: any, _pi: ExtensionAPI): Promise<void> {
   if (!ctx.hasUI) {
     ctx.ui.notify('Settings editor requires interactive mode', 'error');
     return;
@@ -845,8 +841,8 @@ async function showSettingsEditor(ctx: any, pi: ExtensionAPI): Promise<void> {
     },
   ];
 
-  const result = await ctx.ui.custom<{ type: string; data?: typeof config } | undefined>(
-    (tui, theme, _kb, done) => {
+  const result = await ctx.ui.custom(
+    (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
       class ConfigDashboardComponent {
         private selectedIndex: number = 0;
         private cachedLines: string[] = [];
@@ -1056,18 +1052,6 @@ function resetSettings(ctx: any): void {
   ctx.ui.notify('Settings reset to defaults (reload required)', 'warning');
 }
 
-async function saveSettings(ctx: any): Promise<void> {
-  const config = getConfig();
-  try {
-    validateConfig(config);
-    saveConfig(config);
-    ctx.ui.notify('Settings saved', 'info');
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`Failed to save settings: ${message}`, 'error');
-  }
-}
-
 // ============================================================================
 // Metrics Actions
 // ============================================================================
@@ -1089,7 +1073,7 @@ async function handleMetricsAction(
 }
 
 async function showMetrics(ctx: any, pi: ExtensionAPI): Promise<void> {
-  const metricsData = metrics.getAllMetrics();
+  const metricsData = metrics.getSnapshot();
   const outputLines: string[] = [];
   
   outputLines.push('## System Metrics');
@@ -1126,8 +1110,8 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
     return;
   }
 
-  const result = await ctx.ui.custom<{ type: string; data?: any } | undefined>(
-    (tui, theme, _kb, done) => {
+  const result = await ctx.ui.custom(
+    (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
       class ResearchConfigMenu {
         private currentSection: MenuSection = 'main';
         private selectedIndex: number = 0;
@@ -1259,11 +1243,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
 
         private get visibleItems(): MenuItem[] {
           return this.menus[this.currentSection].filter(item => !item.hidden?.());
-        }
-
-        private clampSelection(): void {
-          const len = this.visibleItems.length;
-          if (this.selectedIndex >= len) this.selectedIndex = Math.max(0, len - 1);
         }
 
         private showStatus(message: string): void {

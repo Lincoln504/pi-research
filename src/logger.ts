@@ -203,7 +203,7 @@ export class Logger implements ILogger {
       }
       
       logger.log('[Logger] Rotated log file to:', archivePath);
-    } catch (error) {
+    } catch (_error) {
       // Ignore rotation errors (file might not exist yet, etc.)
     }
   }
@@ -242,7 +242,7 @@ export class Logger implements ILogger {
         // Non-POSIX: assume OK (Windows has different disk management)
         this.hasDiskSpace = true;
       }
-    } catch (error) {
+    } catch (_error) {
       // On error, assume OK to avoid blocking logging
       this.hasDiskSpace = true;
     }

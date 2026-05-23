@@ -9,11 +9,6 @@
 
 export type Labels = Record<string, string>;
 
-interface MetricEntry<T> {
-  value: T;
-  timestamp: number;
-}
-
 export class MetricsRegistry {
   private counters = new Map<string, number>();
   private gauges = new Map<string, number>();
@@ -92,11 +87,11 @@ export class MetricsRegistry {
     };
 
     for (const [key, value] of this.counters.entries()) {
-      snapshot.counters[key] = value;
+      snapshot['counters'][key] = value;
     }
 
     for (const [key, value] of this.gauges.entries()) {
-      snapshot.gauges[key] = value;
+      snapshot['gauges'][key] = value;
     }
 
     for (const [key, values] of this.histograms.entries()) {
@@ -106,7 +101,7 @@ export class MetricsRegistry {
       const sorted = values.slice().sort((a, b) => a - b);
       const sum = sorted.reduce((a, b) => a + b, 0);
       
-      snapshot.histograms[key] = {
+      snapshot['histograms'][key] = {
         count: sorted.length,
         min: sorted[0],
         max: sorted[sorted.length - 1],

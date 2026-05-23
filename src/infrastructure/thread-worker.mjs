@@ -4,7 +4,7 @@
  * Executes search and scrape tasks in worker processes using Camoufox.
  */
 
-/* global document, URL, setTimeout, setInterval */
+/* global document, URL, setTimeout, setInterval, clearInterval */
 import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';

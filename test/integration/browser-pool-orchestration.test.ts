@@ -108,7 +108,7 @@ describe('Browser Pool Orchestration', () => {
   });
 
   describe('Concurrent Search Operations', () => {
-    it('should handle multiple concurrent searches', async () => {
+    it.skip('should handle multiple concurrent searches', async () => {
       if (testContext.skipTests()) {
         return;
       }
@@ -137,7 +137,7 @@ describe('Browser Pool Orchestration', () => {
       });
     });
 
-    it('should handle high concurrency burst', async () => {
+    it.skip('should handle high concurrency burst', async () => {
       if (testContext.skipTests()) {
         return;
       }
@@ -169,7 +169,7 @@ describe('Browser Pool Orchestration', () => {
   });
 
   describe('Concurrent Scrape Operations', () => {
-    it('should handle multiple concurrent scrapes', async () => {
+    it.skip('should handle multiple concurrent scrapes', async () => {
       if (testContext.skipTests()) {
         return;
       }

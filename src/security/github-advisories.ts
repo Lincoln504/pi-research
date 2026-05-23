@@ -133,10 +133,7 @@ const DEFAULT_MAX_RESULTS = 20;
  * Type guard to check if value is a GitHubAdvisoryRaw
  */
 function isGitHubAdvisoryRaw(value: unknown): value is GitHubAdvisoryRaw {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  return true;
+  return typeof value === 'object' && value !== null;
 }
 
 /**
@@ -381,8 +378,8 @@ export async function searchGitHubAdvisories(
         }
 
         // Track rate limit headers
-        const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
-        const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
+        const rateLimitRemaining = resp.headers?.get ? resp.headers.get('X-RateLimit-Remaining') : null;
+        const rateLimitLimit = resp.headers?.get ? resp.headers.get('X-RateLimit-Limit') : null;
         if (rateLimitRemaining !== null) {
           metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: 'repo_advisories' });
         }
@@ -461,15 +458,14 @@ export async function searchGitHubAdvisories(
           }
 
           // Track rate limit headers
-          const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
-          const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
+          const rateLimitRemaining = resp.headers?.get ? resp.headers.get('X-RateLimit-Remaining') : null;
+          const rateLimitLimit = resp.headers?.get ? resp.headers.get('X-RateLimit-Limit') : null;
           if (rateLimitRemaining !== null) {
             metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: endpointType });
           }
           if (rateLimitLimit !== null) {
             metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: endpointType });
-          }
-          
+          }          
           metrics.increment('github_requests_total', 1, { endpoint: endpointType, status: 'success' });
           return resp;
         }, {
@@ -499,35 +495,40 @@ export async function searchGitHubAdvisories(
       // Deduplicate by GHSA ID
       const seen = new Set<string>();
       for (const adv of termResults) {
-        if (!seen.has(adv.id)) {
+        if (adv.id && !seen.has(adv.id)) {
           seen.add(adv.id);
           allAdvisories.push(adv);
+        } else if (!adv.id) {
+           // Fallback for items without ID (shouldn't happen with mapGitHubAdvisory)
+           allAdvisories.push(adv);
         }
       }
     }
 
     // Filter by search terms if provided (OR logic: match any term)
     if (terms.length > 0) {
-      allAdvisories = allAdvisories.filter((adv): boolean =>
-        terms.some((term): boolean => {
+      allAdvisories = allAdvisories.filter((adv): boolean => {
+        if (terms.length === 0) return true;
+        
+        return terms.some((term): boolean => {
           const t = term.toLowerCase();
-          const advId = adv.id.toLowerCase();
-          const advSummary = adv.summary.toLowerCase();
-          const advDescription = adv.description !== undefined
-            ? adv.description.toLowerCase()
-            : '';
-          const advCveId = adv.cveId !== undefined
-            ? adv.cveId.toLowerCase()
-            : '';
+          const advId = (adv.id || '').toLowerCase();
+          const advSummary = (adv.summary || '').toLowerCase();
+          const advDescription = (adv.description || '').toLowerCase();
+          const advCveId = (adv.cveId || '').toLowerCase();
 
+          // Precise match for IDs
+          if (advId === t || advCveId === t) return true;
+
+          // Partial match for everything else
           return (
             advId.includes(t) ||
             advCveId.includes(t) ||
             advSummary.includes(t) ||
             advDescription.includes(t)
           );
-        }),
-      );
+        });
+      });
     }
 
     // Filter by severity if provided

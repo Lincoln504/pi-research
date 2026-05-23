@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
     execute: mockExecute,
     description: 'Perform deep research using a coordinated team of agents.',
   })),
+  createHealthTool: vi.fn(() => ({
+    name: 'health',
+    execute: mockExecute,
+    description: 'Check system health',
+  })),
   randomUUID: vi.fn(() => 'mock-uuid-123'),
 }));
 
@@ -17,6 +22,7 @@ vi.mock('node:crypto', () => ({
 
 vi.mock('../../src/tool.ts', () => ({
   createResearchTool: mocks.createResearchTool,
+  createHealthTool: mocks.createHealthTool,
 }));
 
 vi.mock('../../src/logger.ts', () => ({

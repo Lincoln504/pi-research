@@ -41,7 +41,7 @@ export async function resetTerminalState(drain: boolean = true): Promise<void> {
     if (drain && process.stdin.isTTY) {
       await drainTerminalInput(100, 20);
     }
-  } catch (error) {
+  } catch (_error) {
     // Ignore errors - terminal might be in an invalid state
   }
 }
@@ -50,23 +50,24 @@ export async function resetTerminalState(drain: boolean = true): Promise<void> {
  * Check if a string appears to be an escape sequence.
  *
  * @param data - Input string to check
- * @returns true if the string starts with ESC (\x1b)
+ * @returns true if the string starts with ESC (\u001b)
  */
 export function isEscapeSequence(data: string): boolean {
-  return data.startsWith('\x1b');
+  return data.startsWith('\u001b');
 }
 
 /**
  * Check if a string appears to be a Kitty keyboard protocol response.
  *
- * Kitty responses match: /^\x1b\[\?[\d;]+u$/
- * Examples: \x1b[?4;1;3u, \x1b[?0u, etc.
+ * Kitty responses match: /^\u001b\[\?[\d;]+u$/
+ * Examples: \u001b[?4;1;3u, \u001b[?0u, etc.
  *
  * @param data - Input string to check
  * @returns true if this looks like a Kitty protocol response
  */
 export function isKittyProtocolResponse(data: string): boolean {
-  return /^\x1b\[\?[\d;]+u$/.test(data);
+  // eslint-disable-next-line no-control-regex
+  return /^\u001b\[\?[\d;]+u$/.test(data);
 }
 
 /**
@@ -78,21 +79,21 @@ export function isKittyProtocolResponse(data: string): boolean {
  * @returns true if this looks like a CSI sequence
  */
 export function isCSISequence(data: string): boolean {
-  return data.startsWith('\x1b[') || data.startsWith('\x1b[');
+  return data.startsWith('\u001b[') || data.startsWith('\u001b[');
 }
 
 /**
  * Check if a string appears to be an OSC (Operating System Command) sequence.
  *
- * OSC sequences: ESC ] ... BEL (\x07) or ESC ] ... ST (\x1b\\)
+ * OSC sequences: ESC ] ... BEL (\x07) or ESC ] ... ST (\u001b\\)
  *
  * @param data - Input string to check
  * @returns true if this looks like an OSC sequence
  */
 export function isOSCSequence(data: string): boolean {
   return (
-    (data.startsWith('\x1b]') && data.includes('\x07')) ||
-    data.endsWith('\x1b\\')
+    (data.startsWith('\u001b]') && data.includes('\x07')) ||
+    data.endsWith('\u001b\\')
   );
 }
 
@@ -105,7 +106,7 @@ export function isOSCSequence(data: string): boolean {
  * @returns true if this looks like an APC sequence
  */
 export function isAPCSequence(data: string): boolean {
-  return data.startsWith('\x1b_') && data.endsWith('\x1b\\');
+  return data.startsWith('\u001b_') && data.endsWith('\u001b\\');
 }
 
 /**
@@ -126,7 +127,7 @@ export function shouldConsumeForCleanup(data: string): boolean {
 
   // Empty or single character - only consume if it's ESC itself
   if (data.length === 1) {
-    return data === '\x1b';
+    return data === '\u001b';
   }
 
   // Kitty protocol response
@@ -173,7 +174,6 @@ export async function drainTerminalInput(
 ): Promise<void> {
   const originalRaw = process.stdin.isRaw;
   let lastDataTime = Date.now();
-  let dataCount = 0;
 
   try {
     // Ensure stdin is readable
@@ -186,7 +186,6 @@ export async function drainTerminalInput(
 
     const onData = () => {
       lastDataTime = Date.now();
-      dataCount++;
     };
 
     process.stdin.on('data', onData);

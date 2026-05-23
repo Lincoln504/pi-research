@@ -51,7 +51,7 @@ export class KnowledgeStore {
   /**
    * Check if two embedding models are dimensionally compatible
    */
-  private checkModelCompatibility(oldModel: string, newModel: string): ModelCompatibility {
+  private checkModelCompatibility(oldModel: string, _newModel: string): ModelCompatibility {
     const oldDim = this.getModelDimension(oldModel);
     const newDim = this.options.embedder.getDimension();
 
@@ -127,7 +127,7 @@ export class KnowledgeStore {
               await this.db.dropTable(this.tableName);
               this.table = await this.createTable();
             } else {
-              throw new Error(errorMsg);
+              throw new Error(errorMsg, { cause: err });
             }
           }
         }
@@ -204,7 +204,7 @@ export class KnowledgeStore {
   /**
    * Migration strategy: Drop and recreate table (data loss)
    */
-  private async migrationDrop(oldModel: string, newModel: string): Promise<MigrationResult> {
+  private async migrationDrop(_oldModel: string, newModel: string): Promise<MigrationResult> {
     logger.warn(`[store] Dropping table and recreating with model ${newModel} (data will be lost)`);
 
     const count = await this.table!.countRows();
@@ -225,7 +225,7 @@ export class KnowledgeStore {
   /**
    * Migration strategy: Re-embed all documents with new model
    */
-  private async migrationReEmbed(oldModel: string, newModel: string): Promise<MigrationResult> {
+  private async migrationReEmbed(_oldModel: string, newModel: string): Promise<MigrationResult> {
     logger.info(`[store] Re-embedding all documents with model ${newModel} (data will be preserved)`);
 
     if (!this.table || !this.db) {

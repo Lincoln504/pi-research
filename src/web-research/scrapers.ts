@@ -101,7 +101,7 @@ function validateUrlForSSRF(url: string): void {
     }
     // Invalid URL is a different issue, let it bubble up
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url' });
-    throw new Error(`Invalid URL: ${url}`);
+    throw new Error(`Invalid URL: ${url}`, { cause: e });
   }
 }
 

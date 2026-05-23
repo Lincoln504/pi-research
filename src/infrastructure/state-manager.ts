@@ -690,7 +690,7 @@ export class StateManager {
                 await fs.unlink(this.lockFilePath);
                 continue;
               }
-            } catch (statError) {
+            } catch (_statError) {
               // Can't stat or read lock file - try to remove it
               try {
                 await fs.unlink(this.lockFilePath);
@@ -737,7 +737,7 @@ export class StateManager {
             metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
             return;
           }
-        } catch (readError) {
+        } catch (_readError) {
           // Lock file might already be gone, that's fine
         }
         
