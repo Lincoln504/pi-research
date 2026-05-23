@@ -687,13 +687,23 @@ export class StateManager {
                 }
                 
                 // Stale lock with different UUID - safe to remove
-                await fs.unlink(this.lockFilePath);
+                // Use atomic rename to "claim" the stale lock file before deleting it
+                // This prevents deleting a lock that was JUST acquired by another process
+                const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+                try {
+                  await fs.rename(this.lockFilePath, trashPath);
+                  await fs.unlink(trashPath);
+                } catch {
+                  // Someone else already cleaned it up or acquired it - that's fine
+                }
                 continue;
               }
             } catch (_statError) {
-              // Can't stat or read lock file - try to remove it
+              // Can't stat or read lock file - try to remove it atomically
+              const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
               try {
-                await fs.unlink(this.lockFilePath);
+                await fs.rename(this.lockFilePath, trashPath);
+                await fs.unlink(trashPath);
                 continue;
               } catch {
                 // Lock file might be removed by another process, continue waiting

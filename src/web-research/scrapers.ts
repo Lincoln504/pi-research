@@ -20,10 +20,29 @@ import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { runBrowserTask } from '../infrastructure/browser-manager.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import crypto from 'node:crypto';
 
 // ============================================================================
-// Type Definitions
+// Constants and Configuration
 // ============================================================================
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0',
+];
+
+function getRandomUserAgent(): string {
+  try {
+    const index = crypto.randomBytes(1)[0] % USER_AGENTS.length;
+    return USER_AGENTS[index];
+  } catch {
+    return USER_AGENTS[0]; // Fallback
+  }
+}
 
 interface NativeJsNodeContext {
   tagName: string;
@@ -54,21 +73,22 @@ const MAX_PDF_SIZE = 100 * 1024 * 1024; // 100MB
 
 // FIX: SSRF protection - prevent access to internal networks
 // These patterns prevent SSRF attacks by blocking access to:
-// - localhost (127.x.x.x, 0.x.x.x, ::1)
-// - link-local addresses (169.254.x.x)
-// - private networks (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
-// - IPv6 link-local and unique local addresses
+// - localhost (127.x.x.x, 0.x.x.x, ::1, ::ffff:127.x.x.x)
+// - link-local addresses (169.254.x.x, fe80::, ::ffff:169.254.x.x)
+// - private networks (10.x.x.x, 192.168.x.x, 172.16-31.x.x, and their IPv4-mapped IPv6 versions)
+// - IPv6 unique local addresses (fc00::, fd00::)
 const INTERNAL_NETWORK_PATTERNS: ReadonlyArray<RegExp> = [
-  /^127\./,                    // IPv4 loopback
-  /^0\./,                      // IPv4 "this" network
-  /^::1$/,                     // IPv6 loopback
-  /^fe80::/i,                  // IPv6 link-local
-  /^fc00::/i,                  // IPv6 unique local
-  /^fd00::/i,                  // IPv6 unique local
-  /^169\.254\./,               // IPv4 link-local (link-local)
-  /^10\./,                     // RFC 1918 Class A private
-  /^192\.168\./,               // RFC 1918 Class C private
+  /^127\./,                        // IPv4 loopback
+  /^0\./,                          // IPv4 "this" network
+  /^::1$/,                         // IPv6 loopback
+  /^fe80::/i,                      // IPv6 link-local
+  /^fc00::/i,                      // IPv6 unique local
+  /^fd00::/i,                      // IPv6 unique local
+  /^169\.254\./,                   // IPv4 link-local (and metadata)
+  /^10\./,                         // RFC 1918 Class A private
+  /^192\.168\./,                   // RFC 1918 Class C private
   /^172\.(1[6-9]|2[0-9]|3[01])\./, // RFC 1918 Class B private
+  /^::ffff:(127\.|0\.|169\.254\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i, // IPv4-mapped IPv6
 ];
 
 function validateUrlForSSRF(url: string): void {
@@ -303,7 +323,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': getRandomUserAgent(),
         'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
       },
     });
@@ -361,7 +381,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   } catch (error) {
     if (error instanceof Error && error.message.includes('not allowed')) {
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'ssrf_blocked' });
-      metrics.observe('scrape_latency_ms', Date.now() - Date.now(), { layer: 'fetch', status: 'ssrf_blocked' });
+      metrics.observe('scrape_latency_ms', Date.now() - fetchStart, { layer: 'fetch', status: 'ssrf_blocked' });
       throw error;
     }
     metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'error' });

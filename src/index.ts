@@ -169,14 +169,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Signal handlers as a secondary path (interactive mode, external kill, SIGHUP).
-  // Use shutdownManager.registerEventListener for proper cleanup
   const handleSIGINT = () => handleShutdown('SIGINT');
   const handleSIGTERM = () => handleShutdown('SIGTERM');
   const handleSIGHUP = () => handleShutdown('SIGHUP');
 
-  process.once('SIGINT', handleSIGINT);
-  process.once('SIGTERM', handleSIGTERM);
-  process.once('SIGHUP', handleSIGHUP);
+  shutdownManager.registerEventListener(process, 'SIGINT', handleSIGINT);
+  shutdownManager.registerEventListener(process, 'SIGTERM', handleSIGTERM);
+  shutdownManager.registerEventListener(process, 'SIGHUP', handleSIGHUP);
 
   // Global extension state for smart dual-sided prompt injection
   let currentTurn = 0;

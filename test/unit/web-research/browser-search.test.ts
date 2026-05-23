@@ -57,7 +57,12 @@ describe('browser-search', () => {
     it('should execute search for multiple queries', async () => {
       const queries = ['query 1', 'query 2', 'query 3'];
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
-        return mockSearchResults.map(r => ({ ...r, title: `${r.title} - ${q}` }));
+        // Use unique URLs for each query to avoid global deduplication
+        return mockSearchResults.map(r => ({ 
+          ...r, 
+          url: `${r.url}?q=${encodeURIComponent(q)}`,
+          title: `${r.title} - ${q}` 
+        }));
       });
 
       const result = await performSearch(queries);
@@ -318,8 +323,8 @@ describe('browser-search', () => {
 
       const result = await performSearch(['test']);
 
-      // Results are stored as-is, deduplication is for progress tracking
-      expect(result.get('test')).toHaveLength(2);
+      // Results should be deduplicated in the final Map
+      expect(result.get('test')).toHaveLength(1);
     });
 
     it('should preserve result structure', async () => {

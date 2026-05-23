@@ -114,6 +114,11 @@ export class Embedder {
 
     try {
       await this.initializingPromise;
+      // Race check: if dispose() was called during initialization, our state will be 'disposing'
+      if (this.state === 'disposing') {
+        logger.warn('[embedder] Initialization finished but embedder was disposed in the meantime.');
+        return;
+      }
       this.state = 'ready';
     } catch (err) {
       this.state = 'failed';
@@ -348,46 +353,49 @@ export class Embedder {
       const dim = this.getDimension();
       const results: Float32Array[] = [];
 
-      for (let i = 0; i < texts.length; i += this.batchSize) {
-        const batch = texts.slice(i, i + this.batchSize).map(t => {
-          const truncated = this.truncateText(t);
-          return this.documentPrefix ? this.documentPrefix + truncated : truncated;
-        });
-
-        let lockAcquired = false;
-        if (this.device === 'webgpu' && this.stateManager) {
-          lockAcquired = await this.stateManager.acquireGpuLock(undefined, 120_000);
-          if (!lockAcquired) {
-            logger.warn('[embedder] GPU per-batch lock timeout after 120s — proceeding without lock');
-          }
+      let lockAcquired = false;
+      if (this.device === 'webgpu' && this.stateManager) {
+        // Use a longer timeout for batch operations as they are expected to take longer
+        lockAcquired = await this.stateManager.acquireGpuLock(undefined, 300_000);
+        if (!lockAcquired) {
+          logger.warn('[embedder] GPU batch lock timeout after 300s — proceeding without lock');
         }
+      }
 
-        let output: any;
-        try {
-          output = await getLogger().runCapturingStderr(async () => {
-            return await this.pipeline!(batch, this.pipelineOpts());
+      try {
+        for (let i = 0; i < texts.length; i += this.batchSize) {
+          const batch = texts.slice(i, i + this.batchSize).map(t => {
+            const truncated = this.truncateText(t);
+            return this.documentPrefix ? this.documentPrefix + truncated : truncated;
           });
-        } catch (err) {
-          if (this.isWebGpuDeviceError(err)) {
-            if (lockAcquired && this.stateManager) {
-              await this.stateManager.releaseGpuLock().catch(() => {});
-              lockAcquired = false;
-            }
-            await this.recoverToCpu();
+
+          let output: any;
+          try {
             output = await getLogger().runCapturingStderr(async () => {
               return await this.pipeline!(batch, this.pipelineOpts());
             });
-          } else {
-            throw err;
+          } catch (err) {
+            if (this.isWebGpuDeviceError(err)) {
+              if (lockAcquired && this.stateManager) {
+                await this.stateManager.releaseGpuLock().catch(() => {});
+                lockAcquired = false;
+              }
+              await this.recoverToCpu();
+              output = await getLogger().runCapturingStderr(async () => {
+                return await this.pipeline!(batch, this.pipelineOpts());
+              });
+            } else {
+              throw err;
+            }
           }
-        } finally {
-          if (lockAcquired && this.stateManager) {
-            await this.stateManager.releaseGpuLock().catch(() => {});
+
+          for (let j = 0; j < batch.length; j++) {
+            results.push(output.data.slice(j * dim, (j + 1) * dim) as Float32Array);
           }
         }
-
-        for (let j = 0; j < batch.length; j++) {
-          results.push(output.data.slice(j * dim, (j + 1) * dim) as Float32Array);
+      } finally {
+        if (lockAcquired && this.stateManager) {
+          await this.stateManager.releaseGpuLock().catch(() => {});
         }
       }
 

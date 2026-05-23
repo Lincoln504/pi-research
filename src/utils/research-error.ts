@@ -124,11 +124,13 @@ export class ResearchError extends Error {
   }
 }
 
+import { randomUUID } from 'node:crypto';
+
 /**
  * Generate a correlation ID for error tracking
  */
 function generateCorrelationId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  return randomUUID();
 }
 
 /**

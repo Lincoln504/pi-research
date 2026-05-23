@@ -426,16 +426,16 @@ describe('GPU lock behavior', () => {
     expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
   });
 
-  it('acquires and releases GPU lock per batch in embedMany()', async () => {
+  it('acquires and releases GPU lock once for entire embedMany() operation', async () => {
     const sm = makeStateManager();
     const e = new Embedder({ model: 'test-model', device: 'webgpu', batchSize: 2, stateManager: sm as any });
     await e.initialize();
     sm.acquireGpuLock.mockClear();
     sm.releaseGpuLock.mockClear();
 
-    await e.embedMany(['a', 'b', 'c', 'd']); // 2 batches of 2
-    expect(sm.acquireGpuLock).toHaveBeenCalledTimes(2);
-    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(2);
+    await e.embedMany(['a', 'b', 'c', 'd']); // 2 batches of 2, but only 1 lock acquisition
+    expect(sm.acquireGpuLock).toHaveBeenCalledTimes(1);
+    expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
   });
 
   it('releases GPU lock even when embed() pipeline throws', async () => {

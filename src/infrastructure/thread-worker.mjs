@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import process from 'node:process';
 import cluster from 'node:cluster';
+import crypto from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 
@@ -24,7 +25,7 @@ if (cluster.isWorker && cluster.worker) {
 }
 
 // Generate a random ID for this worker process to track distribution in logs
-const workerId = Math.random().toString(36).substring(2, 6);
+const workerId = crypto.randomBytes(2).toString('hex');
 
 // Orphaned worker protection: If parent dies, kill the worker.
 // This works cross-platform (Linux, Mac, Windows) in Node.js.
@@ -38,8 +39,8 @@ if (process.ppid) {
             // If error is thrown, the parent process is likely dead or unreachable
             logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
             // FIX: Await cleanup to prevent browser/context leaks
-            if (context) await context.close().catch(() => {});
-            if (browser) await browser.close().catch(() => {});
+            if (contextInstance) await contextInstance.close().catch(() => {});
+            if (browserInstance) await browserInstance.close().catch(() => {});
             // Clear the orphan check timer to prevent it from keeping the event loop alive
             if (orphanCheckTimer) {
                 clearInterval(orphanCheckTimer);
@@ -48,7 +49,8 @@ if (process.ppid) {
             process.exit(1);
         }
     }, 10000);
-}
+    if (orphanCheckTimer.unref) orphanCheckTimer.unref();
+    }
 
 /**
  * File-based logger for workers that mirrors the main process format

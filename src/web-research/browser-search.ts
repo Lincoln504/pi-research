@@ -49,11 +49,25 @@ export async function performSearch(
             if (results?.length > 0) {
                 metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
-                for (const r of results) { if (r.url) seenUrls.add(r.url); }
+                
+                // Deduplicate results across queries to prevent redundant scraping
+                const uniqueResults = [];
+                for (const r of results) {
+                    if (r.url) {
+                        if (!seenUrls.has(r.url)) {
+                            seenUrls.add(r.url);
+                            uniqueResults.push(r);
+                        }
+                    }
+                }
+                resultMap.set(query, uniqueResults);
+                if (uniqueResults.length < results.length) {
+                    logger.debug(`[Search] Deduplicated ${results.length - uniqueResults.length} redundant results for: ${query}`);
+                }
             } else {
                 metrics.increment('browser_search_queries_total', 1, { status: 'no_results' });
+                resultMap.set(query, []);
             }
-            resultMap.set(query, results || []);
         } catch (error) {
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration, { status: 'error' });

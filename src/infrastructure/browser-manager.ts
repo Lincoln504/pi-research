@@ -306,6 +306,14 @@ class BrowserTaskScheduler implements IScheduler {
                         tasksStealingOnBackPressure: true
                     }
                 });
+
+                // Race check: if shutdown() was called while we were initializing the pool
+                if (this.isShuttingDown) {
+                    logger.warn('[Scheduler] Pool initialized but scheduler is already shutting down. Destroying...');
+                    await this.pool.destroy().catch(() => {});
+                    this.pool = null;
+                    throw new Error('Scheduler is shutting down');
+                }
                 
                 metrics.setGauge('browser_pool_workers', maxWorkers);
                 metrics.increment('browser_pool_initializations_total', 1, { success: 'true' });
@@ -628,6 +636,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         const stateManager = getSharedStateManager();
         const serverInfo = await stateManager.getBrowserServer();
         
+        // Race check: if another process won election while we were starting, serverInfo will be fresh
+        // but our modules might have been reloaded.
+        
         // Check if existing scheduler has different config version
         if (serverInfo) {
             const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
@@ -652,8 +663,16 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                     // Version matches, use existing scheduler
                     logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
                     const client = new BrowserClient(serverInfo.port);
-                    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
-                    cachedSchedulerVersion = currentVersion;
+                    
+                    // Race check: if initializationPromise was cleared (restart), don't set global reference
+                    if (initializationPromise === p) {
+                        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+                        cachedSchedulerVersion = currentVersion;
+                    } else {
+                        logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
+                        await client.shutdown().catch(() => {});
+                        throw new Error('Initialization superseded');
+                    }
                     return client;
                 }
             }
@@ -666,8 +685,13 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             port = await scheduler.startServer();
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
-            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
-            cachedSchedulerVersion = currentVersion;
+            if (initializationPromise === p) {
+                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+                cachedSchedulerVersion = currentVersion;
+            } else {
+                await scheduler.shutdown().catch(() => {});
+                throw new Error('Initialization superseded');
+            }
             return scheduler;
         }
 
@@ -690,8 +714,13 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             });
         } catch (error) {
             logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
-            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
-            cachedSchedulerVersion = currentVersion;
+            if (initializationPromise === p) {
+                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+                cachedSchedulerVersion = currentVersion;
+            } else {
+                await scheduler.shutdown().catch(() => {});
+                throw new Error('Initialization superseded');
+            }
             return scheduler;
         }
 
@@ -699,16 +728,27 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
             await scheduler.shutdown();
             const client = new BrowserClient(winnerPort);
-            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
-            cachedSchedulerVersion = schedulerVersion;
+            if (initializationPromise === p) {
+                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+                cachedSchedulerVersion = schedulerVersion;
+            } else {
+                await client.shutdown().catch(() => {});
+                throw new Error('Initialization superseded');
+            }
             return client;
         }
 
         logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         metrics.increment('browser_leadership_wins_total', 1);
-        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
-        cachedSchedulerVersion = schedulerVersion;
+        if (initializationPromise === p) {
+            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+            cachedSchedulerVersion = schedulerVersion;
+        } else {
+            logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
+            await scheduler.shutdown().catch(() => {});
+            throw new Error('Initialization superseded');
+        }
         return scheduler;
     })();
 

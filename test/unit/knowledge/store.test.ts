@@ -22,7 +22,7 @@ describe('KnowledgeStore', () => {
     store = new KnowledgeStore({
       dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'test-model',
+      modelName: 'Xenova/all-MiniLM-L6-v2',
     });
   });
 
@@ -235,7 +235,7 @@ describe('KnowledgeStore', () => {
     const newStore = new KnowledgeStore({
       dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'test-model',
+      modelName: 'Xenova/all-MiniLM-L6-v2',
     });
     await newStore.open();
     try {
@@ -268,7 +268,7 @@ describe('KnowledgeStore', () => {
     const newStore = new KnowledgeStore({
       dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'different-model',
+      modelName: 'Xenova/multilingual-e5-base',
     });
     await newStore.open();
     try {
@@ -296,5 +296,50 @@ describe('KnowledgeStore', () => {
     // Should still be able to add documents after clearing
     await store.addDocuments([doc]);
     expect(await store.count()).toBe(1);
+  });
+
+  it('should successfully re-embed documents using temp table strategy', async () => {
+    // 1. Initial setup with model A
+    const modelA = 'Xenova/all-MiniLM-L6-v2';
+    vi.mocked(mockEmbedder.getDimension).mockReturnValue(384);
+    
+    const initialStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: modelA,
+    });
+    
+    await initialStore.open();
+    await initialStore.addDocuments([{
+      url: 'https://migrate.test',
+      text: 'Migrate me',
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now()
+    }]);
+    expect(await initialStore.count()).toBe(1);
+    await initialStore.close();
+    
+    // 2. Re-open with model B and re-embed strategy
+    const modelB = 'Xenova/multilingual-e5-base';
+    // Clear mocks before next phase
+    vi.mocked(mockEmbedder.embedMany).mockClear();
+    vi.mocked(mockEmbedder.getDimension).mockReturnValue(768);
+    // mockEmbedder.embedMany needs to return vectors of the new dimension
+    vi.mocked(mockEmbedder.embedMany).mockImplementation(async (texts: string[]) => texts.map(() => new Float32Array(768)));
+    
+    const migrateStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: modelB,
+      migrationStrategy: 're-embed'
+    });
+    
+    await migrateStore.open();
+    expect(await migrateStore.count()).toBe(1);
+    
+    // Check if it was re-embedded (mockEmbedder.embedMany should have been called)
+    expect(mockEmbedder.embedMany).toHaveBeenCalled();
+    
+    await migrateStore.close();
   });
 });

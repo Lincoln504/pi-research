@@ -83,7 +83,12 @@ export class KnowledgeStore {
       'Xenova/all-mpnet-base-v2': 768,
       'onnx-community/granite-embedding-small-english-r2-ONNX': 384,
     };
-    return dimensions[modelName] || 384; // Default fallback
+    
+    const dim = dimensions[modelName];
+    if (dim === undefined) {
+      throw new Error(`Unknown embedding model: ${modelName}. Cannot determine dimensionality for migration safety.`);
+    }
+    return dim;
   }
 
   async open(): Promise<void> {
@@ -174,8 +179,8 @@ export class KnowledgeStore {
     logger.info(`[store] Old model: ${oldModel}, New model: ${newModel}`);
 
     if (!compatibility.isCompatible) {
-      // Dimension mismatch: only 'drop' is valid
-      if (strategy !== 'drop') {
+      // Dimension mismatch: only 'drop' and 're-embed' are valid
+      if (strategy !== 'drop' && strategy !== 're-embed') {
         throw new Error(compatibility.reason || 'Incompatible model dimensions');
       }
       logger.warn(`[store] ${compatibility.reason}`);
@@ -185,9 +190,7 @@ export class KnowledgeStore {
       case 'drop':
         return this.migrationDrop(oldModel, newModel);
       case 're-embed':
-        if (!compatibility.isCompatible) {
-          throw new Error(compatibility.reason || 'Cannot re-embed with dimension mismatch');
-        }
+        // Dimensions can differ for re-embed as we recreate the table
         return this.migrationReEmbed(oldModel, newModel);
       case 'continue':
         if (!compatibility.isCompatible) {
@@ -226,71 +229,105 @@ export class KnowledgeStore {
    * Migration strategy: Re-embed all documents with new model
    */
   private async migrationReEmbed(_oldModel: string, newModel: string): Promise<MigrationResult> {
-    logger.info(`[store] Re-embedding all documents with model ${newModel} (data will be preserved)`);
+    logger.info(`[store] Re-embedding documents with model ${newModel} (data will be preserved)`);
 
     if (!this.table || !this.db) {
       throw new Error('Table not connected');
     }
 
-    // Capture the table reference before potentially dropping it
     const oldTable = this.table;
     const totalDocs = await oldTable.countRows();
     logger.info(`[store] Processing ${totalDocs} documents for re-embedding...`);
 
-    // Read all documents (without vectors)
-    const documents: StoreDocument[] = [];
-    const batch = await oldTable.query().limit(totalDocs).toArray();
-
-    for (const row of batch) {
-      documents.push({
-        url: row.url as string,
-        text: row.text as string,
-        content: row.content as string | undefined,
-        metadata: JSON.parse(row.metadata as string),
-        timestamp: row.timestamp as number
-      });
-    }
-
-    // Drop old table
-    await this.db.dropTable(this.tableName);
-    this.table = await this.createTable();
-
-    // Re-embed and add all documents
+    // Use a temporary table for re-embedding to prevent data loss if the process crashes
+    const tempTableName = `${this.tableName}_migration_${Date.now()}`;
+    let tempTable: lancedb.Table | null = null;
+    
     let processed = 0;
     const batchSize = 100;
 
-    for (let i = 0; i < documents.length; i += batchSize) {
-      const batchDocs = documents.slice(i, i + batchSize);
+    try {
+      // Process in batches from the old table
+      for (let i = 0; i < totalDocs; i += batchSize) {
+        // Fetch a batch of documents
+        const batchRows = await oldTable.query()
+          .limit(batchSize)
+          .offset(i)
+          .toArray();
 
-      // Re-embed all texts in batch
-      const texts = batchDocs.map(d => d.text);
-      const vectors = await this.options.embedder.embedMany(texts);
+        if (batchRows.length === 0) break;
 
-      // Prepare records for LanceDB
-      const records = batchDocs.map((doc, idx) => ({
-        vector: vectors[idx],
-        url: doc.url,
-        text: doc.text,
-        content: doc.content || null,
-        metadata: JSON.stringify(doc.metadata),
-        timestamp: doc.timestamp
-      }));
+        const batchDocs = batchRows.map(row => ({
+          url: row.url as string,
+          text: row.text as string,
+          content: row.content as string | undefined,
+          metadata: JSON.parse(row.metadata as string),
+          timestamp: row.timestamp as number
+        }));
 
-      await this.table.add(records);
-      processed += batchDocs.length;
+        // Re-embed all texts in batch
+        const texts = batchDocs.map(d => d.text);
+        const vectors = await this.options.embedder.embedMany(texts);
 
-      if (processed % 500 === 0 || processed === totalDocs) {
-        logger.info(`[store] Migration progress: ${processed}/${totalDocs} documents re-embedded`);
+        // Prepare records for the new table
+        const records = batchDocs.map((doc, idx) => ({
+          vector: Array.from(vectors[idx]!),
+          url: doc.url,
+          text: doc.text,
+          content: doc.content || null,
+          metadata: JSON.stringify(doc.metadata),
+          timestamp: BigInt(doc.timestamp)
+        }));
+
+        // Create temp table on first batch
+        if (!tempTable) {
+          tempTable = await this.createTable(tempTableName);
+          await tempTable.add(records);
+        } else {
+          await tempTable.add(records);
+        }
+
+        processed += batchDocs.length;
+        if (processed % 500 === 0 || processed === totalDocs) {
+          logger.info(`[store] Migration progress: ${processed}/${totalDocs} documents re-embedded`);
+        }
       }
+
+      // Atomically swap tables if possible (LanceDB doesn't have RENAME TABLE, so we drop and recreate)
+      // This is still a small window of failure, but re-embedding is already done.
+      await this.db.dropTable(this.tableName);
+      this.table = await this.createTable();
+      
+      // Copy data from temp table to new main table
+      if (tempTable) {
+        const allNewRows = await tempTable.query().toArray();
+        const finalRecords = allNewRows.map(row => ({
+          vector: Array.from(row.vector as Float32Array),
+          url: row.url as string,
+          text: row.text as string,
+          content: row.content as string | null,
+          metadata: row.metadata as string,
+          timestamp: row.timestamp as bigint
+        }));
+        await this.table.add(finalRecords);
+        await this.db.dropTable(tempTableName);
+      }
+
+      logger.info(`[store] Migration complete: ${processed} documents re-embedded with model ${newModel}`);
+
+      return {
+        strategy: 're-embed',
+        success: true,
+        documentsProcessed: processed
+      };
+    } catch (error) {
+      logger.error(`[store] Migration failed at ${processed}/${totalDocs}:`, error);
+      // Cleanup temp table if it exists
+      try {
+        await this.db.dropTable(tempTableName);
+      } catch { /* ignore */ }
+      throw error;
     }
-
-    logger.info(`[store] Migration complete: ${processed} documents re-embedded with model ${newModel}`);
-
-    return {
-      strategy: 're-embed',
-      success: true,
-      documentsProcessed: processed
-    };
   }
 
   /**
@@ -317,7 +354,7 @@ export class KnowledgeStore {
     };
   }
 
-  private async createTable(): Promise<lancedb.Table> {
+  private async createTable(name: string = this.tableName): Promise<lancedb.Table> {
     if (!this.db) throw new Error('Database not connected');
 
     const dim = this.options.embedder.getDimension();
@@ -332,7 +369,7 @@ export class KnowledgeStore {
 
     // Create empty table with schema and metadata
     const table = await this.db.createTable({
-      name: this.tableName,
+      name,
       data: [],
       schema: schema,
     });
