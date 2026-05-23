@@ -1,4 +1,12 @@
-export type MigrationStrategy = 'drop' | 're-embed' | 'continue' | 'error';
+/**
+ * Simplified migration system for Knowledge Store.
+ *
+ * For a local research tool, we only need 2 strategies:
+ * - 'drop': Recreate table (fast, simple, data loss)
+ * - 're-embed': Preserve data by re-embedding with new model
+ */
+
+export type MigrationStrategy = 'drop' | 're-embed';
 
 export interface MigrationResult {
   strategy: MigrationStrategy;
@@ -7,11 +15,4 @@ export interface MigrationResult {
   error?: string;
 }
 
-export interface ModelCompatibility {
-  isCompatible: boolean;
-  reason?: string;
-  oldDimension?: number;
-  newDimension?: number;
-}
-
-export const VALID_MIGRATION_STRATEGIES: MigrationStrategy[] = ['drop', 're-embed', 'continue', 'error'];
+export const VALID_MIGRATION_STRATEGIES: MigrationStrategy[] = ['drop', 're-embed'];

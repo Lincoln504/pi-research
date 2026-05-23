@@ -12,7 +12,7 @@ import { logger } from '../logger.ts';
 import type { Embedder } from './embedder.ts';
 import * as fs from 'node:fs';
 import { getConfig } from '../config.ts';
-import { MigrationStrategy, ModelCompatibility, MigrationResult } from './migration.ts';
+import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
 
 export interface StoreOptions {
@@ -48,49 +48,6 @@ export class KnowledgeStore {
     this.options = options;
   }
 
-  /**
-   * Check if two embedding models are dimensionally compatible
-   */
-  private checkModelCompatibility(oldModel: string, _newModel: string): ModelCompatibility {
-    const oldDim = this.getModelDimension(oldModel);
-    const newDim = this.options.embedder.getDimension();
-
-    if (oldDim === newDim) {
-      return { isCompatible: true, oldDimension: oldDim, newDimension: newDim };
-    }
-
-    return {
-      isCompatible: false,
-      reason: `Dimension mismatch: old model uses ${oldDim} dimensions, new model uses ${newDim} dimensions. Vectors must have the same dimensionality.`,
-      oldDimension: oldDim,
-      newDimension: newDim
-    };
-  }
-
-  /**
-   * Get embedding dimension for a model name (hardcoded for known models)
-   */
-  private getModelDimension(modelName: string): number {
-    // Embedding dimensions for supported models
-    const dimensions: Record<string, number> = {
-      'Xenova/multilingual-e5-small': 384,
-      'Xenova/multilingual-e5-base': 768,
-      'Xenova/bge-m3': 1024,
-      'onnx-community/embeddinggemma-300m-ONNX': 512,
-      'onnx-community/Qwen3-Embedding-0.6B-ONNX': 1024,
-      'Xenova/all-MiniLM-L6-v2': 384,
-      'Xenova/bge-small-en-v1.5': 384,
-      'Xenova/all-mpnet-base-v2': 768,
-      'onnx-community/granite-embedding-small-english-r2-ONNX': 384,
-    };
-    
-    const dim = dimensions[modelName];
-    if (dim === undefined) {
-      throw new Error(`Unknown embedding model: ${modelName}. Cannot determine dimensionality for migration safety.`);
-    }
-    return dim;
-  }
-
   async open(): Promise<void> {
     if (this.db) return;
 
@@ -117,8 +74,8 @@ export class KnowledgeStore {
         if (storedModel !== this.options.modelName) {
           logger.warn(`[store] Model change detected: ${storedModel} → ${this.options.modelName}`);
 
-          // Determine migration strategy
-          const strategy = this.options.migrationStrategy || this.getRecommendedMigrationStrategy(storedModel!, this.options.modelName);
+          // Determine migration strategy (default to 'drop' for simplicity)
+          const strategy = this.options.migrationStrategy || 'drop';
 
           try {
             await this.handleModelChange(storedModel!, this.options.modelName, strategy);
@@ -126,8 +83,8 @@ export class KnowledgeStore {
             const errorMsg = `Model migration failed using strategy '${strategy}': ${err instanceof Error ? err.message : String(err)}`;
             logger.error(`[store] ${errorMsg}`);
 
-            // If migration fails, we must either drop or error out
-            if (strategy === 'drop') {
+            // If migration fails, fall back to drop strategy
+            if (strategy !== 'drop') {
               logger.warn('[store] Falling back to drop strategy after migration failure');
               await this.db.dropTable(this.tableName);
               this.table = await this.createTable();
@@ -149,63 +106,32 @@ export class KnowledgeStore {
   }
 
   /**
-   * Get recommended migration strategy based on model compatibility
-   */
-  private getRecommendedMigrationStrategy(oldModel: string, newModel: string): MigrationStrategy {
-    const compatibility = this.checkModelCompatibility(oldModel, newModel);
-
-    if (!compatibility.isCompatible) {
-      logger.warn(`[store] Dimension mismatch detected. Recommended strategy: 'drop' (data loss required)`);
-      return 'drop';
-    }
-
-    // Same dimensions: default to 'drop' for backward compatibility
-    // Users can opt-in to 're-embed' via PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY env var
-    logger.info(`[store] Compatible model change detected. Default strategy: 'drop' (use 're-embed' to preserve data)`);
-    return 'drop';
-  }
-
-  /**
-   * Handle model change based on the selected migration strategy
+   * Handle model change based on the selected migration strategy.
+   * Simplified to only support 'drop' and 're-embed' strategies.
    */
   private async handleModelChange(
     oldModel: string,
     newModel: string,
     strategy: MigrationStrategy
   ): Promise<MigrationResult> {
-    const compatibility = this.checkModelCompatibility(oldModel, newModel);
-
     logger.info(`[store] Executing migration strategy: ${strategy}`);
     logger.info(`[store] Old model: ${oldModel}, New model: ${newModel}`);
-
-    if (!compatibility.isCompatible) {
-      // Dimension mismatch: only 'drop' and 're-embed' are valid
-      if (strategy !== 'drop' && strategy !== 're-embed') {
-        throw new Error(compatibility.reason || 'Incompatible model dimensions');
-      }
-      logger.warn(`[store] ${compatibility.reason}`);
-    }
 
     switch (strategy) {
       case 'drop':
         return this.migrationDrop(oldModel, newModel);
       case 're-embed':
-        // Dimensions can differ for re-embed as we recreate the table
         return this.migrationReEmbed(oldModel, newModel);
-      case 'continue':
-        if (!compatibility.isCompatible) {
-          throw new Error(compatibility.reason || 'Cannot continue with dimension mismatch');
-        }
-        return this.migrationContinue(oldModel, newModel);
-      case 'error':
-        throw new Error(`Model change detected (${oldModel} → ${newModel}). Use one of these strategies: 'drop', 're-embed', 'continue', or set migrationStrategy in StoreOptions.`);
       default:
-        throw new Error(`Unknown migration strategy: ${strategy}`);
+        // Fallback to 'drop' for any unrecognized strategy
+        logger.warn(`[store] Unknown migration strategy '${strategy}', falling back to 'drop'`);
+        return this.migrationDrop(oldModel, newModel);
     }
   }
 
   /**
-   * Migration strategy: Drop and recreate table (data loss)
+   * Migration strategy: Drop and recreate table (data loss).
+   * Fast and simple - appropriate for local cache invalidation.
    */
   private async migrationDrop(_oldModel: string, newModel: string): Promise<MigrationResult> {
     logger.warn(`[store] Dropping table and recreating with model ${newModel} (data will be lost)`);
@@ -226,7 +152,8 @@ export class KnowledgeStore {
   }
 
   /**
-   * Migration strategy: Re-embed all documents with new model
+   * Migration strategy: Re-embed all documents with new model (data preserved).
+   * Simplified implementation without temp table complexity.
    */
   private async migrationReEmbed(_oldModel: string, newModel: string): Promise<MigrationResult> {
     logger.info(`[store] Re-embedding documents with model ${newModel} (data will be preserved)`);
@@ -235,123 +162,76 @@ export class KnowledgeStore {
       throw new Error('Table not connected');
     }
 
-    const oldTable = this.table;
-    const totalDocs = await oldTable.countRows();
+    const totalDocs = await this.table.countRows();
     logger.info(`[store] Processing ${totalDocs} documents for re-embedding...`);
 
-    // Use a temporary table for re-embedding to prevent data loss if the process crashes
-    const tempTableName = `${this.tableName}_migration_${Date.now()}`;
-    let tempTable: lancedb.Table | null = null;
-    
     let processed = 0;
-    const batchSize = 100;
+    let embedded = 0;
+    const batchSize = 50;
+    const allDocs: StoreDocument[] = [];
 
     try {
-      // Process in batches from the old table
+      // Read all documents from old table
       for (let i = 0; i < totalDocs; i += batchSize) {
-        // Fetch a batch of documents
-        const batchRows = await oldTable.query()
+        const batchRows = await this.table.query()
           .limit(batchSize)
           .offset(i)
           .toArray();
-
-        if (batchRows.length === 0) break;
 
         const batchDocs = batchRows.map(row => ({
           url: row.url as string,
           text: row.text as string,
           content: row.content as string | undefined,
           metadata: JSON.parse(row.metadata as string),
-          timestamp: row.timestamp as number
+          timestamp: Number(row.timestamp),
         }));
 
-        // Re-embed all texts in batch
-        const texts = batchDocs.map(d => d.text);
+        allDocs.push(...batchDocs);
+        processed += batchDocs.length;
+
+        if (processed % 500 === 0 || processed === totalDocs) {
+          logger.info(`[store] Read ${processed}/${totalDocs} documents from old table`);
+        }
+      }
+
+      // Drop old table and create new one with correct schema
+      await this.db.dropTable(this.tableName);
+      this.table = await this.createTable();
+
+      // Re-embed and insert all documents
+      for (let i = 0; i < allDocs.length; i += batchSize) {
+        const batch = allDocs.slice(i, i + batchSize);
+        const texts = batch.map(d => d.text);
         const vectors = await this.options.embedder.embedMany(texts);
 
-        // Prepare records for the new table
-        const records = batchDocs.map((doc, idx) => ({
+        const records = batch.map((doc, idx) => ({
           vector: Array.from(vectors[idx]!),
           url: doc.url,
           text: doc.text,
           content: doc.content || null,
           metadata: JSON.stringify(doc.metadata),
-          timestamp: BigInt(doc.timestamp)
+          timestamp: BigInt(doc.timestamp),
         }));
 
-        // Create temp table on first batch
-        if (!tempTable) {
-          tempTable = await this.createTable(tempTableName);
-          await tempTable.add(records);
-        } else {
-          await tempTable.add(records);
-        }
+        await this.table.add(records);
+        embedded += batch.length;
 
-        processed += batchDocs.length;
-        if (processed % 500 === 0 || processed === totalDocs) {
-          logger.info(`[store] Migration progress: ${processed}/${totalDocs} documents re-embedded`);
+        if (embedded % 100 === 0 || embedded === allDocs.length) {
+          logger.info(`[store] Re-embedded ${embedded}/${allDocs.length} documents`);
         }
       }
 
-      // Atomically swap tables if possible (LanceDB doesn't have RENAME TABLE, so we drop and recreate)
-      // This is still a small window of failure, but re-embedding is already done.
-      await this.db.dropTable(this.tableName);
-      this.table = await this.createTable();
-      
-      // Copy data from temp table to new main table
-      if (tempTable) {
-        const allNewRows = await tempTable.query().toArray();
-        const finalRecords = allNewRows.map(row => ({
-          vector: Array.from(row.vector as Float32Array),
-          url: row.url as string,
-          text: row.text as string,
-          content: row.content as string | null,
-          metadata: row.metadata as string,
-          timestamp: row.timestamp as bigint
-        }));
-        await this.table.add(finalRecords);
-        await this.db.dropTable(tempTableName);
-      }
-
-      logger.info(`[store] Migration complete: ${processed} documents re-embedded with model ${newModel}`);
+      logger.info(`[store] Migration complete: ${embedded} documents re-embedded with model ${newModel}`);
 
       return {
         strategy: 're-embed',
         success: true,
-        documentsProcessed: processed
+        documentsProcessed: embedded
       };
     } catch (error) {
-      logger.error(`[store] Migration failed at ${processed}/${totalDocs}:`, error);
-      // Cleanup temp table if it exists
-      try {
-        await this.db.dropTable(tempTableName);
-      } catch { /* ignore */ }
+      logger.error(`[store] Migration failed at ${embedded}/${totalDocs}:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Migration strategy: Continue with existing data, use new model for new documents
-   */
-  private async migrationContinue(oldModel: string, newModel: string): Promise<MigrationResult> {
-    logger.info(`[store] Continuing with existing data. Old documents use ${oldModel}, new documents will use ${newModel}`);
-    logger.warn(`[store] Note: Search results may have mixed quality due to different models`);
-
-    // Update metadata to indicate mixed model usage
-    // Note: We cannot change the schema metadata on an existing table, so we log a warning
-    logger.warn(`[store] Mixed model mode: table metadata will still show ${oldModel}`);
-
-    if (!this.table) {
-      throw new Error('Table not connected');
-    }
-
-    const totalDocs = await this.table.countRows();
-
-    return {
-      strategy: 'continue',
-      success: true,
-      documentsProcessed: totalDocs
-    };
   }
 
   private async createTable(name: string = this.tableName): Promise<lancedb.Table> {

@@ -14,12 +14,13 @@ function getMigrationStrategy(): MigrationStrategy | undefined {
   const strategy = process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
   if (!strategy) return undefined;
   
-  const validStrategies: MigrationStrategy[] = ['drop', 're-embed', 'continue', 'error'];
+  // Only support 'drop' and 're-embed' - simplified from 4 strategies
+  const validStrategies: MigrationStrategy[] = ['drop', 're-embed'];
   if (validStrategies.includes(strategy as MigrationStrategy)) {
     return strategy as MigrationStrategy;
   }
   
-  logger.warn(`[knowledge] Invalid migration strategy '${strategy}'. Valid options: drop, re-embed, continue, error`);
+  logger.warn(`[knowledge] Invalid migration strategy '${strategy}'. Valid options: drop, re-embed. Falling back to default (drop).`);
   return undefined;
 }
 
