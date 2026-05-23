@@ -3,9 +3,9 @@ import { forceSchedulerRestart, stopBrowserManager } from '../../../src/infrastr
 import {
   getSchedulerInstance,
   setScheduler,
-  setHealthCheckPending,
   resetAllInternalState,
 } from '../../../src/core/internal-state.ts';
+import { setHealthCheckPending } from '../../../src/core/health-cache-manager.ts';
 
 // ---------------------------------------------------------------------------
 // Mock poolifier — required so FixedClusterPool never spawns real workers

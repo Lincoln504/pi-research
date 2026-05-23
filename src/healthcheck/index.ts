@@ -21,8 +21,7 @@ import {
   resetHealthCheckFailureCount,
   isHealthCheckBackoffActive,
   getHealthCheckBackoffRemainingMs,
-  clearHealthCheckState,
-} from '../core/internal-state.ts';
+} from '../core/health-cache-manager.ts';
 
 export interface HealthCheckResult {
   success: boolean;
@@ -200,6 +199,12 @@ export async function isHealthCheckSuccessful(): Promise<boolean> {
  * This resets all backoff state and pending checks
  */
 export function clearHealthCheckCache(): void {
-  clearHealthCheckState();
-  logger.debug('[healthcheck] Cache cleared');
+  // Import the health cache manager to avoid circular dependency
+  // We use a dynamic import here to ensure the module is loaded when needed
+  import('../core/health-cache-manager.ts').then(mod => {
+    mod.clearHealthCheckCache();
+    logger.debug('[healthcheck] Cache cleared');
+  }).catch(err => {
+    logger.error('[healthcheck] Failed to clear health check cache:', err);
+  });
 }

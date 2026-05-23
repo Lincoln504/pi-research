@@ -21,8 +21,8 @@ import {
   setSchedulerInitializationPromise,
   isSchedulerRestartInProgress,
   setSchedulerRestartInProgress,
-  setHealthCheckPending,
 } from '../core/internal-state.ts';
+import { setHealthCheckPending } from '../core/health-cache-manager.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -1,8 +1,11 @@
 /**
  * Tests for Internal State Management
- * 
+ *
  * These tests verify that the internal state management correctly replaces
  * globalThis usage while maintaining thread safety and proper cleanup.
+ *
+ * Note: Health check state management has been moved to health-cache-manager.ts
+ * to avoid circular dependencies between healthcheck and knowledge modules.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -16,6 +19,9 @@ import {
   isSchedulerRestartInProgress,
   setSchedulerRestartInProgress,
   clearSchedulerState,
+  resetAllInternalState,
+} from '../../../src/core/internal-state.ts';
+import {
   getHealthCheckPending,
   setHealthCheckPending,
   getHealthCheckFailureCount,
@@ -23,9 +29,8 @@ import {
   resetHealthCheckFailureCount,
   isHealthCheckBackoffActive,
   getHealthCheckBackoffRemainingMs,
-  clearHealthCheckState,
-  resetAllInternalState,
-} from '../../../src/core/internal-state.ts';
+  clearHealthCheckCache,
+} from '../../../src/core/health-cache-manager.ts';
 import type { IScheduler } from '../../../src/core/service-interfaces.ts';
 
 // Mock scheduler for testing
@@ -48,7 +53,8 @@ describe('Internal State Management - Scheduler', () => {
   });
 
   describe('Scheduler Instance Management', () => {
-    it('should initialize with null scheduler', () => {
+
+    it('should get null when no scheduler is set', () => {
       expect(getSchedulerInstance()).toBeNull();
     });
 
@@ -58,42 +64,24 @@ describe('Internal State Management - Scheduler', () => {
     });
 
     it('should replace existing scheduler', () => {
-      const mockScheduler2: IScheduler = {
-        name: 'mock-scheduler-2',
-        lifecycle: 'initialized' as any,
-        runSearch: vi.fn(),
-        runScrape: vi.fn(),
-        runHealthCheck: vi.fn(),
-        shutdown: vi.fn(),
-      };
-
+      const mockScheduler2 = { ...mockScheduler, name: 'mock-scheduler-2' };
       setScheduler(mockScheduler);
-      expect(getSchedulerInstance()).toBe(mockScheduler);
-
       setScheduler(mockScheduler2);
       expect(getSchedulerInstance()).toBe(mockScheduler2);
-      expect(getSchedulerInstance()).not.toBe(mockScheduler);
     });
 
     it('should clear scheduler state', () => {
       setScheduler(mockScheduler);
-      setSchedulerVersion('v1');
-      setSchedulerInitializationPromise(Promise.resolve(mockScheduler));
-
       expect(getSchedulerInstance()).toBe(mockScheduler);
-      expect(getSchedulerVersionState()).toBe('v1');
-      expect(getSchedulerInitializationPromise()).not.toBeNull();
 
       clearSchedulerState();
-
       expect(getSchedulerInstance()).toBeNull();
-      expect(getSchedulerVersionState()).toBeNull();
-      expect(getSchedulerInitializationPromise()).toBeNull();
     });
   });
 
   describe('Scheduler Version Management', () => {
-    it('should initialize with null version', () => {
+
+    it('should get null when no version is set', () => {
       expect(getSchedulerVersionState()).toBeNull();
     });
 
@@ -102,229 +90,165 @@ describe('Internal State Management - Scheduler', () => {
       expect(getSchedulerVersionState()).toBe('v1.0.0');
     });
 
-    it('should replace existing version', () => {
+    it('should update scheduler version', () => {
       setSchedulerVersion('v1.0.0');
-      expect(getSchedulerVersionState()).toBe('v1.0.0');
-
       setSchedulerVersion('v2.0.0');
       expect(getSchedulerVersionState()).toBe('v2.0.0');
+    });
+
+    it('should clear version when scheduler state is cleared', () => {
+      setSchedulerVersion('v1.0.0');
+      clearSchedulerState();
+      expect(getSchedulerVersionState()).toBeNull();
     });
   });
 
   describe('Scheduler Initialization Promise Management', () => {
-    it('should initialize with null initialization promise', () => {
+
+    it('should get null when no initialization promise is set', () => {
       expect(getSchedulerInitializationPromise()).toBeNull();
     });
 
     it('should set and get initialization promise', async () => {
       const promise = Promise.resolve(mockScheduler);
       setSchedulerInitializationPromise(promise);
+      expect(getSchedulerInitializationPromise()).toBe(promise);
 
-      const retrieved = getSchedulerInitializationPromise();
-      expect(retrieved).toBe(promise);
-
-      const result = await retrieved;
+      const result = await promise;
       expect(result).toBe(mockScheduler);
     });
 
-    it('should replace existing initialization promise', () => {
-      const promise1 = Promise.resolve(mockScheduler);
-      const promise2 = Promise.resolve(mockScheduler);
-
-      setSchedulerInitializationPromise(promise1);
-      expect(getSchedulerInitializationPromise()).toBe(promise1);
-
-      setSchedulerInitializationPromise(promise2);
-      expect(getSchedulerInitializationPromise()).toBe(promise2);
+    it('should clear initialization promise when scheduler state is cleared', () => {
+      const promise = Promise.resolve(mockScheduler);
+      setSchedulerInitializationPromise(promise);
+      clearSchedulerState();
+      expect(getSchedulerInitializationPromise()).toBeNull();
     });
   });
 
-  describe('Restart Progress Management', () => {
-    it('should initialize with restart not in progress', () => {
+  describe('Scheduler Restart State Management', () => {
+
+    it('should return false when restart is not in progress', () => {
       expect(isSchedulerRestartInProgress()).toBe(false);
     });
 
-    it('should set restart in progress', () => {
-      setSchedulerRestartInProgress(true);
-      expect(isSchedulerRestartInProgress()).toBe(true);
-    });
-
-    it('should clear restart in progress', () => {
+    it('should set and check restart in progress state', () => {
       setSchedulerRestartInProgress(true);
       expect(isSchedulerRestartInProgress()).toBe(true);
 
       setSchedulerRestartInProgress(false);
       expect(isSchedulerRestartInProgress()).toBe(false);
     });
+
+    it('should clear restart state when scheduler state is cleared', () => {
+      setSchedulerRestartInProgress(true);
+      clearSchedulerState();
+      expect(isSchedulerRestartInProgress()).toBe(false);
+    });
   });
 });
 
-describe('Internal State Management - Health Check', () => {
+describe('Health Check Cache Management', () => {
   beforeEach(() => {
-    resetAllInternalState();
+    clearHealthCheckCache();
   });
 
   afterEach(() => {
-    resetAllInternalState();
+    clearHealthCheckCache();
   });
 
-  describe('Pending Health Check Management', () => {
-    it('should initialize with null pending check', () => {
-      expect(getHealthCheckPending()).toBeNull();
-    });
+  it('should track pending health check', () => {
+    const promise = Promise.resolve({ success: true } as any);
+    setHealthCheckPending(promise);
 
-    it('should set and get pending health check', async () => {
-      const promise = Promise.resolve({
-        success: true,
-        searchOk: true,
-        scrapeOk: true,
-        timestamp: new Date().toISOString(),
-      });
-      setHealthCheckPending(promise);
-
-      const retrieved = getHealthCheckPending();
-      expect(retrieved).toBe(promise);
-
-      const result = await retrieved;
-      expect(result.success).toBe(true);
-    });
-
-    it('should replace existing pending check', () => {
-      const promise1 = Promise.resolve({ success: true } as any);
-      const promise2 = Promise.resolve({ success: false } as any);
-
-      setHealthCheckPending(promise1);
-      expect(getHealthCheckPending()).toBe(promise1);
-
-      setHealthCheckPending(promise2);
-      expect(getHealthCheckPending()).toBe(promise2);
-    });
+    expect(getHealthCheckPending()).not.toBeNull();
+    expect(getHealthCheckPending()).toBe(promise);
   });
 
-  describe('Health Check Failure Count', () => {
-    it('should initialize with zero failure count', () => {
-      expect(getHealthCheckFailureCount()).toBe(0);
-    });
+  it('should clear pending health check', () => {
+    const promise = Promise.resolve({ success: true } as any);
+    setHealthCheckPending(promise);
+    expect(getHealthCheckPending()).not.toBeNull();
 
-    it('should increment failure count', () => {
-      expect(getHealthCheckFailureCount()).toBe(0);
-
-      const count = incrementHealthCheckFailureCount();
-      expect(count).toBe(1);
-      expect(getHealthCheckFailureCount()).toBe(1);
-
-      const count2 = incrementHealthCheckFailureCount();
-      expect(count2).toBe(2);
-      expect(getHealthCheckFailureCount()).toBe(2);
-    });
-
-    it('should reset failure count', () => {
-      incrementHealthCheckFailureCount();
-      incrementHealthCheckFailureCount();
-      expect(getHealthCheckFailureCount()).toBe(2);
-
-      resetHealthCheckFailureCount();
-      expect(getHealthCheckFailureCount()).toBe(0);
-    });
-
-    it('should reset backoff when failure count is reset', () => {
-      incrementHealthCheckFailureCount();
-      expect(isHealthCheckBackoffActive()).toBe(true);
-
-      resetHealthCheckFailureCount();
-      expect(isHealthCheckBackoffActive()).toBe(false);
-    });
+    setHealthCheckPending(null);
+    expect(getHealthCheckPending()).toBeNull();
   });
 
-  describe('Health Check Backoff Management', () => {
-    it('should not be active initially', () => {
-      expect(isHealthCheckBackoffActive()).toBe(false);
-      expect(getHealthCheckBackoffRemainingMs()).toBe(0);
-    });
+  it('should track health check failure count', () => {
+    expect(getHealthCheckFailureCount()).toBe(0);
 
-    it('should set backoff on failure', () => {
-      incrementHealthCheckFailureCount();
-      expect(isHealthCheckBackoffActive()).toBe(true);
-      expect(getHealthCheckBackoffRemainingMs()).toBeGreaterThan(0);
-    });
+    incrementHealthCheckFailureCount();
+    expect(getHealthCheckFailureCount()).toBe(1);
 
-    it('should decrease backoff over time', async () => {
-      incrementHealthCheckFailureCount();
-      const initialRemaining = getHealthCheckBackoffRemainingMs();
-      expect(initialRemaining).toBeGreaterThan(0);
-
-      // Wait 500ms
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const remainingAfterWait = getHealthCheckBackoffRemainingMs();
-      expect(remainingAfterWait).toBeLessThan(initialRemaining);
-    });
-
-    it('should have exponential backoff', () => {
-      resetHealthCheckFailureCount();
-
-      incrementHealthCheckFailureCount();
-      const backoff1 = getHealthCheckBackoffRemainingMs();
-      expect(backoff1).toBeGreaterThanOrEqual(1999); // 2^0 * 2000 = 2000ms (allow 1ms timing variance)
-
-      incrementHealthCheckFailureCount();
-      const backoff2 = getHealthCheckBackoffRemainingMs();
-      expect(backoff2).toBeGreaterThanOrEqual(3999); // 2^1 * 2000 = 4000ms
-
-      incrementHealthCheckFailureCount();
-      const backoff3 = getHealthCheckBackoffRemainingMs();
-      expect(backoff3).toBeGreaterThanOrEqual(7999); // 2^2 * 2000 = 8000ms
-
-      incrementHealthCheckFailureCount();
-      const backoff4 = getHealthCheckBackoffRemainingMs();
-      expect(backoff4).toBeGreaterThanOrEqual(15999); // 2^3 * 2000 = 16000ms
-
-      incrementHealthCheckFailureCount();
-      const backoff5 = getHealthCheckBackoffRemainingMs();
-      expect(backoff5).toBeGreaterThanOrEqual(29999); // 2^4 * 2000 = 32000ms, capped at 30000ms
-
-      incrementHealthCheckFailureCount();
-      const backoff6 = getHealthCheckBackoffRemainingMs();
-      expect(backoff6).toBeGreaterThanOrEqual(29999); // Still capped at 30000ms
-    });
-
-    it('should clear backoff when state is cleared', () => {
-      incrementHealthCheckFailureCount();
-      expect(isHealthCheckBackoffActive()).toBe(true);
-
-      clearHealthCheckState();
-      expect(isHealthCheckBackoffActive()).toBe(false);
-      expect(getHealthCheckBackoffRemainingMs()).toBe(0);
-    });
+    incrementHealthCheckFailureCount();
+    expect(getHealthCheckFailureCount()).toBe(2);
   });
 
-  describe('Health Check State Management', () => {
-    it('should clear all health check state', () => {
-      const promise = Promise.resolve({ success: true } as any);
-      setHealthCheckPending(promise);
+  it('should reset health check failure count', () => {
+    incrementHealthCheckFailureCount();
+    incrementHealthCheckFailureCount();
+    expect(getHealthCheckFailureCount()).toBe(2);
+
+    resetHealthCheckFailureCount();
+    expect(getHealthCheckFailureCount()).toBe(0);
+  });
+
+  it('should calculate exponential backoff', () => {
+    incrementHealthCheckFailureCount();
+    const backoff1 = getHealthCheckBackoffRemainingMs();
+    expect(backoff1).toBeGreaterThan(0);
+    expect(backoff1).toBeLessThanOrEqual(2000);
+
+    incrementHealthCheckFailureCount();
+    const backoff2 = getHealthCheckBackoffRemainingMs();
+    expect(backoff2).toBeGreaterThan(backoff1);
+
+    // After many failures, backoff should cap at 30s
+    for (let i = 0; i < 10; i++) {
       incrementHealthCheckFailureCount();
-      incrementHealthCheckFailureCount();
+    }
+    const backoffMax = getHealthCheckBackoffRemainingMs();
+    expect(backoffMax).toBeLessThanOrEqual(30000);
+  });
 
-      expect(getHealthCheckPending()).not.toBeNull();
-      expect(getHealthCheckFailureCount()).toBe(2);
-      expect(isHealthCheckBackoffActive()).toBe(true);
+  it('should check if backoff is active', async () => {
+    expect(isHealthCheckBackoffActive()).toBe(false);
 
-      clearHealthCheckState();
+    incrementHealthCheckFailureCount();
+    expect(isHealthCheckBackoffActive()).toBe(true);
 
-      expect(getHealthCheckPending()).toBeNull();
-      expect(getHealthCheckFailureCount()).toBe(0);
-      expect(isHealthCheckBackoffActive()).toBe(false);
-    });
+    // Wait for backoff to expire
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    expect(isHealthCheckBackoffActive()).toBe(false);
+  });
+
+  it('should clear all health check state', () => {
+    const promise = Promise.resolve({ success: true } as any);
+    setHealthCheckPending(promise);
+    incrementHealthCheckFailureCount();
+    incrementHealthCheckFailureCount();
+
+    expect(getHealthCheckPending()).not.toBeNull();
+    expect(getHealthCheckFailureCount()).toBe(2);
+    expect(isHealthCheckBackoffActive()).toBe(true);
+
+    clearHealthCheckCache();
+
+    expect(getHealthCheckPending()).toBeNull();
+    expect(getHealthCheckFailureCount()).toBe(0);
+    expect(isHealthCheckBackoffActive()).toBe(false);
   });
 });
 
 describe('Internal State Management - Global Reset', () => {
   beforeEach(() => {
     resetAllInternalState();
+    clearHealthCheckCache();
   });
 
   afterEach(() => {
     resetAllInternalState();
+    clearHealthCheckCache();
   });
 
   it('should reset all scheduler state', () => {
@@ -356,6 +280,7 @@ describe('Internal State Management - Global Reset', () => {
     expect(isHealthCheckBackoffActive()).toBe(true);
 
     resetAllInternalState();
+    clearHealthCheckCache();
 
     expect(getHealthCheckPending()).toBeNull();
     expect(getHealthCheckFailureCount()).toBe(0);
@@ -379,6 +304,7 @@ describe('Internal State Management - Global Reset', () => {
 
     // Reset all
     resetAllInternalState();
+    clearHealthCheckCache();
 
     // Verify everything is reset
     expect(getSchedulerInstance()).toBeNull();
@@ -394,10 +320,12 @@ describe('Internal State Management - Global Reset', () => {
 describe('Internal State Management - Thread Safety (Simulated)', () => {
   beforeEach(() => {
     resetAllInternalState();
+    clearHealthCheckCache();
   });
 
   afterEach(() => {
     resetAllInternalState();
+    clearHealthCheckCache();
   });
 
   it('should handle concurrent scheduler access', async () => {

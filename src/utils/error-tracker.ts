@@ -2,29 +2,37 @@
  * Enhanced Error Tracking with Pattern Recognition
  */
 
-import { logger } from '../logger.ts';
+import type {
+  IErrorTracker,
+  IErrorTrackerLogger,
+  ErrorContext,
+  ErrorPattern,
+  ErrorReport,
+} from '../core/interfaces/error-tracking.ts';
 
-export interface ErrorContext {
-  researchId?: string;
-  mode?: string;
-  component?: string;
-  operation?: string;
-  [key: string]: any;
-}
+// Re-export types for backward compatibility
+export type { ErrorContext, ErrorPattern, ErrorReport } from '../core/interfaces/error-tracking.ts';
 
-export interface ErrorPattern {
-  signature: string;
-  message: string;
-  count: number;
-  firstSeen: string;
-  lastSeen: string;
-  contexts: ErrorContext[];
-}
-
-export class ErrorTracker {
+export class ErrorTracker implements IErrorTracker {
   private patterns = new Map<string, ErrorPattern>();
   private readonly MAX_CONTEXTS_PER_PATTERN = 10;
+  private logger: IErrorTrackerLogger | null;
   
+  /**
+   * Create a new ErrorTracker
+   * @param logger - Optional logger instance (prevents circular dependency)
+   */
+  constructor(logger?: IErrorTrackerLogger) {
+    this.logger = logger || null;
+  }
+
+  /**
+   * Set or update the logger (useful for lazy initialization)
+   */
+  public setLogger(logger: IErrorTrackerLogger | null): void {
+    this.logger = logger;
+  }
+
   /**
    * Normalizes an error message to extract a stable signature.
    * Removes IDs, numbers, and UUIDs to group similar errors.
@@ -40,6 +48,18 @@ export class ErrorTracker {
       // Normalize whitespace
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  /**
+   * Log a debug message (if logger is available)
+   */
+  private debug(...args: unknown[]): void {
+    if (this.logger) {
+      this.logger.debug(...args);
+    } else {
+      // Fallback to console if no logger
+      console.debug('[ErrorTracker]', ...args);
+    }
   }
 
   public trackError(error: Error | string, context: ErrorContext = {}): void {
@@ -62,14 +82,14 @@ export class ErrorTracker {
 
     pattern.count++;
     pattern.lastSeen = now;
-    
+
     // Add context to rolling buffer
     pattern.contexts.push(context);
     if (pattern.contexts.length > this.MAX_CONTEXTS_PER_PATTERN) {
       pattern.contexts.shift(); // Keep only recent contexts
     }
-    
-    logger.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
+
+    this.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
   }
 
   public getReport(): { totalErrors: number, uniquePatterns: number, patterns: ErrorPattern[] } {
@@ -95,4 +115,5 @@ export class ErrorTracker {
   }
 }
 
+// Create singleton without logger initially (will be set by logger module)
 export const errorTracker = new ErrorTracker();

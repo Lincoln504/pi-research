@@ -6,7 +6,7 @@ import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 import * as fs from 'node:fs';
-import { clearHealthCheckCache } from '../healthcheck/index.ts';
+import { clearHealthCheckCache } from '../core/health-cache-manager.ts';
 import type { MigrationStrategy } from './migration.ts';
 
 /** Migration strategy for model changes (read from env or config) */
