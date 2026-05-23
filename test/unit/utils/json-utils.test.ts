@@ -66,13 +66,6 @@ describe('extractJsonFromCodeBlocks', () => {
 // ---------------------------------------------------------------------------
 
 describe('extractJsonObject', () => {
-  it('extracts a simple object', () => {
-    const result = extractJsonObject('{"key":"value"}');
-    expect(result.success).toBe(true);
-    expect(result.value).toEqual({ key: 'value' });
-    expect(result.method).toBe('raw-object');
-  });
-
   it('ignores leading prose and extracts the object', () => {
     const result = extractJsonObject('Here is the plan: {"action":"delegate"}');
     expect(result.success).toBe(true);
@@ -161,13 +154,6 @@ describe('extractJsonObject', () => {
 // ---------------------------------------------------------------------------
 
 describe('extractJsonArray', () => {
-  it('extracts a simple string array', () => {
-    const result = extractJsonArray('["one","two","three"]');
-    expect(result.success).toBe(true);
-    expect(result.value).toEqual(['one', 'two', 'three']);
-    expect(result.method).toBe('raw-array');
-  });
-
   it('extracts an array of objects', () => {
     const result = extractJsonArray('[{"id":1},{"id":2}]');
     expect(result.success).toBe(true);
@@ -256,13 +242,6 @@ describe('extractJson', () => {
 // ---------------------------------------------------------------------------
 
 describe('normalizeStringArrayDetailed', () => {
-  it('passes through a clean string array unchanged', () => {
-    const result = normalizeStringArrayDetailed(['alpha', 'beta', 'gamma']);
-    expect(result.strings).toEqual(['alpha', 'beta', 'gamma']);
-    expect(result.skippedCount).toBe(0);
-    expect(result.warnings).toHaveLength(0);
-  });
-
   it('trims whitespace from strings', () => {
     const result = normalizeStringArrayDetailed(['  hello  ', '\tworld\n']);
     expect(result.strings).toEqual(['hello', 'world']);

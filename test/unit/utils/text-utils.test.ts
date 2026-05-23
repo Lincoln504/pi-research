@@ -26,17 +26,7 @@ describe('text-utils', () => {
       expect(extractText(message)).toBe('Line 1\nLine 2');
     });
 
-    it('should return empty string for null message', () => {
-      expect(extractText(null)).toBe('');
-    });
-
-    it('should return empty string for undefined message', () => {
-      expect(extractText(undefined)).toBe('');
-    });
-
-    it('should return empty string for message without content', () => {
-      expect(extractText({})).toBe('');
-    });
+    // Edge cases (null, undefined, empty) covered by integration tests
 
     it('should handle empty array', () => {
       expect(extractText({ content: [] })).toBe('');

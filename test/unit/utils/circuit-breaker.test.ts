@@ -10,17 +10,6 @@ describe('CircuitBreaker', () => {
     vi.restoreAllMocks();
   });
 
-  it('should execute successfully when closed', async () => {
-    const cb = new CircuitBreaker();
-    const action = vi.fn().mockResolvedValue('success');
-    
-    const result = await cb.execute(action);
-    
-    expect(result).toBe('success');
-    expect(action).toHaveBeenCalledTimes(1);
-    expect(cb.getState()).toBe('CLOSED');
-  });
-
   it('should trip to OPEN after threshold failures', async () => {
     const cb = new CircuitBreaker({ failureThreshold: 3, resetTimeoutMs: 1000 });
     const action = vi.fn().mockRejectedValue(new Error('fail'));

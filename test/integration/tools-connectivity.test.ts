@@ -150,5 +150,253 @@ describe('Search and Scrape Tools Connectivity', () => {
         expect(text).toMatch(/^#+\s/m);
       }
     });
+
+  describe('Scrape Tool - Error Scenarios', () => {
+    it('should handle invalid URL gracefully', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeToolInstance(tracker);
+      const urls = ['not-a-valid-url'];
+      
+      const result = await tool.execute(
+        'test-scrape-invalid-url',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+      
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        // Should have error information
+        expect(text).toBeDefined();
+        expect(typeof text).toBe('string');
+      }
+    });
+
+    it('should handle non-existent URL gracefully', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeToolInstance(tracker);
+      const urls = ['https://this-definitely-does-not-exist-12345.com'];
+      
+      const result = await tool.execute(
+        'test-scrape-404',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+      
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        // Should report failure
+        expect(text).toBeDefined();
+        expect(typeof text).toBe('string');
+      }
+    });
+
+    it('should handle mixed valid and invalid URLs', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeToolInstance(tracker);
+      const urls = [
+        'https://en.wikipedia.org/wiki/TypeScript',
+        'not-a-valid-url',
+        'https://en.wikipedia.org/wiki/JavaScript',
+      ];
+      
+      const result = await tool.execute(
+        'test-scrape-mixed',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+      
+      if (result.content[0]?.type === 'text') {
+        const text = result.content[0].text as string;
+        if (isNetworkUnavailable(text)) {
+          return;
+        }
+        // Should have partial success
+        expect(text).toBeDefined();
+        expect(typeof text).toBe('string');
+      }
+    });
+
+    it('should handle empty URL list', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeToolInstance(tracker);
+      const urls: string[] = [];
+      
+      const result = await tool.execute(
+        'test-scrape-empty',
+        { urls },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+    });
+  });
+
+  describe('Search Tool - Error Scenarios', () => {
+    it('should handle empty query gracefully', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tool = createSearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker: new ToolUsageTracker({ gathering: 6 }) 
+      });
+      
+      const result = await tool.execute(
+        'test-search-empty',
+        { queries: [''] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+    });
+
+    it('should handle very long query', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tool = createSearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker: new ToolUsageTracker({ gathering: 6 }) 
+      });
+      
+      const longQuery = 'a '.repeat(10000);
+      const result = await tool.execute(
+        'test-search-long',
+        { queries: [longQuery] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+    });
+
+    it('should handle special characters in query', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tool = createSearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker: new ToolUsageTracker({ gathering: 6 }) 
+      });
+      
+      const specialQuery = 'C++ vs Java & "Python"';
+      const result = await tool.execute(
+        'test-search-special',
+        { queries: [specialQuery] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+
+      expect(result).toBeDefined();
+      expect(result.content).toBeDefined();
+    });
+  });
+
+  describe('Tool Failure Cascade Prevention', () => {
+    it('should prevent search failure from affecting subsequent searches', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tool = createSearchTool({ 
+        ctx: mockExtensionCtx as any, 
+        tracker: new ToolUsageTracker({ gathering: 6 }) 
+      });
+      
+      // First search with invalid query
+      const result1 = await tool.execute(
+        'test-cascade-1',
+        { queries: [''] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result1).toBeDefined();
+
+      // Second search with valid query should still work
+      const result2 = await tool.execute(
+        'test-cascade-2',
+        { queries: ['test query'] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result2).toBeDefined();
+      expect(result2.content).toBeDefined();
+    });
+
+    it('should prevent scrape failure from affecting subsequent scrapes', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+      
+      const tracker = new ToolUsageTracker({ scrape: 10 });
+      const tool = createScrapeToolInstance(tracker);
+      
+      // First scrape with invalid URL
+      const result1 = await tool.execute(
+        'test-scrape-cascade-1',
+        { urls: ['not-a-valid-url'] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result1).toBeDefined();
+
+      // Second scrape with valid URL should still work
+      const result2 = await tool.execute(
+        'test-scrape-cascade-2',
+        { urls: ['https://en.wikipedia.org/wiki/Test'] },
+        undefined,
+        undefined,
+        mockExtensionCtx as any
+      );
+      expect(result2).toBeDefined();
+      expect(result2.content).toBeDefined();
+    });
+  });
   });
 });

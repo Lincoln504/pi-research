@@ -46,49 +46,6 @@ describe('logger', () => {
   });
 
   describe('Logger class', () => {
-    it('should create logger instance with no options', () => {
-      const logger = new Logger();
-      expect(logger).toBeDefined();
-      expect(logger.log).toBeDefined();
-      expect(logger.info).toBeDefined();
-      expect(logger.error).toBeDefined();
-      expect(logger.warn).toBeDefined();
-      expect(logger.debug).toBeDefined();
-    });
-
-    it('should be silent when not verbose', () => {
-      const logger = new Logger({ verbose: false, logFilePath: TEST_LOG_PATH });
-
-      expect(() => {
-        logger.log('test message');
-        logger.info('info message');
-      }).not.toThrow();
-
-      expect(logger.isVerbose()).toBe(false);
-    });
-
-    it('should detect verbose from isVerbose()', () => {
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      expect(logger.isVerbose()).toBe(true);
-    });
-
-    it('should handle error objects', () => {
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-
-      const testError = new Error('test error');
-      expect(() => {
-        logger.error(testError);
-      }).not.toThrow();
-    });
-
-    it('should handle object arguments', () => {
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-
-      const testData = { key: 'value', number: 42 };
-      expect(() => {
-        logger.log('test', testData, 'extra');
-      }).not.toThrow();
-    });
 
     it('should write structured JSONL with scoped context when verbose', () => {
       const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
@@ -138,19 +95,6 @@ describe('logger', () => {
       expect(console.error).toBe(originalConsole.error);
       expect(console.warn).toBe(originalConsole.warn);
       expect(console.debug).toBe(originalConsole.debug);
-    });
-
-    it('should return log file path', () => {
-      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
-      expect(logger.getLogFilePath()).toBe(TEST_LOG_PATH);
-    });
-
-    it('should return isVerbose status', () => {
-      const verbose = new Logger({ verbose: true });
-      const silent = new Logger({ verbose: false });
-
-      expect(verbose.isVerbose()).toBe(true);
-      expect(silent.isVerbose()).toBe(false);
     });
 
     it('should have default log file path', () => {

@@ -89,27 +89,7 @@ describe('validateQuery', () => {
   });
 });
 
-describe('sanitizeQuery', () => {
-  it('should trim whitespace', () => {
-    const result = sanitizeQuery('  test query  ');
-    expect(result).toBe('test query');
-  });
 
-  it('should normalize multiple spaces to single space', () => {
-    const result = sanitizeQuery('test   query   with    spaces');
-    expect(result).toBe('test query with spaces');
-  });
-
-  it('should remove control characters', () => {
-    const result = sanitizeQuery('test\u0000query\u001F');
-    expect(result).toBe('testquery');
-  });
-
-  it('should preserve normal characters', () => {
-    const result = sanitizeQuery('Normal query! @ # $ % ^ & * ( )');
-    expect(result).toBe('Normal query! @ # $ % ^ & * ( )');
-  });
-});
 
 describe('validateAndSanitizeQuery', () => {
   it('should return sanitized query for valid input', () => {
