@@ -43,16 +43,17 @@ vi.mock('../../../src/config.ts', () => ({
 }));
 
 import { runBrowserTask, stopBrowserManager } from '../../../src/infrastructure/browser-manager.ts';
+import { resetAllInternalState } from '../../../src/core/internal-state.ts';
 
 describe('BrowserManager retry behavior', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
-        (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = null;
+        resetAllInternalState();
     });
 
     afterEach(async () => {
         await stopBrowserManager();
+        resetAllInternalState();
     });
 
     it('retries once on a transient ECONNRESET and succeeds', async () => {

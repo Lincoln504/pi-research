@@ -380,7 +380,7 @@ function parseNVDResponse(data: unknown, options: SearchOptions | undefined): Vu
 }
 
 function buildURL(term: string, options: SearchOptions | undefined, maxResults: number, startIndex: number = 0): string {
-  const params = new globalThis.URLSearchParams();
+  const params = new URLSearchParams();
 
   // Add keyword search (supports multiple keywords with AND logic)
   params.append('keywordSearch', term);

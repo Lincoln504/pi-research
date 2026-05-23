@@ -115,7 +115,8 @@ export class Embedder {
     try {
       await this.initializingPromise;
       // Race check: if dispose() was called during initialization, our state will be 'disposing'
-      if (this.state === 'disposing') {
+      const currentState = this.state as EmbedderState;
+      if (currentState === 'disposing') {
         logger.warn('[embedder] Initialization finished but embedder was disposed in the meantime.');
         return;
       }

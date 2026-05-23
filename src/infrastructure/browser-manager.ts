@@ -14,6 +14,15 @@ import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
+import {
+  getSchedulerInstance,
+  setScheduler,
+  setSchedulerVersion,
+  setSchedulerInitializationPromise,
+  isSchedulerRestartInProgress,
+  setSchedulerRestartInProgress,
+  setHealthCheckPending,
+} from '../core/internal-state.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -92,41 +101,36 @@ export function getClientAgent(): http.Agent {
     return clientAgent;
 }
 
-// Prevents concurrent forceSchedulerRestart() calls from each clearing
-// initializationPromise and spawning multiple competing FixedClusterPool instances.
-// Without this guard, N simultaneous task timeouts spawn N pools but only one
-// wins the state-manager election — the other N-1 pools are orphaned forever.
-let isRestartInProgress = false;
-
 /**
  * Force a restart of the scheduler by clearing the global cache and state.
  * This should be called when configuration changes are detected.
  */
 export async function forceSchedulerRestart(forceClearRemoteState: boolean = false): Promise<void> {
-    if (isRestartInProgress) {
+    if (isSchedulerRestartInProgress()) {
         logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
         return;
     }
-    isRestartInProgress = true;
+    setSchedulerRestartInProgress(true);
     try {
     logger.log('[Scheduler] Forcing scheduler restart due to config change...');
 
-    // Grab the current scheduler BEFORE clearing the global reference so we can
+    // Grab the current scheduler BEFORE clearing the reference so we can
     // shut it down properly. Without this, the old scheduler's leadership-check
     // timer keeps firing for up to 60s after the restart, and its pool workers
     // keep running until the leadership loss is detected.
-    const oldScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const oldScheduler = getSchedulerInstance();
 
-    // Clear global cache immediately so new requests spawn a fresh scheduler.
-    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
+    // Clear cache immediately so new requests spawn a fresh scheduler.
+    setScheduler(null);
+    setSchedulerVersion(null);
+    setSchedulerInitializationPromise(null);
     cachedSchedulerVersion = null;
     initializationPromise = null;
 
     // Clear the health check singleton cache so the next research run re-validates the
     // browser. The scheduler restart means the pool is being torn down; a cached
     // "health OK" result would be stale and could let a dead pool go undetected.
-    // Cleared via globalThis directly to avoid a circular import with healthcheck/index.ts.
-    (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = null;
+    setHealthCheckPending(null);
 
     // Find and clear any stale scheduler processes BEFORE clearing state.
     // Only clear if the registered PID is dead or belongs to this process — never
@@ -160,7 +164,7 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
 
     logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
     } finally {
-        isRestartInProgress = false;
+        setSchedulerRestartInProgress(false);
     }
 }
 
@@ -183,7 +187,7 @@ class BrowserTaskScheduler implements IScheduler {
     private isShuttingDown: boolean = false;
     private readonly stateManager = getSharedStateManager();
 
-    constructor(private readonly schedulerId: string) {
+    constructor(public readonly schedulerId: string) {
         // Pool initialization is deferred to first use via ensurePool()
         // This allows config changes to be detected and handled
         this.startLeadershipCheck();
@@ -451,9 +455,12 @@ class BrowserTaskScheduler implements IScheduler {
             this.leadershipTimer = null;
         }
 
-        // Clear global reference immediately to prevent new tasks from using this scheduler
-        if ((globalThis as any).__PI_RESEARCH_SCHEDULER__ === this) {
-            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
+        // Clear reference immediately to prevent new tasks from using this scheduler
+        const currentScheduler = getSchedulerInstance();
+        if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
+            setScheduler(null);
+            setSchedulerVersion(null);
+            setSchedulerInitializationPromise(null);
             cachedSchedulerVersion = null;
             initializationPromise = null;
         }
@@ -610,7 +617,7 @@ let initializationPromise: Promise<IScheduler> | null = null;
 
 async function getScheduler(config?: Config): Promise<IScheduler> {
     const currentVersion = generateSchedulerVersion(config);
-    let existing = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    let existing = getSchedulerInstance();
     
     // Check if cached scheduler has different version (config changed)
     if (existing && cachedSchedulerVersion && cachedSchedulerVersion !== currentVersion) {
@@ -623,12 +630,14 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         if (existing instanceof BrowserTaskScheduler) {
             existing.resetIdleTimerOnActivity();
         }
-        return existing;
+        return existing as IScheduler;
     }
 
     if (initializationPromise) return initializationPromise;
 
-    const p: Promise<IScheduler> = (async () => {
+    let p: Promise<IScheduler>;
+    
+    const initializationFunction = async () => {
         const schedulerVersion = currentVersion;
         // Generate a unique ID for this scheduler instance to prevent PID reuse issues
         const schedulerId = crypto.randomUUID();
@@ -664,9 +673,10 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                     logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
                     const client = new BrowserClient(serverInfo.port);
                     
-                    // Race check: if initializationPromise was cleared (restart), don't set global reference
+                                // Race check: if initializationPromise was cleared (restart), don't set reference
                     if (initializationPromise === p) {
-                        (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+                        setScheduler(client as any);
+                        setSchedulerVersion(currentVersion);
                         cachedSchedulerVersion = currentVersion;
                     } else {
                         logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
@@ -686,7 +696,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
             if (initializationPromise === p) {
-                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+                setScheduler(scheduler as any);
+                setSchedulerVersion(currentVersion);
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
@@ -715,7 +726,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
             if (initializationPromise === p) {
-                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+                setScheduler(scheduler);
+                setSchedulerVersion(currentVersion);
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
@@ -729,7 +741,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             await scheduler.shutdown();
             const client = new BrowserClient(winnerPort);
             if (initializationPromise === p) {
-                (globalThis as any).__PI_RESEARCH_SCHEDULER__ = client;
+                setScheduler(client);
+                setSchedulerVersion(schedulerVersion);
                 cachedSchedulerVersion = schedulerVersion;
             } else {
                 await client.shutdown().catch(() => {});
@@ -742,7 +755,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         metrics.increment('browser_leadership_wins_total', 1);
         if (initializationPromise === p) {
-            (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
+            setScheduler(scheduler as any);
+            setSchedulerVersion(schedulerVersion);
             cachedSchedulerVersion = schedulerVersion;
         } else {
             logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
@@ -750,8 +764,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             throw new Error('Initialization superseded');
         }
         return scheduler;
-    })();
-
+    };
+    
+    p = initializationFunction();
     initializationPromise = p;
     // Clear on rejection so the next caller retries rather than receiving the same
     // rejected promise forever.
@@ -760,6 +775,12 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
     });
     return p;
 }
+
+// Export the getScheduler function for use by BrowserManagerService
+export { getScheduler as _internalGetScheduler };
+
+// Export getSchedulerVersion for use by BrowserManagerService
+export { getSchedulerVersion as _internalGetSchedulerVersion, generateSchedulerVersion as _internalGenerateSchedulerVersion };
 
 const require = createRequire(import.meta.url);
 
@@ -844,11 +865,12 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
 export async function stopBrowserManager(): Promise<void> {
   browserCircuitBreaker.reset();
   metrics.increment('browser_manager_shutdowns_total', 1);
-  const globalScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+  const globalScheduler = getSchedulerInstance();
   // Clear both references before any async work so concurrent getScheduler()
   // calls during shutdown see null and start fresh rather than receiving a
   // scheduler that is mid-teardown.
-  (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
+  setScheduler(null);
+  setSchedulerInitializationPromise(null);
   initializationPromise = null;
 
   if (globalScheduler instanceof BrowserTaskScheduler) {

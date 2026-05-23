@@ -37,10 +37,16 @@ const USER_AGENTS = [
 
 function getRandomUserAgent(): string {
   try {
-    const index = crypto.randomBytes(1)[0] % USER_AGENTS.length;
-    return USER_AGENTS[index];
+    const buffer = crypto.randomBytes(1);
+    const byte = buffer[0];
+    const index = byte !== undefined ? Math.floor(byte / 256 * USER_AGENTS.length) : 0;
+    const userAgent = USER_AGENTS[index];
+    if (!userAgent) {
+      return USER_AGENTS[0]!;
+    }
+    return userAgent!;
   } catch {
-    return USER_AGENTS[0]; // Fallback
+    return USER_AGENTS[0]!; // Fallback
   }
 }
 
@@ -318,8 +324,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   };
   if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
+  const fetchStart = Date.now();
   try {
-    const fetchStart = Date.now();
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {

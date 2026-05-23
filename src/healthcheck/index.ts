@@ -13,6 +13,16 @@ import { getEmbedder } from '../knowledge/index.ts';
 import { healthRegistry } from './registry.ts';
 export { healthRegistry } from './registry.ts';
 import { recordHealthCheck, getHealthSummary } from './persistence.ts';
+import {
+  getHealthCheckPending,
+  setHealthCheckPending,
+  getHealthCheckFailureCount,
+  incrementHealthCheckFailureCount,
+  resetHealthCheckFailureCount,
+  isHealthCheckBackoffActive,
+  getHealthCheckBackoffRemainingMs,
+  clearHealthCheckState,
+} from '../core/internal-state.ts';
 
 export interface HealthCheckResult {
   success: boolean;
@@ -101,56 +111,40 @@ healthRegistry.register('ErrorTracker', async () => {
   }
 }, { timeoutMs: 1000, critical: false }); // Not critical - errors are informational
 
-// Global state for the health check singleton
-function getPendingCheck(): Promise<HealthCheckResult> | null {
-  return (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ || null;
-}
 
-function setPendingCheck(val: Promise<HealthCheckResult> | null) {
-  (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = val;
-}
 
-let healthCheckFailureCount = 0;
-let healthCheckBackoffUntil = 0;
 
-export function clearHealthCheckCache() {
-  setPendingCheck(null);
-  healthCheckFailureCount = 0;
-  healthCheckBackoffUntil = 0;
-}
 
 export async function runHealthCheck(): Promise<HealthCheckResult> {
-  const pending = getPendingCheck();
+  const pending = getHealthCheckPending();
   if (pending) return pending;
 
   const promise = performActualCheck();
-  setPendingCheck(promise);
+  setHealthCheckPending(promise);
   
   try {
     const result = await promise;
     if (!result.success) {
-      setPendingCheck(null);
-      healthCheckFailureCount++;
-      healthCheckBackoffUntil = Date.now() + Math.min(30000, 2000 * Math.pow(2, healthCheckFailureCount - 1));
-      logger.warn(`[healthcheck] Check failed, backoff set for ${healthCheckBackoffUntil - Date.now()}ms (failure #${healthCheckFailureCount})`);
+      setHealthCheckPending(null);
+      incrementHealthCheckFailureCount();
     } else {
-      if (healthCheckFailureCount > 0) {
-        logger.log(`[healthcheck] Check succeeded after ${healthCheckFailureCount} failures, resetting backoff`);
+      const failureCount = getHealthCheckFailureCount();
+      if (failureCount > 0) {
+        logger.log(`[healthcheck] Check succeeded after ${failureCount} failures, resetting backoff`);
       }
-      healthCheckFailureCount = 0;
-      healthCheckBackoffUntil = 0;
+      resetHealthCheckFailureCount();
     }
     return result;
   } catch (error) {
-    setPendingCheck(null);
+    setHealthCheckPending(null);
     throw error;
   }
 }
 
 async function performActualCheck(): Promise<HealthCheckResult> {
-  const now = Date.now();
-  if (now < healthCheckBackoffUntil) {
-    const waitMs = healthCheckBackoffUntil - now;
+  // Wait for backoff if active
+  if (isHealthCheckBackoffActive()) {
+    const waitMs = getHealthCheckBackoffRemainingMs();
     logger.warn(`[healthcheck] Backing off for ${waitMs}ms due to previous failure(s)`);
     await new Promise(resolve => setTimeout(resolve, waitMs));
   }
@@ -199,4 +193,13 @@ export async function isHealthCheckSuccessful(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Clear the health check cache
+ * This resets all backoff state and pending checks
+ */
+export function clearHealthCheckCache(): void {
+  clearHealthCheckState();
+  logger.debug('[healthcheck] Cache cleared');
 }

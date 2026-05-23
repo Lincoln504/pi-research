@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runBrowserTask, stopBrowserManager, forceSchedulerRestart } from '../../../src/infrastructure/browser-manager.ts';
 import { getConfig } from '../../../src/config.ts';
+import {
+  getSchedulerInstance,
+  resetAllInternalState,
+} from '../../../src/core/internal-state.ts';
 
 // Mock poolifier
 const mockDestroy = vi.fn(async () => {});
@@ -56,12 +60,12 @@ vi.mock('../../../src/config.ts', () => ({
 describe('BrowserManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
-    (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = null;
+    resetAllInternalState();
   });
 
   afterEach(async () => {
     await stopBrowserManager();
+    resetAllInternalState();
   });
 
   it('should run a search task', async () => {
@@ -76,10 +80,10 @@ describe('BrowserManager', () => {
 
   it('should reuse scheduler when config is same', async () => {
     await runBrowserTask('q1', 'search');
-    const firstScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const firstScheduler = getSchedulerInstance();
     
     await runBrowserTask('q2', 'search');
-    const secondScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const secondScheduler = getSchedulerInstance();
     
     expect(firstScheduler).toBe(secondScheduler);
   });
@@ -87,7 +91,7 @@ describe('BrowserManager', () => {
   it('should restart scheduler when config changes', async () => {
     // First run with initial config (WORKER_THREADS: 4)
     await runBrowserTask('q1', 'search');
-    const firstScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const firstScheduler = getSchedulerInstance();
     expect(firstScheduler).not.toBeNull();
 
     // Change config
@@ -99,7 +103,7 @@ describe('BrowserManager', () => {
 
     // Second run should detect change and restart
     await runBrowserTask('q2', 'search');
-    const secondScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const secondScheduler = getSchedulerInstance();
     
     expect(secondScheduler).not.toBe(firstScheduler);
     expect(secondScheduler).not.toBeNull();
@@ -110,11 +114,11 @@ describe('BrowserManager', () => {
 
   it('forceSchedulerRestart clears global state', async () => {
     await runBrowserTask('q1', 'search');
-    expect((globalThis as any).__PI_RESEARCH_SCHEDULER__).not.toBeNull();
+    expect(getSchedulerInstance()).not.toBeNull();
     
     await forceSchedulerRestart();
     
-    expect((globalThis as any).__PI_RESEARCH_SCHEDULER__).toBeNull();
+    expect(getSchedulerInstance()).toBeNull();
     expect(mockClearBrowserServer).toHaveBeenCalled();
   });
 
@@ -129,7 +133,7 @@ describe('BrowserManager', () => {
 
   it('should lose leadership if schedulerId changes in state', async () => {
       await runBrowserTask('q1', 'search');
-      const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+      const scheduler = getSchedulerInstance();
       const shutdownSpy = vi.spyOn(scheduler, 'shutdown');
       
       const { StateManager } = await import('../../../src/infrastructure/state-manager.ts');
@@ -150,7 +154,7 @@ describe('BrowserManager', () => {
       vi.mocked(mockStateManager.getBrowserServer).mockResolvedValue({
           schedulerId: 'someone-else',
           pid: 9999,
-          url: 'http://localhost:1234'
+          url: 'http://localhost://localhost:1234'
       });
       
       // Need 5 consecutive leadership misses (threshold is 5) - advance 150s for 5 checks
@@ -160,7 +164,7 @@ describe('BrowserManager', () => {
 
     it('should shut down after idle timeout', async () => {
       await runBrowserTask('q1', 'search');
-      const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+      const scheduler = getSchedulerInstance();
       const shutdownSpy = vi.spyOn(scheduler, 'shutdown');
       
       const mockStateManager = (scheduler as any).stateManager;
@@ -177,7 +181,7 @@ describe('BrowserManager', () => {
 
     it('should reset idle timer on activity', async () => {
       await runBrowserTask('q1', 'search');
-      const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+      const scheduler = getSchedulerInstance();
       const shutdownSpy = vi.spyOn(scheduler, 'shutdown');
       
       const mockStateManager = (scheduler as any).stateManager;
@@ -204,4 +208,3 @@ describe('BrowserManager', () => {
     });
   });
 });
-

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { forceSchedulerRestart, stopBrowserManager } from '../../../src/infrastructure/browser-manager.ts';
+import {
+  getSchedulerInstance,
+  setScheduler,
+  setHealthCheckPending,
+  resetAllInternalState,
+} from '../../../src/core/internal-state.ts';
 
 // ---------------------------------------------------------------------------
 // Mock poolifier — required so FixedClusterPool never spawns real workers
@@ -75,12 +81,12 @@ import { runBrowserTask } from '../../../src/infrastructure/browser-manager.ts';
 describe('Leadership election', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = null;
-    (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = 'some-cached-value';
+    resetAllInternalState();
   });
 
   afterEach(async () => {
     await stopBrowserManager();
+    resetAllInternalState();
   });
 
   // -------------------------------------------------------------------------
@@ -97,7 +103,7 @@ describe('Leadership election', () => {
 
     await runBrowserTask('test-win', 'search');
 
-    const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const scheduler = getSchedulerInstance();
     expect(scheduler).not.toBeNull();
 
     // updateState should have been called and the state should have been written
@@ -137,7 +143,7 @@ describe('Leadership election', () => {
       // Expected — BrowserClient cannot connect to a fake port
     }
 
-    const scheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const scheduler = getSchedulerInstance();
     // A BrowserClient was stored (not null, not the BrowserTaskScheduler that
     // would have started a server)
     expect(scheduler).not.toBeNull();
@@ -159,7 +165,7 @@ describe('Leadership election', () => {
 
     await runBrowserTask('test-cascade', 'search');
 
-    const ourScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
+    const ourScheduler = getSchedulerInstance();
     expect(ourScheduler).not.toBeNull();
 
     // Now simulate: state now belongs to a DIFFERENT scheduler (e.g., new leader
@@ -181,26 +187,26 @@ describe('Leadership election', () => {
   // -------------------------------------------------------------------------
   // Scenario 4: forceSchedulerRestart clears health check cache
   // -------------------------------------------------------------------------
-  it('forceSchedulerRestart clears __PI_RESEARCH_HEALTH_CHECK_PENDING__', async () => {
-    (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = 'some-pending-promise';
+  it('forceSchedulerRestart clears health check cache', async () => {
+    setHealthCheckPending(Promise.resolve({ success: true, searchOk: true, scrapeOk: true, timestamp: '2024-01-01' } as any));
 
     mockGetBrowserServer.mockResolvedValue(null);
 
     await forceSchedulerRestart();
 
-    expect((globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__).toBeNull();
+    expect(getSchedulerInstance()).toBeNull();
   });
 
   // -------------------------------------------------------------------------
   // Scenario 5: forceSchedulerRestart clears global scheduler reference
   // -------------------------------------------------------------------------
-  it('forceSchedulerRestart clears __PI_RESEARCH_SCHEDULER__', async () => {
-    (globalThis as any).__PI_RESEARCH_SCHEDULER__ = { fake: 'scheduler' };
+  it('forceSchedulerRestart clears global scheduler reference', async () => {
+    setScheduler({ fake: 'scheduler' } as any);
 
     mockGetBrowserServer.mockResolvedValue(null);
 
     await forceSchedulerRestart();
 
-    expect((globalThis as any).__PI_RESEARCH_SCHEDULER__).toBeNull();
+    expect(getSchedulerInstance()).toBeNull();
   });
 });
