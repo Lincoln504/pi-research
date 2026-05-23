@@ -39,6 +39,8 @@ import { Value } from 'typebox/value';
 import type { ResearchObserver } from './research-observer.ts';
 import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { registerScrapedLinks, normalizeUrl, getCachedScrapedContent } from '../utils/shared-links.ts';
+import { healthRegistry } from '../healthcheck/index.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -78,6 +80,7 @@ export class DeepResearchOrchestrator {
   private allQueriesHistory: string[] = [];
   private totalResearchersPlanned: number = 0;
   private activeSessions = new Map<string, { abort(): Promise<void> }>();
+  private readonly sessionStart: number = Date.now();
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig();
@@ -94,6 +97,7 @@ export class DeepResearchOrchestrator {
   async run(signal?: AbortSignal): Promise<string> {
     logger.log(`[Orchestrator] Starting deep research with complexity ${this.options.complexity}`);
     this.options.observer?.onStart?.(this.options.query, this.options.complexity);
+    metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(this.options.complexity) });
 
     // Knowledge Store Context Injection
     let historicalLinksSection = '';
@@ -126,6 +130,7 @@ export class DeepResearchOrchestrator {
     try {
       // 1. Initial Planning
       this.options.observer?.onPlanningStart?.(1);
+      metrics.increment('coordinator_plans_total', 1, { complexity: String(this.options.complexity) });
 
       const auth = await this.options.ctx.modelRegistry.getApiKeyAndHeaders(this.options.model);
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
@@ -153,6 +158,7 @@ export class DeepResearchOrchestrator {
         if ((planResponse as any).stopReason === 'error' || (planResponse as any).stopReason === 'aborted') {
           const apiError = (planResponse as any).errorMessage || `Model API returned stop reason: ${(planResponse as any).stopReason}`;
           logger.error(`[Orchestrator] Coordinator API call failed (attempt ${attempt}): ${apiError}`);
+          metrics.increment('llm_api_errors_total', 1, { component: 'coordinator', stopReason: (planResponse as any).stopReason });
           throw new Error(`Coordinator model API error: ${apiError}`);
         }
 
@@ -170,6 +176,8 @@ export class DeepResearchOrchestrator {
               const coordUsage = parseTokenUsage(coordUsageObj);
               const tokens = calculateTotalTokens(coordUsage);
               const cost = (coordUsageObj as any).cost?.total ?? 0;
+              metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(this.options.complexity) });
+              metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(this.options.complexity) });
               // DESIGN NOTE: We call both onPlanningTokens and onTokensConsumed with the same values.
               // However, in the current implementation (src/tool.ts), only onPlanningTokens is implemented.
               // onTokensConsumed is called but does nothing. This is intentional - observers implement
@@ -179,14 +187,17 @@ export class DeepResearchOrchestrator {
               this.options.observer?.onTokensConsumed?.(tokens, cost);
           }
           this.options.observer?.onPlanningSuccess?.(currentPlan);
+          metrics.increment('coordinator_plans_total', 1, { complexity: String(this.options.complexity), status: 'success' });
           break;
         } catch (_err) {
           if (attempt >= 3) {
             logger.warn(`[Orchestrator] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
+            metrics.increment('coordinator_plans_total', 1, { complexity: String(this.options.complexity), status: 'fallback' });
             currentPlan = this.buildFallbackCoordinatorPlan(lastRawPlanText);
             this.options.observer?.onPlanningSuccess?.(currentPlan);
             break;
           }
+          metrics.increment('coordinator_plans_total', 1, { complexity: String(this.options.complexity), status: 'error' });
           if (attempt === 1) historyMessages.push(messages[0]);
           historyMessages.push({ role: 'assistant', content: planResponse.content });
           historyMessages.push({ role: 'user', content: [{ type: 'text', text: retryHint }] });
@@ -204,14 +215,36 @@ export class DeepResearchOrchestrator {
       this.totalResearchersPlanned += currentPlan.researchers?.length ?? 0;
 
       logger.log(`[Orchestrator] ${this.elapsed()} Coordinator done in ${((Date.now() - coordStartMs) / 1000).toFixed(1)}s — planned ${currentPlan.researchers?.length || 0} researcher(s)`);
+      const coordDuration = Date.now() - coordStartMs;
+      metrics.observe('coordinator_latency_ms', coordDuration, { complexity: String(this.options.complexity) });
+      metrics.observe('coordinator_researchers_planned', currentPlan.researchers?.length || 0, { complexity: String(this.options.complexity) });
 
       const maxRounds = this.options.complexity === 1 ? MAX_ROUNDS_LEVEL_1 :
                            this.options.complexity === 2 ? MAX_ROUNDS_LEVEL_2 :
                            MAX_ROUNDS_LEVEL_3;
+      metrics.increment('research_queries_total', currentPlan.allQueries?.length || 0, { mode: 'deep', complexity: String(this.options.complexity) });
 
       while (this.currentRound < maxRounds + MAX_EXTRA_ROUNDS) {
           if (signal?.aborted) throw new Error("Research aborted.");
           this.currentRound++;
+          
+          // Log health status at the start of each round for long-running research
+          if (this.currentRound > 1) {
+            try {
+              const health = await healthRegistry.runAll();
+              if (health.status === 'healthy') {
+                logger.debug(`[Orchestrator] Health status at Round ${this.currentRound}: ✅ All systems operational`);
+              } else if (health.status === 'degraded') {
+                const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
+                logger.warn(`[Orchestrator] Health status at Round ${this.currentRound}: ⚠️ Degraded (${degraded.join(', ')})`);
+              } else {
+                const failed = health.components.filter(c => !c.healthy).map(c => c.component);
+                logger.error(`[Orchestrator] Health status at Round ${this.currentRound}: ❌ Unhealthy (${failed.join(', ')})`);
+              }
+            } catch (err) {
+              logger.warn('[Orchestrator] Failed to check health status:', err);
+            }
+          }
           if (!currentPlan || !currentPlan.researchers || currentPlan.researchers.length === 0) break;
           
           this.options.observer?.onRoundStart?.(this.currentRound);
@@ -223,14 +256,22 @@ export class DeepResearchOrchestrator {
 
           this.allQueriesHistory.push(...currentPlan.allQueries);
           this.options.observer?.onSearchStart?.(currentPlan.allQueries);
+          const searchStartMs = Date.now();
           const searchResults = await search(currentPlan.allQueries, this.config, signal, (links) => {
               this.options.observer?.onSearchProgress?.(links);
           });
-          this.options.observer?.onSearchComplete?.(searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0));
+          const searchDuration = Date.now() - searchStartMs;
+          metrics.observe('research_search_latency_ms', searchDuration, { mode: 'deep', complexity: String(this.options.complexity) });
+          const totalResults = searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0);
+          metrics.observe('research_search_results_total', totalResults, { mode: 'deep', complexity: String(this.options.complexity) });
+          this.options.observer?.onSearchComplete?.(totalResults);
           logger.info(`[Orchestrator] Search burst completed. Distributing results to ${currentPlan.researchers.length} researcher(s)...`);
           const researcherLinks = this.distributeResults(currentPlan, searchResults);
           logger.info(`[Orchestrator] Starting ${currentPlan.researchers.length} researchers in parallel with search results...`);
+          const researcherStartMs = Date.now();
           await this.runResearchersParallel(currentPlan.researchers, researcherLinks, signal);
+          const researcherDuration = Date.now() - researcherStartMs;
+          metrics.observe('research_researcher_latency_ms', researcherDuration, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
 
           // Store researcher-generated link descriptions for vector search.
           // Researchers read the full scraped content and write comprehensive descriptions;
@@ -277,18 +318,33 @@ export class DeepResearchOrchestrator {
 
           const mustSynthesize = this.currentRound >= maxRounds + MAX_EXTRA_ROUNDS;
           this.plan = currentPlan;
+          const evaluationStartMs = Date.now();
           currentPlan = await this.evaluate(signal, mustSynthesize);
+          const evaluationDuration = Date.now() - evaluationStartMs;
+          metrics.observe('research_evaluation_latency_ms', evaluationDuration, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
 
           if (currentPlan.action === 'synthesize') {
+              metrics.increment('research_synthesis_decisions_total', 1, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
               const synthesis = this.ensureCitedLinks(currentPlan.content || this.buildFallbackSynthesis());
               this.options.observer?.onComplete?.(synthesis);
+              const sessionDuration = Date.now() - this.sessionStart;
+              metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(this.options.complexity), status: 'success' });
+              metrics.observe('research_rounds_total', this.currentRound, { mode: 'deep', complexity: String(this.options.complexity) });
+              metrics.observe('researchers_total', this.totalResearchersPlanned, { mode: 'deep', complexity: String(this.options.complexity) });
+              metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(this.options.complexity), status: 'success' });
               await this.cleanup();
               return synthesis;
           }
+          metrics.increment('research_delegation_decisions_total', 1, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
       }
 
       const finalSynthesis = this.buildFallbackSynthesis();
       this.options.observer?.onComplete?.(finalSynthesis);
+      const sessionDuration = Date.now() - this.sessionStart;
+      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(this.options.complexity), status: 'success' });
+      metrics.observe('research_rounds_total', this.currentRound, { mode: 'deep', complexity: String(this.options.complexity) });
+      metrics.observe('researchers_total', this.totalResearchersPlanned, { mode: 'deep', complexity: String(this.options.complexity) });
+      metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(this.options.complexity), status: 'success' });
       await this.cleanup();
       return finalSynthesis;
 
@@ -297,6 +353,10 @@ export class DeepResearchOrchestrator {
         await this.cleanup();
         throw error;
       }
+      const sessionDuration = Date.now() - this.sessionStart;
+      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(this.options.complexity), status: 'error' });
+      metrics.observe('research_rounds_total', this.currentRound, { mode: 'deep', complexity: String(this.options.complexity) });
+      metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(this.options.complexity), status: 'error' });
       logger.error('[Orchestrator] Run failed:', error);
       if (this.reports.size > 0) {
         const partial = this.buildFallbackSynthesis();
@@ -671,6 +731,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
   private async runResearcher(config: ResearcherConfig, initialLinks: string[], historicalUrls: string[], signal?: AbortSignal): Promise<void> {
     const id = String(config.id);
     this.options.observer?.onResearcherStart?.(id, config.name, config.goal, this.currentRound);
+    metrics.increment('researchers_launched_total', 1, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
 
     const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
         ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
@@ -707,6 +768,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
     const extendedCtx = this.options.ctx as any;
     const maxAttempts = this.config.RESEARCHER_MAX_RETRIES + 1;
     let lastError: unknown;
+    const researcherExecutionStartMs = Date.now();
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (attempt > 1) {
@@ -743,6 +805,8 @@ You are in the late phase of research. Set a higher threshold for delegation:
                   const tokens = calculateTotalTokens(parsed);
                   const cost: number = (rawUsage as any).cost?.total ?? 0;
                   if (tokens > 0 || cost > 0) {
+                      metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(this.options.complexity) });
+                      metrics.increment('llm_cost_total', cost, { component: 'researcher', complexity: String(this.options.complexity) });
                       // DESIGN NOTE: onResearcherProgress includes token/cost tracking.
                       // onTokensConsumed is called as an alternative interface for observers
                       // that prefer granular tracking. Implement ONE OR THE OTHER, not both.
@@ -795,18 +859,24 @@ You are in the late phase of research. Set a higher threshold for delegation:
           abortCleanup?.();
         }
         const responseText = ensureAssistantResponse(session, id);
+        const researcherDuration = Date.now() - researcherExecutionStartMs;
+        metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
         logger.debug(`[Orchestrator] Researcher ${id} Final Response:\n${responseText}`);
         
         this.reports.set(`${this.currentRound}.${id}`, responseText);
         this.options.observer?.onResearcherComplete?.(id, responseText);
         return;
       } catch (err) {
+        const researcherDuration = Date.now() - researcherExecutionStartMs;
+        metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound), status: 'error' });
+        metrics.increment('researcher_errors_total', 1, { mode: 'deep', complexity: String(this.options.complexity), round: String(this.currentRound) });
         lastError = err;
         const errMsg = err instanceof Error ? err.message : String(err);
         if (attempt < maxAttempts) {
           logger.warn(`[Orchestrator] Researcher ${id} attempt ${attempt} failed: ${errMsg}; will retry`);
         } else {
           logger.error(`[Orchestrator] Researcher ${id} failed all ${maxAttempts} attempts: ${errMsg}`);
+          metrics.increment('researcher_retries_exhausted_total', 1, { mode: 'deep', complexity: String(this.options.complexity) });
         }
       } finally {
         subscription();
@@ -823,6 +893,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
   private async evaluate(signal?: AbortSignal, mustSynthesize = false): Promise<ResearchPlan> {
       this.options.observer?.onEvaluationStart?.(this.currentRound);
       this.options.observer?.onEvaluationProgress?.('eval');
+      metrics.increment('evaluator_runs_total', 1, { complexity: String(this.options.complexity), round: String(this.currentRound) });
 
       const previousQueriesSection = this.plan?.allQueries && this.plan.allQueries.length > 0
           ? `\n### Previous Queries (Sibling Researchers)\n${this.plan.allQueries.map(q => `- ${q}`).join('\n')}\n`
@@ -890,6 +961,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
           if ((response as any).stopReason === 'error' || (response as any).stopReason === 'aborted') {
               const apiError = (response as any).errorMessage || `Model API returned stop reason: ${(response as any).stopReason}`;
               logger.error(`[Orchestrator] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
+              metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: (response as any).stopReason });
               throw new Error(`Evaluator model API error: ${apiError}`);
           }
 
@@ -901,12 +973,15 @@ You are in the late phase of research. Set a higher threshold for delegation:
               const evalUsage = parseTokenUsage(evalUsageObj);
               const tokens = calculateTotalTokens(evalUsage);
               const cost = (evalUsageObj as any).cost?.total ?? 0;
+              metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(this.options.complexity) });
+              metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(this.options.complexity) });
               // DESIGN NOTE: onEvaluationTokens includes token/cost tracking.
               // onTokensConsumed is called as an alternative interface for observers
               // that prefer granular tracking. Implement ONE OR THE OTHER, not both.
               this.options.observer?.onEvaluationTokens?.(tokens, cost);
               this.options.observer?.onTokensConsumed?.(tokens, cost);
           }
+
           if (text.trim()) break;
       }
 

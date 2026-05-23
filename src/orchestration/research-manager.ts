@@ -13,6 +13,7 @@ import type { ResearchObserver } from './research-observer.ts';
 import type { Config } from '../config.ts';
 import { initKnowledgeStore } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;
@@ -36,34 +37,49 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
     throw new Error('No model provided for research.');
   }
 
+  const researchStart = Date.now();
+  metrics.increment('research_manager_requests_total', 1, { depth: String(depth) });
+
   // Non-blocking initialization of the knowledge store (embedding model) 
   // only when research is actually invoked.
   initKnowledgeStore().catch(err => {
     logger.warn('[ResearchManager] Lazy knowledge store initialization failed (non-fatal):', err);
   });
 
-  if (depth === 0) {
-    const orchestrator = new QuickResearchOrchestrator({
-      ctx,
-      model: selectedModel,
-      query,
-      sessionId,
-      researchId,
-      observer,
-      config,
-    });
-    return orchestrator.run(signal);
-  } else {
-    const orchestrator = new DeepResearchOrchestrator({
-      ctx,
-      model: selectedModel,
-      query,
-      complexity: depth as 1 | 2 | 3,
-      sessionId,
-      researchId,
-      observer,
-      config,
-    });
-    return orchestrator.run(signal);
+  let result: string;
+  try {
+    if (depth === 0) {
+      const orchestrator = new QuickResearchOrchestrator({
+        ctx,
+        model: selectedModel,
+        query,
+        sessionId,
+        researchId,
+        observer,
+        config,
+      });
+      result = await orchestrator.run(signal);
+    } else {
+      const orchestrator = new DeepResearchOrchestrator({
+        ctx,
+        model: selectedModel,
+        query,
+        complexity: depth as 1 | 2 | 3,
+        sessionId,
+        researchId,
+        observer,
+        config,
+      });
+      result = await orchestrator.run(signal);
+    }
+    const researchDuration = Date.now() - researchStart;
+    metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'success' });
+    metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'success' });
+    return result;
+  } catch (error) {
+    const researchDuration = Date.now() - researchStart;
+    metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error' });
+    metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error' });
+    throw error;
   }
 }

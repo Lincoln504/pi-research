@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 
 // ============================================================================
 // Type Definitions
@@ -198,16 +199,30 @@ export async function retryWithBackoff<T>(
     ...options,
   };
 
+  const startTime = Date.now();
   let lastError: Error | null = null;
   let attempt = 0;
+  metrics.increment('retry_attempts_total', 1, { label: opts.label });
 
   while (attempt <= opts.maxRetries) {
     try {
-      return await fn();
+      const result = await fn();
+      const duration = Date.now() - startTime;
+      metrics.observe('retry_duration_ms', duration, { label: opts.label, status: 'success' });
+      if (attempt > 0) {
+        metrics.increment('retry_successful_after_retries_total', 1, { attempt: String(attempt), label: opts.label });
+      }
+      return result;
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (!opts.isTransientError(lastError) || attempt === opts.maxRetries) {
+        const duration = Date.now() - startTime;
+        metrics.observe('retry_duration_ms', duration, { label: opts.label, status: 'exhausted' });
+        metrics.increment('retry_exhausted_total', 1, { label: opts.label });
+        if (!opts.isTransientError(lastError)) {
+          metrics.increment('retry_non_transient_errors_total', 1, { label: opts.label });
+        }
         throw lastError;
       }
 
@@ -216,6 +231,8 @@ export async function retryWithBackoff<T>(
       const jitter = Math.random() * 0.5 * baseDelay; // ±50% jitter
       const delay = Math.min(baseDelay + jitter, opts.maxDelay);
 
+      metrics.increment('retry_backoff_total', 1, { attempt: String(attempt), label: opts.label });
+      metrics.observe('retry_backoff_delay_ms', delay, { attempt: String(attempt), label: opts.label });
       logger.warn(`[Retry] ${opts.label} failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
 
       // Wait before retrying

@@ -10,6 +10,7 @@ import { Value } from 'typebox/value';
 import { searchSecurityDatabases } from '../security/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { MAX_GATHERING_CALLS } from '../constants.ts';
+import { metrics } from '../utils/metrics.ts';
 
 export function createSecuritySearchTool(options: {
   ctx: ExtensionContext;
@@ -63,9 +64,13 @@ export function createSecuritySearchTool(options: {
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
+      const startTime = Date.now();
+      metrics.increment('tool_security_search_calls_total', 1);
+
       // Record call in tracker - returns false if limit reached
       const allowed = options.tracker.recordCall('security_search');
       if (!allowed) {
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'rate_limited' });
           return {
             content: [{ type: 'text', text: options.tracker.getLimitMessage('security_search') }],
             details: { blocked: true, reason: 'limit_reached' },
@@ -73,17 +78,18 @@ export function createSecuritySearchTool(options: {
       }
 
       if (!Value.Check(SecuritySearchParamsSchema, params)) {
+          metrics.increment('tool_security_search_calls_total', 1, { status: 'invalid_params' });
           return {
             content: [{ type: 'text', text: 'Invalid parameters for security_search tool.' }],
             details: { error: 'invalid_parameters' },
           };
       }
 
-      const startTime = Date.now();
       const p = params as Static<typeof SecuritySearchParamsSchema>;
 
       const terms = p.terms;
       if (terms.length === 0) {
+        metrics.increment('tool_security_search_calls_total', 1, { status: 'no_terms' });
         throw new Error('At least one search term is required');
       }
 
@@ -91,6 +97,9 @@ export function createSecuritySearchTool(options: {
         ? p.databases
         : ['nvd', 'cisa_kev', 'github', 'osv'];
       const maxResults = p.maxResults ?? 20;
+
+      metrics.increment('tool_security_search_terms_total', terms.length);
+      metrics.increment('tool_security_search_databases_total', databases.length);
 
       let results;
       try {
@@ -104,6 +113,9 @@ export function createSecuritySearchTool(options: {
           githubRepo: p.githubRepo,
         });
       } catch (error) {
+        const duration = Date.now() - startTime;
+        metrics.observe('tool_security_search_duration_ms', duration, { status: 'error' });
+        metrics.increment('tool_security_search_calls_total', 1, { status: 'error' });
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
           content: [
@@ -116,12 +128,28 @@ export function createSecuritySearchTool(options: {
             error: errorMsg,
             databases,
             terms,
-            duration: Date.now() - startTime,
+            duration,
           },
         };
       }
 
       const elapsed = Date.now() - startTime;
+      metrics.observe('tool_security_search_duration_ms', elapsed, { status: 'success' });
+      metrics.increment('tool_security_search_calls_total', 1, { status: 'success' });
+      metrics.increment('tool_security_search_vulnerabilities_total', results.totalVulnerabilities);
+
+      if (results.results.nvd?.count) {
+        metrics.increment('tool_security_search_vulnerabilities_total', results.results.nvd.count, { database: 'nvd' });
+      }
+      if (results.results.cisa_kev?.count) {
+        metrics.increment('tool_security_search_vulnerabilities_total', results.results.cisa_kev.count, { database: 'cisa_kev' });
+      }
+      if (results.results.github?.count) {
+        metrics.increment('tool_security_search_vulnerabilities_total', results.results.github.count, { database: 'github' });
+      }
+      if (results.results.osv?.count) {
+        metrics.increment('tool_security_search_vulnerabilities_total', results.results.osv.count, { database: 'osv' });
+      }
 
       let markdown = '# Security Vulnerability Search Results\n\n';
       markdown += `**Source: Security Databases**\n\n`;

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 
 /**
  * State metrics interface
@@ -213,7 +214,19 @@ export class StateManager {
    */
   public async readState(): Promise<SingletonState> {
     await this.ensureDirectories();
-    return this.withLock(() => this._readState());
+    const startTime = Date.now();
+    try {
+      const result = await this.withLock(() => this._readState());
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'read', status: 'success' });
+      metrics.increment('state_operations_total', 1, { operation: 'read', status: 'success' });
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'read', status: 'error' });
+      metrics.increment('state_operations_total', 1, { operation: 'read', status: 'error' });
+      throw error;
+    }
   }
 
   /**
@@ -265,7 +278,18 @@ export class StateManager {
    */
   public async writeState(state: SingletonState): Promise<void> {
     await this.ensureDirectories();
-    return this.withLock(() => this._writeState(state));
+    const startTime = Date.now();
+    try {
+      await this.withLock(() => this._writeState(state));
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'write', status: 'success' });
+      metrics.increment('state_operations_total', 1, { operation: 'write', status: 'success' });
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'write', status: 'error' });
+      metrics.increment('state_operations_total', 1, { operation: 'write', status: 'error' });
+      throw error;
+    }
   }
 
   /**
@@ -314,11 +338,22 @@ export class StateManager {
    */
   public async updateState(updater: (state: SingletonState) => SingletonState | Promise<SingletonState>): Promise<void> {
     await this.ensureDirectories();
-    return this.withLock(async () => {
-      const currentState = await this._readState();
-      const newState = await updater(currentState);
-      await this._writeState(newState);
-    });
+    const startTime = Date.now();
+    try {
+      await this.withLock(async () => {
+        const currentState = await this._readState();
+        const newState = await updater(currentState);
+        await this._writeState(newState);
+      });
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'update', status: 'success' });
+      metrics.increment('state_operations_total', 1, { operation: 'update', status: 'success' });
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      metrics.observe('state_operation_duration_ms', duration, { operation: 'update', status: 'error' });
+      metrics.increment('state_operations_total', 1, { operation: 'update', status: 'error' });
+      throw error;
+    }
   }
 
   /**
@@ -467,6 +502,12 @@ export class StateManager {
       containerUptime = now - state.lastUpdated;
     }
 
+    // Export to metrics system
+    metrics.setGauge('state_sessions_total', totalSessions);
+    metrics.setGauge('state_sessions_active', activeSessions);
+    metrics.setGauge('state_browser_server_exists', state.browserServer ? 1 : 0);
+    metrics.setGauge('state_gpu_lock_owner_exists', state.gpuOwner ? 1 : 0);
+
     return {
       totalSessions,
       activeSessions,
@@ -607,6 +648,7 @@ export class StateManager {
     await this.ensureDirectories();
 
     const startTime = Date.now();
+    let contentionCount = 0;
 
     for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
       try {
@@ -614,11 +656,20 @@ export class StateManager {
         this.lockHandle = await fs.open(this.lockFilePath, 'wx');
         await this.lockHandle.write(this.lockUuid);
         await this.lockHandle.sync(); // Ensure UUID is written to disk
+        
+        const duration = Date.now() - startTime;
+        metrics.observe('state_lock_acquire_duration_ms', duration);
+        metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
+        if (contentionCount > 0) {
+          metrics.increment('state_lock_contention_total', 1);
+          metrics.observe('state_lock_contention_retries', contentionCount);
+        }
         return;
       } catch (error: unknown) {
         if (error instanceof Error && 'code' in error) {
           const errnoError = error as NodeJS.ErrnoException;
           if (errnoError.code === 'EEXIST') {
+            contentionCount++;
             // FIX: Read lock UUID to verify ownership before considering stale
             try {
               const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
@@ -657,10 +708,14 @@ export class StateManager {
 
           }
         }
+        const duration = Date.now() - startTime;
+        metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
+        metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
         throw error;
       }
     }
 
+    metrics.increment('state_lock_acquire_total', 1, { status: 'failed' });
     throw new Error(`Failed to acquire lock after ${this.lockRetries} retries`);
   }
 
@@ -679,6 +734,7 @@ export class StateManager {
             // Lock was stolen by another process, don't delete
             logger.warn('[StateManager] Lock UUID mismatch during release, skipping deletion');
             this.lockHandle = null;
+            metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
             return;
           }
         } catch (readError) {
@@ -691,16 +747,20 @@ export class StateManager {
           this.lockHandle = null;
         }
       } catch (error: unknown) {
+        metrics.increment('state_lock_release_total', 1, { status: 'error' });
         throw new Error(`Failed to close lock file handle: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
       }
     }
 
     try {
       await fs.unlink(this.lockFilePath);
+      metrics.increment('state_lock_release_total', 1, { status: 'success' });
+      metrics.setGauge('state_lock_held', 0);
     } catch (error: unknown) {
       if (error instanceof Error && 'code' in error) {
         const errnoError = error as NodeJS.ErrnoException;
         if (errnoError.code !== 'ENOENT') {
+          metrics.increment('state_lock_release_total', 1, { status: 'error' });
           throw new Error(`Failed to remove lock file: ${errnoError.message}`, { cause: error });
         }
       }
@@ -785,6 +845,7 @@ public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock: boo
 public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Promise<boolean> {
   const startTime = Date.now();
   const retryDelay = 500;
+  let retryCount = 0;
 
   while (Date.now() - startTime < timeoutMs) {
     let acquired = false;
@@ -827,8 +888,19 @@ public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Prom
       return state;
     });
 
-    if (acquired) return true;
+    if (acquired) {
+      const duration = Date.now() - startTime;
+      metrics.observe('gpu_lock_acquire_duration_ms', duration);
+      metrics.increment('gpu_lock_acquire_total', 1, { status: 'success' });
+      metrics.setGauge('gpu_lock_held', 1);
+      if (retryCount > 0) {
+        metrics.increment('gpu_lock_contention_total', 1);
+        metrics.observe('gpu_lock_contention_retries', retryCount);
+      }
+      return true;
+    }
     
+    retryCount++;
     // Check if we still have time to wait
     if (Date.now() - startTime + retryDelay < timeoutMs) {
       await this.sleep(retryDelay);
@@ -837,6 +909,7 @@ public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Prom
     }
   }
 
+  metrics.increment('gpu_lock_acquire_total', 1, { status: 'timeout' });
   return false;
 }
 
@@ -848,6 +921,8 @@ public async releaseGpuLock(pid: number = process.pid): Promise<void> {
   await this.updateState((state) => {
     if (state.gpuOwner?.pid === pid) {
       delete state.gpuOwner;
+      metrics.setGauge('gpu_lock_held', 0);
+      metrics.increment('gpu_lock_release_total', 1, { status: 'success' });
     }
     return state;
   });

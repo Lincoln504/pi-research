@@ -5,11 +5,14 @@
  */
 
 import { logger } from '../logger.ts';
+import { errorTracker } from '../utils/error-tracker.ts';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/browser-manager.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 import { getEmbedder } from '../knowledge/index.ts';
 import { healthRegistry } from './registry.ts';
+export { healthRegistry } from './registry.ts';
+import { recordHealthCheck, getHealthSummary } from './persistence.ts';
 
 export interface HealthCheckResult {
   success: boolean;
@@ -60,18 +63,43 @@ healthRegistry.register('KnowledgeStore', async () => {
 healthRegistry.register('GPULock', async () => {
   try {
     const stateManager = getSharedStateManager();
-    const lockInfo = await stateManager.getGpuLockInfo();
-    return { 
-      healthy: true, 
-      diagnostic: { 
-        locked: lockInfo.locked, 
-        stale: lockInfo.locked && (Date.now() - lockInfo.timestamp > 120_000) 
-      } 
+    const gpuOwner = await stateManager.getGpuOwner();
+    const locked = gpuOwner !== null;
+    const stale = locked && gpuOwner !== undefined && (Date.now() - gpuOwner.startedAt > 120_000);
+    return {
+      healthy: true,
+      diagnostic: {
+        locked,
+        stale,
+        ownerPid: gpuOwner?.pid,
+        ownerSessionId: gpuOwner?.sessionId,
+      }
     };
   } catch (e) {
     return { healthy: false, error: `GPU Lock check failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }, { timeoutMs: 5000, critical: false });
+
+// Register ErrorTracker Check
+healthRegistry.register('ErrorTracker', async () => {
+  try {
+    const report = errorTracker.getReport();
+    // Consider unhealthy if there are more than 100 errors
+    const isErrorCountHigh = report.totalErrors > 100;
+    return {
+      healthy: !isErrorCountHigh,
+      error: isErrorCountHigh ? `High error count: ${report.totalErrors} errors across ${report.uniquePatterns} patterns` : undefined,
+      diagnostic: {
+        totalErrors: report.totalErrors,
+        uniquePatterns: report.uniquePatterns,
+        topPattern: report.patterns[0]?.signature || 'none',
+        topPatternCount: report.patterns[0]?.count || 0,
+      }
+    };
+  } catch (e) {
+    return { healthy: false, error: `ErrorTracker check failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}, { timeoutMs: 1000, critical: false }); // Not critical - errors are informational
 
 // Global state for the health check singleton
 function getPendingCheck(): Promise<HealthCheckResult> | null {
@@ -128,8 +156,11 @@ async function performActualCheck(): Promise<HealthCheckResult> {
   }
 
   logger.log('[healthcheck] Starting System Health Checks...');
-  
+
   const systemHealth = await healthRegistry.runAll();
+
+  // Record health check for monitoring
+  recordHealthCheck(systemHealth);
   
   const result: HealthCheckResult = {
     success: systemHealth.status === 'healthy' || systemHealth.status === 'degraded',
@@ -150,6 +181,10 @@ async function performActualCheck(): Promise<HealthCheckResult> {
   if (systemHealth.status === 'unhealthy') {
       const failedCritical = systemHealth.components.find(c => !c.healthy && c.component === 'BrowserPool'); // Currently only BrowserPool is critical
       logger.error('[healthcheck] System validation failed:', failedCritical?.error);
+
+      // Log health summary for diagnostics
+      const summary = getHealthSummary();
+      logger.info(`[healthcheck] Health summary: ${summary.healthy}/${summary.total} healthy, ${summary.degraded} degraded, ${summary.unhealthy} unhealthy`);
   } else {
       logger.log('[healthcheck] ALL SYSTEMS GO. Ready for research.');
   }

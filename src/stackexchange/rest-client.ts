@@ -6,6 +6,7 @@
 import type { StackExchangeWrapper } from './types.ts';
 import { logger } from '../logger.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
@@ -46,10 +47,12 @@ export class StackExchangeClient {
   }
 
   async request<T>(options: RequestOptions, signal?: AbortSignal): Promise<StackExchangeWrapper<T>> {
+    const startTime = Date.now();
     return this.circuitBreaker.execute(async () => {
       // Check for backoff from previous requests
       if (this.lastBackoff && this.lastBackoff > Date.now()) {
         const waitTime = Math.ceil((this.lastBackoff - Date.now()) / 1000);
+        metrics.increment('stackexchange_backoff_wait_total', 1);
         throw new Error(
           `Rate limited. Please wait ${waitTime} seconds before making more requests.`,
         );
@@ -97,6 +100,12 @@ export class StackExchangeClient {
 
         // Handle API errors
         if (data.error_id) {
+          const errorName = data.error_name ?? 'unknown';
+          metrics.increment('stackexchange_errors_total', 1, { 
+            endpoint: options.endpoint, 
+            error_id: data.error_id.toString(),
+            error_name: errorName 
+          });
           throw new Error(
             `Stack Exchange API Error (${data.error_id} - ${data.error_name}): ${data.error_message}`,
           );
@@ -106,18 +115,32 @@ export class StackExchangeClient {
         this.quotaRemaining = data.quota_remaining;
         this.quotaMax = data.quota_max;
         this.requestCount++;
+        
+        // Track quota metrics
+        metrics.setGauge('stackexchange_quota_remaining', this.quotaRemaining);
+        metrics.setGauge('stackexchange_quota_max', this.quotaMax);
+        metrics.setGauge('stackexchange_quota_used', this.quotaMax - this.quotaRemaining);
 
         // Handle backoff
         if (data.backoff) {
           this.lastBackoff = Date.now() + (data.backoff * 1000);
+          metrics.increment('stackexchange_backoff_total', 1, { seconds: data.backoff.toString() });
+          metrics.observe('stackexchange_backoff_duration_seconds', data.backoff);
           logger.warn(`[StackExchange] Backoff required: ${data.backoff} seconds`);
         }
-
+        
+        // Track successful requests
+        metrics.increment('stackexchange_requests_total', 1, { endpoint: options.endpoint, status: 'success' });
+        
         return data;
       } catch (error) {
         clearTimeout(timeoutId);
-
+        const duration = Date.now() - startTime;
+        metrics.observe('stackexchange_request_duration_ms', duration, { endpoint: options.endpoint, status: 'error' });
+        metrics.increment('stackexchange_requests_total', 1, { endpoint: options.endpoint, status: 'error' });
+        
         if (error instanceof Error && error.name === 'AbortError') {
+          metrics.increment('stackexchange_timeouts_total', 1, { endpoint: options.endpoint });
           throw new Error(`Request timeout after ${this._timeout}ms`, { cause: error });
         }
 
@@ -131,12 +154,23 @@ export class StackExchangeClient {
   }
 
   getQuotaInfo(): { remaining: number; max: number; requestCount: number; lastBackoff: number | null } {
-    return {
+    const info = {
       remaining: this.quotaRemaining,
       max: this.quotaMax,
       requestCount: this.requestCount,
       lastBackoff: this.lastBackoff,
     };
+    
+    // Track quota exhaustion events
+    if (this.isQuotaExhausted()) {
+      metrics.increment('stackexchange_quota_exhausted_total', 1);
+    }
+    
+    if (this.isQuotaLow()) {
+      metrics.increment('stackexchange_quota_low_total', 1);
+    }
+    
+    return info;
   }
 
   isQuotaExhausted(): boolean {

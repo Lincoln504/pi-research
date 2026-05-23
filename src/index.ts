@@ -1,13 +1,11 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
-import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
-import { createResearchTool } from './tool.ts';
+import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
-import * as os from 'node:os';
-import * as fss from 'node:fs';
-import * as pathmod from 'node:path';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { shutdownKnowledgeStore, isKnowledgeStoreReady, getStore, SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
+import { shutdownKnowledgeStore } from './knowledge/index.ts';
+import { healthRegistry, clearHealthCheckCache } from './healthcheck/index.ts';
+import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
@@ -122,6 +120,8 @@ export default function (pi: ExtensionAPI) {
   // 3. clearAllSessionState (runs third - fast)
   // 4. resetTerminalState (runs first - fast, prevents ghost character leaks on reload)
   shutdownManager.register(async () => {
+    // Clear health check cache before shutdown to ensure clean state on next startup
+    clearHealthCheckCache();
     await stopBrowserManager();
   });
 
@@ -190,6 +190,10 @@ export default function (pi: ExtensionAPI) {
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);
 
+  // Create and register the health check tool
+  const healthTool: ToolDefinition = createHealthTool();
+  pi.registerTool(healthTool);
+
   // /research <query> — direct quick research, no LLM turn.
   pi.registerCommand('research', {
     description: 'Web research a query',
@@ -238,422 +242,69 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // /research-config — interactive configuration dashboard
+  // /research-config — consolidated research configuration and management command
+  // Replaces: /health, /health-clear, /health-history, /errors, /errors-clear, /errors-export, /knowledge-migrate
+  // Usage:
+  //   /research-config                    - Opens interactive TUI menu
+  //   /research-config <section>          - Direct access to section (health|errors|knowledge|settings|metrics)
+  //   /research-config <section> <action>  - Direct action (e.g., health run, errors clear)
+  //   
+  // Backward compatibility: old commands still work (e.g., /health, /errors)
   pi.registerCommand('research-config', {
-    description: 'Research Configuration TUI',
+    description: 'Research configuration and management (health, errors, knowledge, settings, metrics)',
+    handler: async (args, ctx) => {
+      await handleResearchConfigCommand(args, ctx, pi);
+    },
+  });
+
+  // Register backward compatibility aliases for old commands
+  // These routes are handled by the consolidated research-config command
+  pi.registerCommand('health', {
+    description: 'Run system health checks (alias for: /research-config health run)',
+    handler: async (args, ctx) => {
+      await handleResearchConfigCommand(`health run ${args}`, ctx, pi);
+    },
+  });
+
+  pi.registerCommand('health-clear', {
+    description: 'Clear health check cache (alias for: /research-config health clear)',
     handler: async (_args, ctx) => {
-      if (!ctx.hasUI) {
-        ctx.ui.notify('Research Configuration TUI requires interactive mode', 'error');
-        return;
-      }
+      await handleResearchConfigCommand('health clear', ctx, pi);
+    },
+  });
 
-      const { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath, getDbDir } = await import('./config.ts');
-      const config = { ...getConfig() }; // Work on a copy
+  pi.registerCommand('health-history', {
+    description: 'View health check history (alias for: /research-config health history)',
+    handler: async (_args, ctx) => {
+      await handleResearchConfigCommand('health history', ctx, pi);
+    },
+  });
 
+  pi.registerCommand('errors', {
+    description: 'View error report (alias for: /research-config errors view)',
+    handler: async (_args, ctx) => {
+      await handleResearchConfigCommand('errors view', ctx, pi);
+    },
+  });
 
-      // pi-research model cache directory — matches the env.cacheDir set in embedder.ts
-      const xdgCacheBase = process.env['XDG_CACHE_HOME'];
-      const piModelCache = pathmod.join(
-        xdgCacheBase ?? pathmod.join(os.homedir(), '.cache'),
-        'pi-research', 'models'
-      );
+  pi.registerCommand('errors-clear', {
+    description: 'Clear error history (alias for: /research-config errors clear)',
+    handler: async (_args, ctx) => {
+      await handleResearchConfigCommand('errors clear', ctx, pi);
+    },
+  });
 
-      function isModelCached(modelId: string): boolean {
-        const onnxDir = pathmod.join(piModelCache, ...modelId.split('/'), 'onnx');
-        try {
-          return fss.readdirSync(onnxDir).some(f => f.endsWith('.onnx'));
-        } catch {
-          return false;
-        }
-      }
+  pi.registerCommand('errors-export', {
+    description: 'Export error report (alias for: /research-config errors export)',
+    handler: async (args, ctx) => {
+      await handleResearchConfigCommand(`errors export ${args}`, ctx, pi);
+    },
+  });
 
-      // Config file path for display (home dir replaced with ~)
-      const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
-
-      // Fetch knowledge store entry count (non-blocking, best-effort)
-      let storeCountLabel = '';
-      if (config.KNOWLEDGE_STORE_ENABLED) {
-        const dbDir = getDbDir();
-        if (isKnowledgeStoreReady()) {
-          try {
-            const st = await getStore();
-            const n = await st.count();
-            storeCountLabel = ` (${n} entries)`;
-          } catch { /* non-fatal */ }
-        } else if (fss.existsSync(dbDir)) {
-          try {
-            const lancedb = await import('@lancedb/lancedb');
-            const db = await lancedb.connect(dbDir);
-            const tableNames = await db.tableNames();
-            if (tableNames.includes('knowledge')) {
-              const table = await db.openTable('knowledge');
-              const n = await table.countRows();
-              storeCountLabel = ` (${n} entries)`;
-            } else {
-              storeCountLabel = ' (0 entries)';
-            }
-          } catch { storeCountLabel = ' (? entries)'; }
-        } else {
-          storeCountLabel = ' (0 entries)';
-        }
-      }
-
-      // Define configuration items with their types and handlers
-      type ConfigKey = keyof typeof config;
-      
-      interface BaseConfigItem {
-        key?: ConfigKey;
-        label: string;
-        description: string;
-        hidden?: () => boolean;
-      }
-
-      interface NumberConfigItem extends BaseConfigItem {
-        type: 'number';
-        key: ConfigKey;
-        min: number;
-        max: number;
-        step: number;
-        displayMin: number;
-        displayMax: number;
-        toDisplay: (value: number) => number;
-        fromDisplay: (display: number) => number;
-        format: (value: number) => string;
-      }
-
-      interface BooleanConfigItem extends BaseConfigItem {
-        type: 'boolean';
-        key: ConfigKey;
-      }
-
-      interface StringConfigItem extends BaseConfigItem {
-        type: 'string';
-        key: ConfigKey;
-        options?: string[]; // For selectors
-        warning?: string;
-      }
-
-      interface ActionConfigItem extends BaseConfigItem {
-        type: 'action';
-        action: () => Promise<void>;
-      }
-
-      type ConfigItem = NumberConfigItem | BooleanConfigItem | StringConfigItem | ActionConfigItem;
-
-      const configItems: ConfigItem[] = [
-        {
-          type: 'number',
-          key: 'MAX_CONCURRENT_RESEARCHERS',
-          label: 'Max Concurrent',
-          description: '(Researchers)',
-          min: 1, max: 5, displayMin: 1, displayMax: 5, step: 1,
-          toDisplay: (v) => v, fromDisplay: (v) => v,
-          format: (v) => v.toString(),
-        },
-        {
-          type: 'number',
-          key: 'DEFAULT_RESEARCH_DEPTH',
-          label: 'Default Depth',
-          description: '(0=quick 1-3=deep)',
-          min: 0, max: 3, displayMin: 0, displayMax: 3, step: 1,
-          toDisplay: (v) => v, fromDisplay: (v) => v,
-          format: (v) => v.toString(),
-        },
-        {
-          type: 'number',
-          key: 'MAX_SCRAPE_BATCHES',
-          label: 'Scrape Batches',
-          description: '(0=unlimited)',
-          min: 0, max: 99, displayMin: 0, displayMax: 99, step: 1,
-          toDisplay: (v) => v, fromDisplay: (v) => v,
-          format: (v) => v === 0 ? 'Unlimited' : v.toString(),
-        },
-        {
-          type: 'number',
-          key: 'WORKER_THREADS',
-          label: 'Worker Threads',
-          description: '(Browser pool)',
-          min: 1, max: 16, displayMin: 1, displayMax: 16, step: 1,
-          toDisplay: (v) => v, fromDisplay: (v) => v,
-          format: (v) => v.toString(),
-        },
-        {
-          type: 'boolean',
-          key: 'KNOWLEDGE_STORE_ENABLED',
-          label: 'Knowledge Store',
-          description: '(Persistent memory)',
-        },
-        {
-          type: 'string',
-          key: 'EMBEDDING_MODEL',
-          label: 'Embed Model',
-          description: '(←→ cycle models)',
-          options: SUPPORTED_MODELS.map(m => m.id),
-          warning: '⚠ Changing model clears DB',
-          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
-        },
-        {
-          type: 'string',
-          key: 'EMBEDDING_DEVICE',
-          label: 'Embed Device',
-          description: '(←→ webgpu/cpu)',
-          options: ['webgpu', 'cpu'],
-          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
-        },
-        {
-          type: 'number',
-          key: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-          label: 'Cache TTL',
-          description: '(Days)',
-          min: 1, max: 365, displayMin: 1, displayMax: 365, step: 1,
-          toDisplay: (v) => v, fromDisplay: (v) => v,
-          format: (v) => `${v}d`,
-          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
-        },
-        {
-          type: 'number',
-          key: 'RESEARCHER_TIMEOUT_MS',
-          label: 'Researcher Timeout',
-          description: '(3-30 min)',
-          min: 180000, max: 1800000, displayMin: 180, displayMax: 1800, step: 30,
-          toDisplay: (v) => v / 1000,
-          fromDisplay: (v) => v * 1000,
-          format: (v) => `${v}s`,
-        },
-        {
-          type: 'action',
-          label: 'Clear DB Cache',
-          get description() { return `(Delete all knowledge${storeCountLabel})`; },
-          action: async () => {
-            await clearKnowledgeStore();
-            storeCountLabel = ' (0 entries)';
-          },
-          hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
-        },
-      ];
-
-      // Use ctx.ui.custom() to create a proper TUI component
-      const result = await ctx.ui.custom<{ type: string; data?: typeof config } | undefined>(
-        (tui, theme, _kb, done) => {
-          // TUI Component class for configuration dashboard
-          class ConfigDashboardComponent {
-            private selectedIndex: number;
-            private cachedLines: string[] = [];
-            private cachedWidth = 0;
-            private cachedVersion = -1;
-            private version = 0;
-            private statusMsg = '';
-            private readonly originalModel: string;
-
-            constructor() {
-              this.selectedIndex = 0;
-              this.originalModel = config['EMBEDDING_MODEL'] as string;
-            }
-
-            private get visibleItems() {
-              return configItems.filter(item => !item.hidden?.());
-            }
-
-            private clampSelection(): void {
-              const len = this.visibleItems.length;
-              if (this.selectedIndex >= len) this.selectedIndex = Math.max(0, len - 1);
-            }
-
-            render(width: number): string[] {
-              // Check cache
-              if (this.cachedWidth === width && this.cachedVersion === this.version) {
-                return this.cachedLines;
-              }
-
-              const sep = theme.fg('accent', '─'.repeat(Math.max(0, width - 2)));
-              const lines = [theme.fg('accent', ' pi-research Configuration'), sep];
-
-              const visibleItems = this.visibleItems;
-              visibleItems.forEach((item, idx) => {
-                const isSelected = idx === this.selectedIndex;
-                const prefix = isSelected ? theme.fg('accent', '► ') : '  ';
-                
-                let valueDisplay = '';
-                let desc = item.description;
-
-                if (item.type === 'number') {
-                  const value = config[item.key] as number;
-                  valueDisplay = item.format(item.toDisplay(value)).padStart(10);
-                } else if (item.type === 'boolean') {
-                  const value = config[item.key] as boolean;
-                  valueDisplay = (value ? 'ON' : 'OFF').padStart(10);
-                } else if (item.type === 'string') {
-                  const value = config[item.key] as string;
-                  if (item.key === 'EMBEDDING_MODEL' && item.options && item.options.length > 0) {
-                    const modelInfo = SUPPORTED_MODELS.find(m => m.id === value);
-                    const cached = isModelCached(value);
-                    const langLabel = modelInfo?.multilingual ? 'multi' : 'EN';
-
-                    // Value column: lang capability when ready, download notice when not.
-                    valueDisplay = (cached ? langLabel : 'auto-dl').padStart(10);
-
-                    // Description: model ID truncated to fit.
-                    // When not cached, append lang tag here since value col is taken by [auto-dl].
-                    // Available visible chars = width − fixed prefix (2+20+1+10+1 = 34)
-                    const available = Math.max(20, width - 34);
-                    const suffix = !cached ? ` ${langLabel}` : '';
-                    const nameMax = Math.max(5, available - suffix.length);
-                    const displayName = value.length <= nameMax
-                      ? value
-                      : value.slice(0, nameMax - 3) + '...';
-
-                    if (isSelected) {
-                      const langColor = modelInfo?.multilingual ? 'accent' : 'muted';
-                      desc = displayName + (!cached ? ' ' + theme.fg(langColor, langLabel) : '');
-                    } else {
-                      desc = displayName + suffix;
-                    }
-                  } else if (item.options && item.options.length > 0) {
-                    // Generic option selector (e.g. Embed Device): show the selected value directly.
-                    valueDisplay = value.padStart(10);
-                    if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
-                  } else {
-                    valueDisplay = (value.length > 10 ? '...' + value.slice(-7) : value).padStart(10);
-                    if (isSelected && item.warning) desc = theme.fg('warning', item.warning);
-                  }
-                } else if (item.type === 'action') {
-                  valueDisplay = '[EXECUTE]'.padStart(10);
-                }
-
-                const line = `${prefix}${item.label.padEnd(20)} ${isSelected ? theme.fg('accent', valueDisplay) : valueDisplay} ${desc}`;
-                lines.push(theme.fg('text', line));
-              });
-
-              lines.push(sep);
-              if (this.statusMsg) {
-                lines.push(theme.fg('success', ` ${this.statusMsg}`));
-              }
-              lines.push(theme.fg('muted', ' ↑↓ Navigate  ←→ Adjust/Toggle  [Enter] Save/Exec  [Esc] Cancel'));
-              lines.push(theme.fg('muted', ` Config: ${envDisplayPath}`));
-              const selKey = visibleItems[this.selectedIndex]?.key;
-              if (selKey === 'EMBEDDING_MODEL') {
-                const currentModel = config['EMBEDDING_MODEL'] as string;
-                const modelReady = isModelCached(currentModel);
-                const statusText = modelReady ? 'downloaded' : 'not downloaded — auto-downloads on first use';
-                lines.push(theme.fg(modelReady ? 'muted' : 'warning', ` Model: ${statusText}`));
-                lines.push(theme.fg('muted', ` Dir:   ${piModelCache}`));
-              }
-              if ((config['EMBEDDING_MODEL'] as string) !== this.originalModel) {
-                lines.push(theme.fg('warning', ` ⚠ Changing model permanently clears the knowledge DB`));
-              }
-
-              // Truncate lines to fit within width
-              this.cachedLines = lines.map(line => {
-                const lw = visibleWidth(line);
-                return lw > width ? truncateToWidth(line, Math.max(1, width)) : line;
-              });
-              this.cachedWidth = width;
-              this.cachedVersion = this.version;
-
-              return this.cachedLines;
-            }
-
-            async handleInput(key: string): Promise<void> {
-              // Escape - cancel
-              if (matchesKey(key, 'escape')) {
-                done({ type: 'cancel' });
-                return;
-              }
-
-              // Enter - save or execute action
-              if (key === '\r' || key === '\n') {
-                const item = this.visibleItems[this.selectedIndex];
-                if (item && item.type === 'action' && 'action' in item) {
-                  this.statusMsg = 'Executing...';
-                  this.version++;
-                  tui.requestRender();
-                  await item.action();
-                  this.statusMsg = 'Action completed';
-                  this.version++;
-                  tui.requestRender();
-                  setTimeout(() => { this.statusMsg = ''; this.version++; tui.requestRender(); }, 2000);
-                  return;
-                }
-                done({ type: 'submit', data: config });
-                return;
-              }
-
-              // Up/Down arrows
-              if (matchesKey(key, 'up')) {
-                const len = this.visibleItems.length;
-                this.selectedIndex = this.selectedIndex > 0 ? this.selectedIndex - 1 : len - 1;
-                this.version++;
-                tui.requestRender();
-                return;
-              }
-              if (matchesKey(key, 'down')) {
-                const len = this.visibleItems.length;
-                this.selectedIndex = this.selectedIndex < len - 1 ? this.selectedIndex + 1 : 0;
-                this.version++;
-                tui.requestRender();
-                return;
-              }
-
-              // Left/Right arrows
-              if (matchesKey(key, 'left') || matchesKey(key, 'right')) {
-                const item = this.visibleItems[this.selectedIndex];
-                if (!item) return;
-
-                if (item.type === 'number') {
-                  const currentValue = config[item.key] as number;
-                  const currentDisplay = item.toDisplay(currentValue);
-                  const isRight = matchesKey(key, 'right');
-                  const newDisplay = isRight 
-                    ? Math.min(item.displayMax, currentDisplay + item.step)
-                    : Math.max(item.displayMin, currentDisplay - item.step);
-                  const newValue = item.fromDisplay(newDisplay);
-                  if (newValue !== currentValue) {
-                    (config[item.key] as any) = newValue;
-                    this.version++;
-                    tui.requestRender();
-                  }
-                } else if (item.type === 'boolean') {
-                  (config[item.key] as any) = !config[item.key];
-                  this.clampSelection();
-                  this.version++;
-                  tui.requestRender();
-                } else if (item.type === 'string') {
-                  // For now, strings are just informational or toggled if options exist
-                  if (item.options) {
-                    const currentIdx = item.options.indexOf(config[item.key] as string);
-                    const isRight = matchesKey(key, 'right');
-                    const nextIdx = isRight 
-                      ? (currentIdx + 1) % item.options.length
-                      : (currentIdx - 1 + item.options.length) % item.options.length;
-                    (config[item.key] as any) = item.options[nextIdx];
-                    this.version++;
-                    tui.requestRender();
-                  }
-                }
-                return;
-              }
-            }
-
-            invalidate(): void {
-              this.cachedVersion = -1;
-            }
-          }
-
-          return new ConfigDashboardComponent();
-        },
-      );
-
-      if (result && result.type === 'submit' && result.data) {
-        try {
-          validateConfig(result.data);
-          saveConfig(result.data);
-          resetConfig();
-          ctx.ui.notify('Configuration updated and saved', 'info');
-          logger.info('[pi-research] Configuration updated via dashboard', result.data);
-        } catch (e: any) {
-          ctx.ui.notify(`Invalid config: ${e.message}`, 'error');
-        }
-      }
+  pi.registerCommand('knowledge-migrate', {
+    description: 'Migrate knowledge store (alias for: /research-config knowledge migrate)',
+    handler: async (args, ctx) => {
+      await handleResearchConfigCommand(`knowledge migrate ${args}`, ctx, pi);
     },
   });
 
@@ -715,6 +366,24 @@ export default function (pi: ExtensionAPI) {
       logger.warn(`[pi-research] Provider error: ${status}`, { headers });
     }
   });
+
+  // Log health status at startup (non-blocking)
+  setTimeout(async () => {
+    try {
+      const health = await healthRegistry.runAll();
+      const statusIcon = health.status === 'healthy' ? '✅' :
+                        health.status === 'degraded' ? '⚠️' : '❌';
+      const failedComponents = health.components.filter((c: any) => !c.healthy).map((c: any) => c.component).join(', ');
+
+      if (health.status === 'healthy') {
+        logger.log(`[pi-research] ${statusIcon} System health check passed. All components operational.`);
+      } else {
+        logger.warn(`[pi-research] ${statusIcon} System health check: ${health.status}. Failed: ${failedComponents || 'none'}`);
+      }
+    } catch (error) {
+      logger.warn('[pi-research] Startup health check failed (non-fatal):', error);
+    }
+  }, 2000);
 
   logger.log('[pi-research] Extension loaded');
 }

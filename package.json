@@ -59,6 +59,7 @@
     "test": "vitest run --config config/tooling/vitest.config.unit.ts",
     "test:unit": "vitest run --config config/tooling/vitest.config.unit.ts",
     "test:integration": "vitest run --config config/tooling/vitest.config.integration.ts",
+    "test:load": "vitest run --config config/tooling/vitest.config.load.ts",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.unit.ts --coverage",
     "postinstall": "node scripts/setup.cjs",

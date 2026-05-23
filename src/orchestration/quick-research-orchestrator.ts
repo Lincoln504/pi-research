@@ -21,6 +21,8 @@ import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
+import { isHealthCheckSuccessful, runHealthCheck } from '../healthcheck/index.ts';
+import { metrics } from '../utils/metrics.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -41,8 +43,22 @@ export class QuickResearchOrchestrator {
 
   async run(signal?: AbortSignal): Promise<string> {
     const { query, model, ctx, observer } = this.options;
+    const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
+    metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0' });
+
+    // Pre-flight health check to ensure browser pool is operational
+    if (!(await isHealthCheckSuccessful())) {
+      logger.warn('[QuickOrchestrator] Pre-flight health check failed, running full check...');
+      const health = await runHealthCheck();
+      if (!health.success) {
+        const error = health.error || 'Unknown health check failure';
+        logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
+        metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_failed' });
+        throw new Error(`Research cannot start: ${error}`);
+      }
+    }
 
     // Knowledge Store Context Injection
     let storeSection = '';
@@ -109,6 +125,8 @@ export class QuickResearchOrchestrator {
                 const tokens = calculateTotalTokens(parsed);
                 const cost: number = (rawUsage as any).cost?.total ?? 0;
                 if (tokens > 0 || cost > 0) {
+                    metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });
+                    metrics.increment('llm_cost_total', cost, { component: 'quick_researcher', complexity: '0' });
                     observer?.onResearcherProgress?.('quick', undefined, tokens, cost);
                     observer?.onTokensConsumed?.(tokens, cost);
                 }
@@ -116,6 +134,7 @@ export class QuickResearchOrchestrator {
         } else if (event.type === 'tool_execution_start') {
             observer?.onResearcherProgress?.('quick', event.toolName);
             if (event.toolName === 'search') {
+                metrics.increment('research_searches_total', 1, { mode: 'quick' });
                 observer?.onSearchStart?.(event.args.queries || []);
             }
         } else if (event.type === 'tool_execution_end') {
@@ -165,6 +184,8 @@ export class QuickResearchOrchestrator {
       }
       
       const result = ensureAssistantResponse(session, 'Quick');
+      const sessionDuration = Date.now() - sessionStart;
+      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'success' });
       logger.debug(`[QuickOrchestrator] Researcher Final Response:\n${result}`);
       
       // Extract citations and store agent-synthesized descriptions for vector/semantic search
@@ -200,8 +221,14 @@ export class QuickResearchOrchestrator {
         }
       }
 
+      metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'success' });
       observer?.onComplete?.(result);
       return result;
+    } catch (error) {
+      const sessionDuration = Date.now() - sessionStart;
+      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'error' });
+      metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'error' });
+      throw error;
     } finally {
       subscription();
       session.abort().catch((err) => {

@@ -16,6 +16,7 @@ import type { Vulnerability, NVDResult } from './types.ts';
 import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const nvdCircuitBreaker = new CircuitBreaker({
   failureThreshold: 3,
@@ -206,6 +207,10 @@ class NVDRateLimiter {
         const timeoutId = setTimeout(resolve, waitTime);
         timeoutId.unref();
       });
+      
+      // Track rate limiter waits
+      metrics.increment('nvd_ratelimiter_wait_total', 1);
+      metrics.observe('nvd_ratelimiter_wait_duration_ms', waitTime);
     }
   }
 }
@@ -443,12 +448,20 @@ function fetchWithRetry(url: string): Promise<Response> {
     maxDelay: 10000, // Max 10s delay
   };
 
+  const endpoint = new URL(url).pathname;
+  
   return nvdCircuitBreaker.execute(async () => {
     return retryWithBackoff(async () => {
       let response: Response;
       try {
         response = await fetch(url, createFetchOptions());
+        // Track successful requests
+        metrics.increment('nvd_requests_total', 1, { endpoint, status: 'success' });
+        metrics.increment('nvd_ratelimiter_used_total', 1, { endpoint });
       } catch (error) {
+        const errorType = error instanceof Error ? error.name : 'unknown';
+        metrics.increment('nvd_requests_total', 1, { endpoint, status: 'error' });
+        metrics.increment('nvd_errors_total', 1, { endpoint, error_type: errorType });
         handleFetchError(error);
       }
       handleResponseStatus(response);
@@ -481,6 +494,13 @@ async function searchSingleTerm(
 
     const vulnerabilities = parseNVDResponse(data, options);
     
+    // Track cache metrics (using pagination results as a proxy)
+    if (vulnerabilities.length === 0) {
+      metrics.increment('nvd_cache_misses_total', 1, { term });
+    } else {
+      metrics.increment('nvd_cache_hits_total', 1, { term });
+    }
+    
     if (vulnerabilities.length === 0) {
       // No more results
       break;
@@ -488,13 +508,18 @@ async function searchSingleTerm(
     
     allVulnerabilities.push(...vulnerabilities);
     
-    if (data.totalResults !== undefined && startIndex + pageSize >= data.totalResults) {
+    const responseData = data as Record<string, unknown> | undefined;
+    if (responseData?.['totalResults'] !== undefined && typeof responseData['totalResults'] === 'number' && startIndex + pageSize >= responseData['totalResults']) {
       break;
     }
     
     startIndex += pageSize;
     totalPagesFetched++;
   }
+
+  // Track pagination metrics
+  metrics.increment('nvd_pagination_requests_total', totalPagesFetched);
+  metrics.observe('nvd_pagination_pages_fetched', totalPagesFetched);
 
   return allVulnerabilities.slice(0, maxResults);
 }
@@ -525,6 +550,7 @@ export async function searchNVD(
   terms: string[],
   options?: SearchOptions,
 ): Promise<NVDResult> {
+  const startTime = Date.now();
   const maxResults = Math.min(options?.maxResults ?? DEFAULT_MAX_RESULTS, MAX_RESULTS_PER_PAGE);
   const vulnerabilities: Vulnerability[] = [];
   let totalResults = 0;
@@ -543,7 +569,12 @@ export async function searchNVD(
     vulnerabilities.push(...uniqueVulns.slice(0, maxResults));
 
   } catch (err) {
+    const errorType = err instanceof Error ? err.name : 'unknown';
     error = err instanceof Error ? err.message : String(err);
+    metrics.increment('nvd_search_errors_total', 1, { error_type: errorType });
+  } finally {
+    const duration = Date.now() - startTime;
+    metrics.observe('nvd_search_duration_ms', duration, { has_error: error ? 'true' : 'false' });
   }
 
   return {
@@ -560,10 +591,16 @@ export async function searchNVD(
  * @returns Promise<Vulnerability | null> containing the vulnerability or null if not found
  */
 export async function getCVEById(cveId: string): Promise<Vulnerability | null> {
+  const startTime = Date.now();
   try {
     const results = await searchNVD([cveId], { maxResults: 1 });
+    const duration = Date.now() - startTime;
+    metrics.observe('nvd_cve_fetch_duration_ms', duration, { found: results.vulnerabilities.length > 0 ? 'true' : 'false' });
     return results.vulnerabilities[0] ?? null;
   } catch (err) {
+    const duration = Date.now() - startTime;
+    metrics.observe('nvd_cve_fetch_duration_ms', duration, { found: 'false', error: 'true' });
+    metrics.increment('nvd_cve_fetch_errors_total', 1);
     logger.error(`[NVD] Error fetching CVE ${cveId}:`, err);
     return null;
   }

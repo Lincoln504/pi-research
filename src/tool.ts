@@ -49,11 +49,13 @@ import {
   abortAllSessions,
 } from './utils/session-state.ts';
 import { cleanupSharedLinks } from './utils/shared-links.ts';
-import { runHealthCheck, isHealthCheckSuccessful } from './healthcheck/index.ts';
+import { runHealthCheck, isHealthCheckSuccessful, healthRegistry } from './healthcheck/index.ts';
+import { getHealthSummary, getHealthHistory, clearHealthHistory } from './healthcheck/persistence.ts';
 import {
   getUnitsPerResearcher,
   LEAD_EVAL_UNITS
 } from './constants.ts';
+import { errorTracker } from './utils/error-tracker.ts';
 import {
   shouldConsumeForCleanup,
   resetTerminalState,
@@ -107,6 +109,140 @@ function getPiSessionMetadata(ctx: ExtensionContext) {
     cwd: ctx.cwd,
   };
 }
+
+
+
+export function createHealthTool(): ToolDefinition {
+  return {
+    name: 'health',
+    label: 'Health Check',
+    description: 'Check system health status across all components (browser pool, knowledge store, GPU lock)',
+    promptSnippet: 'Run health checks on the research system',
+    parameters: Type.Object({
+      verbose: Type.Optional(Type.Boolean({
+        description: 'Show detailed diagnostic information for each component',
+      })),
+      clear: Type.Optional(Type.Boolean({
+        description: 'Clear health check history before running new checks',
+      })),
+      history: Type.Optional(Type.Integer({
+        minimum: 0,
+        maximum: 100,
+        description: 'Show health check history for the last N checks (0 for no history)',
+      })),
+    }),
+    renderShell: 'self',
+    async execute(
+      _toolCallId: string,
+      params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      _ctx: ExtensionContext,
+    ): Promise<AgentToolResult<unknown>> {
+      const { verbose, clear, history: historyLimit } = params as { verbose?: boolean; clear?: boolean; history?: number };
+
+      const outputLines: string[] = [];
+
+      // Clear health history if requested
+      if (clear) {
+        try {
+          clearHealthHistory();
+          outputLines.push('✅ Health history cleared.\n');
+        } catch (error) {
+          outputLines.push(`⚠️  Failed to clear health history: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
+
+      // Run health checks
+      try {
+        const systemHealth = await healthRegistry.runAll();
+
+        outputLines.push('## System Health Status');
+        outputLines.push('');
+
+        const statusIcon = systemHealth.status === 'healthy' ? '✅' :
+                          systemHealth.status === 'degraded' ? '⚠️' : '❌';
+        const statusText = systemHealth.status === 'healthy' ? 'All systems operational' :
+                          systemHealth.status === 'degraded' ? 'System degraded (non-critical issues)' :
+                          'System unhealthy (critical failures)';
+
+        outputLines.push(`**${statusIcon} ${statusText}**`);
+        outputLines.push('');
+
+        for (const component of systemHealth.components) {
+          const icon = component.healthy ? '✅' : '❌';
+          const criticalMark = healthRegistry.isCritical(component.component) ? ' [CRITICAL]' : '';
+          outputLines.push(`${icon} **${component.component}**${criticalMark}`);
+          
+          if (component.error) {
+            outputLines.push(`  - Error: ${component.error}`);
+          }
+          
+          if (verbose && component.diagnostic) {
+            const diagnostics = Object.entries(component.diagnostic)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(', ');
+            if (diagnostics) {
+              outputLines.push(`  - Diagnostic: ${diagnostics}`);
+            }
+          }
+          
+          if (verbose) {
+            outputLines.push(`  - Duration: ${component.durationMs.toFixed(0)}ms`);
+          }
+          outputLines.push('');
+        }
+
+        outputLines.push(`Checked at: ${new Date(systemHealth.timestamp).toLocaleString()}`);
+        outputLines.push('');
+
+        // Add health summary if verbose or history requested
+        if (verbose || historyLimit !== undefined) {
+          const summary = getHealthSummary();
+          outputLines.push('## Health Statistics');
+          outputLines.push('');
+          outputLines.push(`- Total checks: ${summary.total}`);
+          outputLines.push(`- Healthy: ${summary.healthy}`);
+          outputLines.push(`- Degraded: ${summary.degraded}`);
+          outputLines.push(`- Unhealthy: ${summary.unhealthy}`);
+          outputLines.push(`- Last check: ${summary.lastCheck ? new Date(summary.lastCheck).toLocaleString() : 'Never'}`);
+          outputLines.push(`- Last status: ${summary.lastStatus?.toUpperCase() || 'Unknown'}`);
+          outputLines.push('');
+
+          // Show history if requested
+          if (historyLimit !== undefined && historyLimit > 0) {
+            const history = getHealthHistory(historyLimit);
+            if (history.length > 0) {
+              outputLines.push('## Recent Checks');
+              outputLines.push('');
+              for (const entry of history) {
+                const icon = entry.status === 'healthy' ? '✅' :
+                            entry.status === 'degraded' ? '⚠️' : '❌';
+                const time = new Date(entry.timestamp).toLocaleTimeString();
+                outputLines.push(`${icon} **${entry.status.toUpperCase()}** — ${time}`);
+
+                const failedComponents = entry.components.filter(c => !c.healthy);
+                if (failedComponents.length > 0) {
+                  outputLines.push(`  Failed: ${failedComponents.map(c => c.component).join(', ')}`);
+                }
+                outputLines.push('');
+              }
+            } else {
+              outputLines.push('_No health check history available._');
+              outputLines.push('');
+            }
+          }
+        }
+
+        return { content: [{ type: 'text', text: outputLines.join('\n') }], details: { health: systemHealth } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [{ type: 'text', text: `**Health check failed**\n\n${message}` }], details: { error: message } };
+      }
+    },
+  };
+}
+
 
 export function createResearchTool(): ToolDefinition {
   return {
@@ -222,6 +358,30 @@ export function createResearchTool(): ToolDefinition {
           registerSessionAbort(piSessionId, researchId, internalAbort);
           const masterWidgetId = `pi-research-master-${piSessionId}`;
 
+          // Periodic health monitoring (every 30s during long runs)
+          let healthMonitorTimer: NodeJS.Timeout | null = null;
+          const startHealthMonitor = () => {
+            if (healthMonitorTimer) return;
+            healthMonitorTimer = setInterval(async () => {
+              try {
+                const health = await healthRegistry.runAll();
+                const failedNonCritical = health.components.filter(c => !c.healthy && !healthRegistry.isCritical(c.component));
+                if (failedNonCritical.length > 0) {
+                  logger.warn(`[research] Periodic health check: non-critical components degraded: ${failedNonCritical.map(c => c.component).join(', ')}`);
+                }
+              } catch (error) {
+                logger.debug('[research] Periodic health check failed (non-blocking):', error);
+              }
+            }, 30000); // Every 30 seconds
+          };
+
+          const stopHealthMonitor = () => {
+            if (healthMonitorTimer) {
+              clearInterval(healthMonitorTimer);
+              healthMonitorTimer = null;
+            }
+          };
+
           cleanup = async () => {
             if (cleanup === null) return;
             cleanup = null;
@@ -276,11 +436,16 @@ export function createResearchTool(): ToolDefinition {
           registerMasterUpdate(piSessionId, updateMasterWidget);
           unsubOrder = onSessionOrderChange(piSessionId, () => refreshAllSessions(piSessionId));
 
+          stopHealthMonitor();
+
           if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
             (ctx.ui as any).setWorkingVisible(false);
           }
 
           await ensureFunctionalHealth(panelState, debouncedRefresh);
+
+          // Start periodic health monitoring for long runs
+          startHealthMonitor();
 
           signal?.addEventListener('abort', async () => {
             aborted = true;
@@ -578,8 +743,35 @@ export function createResearchTool(): ToolDefinition {
             researchId,
           }, internalAbort.signal);
 
-          const exportPath = await exportResearchReport(sanitizedQuery, result, researchComplexity === 0 ? 'quick' : 'deep', ctx.cwd);
-          const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
+          // Append error summary if any errors were tracked during this research
+          const errorReport = errorTracker.getReport();
+          let resultWithErrorSummary = result;
+          if (errorReport.totalErrors > 0) {
+            const errorLines: string[] = [];
+            errorLines.push('');
+            errorLines.push('---');
+            errorLines.push('## ⚠️ Error Summary');
+            errorLines.push('');
+            errorLines.push(`This research encountered **${errorReport.totalErrors} error(s)** across **${errorReport.uniquePatterns} unique pattern(s)**.`);
+            errorLines.push('');
+            if (errorReport.patterns.length > 0) {
+              errorLines.push('**Most frequent error(s):**');
+              for (const pattern of errorReport.patterns.slice(0, 3)) {
+                const timeSince = Math.floor((Date.now() - new Date(pattern.lastSeen).getTime()) / 1000);
+                const timeAgo = timeSince < 60 ? `${timeSince}s ago` :
+                                timeSince < 3600 ? `${Math.floor(timeSince / 60)}m ago` :
+                                `${Math.floor(timeSince / 3600)}h ago`;
+                errorLines.push(`- ${pattern.signature} (${pattern.count}x, last ${timeAgo})`);
+              }
+            }
+            errorLines.push('');
+            errorLines.push('Use `/errors` to view detailed error reports.');
+            errorLines.push('Use `/errors-clear` to clear error history.');
+            resultWithErrorSummary = result + errorLines.join('\n');
+          }
+
+          const exportPath = await exportResearchReport(sanitizedQuery, resultWithErrorSummary, researchComplexity === 0 ? 'quick' : 'deep', ctx.cwd);
+          const finalResult = exportPath ? appendExportMessage(resultWithErrorSummary, exportPath, panelState.totalCost) : resultWithErrorSummary;
 
           await cleanup?.();
           return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };

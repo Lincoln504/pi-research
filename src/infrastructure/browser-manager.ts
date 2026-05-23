@@ -13,6 +13,7 @@ import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -177,6 +178,9 @@ class BrowserTaskScheduler implements IScheduler {
     private currentWorkerCount: number | null = null;
     private leadershipTimer: any = null;
     private consecutiveErrors: number = 0;
+    private consecutiveLeadershipMisses: number = 0;
+    private readonly LEADERSHIP_MISS_THRESHOLD: number = 5;
+    private isShuttingDown: boolean = false;
     private readonly stateManager = getSharedStateManager();
 
     constructor(private readonly schedulerId: string) {
@@ -191,18 +195,29 @@ class BrowserTaskScheduler implements IScheduler {
             const serverInfo = await this.stateManager.getBrowserServer();
             // If the state file now points to a different schedulerId, we have lost leadership
             if (serverInfo?.schedulerId !== this.schedulerId) {
-                logger.warn(`[Scheduler] Leadership lost (ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}). Shutting down pool...`);
-                await this.shutdown();
+                this.consecutiveLeadershipMisses++;
+                metrics.increment('browser_leadership_misses_total', 1);
+                metrics.setGauge('browser_is_leader', 0);
+                logger.warn(`[Scheduler] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) - ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}`);
+                
+                if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
+                    metrics.increment('browser_leadership_lost_total', 1);
+                    logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
+                    await this.shutdown();
+                }
+            } else {
+                // Reset counter on successful leadership check
+                if (this.consecutiveLeadershipMisses > 0) {
+                    logger.log(`[Scheduler] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
+                    this.consecutiveLeadershipMisses = 0;
+                }
+                metrics.setGauge('browser_is_leader', 1);
             }
             // Decay the consecutive error counter to allow recovery after transient errors
             if (this.consecutiveErrors > 0) {
                 this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
             }
         }, 30000); // Check leadership every 30 seconds (reduced from 60s for faster failover)
-        // unref() to allow process to exit cleanly even if this timer is the only thing keeping it alive
-        if (this.leadershipTimer.unref) {
-            this.leadershipTimer.unref();
-        }
     }
 
     private idleTimer: any = null;
@@ -276,8 +291,10 @@ class BrowserTaskScheduler implements IScheduler {
                     env: browserEnv,
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;
+                        metrics.increment('browser_pool_errors_total', 1);
                         logger.error('[Scheduler] Cluster Error:', e);
                         if (this.consecutiveErrors >= 3) {
+                            metrics.increment('browser_pool_unhealthy_events_total', 1);
                             logger.error(`[Scheduler] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
                         }
                     },
@@ -290,7 +307,13 @@ class BrowserTaskScheduler implements IScheduler {
                     }
                 });
                 
+                metrics.setGauge('browser_pool_workers', maxWorkers);
+                metrics.increment('browser_pool_initializations_total', 1, { success: 'true' });
+                
                 return this.pool;
+            } catch (error) {
+                metrics.increment('browser_pool_initializations_total', 1, { success: 'false' });
+                throw error;
             } finally {
                 this.poolInitializationPromise = null;
             }
@@ -318,19 +341,28 @@ class BrowserTaskScheduler implements IScheduler {
                 pool.execute({ type: 'search', query }),
                 timeoutPromise
             ]) as { results: SearchResult[], error?: string };
+        } catch (error) {
+            metrics.increment('browser_search_errors_total', 1);
+            throw error;
         } finally {
             clearTimeout(timeoutId!);
         }
         
         const duration = Date.now() - startTime;
+        metrics.observe('browser_search_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_search_requests_total', 1, { status: 'success' });
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
-        if (result.error) throw new Error(result.error);
+        if (result.error) {
+            metrics.increment('browser_search_requests_total', 1, { status: 'error' });
+            throw new Error(result.error);
+        }
         this.consecutiveErrors = 0;
         return result.results;
     }
 
     async runScrape(url: string, config?: Config): Promise<any> {
         const pool = await this.ensurePool(config);
+        const startTime = Date.now();
         const timeoutMs = 60000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -344,11 +376,20 @@ class BrowserTaskScheduler implements IScheduler {
                 pool.execute({ type: 'scrape', url }),
                 timeoutPromise
             ]);
+        } catch (error) {
+            metrics.increment('browser_scrape_errors_total', 1);
+            throw error;
         } finally {
             clearTimeout(timeoutId!);
         }
         
-        if (result.error) throw new Error(result.error);
+        const duration = Date.now() - startTime;
+        metrics.observe('browser_scrape_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_scrape_requests_total', 1, { status: 'success' });
+        if (result.error) {
+            metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
+            throw new Error(result.error);
+        }
         this.consecutiveErrors = 0;
         return result;
     }
@@ -368,13 +409,23 @@ class BrowserTaskScheduler implements IScheduler {
                 pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]) as { success: boolean; error?: string };
+        } catch (error) {
+            metrics.increment('browser_healthcheck_errors_total', 1);
+            throw error;
         } finally {
             clearTimeout(timeoutId!);
         }
         
         const duration = Date.now() - startTime;
+        metrics.observe('browser_healthcheck_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_healthcheck_requests_total', 1, { status: 'success' });
+        metrics.setGauge('browser_pool_health', 1); // Health check passed
         logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
-        if (result.error) throw new Error(result.error);
+        if (result.error) {
+            metrics.increment('browser_healthcheck_requests_total', 1, { status: 'error' });
+            metrics.setGauge('browser_pool_health', 0); // Health check failed
+            throw new Error(result.error);
+        }
         this.consecutiveErrors = 0;
         return result;
     }
@@ -655,6 +706,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
 
         logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
+        metrics.increment('browser_leadership_wins_total', 1);
         (globalThis as any).__PI_RESEARCH_SCHEDULER__ = scheduler;
         cachedSchedulerVersion = schedulerVersion;
         return scheduler;
@@ -751,6 +803,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
 
 export async function stopBrowserManager(): Promise<void> {
   browserCircuitBreaker.reset();
+  metrics.increment('browser_manager_shutdowns_total', 1);
   const globalScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
   // Clear both references before any async work so concurrent getScheduler()
   // calls during shutdown see null and start fresh rather than receiving a

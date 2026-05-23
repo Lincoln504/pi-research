@@ -21,6 +21,7 @@ import {
 import { type Config, DEFAULTS } from '../config.ts';
 import { getStore, isKnowledgeStoreReady } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 
 export function createScrapeTool(options: {
   ctx: ExtensionContext;
@@ -63,9 +64,13 @@ export function createScrapeTool(options: {
     ],
     parameters: ScrapeParams,
     async execute(_callId, params, signal): Promise<AgentToolResult<unknown>> {
+      const callStartTime = Date.now();
+      metrics.increment('tool_scrape_calls_total', 1);
+
       const callCount = options.tracker.getToolCallCount('scrape');
       const limit = options.tracker.getToolLimit('scrape') ?? maxScrapeBatches;
       if (callCount >= limit) {
+          metrics.increment('tool_scrape_calls_total', 1, { status: 'rate_limited' });
           return {
             content: [{ type: 'text', text: options.tracker.getLimitMessage('scrape') }],
             details: { blocked: true, reason: 'limit_reached' },
@@ -73,6 +78,7 @@ export function createScrapeTool(options: {
       }
 
       if (!Value.Check(ScrapeParams, params)) {
+          metrics.increment('tool_scrape_calls_total', 1, { status: 'invalid_params' });
           return {
             content: [{ type: 'text', text: 'Invalid parameters for scrape tool. Expected an array of URLs.' }],
             details: { error: 'invalid_parameters' },
@@ -100,8 +106,10 @@ export function createScrapeTool(options: {
       }
       
       urls = Array.from(new Set(urls)).filter(u => u.startsWith('http'));
+      metrics.increment('tool_scrape_urls_total', urls.length);
 
       if (urls.length === 0) {
+          metrics.increment('tool_scrape_calls_total', 1, { status: 'no_valid_urls' });
           return { content: [{ type: 'text', text: 'No valid URLs provided for scraping.' }], details: { error: 'invalid_input' } };
       }
 
@@ -114,8 +122,10 @@ export function createScrapeTool(options: {
       // Global Deduplication
       const { kept: dedupedUrls, duplicates } = deduplicateUrls(urls, options.getGlobalState().researchId);
       let dedupNote = duplicates.length > 0 ? `**Global Deduplication**: ${duplicates.length} URL(s) skipped (already in pool).\n\n` : '';
+      metrics.increment('tool_scrape_duplicates_total', duplicates.length);
       
       if (dedupedUrls.length === 0) {
+          metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates' });
           return { content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool.` }], details: { all_duplicates: true } };
       }
 
@@ -144,15 +154,18 @@ export function createScrapeTool(options: {
             }
           }
           if (cachedResults.length > 0) {
+            metrics.increment('tool_scrape_cache_hits_total', cachedResults.length);
             logger.log(`[scrape] Cache: ${cachedResults.length} full-text hit(s) out of ${finalUrls.length} URL(s)`);
           }
         } catch (err) {
           // FIX: Provide better context for cache failures
           const isReady = await isKnowledgeStoreReady();
           if (!isReady) {
+            metrics.increment('tool_scrape_cache_errors_total', 1, { reason: 'store_not_ready' });
             logger.warn(`[scrape] Knowledge store not initialized - all ${finalUrls.length} URL(s) will be scraped fresh`);
             logger.warn('[scrape] Note: Knowledge store initialization failure is permanent; restart process to retry');
           } else {
+            metrics.increment('tool_scrape_cache_errors_total', 1, { reason: 'lookup_failed' });
             logger.warn('[scrape] Knowledge store cache lookup failed (non-fatal):', err);
           }
         }
@@ -184,8 +197,17 @@ export function createScrapeTool(options: {
           options.onLinksScraped(allSuccessful.map(r => r.url));
       }
 
+      const totalDuration = Date.now() - callStartTime;
+      const scrapeDuration = Date.now() - scrapeStartTime;
+      metrics.observe('tool_scrape_total_duration_ms', totalDuration, { status: 'success' });
+      metrics.observe('tool_scrape_fetch_duration_ms', scrapeDuration);
+      metrics.increment('tool_scrape_calls_total', 1, { status: 'success' });
+      metrics.increment('tool_scrape_successful_total', allSuccessful.length);
+      metrics.increment('tool_scrape_failed_total', failedFresh.length);
+      metrics.increment('tool_scrape_cache_hits_total', cachedResults.length);
+
       let markdown = `# URL Scrape Results (${batchLabel})\n\n${dedupNote}`;
-      markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${((Date.now() - scrapeStartTime)/1000).toFixed(2)}s\n\n`;
+      markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${(totalDuration/1000).toFixed(2)}s\n\n`;
 
       for (const res of allSuccessful) {
           const isCached = cachedResults.some(c => c.url === res.url);

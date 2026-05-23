@@ -6,6 +6,22 @@ import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 import * as fs from 'node:fs';
+import { clearHealthCheckCache } from '../healthcheck/index.ts';
+import type { MigrationStrategy } from './migration.ts';
+
+/** Migration strategy for model changes (read from env or config) */
+function getMigrationStrategy(): MigrationStrategy | undefined {
+  const strategy = process.env.PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY;
+  if (!strategy) return undefined;
+  
+  const validStrategies: MigrationStrategy[] = ['drop', 're-embed', 'continue', 'error'];
+  if (validStrategies.includes(strategy as MigrationStrategy)) {
+    return strategy as MigrationStrategy;
+  }
+  
+  logger.warn(`[knowledge] Invalid migration strategy '${strategy}'. Valid options: drop, re-embed, continue, error`);
+  return undefined;
+}
 
 interface ModelConfig {
   pooling: 'mean' | 'cls' | 'last_token';
@@ -212,10 +228,17 @@ export async function initKnowledgeStore(): Promise<void> {
         }
         const embedInit = embedder.initialize();
 
+        // Get migration strategy from environment or use default
+        const migrationStrategy = getMigrationStrategy();
+        if (migrationStrategy) {
+          logger.info(`[knowledge] Using migration strategy: ${migrationStrategy}`);
+        }
+
         store = new KnowledgeStore({
           dbDir: getDbDir(),
           embedder: embedder,
           modelName: config.EMBEDDING_MODEL,
+          migrationStrategy: migrationStrategy,
         });
 
         const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);
@@ -228,6 +251,7 @@ export async function initKnowledgeStore(): Promise<void> {
 
         inflightEmbedder = null;
         logger.info('[knowledge] Knowledge Store ready.');
+        logger.info('[knowledge] Health status: KnowledgeStore component initialized successfully.');
         return;
       } catch (err) {
         const givingUp = attempt >= MAX_INIT_RETRIES;
@@ -288,6 +312,8 @@ export async function clearKnowledgeStore(): Promise<void> {
   if (store) {
     try {
       await store.clear();
+      // Clear health check cache since knowledge store was modified
+      clearHealthCheckCache();
       return;
     } catch (err) {
       logger.warn('[knowledge] Failed to clear store via active connection, falling back to FS deletion:', err);
@@ -299,6 +325,8 @@ export async function clearKnowledgeStore(): Promise<void> {
   if (fs.existsSync(dbDir)) {
     try {
       fs.rmSync(dbDir, { recursive: true, force: true });
+      // Clear health check cache since knowledge store was modified
+      clearHealthCheckCache();
       logger.info('[knowledge] Knowledge store cleared via filesystem deletion.');
     } catch (err) {
       logger.error('[knowledge] Failed to delete knowledge_db directory:', err);

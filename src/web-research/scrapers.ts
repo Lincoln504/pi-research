@@ -19,6 +19,7 @@ import { logger } from '../logger.ts';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { runBrowserTask } from '../infrastructure/browser-manager.ts';
 import type { Config } from '../config.ts';
+import { metrics } from '../utils/metrics.ts';
 
 // ============================================================================
 // Type Definitions
@@ -77,18 +78,21 @@ function validateUrlForSSRF(url: string): void {
     
     // Check for localhost
     if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'localhost' });
       throw new Error('Access to localhost is not allowed');
     }
     
     // Check for internal network patterns
     for (const pattern of INTERNAL_NETWORK_PATTERNS) {
       if (pattern.test(hostname)) {
+        metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'internal_network' });
         throw new Error('Access to internal networks is not allowed');
       }
     }
     
     // Additional safety: check for non-HTTP protocols
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'invalid_protocol' });
       throw new Error('Only HTTP/HTTPS protocols are allowed');
     }
   } catch (e) {
@@ -96,6 +100,7 @@ function validateUrlForSSRF(url: string): void {
       throw e; // Re-throw our validation errors
     }
     // Invalid URL is a different issue, let it bubble up
+    metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url' });
     throw new Error(`Invalid URL: ${url}`);
   }
 }
@@ -107,9 +112,11 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
     if (bytes.length > MAX_PDF_SIZE) {
         const sizeMB = Math.round(bytes.length / 1024 / 1024);
         logger.warn(`[Scrapers] PDF too large (${sizeMB}MB, max 100MB), skipping extraction`);
+        metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
         return `*Error: PDF too large (${sizeMB}MB, max 100MB).*`;
     }
 
+    const pdfExtractionStart = Date.now();
     try {
         const { WasmPdfDocument } = await import('pdf-oxide-wasm');
         const doc = new WasmPdfDocument(bytes);
@@ -126,10 +133,14 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
         }
         
         doc.free();
+        const pdfExtractionDuration = Date.now() - pdfExtractionStart;
+        metrics.observe('scrape_pdf_conversion_ms', pdfExtractionDuration);
+        metrics.increment('scrape_pdf_conversions_total', 1, { status: 'success', pages: String(pageCount) });
         return markdown;
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         logger.error(`[Scrapers] PDF extraction failed: ${msg}`);
+        metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'extraction_failed' });
         return `*Error: Could not extract content from PDF (${msg}).*`;
     }
 }
@@ -254,11 +265,15 @@ const BOT_PATTERNS: ReadonlyArray<[string, string]> = [
 function validateContent(html: string, markdown: string, url: string): void {
   const htmlLow = html.toLowerCase();
   for (const [pattern, reason] of BOT_PATTERNS) {
-    if (htmlLow.includes(pattern)) throw new Error(`Fetch blocked: ${reason}`);
+    if (htmlLow.includes(pattern)) {
+      metrics.increment('scrape_errors_total', 1, { error_type: 'bot_protection' });
+      throw new Error(`Fetch blocked: ${reason}`);
+    }
   }
 
   const words = markdown.trim().split(/\s+/).filter(w => w.length > 0);
   if (words.length < 50 && !url.includes('example.com')) {
+    metrics.increment('scrape_errors_total', 1, { error_type: 'stub_content' });
     throw new Error(`Fetch returned stub: only ${words.length} words found.`);
   }
 }
@@ -284,6 +299,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
   try {
+    const fetchStart = Date.now();
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
@@ -292,9 +308,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       },
     });
 
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      metrics.increment('scrape_errors_total', 1, { error_type: 'http_error', status_code: String(response.status) });
+      throw new Error(`HTTP ${response.status}`);
+    }
 
     const contentType = response.headers.get('content-type') ?? '';
+    const fetchDuration = Date.now() - fetchStart;
     
     // FIX: Check response size to prevent OOM attacks
     const contentLength = response.headers.get('content-length');
@@ -304,11 +324,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
         if (size > MAX_PDF_SIZE) {
           const sizeMB = Math.round(size / 1024 / 1024);
           logger.warn(`[Scrapers] PDF too large (Content-Length: ${sizeMB}MB, max 100MB), skipping`);
+          metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'size_exceeded' });
           throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
         }
       } else if (size > MAX_HTML_SIZE) {
         const sizeMB = Math.round(size / 1024 / 1024);
         logger.warn(`[Scrapers] HTML response too large (Content-Length: ${sizeMB}MB, max 25MB), skipping`);
+        metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: contentType.split(';')[0] || 'unknown' });
         throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
       }
     }
@@ -317,6 +339,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       const buffer = await response.arrayBuffer();
       const markdown = await extractPdfToMarkdown(new Uint8Array(buffer));
       validateContent('', markdown, url);
+      metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'pdf', status: 'success' });
+      metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'pdf', status: 'success' });
       return { source: 'fetch', layer: 'fetch', markdown };
     }
 
@@ -326,11 +350,22 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     if (html.length > MAX_HTML_SIZE) {
       const sizeMB = Math.round(html.length / 1024 / 1024);
       logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), truncating`);
+      metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
     const markdown = await convertToMarkdown(html);
     validateContent(html, markdown, url);
+    metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'html', status: 'success' });
+    metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'html', status: 'success' });
     return { source: 'fetch', layer: 'fetch', markdown };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not allowed')) {
+      metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'ssrf_blocked' });
+      metrics.observe('scrape_latency_ms', Date.now() - Date.now(), { layer: 'fetch', status: 'ssrf_blocked' });
+      throw error;
+    }
+    metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'error' });
+    throw error;
   } finally {
     clearTimeout(timeoutId);
     if (signal) signal.removeEventListener('abort', onAbort);
@@ -343,23 +378,35 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 
 async function scrapeWithStealthBrowser(_url: string, config?: Config): Promise<ScrapeLayerResult> {
   // Dispatch to unified worker pool (Camoufox)
-  const result = await runBrowserTask<any>(_url, 'scrape', config);
+  const browserStart = Date.now();
+  try {
+    const result = await runBrowserTask<any>(_url, 'scrape', config);
+    const browserDuration = Date.now() - browserStart;
 
-  if (result.buffer) {
-      const markdown = await extractPdfToMarkdown(new Uint8Array(result.buffer));
-      return { source: 'playwright', layer: 'playwright+camoufox', markdown };
+    if (result.buffer) {
+        const markdown = await extractPdfToMarkdown(new Uint8Array(result.buffer));
+        metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'pdf', status: 'success' });
+        metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'pdf', status: 'success' });
+        return { source: 'playwright', layer: 'playwright+camoufox', markdown };
+    }
+
+    let html = result.html || '';
+    let markdown = await convertToMarkdown(html);
+
+    // Robustness: If we got a stub, the main thread can't easily tell the worker 
+    // to retry with networkidle without another roundtrip.
+    // However, the unified worker now uses a standard high-fidelity wait.
+    
+    validateContent(html, markdown, _url);
+    metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'html', status: 'success' });
+    metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', content_type: 'html', status: 'success' });
+    return { source: 'playwright', layer: 'playwright+camoufox', markdown };
+  } catch (error) {
+    const browserDuration = Date.now() - browserStart;
+    metrics.increment('scrape_operations_total', 1, { layer: 'playwright', status: 'error' });
+    metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', status: 'error' });
+    throw error;
   }
-
-  let html = result.html || '';
-  let markdown = await convertToMarkdown(html);
-
-  // Robustness: If we got a stub, the main thread can't easily tell the worker 
-  // to retry with networkidle without another roundtrip.
-  // However, the unified worker now uses a standard high-fidelity wait.
-  
-  validateContent(html, markdown, _url);
-
-  return { source: 'playwright', layer: 'playwright+camoufox', markdown };
 }
 
 // ============================================================================
@@ -369,6 +416,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config): Promise<
 export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config): Promise<any> {
   // Robustness: ensure we actually have a single string URL
   if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
+      metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
       return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
   }
   
@@ -377,6 +425,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     const res = await scrapeWithFetch(url, signal);
     const duration = Date.now() - start;
     logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
+    metrics.increment('scrape_layer_fallbacks_total', 0); // No fallback needed
     return { ...res, url, success: true };
   } catch (e1) {
     const fetchDuration = Date.now() - start;
@@ -387,24 +436,43 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
         const browserStart = Date.now();
         const res = await scrapeWithStealthBrowser(url, config);
         const browserDuration = Date.now() - browserStart;
-        logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${Date.now() - start}ms)`);
+        const totalDuration = Date.now() - start;
+        logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${totalDuration}ms)`);
+        metrics.increment('scrape_layer_fallbacks_total', 1, { from_layer: 'fetch', to_layer: 'playwright' });
         return { ...res, url, success: true };
       } catch (e2) {
-        logger.error(`[Scrapers] Browser fallback failed for ${url} in ${Date.now() - start}ms:`, e2);
+        const totalDuration = Date.now() - start;
+        logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
+        metrics.increment('scrape_errors_total', 1, { error_type: 'fallback_failed', layer: 'playwright' });
         return { url, success: false, error: String(e2), markdown: '' };
       }
     }
+    metrics.increment('scrape_errors_total', 1, { error_type: 'no_fallback_available', layer: 'fetch' });
     return { url, success: false, error: String(e1), markdown: '' };
   }
 }
 
 export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config): Promise<any[]> {
+    metrics.increment('scrape_batches_total', 1);
+    metrics.observe('scrape_urls_per_batch', urls.length);
+    const batchStart = Date.now();
+    
     const results: any[] = [];
     for (let i = 0; i < urls.length; i += maxConcurrency) {
         const batch = urls.slice(i, i + maxConcurrency);
         const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config)));
         results.push(...batchRes);
     }
+    
+    const batchDuration = Date.now() - batchStart;
+    metrics.observe('scrape_batch_latency_ms', batchDuration);
+    
+    // Count successes and failures
+    const successes = results.filter(r => r.success).length;
+    const failures = results.length - successes;
+    metrics.increment('scrape_operations_total', successes, { status: 'success' });
+    metrics.increment('scrape_operations_total', failures, { status: 'error' });
+    
     return results;
 }
 

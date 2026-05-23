@@ -1,4 +1,3 @@
-import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 
 export interface HealthCheckStatus {
@@ -35,6 +34,10 @@ class HealthCheckRegistry {
       timeoutMs: options.timeoutMs ?? 15000,
       critical: options.critical ?? true,
     });
+  }
+
+  public isCritical(componentName: string): boolean {
+    return this.checks.some(c => c.name === componentName && c.critical);
   }
 
   public async runAll(): Promise<SystemHealth> {
@@ -98,3 +101,10 @@ class HealthCheckRegistry {
 }
 
 export const healthRegistry = new HealthCheckRegistry();
+
+// Helper function to check if a component is critical
+export function isCritical(componentName: string): boolean {
+  return (healthRegistry as any).checks.some(
+    (c: RegisteredCheck) => c.name === componentName && c.critical
+  );
+}

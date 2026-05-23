@@ -15,6 +15,7 @@ import type { Advisory, GitHubResult } from './types.ts';
 import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const githubCircuitBreaker = new CircuitBreaker({
   failureThreshold: 5,
@@ -337,6 +338,7 @@ export async function searchGitHubAdvisories(
     readonly repo?: string;         // "owner/repo" format
   },
 ): Promise<GitHubResult> {
+  const startTime = Date.now();
   const maxResults = options?.maxResults ?? DEFAULT_MAX_RESULTS;
   const advisories: Advisory[] = [];
   let error: string | undefined = undefined;
@@ -369,6 +371,7 @@ export async function searchGitHubAdvisories(
             throw new Error(`Repository "${owner}/${name}" not found or no access to security advisories.`);
           }
           if (resp.status === 403) {
+            metrics.increment('github_ratelimit_hits_total', 1, { endpoint: 'repo_advisories' });
             throw new Error('GitHub API rate limit exceeded (HTTP 403). Retrying with backoff...');
           }
           if (resp.status >= 500) {
@@ -377,6 +380,17 @@ export async function searchGitHubAdvisories(
           throw new Error(`GitHub API error (${resp.status}): ${resp.statusText}`);
         }
 
+        // Track rate limit headers
+        const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
+        const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
+        if (rateLimitRemaining !== null) {
+          metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: 'repo_advisories' });
+        }
+        if (rateLimitLimit !== null) {
+          metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: 'repo_advisories' });
+        }
+        
+        metrics.increment('github_requests_total', 1, { endpoint: 'repo_advisories', status: 'success' });
         return resp;
       }, {
         maxRetries: 2,
@@ -407,16 +421,20 @@ export async function searchGitHubAdvisories(
       for (const term of terms) {
         const termUpper = term.toUpperCase();
         let apiUrl: string;
+        let endpointType: string;
 
         if (termUpper.startsWith('CVE-')) {
           // Use cve_id param for CVE lookups
           apiUrl = `${GITHUB_API_BASE}/advisories?cve_id=${encodeURIComponent(termUpper)}&per_page=${maxResults}`;
+          endpointType = 'cve_lookup';
         } else if (termUpper.startsWith('GHSA-')) {
           // Direct advisory lookup by GHSA ID
           apiUrl = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(term)}`;
+          endpointType = 'ghsa_lookup';
         } else {
           // Keyword: fetch recent published advisories and filter client-side
           apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc`;
+          endpointType = 'search';
         }
 
         const response = await retryWithBackoff(async (): Promise<Response> => {
@@ -433,6 +451,7 @@ export async function searchGitHubAdvisories(
               throw new Error('Advisory not found (HTTP 404)');
             }
             if (resp.status === 403) {
+              metrics.increment('github_ratelimit_hits_total', 1, { endpoint: endpointType });
               throw new Error('GitHub API rate limit exceeded (HTTP 403). Retrying with backoff...');
             }
             if (resp.status >= 500) {
@@ -441,6 +460,17 @@ export async function searchGitHubAdvisories(
             throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
           }
 
+          // Track rate limit headers
+          const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
+          const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
+          if (rateLimitRemaining !== null) {
+            metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: endpointType });
+          }
+          if (rateLimitLimit !== null) {
+            metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: endpointType });
+          }
+          
+          metrics.increment('github_requests_total', 1, { endpoint: endpointType, status: 'success' });
           return resp;
         }, {
           maxRetries: 2,
@@ -459,6 +489,9 @@ export async function searchGitHubAdvisories(
         } else if (isGitHubAdvisoryListResponse(data) && isArray(data.items)) {
           items = data.items.filter(isGitHubAdvisoryRaw);
         }
+        
+        // Track cache metrics
+        metrics.increment(items.length > 0 ? 'github_cache_hits_total' : 'github_cache_misses_total', 1, { term, endpoint: endpointType });
 
         termResults.push(...items.map(mapGitHubAdvisory));
       }
@@ -511,6 +544,10 @@ export async function searchGitHubAdvisories(
 
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : String(err);
+    metrics.increment('github_search_errors_total', 1, { error_type: err instanceof Error ? err.name : 'unknown' });
+  } finally {
+    const duration = Date.now() - startTime;
+    metrics.observe('github_search_duration_ms', duration, { has_error: error ? 'true' : 'false' });
   }
 
   return {
@@ -527,6 +564,7 @@ export async function searchGitHubAdvisories(
  * @returns Promise resolving to Advisory or null if not found
  */
 export async function getAdvisoryById(id: string): Promise<Advisory | null> {
+  const startTime = Date.now();
   try {
     if (id === '') {
       return null;
@@ -548,6 +586,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
           throw new Error('Advisory not found (HTTP 404)');
         }
         if (resp.status === 403) {
+          metrics.increment('github_ratelimit_hits_total', 1, { endpoint: 'advisory_by_id' });
           throw new Error('GitHub API rate limit exceeded (HTTP 403). Retrying with backoff...');
         }
         if (resp.status >= 500) {
@@ -556,6 +595,17 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
         throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
       }
 
+      // Track rate limit headers
+      const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
+      const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
+      if (rateLimitRemaining !== null) {
+        metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: 'advisory_by_id' });
+      }
+      if (rateLimitLimit !== null) {
+        metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: 'advisory_by_id' });
+      }
+      
+      metrics.increment('github_requests_total', 1, { endpoint: 'advisory_by_id', status: 'success' });
       return resp;
     }, {
       maxRetries: 2,
@@ -566,11 +616,18 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
     const data = await response.json();
 
     if (isGitHubAdvisoryRaw(data)) {
+      const duration = Date.now() - startTime;
+      metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'true' });
       return mapGitHubAdvisory(data);
     }
 
+    const duration = Date.now() - startTime;
+    metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'false' });
     return null;
   } catch (err: unknown) {
+    const duration = Date.now() - startTime;
+    metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'false', error: 'true' });
+    metrics.increment('github_advisory_fetch_errors_total', 1);
     // Check if it's a 404 error (not found) - return null instead of throwing
     if (err instanceof Error && err.message.includes('HTTP 404')) {
       logger.warn(`[GitHub Advisories] Advisory ${id} not found`);

@@ -8,6 +8,7 @@ import { runWorkerSearch, getMaxWorkers } from '../infrastructure/browser-manage
 import { logger } from '../logger.ts';
 import type { SearchResult } from './types.ts';
 import type { Config } from '../config.ts';
+import { metrics } from '../utils/metrics.ts';
 
 /**
  * Orchestrate high-fidelity search across multiple queries.
@@ -20,9 +21,14 @@ export async function performSearch(
     signal?: AbortSignal,
     onProgress?: (links: number) => void
 ): Promise<Map<string, SearchResult[]>> {
+    const startTime = Date.now();
     const resultMap = new Map<string, SearchResult[]>();
     const seenUrls = new Set<string>();
     const maxWorkers = getMaxWorkers(config);
+
+    metrics.setGauge('browser_search_max_workers', maxWorkers);
+    metrics.increment('browser_search_orchestrations_total', 1);
+    metrics.increment('browser_search_queries_total', queries.length);
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 
@@ -30,17 +36,28 @@ export async function performSearch(
     const searchTasks = filteredQueries.map(async (query) => {
         if (signal?.aborted) {
             resultMap.set(query, []);
+            metrics.increment('browser_search_queries_total', 1, { status: 'aborted' });
             return;
         }
+        const queryStartTime = Date.now();
         try {
             const results = await runWorkerSearch(query, config);
-            resultMap.set(query, results || []);
-
+            const queryDuration = Date.now() - queryStartTime;
+            metrics.observe('browser_search_query_duration_ms', queryDuration);
+            metrics.increment('browser_search_queries_total', 1, { status: 'success' });
+            
             if (results?.length > 0) {
+                metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
                 for (const r of results) { if (r.url) seenUrls.add(r.url); }
+            } else {
+                metrics.increment('browser_search_queries_total', 1, { status: 'no_results' });
             }
+            resultMap.set(query, results || []);
         } catch (error) {
+            const queryDuration = Date.now() - queryStartTime;
+            metrics.observe('browser_search_query_duration_ms', queryDuration, { status: 'error' });
+            metrics.increment('browser_search_queries_total', 1, { status: 'error' });
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[Search] Worker failed for "${query}": ${msg}`);
             resultMap.set(query, []);
@@ -54,11 +71,16 @@ export async function performSearch(
     // Detect total failure: if every valid query returned empty, the worker pool is likely dead.
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);
     if (totalResults === 0 && filteredQueries.length > 0) {
+        metrics.increment('browser_search_total_failures_total', 1);
         throw new Error(
             `Search completely failed: all ${filteredQueries.length} queries returned no results. ` +
             `Browser workers may be unavailable or DuckDuckGo is unreachable.`
         );
     }
+
+    const totalDuration = Date.now() - startTime;
+    metrics.observe('browser_search_total_duration_ms', totalDuration);
+    metrics.increment('browser_search_unique_urls_total', seenUrls.size);
 
     return resultMap;
 }

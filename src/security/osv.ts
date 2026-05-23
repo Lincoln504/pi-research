@@ -11,6 +11,7 @@ import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-
 import { logger } from '../logger.ts';
 import { OSV_TIMEOUT_MS, DEFAULT_MAX_RETRIES, DEFAULT_INITIAL_DELAY_MS, DEFAULT_MAX_DELAY_MS } from '../constants.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const osvCircuitBreaker = new CircuitBreaker({
   failureThreshold: 5,
@@ -164,6 +165,7 @@ async function fetchWithRetry(
   url: string,
   options: RequestInit,
 ): Promise<Response> {
+  const endpoint = new URL(url).pathname;
   return osvCircuitBreaker.execute(async () => {
     return retryWithBackoff(
       async () => {
@@ -171,8 +173,13 @@ async function fetchWithRetry(
         if (!response.ok) {
           const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
           error.status = response.status;
+          metrics.increment('osv_errors_total', 1, { endpoint, status_code: response.status.toString() });
+          if (response.status === 429) {
+            metrics.increment('osv_ratelimit_hits_total', 1, { endpoint });
+          }
           throw error;
         }
+        metrics.increment('osv_requests_total', 1, { endpoint, status: 'success' });
         return response;
       },
       {
@@ -211,6 +218,7 @@ export async function searchOSV(
     includeAffected?: boolean; // Include affected version ranges
   },
 ): Promise<OSVResult> {
+  const startTime = Date.now();
   const maxResults: number = options?.maxResults ?? DEFAULT_MAX_RESULTS;
   const vulnerabilities: Vulnerability[] = [];
   let error: string | undefined = undefined;
@@ -273,6 +281,9 @@ export async function searchOSV(
         logger.warn(`OSV returned unexpected format for "${term}"`);
         continue;
       }
+      
+      // Track cache metrics
+      metrics.increment(items.length > 0 ? 'osv_cache_hits_total' : 'osv_cache_misses_total', 1, { term, endpoint: termUpper.startsWith('CVE-') || termUpper.startsWith('GHSA-') || termUpper.startsWith('OSV-') ? 'vulns_by_id' : 'query' });
 
       for (const item of items) {
         const vuln: Vulnerability = mapOsvItemToVulnerability(item);
@@ -305,6 +316,10 @@ export async function searchOSV(
 
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : String(err);
+    metrics.increment('osv_search_errors_total', 1, { error_type: err instanceof Error ? err.name : 'unknown' });
+  } finally {
+    const duration = Date.now() - startTime;
+    metrics.observe('osv_search_duration_ms', duration, { has_error: error ? 'true' : 'false' });
   }
 
   return {
@@ -321,6 +336,7 @@ export async function searchOSV(
  * @returns Vulnerability object if found, null otherwise
  */
 export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
+  const startTime = Date.now();
   try {
     const url: string = `${OSV_BASE_URL}/vulns/${osvId}`;
     const response: Response = await fetchWithRetry(url, {
@@ -334,12 +350,19 @@ export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
     const data: unknown = await response.json();
 
     if (!isOsvVulnerability(data)) {
+      const duration = Date.now() - startTime;
+      metrics.observe('osv_vuln_fetch_duration_ms', duration, { found: 'false' });
       logger.error(`OSV ${osvId} returned unexpected format`);
       return null;
     }
 
+    const duration = Date.now() - startTime;
+    metrics.observe('osv_vuln_fetch_duration_ms', duration, { found: 'true' });
     return mapOsvItemToVulnerability(data);
   } catch (err: unknown) {
+    const duration = Date.now() - startTime;
+    metrics.observe('osv_vuln_fetch_duration_ms', duration, { found: 'false', error: 'true' });
+    metrics.increment('osv_vuln_fetch_errors_total', 1);
     logger.error(`Error fetching OSV ${osvId}:`, err);
     return null;
   }

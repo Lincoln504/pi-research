@@ -153,7 +153,8 @@ describe('BrowserManager', () => {
           url: 'http://localhost:1234'
       });
       
-      await vi.advanceTimersByTimeAsync(60001);
+      // Need 5 consecutive leadership misses (threshold is 5) - advance 150s for 5 checks
+      await vi.advanceTimersByTimeAsync(150001);
       expect(shutdownSpy).toHaveBeenCalled();
     });
 

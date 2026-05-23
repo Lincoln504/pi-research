@@ -8,6 +8,7 @@
 
 import type { Vulnerability, CisaKevResult } from './types.ts';
 import { createTimeoutSignal } from '../web-research/retry-utils.ts';
+import { metrics } from '../utils/metrics.ts';
 
 const CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
 
@@ -117,6 +118,7 @@ export async function searchCisaKev(
     readonly maxResults?: number;
   },
 ): Promise<CisaKevResult> {
+  const startTime = Date.now();
   const maxResults = options?.maxResults ?? 100;
   const vulnerabilities: Vulnerability[] = [];
   let error: string | undefined = undefined;
@@ -131,13 +133,19 @@ export async function searchCisaKev(
     });
 
     if (!response.ok) {
+      metrics.increment('cisa_kev_errors_total', 1, { status_code: response.status.toString() });
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
+    
+    metrics.increment('cisa_kev_requests_total', 1, { status: 'success' });
 
     const data: unknown = await response.json();
 
     // CISA KEV format is an array of vulnerability objects or nested in a response object
     const cisaData = extractCisaKevItems(data);
+    
+    // Track cache metrics
+    metrics.increment(cisaData.length > 0 ? 'cisa_kev_cache_hits_total' : 'cisa_kev_cache_misses_total', 1);
 
     // Map CISA format to our Vulnerability interface
     for (const item of cisaData) {
@@ -182,6 +190,10 @@ export async function searchCisaKev(
 
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : String(err);
+    metrics.increment('cisa_kev_search_errors_total', 1, { error_type: err instanceof Error ? err.name : 'unknown' });
+  } finally {
+    const duration = Date.now() - startTime;
+    metrics.observe('cisa_kev_fetch_duration_ms', duration, { has_error: error ? 'true' : 'false' });
   }
 
   return {
