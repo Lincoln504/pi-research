@@ -45,11 +45,65 @@ interface NativeHtmlToMarkdownModule {
 /**
  * Robustly extract text from PDF bytes using pdf-oxide-wasm.
  */
+// Size limits to prevent OOM attacks
+// Note: HTML is converted to markdown which typically reduces size by 60-80%,
+// so we can allow larger responses than PDF while still preventing unbounded memory usage
+const MAX_HTML_SIZE = 25 * 1024 * 1024; // 25MB
+const MAX_PDF_SIZE = 100 * 1024 * 1024; // 100MB
+
+// FIX: SSRF protection - prevent access to internal networks
+// These patterns prevent SSRF attacks by blocking access to:
+// - localhost (127.x.x.x, 0.x.x.x, ::1)
+// - link-local addresses (169.254.x.x)
+// - private networks (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
+// - IPv6 link-local and unique local addresses
+const INTERNAL_NETWORK_PATTERNS: ReadonlyArray<RegExp> = [
+  /^127\./,                    // IPv4 loopback
+  /^0\./,                      // IPv4 "this" network
+  /^::1$/,                     // IPv6 loopback
+  /^fe80::/i,                  // IPv6 link-local
+  /^fc00::/i,                  // IPv6 unique local
+  /^fd00::/i,                  // IPv6 unique local
+  /^169\.254\./,               // IPv4 link-local (link-local)
+  /^10\./,                     // RFC 1918 Class A private
+  /^192\.168\./,               // RFC 1918 Class C private
+  /^172\.(1[6-9]|2[0-9]|3[01])\./, // RFC 1918 Class B private
+];
+
+function validateUrlForSSRF(url: string): void {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    
+    // Check for localhost
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      throw new Error('Access to localhost is not allowed');
+    }
+    
+    // Check for internal network patterns
+    for (const pattern of INTERNAL_NETWORK_PATTERNS) {
+      if (pattern.test(hostname)) {
+        throw new Error('Access to internal networks is not allowed');
+      }
+    }
+    
+    // Additional safety: check for non-HTTP protocols
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Only HTTP/HTTPS protocols are allowed');
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('not allowed')) {
+      throw e; // Re-throw our validation errors
+    }
+    // Invalid URL is a different issue, let it bubble up
+    throw new Error(`Invalid URL: ${url}`);
+  }
+}
+
 async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
     // Validate PDF size to prevent unbounded memory usage during parsing
     // Note: pdf-oxide-wasm loads the entire PDF into memory for text extraction,
     // so we limit to prevent pathological cases while allowing most web PDFs
-    const MAX_PDF_SIZE = 100 * 1024 * 1024; // 100MB
     if (bytes.length > MAX_PDF_SIZE) {
         const sizeMB = Math.round(bytes.length / 1024 / 1024);
         logger.warn(`[Scrapers] PDF too large (${sizeMB}MB, max 100MB), skipping extraction`);
@@ -214,6 +268,9 @@ function validateContent(html: string, markdown: string, url: string): void {
 // ============================================================================
 
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
+  // FIX: Validate URL to prevent SSRF attacks
+  validateUrlForSSRF(url);
+  
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PRIMARY_SCRAPER_TIMEOUT);
   // unref() to allow clean exit if this is the only timer keeping the event loop alive
@@ -238,6 +295,24 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const contentType = response.headers.get('content-type') ?? '';
+    
+    // FIX: Check response size to prevent OOM attacks
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const size = parseInt(contentLength, 10);
+      if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
+        if (size > MAX_PDF_SIZE) {
+          const sizeMB = Math.round(size / 1024 / 1024);
+          logger.warn(`[Scrapers] PDF too large (Content-Length: ${sizeMB}MB, max 100MB), skipping`);
+          throw new Error(`PDF too large (${sizeMB}MB, max 100MB)`);
+        }
+      } else if (size > MAX_HTML_SIZE) {
+        const sizeMB = Math.round(size / 1024 / 1024);
+        logger.warn(`[Scrapers] HTML response too large (Content-Length: ${sizeMB}MB, max 25MB), skipping`);
+        throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
+      }
+    }
+    
     if (contentType.includes('application/pdf') || url.toLowerCase().endsWith('.pdf')) {
       const buffer = await response.arrayBuffer();
       const markdown = await extractPdfToMarkdown(new Uint8Array(buffer));
@@ -246,6 +321,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     }
 
     const html = await response.text();
+    
+    // Double-check size for HTML (in case Content-Length was missing or incorrect)
+    if (html.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(html.length / 1024 / 1024);
+      logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), truncating`);
+      throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
+    }
     const markdown = await convertToMarkdown(html);
     validateContent(html, markdown, url);
     return { source: 'fetch', layer: 'fetch', markdown };

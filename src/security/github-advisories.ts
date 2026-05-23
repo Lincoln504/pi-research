@@ -13,7 +13,15 @@
 
 import type { Advisory, GitHubResult } from './types.ts';
 import { logger } from '../logger.ts';
-import { createTimeoutSignal, retryWithBackoff } from '../web-research/retry-utils.ts';
+import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+
+const githubCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  resetTimeoutMs: 30000,
+  name: 'GitHub API',
+  isTransientError: isTransientError
+});
 
 // ============================================================================
 // Type Definitions for Fetch API
@@ -347,7 +355,7 @@ export async function searchGitHubAdvisories(
       const [owner, name] = repoParts;
       const url = `${GITHUB_API_BASE}/repos/${owner}/${name}/security-advisories?per_page=${maxResults}`;
 
-      const response = await retryWithBackoff(async (): Promise<Response> => {
+      const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async (): Promise<Response> => {
         const resp = await fetch(url, {
           headers: {
             'User-Agent': 'pi-research/2.0',
@@ -374,7 +382,7 @@ export async function searchGitHubAdvisories(
         maxRetries: 2,
         initialDelay: 1000,
         maxDelay: 5000,
-      });
+      }));
 
       const data = await response.json();
       let repoAdvisories: readonly GitHubAdvisoryRaw[] = [];
@@ -526,7 +534,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
 
     const url = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(id)}`;
 
-    const response = await retryWithBackoff(async (): Promise<Response> => {
+    const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async (): Promise<Response> => {
       const resp = await fetch(url, {
         headers: {
           'User-Agent': 'pi-research/2.0',
@@ -553,7 +561,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
       maxRetries: 2,
       initialDelay: 1000,
       maxDelay: 5000,
-    });
+    }));
 
     const data = await response.json();
 

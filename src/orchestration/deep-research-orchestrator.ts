@@ -170,6 +170,11 @@ export class DeepResearchOrchestrator {
               const coordUsage = parseTokenUsage(coordUsageObj);
               const tokens = calculateTotalTokens(coordUsage);
               const cost = (coordUsageObj as any).cost?.total ?? 0;
+              // DESIGN NOTE: We call both onPlanningTokens and onTokensConsumed with the same values.
+              // However, in the current implementation (src/tool.ts), only onPlanningTokens is implemented.
+              // onTokensConsumed is called but does nothing. This is intentional - observers implement
+              // one or the other based on their needs. Do NOT implement both in the same observer
+              // or tokens will be double-counted.
               this.options.observer?.onPlanningTokens?.(tokens, cost);
               this.options.observer?.onTokensConsumed?.(tokens, cost);
           }
@@ -738,6 +743,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
                   const tokens = calculateTotalTokens(parsed);
                   const cost: number = (rawUsage as any).cost?.total ?? 0;
                   if (tokens > 0 || cost > 0) {
+                      // DESIGN NOTE: onResearcherProgress includes token/cost tracking.
+                      // onTokensConsumed is called as an alternative interface for observers
+                      // that prefer granular tracking. Implement ONE OR THE OTHER, not both.
                       this.options.observer?.onResearcherProgress?.(id, undefined, tokens, cost);
                       this.options.observer?.onTokensConsumed?.(tokens, cost);
                   }
@@ -893,6 +901,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
               const evalUsage = parseTokenUsage(evalUsageObj);
               const tokens = calculateTotalTokens(evalUsage);
               const cost = (evalUsageObj as any).cost?.total ?? 0;
+              // DESIGN NOTE: onEvaluationTokens includes token/cost tracking.
+              // onTokensConsumed is called as an alternative interface for observers
+              // that prefer granular tracking. Implement ONE OR THE OTHER, not both.
               this.options.observer?.onEvaluationTokens?.(tokens, cost);
               this.options.observer?.onTokensConsumed?.(tokens, cost);
           }

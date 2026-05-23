@@ -590,6 +590,23 @@ export function createResearchTool(): ToolDefinition {
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
         await cleanup?.();
+        const errMsg = String(error).toLowerCase();
+        
+        // Handle rate limits gracefully by explicitly instructing the agent to surface it to the user
+        if (errMsg.includes('429') || errMsg.includes('rate limit') || errMsg.includes('too many requests') || errMsg.includes('quota')) {
+            logger.warn('[research] Run halted gracefully due to rate limit:', error);
+            if (ctx.ui?.notify) {
+                ctx.ui.notify('Research halted: API rate limit reached', 'warning');
+            }
+            return {
+                content: [{
+                    type: 'text',
+                    text: `[SYSTEM MESSAGE]: The research operation was halted gracefully because an API rate limit (HTTP 429) was reached. Please inform the user that the operation was stopped due to provider rate limits and they should wait a moment before trying again.\n\nDetails: ${String(error)}`
+                }],
+                details: {}
+            };
+        }
+
         logger.error('[research] run failed', error);
         return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
       } finally {

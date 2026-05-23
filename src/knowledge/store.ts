@@ -7,6 +7,7 @@ import {
   Utf8, 
   Int64 
 } from 'apache-arrow';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import type { Embedder } from './embedder.ts';
 import * as fs from 'node:fs';
@@ -34,6 +35,11 @@ export class KnowledgeStore {
   private isClosing = false;
   private pendingOperations = 0;
   private rrfReranker: lancedb.rerankers.RRFReranker | null = null;
+  private circuitBreaker = new CircuitBreaker({
+    failureThreshold: 3,
+    resetTimeoutMs: 15000,
+    name: 'KnowledgeStore'
+  });
 
   constructor(options: StoreOptions) {
     this.options = options;
@@ -145,35 +151,37 @@ export class KnowledgeStore {
   }
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
-    if (!this.table) throw new Error('Store not open');
+    return this.circuitBreaker.execute(async () => {
+      if (!this.table) throw new Error('Store not open');
 
-    const rowCount = await this.table.countRows();
-    if (rowCount === 0) return [];
+      const rowCount = await this.table.countRows();
+      if (rowCount === 0) return [];
 
-    const vector = await this.options.embedder.embed(query);
+      const vector = await this.options.embedder.embed(query);
 
-    const results = await this.table
-      .query()
-      .nearestTo(Array.from(vector))
-      .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
-      .fullTextSearch(query)
-      .rerank(await this.getReranker())
-      .limit(options.limit ?? 5)
-      .toArray();
+      const results = await this.table
+        .query()
+        .nearestTo(Array.from(vector))
+        .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
+        .fullTextSearch(query)
+        .rerank(await this.getReranker())
+        .limit(options.limit ?? 5)
+        .toArray();
 
-    // The LanceDB where clause ensures we only get synthesis-description entries.
-    const filteredResults = results
-      .map(r => ({
-        url: r.url as string,
-        text: r.text as string,
-        content: (r.content as string | null) ?? undefined,
-        metadata: JSON.parse(r.metadata as string),
-        timestamp: Number(r.timestamp),
-      }))
-      // Double check just in case the LIKE matched something unexpectedly
-      .filter(doc => doc.metadata.ingestionType === 'synthesis-description');
+      // The LanceDB where clause ensures we only get synthesis-description entries.
+      const filteredResults = results
+        .map(r => ({
+          url: r.url as string,
+          text: r.text as string,
+          content: (r.content as string | null) ?? undefined,
+          metadata: JSON.parse(r.metadata as string),
+          timestamp: Number(r.timestamp),
+        }))
+        // Double check just in case the LIKE matched something unexpectedly
+        .filter(doc => doc.metadata.ingestionType === 'synthesis-description');
 
-    return filteredResults;
+      return filteredResults;
+    });
   }
 
   /**

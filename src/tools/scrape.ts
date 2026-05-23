@@ -19,7 +19,7 @@ import {
   getMaxScrapeBatches,
 } from '../constants.ts';
 import { type Config, DEFAULTS } from '../config.ts';
-import { getStore } from '../knowledge/index.ts';
+import { getStore, isKnowledgeStoreReady } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
 
 export function createScrapeTool(options: {
@@ -147,7 +147,14 @@ export function createScrapeTool(options: {
             logger.log(`[scrape] Cache: ${cachedResults.length} full-text hit(s) out of ${finalUrls.length} URL(s)`);
           }
         } catch (err) {
-          logger.warn('[scrape] Knowledge store cache lookup failed (non-fatal):', err);
+          // FIX: Provide better context for cache failures
+          const isReady = await isKnowledgeStoreReady();
+          if (!isReady) {
+            logger.warn(`[scrape] Knowledge store not initialized - all ${finalUrls.length} URL(s) will be scraped fresh`);
+            logger.warn('[scrape] Note: Knowledge store initialization failure is permanent; restart process to retry');
+          } else {
+            logger.warn('[scrape] Knowledge store cache lookup failed (non-fatal):', err);
+          }
         }
       }
 

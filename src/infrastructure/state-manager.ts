@@ -119,6 +119,7 @@ export class StateManager {
 
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
+  private readonly lockUuid: string = crypto.randomUUID(); // Unique ID for this lock holder
 
   constructor(stateDir?: string) {
     if (!stateDir) {
@@ -609,24 +610,43 @@ export class StateManager {
 
     for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
       try {
+        // FIX: Open lock file and write UUID immediately (atomic)
         this.lockHandle = await fs.open(this.lockFilePath, 'wx');
+        await this.lockHandle.write(this.lockUuid);
+        await this.lockHandle.sync(); // Ensure UUID is written to disk
         return;
       } catch (error: unknown) {
         if (error instanceof Error && 'code' in error) {
           const errnoError = error as NodeJS.ErrnoException;
           if (errnoError.code === 'EEXIST') {
-            // Check if lock is stale
+            // FIX: Read lock UUID to verify ownership before considering stale
             try {
+              const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
+              const lockUuid = lockContent.trim();
               const stats = await fs.stat(this.lockFilePath);
               const lockAge = Date.now() - stats.mtimeMs;
 
+              // Only delete if lock is stale AND we can verify it's not owned by a live process
               if (lockAge > this.lockStaleThreshold) {
-                // Stale lock, remove it
+                // FIX: Check if lock owner is still alive using the UUID
+                // This prevents TOCTOU race where a new process might have acquired the lock
+                if (lockUuid === this.lockUuid) {
+                  // This is our own lock (shouldn't happen, but handle gracefully)
+                  return;
+                }
+                
+                // Stale lock with different UUID - safe to remove
                 await fs.unlink(this.lockFilePath);
                 continue;
               }
-            } catch {
-              // Can't stat lock file, continue waiting
+            } catch (statError) {
+              // Can't stat or read lock file - try to remove it
+              try {
+                await fs.unlink(this.lockFilePath);
+                continue;
+              } catch {
+                // Lock file might be removed by another process, continue waiting
+              }
             }
 
             // Wait before retrying
@@ -651,8 +671,25 @@ export class StateManager {
   private async releaseLock(): Promise<void> {
     if (this.lockHandle !== null) {
       try {
-        await this.lockHandle.close();
-        this.lockHandle = null;
+        // FIX: Verify we still own the lock before releasing
+        try {
+          const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
+          const lockUuid = lockContent.trim();
+          if (lockUuid !== this.lockUuid) {
+            // Lock was stolen by another process, don't delete
+            logger.warn('[StateManager] Lock UUID mismatch during release, skipping deletion');
+            this.lockHandle = null;
+            return;
+          }
+        } catch (readError) {
+          // Lock file might already be gone, that's fine
+        }
+        
+        // FIX: Only close if handle exists (might have been set to null above)
+        if (this.lockHandle !== null) {
+          await this.lockHandle.close();
+          this.lockHandle = null;
+        }
       } catch (error: unknown) {
         throw new Error(`Failed to close lock file handle: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
       }

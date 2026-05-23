@@ -10,6 +10,14 @@ import type { Vulnerability, OSVResult } from './types.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { logger } from '../logger.ts';
 import { OSV_TIMEOUT_MS, DEFAULT_MAX_RETRIES, DEFAULT_INITIAL_DELAY_MS, DEFAULT_MAX_DELAY_MS } from '../constants.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+
+const osvCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  resetTimeoutMs: 30000,
+  name: 'OSV API',
+  isTransientError: isTransientError
+});
 
 const OSV_BASE_URL = 'https://api.osv.dev/v1';
 const DEFAULT_MAX_RESULTS = 20;
@@ -156,33 +164,35 @@ async function fetchWithRetry(
   url: string,
   options: RequestInit,
 ): Promise<Response> {
-  return retryWithBackoff(
-    async () => {
-      const response = await fetch(url, options);
-      if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
-        error.status = response.status;
-        throw error;
-      }
-      return response;
-    },
-    {
-      maxRetries: DEFAULT_MAX_RETRIES,
-      initialDelay: DEFAULT_INITIAL_DELAY_MS,
-      maxDelay: DEFAULT_MAX_DELAY_MS,
-      label: `OSV API: ${url}`,
-      isTransientError: (error) => {
-        // Check if error has status property
-        const status = (error as Error & { status?: number })?.status;
-        if (typeof status === 'number') {
-          // Retry on 429 (rate limit), 403 (forbidden), 5xx (server errors)
-          return status === 429 || status === 403 || status >= 500;
+  return osvCircuitBreaker.execute(async () => {
+    return retryWithBackoff(
+      async () => {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
+          error.status = response.status;
+          throw error;
         }
-        // For other errors, use default transient error check
-        return isTransientError(error);
+        return response;
       },
-    },
-  );
+      {
+        maxRetries: DEFAULT_MAX_RETRIES,
+        initialDelay: DEFAULT_INITIAL_DELAY_MS,
+        maxDelay: DEFAULT_MAX_DELAY_MS,
+        label: `OSV API: ${url}`,
+        isTransientError: (error) => {
+          // Check if error has status property
+          const status = (error as Error & { status?: number })?.status;
+          if (typeof status === 'number') {
+            // Retry on 429 (rate limit), 403 (forbidden), 5xx (server errors)
+            return status === 429 || status === 403 || status >= 500;
+          }
+          // For other errors, use default transient error check
+          return isTransientError(error);
+        },
+      },
+    );
+  });
 }
 
 /**

@@ -1,12 +1,15 @@
 /**
  * Health Check Module
  *
- * Exclusively validates browser-based research capabilities.
+ * Validates system capabilities using the central health registry.
  */
 
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/browser-manager.ts';
+import { getSharedStateManager } from '../infrastructure/state-manager.ts';
+import { getEmbedder } from '../knowledge/index.ts';
+import { healthRegistry } from './registry.ts';
 
 export interface HealthCheckResult {
   success: boolean;
@@ -16,8 +19,61 @@ export interface HealthCheckResult {
   timestamp: string;
 }
 
-// Global state for the health check singleton, using globalThis to avoid TDZ and 
-// ensure it's shared even if the module is evaluated multiple times concurrently.
+// Register Browser Pool Check
+healthRegistry.register('BrowserPool', async () => {
+  if (!isBrowserAvailable()) {
+    return { healthy: false, error: 'Browser binaries (Camoufox) not found or not installed.' };
+  }
+  
+  try {
+    const searchResult = await runBrowserHealthCheck();
+    if (searchResult.success) {
+      return { healthy: true };
+    } else {
+      return { healthy: false, error: 'Browser healthcheck failed: worker reported failure or page failed to load.' };
+    }
+  } catch (e) {
+    return { healthy: false, error: `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}, { timeoutMs: 30000, critical: true });
+
+// Register Knowledge Store Check
+healthRegistry.register('KnowledgeStore', async () => {
+  if (!getConfig().KNOWLEDGE_STORE_ENABLED) {
+    return { healthy: true, diagnostic: { status: 'disabled in config' } };
+  }
+  try {
+    const embedder = await getEmbedder();
+    if (embedder.isInitialized()) {
+        const testVector = await embedder.embed("health check test");
+        if (testVector && testVector.length > 0) {
+            return { healthy: true, diagnostic: { dimension: testVector.length } };
+        }
+    }
+    return { healthy: false, error: 'Embedder not initialized or test embedding failed' };
+  } catch (e) {
+    return { healthy: false, error: `Knowledge Store check failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}, { timeoutMs: 15000, critical: false }); // Not critical for pure web research
+
+// Register GPU Lock Check
+healthRegistry.register('GPULock', async () => {
+  try {
+    const stateManager = getSharedStateManager();
+    const lockInfo = await stateManager.getGpuLockInfo();
+    return { 
+      healthy: true, 
+      diagnostic: { 
+        locked: lockInfo.locked, 
+        stale: lockInfo.locked && (Date.now() - lockInfo.timestamp > 120_000) 
+      } 
+    };
+  } catch (e) {
+    return { healthy: false, error: `GPU Lock check failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}, { timeoutMs: 5000, critical: false });
+
+// Global state for the health check singleton
 function getPendingCheck(): Promise<HealthCheckResult> | null {
   return (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ || null;
 }
@@ -26,15 +82,15 @@ function setPendingCheck(val: Promise<HealthCheckResult> | null) {
   (globalThis as any).__PI_RESEARCH_HEALTH_CHECK_PENDING__ = val;
 }
 
-// Backoff state to prevent retry storms on transient failures
 let healthCheckFailureCount = 0;
 let healthCheckBackoffUntil = 0;
 
-/**
- * Execute a simplified health check verifying browser-based research readiness.
- * Thread-safe singleton pattern to ensure multiple concurrent research sessions
- * share the same health check process.
- */
+export function clearHealthCheckCache() {
+  setPendingCheck(null);
+  healthCheckFailureCount = 0;
+  healthCheckBackoffUntil = 0;
+}
+
 export async function runHealthCheck(): Promise<HealthCheckResult> {
   const pending = getPendingCheck();
   if (pending) return pending;
@@ -44,15 +100,12 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
   
   try {
     const result = await promise;
-    // If the check failed, clear the cache so the next request can try again
     if (!result.success) {
       setPendingCheck(null);
-      // Increment failure count and set backoff
       healthCheckFailureCount++;
       healthCheckBackoffUntil = Date.now() + Math.min(30000, 2000 * Math.pow(2, healthCheckFailureCount - 1));
       logger.warn(`[healthcheck] Check failed, backoff set for ${healthCheckBackoffUntil - Date.now()}ms (failure #${healthCheckFailureCount})`);
     } else {
-      // Success - reset failure count and backoff
       if (healthCheckFailureCount > 0) {
         logger.log(`[healthcheck] Check succeeded after ${healthCheckFailureCount} failures, resetting backoff`);
       }
@@ -66,11 +119,7 @@ export async function runHealthCheck(): Promise<HealthCheckResult> {
   }
 }
 
-/**
- * The actual check logic
- */
 async function performActualCheck(): Promise<HealthCheckResult> {
-  // Apply backoff if previous check failed
   const now = Date.now();
   if (now < healthCheckBackoffUntil) {
     const waitMs = healthCheckBackoffUntil - now;
@@ -78,95 +127,41 @@ async function performActualCheck(): Promise<HealthCheckResult> {
     await new Promise(resolve => setTimeout(resolve, waitMs));
   }
 
-  const timeoutMs = getConfig().HEALTH_CHECK_TIMEOUT_MS ?? 30000;
-
-  const check = async (): Promise<HealthCheckResult> => {
-    const result: HealthCheckResult = {
-      success: false,
-      searchOk: false,
-      scrapeOk: false,
-      timestamp: new Date().toISOString(),
-    };
-
-    logger.log('[healthcheck] Starting Browser-based Research Health Check...');
-
-    // PHASE 1: Verify Browser Availability
-    if (!isBrowserAvailable()) {
-      result.error = 'Browser binaries (Camoufox) not found or not installed.';
-      logger.error('[healthcheck] Search validation failed:', result.error);
-      return result;
-    }
-
-    // PHASE 2: Test browser via DuckDuckGo Lite navigation.
-    // This validates both worker initialization and network connectivity in a single step.
-    // A separate canary scrape is unnecessary — if the browser can load DuckDuckGo it can scrape.
-    logger.log('[healthcheck] Testing browser via pool healthcheck...');
-    try {
-      const searchResult = await runBrowserHealthCheck();
-      if (searchResult.success) {
-        logger.log('[healthcheck] ✓ Browser and network verified.');
-        result.searchOk = true;
-        result.scrapeOk = true;
-      } else {
-        result.error = 'Browser healthcheck failed: worker reported failure or page failed to load.';
-        logger.error('[healthcheck] Browser validation failed:', result.error);
-        return result;
-      }
-    } catch (e) {
-      result.error = `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}`;
-      logger.error('[healthcheck] Browser validation failed:', result.error);
-      return result;
-    }
-
-    result.success = true;
-    logger.log('[healthcheck] ALL SYSTEMS GO. Ready for research.');
-    return result;
+  logger.log('[healthcheck] Starting System Health Checks...');
+  
+  const systemHealth = await healthRegistry.runAll();
+  
+  const result: HealthCheckResult = {
+    success: systemHealth.status === 'healthy' || systemHealth.status === 'degraded',
+    searchOk: false,
+    scrapeOk: false,
+    timestamp: systemHealth.timestamp,
   };
 
-  let timeoutId: NodeJS.Timeout;
-  const timeoutPromise = new Promise<HealthCheckResult>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
-    // unref() to allow clean exit if this is the only timer keeping the event loop alive
-    if (timeoutId.unref) {
-        timeoutId.unref();
-    }
-  });
-
-  try {
-    try {
-      return await Promise.race([check(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutId!);
-    }
-  } catch (e) {
-    return {
-      success: false,
-      searchOk: false,
-      scrapeOk: false,
-      error: e instanceof Error ? e.message : String(e),
-      timestamp: new Date().toISOString(),
-    };
+  const browserCheck = systemHealth.components.find(c => c.component === 'BrowserPool');
+  if (browserCheck?.healthy) {
+    result.searchOk = true;
+    result.scrapeOk = true;
+  } else {
+    result.error = browserCheck?.error;
+    result.success = false; // Browser is critical
   }
+
+  if (systemHealth.status === 'unhealthy') {
+      const failedCritical = systemHealth.components.find(c => !c.healthy && c.component === 'BrowserPool'); // Currently only BrowserPool is critical
+      logger.error('[healthcheck] System validation failed:', failedCritical?.error);
+  } else {
+      logger.log('[healthcheck] ALL SYSTEMS GO. Ready for research.');
+  }
+
+  return result;
 }
 
-/**
- * Check if the health check has already succeeded
- */
 export async function isHealthCheckSuccessful(): Promise<boolean> {
-  const pending = getPendingCheck();
-  if (!pending) return false;
   try {
-    const result = await pending;
-    return result.success;
+    const health = await runHealthCheck();
+    return health.success;
   } catch {
     return false;
   }
-}
-
-/**
- * Clear the cached health check result
- */
-export function clearHealthCheckCache(): void {
-  setPendingCheck(null);
-  logger.log('[healthcheck] Health check cache cleared');
 }

@@ -12,9 +12,30 @@ import * as crypto from 'node:crypto';
 import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+export function isTransientSocketError(error: any): boolean {
+    return error && typeof error.message === 'string' && (
+        error.message.includes('ECONNREFUSED') ||
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('socket hang up') ||
+        error.message.includes('EPIPE') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('timed out') ||
+        error.message.includes('pool busy') ||
+        error.message.includes('unreachable')
+    );
+}
+
+export const browserCircuitBreaker = new CircuitBreaker({
+    failureThreshold: 3,
+    resetTimeoutMs: 15000,
+    name: 'BrowserPool',
+    isTransientError: isTransientSocketError
+});
 
 /**
  * Global HTTP Agent for high-concurrency client requests
@@ -193,10 +214,6 @@ class BrowserTaskScheduler implements IScheduler {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
             this.shutdown();
         }, this.IDLE_TIMEOUT_MS);
-        // unref() to allow process to exit cleanly even if this timer is the only thing keeping it alive
-        if (this.idleTimer.unref) {
-            this.idleTimer.unref();
-        }
     }
 
     public resetIdleTimerOnActivity(): void {
@@ -343,7 +360,6 @@ class BrowserTaskScheduler implements IScheduler {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
-            if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: { success: boolean; error?: string };
@@ -364,6 +380,8 @@ class BrowserTaskScheduler implements IScheduler {
     }
 
     async shutdown() {
+        if (this.isShuttingDown) return;
+        this.isShuttingDown = true;
         if (this.idleTimer) {
             clearTimeout(this.idleTimer);
             this.idleTimer = null;
@@ -651,19 +669,6 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
     return p;
 }
 
-function isTransientSocketError(error: any): boolean {
-    return error && typeof error.message === 'string' && (
-        error.message.includes('ECONNREFUSED') ||
-        error.message.includes('ECONNRESET') ||
-        error.message.includes('socket hang up') ||
-        error.message.includes('EPIPE') ||
-        error.message.includes('ETIMEDOUT') ||
-        error.message.includes('timed out') ||
-        error.message.includes('pool busy') ||
-        error.message.includes('unreachable')
-    );
-}
-
 const require = createRequire(import.meta.url);
 
 export function isBrowserAvailable(): boolean {
@@ -681,18 +686,20 @@ export function isBrowserAvailable(): boolean {
  */
 export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape', config?: Config, retries = 1): Promise<T> {
     try {
-        const scheduler = await getScheduler(config);
-        if (type === 'search') {
-            const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
-            return (await scheduler.runSearch(query, config)) as any;
-        }
-        
-        const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
-        if (url) {
-            return (await scheduler.runScrape(url, config)) as any;
-        }
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            if (type === 'search') {
+                const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
+                return (await scheduler.runSearch(query, config)) as any;
+            }
+            
+            const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
+            if (url) {
+                return (await scheduler.runScrape(url, config)) as any;
+            }
 
-        throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
+            throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
+        });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
@@ -708,8 +715,10 @@ export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape
 
 export async function runBrowserHealthCheck(config?: Config, retries = 1): Promise<{ success: boolean }> {
     try {
-        const scheduler = await getScheduler(config);
-        return await scheduler.runHealthCheck(config);
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            return await scheduler.runHealthCheck(config);
+        });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
@@ -724,8 +733,10 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
 
 export async function runWorkerSearch(query: string, config?: Config, retries = 1): Promise<SearchResult[]> {
     try {
-        const scheduler = await getScheduler(config);
-        return await scheduler.runSearch(query, config);
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            return await scheduler.runSearch(query, config);
+        });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
@@ -739,6 +750,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
 }
 
 export async function stopBrowserManager(): Promise<void> {
+  browserCircuitBreaker.reset();
   const globalScheduler = (globalThis as any).__PI_RESEARCH_SCHEDULER__;
   // Clear both references before any async work so concurrent getScheduler()
   // calls during shutdown see null and start fresh rather than receiving a
@@ -756,7 +768,3 @@ export async function stopBrowserManager(): Promise<void> {
   // Destroy the keep-alive HTTP agent so its open sockets don't block process exit.
   clientAgent.destroy();
 }
-
-// Note: stopBrowserManager is registered in src/index.ts to ensure proper
-// shutdown order (browser pool stops BEFORE knowledge store shuts down).
-

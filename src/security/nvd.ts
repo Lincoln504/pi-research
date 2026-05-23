@@ -14,7 +14,15 @@
 
 import type { Vulnerability, NVDResult } from './types.ts';
 import { logger } from '../logger.ts';
-import { createTimeoutSignal, retryWithBackoff } from '../web-research/retry-utils.ts';
+import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+
+const nvdCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  name: 'NVD API',
+  isTransientError: isTransientError
+});
 
 // ============================================================================
 // Type Definitions
@@ -218,6 +226,7 @@ interface SearchOptions {
   readonly cweId?: string;
   readonly startDate?: string;
   readonly endDate?: string;
+  readonly maxPages?: number;     // FIX: Maximum number of pages to fetch (default: 5)
 }
 
 interface RetryOptions {
@@ -365,7 +374,7 @@ function parseNVDResponse(data: unknown, options: SearchOptions | undefined): Vu
   return [];
 }
 
-function buildURL(term: string, options: SearchOptions | undefined, maxResults: number): string {
+function buildURL(term: string, options: SearchOptions | undefined, maxResults: number, startIndex: number = 0): string {
   const params = new globalThis.URLSearchParams();
 
   // Add keyword search (supports multiple keywords with AND logic)
@@ -386,6 +395,8 @@ function buildURL(term: string, options: SearchOptions | undefined, maxResults: 
     params.append('pubEndDate', options.endDate);
   }
   params.append('resultsPerPage', maxResults.toString());
+  // FIX: Add pagination support
+  params.append('startIndex', startIndex.toString());
 
   return `${NVD_BASE_URL}?${params.toString()}`;
 }
@@ -432,33 +443,60 @@ function fetchWithRetry(url: string): Promise<Response> {
     maxDelay: 10000, // Max 10s delay
   };
 
-  return retryWithBackoff(async () => {
-    let response: Response;
-    try {
-      response = await fetch(url, createFetchOptions());
-    } catch (error) {
-      handleFetchError(error);
-    }
-    handleResponseStatus(response);
-    return response;
-  }, retryOptions);
+  return nvdCircuitBreaker.execute(async () => {
+    return retryWithBackoff(async () => {
+      let response: Response;
+      try {
+        response = await fetch(url, createFetchOptions());
+      } catch (error) {
+        handleFetchError(error);
+      }
+      handleResponseStatus(response);
+      return response;
+    }, retryOptions);
+  });
 }
 
+// FIX: Pagination support - fetch multiple pages up to maxPages
 async function searchSingleTerm(
   term: string,
   options: SearchOptions | undefined,
   maxResults: number,
 ): Promise<Vulnerability[]> {
-  const url = buildURL(term, options, maxResults);
+  const allVulnerabilities: Vulnerability[] = [];
+  const maxPages = options?.maxPages ?? 5; // Default to 5 pages max
+  const pageSize = Math.min(20, maxResults); // Fetch 20 per page, cap at maxResults
+  let startIndex = 0;
+  let totalPagesFetched = 0;
+  
+  while (totalPagesFetched < maxPages && allVulnerabilities.length < maxResults) {
+    const url = buildURL(term, options, pageSize, startIndex);
 
-  // Apply rate limiting before making the request
-  await nvdRateLimiter.acquire();
+    // Apply rate limiting before making the request
+    await nvdRateLimiter.acquire();
 
-  // Wrap fetch with retry logic for transient errors (rate limiting, server errors)
-  const response = await fetchWithRetry(url);
-  const data = await response.json();
+    // Wrap fetch with retry logic for transient errors (rate limiting, server errors)
+    const response = await fetchWithRetry(url);
+    const data = await response.json();
 
-  return parseNVDResponse(data, options);
+    const vulnerabilities = parseNVDResponse(data, options);
+    
+    if (vulnerabilities.length === 0) {
+      // No more results
+      break;
+    }
+    
+    allVulnerabilities.push(...vulnerabilities);
+    
+    if (data.totalResults !== undefined && startIndex + pageSize >= data.totalResults) {
+      break;
+    }
+    
+    startIndex += pageSize;
+    totalPagesFetched++;
+  }
+
+  return allVulnerabilities.slice(0, maxResults);
 }
 
 function deduplicateVulnerabilities(vulnerabilityArrays: Vulnerability[][]): Vulnerability[] {

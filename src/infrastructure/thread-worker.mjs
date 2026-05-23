@@ -30,15 +30,21 @@ const workerId = Math.random().toString(36).substring(2, 6);
 // This works cross-platform (Linux, Mac, Windows) in Node.js.
 let orphanCheckTimer = null;
 if (process.ppid) {
-    orphanCheckTimer = setInterval(() => {
+    orphanCheckTimer = setInterval(async () => {
         try {
             // signal 0 checks if the process is alive
             process.kill(process.ppid, 0);
         } catch (_e) {
             // If error is thrown, the parent process is likely dead or unreachable
             logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
-            if (context) context.close().catch(() => {});
-            if (browser) browser.close().catch(() => {});
+            // FIX: Await cleanup to prevent browser/context leaks
+            if (context) await context.close().catch(() => {});
+            if (browser) await browser.close().catch(() => {});
+            // Clear the orphan check timer to prevent it from keeping the event loop alive
+            if (orphanCheckTimer) {
+                clearInterval(orphanCheckTimer);
+                orphanCheckTimer = null;
+            }
             process.exit(1);
         }
     }, 10000);

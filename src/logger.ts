@@ -132,21 +132,122 @@ function formatArg(arg: unknown): string {
 export class Logger implements ILogger {
   private verbose: boolean;
   private logFile: string;
+  private logDir: string;
+  private lastDiskSpaceCheck: number = 0;
+  private hasDiskSpace: boolean = true;
+  
+  // FIX: Disk space check configuration
+  private readonly MIN_DISK_SPACE_BYTES = 1_048_576; // 1MB minimum
+  private readonly DISK_SPACE_CHECK_INTERVAL_MS = 60_000; // Check every 60 seconds
+  
+  // FIX: Log rotation configuration
+  private readonly MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB max file size
+  private readonly MAX_LOG_FILES = 5; // Keep last 5 archived logs
+  private lastRotationCheck: number = 0;
   readonly [LOGGER_BRAND] = true;
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
     this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(options.researchRunId);
+    this.logDir = path.dirname(this.logFile);
 
     // Ensure parent directory exists
     try {
-      const dir = path.dirname(this.logFile);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
+      if (!existsSync(this.logDir)) {
+        mkdirSync(this.logDir, { recursive: true });
       }
     } catch {
       // Ignore if we can't create dir
     }
+  }
+
+  /**
+   * FIX: Rotate log files when they exceed MAX_LOG_SIZE.
+   * Archives are created with ISO timestamp suffix.
+   * Old archives beyond MAX_LOG_FILES are cleaned up.
+   */
+  private rotateLogFile(): void {
+    try {
+      const stats = fs.statSync(this.logFile);
+      const fileSize = stats.size;
+      
+      if (fileSize <= this.MAX_LOG_SIZE) {
+        return; // No rotation needed
+      }
+      
+      // Create archive filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const archivePath = `${this.logFile}.${timestamp}`;
+      
+      // Rename current log file to archive
+      fs.renameSync(this.logFile, archivePath);
+      
+      // Clean up old archives
+      try {
+        const files = fs.readdirSync(this.logDir);
+        const logFiles = files
+          .filter(f => f.startsWith(path.basename(this.logFile)) && f !== path.basename(this.logFile))
+          .sort(); // Sort by timestamp (oldest first)
+        
+        // Remove excess archives
+        const toDelete = logFiles.slice(0, -this.MAX_LOG_FILES);
+        for (const file of toDelete) {
+          try {
+            fs.unlinkSync(path.join(this.logDir, file));
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+      
+      logger.log('[Logger] Rotated log file to:', archivePath);
+    } catch (error) {
+      // Ignore rotation errors (file might not exist yet, etc.)
+    }
+  }
+
+  /**
+   * FIX: Check if there is sufficient disk space for logging.
+   * Checks are throttled to avoid excessive filesystem operations.
+   * 
+   * @returns true if there is enough disk space, false otherwise
+   */
+  private hasSufficientDiskSpace(): boolean {
+    const now = Date.now();
+    
+    // Only check periodically (every 60 seconds)
+    if (now - this.lastDiskSpaceCheck < this.DISK_SPACE_CHECK_INTERVAL_MS) {
+      return this.hasDiskSpace;
+    }
+    
+    this.lastDiskSpaceCheck = now;
+    
+    try {
+      // POSIX: use statfs for accurate disk space information
+      if (typeof fs.statfs !== 'undefined') {
+        const stats = fs.statfsSync(this.logDir);
+        const availableBytes = stats.bavail * stats.bsize;
+        
+        if (availableBytes < this.MIN_DISK_SPACE_BYTES) {
+          this.hasDiskSpace = false;
+          // Only log once (not via this.emit to avoid recursion)
+          console.error('[Logger] Insufficient disk space for logging:', 
+            `${Math.round(availableBytes / 1024 / 1024)}MB available, minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required`);
+        } else {
+          this.hasDiskSpace = true;
+        }
+      } else {
+        // Non-POSIX: assume OK (Windows has different disk management)
+        this.hasDiskSpace = true;
+      }
+    } catch (error) {
+      // On error, assume OK to avoid blocking logging
+      this.hasDiskSpace = true;
+    }
+    
+    return this.hasDiskSpace;
   }
 
   /**
@@ -158,6 +259,18 @@ export class Logger implements ILogger {
     // Only filter INFO and DEBUG if not verbose
     if (!this.verbose && (level === LogLevel.INFO || level === LogLevel.DEBUG)) {
       return;
+    }
+
+    // FIX: Check disk space before writing
+    if (!this.hasSufficientDiskSpace()) {
+      return; // Skip writing when disk is full
+    }
+
+    // FIX: Rotate log file if needed (check every 60 seconds or on ERROR/WARN)
+    const now = Date.now();
+    if (now - this.lastRotationCheck > 60_000 || level === 'ERROR' || level === 'WARN') {
+      this.rotateLogFile();
+      this.lastRotationCheck = now;
     }
 
     const timestamp = new Date().toISOString();
@@ -244,10 +357,16 @@ export class Logger implements ILogger {
         debug: console.debug,
     };
     const logFile = this.logFile;
+    const hasSufficientDiskSpace = this.hasSufficientDiskSpace.bind(this);
 
     // Patch console methods — redirect all application/library logs to the log file
     const patchConsole = (level: string) => {
         return (...args: unknown[]) => {
+            // FIX: Check disk space before writing
+            if (!hasSufficientDiskSpace()) {
+                return;
+            }
+            
             const timestamp = new Date().toISOString();
             const entry = {
                 timestamp,
@@ -271,6 +390,12 @@ export class Logger implements ILogger {
     (process.stderr.write as any) = (chunk: string | Uint8Array, encodingOrCb?: any, callback?: any) => {
         const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
         const message = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+
+        // FIX: Check disk space before writing
+        if (!hasSufficientDiskSpace()) {
+            if (typeof cb === 'function') cb();
+            return true;
+        }
 
         const timestamp = new Date().toISOString();
         const entry = {
@@ -348,6 +473,13 @@ export class Logger implements ILogger {
 
         // If it's plain text (no ANSI) and non-empty, it's likely a leaked log — divert and log
         if (!hasAnsi && message.trim().length > 0) {
+            // FIX: Check disk space before writing
+            if (!hasSufficientDiskSpace()) {
+                const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
+                if (typeof cb === 'function') cb();
+                return true;
+            }
+            
             const timestamp = new Date().toISOString();
             const entry = {
                 timestamp,
@@ -409,6 +541,11 @@ export class Logger implements ILogger {
                         (!hasAnsi && !isBoxDrawing && message.trim().length > 0);
 
                     if (shouldDivert) {
+                        // FIX: Check disk space before writing
+                        if (!hasSufficientDiskSpace()) {
+                            return (typeof chunk === 'string' ? Buffer.from(chunk).length : (chunk as any).length);
+                        }
+                        
                         const timestamp = new Date().toISOString();
                         const entry = {
                             timestamp,
@@ -466,6 +603,16 @@ export class Logger implements ILogger {
 
   error(...args: unknown[]): void {
     this.emit(LogLevel.ERROR, ...args);
+    // Track errors for pattern recognition
+    if (args.length > 0) {
+      const errArg = args.find(a => a instanceof Error) || args[0];
+      const context = getLogContext();
+      
+      // Lazy load to break circular dependency
+      import('./utils/error-tracker.ts').then(mod => {
+        mod.errorTracker.trackError(errArg as string | Error, context);
+      }).catch(() => {});
+    }
   }
 
   warn(...args: unknown[]): void {

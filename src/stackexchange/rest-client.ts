@@ -5,6 +5,7 @@
 
 import type { StackExchangeWrapper } from './types.ts';
 import { logger } from '../logger.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 
 const API_BASE = 'https://api.stackexchange.com/2.3';
 
@@ -21,6 +22,7 @@ export class StackExchangeClient {
   private quotaMax = 300;
   private requestCount = 0;
   private lastBackoff: number | null = null;
+  private circuitBreaker: CircuitBreaker;
 
   constructor(
     apiKey: string | null,
@@ -28,89 +30,104 @@ export class StackExchangeClient {
   ) {
     this._apiKey = apiKey;
     this._timeout = timeout;
+    this.circuitBreaker = new CircuitBreaker({
+      failureThreshold: 5,
+      resetTimeoutMs: 30000,
+      name: 'StackExchange API',
+      isTransientError: (err) => {
+        if (err instanceof Error) {
+            // Count network errors and 5xx errors, but not 4xx client errors (except 429)
+            const msg = err.message.toLowerCase();
+            return msg.includes('timeout') || msg.includes('network') || msg.includes('econn') || msg.includes('50') || msg.includes('429');
+        }
+        return true;
+      }
+    });
   }
 
   async request<T>(options: RequestOptions, signal?: AbortSignal): Promise<StackExchangeWrapper<T>> {
-    // Check for backoff from previous requests
-    if (this.lastBackoff && this.lastBackoff > Date.now()) {
-      const waitTime = Math.ceil((this.lastBackoff - Date.now()) / 1000);
-      throw new Error(
-        `Rate limited. Please wait ${waitTime} seconds before making more requests.`,
-      );
-    }
-
-    const url = new URL(`${API_BASE}${options.endpoint}`);
-    url.search = options.params.toString();
-
-    // Add API key if provided
-    if (this._apiKey) {
-      url.searchParams.set('key', this._apiKey);
-    }
-
-    // Add site parameter if not already present (for methods that need it)
-    if (!url.searchParams.has('site') && !options.endpoint.startsWith('/sites')) {
-      url.searchParams.set('site', 'stackoverflow.com');
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, this._timeout);
-
-    // Chain the signal if provided
-    const abortHandler = () => {
-      clearTimeout(timeoutId);
-      controller.abort();
-    };
-    if (signal) {
-      signal.addEventListener('abort', abortHandler, { once: true });
-    }
-
-    try {
-      const response = await fetch(url.toString(), {
-        method: options.method,
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
-
-      clearTimeout(timeoutId);
-
-      const data = await response.json() as StackExchangeWrapper<T>;
-
-      // Handle API errors
-      if (data.error_id) {
+    return this.circuitBreaker.execute(async () => {
+      // Check for backoff from previous requests
+      if (this.lastBackoff && this.lastBackoff > Date.now()) {
+        const waitTime = Math.ceil((this.lastBackoff - Date.now()) / 1000);
         throw new Error(
-          `Stack Exchange API Error (${data.error_id} - ${data.error_name}): ${data.error_message}`,
+          `Rate limited. Please wait ${waitTime} seconds before making more requests.`,
         );
       }
 
-      // Update quota tracking
-      this.quotaRemaining = data.quota_remaining;
-      this.quotaMax = data.quota_max;
-      this.requestCount++;
+      const url = new URL(`${API_BASE}${options.endpoint}`);
+      url.search = options.params.toString();
 
-      // Handle backoff
-      if (data.backoff) {
-        this.lastBackoff = Date.now() + (data.backoff * 1000);
-        logger.warn(`[StackExchange] Backoff required: ${data.backoff} seconds`);
+      // Add API key if provided
+      if (this._apiKey) {
+        url.searchParams.set('key', this._apiKey);
       }
 
-      return data;
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${this._timeout}ms`, { cause: error });
+      // Add site parameter if not already present (for methods that need it)
+      if (!url.searchParams.has('site') && !options.endpoint.startsWith('/sites')) {
+        url.searchParams.set('site', 'stackoverflow.com');
       }
 
-      throw error;
-    } finally {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, this._timeout);
+
+      // Chain the signal if provided
+      const abortHandler = () => {
+        clearTimeout(timeoutId);
+        controller.abort();
+      };
       if (signal) {
-        signal.removeEventListener('abort', abortHandler);
+        signal.addEventListener('abort', abortHandler, { once: true });
       }
-    }
+
+      try {
+        const response = await fetch(url.toString(), {
+          method: options.method,
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
+
+        clearTimeout(timeoutId);
+
+        const data = await response.json() as StackExchangeWrapper<T>;
+
+        // Handle API errors
+        if (data.error_id) {
+          throw new Error(
+            `Stack Exchange API Error (${data.error_id} - ${data.error_name}): ${data.error_message}`,
+          );
+        }
+
+        // Update quota tracking
+        this.quotaRemaining = data.quota_remaining;
+        this.quotaMax = data.quota_max;
+        this.requestCount++;
+
+        // Handle backoff
+        if (data.backoff) {
+          this.lastBackoff = Date.now() + (data.backoff * 1000);
+          logger.warn(`[StackExchange] Backoff required: ${data.backoff} seconds`);
+        }
+
+        return data;
+      } catch (error) {
+        clearTimeout(timeoutId);
+
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(`Request timeout after ${this._timeout}ms`, { cause: error });
+        }
+
+        throw error;
+      } finally {
+        if (signal) {
+          signal.removeEventListener('abort', abortHandler);
+        }
+      }
+    });
   }
 
   getQuotaInfo(): { remaining: number; max: number; requestCount: number; lastBackoff: number | null } {

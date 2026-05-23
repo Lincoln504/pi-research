@@ -14,6 +14,7 @@ describe('NVD Client', () => {
 
   it('should search NVD with multiple terms and deduplicate', async () => {
     const mockResponse = {
+      totalResults: 1,
       vulnerabilities: [
         {
           cve: {
@@ -57,6 +58,7 @@ describe('NVD Client', () => {
 
   it('should parse CVSS v3.0 metrics if v3.1 is missing', async () => {
     const mockResponse = {
+      totalResults: 1,
       vulnerabilities: [{
         cve: {
           id: 'CVE-V30',
@@ -82,6 +84,7 @@ describe('NVD Client', () => {
 
   it('should extract complex data (CWEs, references, CPEs)', async () => {
     const mockResponse = {
+      totalResults: 1,
       vulnerabilities: [{
         cve: {
           id: 'CVE-COMPLEX',
