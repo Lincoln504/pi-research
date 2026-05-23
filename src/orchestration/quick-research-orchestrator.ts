@@ -23,6 +23,7 @@ import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { isHealthCheckSuccessful, runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
+import type { ExtendedResearchContext, GlobalStateGetter, AbortCleanup, ResearchMessage } from '../types/index.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -100,15 +101,14 @@ export class QuickResearchOrchestrator {
 
     logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
-    const extendedCtx = ctx as any;
     const session = await createResearcherSession({
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      settingsManager: extendedCtx.settingsManager,
+      settingsManager: undefined,
       systemPrompt: prompt,
       extensionCtx: ctx,
-      getGlobalState: () => ({ researchId: this.options.researchId } as any),
+      getGlobalState: () => ({ researchId: this.options.researchId }),
       updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
       onSearchProgress: (links) => {
         observer?.onSearchProgress?.(links);
@@ -117,13 +117,13 @@ export class QuickResearchOrchestrator {
 
     const subscription = session.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_end') {
-            const msg = event.message as any;
+            const msg = event.message as ResearchMessage;
             if (msg?.role !== 'assistant') return;
             const rawUsage = msg.usage;
             if (rawUsage) {
                 const parsed = parseTokenUsage(rawUsage);
                 const tokens = calculateTotalTokens(parsed);
-                const cost: number = (rawUsage as any).cost?.total ?? 0;
+                const cost: number = rawUsage.cost?.total ?? 0;
                 if (tokens > 0 || cost > 0) {
                     metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });
                     metrics.increment('llm_cost_total', cost, { component: 'quick_researcher', complexity: '0' });
@@ -173,7 +173,7 @@ export class QuickResearchOrchestrator {
                 onAbort();
               } else {
                 signal.addEventListener('abort', onAbort, { once: true });
-                (abortCleanup as any) = () => signal.removeEventListener('abort', onAbort);
+                (abortCleanup as AbortCleanup) = () => signal.removeEventListener('abort', onAbort);
               }
             })
           ] : []),

@@ -23,20 +23,23 @@ import {
   setSchedulerRestartInProgress,
 } from '../core/internal-state.ts';
 import { setHealthCheckPending } from '../core/health-cache-manager.ts';
+import type { NodeError, BrowserTask } from '../types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export function isTransientSocketError(error: any): boolean {
-    return error && typeof error.message === 'string' && (
-        error.message.includes('ECONNREFUSED') ||
-        error.message.includes('ECONNRESET') ||
-        error.message.includes('socket hang up') ||
-        error.message.includes('EPIPE') ||
-        error.message.includes('ETIMEDOUT') ||
-        error.message.includes('timed out') ||
-        error.message.includes('pool busy') ||
-        error.message.includes('unreachable')
+export function isTransientSocketError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const err = error as NodeError;
+    return typeof err.message === 'string' && (
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('ECONNRESET') ||
+        err.message.includes('socket hang up') ||
+        err.message.includes('EPIPE') ||
+        err.message.includes('ETIMEDOUT') ||
+        err.message.includes('timed out') ||
+        err.message.includes('pool busy') ||
+        err.message.includes('unreachable')
     );
 }
 
@@ -170,7 +173,7 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
 
 interface IScheduler {
     runSearch(query: string, config?: Config): Promise<SearchResult[]>;
-    runScrape(url: string, config?: Config): Promise<any>;
+    runScrape(url: string, config?: Config): Promise<unknown>;
     runHealthCheck(config?: Config): Promise<{ success: boolean }>;
     shutdown(): Promise<void>;
 }
@@ -581,13 +584,17 @@ class BrowserClient implements IScheduler {
                 resolved = true;
                 clearTimeout(timer);
                 // Enhance error message with socket-specific details
-                const errorMsg = (err as any).code === 'ECONNRESET' || (err as any).code === 'EPIPE' 
-                    ? `Browser pool socket ${path} closed (pool likely busy or restarting) - ${err.message}`
-                    : (err as any).code === 'ECONNREFUSED'
-                    ? `Browser pool ${path} unreachable (server may have crashed) - ${err.message}`
-                    : (err as any).code === 'ETIMEDOUT'
-                    ? `Browser pool ${path} timed out (slow browser response) - ${err.message}`
-                    : `Browser pool ${path} error: ${err.message}`;
+                const nodeErr = err as NodeError;
+                let errorMsg: string;
+                if (nodeErr.code === 'ECONNRESET' || nodeErr.code === 'EPIPE') {
+                    errorMsg = `Browser pool socket ${path} closed (pool likely busy or restarting) - ${err.message}`;
+                } else if (nodeErr.code === 'ECONNREFUSED') {
+                    errorMsg = `Browser pool ${path} unreachable (server may have crashed) - ${err.message}`;
+                } else if (nodeErr.code === 'ETIMEDOUT') {
+                    errorMsg = `Browser pool ${path} timed out (slow browser response) - ${err.message}`;
+                } else {
+                    errorMsg = `Browser pool ${path} error: ${err.message}`;
+                }
                 logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, errorMsg);
                 reject(new Error(errorMsg));
             });
@@ -675,7 +682,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                     
                                 // Race check: if initializationPromise was cleared (restart), don't set reference
                     if (initializationPromise === p) {
-                        setScheduler(client as any);
+                        setScheduler(client);
                         setSchedulerVersion(currentVersion);
                         cachedSchedulerVersion = currentVersion;
                     } else {
@@ -696,7 +703,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
             if (initializationPromise === p) {
-                setScheduler(scheduler as any);
+                setScheduler(scheduler);
                 setSchedulerVersion(currentVersion);
                 cachedSchedulerVersion = currentVersion;
             } else {
@@ -755,7 +762,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         metrics.increment('browser_leadership_wins_total', 1);
         if (initializationPromise === p) {
-            setScheduler(scheduler as any);
+            setScheduler(scheduler);
             setSchedulerVersion(schedulerVersion);
             cachedSchedulerVersion = schedulerVersion;
         } else {
@@ -797,18 +804,19 @@ export function isBrowserAvailable(): boolean {
 /**
  * Dispatches a browser task to the unified worker pool.
  */
-export async function runBrowserTask<T>(taskOrUrl: any, type: 'search' | 'scrape' = 'scrape', config?: Config, retries = 1): Promise<T> {
+export async function runBrowserTask<T>(taskOrUrl: string | BrowserTask, type: 'search' | 'scrape' = 'scrape', config?: Config, retries = 1): Promise<T> {
     try {
         return await browserCircuitBreaker.execute(async () => {
             const scheduler = await getScheduler(config);
             if (type === 'search') {
-                const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).query;
-                return (await scheduler.runSearch(query, config)) as any;
+                const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).query;
+                if (!query) throw new Error('Search task requires a query');
+                return (await scheduler.runSearch(query, config)) as T;
             }
             
-            const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as any).url;
+            const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).url;
             if (url) {
-                return (await scheduler.runScrape(url, config)) as any;
+                return (await scheduler.runScrape(url, config)) as T;
             }
 
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');

@@ -41,6 +41,7 @@ import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { registerScrapedLinks, normalizeUrl, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
+import type { LLMResponseMetadata, AbortCleanup, GlobalStateGetter, ResearchMessage, ExtendedResearchContext } from '../types/index.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -136,7 +137,7 @@ export class DeepResearchOrchestrator {
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
       logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
 
-      const historyMessages: any[] = [];
+      const historyMessages: { role: string; content: { type: string; text: string }[] }[] = [];
       let lastRawPlanText = '';
       for (let attempt = 1; attempt <= 3; attempt++) {
         if (attempt > 1) this.options.observer?.onPlanningStart?.(attempt);
@@ -155,10 +156,11 @@ export class DeepResearchOrchestrator {
           messages,
         }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
-        if ((planResponse as any).stopReason === 'error' || (planResponse as any).stopReason === 'aborted') {
-          const apiError = (planResponse as any).errorMessage || `Model API returned stop reason: ${(planResponse as any).stopReason}`;
+        const planMetadata = planResponse as LLMResponseMetadata;
+        if (planMetadata.stopReason === 'error' || planMetadata.stopReason === 'aborted') {
+          const apiError = planMetadata.errorMessage || `Model API returned stop reason: ${planMetadata.stopReason}`;
           logger.error(`[Orchestrator] Coordinator API call failed (attempt ${attempt}): ${apiError}`);
-          metrics.increment('llm_api_errors_total', 1, { component: 'coordinator', stopReason: (planResponse as any).stopReason });
+          metrics.increment('llm_api_errors_total', 1, { component: 'coordinator', stopReason: planMetadata.stopReason });
           throw new Error(`Coordinator model API error: ${apiError}`);
         }
 
@@ -171,11 +173,10 @@ export class DeepResearchOrchestrator {
         try {
           currentPlan = this.parseJsonPlan(rawPlanText);
 
-          const coordUsageObj = (planResponse as any).usage;
-          if (coordUsageObj) {
-              const coordUsage = parseTokenUsage(coordUsageObj);
+          if (planResponse.usage) {
+              const coordUsage = parseTokenUsage(planResponse.usage);
               const tokens = calculateTotalTokens(coordUsage);
-              const cost = (coordUsageObj as any).cost?.total ?? 0;
+              const cost = planResponse.usage.cost?.total ?? 0;
               metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(this.options.complexity) });
               metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(this.options.complexity) });
               // DESIGN NOTE: We call both onPlanningTokens and onTokensConsumed with the same values.
@@ -765,7 +766,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
     logger.debug(`[Orchestrator] Researcher ${id} System Prompt:\n${prompt}`);
 
-    const extendedCtx = this.options.ctx as any;
+    const extendedCtx = this.options.ctx as ExtendedResearchContext;
     const maxAttempts = this.config.RESEARCHER_MAX_RETRIES + 1;
     let lastError: unknown;
     const researcherExecutionStartMs = Date.now();
@@ -787,7 +788,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
         extensionCtx: this.options.ctx,
         noSearch: true,
         noStoredSearch: true,
-        getGlobalState: () => ({ researchId: this.options.researchId } as any),
+        getGlobalState: (): GlobalStateGetter['call'] => () => ({ researchId: this.options.researchId }),
         updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
         onSearchProgress: (links) => {
             this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
@@ -797,13 +798,13 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
       const subscription = session.subscribe((event: AgentSessionEvent) => {
           if (event.type === 'message_end') {
-              const msg = event.message as any;
+              const msg = event.message as ResearchMessage;
               if (msg?.role !== 'assistant') return;
               const rawUsage = msg.usage;
               if (rawUsage) {
                   const parsed = parseTokenUsage(rawUsage);
                   const tokens = calculateTotalTokens(parsed);
-                  const cost: number = (rawUsage as any).cost?.total ?? 0;
+                  const cost: number = rawUsage.cost?.total ?? 0;
                   if (tokens > 0 || cost > 0) {
                       metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(this.options.complexity) });
                       metrics.increment('llm_cost_total', cost, { component: 'researcher', complexity: String(this.options.complexity) });
@@ -849,7 +850,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
                   onAbort();
                 } else {
                   signal.addEventListener('abort', onAbort, { once: true });
-                  (abortCleanup as any) = () => signal.removeEventListener('abort', onAbort);
+                  (abortCleanup as AbortCleanup) = () => signal.removeEventListener('abort', onAbort);
                 }
               })
             ] : []),
@@ -958,21 +959,21 @@ You are in the late phase of research. Set a higher threshold for delegation:
               messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }]
           }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
-          if ((response as any).stopReason === 'error' || (response as any).stopReason === 'aborted') {
-              const apiError = (response as any).errorMessage || `Model API returned stop reason: ${(response as any).stopReason}`;
+          const responseMetadata = response as LLMResponseMetadata;
+          if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
+              const apiError = responseMetadata.errorMessage || `Model API returned stop reason: ${responseMetadata.stopReason}`;
               logger.error(`[Orchestrator] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
-              metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: (response as any).stopReason });
+              metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: responseMetadata.stopReason });
               throw new Error(`Evaluator model API error: ${apiError}`);
           }
 
           const textContent = response.content.find((c): c is TextContent => c.type === 'text');
           text = textContent?.text || "";
           logger.debug(`[Orchestrator] Evaluator Response:\n${text}`);
-          const evalUsageObj = (response as any).usage;
-          if (evalUsageObj) {
-              const evalUsage = parseTokenUsage(evalUsageObj);
+          if (response.usage) {
+              const evalUsage = parseTokenUsage(response.usage);
               const tokens = calculateTotalTokens(evalUsage);
-              const cost = (evalUsageObj as any).cost?.total ?? 0;
+              const cost = response.usage.cost?.total ?? 0;
               metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(this.options.complexity) });
               metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(this.options.complexity) });
               // DESIGN NOTE: onEvaluationTokens includes token/cost tracking.
@@ -1021,7 +1022,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
           plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
       }
 
-      this.options.observer?.onEvaluationDecision?.(plan.action as any, plan, this.currentRound);
+      this.options.observer?.onEvaluationDecision?.(plan.action as 'synthesize' | 'delegate', plan, this.currentRound);
 
       if (mustSynthesize && plan.action !== 'synthesize') {
           logger.warn('[Orchestrator] Evaluator tried to delegate despite reaching max rounds; forcing synthesis.');

@@ -13,6 +13,7 @@ import type {
 } from '@mariozechner/pi-coding-agent';
 import type { Model } from '@mariozechner/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
+import type { ExtendedResearchContext, ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
 import { validateConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
@@ -127,7 +128,8 @@ export function createResearchTool(): ToolDefinition {
             // exists under multiple providers (e.g. built-in "zai/glm-4.7" vs
             // user-configured "glm-coding/glm-4.7"), causing auth failures.
             let selectedModel = baseModel;
-            if (modelId && (ctx.model as any)?.id !== modelId) {
+            const extendedCtx = ctx as ExtendedResearchContext;
+            if (modelId && extendedCtx.model?.id !== modelId) {
                 selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
             }
 
@@ -199,8 +201,8 @@ export function createResearchTool(): ToolDefinition {
             const result = await runResearch({
               ctx,
               query: sanitizedQuery,
-              depth: (depth ?? 0) as any,
-              model: selectedModel as Model<any>,
+              depth: (depth ?? 0) as ResearchDepth,
+              model: selectedModel as Model<unknown>,
               observer,
               sessionId: piSessionId,
               researchId,

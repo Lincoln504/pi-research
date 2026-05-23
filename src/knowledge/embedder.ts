@@ -7,6 +7,36 @@ import { logger, getLogger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { StateManager } from '../infrastructure/state-manager.ts';
 
+/**
+ * ONNX runtime environment
+ */
+interface ONNXRuntimeEnv {
+  logLevel?: string;
+  debug?: boolean;
+}
+
+/**
+ * HuggingFace environment with ONNX support
+ */
+interface HFEnv {
+  cacheDir: string;
+  onnx?: ONNXRuntimeEnv;
+}
+
+/**
+ * Disposable pipeline interface
+ */
+interface DisposablePipeline {
+  dispose(): Promise<void>;
+}
+
+/**
+ * Feature extraction pipeline with device option
+ */
+interface FeatureExtractionPipelineWithDevice extends FeatureExtractionPipeline {
+  device?: 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu';
+}
+
 export interface EmbedderOptions {
   model: string;
   pooling?: 'mean' | 'cls' | 'last_token';
@@ -78,10 +108,10 @@ export class Embedder {
     this.stateManager = options.stateManager ?? null;
 
     try {
-      const onnxEnv = (env as any).onnx;
-      if (onnxEnv) {
-        onnxEnv.logLevel = 'error';
-        onnxEnv.debug = false;
+      const hfEnv = env as HFEnv;
+      if (hfEnv.onnx) {
+        hfEnv.onnx.logLevel = 'error';
+        hfEnv.onnx.debug = false;
       }
     } catch (e) {
       logger.debug('[embedder] Failed to set ONNX logLevel:', e);
@@ -158,10 +188,10 @@ export class Embedder {
           : `Model download timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
 
         const pipelinePromise = Promise.resolve(pipeline('feature-extraction', this.model, {
-          device: (this.device as any),
+          device: this.device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
         }));
 
-        pipelinePromise.then((p: any) => {
+        pipelinePromise.then((p: DisposablePipeline) => {
           // If state is disposing/idle/failed and the pipeline resolves later,
           // safely dispose it instead of holding it.
           if (this.pipeline !== p && this.state !== 'initializing') {
@@ -194,7 +224,7 @@ export class Embedder {
         if (this.device === 'webgpu' && this.isWebGpuDeviceError(warmupErr)) {
           logger.warn('[embedder] WebGPU OOM during warmup — falling back to CPU');
           if (this.pipeline) {
-              try { await (this.pipeline as any).dispose(); } catch { /* ignore */ }
+              try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
           }
           this.pipeline = null;
 
@@ -207,7 +237,7 @@ export class Embedder {
           this.pipeline = await getLogger().runCapturingStderr(async () => {
             return await withTimeout(
               pipeline('feature-extraction', this.model, {
-                device: 'cpu' as any,
+                device: 'cpu',
               }),
               this.initializationTimeoutMs,
               'CPU fallback model load timed out'
@@ -237,7 +267,7 @@ export class Embedder {
         this.gpuLockHeld = false;
       }
       if (this.pipeline) {
-        try { await (this.pipeline as any).dispose(); } catch (_e) { /* ignore */ }
+        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
         this.pipeline = null;
       }
       logger.error(`[embedder] Failed to initialize:`, err);
@@ -276,7 +306,7 @@ export class Embedder {
     }
     this.state = 'initializing';
     if (this.pipeline) {
-      try { await (this.pipeline as any).dispose(); } catch (_e) { /* ignore */ }
+      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
       this.pipeline = null;
     }
     this.device = 'cpu';
@@ -295,11 +325,11 @@ export class Embedder {
     logger.warn('[embedder] CPU fallback ready.');
   }
 
-  private pipelineOpts() {
+  private pipelineOpts(): { pooling: 'mean' | 'cls' | 'last_token'; normalize: boolean } {
     return {
-      pooling: this.poolingMode,
+      pooling: this.poolingMode as 'mean' | 'cls' | 'last_token',
       normalize: true,
-    } as any;
+    };
   }
 
   private truncateText(text: string): string {
@@ -426,7 +456,7 @@ export class Embedder {
 
       if (this.pipeline) {
         try {
-          await (this.pipeline as any).dispose();
+          await (this.pipeline as DisposablePipeline).dispose();
         } catch (err) {
           logger.warn('[embedder] Error during pipeline dispose:', err);
         }

@@ -441,12 +441,12 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
                 : Math.max(item.displayMin, currentDisplay - item.step);
               const newValue = item.fromDisplay(newDisplay);
               if (newValue !== currentValue) {
-                (config[item.key] as any) = newValue;
+                (config as Record<string, unknown>)[item.key] = newValue;
                 this.version++;
                 tui.requestRender();
               }
             } else if (item.type === 'boolean') {
-              (config[item.key] as any) = !config[item.key];
+              (config as Record<string, unknown>)[item.key] = !(config as Record<string, unknown>)[item.key];
               this.clampSelection();
               this.version++;
               tui.requestRender();
@@ -457,7 +457,7 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
                 const nextIdx = isRight 
                   ? (currentIdx + 1) % item.options.length
                   : (currentIdx - 1 + item.options.length) % item.options.length;
-                (config[item.key] as any) = item.options[nextIdx];
+                (config as Record<string, unknown>)[item.key] = item.options[nextIdx];
                 this.version++;
                 tui.requestRender();
               }

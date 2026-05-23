@@ -110,7 +110,7 @@ export class KnowledgeStore {
         let storedModel = schema.metadata.get('embedding_model');
 
         // Arrow metadata might be returned as Uint8Array
-        if ((storedModel as any) instanceof Uint8Array) {
+        if (typeof storedModel === 'object' && storedModel !== null && 'byteLength' in storedModel && 'byteOffset' in storedModel) {
           storedModel = new TextDecoder().decode(storedModel as unknown as Uint8Array);
         }
 

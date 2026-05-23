@@ -17,12 +17,13 @@ import {
 } from '../utils/session-state.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
 import { resetTerminalState } from '../utils/terminal-state.ts';
+import type { ResearchPanelState } from '../tui/research-panel.ts';
 
 export interface CleanupContext {
   researchId: string;
   piSessionId: string;
   masterWidgetId: string;
-  panelState: any;
+  panelState: ResearchPanelState;
   waveTimer: NodeJS.Timeout | null;
   unsubOrder: (() => void) | null;
   unsubInput: (() => void) | null;
@@ -65,7 +66,8 @@ export function createCleanupFunction(
     // Drain terminal input to consume any pending protocol responses
     // This prevents Kitty protocol responses (like \x1b[?4;1;3u) from leaking to the shell
     try {
-      const tuiTerminal = (ctx.ui as any).tui?.terminal;
+      const tuiUI = ctx.ui as { tui?: { terminal?: { drainInput?: (timeoutMs: number, maxAttempts: number) => Promise<void> } } };
+      const tuiTerminal = tuiUI?.tui?.terminal;
       if (tuiTerminal && typeof tuiTerminal.drainInput === 'function') {
         // Use pi-tui's built-in drainInput if available
         await tuiTerminal.drainInput(100, 20);
@@ -81,8 +83,8 @@ export function createCleanupFunction(
     if (waveTimerRef) {
       clearInterval(waveTimerRef);
       waveTimerRef = null;
-      (panelState as any).waveFrame = undefined;
-      (panelState as any).waveColors = undefined;
+      panelState.waveFrame = undefined;
+      panelState.waveColors = undefined;
     }
 
     if (unsubOrderRef) {
@@ -101,8 +103,9 @@ export function createCleanupFunction(
     const activePanels = getPiActivePanels(piSessionId);
     if (activePanels.length === 0) {
       ctx.ui.setWidget(masterWidgetId, undefined);
-      if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
-        (ctx.ui as any).setWorkingVisible(true);
+      const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
+      if (typeof tuiUI?.setWorkingVisible === 'function') {
+        tuiUI.setWorkingVisible(true);
       }
     } else {
       refreshAllSessions(piSessionId);
@@ -116,31 +119,31 @@ export function createCleanupFunction(
  * Update the wave timer reference in the cleanup context
  */
 export function updateWaveTimer(cleanupCtx: CleanupContext, timer: NodeJS.Timeout | null): void {
-  (cleanupCtx as any).waveTimer = timer;
+  (cleanupCtx as CleanupContext & { waveTimer?: NodeJS.Timeout | null }).waveTimer = timer;
 }
 
 /**
  * Update the unsubOrder reference in the cleanup context
  */
 export function updateUnsubOrder(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
-  (cleanupCtx as any).unsubOrder = unsub;
+  (cleanupCtx as CleanupContext & { unsubOrder?: (() => void) | null }).unsubOrder = unsub;
 }
 
 /**
  * Update the unsubInput reference in the cleanup context
  */
 export function updateUnsubInput(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
-  (cleanupCtx as any).unsubInput = unsub;
+  (cleanupCtx as CleanupContext & { unsubInput?: (() => void) | null }).unsubInput = unsub;
 }
 
 /**
  * Stop and clear wave animation
  */
-export function stopWaveAnimation(panelState: any): void {
-  if ((panelState as any).waveTimer) {
-    clearInterval((panelState as any).waveTimer);
-    (panelState as any).waveTimer = null;
+export function stopWaveAnimation(panelState: ResearchPanelState): void {
+  if (panelState.waveTimer) {
+    clearInterval(panelState.waveTimer);
+    panelState.waveTimer = null;
   }
-  (panelState as any).waveFrame = undefined;
-  (panelState as any).waveColors = undefined;
+  panelState.waveFrame = undefined;
+  panelState.waveColors = undefined;
 }

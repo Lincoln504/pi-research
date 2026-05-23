@@ -104,7 +104,5 @@ export const healthRegistry = new HealthCheckRegistry();
 
 // Helper function to check if a component is critical
 export function isCritical(componentName: string): boolean {
-  return (healthRegistry as any).checks.some(
-    (c: RegisteredCheck) => c.name === componentName && c.critical
-  );
+  return healthRegistry.isCritical(componentName);
 }

@@ -11,6 +11,7 @@
 
 import type { ResearchObserver } from '../orchestration/research-observer.ts';
 import { getUnitsPerResearcher, LEAD_EVAL_UNITS } from '../constants.ts';
+import type { ResearchPanelState } from '../tui/research-panel.ts';
 import {
   addSlice,
   activateSlice,
@@ -23,7 +24,7 @@ import {
 } from '../tui/research-panel.ts';
 
 export interface ObserverContext {
-  panelState: any;
+  panelState: ResearchPanelState;
   debouncedRefresh: () => void;
   researchComplexity: number;
 }
@@ -61,7 +62,7 @@ export function createResearchObserver(
         updateSliceStatus(panelState, state.quickSliceLabel, 'Researching...');
         
         const units = getUnitsPerResearcher();
-        panelState.progress = { expected: units, made: 0 };
+        panelState['progress'] = { expected: units, made: 0 };
       }
       debouncedRefresh();
     },
@@ -100,7 +101,7 @@ export function createResearchObserver(
       // Mark that we need to clear completed slices once the next round's researchers start.
       // This keeps previous round findings visible during the evaluation and search burst phases.
       if (round > 1) {
-        (panelState as any).needsClear = true;
+        panelState.needsClear = true;
       }
     },
 
@@ -129,10 +130,10 @@ export function createResearchObserver(
       // Start wave animation timer
       panelState.waveFrame = 0;
       if (waveTimer) clearInterval(waveTimer);
-      (state as any).waveTimer = setInterval(() => {
+      state.waveTimer = setInterval(() => {
         if (!panelState.isSearching) {
-          clearInterval((state as any).waveTimer!);
-          (state as any).waveTimer = null;
+          clearInterval(state.waveTimer!);
+          state.waveTimer = null;
           return;
         }
         panelState.waveFrame = (panelState.waveFrame ?? 0) + 1;
@@ -161,9 +162,9 @@ export function createResearchObserver(
       panelState.isSearching = false;
 
       // Stop wave animation timer
-      if ((state as any).waveTimer) {
-        clearInterval((state as any).waveTimer);
-        (state as any).waveTimer = null;
+      if (state.waveTimer) {
+        clearInterval(state.waveTimer);
+        state.waveTimer = null;
       }
       panelState.waveFrame = undefined;
       panelState.waveColors = undefined; // Clear persistent colors for next search
@@ -194,9 +195,9 @@ export function createResearchObserver(
 
       // Deferred clearing: remove researchers from previous rounds only when the
       // first researcher of the current round starts.
-      if ((panelState as any).needsClear) {
+      if (panelState.needsClear) {
         clearCompletedResearchers(panelState);
-        (panelState as any).needsClear = false;
+        panelState.needsClear = false;
       }
 
       // Researchers from previous rounds are cleared above
@@ -343,7 +344,7 @@ export function createObserverState(): ObserverState {
 /**
  * Stop wave animation in the observer
  */
-export function stopObserverWaveAnimation(state: ObserverState, panelState: any): void {
+export function stopObserverWaveAnimation(state: ObserverState, panelState: ResearchState): void {
   if (state.waveTimer) {
     clearInterval(state.waveTimer);
     state.waveTimer = null;

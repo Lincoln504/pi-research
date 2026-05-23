@@ -51,6 +51,10 @@ export interface ResearchPanelState {
   waveFrame?: number;
   /** Persistent color codes for wave animation (one per position) */
   waveColors?: string[];
+  /** Timer for wave animation */
+  waveTimer?: NodeJS.Timeout | null;
+  /** Flag indicating whether completed researchers should be cleared */
+  needsClear?: boolean;
 }
 
 /**

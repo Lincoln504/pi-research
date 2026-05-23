@@ -18,6 +18,7 @@ import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
 import type { MenuSection, MenuItem, CommandArgs } from './config-registry.ts';
 import { parseCommandArgs, KNOWN_SECTIONS as knownSections } from './config-registry.ts';
+import type { ConfigSection } from './types/index.ts';
 import * as healthModule from './commands/health-command.ts';
 import * as errorsModule from './commands/errors-command.ts';
 import * as knowledgeModule from './commands/knowledge-command.ts';
@@ -61,7 +62,7 @@ async function routeDirectAction(
   const params = parsed.params || [];
 
   // New section-based routing (Preferred)
-  if (section && knownSections.includes(section as any)) {
+  if (section && knownSections.includes(section as ConfigSection)) {
     switch (section) {
       case 'health':
         await healthModule.handleHealthAction(action, params, ctx, pi);

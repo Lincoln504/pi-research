@@ -11,6 +11,7 @@ import { searchSecurityDatabases } from '../security/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { MAX_GATHERING_CALLS } from '../constants.ts';
 import { metrics } from '../utils/metrics.ts';
+import type { SecuritySearchParams } from '../security/types.ts';
 
 export function createSecuritySearchTool(options: {
   ctx: ExtensionContext;
@@ -93,8 +94,8 @@ export function createSecuritySearchTool(options: {
         throw new Error('At least one search term is required');
       }
 
-      const databases = p.databases !== undefined && p.databases.length > 0
-        ? p.databases
+      const databases: readonly ('nvd' | 'cisa_kev' | 'github' | 'osv')[] = p.databases !== undefined && p.databases.length > 0
+        ? p.databases as readonly ('nvd' | 'cisa_kev' | 'github' | 'osv')[]
         : ['nvd', 'cisa_kev', 'github', 'osv'];
       const maxResults = p.maxResults ?? 20;
 
@@ -103,15 +104,16 @@ export function createSecuritySearchTool(options: {
 
       let results;
       try {
-        results = await searchSecurityDatabases({
+        const searchParams: SecuritySearchParams = {
           terms,
-          databases: databases as any,
+          databases,
           severity: p.severity,
           maxResults,
           includeExploited: p.includeExploited ?? false,
           ecosystem: p.ecosystem,
           githubRepo: p.githubRepo,
-        });
+        };
+        results = await searchSecurityDatabases(searchParams);
       } catch (error) {
         const duration = Date.now() - startTime;
         metrics.observe('tool_security_search_duration_ms', duration, { status: 'error' });

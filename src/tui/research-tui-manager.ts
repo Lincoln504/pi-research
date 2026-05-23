@@ -21,6 +21,7 @@ import {
   abortAllSessions,
 } from '../utils/session-state.ts';
 import { shouldConsumeForCleanup } from '../utils/terminal-state.ts';
+import type { ResearchPanelState } from './research-panel.ts';
 
 export interface TuiContext {
   piSessionId: string;
@@ -34,7 +35,7 @@ export interface TuiDependencies {
 }
 
 export interface TuiManager {
-  panelState: any;
+  panelState: ResearchPanelState;
   masterWidgetId: string;
   unsubOrder: (() => void) | null;
   unsubInput: (() => void) | null;
@@ -179,8 +180,9 @@ function getActivePanelsForSession(piSessionId: string) {
  * Hide the working indicator during research
  */
 export function hideWorkingIndicator(ctx: ExtensionContext): void {
-  if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
-    (ctx.ui as any).setWorkingVisible(false);
+  const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
+  if (typeof tuiUI?.setWorkingVisible === 'function') {
+    tuiUI.setWorkingVisible(false);
   }
 }
 
@@ -188,7 +190,8 @@ export function hideWorkingIndicator(ctx: ExtensionContext): void {
  * Show the working indicator (typically on cleanup)
  */
 export function showWorkingIndicator(ctx: ExtensionContext): void {
-  if (typeof (ctx.ui as any).setWorkingVisible === 'function') {
-    (ctx.ui as any).setWorkingVisible(true);
+  const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
+  if (typeof tuiUI?.setWorkingVisible === 'function') {
+    tuiUI.setWorkingVisible(true);
   }
 }

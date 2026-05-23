@@ -19,6 +19,7 @@ import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 import type { Config } from '../config.ts';
+import type { GlobalStateGetter } from '../types/index.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -74,7 +75,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   const tracker = new ToolUsageTracker(createDefaultToolLimits());
 
   // Use provided closures or fallback to safe dummies
-  const globalState = getGlobalState || (() => ({} as any));
+  const globalState: GlobalStateGetter = getGlobalState || (() => ({}));
   const globalLinks = updateGlobalLinks || (() => {});
 
   try {

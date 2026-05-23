@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
+import type { NodeError, ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
@@ -48,7 +49,8 @@ export default function (pi: ExtensionAPI) {
   shutdownManager.registerEventListener(process, 'uncaughtException', (err: Error, origin: string) => {
     // EPIPE = pi closed its stdout/stderr pipe before we finished writing (normal at shutdown).
     // Check before incrementing so it never contributes to the crash threshold.
-    if (err.message.includes('EPIPE') || (err as any).code === 'EPIPE') {
+    const nodeErr = err as NodeError;
+    if (err.message.includes('EPIPE') || nodeErr.code === 'EPIPE') {
       logger.warn('[pi-research] EPIPE — pipe closed (normal at shutdown), ignoring.');
       return;
     }
@@ -211,7 +213,7 @@ export default function (pi: ExtensionAPI) {
           { query: text, depth: config.DEFAULT_RESEARCH_DEPTH },
           ctx.signal,
           undefined,
-          ctx as any,
+          ctx,
         );
 
         const output = extractResultText(result);
@@ -221,7 +223,7 @@ export default function (pi: ExtensionAPI) {
           customType: 'research-result',
           content: output,
           display: true,
-          details: { totalTokens: (result.details as any)?.totalTokens ?? 0 },
+          details: { totalTokens: (result.details as ResearchResultDetails)?.totalTokens ?? 0 },
         });
 
         ctx.ui.notify('✅ Research complete', 'info');

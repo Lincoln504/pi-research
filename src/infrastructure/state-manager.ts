@@ -970,7 +970,7 @@ public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
     }
 
     if (state.browserServer !== undefined) {
-      const bs = state.browserServer as any;
+      const bs = state.browserServer;
       if (typeof bs.port !== 'number' || typeof bs.pid !== 'number') {
         throw new Error('Invalid state: browserServer must have numeric port and pid fields');
       }
@@ -979,12 +979,12 @@ public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
       }
     }
 
-    if ((state as any).schedulerVersion !== undefined && typeof (state as any).schedulerVersion !== 'string') {
+    if (state.schedulerVersion !== undefined && typeof state.schedulerVersion !== 'string') {
       throw new Error('Invalid state: schedulerVersion must be a string');
     }
 
     if (state.gpuOwner !== undefined) {
-      const go = state.gpuOwner as any;
+      const go = state.gpuOwner;
       if (typeof go.pid !== 'number' || typeof go.startedAt !== 'number') {
         throw new Error('Invalid state: gpuOwner must have numeric pid and startedAt fields');
       }
