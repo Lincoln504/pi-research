@@ -4,6 +4,8 @@
  * Service wrapper for the browser scheduler functionality.
  * Provides a clean interface for browser operations (search, scrape, health check)
  * and manages the scheduler lifecycle properly.
+ *
+ * All state is managed within the singleton instance, accessed via getSchedulerService().
  */
 
 import type { IScheduler, SearchResult } from './service-interfaces.ts';
@@ -17,6 +19,40 @@ import {
   _internalGetScheduler as getScheduler,
   _internalGetSchedulerVersion as getSchedulerVersion,
 } from '../infrastructure/browser-manager.ts';
+
+// ============================================================================
+// Scheduler Instance Interface (minimal to avoid circular dependencies)
+// ============================================================================
+
+/**
+ * Scheduler instance interface (minimal to avoid circular dependencies)
+ */
+export interface ISchedulerInstance {
+  shutdown(): Promise<void>;
+  schedulerId?: string;
+  [key: string]: any;
+}
+
+// ============================================================================
+// Singleton Scheduler Service Instance
+// ============================================================================
+
+let _schedulerServiceInstance: SchedulerService | null = null;
+
+/**
+ * Get the singleton SchedulerService instance
+ * This is the only way to access the scheduler service across the application
+ */
+export function getSchedulerService(): SchedulerService {
+  if (!_schedulerServiceInstance) {
+    _schedulerServiceInstance = new SchedulerService();
+  }
+  return _schedulerServiceInstance;
+}
+
+// ============================================================================
+// Scheduler Service Implementation
+// ============================================================================
 
 // Internal scheduler type - matches the actual implementation
 interface ISchedulerInternal {
@@ -33,10 +69,15 @@ interface ISchedulerInternal {
 /**
  * Scheduler Service Implementation
  * Wraps the browser scheduler with proper service lifecycle management
+ * All state is managed within the instance - no module-level state
  */
 export class SchedulerService implements IService, IScheduler {
   readonly name = 'scheduler';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
+
+  // ==========================================================================
+  // INSTANCE STATE - All state is instance-level, no module-level state
+  // ==========================================================================
 
   // Internal scheduler instance (either BrowserTaskScheduler or BrowserClient)
   private _scheduler: ISchedulerInternal | null = null;
@@ -52,6 +93,24 @@ export class SchedulerService implements IService, IScheduler {
 
   // Initialization lock
   private _initializationLock: Promise<IScheduler> | null = null;
+
+  // Shared scheduler state (for cross-module access)
+  // This replaces the module-level _internalState
+  private _sharedState: {
+    schedulerInstance: ISchedulerInstance | null;
+    schedulerVersion: string | null;
+    initializationPromise: Promise<ISchedulerInstance> | null;
+    isRestartInProgress: boolean;
+  } = {
+    schedulerInstance: null,
+    schedulerVersion: null,
+    initializationPromise: null,
+    isRestartInProgress: false,
+  };
+
+  // ==========================================================================
+  // Service Lifecycle Methods
+  // ==========================================================================
 
   async initialize(): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
@@ -87,12 +146,94 @@ export class SchedulerService implements IService, IScheduler {
       this._scheduler = null;
     }
 
+    // Clear shared state
+    this._sharedState = {
+      schedulerInstance: null,
+      schedulerVersion: null,
+      initializationPromise: null,
+      isRestartInProgress: false,
+    };
+
     this._metadata = null;
     this._initializationLock = null;
 
     this.lifecycle = ServiceLifecycle.DISPOSED;
     logger.debug('[SchedulerService] Disposed');
   }
+
+  // ==========================================================================
+  // State Management Methods (Instance Methods - No Module-Level State)
+  // ==========================================================================
+
+  /**
+   * Get the current scheduler instance
+   */
+  getSchedulerInstance(): ISchedulerInstance | null {
+    return this._sharedState.schedulerInstance;
+  }
+
+  /**
+   * Set the scheduler instance
+   */
+  setSchedulerInstance(scheduler: ISchedulerInstance | null): void {
+    this._sharedState.schedulerInstance = scheduler;
+  }
+
+  /**
+   * Get the scheduler version
+   */
+  getSchedulerVersion(): string | null {
+    return this._sharedState.schedulerVersion;
+  }
+
+  /**
+   * Set the scheduler version
+   */
+  setSchedulerVersion(version: string | null): void {
+    this._sharedState.schedulerVersion = version;
+  }
+
+  /**
+   * Get the scheduler initialization promise
+   */
+  getSchedulerInitializationPromise(): Promise<ISchedulerInstance> | null {
+    return this._sharedState.initializationPromise;
+  }
+
+  /**
+   * Set the scheduler initialization promise
+   */
+  setSchedulerInitializationPromise(promise: Promise<ISchedulerInstance> | null): void {
+    this._sharedState.initializationPromise = promise;
+  }
+
+  /**
+   * Check if a scheduler restart is in progress
+   */
+  isSchedulerRestartInProgress(): boolean {
+    return this._sharedState.isRestartInProgress;
+  }
+
+  /**
+   * Set the scheduler restart in progress state
+   */
+  setSchedulerRestartInProgress(inProgress: boolean): void {
+    this._sharedState.isRestartInProgress = inProgress;
+  }
+
+  /**
+   * Clear all scheduler state
+   */
+  clearSchedulerState(): void {
+    this._sharedState.schedulerInstance = null;
+    this._sharedState.schedulerVersion = null;
+    this._sharedState.initializationPromise = null;
+    this._sharedState.isRestartInProgress = false;
+  }
+
+  // ==========================================================================
+  // Scheduler Operations
+  // ==========================================================================
 
   /**
    * Get or create the scheduler instance
@@ -194,6 +335,10 @@ export class SchedulerService implements IService, IScheduler {
     }
   }
 
+  // ==========================================================================
+  // Metadata and Query Methods
+  // ==========================================================================
+
   /**
    * Get the scheduler metadata
    */
@@ -244,6 +389,9 @@ export class SchedulerService implements IService, IScheduler {
 
     // Clear initialization lock
     this._initializationLock = null;
+
+    // Clear shared state
+    this.clearSchedulerState();
 
     logger.debug('[SchedulerService] Scheduler restart complete (will recreate on next access)');
   }

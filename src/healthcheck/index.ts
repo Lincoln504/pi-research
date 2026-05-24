@@ -9,6 +9,7 @@ import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/browser-manager.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
+import { getSchedulerService } from '../core/scheduler-service.ts';
 import { getEmbedder } from '../knowledge/index.ts';
 import { healthRegistry } from './registry.ts';
 
@@ -37,8 +38,8 @@ healthRegistry.register('BrowserPool', async () => {
   
   try {
     // Lazy-aware health check: if pool not active, just report binary is OK
-    const { getSchedulerInstance } = await import('../core/internal-state.ts');
-    const activeScheduler = getSchedulerInstance();
+    const schedulerService = getSchedulerService();
+    const activeScheduler = schedulerService.getSchedulerInstance();
     
     if (!activeScheduler) {
         return { healthy: true, diagnostic: { status: 'ready (idle)' } };

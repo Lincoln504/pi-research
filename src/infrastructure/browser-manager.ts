@@ -14,14 +14,7 @@ import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
-import {
-  getSchedulerInstance,
-  setScheduler,
-  setSchedulerVersion,
-  setSchedulerInitializationPromise,
-  isSchedulerRestartInProgress,
-  setSchedulerRestartInProgress,
-} from '../core/internal-state.ts';
+import { getSchedulerService } from '../core/scheduler-service.ts';
 import type { NodeError, BrowserTask } from '../types/index.ts';
 import { errorTracker } from '../utils/error-tracker.ts';
 
@@ -109,11 +102,13 @@ export function getClientAgent(): http.Agent {
  * This should be called when configuration changes are detected.
  */
 export async function forceSchedulerRestart(forceClearRemoteState: boolean = false): Promise<void> {
-    if (isSchedulerRestartInProgress()) {
+    const schedulerService = getSchedulerService();
+    
+    if (schedulerService.isSchedulerRestartInProgress()) {
         logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
         return;
     }
-    setSchedulerRestartInProgress(true);
+    schedulerService.setSchedulerRestartInProgress(true);
     try {
     logger.log('[Scheduler] Forcing scheduler restart due to config change...');
 
@@ -121,12 +116,12 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
     // shut it down properly. Without this, the old scheduler's leadership-check
     // timer keeps firing for up to 60s after the restart, and its pool workers
     // keep running until the leadership loss is detected.
-    const oldScheduler = getSchedulerInstance();
+    const oldScheduler = schedulerService.getSchedulerInstance();
 
     // Clear cache immediately so new requests spawn a fresh scheduler.
-    setScheduler(null);
-    setSchedulerVersion(null);
-    setSchedulerInitializationPromise(null);
+    schedulerService.setSchedulerInstance(null);
+    schedulerService.setSchedulerVersion(null);
+    schedulerService.setSchedulerInitializationPromise(null);
     cachedSchedulerVersion = null;
     initializationPromise = null;
 
@@ -162,7 +157,7 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
 
     logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
     } finally {
-        setSchedulerRestartInProgress(false);
+        schedulerService.setSchedulerRestartInProgress(false);
     }
 }
 
@@ -491,11 +486,12 @@ class BrowserTaskScheduler implements IScheduler {
         }
 
         // Clear reference immediately to prevent new tasks from using this scheduler
-        const currentScheduler = getSchedulerInstance();
+        const schedulerService = getSchedulerService();
+        const currentScheduler = schedulerService.getSchedulerInstance();
         if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
-            setScheduler(null);
-            setSchedulerVersion(null);
-            setSchedulerInitializationPromise(null);
+            schedulerService.setSchedulerInstance(null);
+            schedulerService.setSchedulerVersion(null);
+            schedulerService.setSchedulerInitializationPromise(null);
             cachedSchedulerVersion = null;
             initializationPromise = null;
         }
@@ -694,8 +690,9 @@ class BrowserClient implements IScheduler {
 let initializationPromise: Promise<IScheduler> | null = null;
 
 async function getScheduler(config?: Config): Promise<IScheduler> {
+    const schedulerService = getSchedulerService();
     const currentVersion = generateSchedulerVersion(config);
-    let existing = getSchedulerInstance();
+    let existing = schedulerService.getSchedulerInstance();
     
     // Check if cached scheduler has different version (config changed)
     if (existing && cachedSchedulerVersion && cachedSchedulerVersion !== currentVersion) {
@@ -753,8 +750,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                     
                                 // Race check: if initializationPromise was cleared (restart), don't set reference
                     if (initializationPromise === p) {
-                        setScheduler(client);
-                        setSchedulerVersion(currentVersion);
+                        schedulerService.setSchedulerInstance(client);
+                        schedulerService.setSchedulerVersion(currentVersion);
                         cachedSchedulerVersion = currentVersion;
                     } else {
                         logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
@@ -774,8 +771,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
             if (initializationPromise === p) {
-                setScheduler(scheduler);
-                setSchedulerVersion(currentVersion);
+                schedulerService.setSchedulerInstance(scheduler);
+                schedulerService.setSchedulerVersion(currentVersion);
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
@@ -804,8 +801,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         } catch (error) {
             logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
             if (initializationPromise === p) {
-                setScheduler(scheduler);
-                setSchedulerVersion(currentVersion);
+                schedulerService.setSchedulerInstance(scheduler);
+                schedulerService.setSchedulerVersion(currentVersion);
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
@@ -819,8 +816,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             await scheduler.shutdown();
             const client = new BrowserClient(winnerPort);
             if (initializationPromise === p) {
-                setScheduler(client);
-                setSchedulerVersion(schedulerVersion);
+                schedulerService.setSchedulerInstance(client);
+                schedulerService.setSchedulerVersion(schedulerVersion);
                 cachedSchedulerVersion = schedulerVersion;
             } else {
                 await client.shutdown().catch(() => {});
@@ -833,8 +830,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         metrics.increment('browser_leadership_wins_total', 1);
         if (initializationPromise === p) {
-            setScheduler(scheduler);
-            setSchedulerVersion(schedulerVersion);
+            schedulerService.setSchedulerInstance(scheduler);
+            schedulerService.setSchedulerVersion(schedulerVersion);
             cachedSchedulerVersion = schedulerVersion;
         } else {
             logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
@@ -961,12 +958,13 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
 export async function stopBrowserManager(): Promise<void> {
   browserCircuitBreaker.reset();
   metrics.increment('browser_manager_shutdowns_total', 1);
-  const globalScheduler = getSchedulerInstance();
+  const schedulerService = getSchedulerService();
+  const globalScheduler = schedulerService.getSchedulerInstance();
   // Clear both references before any async work so concurrent getScheduler()
   // calls during shutdown see null and start fresh rather than receiving a
   // scheduler that is mid-teardown.
-  setScheduler(null);
-  setSchedulerInitializationPromise(null);
+  schedulerService.setSchedulerInstance(null);
+  schedulerService.setSchedulerInitializationPromise(null);
   initializationPromise = null;
 
   if (globalScheduler instanceof BrowserTaskScheduler) {
