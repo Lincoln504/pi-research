@@ -4,13 +4,13 @@ import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { shutdownKnowledgeStore } from './knowledge/index.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
 import { resetTerminalState } from './utils/terminal-state.ts';
+import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -38,8 +38,44 @@ function extractResultText(result: AgentToolResult<unknown>): string {
 /**
  * Pi Research Extension
  */
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   logger.log('[pi-research] Activating extension...');
+
+  // ============================================================
+  // SERVICE REGISTRY INITIALIZATION
+  // ============================================================
+  // Register all core services with the service registry
+  // This must happen early so services are available for the rest of the extension
+  try {
+    registerCoreServices();
+    logger.log('[pi-research] Core services registered');
+  } catch (err) {
+    logger.error('[pi-research] Failed to register core services:', err);
+    // Continue anyway - the extension should still work with fallback behavior
+  }
+
+  // Initialize core services BEFORE the extension becomes usable
+  // This ensures all critical services are ready when tools/commands are invoked
+  // Prevents race conditions where services are used before initialization
+  let initializationResult: { initialized: string[]; failed: string[] } | null = null;
+  try {
+    logger.log('[pi-research] Waiting for core services to initialize...');
+    initializationResult = await initializeCoreServices();
+    
+    // Verify critical services are ready
+    if (initializationResult.failed.length > 0) {
+      logger.error('[pi-research] ⚠ Some services failed to initialize, extension may not work correctly');
+      for (const failure of initializationResult.failed) {
+        logger.error(`[pi-research]   - ${failure}`);
+      }
+    } else {
+      logger.log('[pi-research] ✓ All critical services initialized and ready');
+    }
+  } catch (err) {
+    logger.error('[pi-research] ✗ Critical error during service initialization:', err);
+    // Don't throw - allow extension to load with degraded functionality
+    // Tools will handle missing services gracefully
+  }
 
   // Global uncaught exception handler to catch synchronous errors that escape all promise handlers.
   // This is a last-resort guard for things like undici's EventEmitter-based socket close errors.
@@ -117,21 +153,19 @@ export default function (pi: ExtensionAPI) {
   };
 
   // Register cleanup tasks in the order they should run in reverse:
+  // Tasks run in REVERSE order of registration (last registered runs first)
+  //
+  // Execution order (reverse of registration):
   // 1. stopBrowserManager (runs last - slow, up to 10s for pool destruction)
-  // 2. shutdownKnowledgeStore (runs second - disposes embedder to prevent DefaultLogger crash)
+  // 2. destroy HTTP agent (runs second)
   // 3. clearAllSessionState (runs third - fast)
-  // 4. resetTerminalState (runs first - fast, prevents ghost character leaks on reload)
+  // 4. resetTerminalState (runs fourth - fast, prevents ghost character leaks on reload)
+  // 5. disposeCoreServices (runs first - disposes all registered services including KnowledgeStore)
+  //
+  // NOTE: shutdownKnowledgeStore() is NOT registered separately because disposeCoreServices()
+  // already handles disposal of the KnowledgeStoreService. Double-disposal causes errors.
   shutdownManager.register(async () => {
     await stopBrowserManager();
-  });
-
-  shutdownManager.register(async () => {
-    await shutdownKnowledgeStore();
-  });
-
-  // Clear all session state on shutdown to ensure timeouts are cleared
-  shutdownManager.register(() => {
-    clearAllSessionState();
   });
 
   // Destroy HTTP agent to prevent socket leaks on all shutdown paths
@@ -143,6 +177,11 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  // Clear all session state on shutdown to ensure timeouts are cleared
+  shutdownManager.register(() => {
+    clearAllSessionState();
+  });
+
   // FIX #4: Reset terminal state on shutdown to prevent ghost character leaks
   // This is crucial for /reload scenarios where terminal protocol responses
   // might arrive after the extension stops but before the new instance starts.
@@ -152,6 +191,18 @@ export default function (pi: ExtensionAPI) {
       logger.debug('[pi-research] Terminal state reset on shutdown');
     } catch (_error) {
       // Ignore terminal reset errors - stdout might be closed
+    }
+  });
+
+  // Dispose all core services first (runs before all other cleanup)
+  // This ensures services are properly disposed before their dependencies are cleaned up
+  shutdownManager.register(async () => {
+    try {
+      await disposeCoreServices();
+      logger.log('[pi-research] Core services disposed');
+    } catch (err) {
+      logger.error('[pi-research] Failed to dispose core services:', err);
+      // Continue with cleanup - don't block shutdown
     }
   });
 

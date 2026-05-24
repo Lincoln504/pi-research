@@ -14,10 +14,6 @@ import { StateManagerService } from './state-manager-service.ts';
 import { KnowledgeStoreService } from './knowledge-store-service.ts';
 import { MetricsService } from './metrics-service.ts';
 import { PlanningService } from './planning-service.ts';
-import type { MetricsService as IMetricsService } from './metrics-service.ts';
-import type { StateManagerService as IStateManagerService } from './state-manager-service.ts';
-import type { BrowserManagerService as IBrowserManagerService } from './browser-manager-service.ts';
-import type { PlanningService as IPlanningService } from './planning-service.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -109,38 +105,94 @@ export function registerCoreServices(): void {
 /**
  * Initialize all core services
  * This is called early in the application startup
+ *
+ * Services are initialized in dependency order:
+ * - Services marked with lazyInitialization: false are eagerly initialized
+ * - Other services are initialized lazily on first use
+ *
+ * Note: Infrastructure services (Metrics, StateManager, HealthCheckCache, BrowserManager)
+ * are always initialized early as they form the foundation for other services.
  */
-export async function initializeCoreServices(): Promise<void> {
+export async function initializeCoreServices(): Promise<{ initialized: string[]; failed: string[] }> {
   logger.log('[ServiceInitialization] Initializing core services...');
 
+  const initialized: string[] = [];
+  const failed: string[] = [];
+
+  // Critical infrastructure services (always initialize early)
+  const criticalInfrastructure = [
+    { name: ServiceNames.METRICS, label: 'Metrics Service' },
+    { name: ServiceNames.STATE_MANAGER, label: 'State Manager Service' },
+    { name: ServiceNames.HEALTH_CHECK_CACHE, label: 'Health Check Cache Service' },
+    { name: ServiceNames.BROWSER_MANAGER, label: 'Browser Manager Service' },
+  ];
+
+  // Services requiring eager initialization (marked with lazyInitialization: false)
+  const eagerServices = [
+    { name: ServiceNames.PLANNING, label: 'Planning Service' },
+  ];
+
+  // Lazy services (initialized on first use)
+  const lazyServices = [
+    ServiceNames.SCHEDULER,
+    ServiceNames.KNOWLEDGE_STORE,
+  ];
+
   try {
-    // Initialize services in dependency order
-    // 1. Metrics (no dependencies)
-    const metricsService = await getService<IMetricsService>(ServiceNames.METRICS);
-    await metricsService.initialize();
+    // Initialize critical infrastructure services
+    logger.log('[ServiceInitialization] Initializing critical infrastructure services...');
+    for (const service of criticalInfrastructure) {
+      try {
+        logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
+        const svc = await getService<any>(service.name);
+        if (svc.initialize) {
+          await svc.initialize();
+        }
+        initialized.push(service.label);
+        logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
+      } catch (err) {
+        const errorMsg = `${service.label} initialization failed`;
+        logger.error(`[ServiceInitialization] ✗ ${errorMsg}:`, err);
+        failed.push(errorMsg);
+        // Continue with other services even if one fails
+      }
+    }
 
-    // 2. State Manager (no dependencies)
-    const stateManagerService = await getService<IStateManagerService>(ServiceNames.STATE_MANAGER);
-    await stateManagerService.initialize();
+    // Initialize eagerly-marked services
+    logger.log('[ServiceInitialization] Initializing eagerly-marked services...');
+    for (const service of eagerServices) {
+      try {
+        logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
+        const svc = await getService<any>(service.name);
+        if (svc.initialize) {
+          await svc.initialize();
+        }
+        initialized.push(service.label);
+        logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
+      } catch (err) {
+        const errorMsg = `${service.label} initialization failed`;
+        logger.error(`[ServiceInitialization] ✗ ${errorMsg}:`, err);
+        failed.push(errorMsg);
+        // Continue with other services even if one fails
+      }
+    }
 
-    // 3. Health Check Cache (no dependencies)
-    await getService(ServiceNames.HEALTH_CHECK_CACHE);
+    // Log lazy services that will be initialized on demand
+    if (lazyServices.length > 0) {
+      logger.log(`[ServiceInitialization] ${lazyServices.length} services configured for lazy initialization: ${lazyServices.join(', ')}`);
+    }
 
-    // 4. Scheduler (depends on State Manager)
-    // Scheduler initializes lazily on first use
+    // Log summary
+    if (failed.length === 0) {
+      logger.log(`[ServiceInitialization] ✓ All ${initialized.length} critical services initialized successfully`);
+    } else {
+      logger.warn(`[ServiceInitialization] ⚠ ${initialized.length}/${initialized.length + failed.length} services initialized, ${failed.length} failed`);
+      for (const failure of failed) {
+        logger.warn(`[ServiceInitialization]   - ${failure}`);
+      }
+    }
 
-    // 5. Browser Manager (depends on Scheduler)
-    const browserManagerService = await getService<IBrowserManagerService>(ServiceNames.BROWSER_MANAGER);
-    await browserManagerService.initialize();
-
-    // 6. Knowledge Store (no hard dependencies, but uses State Manager for GPU lock)
-    // Knowledge store initializes lazily on first use
-
-    // 7. Planning Service (no hard dependencies)
-    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING);
-    await planningService.initialize();
-
-    logger.log('[ServiceInitialization] Core services initialized successfully');
+    return { initialized, failed };
   } catch (err) {
     logger.error('[ServiceInitialization] Failed to initialize core services:', err);
     throw err;
