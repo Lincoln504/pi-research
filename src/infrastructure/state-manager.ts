@@ -1,9 +1,30 @@
+/**
+ * State Manager
+ *
+ * Refactored state management that delegates to specialized services.
+ * Maintains backward compatibility while providing clean separation of concerns.
+ *
+ * This class manages:
+ * - State file persistence (read/write/update)
+ * - Session lifecycle management
+ * - Browser server coordination
+ * - Backup and recovery
+ *
+ * Delegates to:
+ * - FileLockService for cross-process locking
+ * - ProcessLifecycleService for PID checks
+ * - GPUResourceService for GPU locking
+ */
+
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { FileLockService } from './file-lock-service.ts';
+import { ProcessLifecycleService, getSharedProcessLifecycleService } from './process-lifecycle-service.ts';
+import { GPUResourceService } from './gpu-resource-service.ts';
 
 /**
  * State metrics interface
@@ -97,6 +118,11 @@ function isSessionInfo(value: unknown): value is SessionInfo {
 /**
  * StateManager class for managing singleton state with file-based storage,
  * file locking, backup system, and corruption recovery.
+ *
+ * Refactored to delegate to specialized services:
+ * - FileLockService for cross-process locking
+ * - ProcessLifecycleService for PID checks
+ * - GPUResourceService for GPU locking
  */
 export class StateManager {
   // Path configuration
@@ -105,22 +131,13 @@ export class StateManager {
   private readonly backupDirPath: string;
   private readonly lockFilePath: string;
 
-  // Lock configuration
-  private readonly lockTimeout: number = 10000; // 10 seconds
-  private readonly lockRetries: number = 100; // 10 seconds with 100ms delay
-  private readonly lockRetryDelay: number = 100; // 100ms between retries
-  private readonly lockStaleThreshold: number = 30000; // 30 seconds
-
   // Backup configuration
   private readonly maxBackups: number = 5;
 
-  // GPU lock staleness threshold: if lock is older than this, reclaim it even if owner is alive
-  // 3 minutes balances responsiveness with tolerance for slow operations
-  private readonly gpuLockStaleThresholdMs: number = 180000; // 3 minutes
-
-  // Lock tracking
-  private lockHandle: fs.FileHandle | null = null;
-  private readonly lockUuid: string = crypto.randomUUID(); // Unique ID for this lock holder
+  // Services
+  private readonly fileLockService: FileLockService;
+  private readonly processLifecycle: ProcessLifecycleService;
+  private readonly gpuResourceService: GPUResourceService;
 
   constructor(stateDir?: string) {
     if (!stateDir) {
@@ -133,38 +150,14 @@ export class StateManager {
     this.backupDirPath = path.join(stateDir, 'backups');
     this.lockFilePath = path.join(this.lockDirPath, 'research-state.lock');
 
-    // Clean up any stale locks on initialization (fire and forget)
-    this.cleanupStaleLocksOnStartup().catch((error: unknown) => {
-      logger.warn('[StateManager] Failed to cleanup stale locks on startup:', error instanceof Error ? error.message : String(error));
+    // Initialize services
+    this.fileLockService = new FileLockService({
+      lockFilePath: this.lockFilePath,
     });
-  }
-
-  /**
-   * Clean up any stale lock files on initialization.
-   * This handles cases where locks weren't released due to crashes.
-   */
-  private async cleanupStaleLocksOnStartup(): Promise<void> {
-    await this.ensureDirectories();
-
-    try {
-      const stats = await fs.stat(this.lockFilePath);
-      const lockAge = Date.now() - stats.mtimeMs;
-
-      // Clean up locks older than stale threshold (30 seconds)
-      if (lockAge > this.lockStaleThreshold) {
-        logger.log(`[StateManager] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old)`);
-        await fs.unlink(this.lockFilePath);
-        logger.log('[StateManager] Stale lock removed');
-      }
-    } catch (error: unknown) {
-      // ENOENT is expected (no lock file exists)
-      if (error instanceof Error && 'code' in error) {
-        const errnoError = error as NodeJS.ErrnoException;
-        if (errnoError.code !== 'ENOENT') {
-          logger.warn(`[StateManager] Could not check lock file: ${errnoError.message}`);
-        }
-      }
-    }
+    this.processLifecycle = getSharedProcessLifecycleService();
+    this.gpuResourceService = new GPUResourceService({
+      processLifecycle: this.processLifecycle,
+    });
   }
 
   /**
@@ -216,7 +209,7 @@ export class StateManager {
     await this.ensureDirectories();
     const startTime = Date.now();
     try {
-      const result = await this.withLock(() => this._readState());
+      const result = await this.fileLockService.withLock(() => this._readState());
       const duration = Date.now() - startTime;
       metrics.observe('state_operation_duration_ms', duration, { operation: 'read', status: 'success' });
       metrics.increment('state_operations_total', 1, { operation: 'read', status: 'success' });
@@ -232,7 +225,7 @@ export class StateManager {
   /**
    * Internal read without lock acquisition (caller must hold lock)
    */
-  private async _readState(): Promise<SingletonState> {
+  public async _readState(): Promise<SingletonState> {
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;
@@ -280,7 +273,7 @@ export class StateManager {
     await this.ensureDirectories();
     const startTime = Date.now();
     try {
-      await this.withLock(() => this._writeState(state));
+      await this.fileLockService.withLock(() => this._writeState(state));
       const duration = Date.now() - startTime;
       metrics.observe('state_operation_duration_ms', duration, { operation: 'write', status: 'success' });
       metrics.increment('state_operations_total', 1, { operation: 'write', status: 'success' });
@@ -340,7 +333,7 @@ export class StateManager {
     await this.ensureDirectories();
     const startTime = Date.now();
     try {
-      await this.withLock(async () => {
+      await this.fileLockService.withLock(async () => {
         const currentState = await this._readState();
         const newState = await updater(currentState);
         await this._writeState(newState);
@@ -432,7 +425,7 @@ export class StateManager {
       }
 
       // Secondary check: is process still alive?
-      const isAlive = await this.isProcessAlive(sessionInfo.pid);
+      const isAlive = this.processLifecycle.isProcessAlive(sessionInfo.pid);
 
       if (!isAlive) {
         sessionsToRemove.set(sessionId, sessionInfo.lastSeen);
@@ -519,20 +512,82 @@ export class StateManager {
   }
 
   /**
-   * Check if a process is alive
-   * @param pid Process ID to check
-   * @returns true if process is alive
+   * Get the current browser server information
    */
-  private async isProcessAlive(pid: number): Promise<boolean> {
-    try {
-      // Try to send signal 0 to check if process exists.
-      // Works on Linux, Mac, and Windows (Node.js implementation).
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      // Process doesn't exist or we can't check it
-      return false;
+  public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
+    const state = await this.readState();
+    return state.browserServer ?? null;
+  }
+
+  /**
+   * Set the current browser server information (atomic: only overwrites if no live server exists)
+   */
+  public async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
+    await this.updateState((state) => {
+      state.browserServer = { port, pid, schedulerId };
+      return state;
+    });
+  }
+
+  /**
+   * Clear the browser server information
+   */
+  public async clearBrowserServer(): Promise<void> {
+    await this.updateState((state) => {
+      delete state.browserServer;
+      return state;
+    });
+  }
+
+  /**
+   * Check if a process is alive with optional scheduler ID verification
+   */
+  public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock: boolean = false): Promise<boolean> {
+    const alive = this.processLifecycle.isProcessAlive(pid);
+    if (!alive) return false;
+
+    if (expectedSchedulerId) {
+      // Use _readState() if skipLock is true to prevent deadlocks when called inside updateState.
+      const state = skipLock ? await this._readState() : await this.readState();
+      return state.browserServer?.schedulerId === expectedSchedulerId;
     }
+
+    return true;
+  }
+
+  /**
+   * Acquire the global GPU resource lock.
+   * Only one process can hold the GPU lock at a time.
+   * @param sessionId Optional session ID for tracking
+   * @param timeoutMs Maximum time to wait for the lock
+   * @returns true if lock was acquired, false if timed out
+   */
+  public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Promise<boolean> {
+    return this.gpuResourceService.acquireGpuLock(
+      (updater) => this.updateState(updater),
+      sessionId,
+      timeoutMs
+    );
+  }
+
+  /**
+   * Release the global GPU resource lock if held by this process.
+   * @param pid Optional PID to release for (defaults to current process)
+   */
+  public async releaseGpuLock(pid: number = process.pid): Promise<void> {
+    await this.gpuResourceService.releaseGpuLock(
+      (updater) => this.updateState(updater),
+      pid
+    );
+  }
+
+  /**
+   * Get information about the current GPU owner
+   */
+  public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
+    return this.gpuResourceService.getGpuOwner(
+      () => this.readState()
+    );
   }
 
   /**
@@ -641,312 +696,6 @@ export class StateManager {
   }
 
   /**
-   * Acquire a filesystem lock for exclusive access to state
-   * @throws Error if unable to acquire lock within timeout
-   */
-  private async acquireLock(): Promise<void> {
-    await this.ensureDirectories();
-
-    const startTime = Date.now();
-    let contentionCount = 0;
-
-    for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
-      try {
-        // FIX: Open lock file and write UUID immediately (atomic)
-        this.lockHandle = await fs.open(this.lockFilePath, 'wx');
-        await this.lockHandle.write(this.lockUuid);
-        await this.lockHandle.sync(); // Ensure UUID is written to disk
-        
-        const duration = Date.now() - startTime;
-        metrics.observe('state_lock_acquire_duration_ms', duration);
-        metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
-        if (contentionCount > 0) {
-          metrics.increment('state_lock_contention_total', 1);
-          metrics.observe('state_lock_contention_retries', contentionCount);
-        }
-        return;
-      } catch (error: unknown) {
-        if (error instanceof Error && 'code' in error) {
-          const errnoError = error as NodeJS.ErrnoException;
-          if (errnoError.code === 'EEXIST') {
-            contentionCount++;
-            // FIX: Read lock UUID to verify ownership before considering stale
-            try {
-              const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
-              const lockUuid = lockContent.trim();
-              const stats = await fs.stat(this.lockFilePath);
-              const lockAge = Date.now() - stats.mtimeMs;
-
-              // Only delete if lock is stale AND we can verify it's not owned by a live process
-              if (lockAge > this.lockStaleThreshold) {
-                // FIX: Check if lock owner is still alive using the UUID
-                // This prevents TOCTOU race where a new process might have acquired the lock
-                if (lockUuid === this.lockUuid) {
-                  // This is our own lock (shouldn't happen, but handle gracefully)
-                  return;
-                }
-                
-                // Stale lock with different UUID - safe to remove
-                // Use atomic rename to "claim" the stale lock file before deleting it
-                // This prevents deleting a lock that was JUST acquired by another process
-                const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-                try {
-                  await fs.rename(this.lockFilePath, trashPath);
-                  await fs.unlink(trashPath);
-                } catch {
-                  // Someone else already cleaned it up or acquired it - that's fine
-                }
-                continue;
-              }
-            } catch (_statError) {
-              // Can't stat or read lock file - try to remove it atomically
-              const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-              try {
-                await fs.rename(this.lockFilePath, trashPath);
-                await fs.unlink(trashPath);
-                continue;
-              } catch {
-                // Lock file might be removed by another process, continue waiting
-              }
-            }
-
-            // Wait before retrying
-            if (Date.now() - startTime < this.lockTimeout) {
-              await this.sleep(this.lockRetryDelay);
-              continue;
-            }
-
-          }
-        }
-        const duration = Date.now() - startTime;
-        metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
-        metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
-        throw error;
-      }
-    }
-
-    metrics.increment('state_lock_acquire_total', 1, { status: 'failed' });
-    throw new Error(`Failed to acquire lock after ${this.lockRetries} retries`);
-  }
-
-  /**
-   * Release the filesystem lock
-   * @throws Error if unable to release lock
-   */
-  private async releaseLock(): Promise<void> {
-    if (this.lockHandle !== null) {
-      try {
-        // FIX: Verify we still own the lock before releasing
-        try {
-          const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
-          const lockUuid = lockContent.trim();
-          if (lockUuid !== this.lockUuid) {
-            // Lock was stolen by another process, don't delete
-            logger.warn('[StateManager] Lock UUID mismatch during release, skipping deletion');
-            this.lockHandle = null;
-            metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
-            return;
-          }
-        } catch (_readError) {
-          // Lock file might already be gone, that's fine
-        }
-        
-        // FIX: Only close if handle exists (might have been set to null above)
-        if (this.lockHandle !== null) {
-          await this.lockHandle.close();
-          this.lockHandle = null;
-        }
-      } catch (error: unknown) {
-        metrics.increment('state_lock_release_total', 1, { status: 'error' });
-        throw new Error(`Failed to close lock file handle: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-      }
-    }
-
-    try {
-      await fs.unlink(this.lockFilePath);
-      metrics.increment('state_lock_release_total', 1, { status: 'success' });
-      metrics.setGauge('state_lock_held', 0);
-    } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error) {
-        const errnoError = error as NodeJS.ErrnoException;
-        if (errnoError.code !== 'ENOENT') {
-          metrics.increment('state_lock_release_total', 1, { status: 'error' });
-          throw new Error(`Failed to remove lock file: ${errnoError.message}`, { cause: error });
-        }
-      }
-    }
-  }
-
-  /**
-   * Execute a callback function while holding the lock with timeout.
-   * @param callback Async function to execute while holding the lock
-   * @param timeout Maximum time to hold the lock (default 30 seconds)
-   * @returns The return value of the callback
-   * @throws Error if unable to acquire lock, timeout, or callback throws
-   */
-  private async withLock<T>(
-    callback: () => Promise<T> | T,
-    _timeout: number = 30000,
-  ): Promise<T> {
-    // 1. Acquire lock with timeout
-    await this.acquireLock();
-    
-    try {
-      return await callback();
-    } finally {
-      try {
-        await this.releaseLock();
-      } catch (error: unknown) {
-        logger.error('[StateManager] Failed to release lock:', error);
-      }
-    }
-  }
-/**
- * Get the current browser server information
- */
-public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
-  const state = await this.readState();
-  return state.browserServer ?? null;
-}
-
-/**
- * Set the current browser server information (atomic: only overwrites if no live server exists)
- */
-public async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
-  await this.updateState((state) => {
-    state.browserServer = { port, pid, schedulerId };
-    return state;
-  });
-}
-
-/**
- * Clear the browser server information
- */
-public async clearBrowserServer(): Promise<void> {
-  await this.updateState((state) => {
-    delete state.browserServer;
-    return state;
-  });
-}
-
-/**
- * Check if a process is alive
- */
-public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock: boolean = false): Promise<boolean> {
-  const alive = await this.isProcessAlive(pid);
-  if (!alive) return false;
-
-  if (expectedSchedulerId) {
-    // Use _readState() if skipLock is true to prevent deadlocks when called inside updateState.
-    const state = skipLock ? await this._readState() : await this.readState();
-    return state.browserServer?.schedulerId === expectedSchedulerId;
-  }
-
-  return true;
-}
-
-/**
- * Acquire the global GPU resource lock.
- * Only one process can hold the GPU lock at a time.
- * @param sessionId Optional session ID for tracking
- * @param timeoutMs Maximum time to wait for the lock
- * @returns true if lock was acquired, false if timed out
- */
-public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Promise<boolean> {
-  const startTime = Date.now();
-  const retryDelay = 500;
-  let retryCount = 0;
-
-  while (Date.now() - startTime < timeoutMs) {
-    let acquired = false;
-    await this.updateState(async (state) => {
-      const now = Date.now();
-      const currentOwner = state.gpuOwner;
-
-      if (currentOwner) {
-        // If we are already the owner, just update startedAt (re-entrant/heartbeat)
-        if (currentOwner.pid === process.pid) {
-          currentOwner.startedAt = now;
-          if (sessionId) currentOwner.sessionId = sessionId;
-          acquired = true;
-          return state;
-        }
-
-        const isAlive = await this.isProcessAlive(currentOwner.pid);
-        const lockAge = now - currentOwner.startedAt;
-        
-        if (isAlive && lockAge < this.gpuLockStaleThresholdMs) {
-          // GPU is busy with a live process and lock is not stale
-          return state;
-        }
-        
-        // Either owner is dead OR lock is stale - reclaim
-        if (!isAlive) {
-          logger.warn(`[StateManager] GPU owner PID ${currentOwner.pid} is dead. Reclaiming GPU lock.`);
-        } else {
-          logger.warn(`[StateManager] GPU lock is stale (${lockAge}ms old, threshold is ${this.gpuLockStaleThresholdMs}ms). Reclaiming GPU lock.`);
-        }
-      }
-
-      // Acquire lock
-      state.gpuOwner = {
-        pid: process.pid,
-        startedAt: now,
-        sessionId
-      };
-      acquired = true;
-      return state;
-    });
-
-    if (acquired) {
-      const duration = Date.now() - startTime;
-      metrics.observe('gpu_lock_acquire_duration_ms', duration);
-      metrics.increment('gpu_lock_acquire_total', 1, { status: 'success' });
-      metrics.setGauge('gpu_lock_held', 1);
-      if (retryCount > 0) {
-        metrics.increment('gpu_lock_contention_total', 1);
-        metrics.observe('gpu_lock_contention_retries', retryCount);
-      }
-      return true;
-    }
-    
-    retryCount++;
-    // Check if we still have time to wait
-    if (Date.now() - startTime + retryDelay < timeoutMs) {
-      await this.sleep(retryDelay);
-    } else {
-      break;
-    }
-  }
-
-  metrics.increment('gpu_lock_acquire_total', 1, { status: 'timeout' });
-  return false;
-}
-
-/**
- * Release the global GPU resource lock if held by this process.
- * @param pid Optional PID to release for (defaults to current process)
- */
-public async releaseGpuLock(pid: number = process.pid): Promise<void> {
-  await this.updateState((state) => {
-    if (state.gpuOwner?.pid === pid) {
-      delete state.gpuOwner;
-      metrics.setGauge('gpu_lock_held', 0);
-      metrics.increment('gpu_lock_release_total', 1, { status: 'success' });
-    }
-    return state;
-  });
-}
-
-/**
- * Get information about the current GPU owner
- */
-public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
-  const state = await this.readState();
-  return state.gpuOwner ?? null;
-}
-
-/**
    * Validate the structure and version of a state object
    * @param state The state object to validate
    * @throws Error if state structure or version is invalid
@@ -1013,15 +762,6 @@ public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
     }
   }
 
-  /**
-   * Sleep for a specified number of milliseconds
-   * @param ms The number of milliseconds to sleep
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise<void>((resolve) => setTimeout(resolve, ms));
-  }
-
-
   // ==================== Backward compatibility methods ====================
 
   /**
@@ -1073,13 +813,7 @@ public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
    * Should be called when shutting down
    */
   public async cleanup(): Promise<void> {
-    if (this.lockHandle !== null) {
-      try {
-        await this.releaseLock();
-      } catch (error: unknown) {
-        logger.error('Failed to release lock during cleanup:', error);
-      }
-    }
+    await this.fileLockService.cleanup();
   }
 
   // ==================== Public getter methods ====================
@@ -1106,6 +840,27 @@ public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
    */
   public getBackupDirPath(): string {
     return this.backupDirPath;
+  }
+
+  /**
+   * Get the file lock service (for testing purposes)
+   */
+  getFileLockService(): FileLockService {
+    return this.fileLockService;
+  }
+
+  /**
+   * Get the process lifecycle service (for testing purposes)
+   */
+  getProcessLifecycleService(): ProcessLifecycleService {
+    return this.processLifecycle;
+  }
+
+  /**
+   * Get the GPU resource service (for testing purposes)
+   */
+  getGpuResourceService(): GPUResourceService {
+    return this.gpuResourceService;
   }
 }
 
