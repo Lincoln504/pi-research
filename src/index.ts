@@ -259,44 +259,9 @@ export default function (pi: ExtensionAPI) {
   // Register backward compatibility aliases for old commands
   // These routes are handled by the consolidated research-config command
   pi.registerCommand('health', {
-    description: 'Run system health checks (alias for: /research-config health run)',
+    description: 'Run system health checks',
     handler: async (args, ctx) => {
       await handleResearchConfigCommand(`health run ${args}`, ctx, pi);
-    },
-  });
-
-  pi.registerCommand('health-clear', {
-    description: 'Clear health check cache (alias for: /research-config health clear)',
-    handler: async (_args, ctx) => {
-      await handleResearchConfigCommand('health clear', ctx, pi);
-    },
-  });
-
-  pi.registerCommand('health-history', {
-    description: 'View health check history (alias for: /research-config health history)',
-    handler: async (_args, ctx) => {
-      await handleResearchConfigCommand('health history', ctx, pi);
-    },
-  });
-
-  pi.registerCommand('errors', {
-    description: 'View error report (alias for: /research-config errors view)',
-    handler: async (_args, ctx) => {
-      await handleResearchConfigCommand('errors view', ctx, pi);
-    },
-  });
-
-  pi.registerCommand('errors-clear', {
-    description: 'Clear error history (alias for: /research-config errors clear)',
-    handler: async (_args, ctx) => {
-      await handleResearchConfigCommand('errors clear', ctx, pi);
-    },
-  });
-
-  pi.registerCommand('errors-export', {
-    description: 'Export error report (alias for: /research-config errors export)',
-    handler: async (args, ctx) => {
-      await handleResearchConfigCommand(`errors export ${args}`, ctx, pi);
     },
   });
 

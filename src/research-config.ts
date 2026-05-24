@@ -2,8 +2,7 @@
  * Research Configuration Command
  *
  * Consolidated command that provides:
- * - Health Management (run, history, clear, configure)
- * - Error Reporting (view, clear, export, configure)
+ * - Health Management (run)
  * - Knowledge Store (status, migrate, clear, configure)
  * - System Settings (view, modify, reset, save/load)
  * - Metrics & Monitoring (view, enable/disable, configure)
@@ -20,7 +19,6 @@ import type { MenuSection, MenuItem, CommandArgs } from './config-registry.ts';
 import { parseCommandArgs, KNOWN_SECTIONS as knownSections } from './config-registry.ts';
 import type { ConfigSection } from './types/index.ts';
 import * as healthModule from './commands/health-command.ts';
-import * as errorsModule from './commands/errors-command.ts';
 import * as knowledgeModule from './commands/knowledge-command.ts';
 import * as settingsModule from './commands/settings-command.ts';
 import * as metricsModule from './commands/metrics-command.ts';
@@ -67,9 +65,6 @@ async function routeDirectAction(
       case 'health':
         await healthModule.handleHealthAction(action, params, ctx, pi);
         break;
-      case 'errors':
-        await errorsModule.handleErrorsAction(action, params, ctx, pi);
-        break;
       case 'knowledge':
         await knowledgeModule.handleKnowledgeAction(action, params, ctx, pi);
         break;
@@ -78,6 +73,9 @@ async function routeDirectAction(
         break;
       case 'metrics':
         await metricsModule.handleMetricsAction(action, params, ctx, pi);
+        break;
+      case 'errors' as any:
+        ctx.ui.notify("Error reporting is no longer supported. The system is now stateless.", 'info');
         break;
     }
     return;
@@ -91,14 +89,6 @@ async function routeDirectAction(
     },
     'health-history': () => {
       healthModule.showHealthHistory(ctx, pi);
-      return Promise.resolve();
-    },
-    'errors-clear': () => {
-      errorsModule.clearErrorHistory(ctx);
-      return Promise.resolve();
-    },
-    'errors-export': () => {
-      errorsModule.exportErrorReport(params[0], ctx);
       return Promise.resolve();
     },
     'knowledge-migrate': () => {
@@ -123,12 +113,6 @@ async function routeDirectAction(
 // ============================================================================
 
 export { handleHealthAction, runHealthCheck, showHealthHistory, showHealthSummary, clearHealthCache } from './commands/health-command.ts';
-
-// ============================================================================
-// Error Reporting Actions (delegated to errors-command module)
-// ============================================================================
-
-export { handleErrorsAction, showErrorReport, showErrorPatterns, exportErrorReport, clearErrorHistory } from './commands/errors-command.ts';
 
 // ============================================================================
 // Knowledge Store Actions (delegated to knowledge-command module)
@@ -178,7 +162,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         private menus: Record<MenuSection, MenuItem[]> = {
           main: [
             { id: 'health', label: 'Health Management', description: 'System health checks and monitoring', submenu: 'health' },
-            { id: 'errors', label: 'Error Reporting', description: 'View and manage error reports', submenu: 'errors' },
             { id: 'knowledge', label: 'Knowledge Store', description: 'Manage persistent memory', submenu: 'knowledge' },
             { id: 'settings', label: 'System Settings', description: 'View and modify configuration', submenu: 'settings' },
             { id: 'metrics', label: 'Metrics & Monitoring', description: 'View system metrics', submenu: 'metrics' },
@@ -188,32 +171,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
               this.showStatus('Running health check...');
               await healthModule.runHealthCheck({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
               this.clearStatus();
-            }},
-            { id: 'back', label: '← Back to Main', description: 'Return to main menu', action: () => {
-              this.currentSection = 'main';
-              this.selectedIndex = 0;
-            }},
-          ],
-          errors: [
-            { id: 'view', label: 'View Error Report', description: 'Show all errors and patterns', action: async () => {
-              this.showStatus('Loading error report...');
-              await errorsModule.showErrorReport({ ui: ctx.ui, cwd: ctx.cwd }, pi);
-              this.clearStatus();
-            }},
-            { id: 'patterns', label: 'View Patterns', description: 'Show error patterns summary', action: async () => {
-              this.showStatus('Loading error patterns...');
-              await errorsModule.showErrorPatterns({ ui: ctx.ui, cwd: ctx.cwd }, pi);
-              this.clearStatus();
-            }},
-            { id: 'export', label: 'Export Report', description: 'Export errors to JSON file', action: async () => {
-              await errorsModule.exportErrorReport(undefined, { ui: ctx.ui, cwd: ctx.cwd });
-              this.showStatus('Error report exported');
-              setTimeout(() => this.clearStatus(), 2000);
-            }},
-            { id: 'clear', label: 'Clear History', description: 'Clear all error history', action: async () => {
-              errorsModule.clearErrorHistory({ ui: ctx.ui, cwd: ctx.cwd });
-              this.showStatus('Error history cleared');
-              setTimeout(() => this.clearStatus(), 2000);
             }},
             { id: 'back', label: '← Back to Main', description: 'Return to main menu', action: () => {
               this.currentSection = 'main';
@@ -277,6 +234,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
               this.selectedIndex = 0;
             }},
           ],
+          errors: [] as any, // Not used
         };
 
         private get visibleItems(): MenuItem[] {

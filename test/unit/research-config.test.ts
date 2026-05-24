@@ -4,8 +4,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleResearchConfigCommand } from '../../src/research-config.ts';
-import { errorTracker } from '../../src/utils/error-tracker.ts';
-import { healthRegistry } from '../../src/healthcheck/index.ts';
 
 // Mock dependencies
 vi.mock('../../src/logger.ts', () => ({
@@ -18,13 +16,6 @@ vi.mock('../../src/healthcheck/index.ts', () => ({
     isCritical: vi.fn().mockReturnValue(true),
   },
   runHealthCheck: vi.fn().mockResolvedValue({ success: true }),
-}));
-
-vi.mock('../../src/utils/error-tracker.ts', () => ({
-  errorTracker: {
-    clear: vi.fn(),
-    getReport: vi.fn().mockReturnValue({ totalErrors: 0, uniquePatterns: 0, patterns: [] }),
-  },
 }));
 
 vi.mock('../../src/config.ts', () => ({
@@ -49,12 +40,6 @@ describe('research-config command routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('routes "errors clear" command correctly', async () => {
-    await handleResearchConfigCommand('errors clear', mockCtx, mockPi as any);
-    expect(errorTracker.clear).toHaveBeenCalled();
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('cleared'), 'info');
   });
 
   it('routes "health history" command to informational message', async () => {

@@ -6,7 +6,6 @@
  */
 
 import { logger } from '../logger.ts';
-import { errorTracker } from '../utils/error-tracker.ts';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/browser-manager.ts';
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
@@ -109,27 +108,6 @@ healthRegistry.register('GPULock', async () => {
     return { healthy: false, error: `GPU Lock check failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }, { timeoutMs: 5000, critical: false });
-
-// Register ErrorTracker Check
-healthRegistry.register('ErrorTracker', async () => {
-  try {
-    const report = errorTracker.getReport();
-    // Consider unhealthy if there are more than 100 errors
-    const isErrorCountHigh = report.totalErrors > 100;
-    return {
-      healthy: !isErrorCountHigh,
-      error: isErrorCountHigh ? `High error count: ${report.totalErrors} errors across ${report.uniquePatterns} patterns` : undefined,
-      diagnostic: {
-        totalErrors: report.totalErrors,
-        uniquePatterns: report.uniquePatterns,
-        topPattern: report.patterns[0]?.signature || 'none',
-        topPatternCount: report.patterns[0]?.count || 0,
-      }
-    };
-  } catch (e) {
-    return { healthy: false, error: `ErrorTracker check failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
-}, { timeoutMs: 1000, critical: false }); // Not critical - errors are informational
 
 // ============================================================================
 // High-level Actions

@@ -15,7 +15,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { IErrorTrackerLogger } from './core/interfaces/error-tracking.ts';
 
 /**
  * Log level enum
@@ -611,16 +610,6 @@ export class Logger implements ILogger {
 
   error(...args: unknown[]): void {
     this.emit(LogLevel.ERROR, ...args);
-    // Track errors for pattern recognition
-    if (args.length > 0) {
-      const errArg = args.find(a => a instanceof Error) || args[0];
-      const context = getLogContext();
-
-      // Use lazy-initialized error tracker to break circular dependency
-      getErrorTracker().then(mod => {
-        mod.errorTracker.trackError(errArg as string | Error, context);
-      }).catch(() => {});
-    }
   }
 
   warn(...args: unknown[]): void {
@@ -687,50 +676,6 @@ export function resetLogger(): void {
   globalLogger = null;
 }
 
-// ============================================================================
-// Error Tracker Lazy Initialization
-// ============================================================================
-
-let errorTrackerModule: typeof import('./utils/error-tracker.ts') | null = null;
-let errorTrackerLoadPromise: Promise<typeof import('./utils/error-tracker.ts')> | null = null;
-
-/**
- * Lazily load the error tracker module and set the logger reference.
- * This breaks the circular dependency between logger and error-tracker.
- */
-async function getErrorTracker(): Promise<typeof import('./utils/error-tracker.ts')> {
-  if (errorTrackerModule) {
-    return errorTrackerModule;
-  }
-
-  if (errorTrackerLoadPromise) {
-    return errorTrackerLoadPromise;
-  }
-
-  errorTrackerLoadPromise = import('./utils/error-tracker.ts').then(mod => {
-    // Set the logger reference in the error tracker after it's loaded
-    // We use a simple logger interface to avoid circular dependency
-    const loggerInterface: IErrorTrackerLogger = {
-      debug: (...args: unknown[]) => getLogger().debug(...args),
-      info: (...args: unknown[]) => getLogger().info(...args),
-      warn: (...args: unknown[]) => getLogger().warn(...args),
-      error: (...args: unknown[]) => getLogger().error(...args),
-    };
-    mod.errorTracker.setLogger(loggerInterface);
-    errorTrackerModule = mod;
-    return mod;
-  });
-
-  return errorTrackerLoadPromise;
-}
-
-/**
- * Get the error tracker module (for external use)
- */
-export async function getErrorTrackerModule(): Promise<typeof import('./utils/error-tracker.ts')> {
-  return getErrorTracker();
-}
-
 /**
  * Logger singleton for backward compatibility
  */
@@ -740,4 +685,5 @@ export const logger = {
   error: (...args: unknown[]) => getLogger().error(...args),
   warn:  (...args: unknown[]) => getLogger().warn(...args),
   debug: (...args: unknown[]) => getLogger().debug(...args),
+  runCapturingStderr: (task: () => Promise<any>) => getLogger().runCapturingStderr(task),
 };

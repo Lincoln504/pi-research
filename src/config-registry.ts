@@ -4,7 +4,7 @@
  * Central registry for research config commands and routing
  */
 
-export type MenuSection = 'main' | 'health' | 'errors' | 'knowledge' | 'settings' | 'metrics';
+export type MenuSection = 'main' | 'health' | 'knowledge' | 'settings' | 'metrics';
 
 export interface MenuItem {
   id: string;
@@ -40,7 +40,7 @@ export function parseCommandArgs(args: string): CommandArgs {
 /**
  * Known sections for routing
  */
-export const KNOWN_SECTIONS = ['health', 'errors', 'knowledge', 'settings', 'metrics'] as const;
+export const KNOWN_SECTIONS = ['health', 'knowledge', 'settings', 'metrics'] as const;
 
 /**
  * Backward compatibility command map
@@ -53,7 +53,6 @@ export function createBackwardCompatibilityMap(
   context: any,
   pi: any,
   healthModule: any,
-  errorsModule: any,
   knowledgeModule: any
 ): CommandMap {
   return {
@@ -63,14 +62,6 @@ export function createBackwardCompatibilityMap(
     },
     'health-history': () => {
       healthModule.showHealthHistory(context, pi);
-      return Promise.resolve();
-    },
-    'errors-clear': () => {
-      errorsModule.clearErrorHistory(context);
-      return Promise.resolve();
-    },
-    'errors-export': () => {
-      errorsModule.exportErrorReport(undefined, context);
       return Promise.resolve();
     },
     'knowledge-migrate': () => {

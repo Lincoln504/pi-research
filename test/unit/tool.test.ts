@@ -18,6 +18,7 @@ vi.mock('../../src/logger.ts', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
+    runCapturingStderr: vi.fn(async (task) => await task()),
   },
   getLogger: vi.fn(() => ({
     log: vi.fn(),
@@ -211,12 +212,6 @@ vi.mock('../../src/utils/research-export.ts', () => ({
   appendExportMessage: vi.fn((result, path, cost) => `${result}\n\nExported to: ${path}`),
 }));
 
-vi.mock('../../src/utils/error-tracker.ts', () => ({
-  errorTracker: {
-    getReport: vi.fn(() => ({ totalErrors: 0, uniquePatterns: 0, patterns: [] })),
-  },
-}));
-
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   SessionManager: { inMemory: vi.fn(() => ({})) },
   SettingsManager: { inMemory: vi.fn(() => ({})) },
@@ -273,6 +268,7 @@ function createMockContext() {
     model: { id: 'test-model' },
     modelRegistry: { 
       getAll: () => [{ id: 'test-model' }],
+      getModel: vi.fn(async (id) => id === 'nonexistent' ? undefined : { id }),
       getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'key', headers: {} })),
     },
     cwd: '/test',
@@ -436,7 +432,7 @@ describe('createResearchTool', () => {
       const result = await tool.execute('id', { query: 'test', depth: 0 }, signal, undefined, createMockContext());
 
       // The actual error message from the implementation
-      expect((result.content[0] as any).text).toContain('Aborted');
+      expect((result.content[0] as any).text).toContain('Research cancelled.');
     });
   });
 
