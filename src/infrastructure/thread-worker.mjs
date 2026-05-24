@@ -213,13 +213,13 @@ async function extractSearchResults(page) {
 
 async function executeSearchTask(browser, context, query) {
     const page = await context.newPage();
-    const SEARCH_TIMEOUT = 12000;
+    const SEARCH_TIMEOUT = 25000;
     page.setDefaultTimeout(SEARCH_TIMEOUT);
     page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
     
     try {
                 logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
-        // Tighten timeouts: DDG Lite is fast, 10-15s should be plenty
+        // Relaxed timeout to accommodate network latency and concurrent worker load
         await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
         await page.fill('input[name="q"]', query);
         await Promise.all([
@@ -302,7 +302,7 @@ async function executeScrapeTask(browser, context, url) {
                           html.includes('<noscript>');
 
         if (needsWait) {
-            await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
             html = await page.content();
         }
 

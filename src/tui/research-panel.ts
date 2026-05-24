@@ -2,8 +2,8 @@
  * Research TUI Panel
  *
  * Side-by-side researcher column layout with progress tracking.
- * Adapted from the original design (pre-search-redesign) to work with
- * the current browser-based architecture (no SearXNG).
+ * Adapted from the original design to work with the current browser-based
+ * architecture using DuckDuckGo Lite (Playwright).
  */
 
 import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
@@ -143,7 +143,7 @@ export function clearCompletedResearchers(state: ResearchPanelState): void {
 }
 
 /**
- * Create initial panel state (without SearXNG status)
+ * Create initial panel state for research session
  */
 export function createInitialPanelState(sessionId: string, query: string, modelName: string): ResearchPanelState {
   return {

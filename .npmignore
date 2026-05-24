@@ -59,12 +59,15 @@ pi-research-*.md
 
 # Session / planning artifacts
 planchat.txt
-AUDIT_FIXES_SUMMARY.md
-*_PLAN_FINAL.md
-*_INVESTIGATION_REPORT.md
-*_RESTORATION_PLAN.md
-*_IMPLEMENTATION_SUMMARY.md
-*_INTEGRATION.md
+*_SUMMARY.md
+*_REPORT.md
+*_PLAN.md
+*_RESULTS.md
+*_FIX.md
+*_CHECKLIST.md
+*_ROADMAP.md
+CIRCULAR_*.md
+ZERO_SCOPE_CREEP_REMEDIATION.md
 
 # Browser cache
 .browser/
