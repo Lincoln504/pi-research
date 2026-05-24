@@ -74,9 +74,6 @@ async function routeDirectAction(
       case 'metrics':
         await metricsModule.handleMetricsAction(action, params, ctx, pi);
         break;
-      case 'errors' as any:
-        ctx.ui.notify("Error reporting is no longer supported. The system is now stateless.", 'info');
-        break;
     }
     return;
   }
@@ -234,7 +231,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
               this.selectedIndex = 0;
             }},
           ],
-          errors: [] as any, // Not used
         };
 
         private get visibleItems(): MenuItem[] {

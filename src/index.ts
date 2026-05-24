@@ -5,10 +5,12 @@ import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
+import { getConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
-import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
+import { stopBrowserManager } from './infrastructure/browser-cleanup.ts';
+import { getClientAgent } from './infrastructure/browser/client-agent.ts';
 import { resetTerminalState } from './utils/terminal-state.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
@@ -52,7 +54,7 @@ export default async function (pi: ExtensionAPI) {
     logger.log('[pi-research] Core services registered');
   } catch (err) {
     logger.error('[pi-research] Failed to register core services:', err);
-    // Continue anyway - the extension should still work with fallback behavior
+    throw new Error(`Failed to register core services: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   // Register infrastructure services (must be after core services are registered)
@@ -61,7 +63,7 @@ export default async function (pi: ExtensionAPI) {
     logger.log('[pi-research] Infrastructure services registered');
   } catch (err) {
     logger.error('[pi-research] Failed to register infrastructure services:', err);
-    // Continue anyway - the extension should still work with fallback behavior
+    throw new Error(`Failed to register infrastructure services: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   // Initialize core services BEFORE the extension becomes usable
@@ -262,7 +264,6 @@ export default async function (pi: ExtensionAPI) {
       if (!text) return;
 
       try {
-        const { getConfig } = await import('./config.ts');
         const config = getConfig();
         
         // Directly invoke the research tool, bypassing the LLM entirely.

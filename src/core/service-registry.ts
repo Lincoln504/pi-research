@@ -94,7 +94,7 @@ interface ServiceRegistration<T extends IService> {
  */
 class ServiceContainer {
   private services: Map<string, ServiceRegistration<any>> = new Map();
-  private isDisposing: boolean = false;
+  public isDisposing: boolean = false;
   private readonly defaultOptions: Required<ServiceContainerOptions>;
 
   constructor(options: ServiceContainerOptions = {}) {
@@ -340,6 +340,34 @@ class ServiceContainer {
   }
 
   /**
+   * Reset the container, clearing all services
+   * This is primarily used for testing to ensure clean state between test runs
+   */
+  reset(): void {
+    if (this.isDisposing) {
+      throw new Error('Cannot reset container while disposing');
+    }
+
+    logger.debug('[ServiceContainer] Resetting container...');
+
+    // Dispose all instances first
+    for (const [name, registration] of this.services.entries()) {
+      if (registration.instance && registration.instance.dispose) {
+        try {
+          registration.instance.dispose();
+        } catch (err) {
+          logger.warn(`[ServiceContainer] Error disposing service '${name}' during reset:`, err);
+        }
+      }
+    }
+
+    // Clear all registrations
+    this.services.clear();
+
+    logger.debug('[ServiceContainer] Container reset complete');
+  }
+
+  /**
    * Internal method to initialize a service
    */
   private async _initializeService<T extends IService>(
@@ -454,4 +482,19 @@ export function isServiceInitialized(name: string): boolean {
  */
 export function disposeAllServices(): Promise<void> {
   return globalServiceContainer.disposeAll();
+}
+
+/**
+ * Reset the global service container
+ * This is primarily used for testing to ensure clean state between test runs
+ */
+export function resetServiceContainer(): void {
+  globalServiceContainer.reset();
+}
+
+/**
+ * Check if the service container is currently being disposed
+ */
+export function isContainerDisposing(): boolean {
+  return globalServiceContainer.isDisposing;
 }

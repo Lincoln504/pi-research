@@ -1,7 +1,11 @@
 import { logger } from '../logger.ts';
-import type { KnowledgeStore, StoreDocument } from './store.ts';
+import type { KnowledgeStore } from './store.ts';
+import type { StoreDocument } from './store-types.ts';
 import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
+import { ServiceLifecycle } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
+import type { IWriterQueue } from '../core/interfaces/knowledge-interfaces.ts';
 
 export interface WriterQueueOptions {
   store: KnowledgeStore;
@@ -15,7 +19,10 @@ export interface IngestionItem {
   metadata?: Record<string, any>;
 }
 
-export class WriterQueue {
+export class WriterQueue implements IWriterQueue {
+  readonly name = ServiceNames.WRITER_QUEUE;
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
   private queue: IngestionItem[] = [];
   private processing = false;
   private options: WriterQueueOptions;
@@ -24,6 +31,15 @@ export class WriterQueue {
 
   constructor(options: WriterQueueOptions) {
     this.options = options;
+  }
+
+  async initialize(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    await this.drain();
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 
   enqueue(item: IngestionItem): void {

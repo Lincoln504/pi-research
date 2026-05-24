@@ -17,10 +17,9 @@ import { type Model } from '@mariozechner/pi-ai';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
+import { ServiceNames, IKnowledgeStore } from '../core/service-interfaces.ts';
 import type { PlanningService } from '../core/planning-service.ts';
 import type { ResearchObserver } from './research-observer.ts';
-import { getStore } from '../knowledge/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import {
     MAX_ROUNDS_LEVEL_1,
@@ -111,7 +110,7 @@ export class DeepResearchOrchestrator {
     let historicalLinksSection = '';
     if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const store = await getStore();
+        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
         const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
         if (historicalUrls.length > 0) {
           historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
@@ -136,11 +135,6 @@ export class DeepResearchOrchestrator {
         query: this.options.query,
         complexity: this.options.complexity,
         model: this.options.model,
-        config: this.config,
-        sessionContext: {
-          sessionId: this.options.sessionId,
-          researchId: this.options.researchId,
-        },
         historicalLinksSection,
         signal,
       });
@@ -304,7 +298,7 @@ export class DeepResearchOrchestrator {
       let historicalLinksSection = '';
       if (this.config.KNOWLEDGE_STORE_ENABLED) {
         try {
-          const store = await getStore();
+          const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
           const historicalUrls = await store.findRelevantUrls(this.options.query, { limit: 20 });
           if (historicalUrls.length > 0) {
             historicalLinksSection = '\n\n## Historical Knowledge Store (Discovery)\n' +
@@ -323,13 +317,11 @@ export class DeepResearchOrchestrator {
 
       // Use PlanningService for evaluation
       const plan = await planningService.updatePlanForRound({
-        currentPlan: previousPlan,
         reports: synthesisService.getAllReports(),
         round: this.currentRound,
         query: this.options.query,
         complexity: this.options.complexity,
         model: this.options.model,
-        config: this.config,
         signal,
         previousPlan,
         totalResearchersPlanned: planningService.getTotalResearchersPlanned(),

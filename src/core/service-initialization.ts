@@ -9,10 +9,6 @@ import { registerService, getService, disposeAllServices } from './service-regis
 import { ServiceNames } from './service-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { HealthCheckService } from './health-check-service.ts';
-import { BrowserManagerService } from './browser-manager-service.ts';
-import { StateManagerService } from './state-manager-service.ts';
-import { KnowledgeStoreService } from './knowledge-store-service.ts';
-import { MetricsService } from './metrics-service.ts';
 import { PlanningService } from './planning-service.ts';
 import { logger } from '../logger.ts';
 
@@ -37,50 +33,6 @@ export function registerCoreServices(): void {
   registerService(
     ServiceNames.HEALTH_CHECK_CACHE,
     () => new HealthCheckService(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    }
-  );
-
-  // Register Browser Manager Service
-  registerService(
-    ServiceNames.BROWSER_MANAGER,
-    () => new BrowserManagerService(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    }
-  );
-
-  // Register State Manager Service
-  registerService(
-    ServiceNames.STATE_MANAGER,
-    () => new StateManagerService(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    }
-  );
-
-  // Register Knowledge Store Service
-  registerService(
-    ServiceNames.KNOWLEDGE_STORE,
-    () => new KnowledgeStoreService(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    }
-  );
-
-  // Register Metrics Service
-  registerService(
-    ServiceNames.METRICS,
-    () => new MetricsService(),
     {
       lazyInitialization: true,
       allowOverwrite: false,
@@ -124,7 +76,6 @@ export async function initializeCoreServices(): Promise<{ initialized: string[];
     { name: ServiceNames.METRICS, label: 'Metrics Service' },
     { name: ServiceNames.STATE_MANAGER, label: 'State Manager Service' },
     { name: ServiceNames.HEALTH_CHECK_CACHE, label: 'Health Check Cache Service' },
-    { name: ServiceNames.BROWSER_MANAGER, label: 'Browser Manager Service' },
   ];
 
   // Services requiring eager initialization (marked with lazyInitialization: false)
@@ -216,4 +167,3 @@ export async function disposeCoreServices(): Promise<void> {
     throw err;
   }
 }
-

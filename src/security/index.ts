@@ -23,10 +23,10 @@ import type {
   OSVResult,
 } from './types.ts';
 import { REQUEST_DELAY_MS_NVD, REQUEST_DELAY_MS_OTHER } from '../constants.ts';
-import { searchNVD } from './nvd.ts';
+import { searchNVD, getCVEById } from './nvd.ts';
 import { searchCisaKev } from './cisa-kev.ts';
-import { searchGitHubAdvisories } from './github-advisories.ts';
-import { searchOSV } from './osv.ts';
+import { searchGitHubAdvisories, getAdvisoryById } from './github-advisories.ts';
+import { searchOSV, getOSVById } from './osv.ts';
 
 // ============================================================================
 // Type Definitions
@@ -207,11 +207,10 @@ export class SecuritySearcher {
 // ============================================================================
 
 class DefaultNVDClient implements INVDClient {
-  async search(terms: readonly string[], options?: NVDSearchOptions): Promise<import('./types.ts').NVDResult> {
+  async search(terms: readonly string[], options?: NVDSearchOptions): Promise<NVDResult> {
     return searchNVD(terms as string[], options);
   }
   async getById(cveId: string): Promise<import('./types.ts').Vulnerability | null> {
-    const { getCVEById } = await import('./nvd.ts');
     return getCVEById(cveId);
   }
 }
@@ -223,21 +222,19 @@ class DefaultCisaKevClient implements ICisaKevClient {
 }
 
 class DefaultGitHubClient implements IGitHubAdvisoriesClient {
-  async search(terms: readonly string[], options?: GitHubSearchOptions): Promise<import('./types.ts').GitHubResult> {
+  async search(terms: readonly string[], options?: GitHubSearchOptions): Promise<GitHubResult> {
     return searchGitHubAdvisories(terms as string[], options);
   }
   async getById(id: string): Promise<import('./types.ts').Advisory | null> {
-    const { getAdvisoryById } = await import('./github-advisories.ts');
     return getAdvisoryById(id);
   }
 }
 
 class DefaultOSVClient implements IOSVClient {
-  async search(terms: readonly string[], options?: OSVSearchOptions): Promise<import('./types.ts').OSVResult> {
+  async search(terms: readonly string[], options?: OSVSearchOptions): Promise<OSVResult> {
     return searchOSV(terms as string[], options);
   }
   async getById(osvId: string): Promise<import('./types.ts').Vulnerability | null> {
-    const { getOSVById } = await import('./osv.ts');
     return getOSVById(osvId);
   }
 }

@@ -5,8 +5,8 @@
  * Provides clean interface for metrics collection and management.
  */
 
-import type { IService } from './service-registry.ts';
-import { ServiceLifecycle } from './service-registry.ts';
+import type { IService } from '../core/service-registry.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
 import type { Labels, IMetricHistogram, IMetricsSnapshot } from '../utils/metrics.ts';
 import { MetricsRegistry, metrics } from '../utils/metrics.ts';

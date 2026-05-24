@@ -1,4 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { resetServiceContainer, registerService } from '../../../src/core/service-registry.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+
+// Create shared mocks for browser functions (hoisted for vi.mock)
+const { mockRunBrowserTask, mockRunBrowserHealthCheck, mockRunWorkerSearch } = vi.hoisted(() => ({
+  mockRunBrowserTask: vi.fn(),
+  mockRunBrowserHealthCheck: vi.fn(),
+  mockRunWorkerSearch: vi.fn(),
+}));
 
 vi.mock('../../../src/web-research/utils.ts', () => ({
   checkModule: vi.fn().mockImplementation((name) => {
@@ -8,7 +17,20 @@ vi.mock('../../../src/web-research/utils.ts', () => ({
 }));
 
 vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
-  runBrowserTask: vi.fn(),
+  runBrowserTask: mockRunBrowserTask,
+  runBrowserHealthCheck: mockRunBrowserHealthCheck,
+  runWorkerSearch: mockRunWorkerSearch,
+  isBrowserAvailable: vi.fn(() => true),
+  getMaxWorkers: vi.fn(() => 2),
+  getSchedulerVersion: vi.fn(() => '1.0.0'),
+  forceSchedulerRestart: vi.fn(),
+}));
+
+// Also mock task-execution-service since that's what scrapers.ts actually imports
+vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({
+  runBrowserTask: mockRunBrowserTask,
+  runBrowserHealthCheck: mockRunBrowserHealthCheck,
+  runWorkerSearch: mockRunWorkerSearch,
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -38,11 +60,33 @@ import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } fr
 describe('scrapers', () => {
   beforeEach(() => {
     initScraperDependencies();
+    mockRunBrowserTask.mockReset();
+    mockRunBrowserHealthCheck.mockReset();
+    mockRunWorkerSearch.mockReset();
+
+    // Register mock scheduler service for browser fallback tests
+    registerService(
+      ServiceNames.SCHEDULER,
+      () => ({
+        name: 'scheduler',
+        lifecycle: 'initialized',
+        async initialize() {},
+        async dispose() {},
+        async runSearch() { return []; },
+        async runScrape() { return { html: '' }; },
+        async runHealthCheck() { return { success: true }; },
+        async shutdown() {},
+        getSchedulerInstance() { return null; },
+        schedulerId: 'test',
+      }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
   });
 
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    resetServiceContainer();
   });
 
   describe('scrapeSingle — URL validation', () => {

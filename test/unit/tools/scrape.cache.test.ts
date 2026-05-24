@@ -10,6 +10,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createScrapeTool } from '../../../src/tools/scrape.ts';
 import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
+import { getService } from '../../../src/core/service-registry.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getService: vi.fn(),
+}));
+
 vi.mock('../../../src/web-research/scrapers.ts', () => ({
   scrape: vi.fn(async (urls) => 
     urls.map((url: string) => ({ url, success: true, markdown: 'fresh content for ' + url, source: 'fetch' }))
@@ -18,7 +25,6 @@ vi.mock('../../../src/web-research/scrapers.ts', () => ({
 
 vi.mock('../../../src/knowledge/index.ts', () => ({
   isKnowledgeStoreReady: vi.fn(),
-  getStore: vi.fn(),
   initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -47,7 +53,7 @@ describe('tools/scrape cache integration', () => {
 
   describe('cache hit scenarios', () => {
     it('bypasses fetch and returns cached content when rebuildDocument has content', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
@@ -60,7 +66,12 @@ describe('tools/scrape cache integration', () => {
         }
         return null;
       });
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -72,7 +83,7 @@ describe('tools/scrape cache integration', () => {
     });
 
     it('handles cached content with raw-content ingestion type', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
@@ -80,7 +91,12 @@ describe('tools/scrape cache integration', () => {
         text: 'raw cached content',
         metadata: { ingestionType: 'raw-content' },
       });
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://raw.example.com'] }, undefined, () => {}, {} as any);
@@ -90,7 +106,7 @@ describe('tools/scrape cache integration', () => {
     });
 
     it('handles mixed cache hits and misses in same batch', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
@@ -104,7 +120,12 @@ describe('tools/scrape cache integration', () => {
         }
         return null;
       });
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://cached.example.com', 'https://uncached.example.com'] }, undefined, () => {}, {} as any);
@@ -119,11 +140,16 @@ describe('tools/scrape cache integration', () => {
 
   describe('cache miss scenarios', () => {
     it('fetches fresh content when rebuildDocument returns null', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: vi.fn().mockResolvedValue(null) } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: vi.fn().mockResolvedValue(null) } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -134,7 +160,7 @@ describe('tools/scrape cache integration', () => {
     });
 
     it('fetches fresh content when knowledge store is not ready', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(false);
@@ -166,12 +192,17 @@ describe('tools/scrape cache integration', () => {
 
   describe('error handling', () => {
     it('handles rebuildDocument errors gracefully', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
       const rebuildDocumentMock = vi.fn().mockRejectedValue(new Error('Store error'));
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -182,12 +213,17 @@ describe('tools/scrape cache integration', () => {
     });
 
     it('handles rebuildDocument returning null (cache miss)', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
       const rebuildDocumentMock = vi.fn().mockResolvedValue(null);
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const result = await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -198,12 +234,15 @@ describe('tools/scrape cache integration', () => {
     });
 
     it('handles getStore throwing an error', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
-      vi.mocked(getStore).mockImplementation(() => {
-        throw new Error('Store not available');
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          throw new Error('Store not available');
+        }
+        return null;
       });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
@@ -217,7 +256,7 @@ describe('tools/scrape cache integration', () => {
 
   describe('concurrent access', () => {
     it('handles multiple concurrent cache lookups', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
@@ -231,7 +270,12 @@ describe('tools/scrape cache integration', () => {
         }
         return null;
       });
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       const [result1, result2, result3] = await Promise.all([
@@ -252,7 +296,7 @@ describe('tools/scrape cache integration', () => {
 
   describe('cache behavior with different ingestion types', () => {
     it('uses cached content regardless of ingestion type', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
@@ -260,7 +304,12 @@ describe('tools/scrape cache integration', () => {
         text: 'cached content with any type',
         metadata: { ingestionType: 'any-type' },
       });
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: rebuildDocumentMock } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: rebuildDocumentMock } as any;
+        }
+        return null;
+      });
 
       const tool = createScrapeTool({ ...mockOptions, tracker });
       await tool.execute('call-1', { urls: ['https://example.com'] }, undefined, () => {}, {} as any);
@@ -273,11 +322,16 @@ describe('tools/scrape cache integration', () => {
 
   describe('integration with global deduplication', () => {
     it('works correctly when global links are being tracked', async () => {
-      const { isKnowledgeStoreReady, getStore } = await import('../../../src/knowledge/index.ts');
+      const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts');
       const { scrape } = await import('../../../src/web-research/scrapers.ts');
 
       vi.mocked(isKnowledgeStoreReady).mockReturnValue(true);
-      vi.mocked(getStore).mockReturnValue({ rebuildDocument: vi.fn().mockResolvedValue(null) } as any);
+      vi.mocked(getService).mockImplementation((name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) {
+          return { rebuildDocument: vi.fn().mockResolvedValue(null) } as any;
+        }
+        return null;
+      });
 
       const mockUpdateLinks = vi.fn();
       const tool = createScrapeTool({ 

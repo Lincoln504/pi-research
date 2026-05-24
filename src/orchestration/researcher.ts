@@ -19,6 +19,7 @@ import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 import type { Config } from '../config.ts';
+import { logger } from '../logger.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;
@@ -124,8 +125,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     }
 
     // Log to confirm thinking level was set
-    const { logger: piLogger } = await import('../logger.ts');
-    piLogger.log(`[Researcher] Created session with thinkingLevel='off', model=${ctxModel?.id || 'unknown'}`);
+    logger.log(`[Researcher] Created session with thinkingLevel='off', model=${ctxModel?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');

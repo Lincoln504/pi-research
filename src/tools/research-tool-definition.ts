@@ -13,11 +13,11 @@ import type {
 } from '@mariozechner/pi-coding-agent';
 import type { Model } from '@mariozechner/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
-import type { ExtendedResearchContext, ResearchDepth } from '../types/index.ts';
+import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
 import { validateConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
-import { createResearchRunId, logger, runWithLogContext, setLogger, createLogger, isVerboseFromEnv, getLogger } from '../logger.ts';
+import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { startResearchSession, registerSessionAbort } from '../utils/session-state.ts';
@@ -26,7 +26,6 @@ import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 import type { ResearchState } from '../types/index.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../utils/research-health.ts';
-import { getPiSessionMetadata } from '../utils/pi-session.ts';
 import { errorTracker, type ErrorReport } from '../utils/error-tracker.ts';
 
 /**
@@ -158,7 +157,7 @@ export function createResearchTool(): ToolDefinition {
     ): Promise<AgentToolResult<unknown>> {
       const { query, depth, model: modelId } = params as { query: string; depth?: number; model?: string };
       const researchId = createResearchRunId();
-      const piSessionId = ctx.sessionId || 'default';
+      const piSessionId = (ctx as any).sessionManager?.getSessionId() || 'default';
       const internalAbort = new AbortController();
       let tuiManager: ReturnType<typeof createResearchTuiManager> | null = null;
       let healthMonitorInstance: ReturnType<typeof createHealthMonitor> | null = null;
@@ -174,7 +173,7 @@ export function createResearchTool(): ToolDefinition {
           // When no explicit model parameter is given, use ctx.model directly.
           let selectedModel: ModelWithId | undefined;
           if (modelId) {
-            selectedModel = await ctx.modelRegistry.getModel(modelId);
+            selectedModel = (ctx.modelRegistry as any).getAll().find((m: any) => m.id === modelId);
             if (!selectedModel) {
               logger.warn(`[research] Model ${modelId} not found, falling back to context model.`);
               selectedModel = ctx.model as ModelWithId;
@@ -211,18 +210,25 @@ export function createResearchTool(): ToolDefinition {
           healthMonitorInstance.start();
 
           // Register with session state
-          const session = startResearchSession(piSessionId, researchId);
-          registerSessionAbort(piSessionId, researchId, () => internalAbort.abort());
+          const sessionResearchId = startResearchSession(piSessionId);
+          registerSessionAbort(piSessionId, sessionResearchId, internalAbort);
 
           // Setup observer
-          const observerState = createObserverState(panelState, () => tuiManager?.debouncedRefresh());
-          const observer = createResearchObserver(observerState);
+          const observerState = createObserverState();
+          const observer = createResearchObserver(
+            { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 0 },
+            observerState
+          );
 
           // Setup cleanup
-          const cleanup = createCleanupFunction(panelState, {
+          const cleanup = createCleanupFunction({
+            researchId: sessionResearchId,
             piSessionId,
-            researchId,
-            tuiManager,
+            masterWidgetId: '',
+            panelState,
+            waveTimer: null,
+            unsubOrder: null,
+            unsubInput: null,
           }, { ctx });
 
           // Handle abort signal
@@ -232,8 +238,8 @@ export function createResearchTool(): ToolDefinition {
 
           // Setup scoped logging
           const researchLogger = createLogger({ researchRunId: researchId, verbose: isVerboseFromEnv() });
-          const previousLogger = getLogger();
-          setLogger(researchLogger);
+          const previousLogger = logger as any; // Cast as we're swapping the global proxy target
+          setLogger(researchLogger as any);
 
           // Hide working indicator
           hideWorkingIndicator(ctx);

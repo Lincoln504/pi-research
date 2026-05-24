@@ -11,7 +11,7 @@ import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { browserCircuitBreaker, isTransientSocketError } from './browser-error-utils.ts';
-import { getScheduler } from './scheduler-factory.ts';
+import { getScheduler, forceSchedulerRestart } from './scheduler-factory.ts';
 
 /**
  * Dispatches a browser task to the unified worker pool.
@@ -48,7 +48,6 @@ export async function runBrowserTask<T>(
             });
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
             await forceSchedulerRestart(true);
             // Add a small delay before retry to allow ports to free up
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -76,7 +75,6 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
             });
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
             await forceSchedulerRestart(true);
             await new Promise(resolve => setTimeout(resolve, 1000));
             return runBrowserHealthCheck(config, retries - 1);
@@ -104,7 +102,6 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
             });
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
             await forceSchedulerRestart(true);
             await new Promise(resolve => setTimeout(resolve, 1000));
             return runWorkerSearch(query, config, retries - 1);

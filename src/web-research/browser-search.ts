@@ -4,7 +4,8 @@
  * Orchestrates exhaustive search bursts across multiple worker processes.
  */
 
-import { runWorkerSearch, getMaxWorkers } from '../infrastructure/browser-manager.ts';
+import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
+import { getMaxWorkers } from '../infrastructure/browser/browser-configuration.ts';
 import { logger } from '../logger.ts';
 import type { SearchResult } from './types.ts';
 import type { Config } from '../config.ts';

@@ -8,15 +8,14 @@
  * All state is managed within the singleton instance, accessed via getSchedulerService().
  */
 
-import type { SearchResult } from './service-interfaces.ts';
-import type { IScheduler } from './scheduler-factory.ts';
-import type { ISchedulerFactory } from './scheduler-factory.ts';
+import type { SearchResult, IScheduler } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { getService } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
 import type { IService } from './service-registry.ts';
+import type { ISchedulerFactory } from './scheduler-factory.ts';
 
 
 
@@ -71,7 +70,7 @@ interface ISchedulerInternal {
  * Wraps the browser scheduler with proper service lifecycle management
  * All state is managed within the instance - no module-level state
  */
-export class SchedulerService implements IService, IScheduler {
+export class SchedulerService implements IService {
   readonly name = 'scheduler';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
@@ -253,10 +252,8 @@ export class SchedulerService implements IService, IScheduler {
     // Create a new initialization lock
     const initPromise = (async () => {
       try {
-        // Get the scheduler factory from the service registry
-        // The factory is registered by infrastructure initialization
+        // Get the scheduler from the factory function
         const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY);
-        
         const scheduler = await factory.getScheduler(config);
         
         // Store the scheduler instance

@@ -12,7 +12,7 @@ import { metrics } from '../../utils/metrics.ts';
 import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
-import { getSharedStateManager } from '../state-manager.ts';
+import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { generateSchedulerVersion } from './browser-configuration.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
@@ -47,7 +47,7 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
         // Find and clear any stale scheduler processes BEFORE clearing state.
         // Only clear if the registered PID is dead or belongs to this process — never
         // wipe state owned by a live remote leader (that would cause split-brain).
-        const stateManager = getSharedStateManager();
+        const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
         const serverInfo = await stateManager.getBrowserServer();
         let shouldClearState = true;
         if (serverInfo) {
@@ -119,7 +119,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
         // Generate a unique ID for this scheduler instance to prevent PID reuse issues
         const schedulerId = crypto.randomUUID();
 
-        const stateManager = getSharedStateManager();
+        const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
         const serverInfo = await stateManager.getBrowserServer();
 
         // Race check: if another process won election while we were starting, serverInfo will be fresh
@@ -165,7 +165,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
         }
 
         // Slow path: start a server then atomically claim leadership via compare-and-set.
-        const scheduler = new BrowserTaskScheduler(schedulerId);
+        const scheduler = new BrowserTaskScheduler(schedulerId, stateManager);
         let port: number;
         try {
             port = await scheduler.startServer();

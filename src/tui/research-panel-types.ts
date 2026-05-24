@@ -1,0 +1,54 @@
+/**
+ * Research Panel Types
+ *
+ * Type definitions for the research TUI panel.
+ */
+
+/**
+ * Local Theme interface — mirrors pi-tui Theme.fg()
+ */
+export interface Theme {
+  fg: (color: string, text: string) => string;
+}
+
+export interface SliceState {
+  id: string;
+  label: string; // Displayed label: "1", "2", "3", etc.
+  completed: boolean;
+  queued: boolean;
+  tokens?: number; // Tokens for this specific agent
+  cost?: number;   // Cost for this specific agent
+  status?: string; // Optional status message like "Searching..."
+}
+
+export interface ResearchProgress {
+  /** Total tool calls expected across all researchers in the initial plan. */
+  expected: number;
+  /** Actual tool calls completed so far. */
+  made: number;
+}
+
+export interface ResearchPanelState {
+  sessionId: string;
+  /** Alias for sessionId — used by the orchestrator */
+  researchId: string;
+  query: string;
+  totalTokens: number;
+  totalCost: number;
+  slices: Map<string, SliceState>;
+  modelName: string;
+  /** True when the research is actively searching (queueing/executing search tool) */
+  isSearching?: boolean;
+  /** Optional progress bar data. Set after planning completes. */
+  progress?: ResearchProgress;
+  /** Temporary status message displayed in the header (e.g. 'planning...') */
+  statusMessage?: string;
+  /** Animation frame counter for traveling wave effect during search */
+  waveFrame?: number;
+  /** Persistent color codes for wave animation (one per position) */
+  waveColors?: string[];
+  /** Timer for wave animation */
+  waveTimer?: NodeJS.Timeout | null;
+  /** Flag indicating whether completed researchers should be cleared */
+  needsClear?: boolean;
+}

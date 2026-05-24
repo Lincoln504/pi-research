@@ -15,10 +15,11 @@ import * as pathmod from 'node:path';
 import * as os from 'node:os';
 import {
   isKnowledgeStoreReady,
-  getStore,
   SUPPORTED_MODELS,
   clearKnowledgeStore,
 } from '../knowledge/index.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames, IKnowledgeStore } from '../core/service-interfaces.ts';
 
 export interface CommandContext {
   ui: {
@@ -127,7 +128,7 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
   if (config.KNOWLEDGE_STORE_ENABLED) {
     if (isKnowledgeStoreReady()) {
       try {
-        const st = await getStore();
+        const st = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
         const n = await st.count();
         storeCountLabel = ` (${n} entries)`;
       } catch { /* non-fatal */ }

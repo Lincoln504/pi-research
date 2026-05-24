@@ -19,7 +19,10 @@ import {
   getMaxScrapeBatches,
 } from '../constants.ts';
 import { type Config, DEFAULTS } from '../config.ts';
-import { getStore, isKnowledgeStoreReady } from '../knowledge/index.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IKnowledgeStore } from '../core/service-interfaces.ts';
+import { isKnowledgeStoreReady } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 
@@ -141,7 +144,7 @@ export function createScrapeTool(options: {
       const knowledgeStoreEnabled = options.config?.KNOWLEDGE_STORE_ENABLED ?? DEFAULTS.KNOWLEDGE_STORE_ENABLED;
       if (knowledgeStoreEnabled) {
         try {
-          const store = await getStore();
+          const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
           for (const url of finalUrls) {
             const normalized = normalizeUrl(url);
             const cacheHit = await store.rebuildDocument(normalized);

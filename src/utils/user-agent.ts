@@ -31,20 +31,18 @@ const REALISTIC_USER_AGENTS = [
  * Get a random realistic User-Agent string
  */
 export function getRandomRealisticUA(): string {
-    const index = Math.floor(Math.random() * REALISTIC_USER_AGENTS.length);
-    return REALISTIC_USER_AGENTS[index] as string;
+    return REALISTIC_USER_AGENTS[Math.floor(Math.random() * REALISTIC_USER_AGENTS.length)]!;
 }
 
 /**
  * Get a realistic User-Agent for a specific platform
  */
-export function getRealisticUA(platform: 'windows' | 'mac' | 'linux'): string {
+export function getRealisticUA(platform: 'windows' | 'mac' | 'linux' | string): string {
     const filtered = REALISTIC_USER_AGENTS.filter(ua => {
         if (platform === 'windows') return ua.includes('Windows');
         if (platform === 'mac') return ua.includes('Macintosh');
         if (platform === 'linux') return ua.includes('Linux');
         return true;
     });
-    const index = Math.floor(Math.random() * filtered.length);
-    return filtered[index] as string;
+    return filtered[Math.floor(Math.random() * filtered.length)]!;
 }

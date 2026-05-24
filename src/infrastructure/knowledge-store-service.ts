@@ -5,10 +5,10 @@
  * Provides clean interface for embedding and storage operations.
  */
 
-import type { IService } from './service-registry.ts';
-import { ServiceLifecycle } from './service-registry.ts';
+import type { IService } from '../core/service-registry.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import type { IEmbedder, IKnowledgeStore, IWriterQueue } from './service-interfaces.ts';
+import type { IEmbedder, IKnowledgeStore, IWriterQueue } from '../core/service-interfaces.ts';
 
 // Static imports from knowledge module
 import {

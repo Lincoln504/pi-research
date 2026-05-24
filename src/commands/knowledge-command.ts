@@ -14,10 +14,11 @@ import {
   shutdownKnowledgeStore,
   initKnowledgeStore,
   isKnowledgeStoreReady,
-  getStore,
   clearKnowledgeStore,
 } from '../knowledge/index.ts';
 import { getConfig, getDbDir } from '../config.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames, IKnowledgeStore } from '../core/service-interfaces.ts';
 
 export interface CommandContext {
   ui: {
@@ -75,7 +76,7 @@ export async function showKnowledgeStatus(ctx: CommandContext, pi: ExtensionAPI)
     
     if (ready) {
       try {
-        const store = await getStore();
+        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
         const count = await store.count();
         outputLines.push(`**Entries:** ${count}`);
       } catch (_error) {
@@ -106,7 +107,7 @@ export async function showKnowledgeCount(ctx: CommandContext, pi: ExtensionAPI):
   }
 
   try {
-    const store = await getStore();
+    const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
     const count = await store.count();
 
     pi.sendMessage({

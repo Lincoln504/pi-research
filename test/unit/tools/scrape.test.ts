@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createScrapeTool } from '../../../src/tools/scrape.ts';
 import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 import { registerScrapedLinks, cleanupSharedLinks } from '../../../src/utils/shared-links.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock the scrapers module
 vi.mock('../../../src/web-research/scrapers.ts', () => ({
@@ -21,16 +22,24 @@ vi.mock('../../../src/config.ts', () => ({
   },
 }));
 
+const mockRebuildDocument = vi.fn().mockResolvedValue(null);
+
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getService: vi.fn(async (name) => {
+    if (name === ServiceNames.KNOWLEDGE_STORE) {
+      return {
+        rebuildDocument: mockRebuildDocument,
+      };
+    }
+    throw new Error(`Service ${name} not mocked`);
+  }),
+}));
+
 // Mock knowledge module
 vi.mock('../../../src/knowledge/index.ts', () => {
   return {
     isKnowledgeStoreReady: vi.fn().mockReturnValue(true),
-    getStore: vi.fn().mockResolvedValue({
-      rebuildDocument: vi.fn().mockResolvedValue(null),
-    }),
-    getWriterQueue: vi.fn().mockResolvedValue({
-      enqueue: vi.fn(),
-    }),
+    initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -51,11 +60,8 @@ describe('tools/scrape', () => {
     tracker = new ToolUsageTracker({ scrape: 2 });
     mockOptions.tracker = tracker;
     
-    // Reset the store mock for each test
-    const { getStore } = await import('../../../src/knowledge/index.ts');
-    const store = await getStore();
-    vi.mocked(store.rebuildDocument).mockReset();
-    vi.mocked(store.rebuildDocument).mockResolvedValue(null);
+    mockRebuildDocument.mockReset();
+    mockRebuildDocument.mockResolvedValue(null);
   });
 
   it('should have correct name and batch protocol in guidelines', () => {
@@ -99,9 +105,7 @@ describe('tools/scrape', () => {
   });
 
   it('should use knowledge store cache for raw-content hits', async () => {
-    const { getStore } = await import('../../../src/knowledge/index.ts');
-    const store = await getStore();
-    vi.mocked(store.rebuildDocument).mockResolvedValueOnce({
+    mockRebuildDocument.mockResolvedValueOnce({
       text: 'cached content',
       metadata: { ingestionType: 'raw-content' }
     });
@@ -116,9 +120,7 @@ describe('tools/scrape', () => {
   });
 
   it('serves cached content directly from rebuildDocument result', async () => {
-    const { getStore } = await import('../../../src/knowledge/index.ts');
-    const store = await getStore();
-    vi.mocked(store.rebuildDocument).mockResolvedValueOnce({
+    mockRebuildDocument.mockResolvedValueOnce({
       text: 'full cached page content',
       metadata: { ingestionType: 'synthesis-description' },
     });

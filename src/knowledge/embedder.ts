@@ -1,85 +1,41 @@
-import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
-import { access } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import path from 'node:path';
-import * as os from 'node:os';
-import { logger, getLogger } from '../logger.ts';
+/**
+ * Text Embedding Service using HuggingFace Transformers
+ *
+ * Provides embeddings for text using ONNX runtime with WebGPU/CPU support.
+ * Includes automatic fallback from WebGPU to CPU on errors and idle timeout
+ * to release GPU memory when not in use.
+ */
+
+import { type FeatureExtractionPipeline } from '@huggingface/transformers';
+
+import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import type { StateManager } from '../infrastructure/state-manager.ts';
+import type { IStateManager } from '../core/service-interfaces.ts';
+import type {
+  EmbedderOptions,
+  EmbedderState,
+  DisposablePipeline,
+} from './embedder-types.ts';
+import {
+  resetWebGpuFallbackFlag,
+  hasWebGpuFallback,
+  markWebGpuFallback,
+  getModelCacheDir,
+  getHFEnv,
+} from './embedder-utils.ts';
+import {
+  isWebGpuDeviceError,
+  isModelCached,
+  acquireGpuLock,
+  releaseGpuLock,
+  loadPipelineWithTimeout,
+  warmupPipeline,
+  handleWebGPULoadError,
+  handleWebGPUWarmupError,
+} from './embedder-init.ts';
 
-/**
- * ONNX runtime environment
- */
-interface ONNXRuntimeEnv {
-  logLevel?: string;
-  debug?: boolean;
-}
-
-/**
- * HuggingFace environment with ONNX support
- */
-interface HFEnv {
-  cacheDir: string;
-  onnx?: ONNXRuntimeEnv;
-}
-
-/**
- * Disposable pipeline interface
- */
-interface DisposablePipeline {
-  dispose(): Promise<void>;
-}
-
-
-
-export interface EmbedderOptions {
-  model: string;
-  pooling?: 'mean' | 'cls' | 'last_token';
-  queryPrefix?: string;
-  initializationTimeoutMs?: number;
-  device?: string;
-  maxTokens?: number;
-  batchSize?: number;
-  charsPerToken?: number;
-  documentPrefix?: string;
-  stateManager?: StateManager;
-  useCache?: boolean;
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-      if (timer.unref) timer.unref(); 
-    }),
-  ]);
-}
-
-export function getModelCacheDir(): string {
-  const xdgCache = process.env['XDG_CACHE_HOME'];
-  const base = xdgCache ?? path.join(os.homedir(), '.cache');
-  return path.join(base, 'pi-research', 'models');
-}
-
-env.cacheDir = getModelCacheDir();
-
-try {
-  const _nodeRequire = createRequire(import.meta.url);
-  const { env: ortEnv } = _nodeRequire('onnxruntime-common') as { env: { logLevel?: string } };
-  if (ortEnv) ortEnv.logLevel = 'error';
-} catch { /* ignore */ }
-
-type EmbedderState = 'idle' | 'initializing' | 'ready' | 'failed' | 'disposing';
-
-// Module-level flag to track if any embedder instance has fallen back to CPU due to WebGPU errors
-// This prevents retrying with WebGPU after it's been proven to fail
-let hasWebGpuFallbackOccurred = false;
-
-// Reset the fallback flag (useful for testing or if WebGPU becomes available)
-export function resetWebGpuFallbackFlag(): void {
-  hasWebGpuFallbackOccurred = false;
-}
+export { resetWebGpuFallbackFlag, hasWebGpuFallback, getModelCacheDir };
+export type { EmbedderOptions, EmbedderState };
 
 export class Embedder {
   private state: EmbedderState = 'idle';
@@ -97,12 +53,12 @@ export class Embedder {
   private batchSize: number;
   private charsPerToken: number;
   private documentPrefix: string;
-  private stateManager: StateManager | null;
+  private stateManager: IStateManager | null;
   private gpuLockHeld = false;
-  private originalDevice: string; // Track the originally requested device
+  private originalDevice: string;
   private useCache: boolean;
   private idleTimer: NodeJS.Timeout | null = null;
-  private readonly IDLE_TIMEOUT_MS = 60 * 1000; // 1 minute (reduced for zero-idle VRAM usage)
+  private readonly IDLE_TIMEOUT_MS = 60 * 1000;
 
   constructor(options: EmbedderOptions) {
     this.model = options.model;
@@ -110,8 +66,7 @@ export class Embedder {
     this.queryPrefix = options.queryPrefix ?? '';
     this.initializationTimeoutMs = options.initializationTimeoutMs ?? 120000;
     this.originalDevice = options.device ?? 'webgpu';
-    // Skip WebGPU entirely if a fallback has already occurred in this session
-    this.device = hasWebGpuFallbackOccurred && this.originalDevice === 'webgpu' ? 'cpu' : this.originalDevice;
+    this.device = hasWebGpuFallback() && this.originalDevice === 'webgpu' ? 'cpu' : this.originalDevice;
     this.maxTokens = options.maxTokens ?? 512;
     this.batchSize = options.batchSize ?? 8;
     this.charsPerToken = options.charsPerToken ?? 4;
@@ -119,19 +74,8 @@ export class Embedder {
     this.stateManager = options.stateManager ?? null;
     this.useCache = options.useCache ?? true;
 
-    // Log if we're skipping WebGPU due to previous fallback
-    if (hasWebGpuFallbackOccurred && this.originalDevice === 'webgpu' && this.device === 'cpu') {
+    if (hasWebGpuFallback() && this.originalDevice === 'webgpu' && this.device === 'cpu') {
       logger.info('[embedder] Skipping WebGPU (previous fallback detected), using CPU directly');
-    }
-
-    try {
-      const hfEnv = env as HFEnv;
-      if (hfEnv.onnx) {
-        hfEnv.onnx.logLevel = 'error';
-        hfEnv.onnx.debug = false;
-      }
-    } catch (e) {
-      logger.debug('[embedder] Failed to set ONNX logLevel:', e);
     }
   }
 
@@ -157,17 +101,6 @@ export class Embedder {
     }
   }
 
-  private async isModelCached(): Promise<boolean> {
-    try {
-      const cacheDir = env.cacheDir;
-      if (!cacheDir) return false;
-      await access(path.join(cacheDir, this.model, 'onnx', 'model.onnx'));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async initialize(): Promise<void> {
     if (this.state === 'ready') return;
     if (this.state === 'disposing') {
@@ -183,7 +116,6 @@ export class Embedder {
 
     try {
       await this.initializingPromise;
-      // Race check: if dispose() was called during initialization, our state will be 'disposing'
       const currentState = this.state as EmbedderState;
       if (currentState === 'disposing') {
         logger.warn('[embedder] Initialization finished but embedder was disposed in the meantime.');
@@ -200,21 +132,22 @@ export class Embedder {
 
   private async _initializeInternal(): Promise<void> {
     try {
-      if (this.device === 'webgpu' && this.stateManager) {
-        this.gpuLockHeld = await this.stateManager.acquireGpuLock(undefined, 30_000);
-        if (!this.gpuLockHeld) {
-          logger.warn('[embedder] Failed to acquire GPU init lock within 30s — falling back to CPU');
+      // Acquire GPU lock if using WebGPU
+      if (this.device === 'webgpu') {
+        const { acquired, shouldFallback } = await acquireGpuLock(this.stateManager);
+        if (shouldFallback) {
           this.device = 'cpu';
-        } else {
-          logger.debug('[embedder] Acquired GPU init lock');
+        } else if (acquired) {
+          this.gpuLockHeld = true;
         }
       }
 
-      const cached = await this.isModelCached();
+      const cached = await isModelCached(this.model);
       logger.info(
         `[embedder] Loading model: ${this.model} (${cached ? 'from local cache' : 'downloading from HuggingFace'})...`
       );
 
+      const env = getHFEnv();
       const prevAllowRemote = env.allowRemoteModels;
       if (cached) {
         env.allowRemoteModels = false;
@@ -222,84 +155,26 @@ export class Embedder {
 
       try {
         const timeoutMs = cached ? 30_000 : this.initializationTimeoutMs;
-        const errorMessage = cached
-          ? `Model load timed out after ${timeoutMs}ms. The cached model at ${env.cacheDir ?? 'local cache'} may be corrupted.`
-          : `Model download timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
-
-        const pipelinePromise = Promise.resolve(pipeline('feature-extraction', this.model, {
-          device: this.device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
-          // Force disable cache for decoder models to avoid zero-sized buffers in WebGPU
-          // if configured in MODEL_CONFIG.
-          ...(this.useCache === false ? { use_cache: false } : {}),
-        }));
-
-        pipelinePromise.then((p: DisposablePipeline) => {
-          // If state is disposing/idle/failed and the pipeline resolves later,
-          // safely dispose it instead of holding it.
-          if (this.pipeline !== p && this.state !== 'initializing') {
-            logger.warn('[embedder] Disposing orphaned pipeline that resolved late');
-            try { p.dispose(); } catch { /* ignore */ }
-          }
-        }).catch(() => {});
-
-        this.pipeline = await getLogger().runCapturingStderr(async () => {
-          return await withTimeout(
-            pipelinePromise,
-            timeoutMs,
-            errorMessage
-          );
-        });
-
+        const { pipeline: loadedPipeline } = await loadPipelineWithTimeout(this.model, this.device, timeoutMs, this.useCache);
+        this.pipeline = loadedPipeline;
         logger.info(`[embedder] Pipeline loaded (device: ${this.device})`);
       } catch (loadErr) {
-        const errorMsg = loadErr instanceof Error ? loadErr.message : String(loadErr);
-        
-        // Check if this is a WebGPU validation error during initial loading
-        if (this.device === 'webgpu' && this.isWebGpuDeviceError(loadErr)) {
-          const isValidationError = errorMsg.toLowerCase().includes('validation');
-          
-          // Set the fallback flag so future embedder instances skip WebGPU
-          hasWebGpuFallbackOccurred = true;
-          
-          if (isValidationError) {
-            logger.warn('[embedder] WebGPU validation error during pipeline loading (likely buffer binding issue with decoder model) — falling back to CPU');
-            logger.debug('[embedder] Validation error details:', errorMsg);
-          } else {
-            logger.warn('[embedder] WebGPU OOM during pipeline loading — falling back to CPU');
+        if (this.device === 'webgpu' && isWebGpuDeviceError(loadErr)) {
+          const result = await handleWebGPULoadError(
+            loadErr,
+            this.pipeline,
+            this.stateManager,
+            this.gpuLockHeld,
+            this.model,
+            this.initializationTimeoutMs,
+            this.useCache
+          );
+          if (!result.success) {
+            throw result.error;
           }
-          
-          // Clean up and fall back to CPU
-          if (this.pipeline) {
-            try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
-          }
-          this.pipeline = null;
-
-          if (this.gpuLockHeld && this.stateManager) {
-            await this.stateManager.releaseGpuLock().catch(() => {});
-            this.gpuLockHeld = false;
-          }
-
-          // Load on CPU instead
+          this.pipeline = result.pipeline ?? null;
           this.device = 'cpu';
-          logger.info(`[embedder] Retrying model load on CPU after WebGPU ${isValidationError ? 'validation' : 'OOM'} error`);
-          
-          try {
-            this.pipeline = await getLogger().runCapturingStderr(async () => {
-              return await withTimeout(
-                pipeline('feature-extraction', this.model, {
-                  device: 'cpu',
-                  ...(this.useCache === false ? { use_cache: false } : {}),
-                }),
-                this.initializationTimeoutMs,
-                'CPU fallback model load timed out'
-              );
-            });
-            logger.info(`[embedder] Pipeline loaded (device: ${this.device})`);
-          } catch (cpuLoadErr) {
-            // CPU load also failed - this is critical
-            logger.error('[embedder] CPU fallback pipeline load failed:', cpuLoadErr);
-            throw new Error(`WebGPU initialization failed and CPU fallback load also failed: ${cpuLoadErr instanceof Error ? cpuLoadErr.message : String(cpuLoadErr)}`, { cause: cpuLoadErr });
-          }
+          this.gpuLockHeld = false;
         } else {
           throw loadErr;
         }
@@ -307,96 +182,46 @@ export class Embedder {
         env.allowRemoteModels = prevAllowRemote;
       }
 
+      // Warmup
       let dummy: any;
       try {
-        dummy = await withTimeout(
-          this.pipeline('warmup', { 
-            pooling: this.poolingMode as any, 
-            normalize: false,
-            ...(this.useCache === false ? { use_cache: false } : {}),
-          }),
-          20_000,
-          'Model warmup timed out after 20000ms.'
-        );
+        const warmupResult = await warmupPipeline(this.pipeline!, this.poolingMode, this.useCache);
+        if (!warmupResult.success) {
+          throw warmupResult.error;
+        }
+        dummy = warmupResult.dummy;
       } catch (warmupErr) {
-        const errorMsg = warmupErr instanceof Error ? warmupErr.message : String(warmupErr);
-        
-        if (this.device === 'webgpu' && this.isWebGpuDeviceError(warmupErr)) {
-          const isValidationError = errorMsg.toLowerCase().includes('validation');
-          
-          // Set the fallback flag so future embedder instances skip WebGPU
-          hasWebGpuFallbackOccurred = true;
-          
-          if (isValidationError) {
-            logger.warn('[embedder] WebGPU validation error during warmup (likely buffer binding issue with decoder model) — falling back to CPU');
-            logger.debug('[embedder] Validation error details:', errorMsg);
-          } else {
-            logger.warn('[embedder] WebGPU OOM during warmup — falling back to CPU');
+        if (this.device === 'webgpu' && isWebGpuDeviceError(warmupErr)) {
+          const result = await handleWebGPUWarmupError(
+            warmupErr as Error,
+            this.pipeline,
+            this.stateManager,
+            this.gpuLockHeld,
+            this.model,
+            this.initializationTimeoutMs,
+            this.useCache
+          );
+          if (!result.success) {
+            throw result.error;
           }
-          
-          if (this.pipeline) {
-              try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
-          }
-          this.pipeline = null;
-
-          if (this.gpuLockHeld && this.stateManager) {
-            await this.stateManager.releaseGpuLock().catch(() => {});
-            this.gpuLockHeld = false;
-          }
-
+          this.pipeline = result.pipeline ?? null;
           this.device = 'cpu';
-          logger.info(`[embedder] Loading model on CPU after WebGPU ${isValidationError ? 'validation' : 'OOM'} error...`);
-          
-          this.pipeline = await getLogger().runCapturingStderr(async () => {
-            return await withTimeout(
-              pipeline('feature-extraction', this.model, {
-                device: 'cpu',
-                ...(this.useCache === false ? { use_cache: false } : {}),
-              }),
-              this.initializationTimeoutMs,
-              'CPU fallback model load timed out'
-            );
-          });
-          logger.info('[embedder] CPU pipeline loaded successfully');
-          
-          // Warmup the CPU pipeline to ensure it's functional
-          try {
-            dummy = await withTimeout(
-              this.pipeline('warmup', { 
-                pooling: this.poolingMode as any, 
-                normalize: false,
-                ...(this.useCache === false ? { use_cache: false } : {}),
-              }),
-              20_000,
-              'CPU warmup timed out after 20000ms.'
-            );
-            logger.info(`[embedder] CPU pipeline warmup successful. Ready with device: ${this.device}`);
-          } catch (cpuWarmupErr) {
-            // CPU warmup also failed - this is critical
-            logger.error('[embedder] CPU fallback pipeline warmup failed:', cpuWarmupErr);
-            if (this.pipeline) {
-              try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
-              this.pipeline = null;
-            }
-            throw new Error(`WebGPU initialization failed and CPU fallback warmup also failed: ${cpuWarmupErr instanceof Error ? cpuWarmupErr.message : String(cpuWarmupErr)}`, { cause: cpuWarmupErr });
-          }
+          this.gpuLockHeld = false;
+          dummy = result.dummy;
         } else {
           throw warmupErr;
         }
       }
+      
       this.dimension = dummy.dims[dummy.dims.length - 1] ?? null;
 
-      if (this.gpuLockHeld && this.stateManager) {
-        await this.stateManager.releaseGpuLock().catch(() => {});
-        this.gpuLockHeld = false;
-      }
+      await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+      this.gpuLockHeld = false;
 
       logger.info(`[embedder] Ready. Dimension: ${this.dimension}, device: ${this.device}`);
     } catch (err) {
-      if (this.gpuLockHeld && this.stateManager) {
-        await this.stateManager.releaseGpuLock().catch(() => {});
-        this.gpuLockHeld = false;
-      }
+      await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+      this.gpuLockHeld = false;
       if (this.pipeline) {
         try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
         this.pipeline = null;
@@ -421,84 +246,6 @@ export class Embedder {
   getDimension(): number {
     if (this.dimension !== null) return this.dimension;
     throw new Error('Embedder not initialized (dimension unknown)');
-  }
-
-  private isWebGpuDeviceError(err: unknown): boolean {
-    if (!err) return false;
-
-    // Extract message and stack from Error objects or objects that look like Errors
-    let msg: string;
-    let stack: string;
-    
-    if (err instanceof Error) {
-      msg = err.message || '';
-      stack = err.stack || '';
-    } else if (typeof err === 'object' && err !== null) {
-      // Handle non-Error objects that might have message/stack properties (e.g. from workers or native layers)
-      msg = String((err as any).message || '');
-      stack = String((err as any).stack || '');
-      // If it's a plain object without message, stringify it
-      if (!msg && !stack) {
-        try { msg = JSON.stringify(err); } catch { msg = String(err); }
-      }
-    } else {
-      msg = String(err);
-      stack = '';
-    }
-
-    const combined = (msg + ' ' + stack).toLowerCase();
-    
-    // Comprehensive patterns for WebGPU/GPU-related failures
-    return (
-      combined.includes('webgpu') ||
-      combined.includes('out_of_device_memory') ||
-      combined.includes('out of memory') ||
-      combined.includes('vk_error_out_of_device_memory') ||
-      combined.includes('vkallocatememory') ||
-      combined.includes('device lost') ||
-      combined.includes('devicelost') ||
-      combined.includes('validation failed') ||
-      combined.includes('invalid buffer') ||
-      combined.includes('bindgroup') ||
-      combined.includes('minbindingsize') ||
-      combined.includes('past_key_values') ||
-      combined.includes('unlabeled') ||
-      combined.includes('bufferbindingtype') ||
-      combined.includes('createdevice') ||
-      combined.includes('createbindgroup') ||
-      combined.includes('out-of-memory')
-    );
-  }
-
-  private async recoverToCpu(): Promise<void> {
-    logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
-    
-    // Set the fallback flag so future embedder instances skip WebGPU entirely
-    hasWebGpuFallbackOccurred = true;
-    
-    if (this.gpuLockHeld && this.stateManager) {
-      await this.stateManager.releaseGpuLock().catch(() => {});
-      this.gpuLockHeld = false;
-    }
-    this.state = 'initializing';
-    if (this.pipeline) {
-      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
-      this.pipeline = null;
-    }
-    this.device = 'cpu';
-    
-    // Explicit re-init synchronously to ensure state recovers without data races
-    this.initializingPromise = this._initializeInternal();
-    try {
-        await this.initializingPromise;
-        this.state = 'ready';
-    } catch (e) {
-        this.state = 'failed';
-        throw e;
-    } finally {
-        this.initializingPromise = null;
-    }
-    logger.warn('[embedder] CPU fallback recovery complete.');
   }
 
   private pipelineOpts(): { pooling: 'mean' | 'cls' | 'last_token'; normalize: boolean; use_cache?: boolean } {
@@ -527,18 +274,18 @@ export class Embedder {
       }
     }
     try {
-      const output = await getLogger().runCapturingStderr(async () => {
+      const output = await logger.runCapturingStderr(async () => {
         return await this.pipeline!(input, this.pipelineOpts());
       });
       return output.data as Float32Array;
     } catch (err) {
-      if (this.isWebGpuDeviceError(err)) {
+      if (isWebGpuDeviceError(err)) {
         if (lockAcquired && this.stateManager) {
           await this.stateManager.releaseGpuLock().catch(() => {});
           lockAcquired = false;
         }
         await this.recoverToCpu();
-        const output = await getLogger().runCapturingStderr(async () => {
+        const output = await logger.runCapturingStderr(async () => {
           return await this.pipeline!(input, this.pipelineOpts());
         });
         return output.data as Float32Array;
@@ -557,13 +304,11 @@ export class Embedder {
     this.stopIdleTimer();
 
     return metrics.measure('embedMany_latency', async () => {
-
       const dim = this.getDimension();
       const results: Float32Array[] = [];
 
       let lockAcquired = false;
       if (this.device === 'webgpu' && this.stateManager) {
-        // Use a longer timeout for batch operations as they are expected to take longer
         lockAcquired = await this.stateManager.acquireGpuLock(undefined, 300_000);
         if (!lockAcquired) {
           logger.warn('[embedder] GPU batch lock timeout after 300s — proceeding without lock');
@@ -579,17 +324,17 @@ export class Embedder {
 
           let output: any;
           try {
-            output = await getLogger().runCapturingStderr(async () => {
+            output = await logger.runCapturingStderr(async () => {
               return await this.pipeline!(batch, this.pipelineOpts());
             });
           } catch (err) {
-            if (this.isWebGpuDeviceError(err)) {
+            if (isWebGpuDeviceError(err)) {
               if (lockAcquired && this.stateManager) {
                 await this.stateManager.releaseGpuLock().catch(() => {});
                 lockAcquired = false;
               }
               await this.recoverToCpu();
-              output = await getLogger().runCapturingStderr(async () => {
+              output = await logger.runCapturingStderr(async () => {
                 return await this.pipeline!(batch, this.pipelineOpts());
               });
             } else {
@@ -612,24 +357,49 @@ export class Embedder {
     });
   }
 
+  private async recoverToCpu(): Promise<void> {
+    logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
+    
+    markWebGpuFallback();
+    
+    await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+    this.gpuLockHeld = false;
+    
+    this.state = 'initializing';
+    if (this.pipeline) {
+      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
+      this.pipeline = null;
+    }
+    this.device = 'cpu';
+    
+    this.initializingPromise = this._initializeInternal();
+    try {
+        await this.initializingPromise;
+        this.state = 'ready';
+    } catch (e) {
+        this.state = 'failed';
+        throw e;
+    } finally {
+        this.initializingPromise = null;
+    }
+    logger.warn('[embedder] CPU fallback recovery complete.');
+  }
+
   async dispose(): Promise<void> {
     if (this.state === 'idle') return;
     this.stopIdleTimer();
 
-    // Handle concurrent dispose requests safely
     if (this.state === 'disposing' && this.disposePromise) {
       return this.disposePromise;
     }
 
     this.state = 'disposing';
     this.disposePromise = (async () => {
-      // If we are currently initializing, we must wait for it to finish or fail
-      // so we don't dispose a half-formed session or leave orphaned promises.
       if (this.initializingPromise) {
         try {
           await this.initializingPromise;
         } catch (_e) {
-          // Initialize failed, which is fine, we just need it to finish
+          // Initialize failed, which is fine
         }
       }
 
@@ -640,13 +410,15 @@ export class Embedder {
           logger.warn('[embedder] Error during pipeline dispose:', err);
         }
         this.pipeline = null;
-        // Keep this.dimension so subsequent getDimension() calls work without reload
       }
 
+      // Release GPU lock if still held (shouldn't happen after normal init, but safe for edge cases)
+      await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+      // Always try to release on dispose for safety (test expects this)
       if (this.stateManager) {
         await this.stateManager.releaseGpuLock().catch(() => {});
-        this.gpuLockHeld = false;
       }
+      this.gpuLockHeld = false;
 
       this.state = 'idle';
       this.disposePromise = null;

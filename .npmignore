@@ -56,6 +56,9 @@ COMMIT_MESSAGE*.txt
 knowledge_db/
 shared-links-pool-*.json
 pi-research-*.md
+deps.svg
+ts-errors*.log
+test-results.txt
 
 # Session / planning artifacts
 planchat.txt
@@ -66,8 +69,11 @@ planchat.txt
 *_FIX.md
 *_CHECKLIST.md
 *_ROADMAP.md
+*_ASSESSMENT.md
+*_STATUS.md
 CIRCULAR_*.md
 ZERO_SCOPE_CREEP_REMEDIATION.md
+VERIFICATION_REPORT.md
 
 # Browser cache
 .browser/

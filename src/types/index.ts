@@ -233,4 +233,4 @@ export interface SecurityDatabases {
 /**
  * Configuration section types
  */
-export type ConfigSection = 'health' | 'errors' | 'knowledge' | 'settings' | 'metrics';
+export type ConfigSection = 'health' | 'knowledge' | 'settings' | 'metrics';

@@ -19,9 +19,11 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
-import { getStore, getWriterQueue } from '../knowledge/index.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IKnowledgeStore, IWriterQueue } from '../core/service-interfaces.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
-import { isHealthCheckSuccessful, runHealthCheck } from '../healthcheck/index.ts';
+import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { AbortCleanup, ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
@@ -63,7 +65,7 @@ export class QuickResearchOrchestrator {
     let storeSection = '';
     if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const store = await getStore();
+        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
         const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
         if (historicalUrls.length > 0) {
           storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
@@ -203,7 +205,7 @@ export class QuickResearchOrchestrator {
       // Quick research is single-pass, so this is the final synthesis point
       if (this.config.KNOWLEDGE_STORE_ENABLED) {
         try {
-          const writer = await getWriterQueue();
+          const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
           const citations = parseCitations(result);
           if (citations.length === 0) {
             logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');

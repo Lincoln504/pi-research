@@ -4,20 +4,19 @@
  * Executes search and scrape tasks in worker processes using Camoufox.
  */
 
-/* global document, URL, setTimeout, setInterval, clearInterval */
 import { ClusterWorker } from 'poolifier';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import process from 'node:process';
 import cluster from 'node:cluster';
 import crypto from 'node:crypto';
-import { getRandomRealisticUA } from '../utils/user-agent.mjs';
+import { getRandomRealisticUA } from '../utils/user-agent.ts';
 
 const require = createRequire(import.meta.url);
 
 // Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
 if (cluster.isWorker && cluster.worker) {
-    cluster.worker.on('error', (err) => {
+    cluster.worker.on('error', (err: any) => {
         if (err && err.code === 'ERR_IPC_CHANNEL_CLOSED') {
             return;
         }
@@ -30,7 +29,7 @@ const workerId = crypto.randomBytes(2).toString('hex');
 
 // Orphaned worker protection: If parent dies, kill the worker.
 // This works cross-platform (Linux, Mac, Windows) in Node.js.
-let orphanCheckTimer = null;
+let orphanCheckTimer: NodeJS.Timeout | null = null;
 if (process.ppid) {
     orphanCheckTimer = setInterval(async () => {
         try {
@@ -50,14 +49,14 @@ if (process.ppid) {
             process.exit(1);
         }
     }, 10000);
-    if (orphanCheckTimer.unref) orphanCheckTimer.unref();
+    if (orphanCheckTimer) orphanCheckTimer.unref();
     }
 
 /**
  * File-based logger for workers that mirrors the main process format
  */
-function logToDebugFile(level, ...args) {
-    const logFile = process.env.PI_RESEARCH_LOG_FILE;
+function logToDebugFile(level: string, ...args: any[]): void {
+    const logFile = process.env['PI_RESEARCH_LOG_FILE'];
     if (!logFile) return;
 
     try {
@@ -79,11 +78,11 @@ function logToDebugFile(level, ...args) {
 }
 
 // Warm browser: Reuse browser instance across tasks.
-let browser = null;
-let context = null;
-let initPromise = null;
+let browser: any = null;
+let context: any = null;
+let initPromise: Promise<void> | null = null;
 
-async function initBrowser() {
+async function initBrowser(): Promise<void> {
     const isBrowserConnected = () => {
         try {
             return browser && typeof browser.isConnected === 'function' && browser.isConnected();
@@ -101,10 +100,10 @@ async function initBrowser() {
             if (!isBrowserConnected() || !context) {
                 logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
 
-                let CamoufoxModule;
+                let CamoufoxModule: any;
                 try {
                     CamoufoxModule = require('camoufox-js');
-                } catch (e) {
+                } catch (e: any) {
                     throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
                 }
 
@@ -165,7 +164,7 @@ async function initBrowser() {
                 browser = launchedBrowser;
                 logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
             }
-        } catch (e) {
+        } catch (e: any) {
             // Close any partially-launched browser to avoid orphaning the process.
             if (browser && typeof browser.close === 'function') {
                 browser.close().catch(() => {});
@@ -187,11 +186,13 @@ async function initBrowser() {
     return initPromise;
 }
 
-async function extractSearchResults(page) {
+async function extractSearchResults(page: any): Promise<any[]> {
     return await page.evaluate(() => {
-        const found = [];
+        // @ts-ignore - document is available in browser context
+        const found: any[] = [];
+        // @ts-ignore - document is available in browser context
         const links = Array.from(document.querySelectorAll('a.result-link'));
-        links.forEach(link => {
+        links.forEach((link: any) => {
             const row = link.closest('tr');
             const snippet = row?.nextElementSibling?.querySelector('td.result-snippet')?.textContent?.trim() || '';
             const title = link.textContent?.trim() || '';
@@ -199,7 +200,7 @@ async function extractSearchResults(page) {
             try {
                 const u = new URL(url);
                 const uddg = u.searchParams.get('uddg');
-                if (uddg) url = decodeURIComponent(uddg);
+                if (uddg) url = decodeURIComponent(uddg || '');
             } catch {
                 // ignore
             }
@@ -211,14 +212,14 @@ async function extractSearchResults(page) {
     });
 }
 
-async function executeSearchTask(browser, context, query) {
-    const page = await context.newPage();
+async function executeSearchTask(_browser: any, _context: any, query: string): Promise<{ results: any[]; jitter: number }> {
+    const page = await _context.newPage();
     const SEARCH_TIMEOUT = 25000;
     page.setDefaultTimeout(SEARCH_TIMEOUT);
     page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
-    
+
     try {
-                logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
+        logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
         // Relaxed timeout to accommodate network latency and concurrent worker load
         await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
         await page.fill('input[name="q"]', query);
@@ -240,23 +241,23 @@ async function executeSearchTask(browser, context, query) {
     }
 }
 
-async function executeScrapeTask(browser, context, url) {
-    const page = await context.newPage();
-    const SCRAPE_TIMEOUT = parseInt(process.env.PI_RESEARCH_SCRAPE_TIMEOUT_MS || '15000', 10);
+async function executeScrapeTask(_browser: any, _context: any, url: string): Promise<{ contentType: string; html?: string; buffer?: Buffer; jitter: number }> {
+    const page = await _context.newPage();
+    const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
     page.setDefaultTimeout(SCRAPE_TIMEOUT);
     page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
-    
+
     try {
-                logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
+        logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
         // High-fidelity wait: try domcontentloaded first for speed
         const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
         const contentType = (await response?.headerValue('content-type')) || '';
-        
+
         if (contentType.includes('application/pdf')) {
             if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
             const buffer = await response.body();
             await page.close();
-            return { contentType, buffer };
+            return { contentType, buffer, jitter: 0 };
         }
 
         // If it's HTML, check if we need to wait longer (JS-heavy sites)
@@ -264,7 +265,7 @@ async function executeScrapeTask(browser, context, url) {
 
         // DETECT CLOUDFLARE CHALLENGE
         const cfPatterns = ['_cf_chl_', 'cdn-cgi/challenge-platform', 'cf_chl_opt', 'Just a moment...', 'Checking your browser before accessing'];
-        const hasCloudflare = cfPatterns.some(pattern => html.includes(pattern));
+        const hasCloudflare = cfPatterns.some((pattern: string) => html.includes(pattern));
 
         if (hasCloudflare) {
             logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge detected for: ${url}`);
@@ -273,6 +274,7 @@ async function executeScrapeTask(browser, context, url) {
             try {
                 await page.waitForFunction(
                     () => {
+                        // @ts-ignore - document is available in browser context
                         const body = document.body.innerHTML;
                         return !body.includes('_cf_chl_') &&
                                !body.includes('cdn-cgi/challenge-platform') &&
@@ -287,7 +289,7 @@ async function executeScrapeTask(browser, context, url) {
                 // Challenge resolved, get updated content
                 html = await page.content();
                 logToDebugFile('INFO', `[Worker-${workerId}] Cloudflare challenge resolved for: ${url}`);
-            } catch (_waitError) {
+            } catch (_waitError: any) {
                 logToDebugFile('ERROR', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
                 const error = new Error('Fetch blocked: Cloudflare challenge');
                 error.cause = _waitError;
@@ -318,8 +320,8 @@ async function executeScrapeTask(browser, context, url) {
     }
 }
 
-async function executeHealthCheckAttempt(browser, context, navTimeoutMs) {
-    const page = await context.newPage();
+async function executeHealthCheckAttempt(_browser: any, _context: any, navTimeoutMs: number): Promise<{ success: boolean; navMs: number }> {
+    const page = await _context.newPage();
     page.setDefaultTimeout(navTimeoutMs);
     page.setDefaultNavigationTimeout(navTimeoutMs);
 
@@ -341,32 +343,55 @@ async function executeHealthCheckAttempt(browser, context, navTimeoutMs) {
     }
 }
 
-async function executeHealthCheck(browser, context) {
+async function executeHealthCheck(_browser: any, _context: any): Promise<{ success: boolean; navMs: number }> {
     // Nav timeout: read from env (passed through getBrowserEnv), floor at 10s.
     // The outer BrowserTaskScheduler.runHealthCheck() has its own 45s hard deadline.
-    const configuredMs = parseInt(process.env.PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS || '0', 10);
+    const configuredMs = parseInt(process.env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'] || '0', 10);
     const HEALTH_TIMEOUT = configuredMs > 0 ? Math.max(10000, configuredMs) : 10000;
 
     try {
-        return await executeHealthCheckAttempt(browser, context, HEALTH_TIMEOUT);
-    } catch (firstError) {
+        return await executeHealthCheckAttempt(_browser, _context, HEALTH_TIMEOUT);
+    } catch (firstError: any) {
         // One retry: if the first attempt fails, the page may have been in a bad state
         // (challenge redirect, partial load, transient network blip). A second attempt
         // on a fresh page helps distinguish a real outage from a one-off failure.
         logToDebugFile('WARN', `[Worker-${workerId}] Health check attempt 1 failed: ${firstError.message}. Retrying once...`);
         try {
-            return await executeHealthCheckAttempt(browser, context, HEALTH_TIMEOUT);
-        } catch (retryError) {
+            return await executeHealthCheckAttempt(_browser, _context, HEALTH_TIMEOUT);
+        } catch (retryError: any) {
             logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryError.message}`);
             throw retryError;
         }
     }
 }
 
-async function runTask(data) {
+interface TaskData {
+    type: string;
+    query?: string;
+    url?: string;
+    queuedAt?: number;
+    taskTimeoutMs?: number;
+}
+
+interface TaskResult {
+    results?: any[];
+    duration: number;
+    jitter?: number;
+    error?: string;
+    success?: boolean;
+    navMs?: number;
+    buffer?: Buffer;
+    html?: string;
+    contentType?: string;
+}
+
+async function runTask(data: TaskData | undefined): Promise<TaskResult> {
+    if (!data) {
+        return { error: 'No task data provided', duration: 0 };
+    }
     const { type, query, url, queuedAt, taskTimeoutMs } = data;
     const startTime = Date.now();
-        logToDebugFile('DEBUG', `[Worker-${workerId}] Received task: ${type}`);
+    logToDebugFile('DEBUG', `[Worker-${workerId}] Received task: ${type}`);
 
     // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
     // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
@@ -376,7 +401,7 @@ async function runTask(data) {
         // Add a 20% buffer to reduce false positives from clock drift and deep queue conditions
         if (queueTime > taskTimeoutMs * 1.20) {
             logToDebugFile('WARN', `[Worker-${workerId}] Dropping zombie task ${type} (queued for ${queueTime}ms, timeout was ${taskTimeoutMs}ms)`);
-            return { error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)` };
+            return { error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)`, duration: queueTime };
         }
     }
 
@@ -385,14 +410,16 @@ async function runTask(data) {
         const initMs = Date.now() - startTime;
 
         if (type === 'search') {
+            if (!query) throw new Error('Search task requires a query');
             const result = await executeSearchTask(browser, context, query);
-                        logToDebugFile('DEBUG', `[Worker-${workerId}] Search completed in ${Date.now() - startTime}ms`);
+            logToDebugFile('DEBUG', `[Worker-${workerId}] Search completed in ${Date.now() - startTime}ms`);
             return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
         }
 
         if (type === 'scrape') {
+            if (!url) throw new Error('Scrape task requires a URL');
             const result = await executeScrapeTask(browser, context, url);
-                        logToDebugFile('DEBUG', `[Worker-${workerId}] Scrape completed in ${Date.now() - startTime}ms`);
+            logToDebugFile('DEBUG', `[Worker-${workerId}] Scrape completed in ${Date.now() - startTime}ms`);
             return { ...result, duration: Date.now() - startTime };
         }
 
@@ -404,15 +431,15 @@ async function runTask(data) {
             logToDebugFile('DEBUG', `[Worker-${workerId}] Healthcheck: browser init ${initMs}ms, nav ${result.navMs ?? '?'}ms`);
             return { ...result, duration: Date.now() - startTime };
         }
-        
-        return { error: 'Unknown task type' };
-    } catch (error) {
+
+        return { error: 'Unknown task type', duration: Date.now() - startTime };
+    } catch (error: any) {
         const errMsg = error instanceof Error ? error.message : String(error);
-                logToDebugFile('ERROR', `[Worker-${workerId}] Task failed: ${errMsg}`);
-        
+        logToDebugFile('ERROR', `[Worker-${workerId}] Task failed: ${errMsg}`);
+
         // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
-        if (errMsg.includes('Target closed') || 
-            errMsg.includes('browser has disconnected') || 
+        if (errMsg.includes('Target closed') ||
+            errMsg.includes('browser has disconnected') ||
             errMsg.includes('Protocol error') ||
             errMsg.includes('Session closed')) {
             if (context) context.close().catch(() => {});
@@ -421,7 +448,7 @@ async function runTask(data) {
             browser = null;
         }
 
-        return { 
+        return {
             error: errMsg,
             duration: Date.now() - startTime
         };
@@ -429,10 +456,6 @@ async function runTask(data) {
 }
 
 export default new ClusterWorker(runTask, {
-    onlineHandler: async () => {
-        logToDebugFile('INFO', `[Worker-${workerId}] Worker online and ready for tasks`);
-        await initBrowser().catch(() => {});
-    },
     killHandler: async () => {
         logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
         if (context) await context.close().catch(() => {});
@@ -447,3 +470,6 @@ export default new ClusterWorker(runTask, {
         process.exit(0);
     }
 });
+
+// Initialize browser when worker comes online
+initBrowser().catch(() => {});

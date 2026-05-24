@@ -1,15 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createStoredSearchTool } from '../../../src/tools/stored-search.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 const mockSearch = vi.fn();
 
 vi.mock('../../../src/knowledge/index.ts', () => ({
   isKnowledgeStoreReady: vi.fn(),
-  getStore: vi.fn(() => ({ search: mockSearch })),
   initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { isKnowledgeStoreReady, getStore } from '../../../src/knowledge/index.ts';
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getService: vi.fn(async (name) => {
+    if (name === ServiceNames.KNOWLEDGE_STORE) {
+      return { search: mockSearch };
+    }
+    throw new Error(`Service ${name} not mocked`);
+  }),
+}));
+
+import { isKnowledgeStoreReady } from '../../../src/knowledge/index.ts';
 
 function makeTool() {
   return createStoredSearchTool({ ctx: {} as any });

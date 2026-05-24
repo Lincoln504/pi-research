@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 
 const mockExecute = vi.fn<() => Promise<{ content: Array<{ type: 'text'; text: string }>; details: Record<string, unknown> }>>();
 
@@ -40,6 +40,7 @@ vi.mock('node:fs', () => ({
 }));
 
 import activate from '../../src/index.ts';
+import { resetServiceContainer } from '../../src/core/service-registry.ts';
 
 type CommandHandler = (args: string, ctx: Record<string, unknown>) => Promise<void>;
 
@@ -75,6 +76,11 @@ function makeCtx(overrides: Record<string, unknown> = {}): Record<string, unknow
 describe('extension entrypoint', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // Reset service container after each test to ensure clean state
+    resetServiceContainer();
   });
 
   it('registers research tool', async () => {

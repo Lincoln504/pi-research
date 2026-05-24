@@ -5,9 +5,9 @@
  * Provides clean interface for cross-process state management.
  */
 
-import { ServiceLifecycle } from './service-registry.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import type { IStateManager } from './service-interfaces.ts';
+import type { IStateManager } from '../core/service-interfaces.ts';
 import type {
   StateMetrics,
   LegacySessionInfo,
@@ -173,10 +173,17 @@ export class StateManagerService implements IStateManager {
   }
 
   /**
-   * Get information about the current GPU owner
+   * Information about the current GPU owner
    */
   async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
     return this.getStateManager().getGpuOwner();
+  }
+
+  /**
+   * Cleanup state manager resources
+   */
+  async cleanup(): Promise<void> {
+    return this.getStateManager().cleanup();
   }
 
   // Backward compatibility methods

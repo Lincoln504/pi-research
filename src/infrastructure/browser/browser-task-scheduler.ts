@@ -13,10 +13,11 @@ import { errorTracker } from '../../utils/error-tracker.ts';
 import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
-import { getSharedStateManager } from '../state-manager.ts';
+import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer } from '../browser-server.ts';
 import { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from './browser-client.ts';
+import { cleanupOrphanedCamoufoxProcesses } from '../browser-cleanup.ts';
 
 /**
  * Browser task scheduler - manages the worker pool and executes tasks.
@@ -31,9 +32,11 @@ export class BrowserTaskScheduler implements IScheduler {
     private readonly LEADERSHIP_MISS_THRESHOLD: number = 5;
     private isShuttingDown: boolean = false;
     private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (reduced from 30m for efficiency)
-    private readonly stateManager = getSharedStateManager();
 
-    constructor(public readonly schedulerId: string) {
+    constructor(
+        public readonly schedulerId: string,
+        private readonly stateManager: IStateManager
+    ) {
         this.workerPoolManager = new WorkerPoolManager();
         this.startLeadershipCheck();
         this.resetIdleTimer();
@@ -283,7 +286,6 @@ export class BrowserTaskScheduler implements IScheduler {
         // Clean up any orphaned Camoufox browser processes that may have been left behind
         // This handles edge cases where workers were force-killed or hung during teardown
         try {
-            const { cleanupOrphanedCamoufoxProcesses } = await import('../browser-cleanup.ts');
             await cleanupOrphanedCamoufoxProcesses();
         } catch (cleanupError) {
             const msg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);

@@ -1,10 +1,12 @@
-import { Embedder, resetWebGpuFallbackFlag } from './embedder.ts';
+import { Embedder } from './embedder.ts';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
 import { Chunker } from './chunker.ts';
 import { getConfig, validateConfig, getDbDir } from '../config.ts';
 import { logger } from '../logger.ts';
-import { getSharedStateManager } from '../infrastructure/state-manager.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IStateManager } from '../core/service-interfaces.ts';
 import * as fs from 'node:fs';
 import type { MigrationStrategy } from './migration.ts';
 
@@ -227,7 +229,7 @@ export async function initKnowledgeStore(): Promise<void> {
             batchSize: modelCfg.batchSize,
             charsPerToken: modelCfg.charsPerToken,
             documentPrefix: modelCfg.documentPrefix,
-            stateManager: getSharedStateManager(),
+            stateManager: await getService<IStateManager>(ServiceNames.STATE_MANAGER),
           });
           inflightEmbedder = embedder;
         }

@@ -8,10 +8,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { performSearch } from '../../../src/web-research/browser-search.ts';
 import type { SearchResult } from '../../../src/web-research/types.ts';
 
-// Mock the browser-manager module
-vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
+// Mock the task-execution-service module
+vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({
   runWorkerSearch: vi.fn(),
+  runBrowserTask: vi.fn(),
+  runBrowserHealthCheck: vi.fn(),
+}));
+
+// Mock the browser-configuration module
+vi.mock('../../../src/infrastructure/browser/browser-configuration.ts', () => ({
   getMaxWorkers: vi.fn(() => 4),
+  isBrowserAvailable: vi.fn(() => true),
+  getSchedulerVersion: vi.fn(() => '1.0.0'),
+  generateSchedulerVersion: vi.fn(() => '1.0.0'),
 }));
 
 // Mock the logger

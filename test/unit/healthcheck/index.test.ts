@@ -1,8 +1,10 @@
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runHealthCheck } from '../../../src/healthcheck/index.ts';
-import { isBrowserAvailable, runBrowserHealthCheck } from '../../../src/infrastructure/browser-manager.ts';
-import { getSchedulerInstance } from '../../../src/core/internal-state.ts';
+import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
+import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
+import { registerService, resetServiceContainer } from '../../../src/core/service-registry.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock dependencies
 vi.mock('../../../src/config.ts', () => ({
@@ -19,8 +21,11 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
-vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
+vi.mock('../../../src/infrastructure/browser/browser-configuration.ts', () => ({
   isBrowserAvailable: vi.fn(),
+}));
+
+vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({
   runBrowserHealthCheck: vi.fn(),
 }));
 
@@ -31,8 +36,35 @@ vi.mock('../../../src/core/internal-state.ts', () => ({
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default to active scheduler to trigger full checks in existing tests
-    vi.mocked(getSchedulerInstance).mockReturnValue({} as any);
+    
+    // Register mock scheduler service
+    registerService(
+      ServiceNames.SCHEDULER,
+      () => ({
+        name: 'scheduler',
+        lifecycle: 'initialized',
+        async initialize() {},
+        async dispose() {},
+        async runSearch() { return []; },
+        async runScrape() { return { html: '' }; },
+        async runHealthCheck() { return { success: true }; },
+        async shutdown() {},
+        getSchedulerInstance() { return { name: 'test-scheduler' }; },
+        getSchedulerVersion() { return '1.0.0'; },
+        getSchedulerInitializationPromise() { return null; },
+        setSchedulerVersion() {},
+        setSchedulerInitializationPromise() {},
+        isSchedulerRestartInProgress() { return false; },
+        setSchedulerRestartInProgress() {},
+        setSchedulerInstance() {},
+        schedulerId: 'test',
+      }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+  });
+
+  afterEach(() => {
+    resetServiceContainer();
   });
 
   it('should pass health check when browser pool reports success', async () => {

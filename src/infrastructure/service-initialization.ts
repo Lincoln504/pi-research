@@ -9,6 +9,9 @@
 import { registerService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import { getSchedulerFactory } from './scheduler-factory-impl.ts';
+import { StateManagerService } from './state-manager-service.ts';
+import { KnowledgeStoreService } from './knowledge-store-service.ts';
+import { MetricsService } from './metrics-service.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -24,6 +27,39 @@ export function registerInfrastructureServices(): void {
     () => getSchedulerFactory(),
     {
       lazyInitialization: false, // Always available
+      allowOverwrite: false,
+      enableLogging: true,
+    }
+  );
+
+  // Register State Manager Service
+  registerService(
+    ServiceNames.STATE_MANAGER,
+    () => new StateManagerService(),
+    {
+      lazyInitialization: true,
+      allowOverwrite: false,
+      enableLogging: true,
+    }
+  );
+
+  // Register Knowledge Store Service
+  registerService(
+    ServiceNames.KNOWLEDGE_STORE,
+    () => new KnowledgeStoreService(),
+    {
+      lazyInitialization: true,
+      allowOverwrite: false,
+      enableLogging: true,
+    }
+  );
+
+  // Register Metrics Service
+  registerService(
+    ServiceNames.METRICS,
+    () => new MetricsService(),
+    {
+      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     }

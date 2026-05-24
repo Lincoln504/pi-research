@@ -7,7 +7,10 @@
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { isKnowledgeStoreReady, getStore, initKnowledgeStore } from '../knowledge/index.ts';
+import { isKnowledgeStoreReady, initKnowledgeStore } from '../knowledge/index.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IKnowledgeStore } from '../core/service-interfaces.ts';
 import { getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 
@@ -55,7 +58,7 @@ export function createStoredSearchTool(_options: {
       const p = params as Static<typeof StoredSearchParams>;
       
       try {
-        const store = await getStore();
+        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
         const results = await store.search(p.query, { limit: p.limit });
         
         if (results.length === 0) {

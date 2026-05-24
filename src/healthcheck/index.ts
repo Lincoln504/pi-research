@@ -7,10 +7,10 @@
 
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
-import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/browser-manager.ts';
-import { getSharedStateManager } from '../infrastructure/state-manager.ts';
+import { isBrowserAvailable } from '../infrastructure/browser/browser-configuration.ts';
+import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
 import { getService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
+import { ServiceNames, IStateManager } from '../core/service-interfaces.ts';
 import { SchedulerService } from '../core/scheduler-service.ts';
 import { getEmbedder } from '../knowledge/index.ts';
 import { healthRegistry } from './registry.ts';
@@ -94,7 +94,7 @@ healthRegistry.register('KnowledgeStore', async () => {
 // Register GPU Lock Check
 healthRegistry.register('GPULock', async () => {
   try {
-    const stateManager = getSharedStateManager();
+    const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
     const gpuOwner = await stateManager.getGpuOwner();
     const locked = gpuOwner !== null;
     const stale = locked && gpuOwner !== undefined && (Date.now() - gpuOwner.startedAt > 120_000);

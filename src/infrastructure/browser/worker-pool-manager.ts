@@ -69,7 +69,7 @@ export class WorkerPoolManager {
                 // If needed in the future, we can add a config option for log file path
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, '../thread-worker.mjs'), {
+                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, '../thread-worker.ts'), {
                     env: browserEnv,
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;

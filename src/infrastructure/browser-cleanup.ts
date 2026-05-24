@@ -10,6 +10,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import { SchedulerService } from '../core/scheduler-service.ts';
+
+import { browserCircuitBreaker } from './browser/browser-error-utils.ts';
+import { getClientAgent } from './browser/client-agent.ts';
 
 const execAsync = promisify(exec);
 
@@ -205,4 +212,38 @@ export async function getActiveCamoufoxProfiles(): Promise<string[]> {
   }
   
   return profiles;
+}
+
+// ============================================================================
+// Browser Manager Cleanup Functions
+// ============================================================================
+
+/**
+ * Stop the browser manager and clean up all resources.
+ * This function is exported for use during shutdown.
+ */
+export async function stopBrowserManager(): Promise<void> {
+  browserCircuitBreaker.reset();
+  metrics.increment('browser_manager_shutdowns_total', 1);
+
+  try {
+    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+    const globalScheduler = schedulerService.getSchedulerInstance();
+
+    // Clear both references before any async work so concurrent getScheduler()
+    // calls during shutdown see null and start fresh rather than receiving a
+    // scheduler that is mid-teardown.
+    schedulerService.setSchedulerInstance(null);
+    schedulerService.setSchedulerInitializationPromise(null);
+
+    if (globalScheduler) {
+      await globalScheduler.shutdown();
+    }
+  } catch (err) {
+    logger.error('[SchedulerService] Error during scheduler shutdown:', err);
+  }
+
+  // Destroy the keep-alive HTTP agent so its open sockets don't block process exit.
+  const agent = getClientAgent();
+  agent.destroy();
 }

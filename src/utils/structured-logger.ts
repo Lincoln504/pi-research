@@ -198,9 +198,7 @@ class StructuredLogger implements ILogger {
     error?: Error
   ): void {
     // Lazy import to avoid circular dependency
-    import('../logger.ts').then(({ getLogger, runWithLogContext }) => {
-      const globalLogger = getLogger();
-
+    import('../logger.ts').then(({ logger: globalLogger, runWithLogContext }) => {
       // Run with the log context to include it in the JSON output
       runWithLogContext(context, () => {
         // Pass error object directly if present for proper error tracking

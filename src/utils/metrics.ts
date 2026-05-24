@@ -126,8 +126,8 @@ export class MetricsRegistry {
       
       snapshot['histograms'][key] = {
         count: sorted.length,
-        min: sorted[0],
-        max: sorted[sorted.length - 1],
+        min: sorted[0] ?? 0,
+        max: sorted[sorted.length - 1] ?? 0,
         avg: sum / sorted.length,
         p50: this.percentile(sorted, 50),
         p90: this.percentile(sorted, 90),

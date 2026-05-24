@@ -79,6 +79,11 @@ COMMIT_MESSAGE*.txt
 # Runtime knowledge store database (generated at runtime)
 knowledge_db/
 
+# Refactoring artifacts
+deps.svg
+ts-errors*.log
+test-results.txt
+
 # Session planning / chat artifacts (never belong in source history)
 planchat.txt
 *_SUMMARY.md
@@ -88,5 +93,8 @@ planchat.txt
 *_FIX.md
 *_CHECKLIST.md
 *_ROADMAP.md
+*_ASSESSMENT.md
+*_STATUS.md
 CIRCULAR_*.md
 ZERO_SCOPE_CREEP_REMEDIATION.md
+VERIFICATION_REPORT.md
