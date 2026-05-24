@@ -14,7 +14,9 @@ import type { SearchResult } from '../web-research/types.ts';
 import { getConfig, type Config } from '../config.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSchedulerService } from '../core/scheduler-service.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import { SchedulerService } from '../core/scheduler-service.ts';
 import type { NodeError, BrowserTask } from '../types/index.ts';
 import { errorTracker } from '../utils/error-tracker.ts';
 
@@ -102,7 +104,7 @@ export function getClientAgent(): http.Agent {
  * This should be called when configuration changes are detected.
  */
 export async function forceSchedulerRestart(forceClearRemoteState: boolean = false): Promise<void> {
-    const schedulerService = getSchedulerService();
+    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     
     if (schedulerService.isSchedulerRestartInProgress()) {
         logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
@@ -486,7 +488,7 @@ class BrowserTaskScheduler implements IScheduler {
         }
 
         // Clear reference immediately to prevent new tasks from using this scheduler
-        const schedulerService = getSchedulerService();
+        const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
         const currentScheduler = schedulerService.getSchedulerInstance();
         if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
             schedulerService.setSchedulerInstance(null);
@@ -690,7 +692,7 @@ class BrowserClient implements IScheduler {
 let initializationPromise: Promise<IScheduler> | null = null;
 
 async function getScheduler(config?: Config): Promise<IScheduler> {
-    const schedulerService = getSchedulerService();
+    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     const currentVersion = generateSchedulerVersion(config);
     let existing = schedulerService.getSchedulerInstance();
     
@@ -958,7 +960,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
 export async function stopBrowserManager(): Promise<void> {
   browserCircuitBreaker.reset();
   metrics.increment('browser_manager_shutdowns_total', 1);
-  const schedulerService = getSchedulerService();
+  const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
   const globalScheduler = schedulerService.getSchedulerInstance();
   // Clear both references before any async work so concurrent getScheduler()
   // calls during shutdown see null and start fresh rather than receiving a

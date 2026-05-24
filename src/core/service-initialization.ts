@@ -13,6 +13,9 @@ import { BrowserManagerService } from './browser-manager-service.ts';
 import { StateManagerService } from './state-manager-service.ts';
 import { KnowledgeStoreService } from './knowledge-store-service.ts';
 import { MetricsService } from './metrics-service.ts';
+import type { MetricsService as IMetricsService } from './metrics-service.ts';
+import type { StateManagerService as IStateManagerService } from './state-manager-service.ts';
+import type { BrowserManagerService as IBrowserManagerService } from './browser-manager-service.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -100,10 +103,12 @@ export async function initializeCoreServices(): Promise<void> {
   try {
     // Initialize services in dependency order
     // 1. Metrics (no dependencies)
-    await getMetricsService().initialize();
+    const metricsService = await getService<IMetricsService>(ServiceNames.METRICS);
+    await metricsService.initialize();
 
     // 2. State Manager (no dependencies)
-    await getStateManagerService().initialize();
+    const stateManagerService = await getService<IStateManagerService>(ServiceNames.STATE_MANAGER);
+    await stateManagerService.initialize();
 
     // 3. Health Check Cache (no dependencies)
     await getService(ServiceNames.HEALTH_CHECK_CACHE);
@@ -112,7 +117,8 @@ export async function initializeCoreServices(): Promise<void> {
     // Scheduler initializes lazily on first use
 
     // 5. Browser Manager (depends on Scheduler)
-    await getBrowserManagerService().initialize();
+    const browserManagerService = await getService<IBrowserManagerService>(ServiceNames.BROWSER_MANAGER);
+    await browserManagerService.initialize();
 
     // 6. Knowledge Store (no hard dependencies, but uses State Manager for GPU lock)
     // Knowledge store initializes lazily on first use
@@ -142,7 +148,3 @@ export async function disposeCoreServices(): Promise<void> {
   }
 }
 
-// Import helper functions for local use
-import { getMetricsService } from './metrics-service.ts';
-import { getStateManagerService } from './state-manager-service.ts';
-import { getBrowserManagerService } from './browser-manager-service.ts';

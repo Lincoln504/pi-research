@@ -13,6 +13,7 @@ import type {
   IBrowserManagerService,
   SchedulerMetadata,
 } from './service-interfaces.ts';
+import { ServiceNames } from './service-interfaces.ts';
 import { ServiceLifecycle, getService } from './service-registry.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
@@ -49,7 +50,7 @@ export class BrowserManagerService implements IBrowserManagerService {
     // Ensure scheduler service is initialized
     try {
       // Scheduler service is initialized lazily on first use
-      await getService<IScheduler>('scheduler');
+      await getService<IScheduler>(ServiceNames.SCHEDULER);
     } catch (err) {
       logger.warn('[BrowserManagerService] Failed to initialize scheduler service:', err);
     }
@@ -79,7 +80,7 @@ export class BrowserManagerService implements IBrowserManagerService {
    * This is the main entry point for scheduler access
    */
   async getScheduler(_config?: Config): Promise<IScheduler> {
-    const schedulerService = await getService<IScheduler>('scheduler');
+    const schedulerService = await getService<IScheduler>(ServiceNames.SCHEDULER);
     return schedulerService;
   }
 
@@ -108,7 +109,7 @@ export class BrowserManagerService implements IBrowserManagerService {
       this._schedulerVersion = null;
 
       // Force restart via the scheduler service
-      const schedulerService = await getService<SchedulerService>('scheduler');
+      const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
       if (typeof schedulerService.forceRestart === 'function') {
         await schedulerService.forceRestart();
       }
@@ -144,7 +145,7 @@ export class BrowserManagerService implements IBrowserManagerService {
     config?: Config,
     _retries: number = 1
   ): Promise<T> {
-    const schedulerService = await getService<IScheduler>('scheduler');
+    const schedulerService = await getService<IScheduler>(ServiceNames.SCHEDULER);
 
     if (type === 'search') {
       const query = typeof task === 'string' ? task : task.query;
@@ -167,7 +168,7 @@ export class BrowserManagerService implements IBrowserManagerService {
    * Run a health check
    */
   async runHealthCheck(config?: Config, _retries: number = 1): Promise<{ success: boolean }> {
-    const schedulerService = await getService<IScheduler>('scheduler');
+    const schedulerService = await getService<IScheduler>(ServiceNames.SCHEDULER);
     return schedulerService.runHealthCheck(config);
   }
 
@@ -179,7 +180,7 @@ export class BrowserManagerService implements IBrowserManagerService {
 
     try {
       // Shutdown the scheduler service
-      const schedulerService = await getService<IScheduler>('scheduler');
+      const schedulerService = await getService<IScheduler>(ServiceNames.SCHEDULER);
       await schedulerService.shutdown();
 
       // Clear cached version
@@ -210,7 +211,7 @@ export class BrowserManagerService implements IBrowserManagerService {
    * Get scheduler metadata (convenience method)
    */
   async getSchedulerMetadata(): Promise<SchedulerMetadata | null> {
-    const schedulerService = await getService<SchedulerService>('scheduler');
+    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     if (typeof schedulerService.getMetadata === 'function') {
       return schedulerService.getMetadata();
     }
@@ -221,7 +222,7 @@ export class BrowserManagerService implements IBrowserManagerService {
    * Check if scheduler is the leader (convenience method)
    */
   async isSchedulerLeader(): Promise<boolean> {
-    const schedulerService = await getService<SchedulerService>('scheduler');
+    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     if (typeof schedulerService.isLeader === 'function') {
       return schedulerService.isLeader();
     }
