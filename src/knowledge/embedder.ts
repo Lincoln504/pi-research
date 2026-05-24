@@ -209,6 +209,48 @@ export class Embedder {
         });
 
         logger.info(`[embedder] Pipeline loaded (device: ${this.device})`);
+      } catch (loadErr) {
+        const errorMsg = loadErr instanceof Error ? loadErr.message : String(loadErr);
+        
+        // Check if this is a WebGPU validation error during initial loading
+        if (this.device === 'webgpu' && this.isWebGpuDeviceError(loadErr)) {
+          const isValidationError = errorMsg.toLowerCase().includes('validation');
+          
+          if (isValidationError) {
+            logger.warn('[embedder] WebGPU validation error during pipeline loading (likely buffer binding issue with decoder model) — falling back to CPU');
+            logger.debug('[embedder] Validation error details:', errorMsg);
+          } else {
+            logger.warn('[embedder] WebGPU OOM during pipeline loading — falling back to CPU');
+          }
+          
+          // Clean up and fall back to CPU
+          if (this.pipeline) {
+            try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
+          }
+          this.pipeline = null;
+
+          if (this.gpuLockHeld && this.stateManager) {
+            await this.stateManager.releaseGpuLock().catch(() => {});
+            this.gpuLockHeld = false;
+          }
+
+          // Load on CPU instead
+          this.device = 'cpu';
+          logger.info(`[embedder] Retrying model load on CPU after WebGPU ${isValidationError ? 'validation' : 'OOM'} error`);
+          
+          this.pipeline = await getLogger().runCapturingStderr(async () => {
+            return await withTimeout(
+              pipeline('feature-extraction', this.model, {
+                device: 'cpu',
+              }),
+              this.initializationTimeoutMs,
+              'CPU fallback model load timed out'
+            );
+          });
+          logger.info(`[embedder] Pipeline loaded (device: ${this.device})`);
+        } else {
+          throw loadErr;
+        }
       } finally {
         env.allowRemoteModels = prevAllowRemote;
       }
@@ -221,8 +263,20 @@ export class Embedder {
           'Model warmup timed out after 20000ms.'
         );
       } catch (warmupErr) {
+        const errorMsg = warmupErr instanceof Error ? warmupErr.message : String(warmupErr);
+        
         if (this.device === 'webgpu' && this.isWebGpuDeviceError(warmupErr)) {
-          logger.warn('[embedder] WebGPU OOM during warmup — falling back to CPU');
+          const isValidationError = errorMsg.toLowerCase().includes('validation');
+          const isOomError = errorMsg.toLowerCase().includes('out_of_device_memory') || 
+                             errorMsg.toLowerCase().includes('vk_error_out_of_device_memory');
+          
+          if (isValidationError) {
+            logger.warn('[embedder] WebGPU validation error during warmup (likely buffer binding issue with decoder model) — falling back to CPU');
+            logger.debug('[embedder] Validation error details:', errorMsg);
+          } else {
+            logger.warn('[embedder] WebGPU OOM during warmup — falling back to CPU');
+          }
+          
           if (this.pipeline) {
               try { await (this.pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
           }
@@ -248,7 +302,7 @@ export class Embedder {
             20_000,
             'CPU warmup timed out after 20000ms.'
           );
-          logger.warn('[embedder] CPU fallback ready after WebGPU warmup OOM.');
+          logger.warn(`[embedder] CPU fallback ready after WebGPU warmup ${isValidationError ? 'validation' : 'OOM'} error.`);
         } else {
           throw warmupErr;
         }
@@ -287,14 +341,20 @@ export class Embedder {
   }
 
   private isWebGpuDeviceError(err: unknown): boolean {
-    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    const msg = err instanceof Error ? err.message : String(err);
+    const lowerMsg = msg.toLowerCase();
     return (
-      msg.includes('webgpu') ||
-      msg.includes('out_of_device_memory') ||
-      msg.includes('vk_error_out_of_device_memory') ||
-      msg.includes('vkallocatememory') ||
-      msg.includes('device lost') ||
-      msg.includes('devicelost')
+      lowerMsg.includes('webgpu') ||
+      lowerMsg.includes('out_of_device_memory') ||
+      lowerMsg.includes('vk_error_out_of_device_memory') ||
+      lowerMsg.includes('vkallocatememory') ||
+      lowerMsg.includes('device lost') ||
+      lowerMsg.includes('devicelost') ||
+      lowerMsg.includes('validation failed') ||
+      lowerMsg.includes('invalid buffer') ||
+      lowerMsg.includes('bindgroup') ||
+      lowerMsg.includes('minbindingsize') ||
+      msg.includes('past_key_values')
     );
   }
 
