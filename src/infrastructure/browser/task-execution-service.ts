@@ -1,0 +1,114 @@
+/**
+ * Task Execution Service
+ *
+ * Handles task execution with retry logic and circuit breaker.
+ * Refactored from browser-manager.ts for better separation of concerns.
+ */
+
+import type { Config } from '../../config.ts';
+import type { SearchResult } from '../../web-research/types.ts';
+import type { BrowserTask } from '../../types/index.ts';
+import { logger } from '../../logger.ts';
+import { errorTracker } from '../../utils/error-tracker.ts';
+import { browserCircuitBreaker, isTransientSocketError } from './browser-error-utils.ts';
+import { getScheduler } from './scheduler-factory.ts';
+
+/**
+ * Dispatches a browser task to the unified worker pool.
+ */
+export async function runBrowserTask<T>(
+    taskOrUrl: string | BrowserTask,
+    type: 'search' | 'scrape' = 'scrape',
+    config?: Config,
+    retries = 1
+): Promise<T> {
+    try {
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            if (type === 'search') {
+                const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).query;
+                if (!query) throw new Error('Search task requires a query');
+                return (await scheduler.runSearch(query, config)) as T;
+            }
+
+            const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).url;
+            if (url) {
+                return (await scheduler.runScrape(url, config)) as T;
+            }
+
+            throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
+        });
+    } catch (error: any) {
+        if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: type,
+                taskType: type,
+                errorType: 'transient_socket_error',
+            });
+            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
+            await forceSchedulerRestart(true);
+            // Add a small delay before retry to allow ports to free up
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
+        }
+        throw error;
+    }
+}
+
+/**
+ * Run a browser health check with retry logic.
+ */
+export async function runBrowserHealthCheck(config?: Config, retries = 1): Promise<{ success: boolean }> {
+    try {
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            return await scheduler.runHealthCheck(config);
+        });
+    } catch (error: any) {
+        if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                errorType: 'transient_socket_error',
+            });
+            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
+            await forceSchedulerRestart(true);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return runBrowserHealthCheck(config, retries - 1);
+        }
+        throw error;
+    }
+}
+
+/**
+ * Run a worker search query with retry logic.
+ */
+export async function runWorkerSearch(query: string, config?: Config, retries = 1): Promise<SearchResult[]> {
+    try {
+        return await browserCircuitBreaker.execute(async () => {
+            const scheduler = await getScheduler(config);
+            return await scheduler.runSearch(query, config);
+        });
+    } catch (error: any) {
+        if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                errorType: 'transient_socket_error',
+            });
+            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+            const { forceSchedulerRestart } = await import('./scheduler-factory.ts');
+            await forceSchedulerRestart(true);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return runWorkerSearch(query, config, retries - 1);
+        }
+        throw error;
+    }
+}

@@ -1,0 +1,293 @@
+/**
+ * Browser Task Scheduler
+ *
+ * Manages the browser task scheduler lifecycle and task execution.
+ * Refactored from browser-manager.ts for better separation of concerns.
+ */
+
+import type { Config } from '../../config.ts';
+import type { SearchResult } from '../../web-research/types.ts';
+import { logger } from '../../logger.ts';
+import { metrics } from '../../utils/metrics.ts';
+import { errorTracker } from '../../utils/error-tracker.ts';
+import { getService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/service-interfaces.ts';
+import { SchedulerService } from '../../core/scheduler-service.ts';
+import { getSharedStateManager } from '../state-manager.ts';
+import { BrowserServer } from '../browser-server.ts';
+import { WorkerPoolManager } from './worker-pool-manager.ts';
+import type { IScheduler } from './browser-client.ts';
+
+/**
+ * Browser task scheduler - manages the worker pool and executes tasks.
+ * Only the leader process has an instance of this scheduler.
+ */
+export class BrowserTaskScheduler implements IScheduler {
+    private workerPoolManager: WorkerPoolManager;
+    private server: BrowserServer | null = null;
+    private leadershipTimer: any = null;
+    private idleTimer: any = null;
+    private consecutiveLeadershipMisses: number = 0;
+    private readonly LEADERSHIP_MISS_THRESHOLD: number = 5;
+    private isShuttingDown: boolean = false;
+    private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (reduced from 30m for efficiency)
+    private readonly stateManager = getSharedStateManager();
+
+    constructor(public readonly schedulerId: string) {
+        this.workerPoolManager = new WorkerPoolManager();
+        this.startLeadershipCheck();
+        this.resetIdleTimer();
+    }
+
+    private startLeadershipCheck() {
+        if (this.leadershipTimer) return;
+        this.leadershipTimer = setInterval(async () => {
+            const serverInfo = await this.stateManager.getBrowserServer();
+            // If the state file now points to a different schedulerId, we have lost leadership
+            if (serverInfo?.schedulerId !== this.schedulerId) {
+                this.consecutiveLeadershipMisses++;
+                metrics.increment('browser_leadership_misses_total', 1);
+                metrics.setGauge('browser_is_leader', 0);
+                logger.warn(`[Scheduler] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) - ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}`);
+
+                if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
+                    metrics.increment('browser_leadership_lost_total', 1);
+                    logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
+                    await this.shutdown();
+                }
+            } else {
+                // Reset counter on successful leadership check
+                if (this.consecutiveLeadershipMisses > 0) {
+                    logger.log(`[Scheduler] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
+                    this.consecutiveLeadershipMisses = 0;
+                }
+                metrics.setGauge('browser_is_leader', 1);
+            }
+            // Decay the consecutive error counter to allow recovery after transient errors
+            this.workerPoolManager.resetConsecutiveErrors();
+        }, 30000); // Check leadership every 30 seconds (reduced from 60s for faster failover)
+        if (this.leadershipTimer.unref) this.leadershipTimer.unref();
+    }
+
+    private resetIdleTimer() {
+        if (this.idleTimer) clearTimeout(this.idleTimer);
+        this.idleTimer = setTimeout(() => {
+            logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
+            this.shutdown();
+        }, this.IDLE_TIMEOUT_MS);
+        if (this.idleTimer.unref) this.idleTimer.unref();
+    }
+
+    public resetIdleTimerOnActivity(): void {
+        this.resetIdleTimer();
+    }
+
+    async startServer(): Promise<number> {
+        this.server = new BrowserServer({
+            onSearch: (q) => this.runSearch(q),
+            onScrape: (u) => this.runScrape(u),
+            onHealthCheck: () => this.runHealthCheck(),
+        });
+        return this.server.start();
+    }
+
+    async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
+        const pool = await this.workerPoolManager.ensurePool(config);
+        const startTime = Date.now();
+
+        // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
+        // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
+        const timeoutMs = 30000;
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
+        });
+
+        let result: { results: SearchResult[], error?: string };
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'search', query }),
+                timeoutPromise
+            ]) as { results: SearchResult[], error?: string };
+        } catch (error) {
+            metrics.increment('browser_search_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                taskType: 'search',
+            });
+            throw error;
+        } finally {
+            clearTimeout(timeoutId!);
+        }
+
+        const duration = Date.now() - startTime;
+        metrics.observe('browser_search_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_search_requests_total', 1, { status: 'success' });
+        logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
+        if (result.error) {
+            metrics.increment('browser_search_requests_total', 1, { status: 'error' });
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                taskType: 'search',
+                errorType: 'search_error',
+            });
+            throw new Error(result.error);
+        }
+        return result.results;
+    }
+
+    async runScrape(url: string, config?: Config): Promise<any> {
+        const pool = await this.workerPoolManager.ensurePool(config);
+        const startTime = Date.now();
+        const timeoutMs = 60000;
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
+        });
+
+        let result: any;
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'scrape', url }),
+                timeoutPromise
+            ]);
+        } catch (error) {
+            metrics.increment('browser_scrape_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'browser-task',
+                taskType: 'scrape',
+            });
+            throw error;
+        } finally {
+            clearTimeout(timeoutId!);
+        }
+
+        const duration = Date.now() - startTime;
+        metrics.observe('browser_scrape_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_scrape_requests_total', 1, { status: 'success' });
+        if (result.error) {
+            metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'browser-task',
+                taskType: 'scrape',
+                errorType: 'scrape_error',
+            });
+            throw new Error(result.error);
+        }
+        return result;
+    }
+
+    async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
+        const pool = await this.workerPoolManager.ensurePool(config);
+        const startTime = Date.now();
+        const timeoutMs = 45000;
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        let result: { success: boolean; error?: string };
+        try {
+            result = await Promise.race([
+                pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                timeoutPromise
+            ]) as { success: boolean; error?: string };
+        } catch (error) {
+            metrics.increment('browser_healthcheck_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                taskType: 'healthcheck',
+            });
+            throw error;
+        } finally {
+            clearTimeout(timeoutId!);
+        }
+
+        const duration = Date.now() - startTime;
+        metrics.observe('browser_healthcheck_duration_ms', duration, { status: 'success' });
+        metrics.increment('browser_healthcheck_requests_total', 1, { status: 'success' });
+        metrics.setGauge('browser_pool_health', 1); // Health check passed
+        logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
+        if (result.error) {
+            metrics.increment('browser_healthcheck_requests_total', 1, { status: 'error' });
+            metrics.setGauge('browser_pool_health', 0); // Health check failed
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                taskType: 'healthcheck',
+                errorType: 'healthcheck_error',
+            });
+            throw new Error(result.error);
+        }
+        return result;
+    }
+
+    async shutdown() {
+        if (this.isShuttingDown) return;
+        this.isShuttingDown = true;
+
+        if (this.idleTimer) {
+            clearTimeout(this.idleTimer);
+            this.idleTimer = null;
+        }
+
+        if (this.leadershipTimer) {
+            clearInterval(this.leadershipTimer);
+            this.leadershipTimer = null;
+        }
+
+        // Clear reference immediately to prevent new tasks from using this scheduler
+        const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+        const currentScheduler = schedulerService.getSchedulerInstance();
+        if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
+            schedulerService.setSchedulerInstance(null);
+            schedulerService.setSchedulerVersion(null);
+            schedulerService.setSchedulerInitializationPromise(null);
+        }
+
+        const serverInfo = await this.stateManager.getBrowserServer();
+        // Only clear state if this scheduler still owns it — same pid AND same schedulerId.
+        // Checking pid alone is wrong when a new scheduler wins election in the same process:
+        // the old scheduler's shutdown would wipe the new leader's registration.
+        if (serverInfo?.pid === process.pid && serverInfo?.schedulerId === this.schedulerId) {
+            await this.stateManager.clearBrowserServer().catch((err) => {
+                logger.warn('[Scheduler] Failed to clear browser server state during shutdown:', err);
+            });
+        }
+
+        if (this.server) {
+            try {
+                // Use a timeout for server shutdown
+                await Promise.race([
+                    this.server.stop(),
+                    new Promise(resolve => setTimeout(resolve, 2000))
+                ]);
+            } catch (e) {
+                logger.warn('[Scheduler] Server shutdown error:', e);
+            }
+            this.server = null;
+        }
+
+        // Shutdown the worker pool
+        await this.workerPoolManager.shutdown();
+
+        // Clean up any orphaned Camoufox browser processes that may have been left behind
+        // This handles edge cases where workers were force-killed or hung during teardown
+        try {
+            const { cleanupOrphanedCamoufoxProcesses } = await import('../browser-cleanup.ts');
+            await cleanupOrphanedCamoufoxProcesses();
+        } catch (cleanupError) {
+            const msg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+            logger.warn('[Scheduler] Failed to cleanup orphaned browsers:', msg);
+        }
+    }
+}
