@@ -13,9 +13,11 @@ import { BrowserManagerService } from './browser-manager-service.ts';
 import { StateManagerService } from './state-manager-service.ts';
 import { KnowledgeStoreService } from './knowledge-store-service.ts';
 import { MetricsService } from './metrics-service.ts';
+import { PlanningService } from './planning-service.ts';
 import type { MetricsService as IMetricsService } from './metrics-service.ts';
 import type { StateManagerService as IStateManagerService } from './state-manager-service.ts';
 import type { BrowserManagerService as IBrowserManagerService } from './browser-manager-service.ts';
+import type { PlanningService as IPlanningService } from './planning-service.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -90,6 +92,17 @@ export function registerCoreServices(): void {
     }
   );
 
+  // Register Planning Service
+  registerService(
+    ServiceNames.PLANNING,
+    () => new PlanningService(),
+    {
+      lazyInitialization: false, // Planning service needs to be available early
+      allowOverwrite: false,
+      enableLogging: true,
+    }
+  );
+
   logger.debug('[ServiceInitialization] All core services registered');
 }
 
@@ -122,6 +135,10 @@ export async function initializeCoreServices(): Promise<void> {
 
     // 6. Knowledge Store (no hard dependencies, but uses State Manager for GPU lock)
     // Knowledge store initializes lazily on first use
+
+    // 7. Planning Service (no hard dependencies)
+    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING);
+    await planningService.initialize();
 
     logger.log('[ServiceInitialization] Core services initialized successfully');
   } catch (err) {

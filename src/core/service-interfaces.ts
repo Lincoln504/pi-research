@@ -289,7 +289,250 @@ export const ServiceNames = {
    * Metrics service
    */
   METRICS: 'metrics',
+
+  /**
+   * Planning service
+   */
+  PLANNING: 'planning',
 } as const;
+
+// ============================================================================
+// Planning Service Interface
+// ============================================================================
+
+/**
+ * Research plan structure returned by the coordinator/evaluator
+ */
+export interface ResearchPlan {
+  action?: 'synthesize' | 'delegate';
+  researchers?: ResearcherConfig[];
+  allQueries?: string[];
+  content?: string;
+}
+
+/**
+ * Individual researcher configuration
+ */
+export interface ResearcherConfig {
+  id: string | number;
+  name: string;
+  goal: string;
+  queries: string[];
+  historicalLinks?: string[];
+}
+
+/**
+ * Session context for planning operations
+ */
+export interface SessionContext {
+  sessionId: string;
+  researchId: string;
+}
+
+/**
+ * Options for generating a research plan
+ */
+export interface GeneratePlanOptions {
+  query: string;
+  complexity: 1 | 2 | 3;
+  model: any;
+  config: any;
+  sessionContext: SessionContext;
+  signal?: AbortSignal;
+  historicalLinksSection?: string;
+}
+
+/**
+ * Options for generating queries for a researcher
+ */
+export interface GenerateQueriesOptions {
+  researcher: ResearcherConfig;
+  query: string;
+  complexity: 1 | 2 | 3;
+  model: any;
+  config: any;
+  signal?: AbortSignal;
+}
+
+/**
+ * Options for updating plan for next round
+ */
+export interface UpdatePlanOptions {
+  currentPlan: ResearchPlan | null;
+  reports: Map<string, string>;
+  round: number;
+  query: string;
+  complexity: 1 | 2 | 3;
+  model: any;
+  config: any;
+  signal?: AbortSignal;
+  previousPlan: ResearchPlan | null;
+  totalResearchersPlanned: number;
+  mustSynthesize?: boolean;
+  historicalLinksSection?: string;
+}
+
+/**
+ * Planning service interface
+ *
+ * Responsible for generating research plans, coordinating researchers,
+ * and managing query generation for multi-round research.
+ */
+export interface IPlanningService extends IService {
+  /**
+   * Generate a research plan
+   *
+   * @param options - Planning options including query, complexity, model, and config
+   * @returns Promise resolving to a ResearchPlan
+   */
+  generatePlan(options: GeneratePlanOptions): Promise<ResearchPlan>;
+
+  /**
+   * Generate researcher configurations from a plan
+   *
+   * @param plan - The research plan
+   * @param query - The root research query
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Array of researcher configurations
+   */
+  generateResearchers(
+    plan: ResearchPlan,
+    query: string,
+    complexity: 1 | 2 | 3
+  ): ResearcherConfig[];
+
+  /**
+   * Generate queries for a researcher
+   *
+   * @param options - Query generation options
+   * @returns Promise resolving to an array of query strings
+   */
+  generateQueries(options: GenerateQueriesOptions): Promise<string[]>;
+
+  /**
+   * Update plan for next round (evaluator logic)
+   *
+   * @param options - Update plan options
+   * @returns Promise resolving to the updated ResearchPlan
+   */
+  updatePlanForRound(options: UpdatePlanOptions): Promise<ResearchPlan>;
+
+  /**
+   * Get the query history
+   *
+   * @returns Array of all queries executed
+   */
+  getQueryHistory(): string[];
+
+  /**
+   * Add queries to history
+   *
+   * @param queries - Array of queries to add
+   */
+  addToQueryHistory(queries: string[]): void;
+
+  /**
+   * Get the current plan
+   *
+   * @returns Current plan or null if none exists
+   */
+  getCurrentPlan(): ResearchPlan | null;
+
+  /**
+   * Get the total number of researchers planned so far
+   *
+   * @returns Total researchers planned
+   */
+  getTotalResearchersPlanned(): number;
+
+  /**
+   * Get the max team size for a complexity level
+   *
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Maximum team size
+   */
+  getTeamSize(complexity: 1 | 2 | 3): number;
+
+  /**
+   * Get the query budget per researcher for a complexity level
+   *
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Maximum queries per researcher
+   */
+  getQueryBudget(complexity: 1 | 2 | 3): number;
+
+  /**
+   * Get complexity-specific guidance for the coordinator
+   *
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @param maxTeamSize - Maximum team size
+   * @param queryBudget - Query budget per researcher
+   * @returns Guidance string for the coordinator prompt
+   */
+  getComplexityGuidance(
+    complexity: 1 | 2 | 3,
+    maxTeamSize: number,
+    queryBudget: number
+  ): string;
+
+  /**
+   * Get complexity-specific guidance for the evaluator
+   *
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Guidance string for the evaluator prompt
+   */
+  getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string;
+
+  /**
+   * Get round phase guidance based on current round and max rounds
+   *
+   * @param currentRound - Current round number
+   * @param maxRounds - Maximum rounds
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Guidance string based on round phase
+   */
+  getRoundPhaseGuidance(
+    currentRound: number,
+    maxRounds: number,
+    complexity: 1 | 2 | 3
+  ): string;
+
+  /**
+   * Cap researcher queries to stay within budget
+   *
+   * @param plan - The plan to cap
+   * @param complexity - Complexity level (1, 2, or 3)
+   * @returns Plan with capped queries
+   */
+  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan;
+
+  /**
+   * Parse JSON from LLM response into ResearchPlan
+   *
+   * @param text - Raw LLM response text
+   * @returns Parsed ResearchPlan
+   * @throws Error if parsing fails
+   */
+  parseJsonPlan(text: string): ResearchPlan;
+
+  /**
+   * Build a fallback coordinator plan when LLM fails
+   *
+   * @param rawText - The raw LLM response text
+   * @param query - The root research query
+   * @returns Fallback ResearchPlan
+   */
+  buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
+
+  /**
+   * Clear all planning state
+   */
+  clearPlanningState(): void;
+}
+
+// ============================================================================
+// Service Names (Constants)
+// ============================================================================
 
 /**
  * Type of service names
