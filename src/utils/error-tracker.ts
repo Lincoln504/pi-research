@@ -7,11 +7,10 @@ import type {
   IErrorTrackerLogger,
   ErrorContext,
   ErrorPattern,
-  ErrorReport,
 } from '../core/interfaces/error-tracking.ts';
 
 // Re-export types for backward compatibility
-export type { ErrorContext, ErrorPattern, ErrorReport } from '../core/interfaces/error-tracking.ts';
+export type { ErrorContext, ErrorPattern } from '../core/interfaces/error-tracking.ts';
 
 export class ErrorTracker implements IErrorTracker {
   private patterns = new Map<string, ErrorPattern>();

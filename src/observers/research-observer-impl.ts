@@ -10,6 +10,7 @@
  */
 
 import type { ResearchObserver } from '../orchestration/research-observer.ts';
+import type { ResearchState } from '../types/index.ts';
 import { getUnitsPerResearcher, LEAD_EVAL_UNITS } from '../constants.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';
 import {

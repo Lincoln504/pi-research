@@ -15,7 +15,7 @@
  * - Traceable: correlation IDs for request tracking
  */
 
-import type { LogContext, LogLevel } from '../logger.ts';
+import type { LogContext } from '../logger.ts';
 
 /**
  * Structured log entry interface
@@ -113,46 +113,21 @@ class StructuredLogger implements ILogger {
    * Format a log entry with consistent structure
    */
   private formatMessage(
-    level: string,
+    _level: string,
     message: string,
-    error?: Error | unknown,
+    _error?: Error | unknown,
     additionalContext?: LogContext
   ): { message: string; context: LogContext } {
     const context: LogContext = {
-      component: this.component,
       ...this.baseContext,
       ...additionalContext,
-    };
+    } as LogContext;
 
     if (this.correlationId) {
-      context.correlationId = this.correlationId;
+      (context as Record<string, unknown>)['correlationId'] = this.correlationId;
     }
 
     return { message, context };
-  }
-
-  /**
-   * Extract error information for structured logging
-   */
-  private extractError(error: Error | unknown): { message: string; stack?: string; code?: string } | undefined {
-    if (error instanceof Error) {
-      const result: { message: string; stack?: string; code?: string } = {
-        message: error.message,
-        stack: error.stack,
-      };
-
-      if ('code' in error && typeof error.code === 'string') {
-        result.code = error.code;
-      }
-
-      return result;
-    }
-
-    if (error) {
-      return { message: String(error) };
-    }
-
-    return undefined;
   }
 
   /**
@@ -180,7 +155,6 @@ class StructuredLogger implements ILogger {
     );
 
     // For errors, always log with the error object for proper error tracking
-    const errorInfo = this.extractError(error);
     if (error) {
       this.writeLog('error', formattedMessage, formattedContext, error instanceof Error ? error : undefined);
     } else {
@@ -375,7 +349,7 @@ export class NoOpLogger implements ILogger {
   warn(_message: string, _context?: LogContext): void {}
   debug(_message: string, _context?: LogContext): void {}
 
-  withContext(context: LogContext): ILogger {
+  withContext(_context: LogContext): ILogger {
     return new NoOpLogger(this.component);
   }
 
@@ -419,7 +393,7 @@ export class InMemoryLogger implements ILogger {
     this.logs.push({ level: 'debug', message, context });
   }
 
-  withContext(context: LogContext): ILogger {
+  withContext(_context: LogContext): ILogger {
     return new InMemoryLogger(this.component);
   }
 

@@ -9,7 +9,7 @@ import {
     type ExtensionContext, 
     type AgentSessionEvent 
 } from '@mariozechner/pi-coding-agent';
-import { complete, completeSimple, type Model, type TextContent } from '@mariozechner/pi-ai';
+import { complete, completeSimple, type Model, type TextContent, type Message } from '@mariozechner/pi-ai';
 import { calculateTotalTokens, parseTokenUsage, estimateTokenCount } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
@@ -41,7 +41,9 @@ import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { registerScrapedLinks, normalizeUrl, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
-import type { LLMResponseMetadata, AbortCleanup, GlobalStateGetter, ResearchMessage, ExtendedResearchContext } from '../types/index.ts';
+import type { LLMResponseMetadata, AbortCleanup, ResearchMessage } from '../types/index.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
+import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 
 const ResearcherConfigSchema = Type.Object({
     id: Type.Union([Type.String(), Type.Number()]),
@@ -137,13 +139,13 @@ export class DeepResearchOrchestrator {
       if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
       logger.log(`[Orchestrator] Coordinator auth for model ${this.options.model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}, headerKeys=${JSON.stringify(Object.keys(auth.headers ?? {}))}`);
 
-      const historyMessages: { role: string; content: { type: string; text: string }[] }[] = [];
+      const historyMessages: Message[] = [];
       let lastRawPlanText = '';
       for (let attempt = 1; attempt <= 3; attempt++) {
         if (attempt > 1) this.options.observer?.onPlanningStart?.(attempt);
         const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
         const messages = attempt === 1
-          ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${this.options.query}"` }] }]
+          ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${this.options.query}"` }] }] as Message[]
           : historyMessages;
 
         this.options.observer?.onPlanningProgress?.(attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
@@ -199,9 +201,12 @@ export class DeepResearchOrchestrator {
             break;
           }
           metrics.increment('coordinator_plans_total', 1, { complexity: String(this.options.complexity), status: 'error' });
-          if (attempt === 1) historyMessages.push(messages[0]);
-          historyMessages.push({ role: 'assistant', content: planResponse.content });
-          historyMessages.push({ role: 'user', content: [{ type: 'text', text: retryHint }] });
+          if (attempt === 1) {
+            const firstMsg = messages[0];
+            if (firstMsg) historyMessages.push(firstMsg);
+          }
+          historyMessages.push({ role: 'assistant', content: planResponse.content } as Message);
+          historyMessages.push({ role: 'user', content: [{ type: 'text', text: retryHint }] } as Message);
         }
       }
 
@@ -766,7 +771,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
     logger.debug(`[Orchestrator] Researcher ${id} System Prompt:\n${prompt}`);
 
-    const extendedCtx = this.options.ctx as ExtendedResearchContext;
+    const extendedCtx = this.options.ctx as unknown as ExtendedExtensionContext;
     const maxAttempts = this.config.RESEARCHER_MAX_RETRIES + 1;
     let lastError: unknown;
     const researcherExecutionStartMs = Date.now();
@@ -783,12 +788,23 @@ You are in the late phase of research. Set a higher threshold for delegation:
         cwd: this.options.ctx.cwd,
         ctxModel: this.options.model,
         modelRegistry: this.options.ctx.modelRegistry,
-        settingsManager: extendedCtx.settingsManager,
+        settingsManager: extendedCtx['settingsManager'] ?? undefined as any,
         systemPrompt: prompt,
         extensionCtx: this.options.ctx,
         noSearch: true,
         noStoredSearch: true,
-        getGlobalState: (): GlobalStateGetter['call'] => () => ({ researchId: this.options.researchId }),
+        getGlobalState: (): SystemResearchState => ({
+          version: 1,
+          researchId: this.options.researchId,
+          rootQuery: this.options.query,
+          complexity: this.options.complexity,
+          currentRound: 1,
+          status: 'researching',
+          lastUpdated: Date.now(),
+          initialAgenda: [],
+          allScrapedLinks: [],
+          aspects: {},
+        }),
         updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
         onSearchProgress: (links) => {
             this.options.observer?.onResearcherProgress?.(id, `${links} Results`);
@@ -798,9 +814,9 @@ You are in the late phase of research. Set a higher threshold for delegation:
 
       const subscription = session.subscribe((event: AgentSessionEvent) => {
           if (event.type === 'message_end') {
-              const msg = event.message as ResearchMessage;
-              if (msg?.role !== 'assistant') return;
-              const rawUsage = msg.usage;
+              const msg = event.message as unknown as ResearchMessage;
+              if (msg?.['role'] !== 'assistant') return;
+              const rawUsage = msg['usage'] as { cost?: { total: number } } | undefined;
               if (rawUsage) {
                   const parsed = parseTokenUsage(rawUsage);
                   const tokens = calculateTotalTokens(parsed);

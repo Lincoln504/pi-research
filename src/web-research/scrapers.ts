@@ -22,16 +22,6 @@ import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
 import crypto from 'node:crypto';
 
-/**
- * PDF document interface with toMarkdownAll method
- */
-interface WasmPdfDocument {
-    pageCount(): number;
-    toMarkdownAll(): string;
-    toMarkdown(page: number): string;
-    free(): void;
-}
-
 // ============================================================================
 // Constants and Configuration
 // ============================================================================

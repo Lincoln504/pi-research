@@ -30,12 +30,7 @@ interface DisposablePipeline {
   dispose(): Promise<void>;
 }
 
-/**
- * Feature extraction pipeline with device option
- */
-interface FeatureExtractionPipelineWithDevice extends FeatureExtractionPipeline {
-  device?: 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu';
-}
+
 
 export interface EmbedderOptions {
   model: string;
@@ -267,8 +262,6 @@ export class Embedder {
         
         if (this.device === 'webgpu' && this.isWebGpuDeviceError(warmupErr)) {
           const isValidationError = errorMsg.toLowerCase().includes('validation');
-          const isOomError = errorMsg.toLowerCase().includes('out_of_device_memory') || 
-                             errorMsg.toLowerCase().includes('vk_error_out_of_device_memory');
           
           if (isValidationError) {
             logger.warn('[embedder] WebGPU validation error during warmup (likely buffer binding issue with decoder model) — falling back to CPU');

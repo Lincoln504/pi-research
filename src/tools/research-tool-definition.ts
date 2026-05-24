@@ -25,6 +25,7 @@ import { errorTracker } from '../utils/error-tracker.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
+import type { ResearchState } from '../types/index.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../utils/research-health.ts';
 import { getPiSessionMetadata } from '../utils/pi-session.ts';
 
@@ -128,7 +129,7 @@ export function createResearchTool(): ToolDefinition {
             // exists under multiple providers (e.g. built-in "zai/glm-4.7" vs
             // user-configured "glm-coding/glm-4.7"), causing auth failures.
             let selectedModel = baseModel;
-            const extendedCtx = ctx as ExtendedResearchContext;
+            const extendedCtx = ctx as unknown as ExtendedResearchContext;
             if (modelId && extendedCtx.model?.id !== modelId) {
                 selectedModel = ctx.modelRegistry.getAll().find(m => m.id === modelId) || baseModel;
             }
@@ -202,7 +203,7 @@ export function createResearchTool(): ToolDefinition {
               ctx,
               query: sanitizedQuery,
               depth: (depth ?? 0) as ResearchDepth,
-              model: selectedModel as Model<unknown>,
+              model: selectedModel as Model<any>,
               observer,
               sessionId: piSessionId,
               researchId,
@@ -214,7 +215,7 @@ export function createResearchTool(): ToolDefinition {
             }
 
             // Stop wave animation
-            stopObserverWaveAnimation(observerState, panelState);
+            stopObserverWaveAnimation(observerState, panelState as unknown as ResearchState);
 
             // Append error summary if any errors were tracked during this research
             const errorReport = errorTracker.getReport();

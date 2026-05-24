@@ -23,7 +23,8 @@ import { getStore, getWriterQueue } from '../knowledge/index.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { isHealthCheckSuccessful, runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
-import type { ExtendedResearchContext, GlobalStateGetter, AbortCleanup, ResearchMessage } from '../types/index.ts';
+import type { AbortCleanup, ResearchMessage } from '../types/index.ts';
+import type { SystemResearchState } from './deep-research-types.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -105,10 +106,21 @@ export class QuickResearchOrchestrator {
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      settingsManager: undefined,
+      settingsManager: undefined as any,
       systemPrompt: prompt,
       extensionCtx: ctx,
-      getGlobalState: () => ({ researchId: this.options.researchId }),
+      getGlobalState: (): SystemResearchState => ({
+        version: 1,
+        researchId: this.options.researchId,
+        rootQuery: query,
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
       updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
       onSearchProgress: (links) => {
         observer?.onSearchProgress?.(links);
@@ -117,9 +129,9 @@ export class QuickResearchOrchestrator {
 
     const subscription = session.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_end') {
-            const msg = event.message as ResearchMessage;
-            if (msg?.role !== 'assistant') return;
-            const rawUsage = msg.usage;
+            const msg = event.message as unknown as ResearchMessage;
+            if (msg?.['role'] !== 'assistant') return;
+            const rawUsage = msg['usage'] as { cost?: { total: number } } | undefined;
             if (rawUsage) {
                 const parsed = parseTokenUsage(rawUsage);
                 const tokens = calculateTotalTokens(parsed);
