@@ -71,11 +71,6 @@ function generateSchedulerVersion(config?: Config): string {
 }
 
 /**
- * Store the current scheduler version globally for quick invalidation checks.
- */
-let cachedSchedulerVersion: string | null = null;
-
-/**
  * Get the current number of worker threads from config.
  * This is a function instead of a constant to allow config changes to take effect
  * without requiring a process restart.
@@ -124,8 +119,6 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
     schedulerService.setSchedulerInstance(null);
     schedulerService.setSchedulerVersion(null);
     schedulerService.setSchedulerInitializationPromise(null);
-    cachedSchedulerVersion = null;
-    initializationPromise = null;
 
     // Find and clear any stale scheduler processes BEFORE clearing state.
     // Only clear if the registered PID is dead or belongs to this process — never
@@ -494,8 +487,6 @@ class BrowserTaskScheduler implements IScheduler {
             schedulerService.setSchedulerInstance(null);
             schedulerService.setSchedulerVersion(null);
             schedulerService.setSchedulerInitializationPromise(null);
-            cachedSchedulerVersion = null;
-            initializationPromise = null;
         }
 
         const serverInfo = await this.stateManager.getBrowserServer();
@@ -689,16 +680,17 @@ class BrowserClient implements IScheduler {
     }
 }
 
-let initializationPromise: Promise<IScheduler> | null = null;
+
 
 async function getScheduler(config?: Config): Promise<IScheduler> {
     const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     const currentVersion = generateSchedulerVersion(config);
     let existing = schedulerService.getSchedulerInstance();
+    const cachedVersion = schedulerService.getSchedulerVersion();
     
     // Check if cached scheduler has different version (config changed)
-    if (existing && cachedSchedulerVersion && cachedSchedulerVersion !== currentVersion) {
-        logger.log(`[Scheduler] Config changed (old: ${cachedSchedulerVersion}, new: ${currentVersion}), forcing restart...`);
+    if (existing && cachedVersion && cachedVersion !== currentVersion) {
+        logger.log(`[Scheduler] Config changed (old: ${cachedVersion}, new: ${currentVersion}), forcing restart...`);
         await forceSchedulerRestart();
         existing = null; // Clear reference after restart
     }
@@ -710,7 +702,8 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         return existing as IScheduler;
     }
 
-    if (initializationPromise) return initializationPromise;
+    const existingPromise = schedulerService.getSchedulerInitializationPromise();
+    if (existingPromise) return existingPromise as Promise<IScheduler>;
 
     let p: Promise<IScheduler>;
     
@@ -750,11 +743,10 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                     logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
                     const client = new BrowserClient(serverInfo.port);
                     
-                                // Race check: if initializationPromise was cleared (restart), don't set reference
-                    if (initializationPromise === p) {
+                    // Race check: if initializationPromise was cleared (restart), don't set reference
+                    if (schedulerService.getSchedulerInitializationPromise() === p) {
                         schedulerService.setSchedulerInstance(client);
                         schedulerService.setSchedulerVersion(currentVersion);
-                        cachedSchedulerVersion = currentVersion;
                     } else {
                         logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
                         await client.shutdown().catch(() => {});
@@ -772,10 +764,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             port = await scheduler.startServer();
         } catch (error) {
             logger.error('[Scheduler] Failed to start server, running standalone:', error);
-            if (initializationPromise === p) {
+            if (schedulerService.getSchedulerInitializationPromise() === p) {
                 schedulerService.setSchedulerInstance(scheduler);
                 schedulerService.setSchedulerVersion(currentVersion);
-                cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
                 throw new Error('Initialization superseded', { cause: error });
@@ -802,10 +793,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             });
         } catch (error) {
             logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
-            if (initializationPromise === p) {
+            if (schedulerService.getSchedulerInitializationPromise() === p) {
                 schedulerService.setSchedulerInstance(scheduler);
                 schedulerService.setSchedulerVersion(currentVersion);
-                cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
                 throw new Error('Initialization superseded', { cause: error });
@@ -817,10 +807,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
             logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
             await scheduler.shutdown();
             const client = new BrowserClient(winnerPort);
-            if (initializationPromise === p) {
+            if (schedulerService.getSchedulerInitializationPromise() === p) {
                 schedulerService.setSchedulerInstance(client);
                 schedulerService.setSchedulerVersion(schedulerVersion);
-                cachedSchedulerVersion = schedulerVersion;
             } else {
                 await client.shutdown().catch(() => {});
                 throw new Error('Initialization superseded');
@@ -831,10 +820,9 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
         logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
         logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
         metrics.increment('browser_leadership_wins_total', 1);
-        if (initializationPromise === p) {
+        if (schedulerService.getSchedulerInitializationPromise() === p) {
             schedulerService.setSchedulerInstance(scheduler);
             schedulerService.setSchedulerVersion(schedulerVersion);
-            cachedSchedulerVersion = schedulerVersion;
         } else {
             logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
             await scheduler.shutdown().catch(() => {});
@@ -844,11 +832,13 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
     };
     
     p = initializationFunction();
-    initializationPromise = p;
+    schedulerService.setSchedulerInitializationPromise(p as any);
     // Clear on rejection so the next caller retries rather than receiving the same
     // rejected promise forever.
     p.catch(() => {
-        if (initializationPromise === p) initializationPromise = null;
+        if (schedulerService.getSchedulerInitializationPromise() === p) {
+            schedulerService.setSchedulerInitializationPromise(null);
+        }
     });
     return p;
 }
@@ -967,7 +957,6 @@ export async function stopBrowserManager(): Promise<void> {
   // scheduler that is mid-teardown.
   schedulerService.setSchedulerInstance(null);
   schedulerService.setSchedulerInitializationPromise(null);
-  initializationPromise = null;
 
   if (globalScheduler instanceof BrowserTaskScheduler) {
       // Do not call clearBrowserServer() here — BrowserTaskScheduler.shutdown() already
