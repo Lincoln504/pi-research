@@ -15,6 +15,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { errorTracker, type ErrorContext } from './utils/error-tracker.ts';
 
 /**
  * Log level enum
@@ -54,6 +55,7 @@ export interface LogContext {
   toolName?: string;
   phase?: string;
   eventName?: string;
+  [key: string]: unknown;
 }
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
@@ -609,6 +611,12 @@ export class Logger implements ILogger {
   }
 
   error(...args: unknown[]): void {
+    // Automatically track errors via ErrorTracker
+    const errArg = args.find((arg): arg is Error => arg instanceof Error);
+    if (errArg) {
+      const context: ErrorContext = getLogContext();
+      errorTracker.trackError(errArg, context);
+    }
     this.emit(LogLevel.ERROR, ...args);
   }
 

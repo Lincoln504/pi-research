@@ -20,6 +20,7 @@ import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { runBrowserTask } from '../infrastructure/browser-manager.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import { errorTracker } from '../utils/error-tracker.ts';
 import crypto from 'node:crypto';
 
 // ============================================================================
@@ -97,6 +98,18 @@ const INTERNAL_NETWORK_PATTERNS: ReadonlyArray<RegExp> = [
   /^::ffff:(127\.|0\.|169\.254\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i, // IPv4-mapped IPv6
 ];
 
+/**
+ * Extract domain from URL for error tracking
+ * Returns 'unknown' for invalid URLs, 'no-url' for missing URLs
+ */
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'unknown';
+  }
+}
+
 function validateUrlForSSRF(url: string): void {
   try {
     const parsed = new URL(url);
@@ -167,6 +180,12 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
         const msg = e instanceof Error ? e.message : String(e);
         logger.error(`[Scrapers] PDF extraction failed: ${msg}`);
         metrics.increment('scrape_pdf_errors_total', 1, { error_type: 'extraction_failed' });
+        errorTracker.trackError(e instanceof Error ? e : String(e), {
+          component: 'scrapers',
+          operation: 'pdf-extract',
+          contentType: 'pdf',
+          errorType: 'extraction_failed',
+        });
         return `*Error: Could not extract content from PDF (${msg}).*`;
     }
 }
@@ -293,14 +312,30 @@ function validateContent(html: string, markdown: string, url: string): void {
   for (const [pattern, reason] of BOT_PATTERNS) {
     if (htmlLow.includes(pattern)) {
       metrics.increment('scrape_errors_total', 1, { error_type: 'bot_protection' });
-      throw new Error(`Fetch blocked: ${reason}`);
+      const error = new Error(`Fetch blocked: ${reason}`);
+      errorTracker.trackError(error, {
+        component: 'scrapers',
+        operation: 'validate',
+        url,
+        domain: extractDomain(url),
+        errorType: 'bot_protection',
+      });
+      throw error;
     }
   }
 
   const words = markdown.trim().split(/\s+/).filter(w => w.length > 0);
   if (words.length < 50 && !url.includes('example.com')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'stub_content' });
-    throw new Error(`Fetch returned stub: only ${words.length} words found.`);
+    const error = new Error(`Fetch returned stub: only ${words.length} words found.`);
+    errorTracker.trackError(error, {
+      component: 'scrapers',
+      operation: 'validate',
+      url,
+      domain: extractDomain(url),
+      errorType: 'stub_content',
+    });
+    throw error;
   }
 }
 
@@ -377,6 +412,14 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       const sizeMB = Math.round(html.length / 1024 / 1024);
       logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), truncating`);
       metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
+      errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
+        component: 'scrapers',
+        operation: 'fetch',
+        url,
+        domain: extractDomain(url),
+        layer: 'fetch',
+        contentType: 'html',
+      });
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
     const markdown = await convertToMarkdown(html);
@@ -388,9 +431,24 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
     if (error instanceof Error && error.message.includes('not allowed')) {
       metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'ssrf_blocked' });
       metrics.observe('scrape_latency_ms', Date.now() - fetchStart, { layer: 'fetch', status: 'ssrf_blocked' });
+      errorTracker.trackError(error, {
+        component: 'scrapers',
+        operation: 'fetch',
+        url,
+        domain: extractDomain(url),
+        layer: 'fetch',
+        errorType: 'ssrf_blocked',
+      });
       throw error;
     }
     metrics.increment('scrape_operations_total', 1, { layer: 'fetch', status: 'error' });
+    errorTracker.trackError(error instanceof Error ? error : String(error), {
+      component: 'scrapers',
+      operation: 'fetch',
+      url,
+      domain: extractDomain(url),
+      layer: 'fetch',
+    });
     throw error;
   } finally {
     clearTimeout(timeoutId);
@@ -431,6 +489,13 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config): Promise<
     const browserDuration = Date.now() - browserStart;
     metrics.increment('scrape_operations_total', 1, { layer: 'playwright', status: 'error' });
     metrics.observe('scrape_latency_ms', browserDuration, { layer: 'playwright', status: 'error' });
+    errorTracker.trackError(error, {
+      component: 'scrapers',
+      operation: 'scrape',
+      url: _url,
+      domain: extractDomain(_url),
+      layer: 'playwright+camoufox',
+    });
     throw error;
   }
 }
@@ -456,6 +521,13 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   } catch (e1) {
     const fetchDuration = Date.now() - start;
     logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${String(e1)}`);
+    errorTracker.trackError(e1, {
+      component: 'scrapers',
+      operation: 'fetch',
+      url,
+      domain: extractDomain(url),
+      layer: 'fetch',
+    });
     
     if (playwrightAvailable) {
       try {
@@ -470,6 +542,14 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
         const totalDuration = Date.now() - start;
         logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
         metrics.increment('scrape_errors_total', 1, { error_type: 'fallback_failed', layer: 'playwright' });
+        errorTracker.trackError(e2, {
+          component: 'scrapers',
+          operation: 'scrape',
+          url,
+          domain: extractDomain(url),
+          layer: 'playwright+camoufox',
+          errorType: 'fallback_failed',
+        });
         return { url, success: false, error: String(e2), markdown: '' };
       }
     }

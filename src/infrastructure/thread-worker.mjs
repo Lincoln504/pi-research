@@ -11,6 +11,7 @@ import * as fs from 'node:fs';
 import process from 'node:process';
 import cluster from 'node:cluster';
 import crypto from 'node:crypto';
+import { getRandomRealisticUA } from '../utils/user-agent.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -116,10 +117,49 @@ async function initBrowser() {
                 const launchedBrowser = await Camoufox({
                     headless: true,
                     humanize: true,
+
+                    // ENHANCED STEALTH OPTIONS
+                    addons: [
+                        'stealth',           // Core stealth features
+                        'canvas',            // Canvas fingerprint protection
+                        'webgl',             // WebGL fingerprint spoofing
+                        'fonts',             // Font fingerprint randomization
+                        'audio',             // Audio context spoofing
+                        'media',             // Media device spoofing
+                        'locale',            // Locale/language mimicking
+                        'permissions',       // Permission spoofing
+                    ],
+
+                    // Screen properties to mimic real display
+                    screen: {
+                        width: 1920,
+                        height: 1080,
+                        colorDepth: 24,
+                        pixelRatio: 1,
+                    },
+
+                    // Locale and timezone to match a real user
+                    locale: 'en-US',
+                    timezone: 'America/New_York',
+
+                    // Geolocation (optional, can be randomized)
+                    geolocation: {
+                        latitude: 40.7128,  // New York City
+                        longitude: -74.0060,
+                    },
+
+                    // Use realistic User-Agent
+                    userAgent: getRandomRealisticUA(),
+
+                    // Disable automation indicators that Cloudflare detects
+                    exclude: [
+                        '--enable-automation',
+                        '--disable-blink-features=AutomationControlled',
+                    ],
                 });
 
                 context = await launchedBrowser.newContext({
-                    viewport: { width: 1280, height: 800 },
+                    viewport: { width: 1920, height: 1080 },
                 });
 
                 browser = launchedBrowser;
@@ -190,7 +230,7 @@ async function executeSearchTask(browser, context, query) {
         const results = await extractSearchResults(page);
 
         await page.close();
-        const jitter = Math.floor(Math.random() * 401) + 200;
+        const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms to mimic human behavior
         await new Promise(r => setTimeout(r, jitter));
 
         return { results, jitter };
@@ -221,10 +261,43 @@ async function executeScrapeTask(browser, context, url) {
 
         // If it's HTML, check if we need to wait longer (JS-heavy sites)
         let html = await page.content();
-        
-        // Improved heuristic: wait if very short OR if it contains common SPA mount points
-        const needsWait = html.length < 5000 || 
-                          html.includes('id="root"') || 
+
+        // DETECT CLOUDFLARE CHALLENGE
+        const cfPatterns = ['_cf_chl_', 'cdn-cgi/challenge-platform', 'cf_chl_opt', 'Just a moment...', 'Checking your browser before accessing'];
+        const hasCloudflare = cfPatterns.some(pattern => html.includes(pattern));
+
+        if (hasCloudflare) {
+            logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge detected for: ${url}`);
+
+            // Wait up to 5 seconds for challenge to resolve
+            try {
+                await page.waitForFunction(
+                    () => {
+                        const body = document.body.innerHTML;
+                        return !body.includes('_cf_chl_') &&
+                               !body.includes('cdn-cgi/challenge-platform') &&
+                               !body.includes('cf_chl_opt') &&
+                               !body.includes('Just a moment...') &&
+                               !body.includes('Checking your browser before accessing') &&
+                               body.length > 5000; // Ensure content loaded
+                    },
+                    { timeout: 5000 }
+                );
+
+                // Challenge resolved, get updated content
+                html = await page.content();
+                logToDebugFile('INFO', `[Worker-${workerId}] Cloudflare challenge resolved for: ${url}`);
+            } catch (_waitError) {
+                logToDebugFile('ERROR', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
+                const error = new Error('Fetch blocked: Cloudflare challenge');
+                error.cause = _waitError;
+                throw error;
+            }
+        }
+
+        // Check if we need to wait longer for JS-heavy sites
+        const needsWait = html.length < 5000 ||
+                          html.includes('id="root"') ||
                           html.includes('id="app"') ||
                           html.includes('<noscript>');
 
@@ -232,9 +305,13 @@ async function executeScrapeTask(browser, context, url) {
             await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
             html = await page.content();
         }
-        
+
+        // Add request delay jitter to mimic human behavior
+        const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms
+        await new Promise(r => setTimeout(r, jitter));
+
         await page.close();
-        return { contentType, html };
+        return { contentType, html, jitter };
     } catch (error) {
         await page.close().catch(() => {});
         throw error;

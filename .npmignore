@@ -61,6 +61,10 @@ pi-research-*.md
 planchat.txt
 AUDIT_FIXES_SUMMARY.md
 *_PLAN_FINAL.md
+*_INVESTIGATION_REPORT.md
+*_RESTORATION_PLAN.md
+*_IMPLEMENTATION_SUMMARY.md
+*_INTEGRATION.md
 
 # Browser cache
 .browser/

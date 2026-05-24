@@ -27,6 +27,73 @@ import { createResearchObserver, createObserverState, stopObserverWaveAnimation 
 import type { ResearchState } from '../types/index.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../utils/research-health.ts';
 import { getPiSessionMetadata } from '../utils/pi-session.ts';
+import { errorTracker, type ErrorReport } from '../utils/error-tracker.ts';
+
+/**
+ * Format a time ago string from an ISO timestamp
+ */
+function formatTimeAgo(isoTimestamp: string): string {
+  const now = Date.now();
+  const then = new Date(isoTimestamp).getTime();
+  const diffMs = now - then;
+  
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+/**
+ * Append error summary to research result
+ */
+function appendErrorSummary(result: string, errorReport: ErrorReport): string {
+  const { totalErrors, uniquePatterns, patterns, byDomain, byType } = errorReport;
+  
+  // Return unchanged if no errors
+  if (totalErrors === 0) {
+    return result;
+  }
+  
+  let summary = `\n\n## ⚠️ Error Summary\n\n`;
+  summary += `This research encountered **${totalErrors} error(s)** across **${uniquePatterns} unique pattern(s)**.\n\n`;
+  
+  // Most frequent errors (top 3)
+  summary += `**Most frequent error(s):**\n`;
+  const topPatterns = patterns.slice(0, 3);
+  for (const pattern of topPatterns) {
+    const timeAgo = formatTimeAgo(pattern.lastSeen);
+    summary += `- **${pattern.count}×**: ${pattern.message} (last: ${timeAgo})\n`;
+  }
+  
+  // Error types
+  if (byType.size > 0) {
+    summary += `\n**Error types:**\n`;
+    const sortedTypes = Array.from(byType.entries()).sort((a, b) => b[1] - a[1]);
+    for (const [type, count] of sortedTypes) {
+      const percentage = Math.round((count / totalErrors) * 100);
+      summary += `- ${type}: ${count} (${percentage}%)\n`;
+    }
+  }
+  
+  // Errors by domain (top 5)
+  if (byDomain.size > 0) {
+    summary += `\n**Errors by domain:**\n`;
+    const sortedDomains = Array.from(byDomain.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    for (const [domain, count] of sortedDomains) {
+      const percentage = Math.round((count / totalErrors) * 100);
+      summary += `- ${domain}: ${count} (${percentage}%)\n`;
+    }
+  }
+  
+  summary += `---`;
+  
+  return result + summary;
+}
 
 /**
  * Create the research tool definition
@@ -194,7 +261,17 @@ export function createResearchTool(): ToolDefinition {
             const exportPath = await exportResearchReport(sanitizedQuery, result, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
 
-            return { result: finalResult, tokens: panelState.totalTokens };
+            // Append error summary if errors occurred during research
+            const errorReport = errorTracker.getReport();
+            let resultWithErrorSummary = finalResult;
+            if (errorReport.totalErrors > 0) {
+              resultWithErrorSummary = appendErrorSummary(finalResult, errorReport);
+            }
+
+            // Clear error tracker for next research run
+            errorTracker.clear();
+
+            return { result: resultWithErrorSummary, tokens: panelState.totalTokens };
           } catch (error) {
             if (aborted || internalAbort.signal.aborted) {
               return { result: 'Research cancelled.', tokens: 0 };

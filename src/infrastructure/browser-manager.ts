@@ -23,6 +23,7 @@ import {
   setSchedulerRestartInProgress,
 } from '../core/internal-state.ts';
 import type { NodeError, BrowserTask } from '../types/index.ts';
+import { errorTracker } from '../utils/error-tracker.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -354,6 +355,12 @@ class BrowserTaskScheduler implements IScheduler {
             ]) as { results: SearchResult[], error?: string };
         } catch (error) {
             metrics.increment('browser_search_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                taskType: 'search',
+            });
             throw error;
         } finally {
             clearTimeout(timeoutId!);
@@ -365,6 +372,13 @@ class BrowserTaskScheduler implements IScheduler {
         logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) {
             metrics.increment('browser_search_requests_total', 1, { status: 'error' });
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                taskType: 'search',
+                errorType: 'search_error',
+            });
             throw new Error(result.error);
         }
         this.consecutiveErrors = 0;
@@ -389,6 +403,11 @@ class BrowserTaskScheduler implements IScheduler {
             ]);
         } catch (error) {
             metrics.increment('browser_scrape_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'browser-task',
+                taskType: 'scrape',
+            });
             throw error;
         } finally {
             clearTimeout(timeoutId!);
@@ -399,6 +418,12 @@ class BrowserTaskScheduler implements IScheduler {
         metrics.increment('browser_scrape_requests_total', 1, { status: 'success' });
         if (result.error) {
             metrics.increment('browser_scrape_requests_total', 1, { status: 'error' });
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'browser-task',
+                taskType: 'scrape',
+                errorType: 'scrape_error',
+            });
             throw new Error(result.error);
         }
         this.consecutiveErrors = 0;
@@ -422,6 +447,11 @@ class BrowserTaskScheduler implements IScheduler {
             ]) as { success: boolean; error?: string };
         } catch (error) {
             metrics.increment('browser_healthcheck_errors_total', 1);
+            errorTracker.trackError(error instanceof Error ? error : String(error), {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                taskType: 'healthcheck',
+            });
             throw error;
         } finally {
             clearTimeout(timeoutId!);
@@ -435,6 +465,12 @@ class BrowserTaskScheduler implements IScheduler {
         if (result.error) {
             metrics.increment('browser_healthcheck_requests_total', 1, { status: 'error' });
             metrics.setGauge('browser_pool_health', 0); // Health check failed
+            errorTracker.trackError(new Error(result.error), {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                taskType: 'healthcheck',
+                errorType: 'healthcheck_error',
+            });
             throw new Error(result.error);
         }
         this.consecutiveErrors = 0;
@@ -526,6 +562,10 @@ class BrowserClient implements IScheduler {
 
     private async request<T>(path: string, data: any): Promise<T> {
         const start = Date.now();
+        // Extract operation from path for error tracking
+        const operation = path.includes('/search') ? 'search' :
+                         path.includes('/scrape') ? 'browser-task' :
+                         path.includes('/healthcheck') ? 'healthcheck' : 'network';
         return new Promise((resolve, reject) => {
             // Increased timeout to 120s to allow for shared pool queuing delays
             const timeoutMs = 120000;
@@ -535,7 +575,13 @@ class BrowserClient implements IScheduler {
                 if (!resolved) {
                     resolved = true;
                     controller.abort();
-                    reject(new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`));
+                    const error = new Error(`[BrowserClient] Request to ${path} timed out after ${timeoutMs}ms (Shared queue may be deep)`);
+                    errorTracker.trackError(error, {
+                        component: 'browser-manager',
+                        operation,
+                        errorType: 'timeout',
+                    });
+                    reject(error);
                 }
             }, timeoutMs);
 
@@ -558,20 +604,38 @@ class BrowserClient implements IScheduler {
                     try {
                         const parsed = JSON.parse(body);
                         if (res.statusCode !== 200) {
-                            reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
+                            const error = new Error(parsed.error || `HTTP ${res.statusCode}`);
+                            errorTracker.trackError(error, {
+                                component: 'browser-manager',
+                                operation,
+                                errorType: 'http_error',
+                            });
+                            reject(error);
                         } else {
                             logger.debug(`[BrowserClient] Request ${path} completed in ${duration}ms`);
                             resolve(parsed);
                         }
                     } catch (_e) {
-                        reject(new Error(`Failed to parse response: ${body}`));
+                        const error = new Error(`Failed to parse response: ${body}`);
+                        errorTracker.trackError(error, {
+                            component: 'browser-manager',
+                            operation,
+                            errorType: 'parse_error',
+                        });
+                        reject(error);
                     }
                 });
                 res.on('error', (err) => {
                     if (resolved) return;
                     resolved = true;
                     clearTimeout(timer);
-                    reject(new Error(`[BrowserClient] Response stream error on ${path}: ${err.message}`));
+                    const error = new Error(`[BrowserClient] Response stream error on ${path}: ${err.message}`);
+                    errorTracker.trackError(error, {
+                        component: 'browser-manager',
+                        operation,
+                        errorType: 'response_stream_error',
+                    });
+                    reject(error);
                 });
             });
 
@@ -582,17 +646,28 @@ class BrowserClient implements IScheduler {
                 // Enhance error message with socket-specific details
                 const nodeErr = err as NodeError;
                 let errorMsg: string;
+                let errorType: string;
                 if (nodeErr.code === 'ECONNRESET' || nodeErr.code === 'EPIPE') {
                     errorMsg = `Browser pool socket ${path} closed (pool likely busy or restarting) - ${err.message}`;
+                    errorType = 'connection_reset';
                 } else if (nodeErr.code === 'ECONNREFUSED') {
                     errorMsg = `Browser pool ${path} unreachable (server may have crashed) - ${err.message}`;
+                    errorType = 'connection_refused';
                 } else if (nodeErr.code === 'ETIMEDOUT') {
                     errorMsg = `Browser pool ${path} timed out (slow browser response) - ${err.message}`;
+                    errorType = 'timeout';
                 } else {
                     errorMsg = `Browser pool ${path} error: ${err.message}`;
+                    errorType = 'unknown';
                 }
+                const error = new Error(errorMsg);
                 logger.error(`[BrowserClient] Request to http://127.0.0.1:${this.port}${path} failed:`, errorMsg);
-                reject(new Error(errorMsg));
+                errorTracker.trackError(error, {
+                    component: 'browser-manager',
+                    operation,
+                    errorType,
+                });
+                reject(error);
             });
             req.write(JSON.stringify(data));
             req.end();
@@ -819,6 +894,12 @@ export async function runBrowserTask<T>(taskOrUrl: string | BrowserTask, type: '
         });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: type,
+                taskType: type,
+                errorType: 'transient_socket_error',
+            });
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
@@ -838,6 +919,11 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
         });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: 'healthcheck',
+                errorType: 'transient_socket_error',
+            });
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
@@ -856,6 +942,12 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
         });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error)) {
+            errorTracker.trackError(error, {
+                component: 'browser-manager',
+                operation: 'search',
+                query,
+                errorType: 'transient_socket_error',
+            });
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
             logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
             await forceSchedulerRestart(true);
