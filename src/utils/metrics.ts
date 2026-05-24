@@ -9,6 +9,29 @@
 
 export type Labels = Record<string, string>;
 
+/**
+ * Metric histogram statistics interface
+ */
+export interface IMetricHistogram {
+  count: number;
+  min: number;
+  max: number;
+  avg: number;
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
+/**
+ * Metrics snapshot interface
+ */
+export interface IMetricsSnapshot {
+  counters: Record<string, number>;
+  gauges: Record<string, number>;
+  histograms: Record<string, IMetricHistogram>;
+}
+
 export class MetricsRegistry {
   private counters = new Map<string, number>();
   private gauges = new Map<string, number>();
@@ -79,8 +102,8 @@ export class MetricsRegistry {
   }
 
   /** Retrieve a snapshot of all metrics */
-  public getSnapshot(): Record<string, any> {
-    const snapshot: Record<string, any> = {
+  public getSnapshot(): IMetricsSnapshot {
+    const snapshot: IMetricsSnapshot = {
       counters: {},
       gauges: {},
       histograms: {}

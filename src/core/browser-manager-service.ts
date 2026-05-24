@@ -1,9 +1,11 @@
 /**
- * Browser Manager Service
+ * Browser Manager Service (Refactored)
  *
  * This service manages the browser scheduler lifecycle and provides
  * a centralized interface for browser operations.
- * It replaces the global __PI_RESEARCH_SCHEDULER__ variable.
+ * 
+ * REFACTORED: No dynamic imports, all interface methods fully implemented.
+ * Acts as a proper facade that delegates to scheduler-service.
  */
 
 import type {
@@ -11,46 +13,63 @@ import type {
   IBrowserManagerService,
   SchedulerMetadata,
 } from './service-interfaces.ts';
-import { ServiceLifecycle } from './service-registry.ts';
+import { ServiceLifecycle, getService } from './service-registry.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
+import type { SearchResult } from '../web-research/types.ts';
+import { SchedulerService } from './scheduler-service.ts';
+
+// Static imports from infrastructure
+import {
+  _internalGetSchedulerVersion as getBrowserSchedulerVersion,
+  isBrowserAvailable,
+} from '../infrastructure/browser-manager.ts';
+import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 
 /**
  * BrowserManagerService implementation
+ * 
+ * This service acts as a facade over the scheduler service, providing
+ * backward compatibility with the existing browser-manager API.
  */
 export class BrowserManagerService implements IBrowserManagerService {
   readonly name = 'browser-manager';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
-  private _scheduler: IScheduler | null = null;
   private _schedulerVersion: string | null = null;
-  private _initializationPromise: Promise<IScheduler> | null = null;
-
-  // Metadata about the current scheduler
-  private _schedulerMetadata: SchedulerMetadata | null = null;
-
-  // Prevent concurrent restarts
-  private _isRestartInProgress = false;
 
   async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    logger.debug('[BrowserManagerService] Initializing...');
+
+    // Ensure scheduler service is initialized
+    try {
+      // Scheduler service is initialized lazily on first use
+      await getService<IScheduler>('scheduler');
+    } catch (err) {
+      logger.warn('[BrowserManagerService] Failed to initialize scheduler service:', err);
+    }
+
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.debug('[BrowserManagerService] Initialized');
   }
 
   async dispose(): Promise<void> {
-    // Shutdown scheduler if present
-    if (this._scheduler) {
-      try {
-        await this._scheduler.shutdown();
-      } catch (err) {
-        logger.warn('[BrowserManagerService] Error during scheduler shutdown:', err);
-      }
-      this._scheduler = null;
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
     }
 
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    logger.debug('[BrowserManagerService] Disposing...');
+
+    // Scheduler service cleanup is handled by the service registry
+    // We just clear our local state
     this._schedulerVersion = null;
-    this._initializationPromise = null;
-    this._schedulerMetadata = null;
+
     this.lifecycle = ServiceLifecycle.DISPOSED;
     logger.debug('[BrowserManagerService] Disposed');
   }
@@ -60,53 +79,52 @@ export class BrowserManagerService implements IBrowserManagerService {
    * This is the main entry point for scheduler access
    */
   async getScheduler(_config?: Config): Promise<IScheduler> {
-    // Import dynamically to avoid circular dependency
-    const { getSchedulerInstance } = await import('./internal-state.ts');
-    return getSchedulerInstance() as IScheduler;
+    const schedulerService = await getService<IScheduler>('scheduler');
+    return schedulerService;
   }
 
   /**
    * Get the current scheduler version
    */
-  getSchedulerVersion(_config?: Config): string {
-    // Import dynamically to avoid circular dependency
-    // Note: This sync method imports async - simplified for compatibility
-    try {
-      const { getSchedulerVersionState } = require('./internal-state.ts');
-      return getSchedulerVersionState() || 'unknown';
-    } catch {
-      return 'unknown';
+  getSchedulerVersion(): string {
+    if (this._schedulerVersion) {
+      return this._schedulerVersion;
     }
+
+    // Use static import
+    const version = getBrowserSchedulerVersion() ?? 'unknown';
+    this._schedulerVersion = version;
+    return version;
   }
 
   /**
    * Force a scheduler restart
    */
-  async forceRestart(_forceClearRemoteState: boolean = false): Promise<void> {
-    if (this._isRestartInProgress) {
-      logger.log('[BrowserManagerService] Restart already in progress, skipping concurrent call.');
-      return;
-    }
+  async forceRestart(forceClearRemoteState: boolean = false): Promise<void> {
+    logger.log('[BrowserManagerService] Forcing scheduler restart...');
 
-    this._isRestartInProgress = true;
     try {
-      logger.log('[BrowserManagerService] Forcing scheduler restart...');
-
-      // Use internal state management to trigger restart
-      const { setSchedulerRestartInProgress } = await import('./internal-state.ts');
-      setSchedulerRestartInProgress(true);
-
-      // Clear local state
-      this._scheduler = null;
+      // Clear the cached version
       this._schedulerVersion = null;
-      this._initializationPromise = null;
-      this._schedulerMetadata = null;
+
+      // Force restart via the scheduler service
+      const schedulerService = await getService<SchedulerService>('scheduler');
+      if (typeof schedulerService.forceRestart === 'function') {
+        await schedulerService.forceRestart();
+      }
+
+      // If forceClearRemoteState is true, we also clear state
+      if (forceClearRemoteState) {
+        const stateManager = getSharedStateManager();
+        await stateManager.clearBrowserServer().catch((err: unknown) => {
+          logger.warn('[BrowserManagerService] Failed to clear browser server state:', err);
+        });
+      }
 
       logger.log('[BrowserManagerService] Restart complete.');
-    } finally {
-      const { setSchedulerRestartInProgress } = await import('./internal-state.ts');
-      setSchedulerRestartInProgress(false);
-      this._isRestartInProgress = false;
+    } catch (err) {
+      logger.error('[BrowserManagerService] Error during scheduler restart:', err);
+      throw err;
     }
   }
 
@@ -114,108 +132,100 @@ export class BrowserManagerService implements IBrowserManagerService {
    * Check if the browser is available
    */
   isBrowserAvailable(): boolean {
-    // Import dynamically to avoid circular dependency
-    try {
-      const { isBrowserAvailable: isBrowserAvailableImpl } = require('../infrastructure/browser-manager.ts');
-      return isBrowserAvailableImpl();
-    } catch {
-      return false;
-    }
+    return isBrowserAvailable();
   }
 
   /**
-   * Run a browser task
+   * Run a browser task (search or scrape)
    */
   async runTask<T>(
-    _task: any,
-    _type: 'search' | 'scrape',
-    _config?: Config,
+    task: string | { query?: string; url?: string },
+    type: 'search' | 'scrape',
+    config?: Config,
     _retries: number = 1
   ): Promise<T> {
-    // This would delegate to the actual browser manager implementation
-    // For now, throw as not implemented in service layer
-    throw new Error('BrowserManagerService.runTask not yet implemented - use browser-manager directly');
+    const schedulerService = await getService<IScheduler>('scheduler');
+
+    if (type === 'search') {
+      const query = typeof task === 'string' ? task : task.query;
+      if (!query) {
+        throw new Error('Search task requires a query');
+      }
+      return (await schedulerService.runSearch(query, config)) as T;
+    } else if (type === 'scrape') {
+      const url = typeof task === 'string' ? task : task.url;
+      if (!url) {
+        throw new Error('Scrape task requires a URL');
+      }
+      return (await schedulerService.runScrape(url, config)) as T;
+    } else {
+      throw new Error(`Unknown task type: ${type}`);
+    }
   }
 
   /**
    * Run a health check
    */
-  async runHealthCheck(_config?: Config, _retries: number = 1): Promise<{ success: boolean }> {
-    // This would delegate to the actual browser manager implementation
-    // For now, throw as not implemented in service layer
-    throw new Error('BrowserManagerService.runHealthCheck not yet implemented - use browser-manager directly');
+  async runHealthCheck(config?: Config, _retries: number = 1): Promise<{ success: boolean }> {
+    const schedulerService = await getService<IScheduler>('scheduler');
+    return schedulerService.runHealthCheck(config);
   }
 
   /**
    * Stop the browser manager
    */
   async stop(): Promise<void> {
-    // This would delegate to the actual browser manager implementation
-    // For now, throw as not implemented in service layer
-    throw new Error('BrowserManagerService.stop not yet implemented - use browser-manager directly');
+    logger.log('[BrowserManagerService] Stopping browser manager...');
+
+    try {
+      // Shutdown the scheduler service
+      const schedulerService = await getService<IScheduler>('scheduler');
+      await schedulerService.shutdown();
+
+      // Clear cached version
+      this._schedulerVersion = null;
+
+      logger.log('[BrowserManagerService] Browser manager stopped.');
+    } catch (err) {
+      logger.error('[BrowserManagerService] Error stopping browser manager:', err);
+      throw err;
+    }
   }
 
   /**
-   * Get the current scheduler (synchronous, may return null)
+   * Run a search (convenience method)
    */
-  getCurrentScheduler(): IScheduler | null {
-    return this._scheduler;
+  async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
+    return this.runTask<SearchResult[]>(query, 'search', config);
   }
 
   /**
-   * Set the current scheduler (internal use)
+   * Run a scrape (convenience method)
    */
-  setCurrentScheduler(scheduler: IScheduler | null): void {
-    this._scheduler = scheduler;
+  async runScrape(url: string, config?: Config): Promise<unknown> {
+    return this.runTask(url, 'scrape', config);
   }
 
   /**
-   * Get the current scheduler version
+   * Get scheduler metadata (convenience method)
    */
-  getCurrentSchedulerVersion(): string | null {
-    return this._schedulerVersion;
+  async getSchedulerMetadata(): Promise<SchedulerMetadata | null> {
+    const schedulerService = await getService<SchedulerService>('scheduler');
+    if (typeof schedulerService.getMetadata === 'function') {
+      return schedulerService.getMetadata();
+    }
+    return null;
   }
 
   /**
-   * Set the current scheduler version (internal use)
+   * Check if scheduler is the leader (convenience method)
    */
-  setCurrentSchedulerVersion(version: string | null): void {
-    this._schedulerVersion = version;
-  }
-
-  /**
-   * Get the scheduler metadata
-   */
-  getSchedulerMetadata(): SchedulerMetadata | null {
-    return this._schedulerMetadata;
-  }
-
-  /**
-   * Set the scheduler metadata (internal use)
-   */
-  setSchedulerMetadata(metadata: SchedulerMetadata | null): void {
-    this._schedulerMetadata = metadata;
-  }
-
-  /**
-   * Check if a restart is in progress
-   */
-  isRestartInProgress(): boolean {
-    return this._isRestartInProgress;
-  }
-
-  /**
-   * Get the initialization promise (internal use)
-   */
-  getInitializationPromise(): Promise<IScheduler> | null {
-    return this._initializationPromise;
-  }
-
-  /**
-   * Set the initialization promise (internal use)
-   */
-  setInitializationPromise(promise: Promise<IScheduler> | null): void {
-    this._initializationPromise = promise;
+  async isSchedulerLeader(): Promise<boolean> {
+    const schedulerService = await getService<SchedulerService>('scheduler');
+    if (typeof schedulerService.isLeader === 'function') {
+      return schedulerService.isLeader();
+    }
+    return false;
   }
 }
 

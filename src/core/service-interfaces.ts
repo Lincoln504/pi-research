@@ -186,6 +186,73 @@ export interface IBrowserManagerService extends IService {
 }
 
 // ============================================================================
+// Knowledge Store Service Interfaces
+// ============================================================================
+
+/**
+ * Embedder interface for text embedding operations
+ */
+export interface IEmbedder {
+  /** Get the current device being used */
+  getDevice(): string | null;
+  /** Get the original device preference */
+  getOriginalDevice(): string | null;
+  /** Check if the embedder is initialized */
+  isInitialized(): boolean;
+  /** Embed a single text string */
+  embed(text: string): Promise<Float32Array | number[]>;
+  /** Embed multiple text strings */
+  embedMany(texts: string[]): Promise<(Float32Array | number[])[]>;
+  /** Dispose the embedder */
+  dispose(): Promise<void>;
+}
+
+/**
+ * Knowledge store interface for storage operations
+ */
+export interface IKnowledgeStore {
+  /** Open the knowledge store */
+  open(): Promise<void>;
+  /** Close the knowledge store */
+  close(): Promise<void>;
+  /** Clear the knowledge store */
+  clear(): Promise<void>;
+  /** Rebuild full-text search index */
+  rebuildFtsIndex(): Promise<void>;
+}
+
+/**
+ * Writer queue interface for batching write operations
+ */
+export interface IWriterQueue {
+  /** Drain the queue, processing all pending writes */
+  drain(): Promise<void>;
+}
+
+/**
+ * Metrics snapshot interface
+ */
+export interface IMetricsSnapshot {
+  counters: Record<string, number>;
+  gauges: Record<string, number>;
+  histograms: Record<string, IMetricHistogram>;
+}
+
+/**
+ * Metric histogram statistics interface
+ */
+export interface IMetricHistogram {
+  count: number;
+  min: number;
+  max: number;
+  avg: number;
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
+// ============================================================================
 // Service Names (Constants)
 // ============================================================================
 
@@ -207,6 +274,21 @@ export const ServiceNames = {
    * Browser manager service
    */
   BROWSER_MANAGER: 'browser-manager',
+
+  /**
+   * State manager service
+   */
+  STATE_MANAGER: 'state-manager',
+
+  /**
+   * Knowledge store service
+   */
+  KNOWLEDGE_STORE: 'knowledge-store',
+
+  /**
+   * Metrics service
+   */
+  METRICS: 'metrics',
 } as const;
 
 /**
