@@ -5,7 +5,7 @@
  * Provides exclusive GPU access control with staleness detection.
  */
 
-import type { SingletonState } from './state-manager.ts';
+import type { SingletonState } from './types/state-types.ts';
 import { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';

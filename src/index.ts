@@ -11,6 +11,7 @@ import { clearAllSessionState } from './utils/session-state.ts';
 import { stopBrowserManager, getClientAgent } from './infrastructure/browser-manager.ts';
 import { resetTerminalState } from './utils/terminal-state.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
+import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 
 // Modular Orchestration Exports
 export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
@@ -51,6 +52,15 @@ export default async function (pi: ExtensionAPI) {
     logger.log('[pi-research] Core services registered');
   } catch (err) {
     logger.error('[pi-research] Failed to register core services:', err);
+    // Continue anyway - the extension should still work with fallback behavior
+  }
+
+  // Register infrastructure services (must be after core services are registered)
+  try {
+    registerInfrastructureServices();
+    logger.log('[pi-research] Infrastructure services registered');
+  } catch (err) {
+    logger.error('[pi-research] Failed to register infrastructure services:', err);
     // Continue anyway - the extension should still work with fallback behavior
   }
 

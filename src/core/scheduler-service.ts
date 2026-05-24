@@ -8,17 +8,17 @@
  * All state is managed within the singleton instance, accessed via getSchedulerService().
  */
 
-import type { IScheduler, SearchResult } from './service-interfaces.ts';
+import type { SearchResult } from './service-interfaces.ts';
+import type { IScheduler } from './scheduler-factory.ts';
+import type { ISchedulerFactory } from './scheduler-factory.ts';
 import { ServiceLifecycle } from './service-registry.ts';
+import { getService } from './service-registry.ts';
+import { ServiceNames } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
 import type { IService } from './service-registry.ts';
 
-// Import the actual scheduler implementation (static import - no dynamic imports)
-import {
-  _internalGetScheduler as getScheduler,
-  _internalGetSchedulerVersion as getSchedulerVersion,
-} from '../infrastructure/browser-manager.ts';
+
 
 // ============================================================================
 // Scheduler Instance Interface (minimal to avoid circular dependencies)
@@ -253,13 +253,17 @@ export class SchedulerService implements IService, IScheduler {
     // Create a new initialization lock
     const initPromise = (async () => {
       try {
-        const scheduler = await getScheduler(config);
+        // Get the scheduler factory from the service registry
+        // The factory is registered by infrastructure initialization
+        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY);
+        
+        const scheduler = await factory.getScheduler(config);
         
         // Store the scheduler instance
         this._scheduler = scheduler as unknown as ISchedulerInternal;
         
         // Update metadata
-        const schedulerVersion = getSchedulerVersion(config);
+        const schedulerVersion = factory.getSchedulerVersion(config);
         const schedulerId = this._scheduler.schedulerId || 'client';
         const isLeader = schedulerId !== 'client';
 

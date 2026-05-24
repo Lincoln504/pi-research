@@ -266,6 +266,11 @@ export const ServiceNames = {
   SCHEDULER: 'scheduler',
 
   /**
+   * Scheduler factory service
+   */
+  SCHEDULER_FACTORY: 'scheduler-factory',
+
+  /**
    * Health check cache service
    */
   HEALTH_CHECK_CACHE: 'health-check-cache',
