@@ -297,6 +297,21 @@ export const ServiceNames = {
 } as const;
 
 // ============================================================================
+// State Manager Service Interface
+// ============================================================================
+
+/**
+ * State manager service interface
+ * Provides state management functionality for the application
+ */
+export interface IStateManager extends IService {
+  /**
+   * Clear the browser server information from state
+   */
+  clearBrowserServer(): Promise<void>;
+}
+
+// ============================================================================
 // Planning Service Interface
 // ============================================================================
 

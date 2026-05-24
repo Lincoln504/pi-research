@@ -5,9 +5,9 @@
  * Provides clean interface for cross-process state management.
  */
 
-import type { IService } from './service-registry.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
+import type { IStateManager } from './service-interfaces.ts';
 import type {
   StateMetrics,
   LegacySessionInfo,
@@ -20,7 +20,7 @@ import { StateManager, getSharedStateManager as getSharedStateManagerImpl } from
 /**
  * State Manager Service Implementation
  */
-export class StateManagerService implements IService {
+export class StateManagerService implements IStateManager {
   readonly name = 'state-manager';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 

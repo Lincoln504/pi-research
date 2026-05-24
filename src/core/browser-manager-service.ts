@@ -12,6 +12,7 @@ import type {
   IScheduler,
   IBrowserManagerService,
   SchedulerMetadata,
+  IStateManager,
 } from './service-interfaces.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import { ServiceLifecycle, getService } from './service-registry.ts';
@@ -25,7 +26,6 @@ import {
   _internalGetSchedulerVersion as getBrowserSchedulerVersion,
   isBrowserAvailable,
 } from '../infrastructure/browser-manager.ts';
-import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 
 /**
  * BrowserManagerService implementation
@@ -116,8 +116,8 @@ export class BrowserManagerService implements IBrowserManagerService {
 
       // If forceClearRemoteState is true, we also clear state
       if (forceClearRemoteState) {
-        const stateManager = getSharedStateManager();
-        await stateManager.clearBrowserServer().catch((err: unknown) => {
+        const stateManagerService = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+        await stateManagerService.clearBrowserServer().catch((err: unknown) => {
           logger.warn('[BrowserManagerService] Failed to clear browser server state:', err);
         });
       }
