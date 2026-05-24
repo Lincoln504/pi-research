@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { QuickResearchOrchestrator } from '../../src/orchestration/quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-orchestrator.ts';
 import { getConfig } from '../../src/config.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -38,6 +38,8 @@ interface ResearchWorkflowResult {
 describe('End-to-End Research Workflows', () => {
   let testContext: TestContext;
   let testDbDir: string;
+  const embedder = makeSyntheticEmbedder();
+  const modelName = 'Xenova/all-MiniLM-L6-v2';
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
@@ -113,7 +115,7 @@ describe('End-to-End Research Workflows', () => {
       const researchId = `research-${randomUUID()}`;
 
       // Create knowledge store
-      const knowledgeStore = new KnowledgeStore(testDbDir);
+      const knowledgeStore = new KnowledgeStore({ dbDir: testDbDir, embedder, modelName });
       await knowledgeStore.open();
 
       const orchestrator = new QuickResearchOrchestrator({
@@ -355,7 +357,7 @@ describe('End-to-End Research Workflows', () => {
       const sessionId = `session-${randomUUID()}`;
       const researchId = `research-${randomUUID()}`;
 
-      const knowledgeStore = new KnowledgeStore(testDbDir);
+      const knowledgeStore = new KnowledgeStore({ dbDir: testDbDir, embedder, modelName });
       await knowledgeStore.open();
 
       const orchestrator = new QuickResearchOrchestrator({
@@ -395,7 +397,7 @@ describe('End-to-End Research Workflows', () => {
       const query1 = 'First query about caching';
       const query2 = 'Follow-up query about caching mechanisms';
 
-      const knowledgeStore = new KnowledgeStore(testDbDir);
+      const knowledgeStore = new KnowledgeStore({ dbDir: testDbDir, embedder, modelName });
       await knowledgeStore.open();
 
       // First research

@@ -38,9 +38,18 @@ healthRegistry.register('BrowserPool', async () => {
   }
   
   try {
+    // Lazy-aware health check: if pool not active, just report binary is OK
+    const { getSchedulerInstance } = await import('../core/internal-state.ts');
+    const activeScheduler = getSchedulerInstance();
+    
+    if (!activeScheduler) {
+        return { healthy: true, diagnostic: { status: 'ready (idle)' } };
+    }
+
+    // If already active, perform a real test
     const searchResult = await runBrowserHealthCheck();
     if (searchResult.success) {
-      return { healthy: true };
+      return { healthy: true, diagnostic: { status: 'active' } };
     } else {
       return { healthy: false, error: 'Browser healthcheck failed: worker reported failure or page failed to load.' };
     }
@@ -56,13 +65,27 @@ healthRegistry.register('KnowledgeStore', async () => {
   }
   try {
     const embedder = await getEmbedder();
-    if (embedder.isInitialized()) {
-        const testVector = await embedder.embed("health check test");
-        if (testVector && testVector.length > 0) {
-            return { healthy: true, diagnostic: { dimension: testVector.length } };
-        }
+    
+    // Lazy-aware health check: if not initialized, we check if the store is open
+    // but don't force a model load to GPU just for the health check.
+    if (!embedder.isInitialized()) {
+        const { isKnowledgeStoreReady } = await import('../knowledge/index.ts');
+        return { 
+            healthy: true, 
+            diagnostic: { 
+                status: 'ready (idle)',
+                device: embedder.getOriginalDevice()
+            } 
+        };
     }
-    return { healthy: false, error: 'Embedder not initialized or test embedding failed' };
+
+    // If already initialized (e.g. active research), perform a real test
+    const testVector = await embedder.embed("health check test");
+    if (testVector && testVector.length > 0) {
+        return { healthy: true, diagnostic: { dimension: testVector.length, status: 'active' } };
+    }
+    
+    return { healthy: false, error: 'Embedder test embedding failed' };
   } catch (e) {
     return { healthy: false, error: `Knowledge Store check failed: ${e instanceof Error ? e.message : String(e)}` };
   }

@@ -191,19 +191,19 @@ describe('BrowserManager', () => {
           url: 'http://localhost:1234'
       });
 
-      // Wait 20 minutes
-      await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+      // Wait 3 minutes (less than 5)
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
       expect(shutdownSpy).not.toHaveBeenCalled();
       
       // Perform activity
       await runBrowserTask('q2', 'search');
       
-      // Wait another 20 minutes (total 40 minutes, but only 20 since last activity)
-      await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+      // Wait another 3 minutes (total 6 minutes, but only 3 since last activity)
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
       expect(shutdownSpy).not.toHaveBeenCalled();
       
-      // Wait 15 more minutes -> should shut down
-      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+      // Wait 3 more minutes -> should shut down (total 6 mins since q2)
+      await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
       expect(shutdownSpy).toHaveBeenCalled();
     });
   });

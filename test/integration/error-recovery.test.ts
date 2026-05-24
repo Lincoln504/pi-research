@@ -13,7 +13,7 @@ import {
 } from '../../src/infrastructure/browser-manager.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { getConfig } from '../../src/config.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
 import { CircuitBreaker } from '../../src/utils/circuit-breaker.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
@@ -39,6 +39,8 @@ interface RecoveryTestResult {
 describe('Error Recovery and Resilience', () => {
   let testContext: TestContext;
   let testDbDir: string;
+  const embedder = makeSyntheticEmbedder();
+  const modelName = 'Xenova/all-MiniLM-L6-v2';
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
@@ -180,13 +182,13 @@ describe('Error Recovery and Resilience', () => {
   describe('Knowledge Store Recovery', () => {
     it('should recover from corrupted database file', async () => {
       const dbPath = path.join(testDbDir, `corrupt-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
 
       // Initialize store
       await knowledgeStore.open();
       await knowledgeStore.addDocuments([
-        { content: 'Test document 1', url: 'https://test.com/1' },
-        { content: 'Test document 2', url: 'https://test.com/2' },
+        { text: 'Test document 1', url: 'https://test.com/1', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Test document 2', url: 'https://test.com/2', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
       ]);
 
       const countBefore = await knowledgeStore.count();
@@ -209,7 +211,7 @@ describe('Error Recovery and Resilience', () => {
       }
 
       // Should recover or create new store
-      const recoveredStore = new KnowledgeStore(dbPath);
+      const recoveredStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
       try {
         await recoveredStore.open();
 
@@ -221,7 +223,7 @@ describe('Error Recovery and Resilience', () => {
       } catch (error) {
         // If recovery fails, we should be able to create a new store
         const newStorePath = path.join(testDbDir, `recovered-${randomUUID()}`);
-        const newStore = new KnowledgeStore(newStorePath);
+        const newStore = new KnowledgeStore({ dbDir: newStorePath, embedder, modelName });
         await newStore.open();
 
         const countInNew = await newStore.count();
@@ -233,12 +235,12 @@ describe('Error Recovery and Resilience', () => {
 
     it('should handle concurrent database operations safely', async () => {
       const dbPath = path.join(testDbDir, `concurrent-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Add initial documents
       await knowledgeStore.addDocuments([
-        { content: 'Initial document', url: 'https://test.com/initial' },
+        { text: 'Initial document', url: 'https://test.com/initial', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
       ]);
 
       // Concurrent operations
@@ -246,11 +248,11 @@ describe('Error Recovery and Resilience', () => {
         knowledgeStore.search('test'),
         knowledgeStore.count(),
         knowledgeStore.addDocuments([
-          { content: 'Concurrent doc 1', url: 'https://test.com/c1' },
+          { text: 'Concurrent doc 1', url: 'https://test.com/c1', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
         ]),
         knowledgeStore.search('initial'),
         knowledgeStore.addDocuments([
-          { content: 'Concurrent doc 2', url: 'https://test.com/c2' },
+          { text: 'Concurrent doc 2', url: 'https://test.com/c2', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
         ]),
       ];
 
@@ -268,7 +270,7 @@ describe('Error Recovery and Resilience', () => {
 
     it('should recover from write failures gracefully', async () => {
       const dbPath = path.join(testDbDir, `write-fail-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Simulate write failures by making the directory read-only
@@ -280,7 +282,7 @@ describe('Error Recovery and Resilience', () => {
         let caughtError = false;
         try {
           await knowledgeStore.addDocuments([
-            { content: 'Should fail', url: 'https://test.com/fail' },
+            { text: 'Should fail', url: 'https://test.com/fail', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
           ]);
         } catch (error) {
           caughtError = true;

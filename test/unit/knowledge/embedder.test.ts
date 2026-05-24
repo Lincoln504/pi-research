@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Embedder } from '../../../src/knowledge/embedder.ts';
+import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
 const { mockPipelineFn, mockEnv, mockAccess } = vi.hoisted(() => {
@@ -45,6 +45,7 @@ describe('Embedder', () => {
   let embedder: Embedder;
 
   beforeEach(() => {
+    resetWebGpuFallbackFlag();
     embedder = new Embedder({
       model: 'test-model',
     });
@@ -75,8 +76,10 @@ describe('Embedder', () => {
     expect(results[0].length).toBe(384);
   });
 
-  it('should throw if not initialized', async () => {
-    await expect(embedder.embed('hello')).rejects.toThrow('Embedder not initialized');
+  it('should initialize lazily when embed() is called', async () => {
+    const result = await embedder.embed('hello');
+    expect(result).toBeInstanceOf(Float32Array);
+    expect(result.length).toBe(384);
   });
 
   it('should return dimension size', async () => {
@@ -84,8 +87,8 @@ describe('Embedder', () => {
     expect(embedder.getDimension()).toBe(384);
   });
 
-  it('should throw from getDimension before initialization', () => {
-    expect(() => embedder.getDimension()).toThrow('Embedder not initialized');
+  it('should throw from getDimension before initialization if dimension unknown', () => {
+    expect(() => embedder.getDimension()).toThrow('dimension unknown');
   });
 
   it('should default to mean pooling and no prefix', async () => {
@@ -385,6 +388,7 @@ describe('GPU lock behavior', () => {
   });
 
   beforeEach(() => {
+    resetWebGpuFallbackFlag();
     vi.clearAllMocks();
     mockAccess.mockResolvedValue(undefined);
   });
@@ -562,25 +566,27 @@ describe('Embedder disposal', () => {
     expect(embedder.isInitialized()).toBe(false);
   });
 
-  it('should throw when calling embed after dispose', async () => {
+  it('should re-initialize when calling embed after dispose', async () => {
     await embedder.initialize();
     await embedder.dispose();
 
-    await expect(embedder.embed('test')).rejects.toThrow('Embedder not initialized');
+    const result = await embedder.embed('test');
+    expect(result).toBeInstanceOf(Float32Array);
   });
 
-  it('should throw when calling embedMany after dispose', async () => {
+  it('should re-initialize when calling embedMany after dispose', async () => {
     await embedder.initialize();
     await embedder.dispose();
 
-    await expect(embedder.embedMany(['test'])).rejects.toThrow('Embedder not initialized');
+    const results = await embedder.embedMany(['test']);
+    expect(results).toHaveLength(1);
   });
 
-  it('should throw when calling getDimension after dispose', async () => {
+  it('should still return dimension size after dispose if previously initialized', async () => {
     await embedder.initialize();
     await embedder.dispose();
 
-    expect(() => embedder.getDimension()).toThrow('Embedder not initialized');
+    expect(embedder.getDimension()).toBe(384);
   });
 
   it('should release GPU lock when disposing with stateManager', async () => {

@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runHealthCheck, clearHealthCheckCache } from '../../../src/healthcheck/index.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../../../src/infrastructure/browser-manager.ts';
+import { getSchedulerInstance } from '../../../src/core/internal-state.ts';
 
 // Mock dependencies
 vi.mock('../../../src/config.ts', () => ({
@@ -23,10 +24,16 @@ vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
   runBrowserHealthCheck: vi.fn(),
 }));
 
+vi.mock('../../../src/core/internal-state.ts', () => ({
+  getSchedulerInstance: vi.fn(),
+}));
+
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearHealthCheckCache();
+    // Default to active scheduler to trigger full checks in existing tests
+    vi.mocked(getSchedulerInstance).mockReturnValue({} as any);
   });
 
   it('should pass health check when browser pool reports success', async () => {

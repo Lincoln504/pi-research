@@ -225,10 +225,11 @@ class BrowserTaskScheduler implements IScheduler {
                 this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
             }
         }, 30000); // Check leadership every 30 seconds (reduced from 60s for faster failover)
+        if (this.leadershipTimer.unref) this.leadershipTimer.unref();
     }
 
     private idleTimer: any = null;
-    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+    private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (reduced from 30m for efficiency)
 
     private resetIdleTimer() {
         if (this.idleTimer) clearTimeout(this.idleTimer);
@@ -236,6 +237,7 @@ class BrowserTaskScheduler implements IScheduler {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
             this.shutdown();
         }, this.IDLE_TIMEOUT_MS);
+        if (this.idleTimer.unref) this.idleTimer.unref();
     }
 
     public resetIdleTimerOnActivity(): void {
@@ -708,7 +710,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
-                throw new Error('Initialization superseded');
+                throw new Error('Initialization superseded', { cause: error });
             }
             return scheduler;
         }
@@ -738,7 +740,7 @@ async function getScheduler(config?: Config): Promise<IScheduler> {
                 cachedSchedulerVersion = currentVersion;
             } else {
                 await scheduler.shutdown().catch(() => {});
-                throw new Error('Initialization superseded');
+                throw new Error('Initialization superseded', { cause: error });
             }
             return scheduler;
         }

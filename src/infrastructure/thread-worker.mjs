@@ -39,8 +39,8 @@ if (process.ppid) {
             // If error is thrown, the parent process is likely dead or unreachable
             logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
             // FIX: Await cleanup to prevent browser/context leaks
-            if (contextInstance) await contextInstance.close().catch(() => {});
-            if (browserInstance) await browserInstance.close().catch(() => {});
+            if (context) await context.close().catch(() => {});
+            if (browser) await browser.close().catch(() => {});
             // Clear the orphan check timer to prevent it from keeping the event loop alive
             if (orphanCheckTimer) {
                 clearInterval(orphanCheckTimer);

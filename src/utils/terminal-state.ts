@@ -217,7 +217,11 @@ export async function drainTerminalInput(
     if (!originalRaw && process.stdin.setRawMode) {
       process.stdin.setRawMode(originalRaw);
     }
-    process.stdin.pause();
+    // Only pause if we're not in a TTY or if it was explicitly paused before.
+    // In a persistent TUI like pi, we should generally leave stdin resumed.
+    if (!process.stdin.isTTY) {
+        process.stdin.pause();
+    }
   }
 }
 

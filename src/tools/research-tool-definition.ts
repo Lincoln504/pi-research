@@ -121,7 +121,7 @@ export function createResearchTool(): ToolDefinition {
         let healthMonitorInstance: ReturnType<typeof createHealthMonitor> | null = null;
 
         try {
-          return await runLogger.runCapturingStderr(async () => {
+          const researchRunResult = await runLogger.runCapturingStderr(async () => {
             validateConfig();
 
             // When no explicit model parameter is given, use ctx.model directly.
@@ -227,9 +227,11 @@ export function createResearchTool(): ToolDefinition {
             const exportPath = await exportResearchReport(sanitizedQuery, resultWithErrorSummary, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(resultWithErrorSummary, exportPath, panelState.totalCost) : resultWithErrorSummary;
 
-            await cleanup?.();
-            return { content: [{ type: 'text', text: finalResult }], details: { totalTokens: panelState.totalTokens } };
+            return { result: finalResult, tokens: panelState.totalTokens };
           });
+
+          await cleanup?.();
+          return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens } };
         } catch (error) {
           if (aborted || internalAbort.signal.aborted) {
             await cleanup?.();

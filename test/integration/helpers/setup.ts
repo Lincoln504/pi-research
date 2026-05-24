@@ -6,6 +6,8 @@
  */
 
 import { isBrowserAvailable, stopBrowserManager } from '../../../src/infrastructure/browser-manager.ts';
+import { type Embedder } from '../../../src/knowledge/embedder.ts';
+import { createHash } from 'node:crypto';
 
 async function importLogger() {
   try {
@@ -80,4 +82,25 @@ export function skipIfNotInitialized(context: TestContext, testFn: () => void | 
     }
     await testFn();
   };
+}
+
+/**
+ * Creates a synthetic embedder for testing that doesn't require model downloads.
+ */
+export function makeSyntheticEmbedder(dim = 384): Embedder {
+  function textToVector(text: string): Float32Array {
+    const v = new Float32Array(dim);
+    const h = createHash('sha256').update(text || '').digest();
+    for (let i = 0; i < dim; i++) {
+      v[i] = (h[i % h.length]! / 255) * 2 - 1;
+    }
+    return v;
+  }
+  return {
+    isInitialized: () => true,
+    getDimension: () => dim,
+    initialize: async () => {},
+    embed: async (text: string) => textToVector(text),
+    embedMany: async (texts: string[]) => texts.map(t => textToVector(t)),
+  } as unknown as Embedder;
 }

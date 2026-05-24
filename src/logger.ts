@@ -440,7 +440,14 @@ export class Logger implements ILogger {
             message.includes('\x1b[2J') ||  // Clear screen
             message.includes('\x1b[J') ||   // Clear to end
             message.includes('\x1b[K') ||   // Clear line
-            message.includes('\x1b[?25') || // Cursor visibility
+            message.includes('\x1b[?25') || // Cursor visibility (h/l)
+            message.includes('\x1b[?1000') || // Mouse tracking
+            message.includes('\x1b[?1002') ||
+            message.includes('\x1b[?1003') ||
+            message.includes('\x1b[?1006') ||
+            message.includes('\x1b[?2004') || // Bracketed paste
+            message.includes('\x1b[<u') ||     // Kitty protocol
+            message.includes('\x1b[>4;0m') ||  // xterm modifyOtherKeys
             /\x1b\[\d+;\d+H/.test(message) || // Move to (row, col)
             /\x1b\[\d+[ABCD]/.test(message);   // Relative move
         /* eslint-enable no-control-regex */

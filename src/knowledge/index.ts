@@ -1,4 +1,4 @@
-import { Embedder } from './embedder.ts';
+import { Embedder, resetWebGpuFallbackFlag } from './embedder.ts';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
 import { Chunker } from './chunker.ts';
@@ -45,6 +45,9 @@ interface ModelConfig {
   // Prefix prepended to document embeddings (embedMany). For asymmetric models like E5
   // that require "passage: " on the document side. Omit for symmetric models.
   documentPrefix?: string;
+  // Whether to use KV cache (past_key_values). Disable for embeddings to avoid zero-sized 
+  // buffers that crash WebGPU validation on decoder models.
+  useCache?: boolean;
   // true = supports 100+ languages; false = English-only. Required so new entries are explicit.
   multilingual: boolean;
 }
@@ -101,6 +104,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     chunkSize: 1600,
     overlapPct: 0.15,
     charsPerToken: 3.5,
+    useCache: false,
     multilingual: true,
   },
   // Qwen3-Embedding-0.6B: decoder model (last_token pooling), asymmetric instruction prefix.
@@ -115,6 +119,7 @@ const MODEL_CONFIG: Record<string, ModelConfig> = {
     maxTokens: 512,
     batchSize: 2,
     charsPerToken: 2.5,
+    useCache: false,
     multilingual: true,
   },
   // ── English-only ─────────────────────────────────────────────────────────────
@@ -163,10 +168,10 @@ const DEFAULT_CHUNK_SIZE = 1200;
 const DEFAULT_OVERLAP_PCT = 0.15;
 
 /** Returns embedder configuration for a model. Pure — safe to call any time. */
-export function getModelEmbedderConfig(modelId: string): { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string; documentPrefix?: string; maxTokens?: number; batchSize?: number; charsPerToken?: number } {
+export function getModelEmbedderConfig(modelId: string): { pooling: 'mean' | 'cls' | 'last_token'; queryPrefix?: string; documentPrefix?: string; maxTokens?: number; batchSize?: number; charsPerToken?: number; useCache?: boolean } {
   const cfg = MODEL_CONFIG[modelId];
   return cfg
-    ? { pooling: cfg.pooling, queryPrefix: cfg.queryPrefix, documentPrefix: cfg.documentPrefix, maxTokens: cfg.maxTokens, batchSize: cfg.batchSize, charsPerToken: cfg.charsPerToken }
+    ? { pooling: cfg.pooling, queryPrefix: cfg.queryPrefix, documentPrefix: cfg.documentPrefix, maxTokens: cfg.maxTokens, batchSize: cfg.batchSize, charsPerToken: cfg.charsPerToken, useCache: cfg.useCache }
     : { pooling: 'mean' };
 }
 
@@ -227,7 +232,10 @@ export async function initKnowledgeStore(): Promise<void> {
           });
           inflightEmbedder = embedder;
         }
-        const embedInit = embedder.initialize();
+
+        // DEFERRED: We no longer force embedder initialization here.
+        // The KnowledgeStore will open the DB, and the Embedder will
+        // initialize lazily on first use (e.g. during health check or research).
 
         // Get migration strategy from environment or use default
         const migrationStrategy = getMigrationStrategy();
@@ -247,11 +255,34 @@ export async function initKnowledgeStore(): Promise<void> {
         const chunker = new Chunker({ targetSize: chunkCfg.chunkSize, overlap: chunkOverlap });
         writerQueue = new WriterQueue({ store: store, chunker });
 
-        await embedInit;
-        await store.open();
+        // OPEN DB ONLY (This no longer requires the model to be loaded if table exists)
+        try {
+          await store.open();
+        } catch (openErr: any) {
+          // If dimension is unknown (new DB), we must initialize the embedder
+          if (openErr?.message?.includes('dimension unknown')) {
+            logger.info('[knowledge] Database missing or dimension unknown, forcing embedder initialization...');
+            const embedInit = embedder.initialize();
+            await embedInit;
+            await store.open();
+          } else {
+            throw openErr;
+          }
+        }
 
+        // Clear the in-flight reference as initialization is now complete
         inflightEmbedder = null;
-        logger.info('[knowledge] Knowledge Store ready.');
+
+        // Log device intention
+        const originalDevice = embedder.getOriginalDevice();
+        const actualDevice = embedder.isInitialized() ? embedder.getDevice() : '(deferred)';
+        
+        if (actualDevice !== '(deferred)') {
+           logger.info(`[knowledge] Knowledge Store ready. Device: ${actualDevice} (Model: ${config.EMBEDDING_MODEL})`);
+        } else {
+           logger.info(`[knowledge] Knowledge Store ready. Device: ${originalDevice} (deferred) (Model: ${config.EMBEDDING_MODEL})`);
+        }
+        
         logger.info('[knowledge] Health status: KnowledgeStore component initialized successfully.');
         return;
       } catch (err) {

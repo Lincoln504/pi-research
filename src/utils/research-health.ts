@@ -107,6 +107,7 @@ export function createHealthMonitor(): HealthMonitor {
         logger.debug('[research] Periodic health check failed (non-blocking):', error);
       }
     }, 30000); // Every 30 seconds
+    if (timer.unref) timer.unref();
   };
 
   const stop = () => {

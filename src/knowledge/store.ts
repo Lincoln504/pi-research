@@ -55,14 +55,30 @@ export class KnowledgeStore {
       if (!fs.existsSync(this.options.dbDir)) {
         fs.mkdirSync(this.options.dbDir, { recursive: true });
       }
+this.db = await lancedb.connect(this.options.dbDir);
 
-      this.db = await lancedb.connect(this.options.dbDir);
+const tableNames = await this.db.tableNames();
+if (tableNames.includes(this.tableName)) {
+  this.table = await this.db.openTable(this.tableName);
 
-      const tableNames = await this.db.tableNames();
-      if (tableNames.includes(this.tableName)) {
-        this.table = await this.db.openTable(this.tableName);
+  // Extract dimension from existing schema if possible
+  try {
+    const schema = await this.table.schema();
+    const vectorField = schema.fields.find(f => f.name === 'vector');
+    if (vectorField && vectorField.type instanceof FixedSizeList) {
+      const dim = vectorField.type.listSize;
+      // Inject dimension into embedder if it doesn't have it yet
+      // This allows the embedder to report its dimension without loading the model
+      if ((this.options.embedder as any).dimension === null) {
+        (this.options.embedder as any).dimension = dim;
+        logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
+      }
+    }
+  } catch (schemaErr) {
+    logger.warn('[store] Failed to extract dimension from schema:', schemaErr);
+  }
 
-        // Check metadata for model mismatch
+  // Check metadata for model mismatch
         const schema = await this.table.schema();
         let storedModel = schema.metadata.get('embedding_model');
 

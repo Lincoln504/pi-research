@@ -12,7 +12,7 @@ import {
 } from '../../src/infrastructure/browser-manager.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { getConfig } from '../../src/config.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -47,6 +47,8 @@ interface ConcurrencyMetrics {
 describe('Concurrent Operations', () => {
   let testContext: TestContext;
   let testDbDir: string;
+  const embedder = makeSyntheticEmbedder();
+  const modelName = 'Xenova/all-MiniLM-L6-v2';
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
@@ -181,18 +183,18 @@ describe('Concurrent Operations', () => {
   describe('Concurrent Research Session Isolation', () => {
     it('should maintain isolation between concurrent knowledge store operations', async () => {
       const dbPath = path.join(testDbDir, `isolation-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Create sessions with different documents
       const session1Docs = [
-        { content: 'Session 1 document A', url: 'https://session1.com/a' },
-        { content: 'Session 1 document B', url: 'https://session1.com/b' },
+        { text: 'Session 1 document A', url: 'https://session1.com/a', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Session 1 document B', url: 'https://session1.com/b', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
       ];
 
       const session2Docs = [
-        { content: 'Session 2 document X', url: 'https://session2.com/x' },
-        { content: 'Session 2 document Y', url: 'https://session2.com/y' },
+        { text: 'Session 2 document X', url: 'https://session2.com/x', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Session 2 document Y', url: 'https://session2.com/y', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
       ];
 
       // Add documents concurrently
@@ -218,16 +220,16 @@ describe('Concurrent Operations', () => {
 
     it('should handle concurrent searches without interference', async () => {
       const dbPath = path.join(testDbDir, `search-isolation-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
 
       await knowledgeStore.open();
 
       // Add diverse documents
       await knowledgeStore.addDocuments([
-        { content: 'TypeScript is a superset of JavaScript', url: 'https://ts.com' },
-        { content: 'Python is a popular programming language', url: 'https://py.com' },
-        { content: 'Rust is a systems programming language', url: 'https://rust.com' },
-        { content: 'Go is a language developed at Google', url: 'https://go.com' },
+        { text: 'TypeScript is a superset of JavaScript', url: 'https://ts.com', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Python is a popular programming language', url: 'https://py.com', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Rust is a systems programming language', url: 'https://rust.com', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+        { text: 'Go is a language developed at Google', url: 'https://go.com', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
       ]);
 
       // Perform concurrent searches
@@ -257,7 +259,7 @@ describe('Concurrent Operations', () => {
 
     it('should handle concurrent document additions and deletions', async () => {
       const dbPath = path.join(testDbDir, `concurrent-crud-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore(dbPath);
+      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
 
       await knowledgeStore.open();
 
@@ -265,8 +267,10 @@ describe('Concurrent Operations', () => {
       const initialDocs = Array.from(
         { length: 10 },
         (_, i) => ({
-          content: `Document ${i}`,
+          text: `Document ${i}`,
           url: `https://test.com/doc${i}`,
+          metadata: { ingestionType: 'synthesis-description' },
+          timestamp: Date.now(),
         })
       );
 
@@ -275,13 +279,13 @@ describe('Concurrent Operations', () => {
       // Concurrent operations: add, search, count
       const operations = [
         knowledgeStore.addDocuments([
-          { content: 'New document A', url: 'https://test.com/new-a' },
-          { content: 'New document B', url: 'https://test.com/new-b' },
+          { text: 'New document A', url: 'https://test.com/new-a', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
+          { text: 'New document B', url: 'https://test.com/new-b', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
         ]),
         knowledgeStore.search('Document'),
         knowledgeStore.count(),
         knowledgeStore.addDocuments([
-          { content: 'New document C', url: 'https://test.com/new-c' },
+          { text: 'New document C', url: 'https://test.com/new-c', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
         ]),
         knowledgeStore.search('New'),
       ];
