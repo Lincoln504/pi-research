@@ -51,15 +51,12 @@ export class QuickResearchOrchestrator {
     metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0' });
 
     // Pre-flight health check to ensure browser pool is operational
-    if (!(await isHealthCheckSuccessful())) {
-      logger.warn('[QuickOrchestrator] Pre-flight health check failed, running full check...');
-      const health = await runHealthCheck();
-      if (!health.success) {
-        const error = health.error || 'Unknown health check failure';
-        logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
-        metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_failed' });
-        throw new Error(`Research cannot start: ${error}`);
-      }
+    const health = await runHealthCheck();
+    if (!health.success) {
+      const error = health.error || 'Unknown health check failure';
+      logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
+      metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_failed' });
+      throw new Error(`Research cannot start: ${error}`);
     }
 
     // Knowledge Store Context Injection
@@ -102,6 +99,7 @@ export class QuickResearchOrchestrator {
 
     logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
+    let lastSeenSearchCount = 0;
     const session = await createResearcherSession({
       cwd: ctx.cwd,
       ctxModel: model,
@@ -123,6 +121,7 @@ export class QuickResearchOrchestrator {
       }),
       updateGlobalLinks: (links) => registerScrapedLinks(this.options.researchId, links),
       onSearchProgress: (links) => {
+        lastSeenSearchCount = links;
         observer?.onSearchProgress?.(links);
       },
     });
@@ -152,7 +151,7 @@ export class QuickResearchOrchestrator {
         } else if (event.type === 'tool_execution_end') {
             observer?.onResearcherProgress?.('quick', `done:${event.toolName}`);
             if (event.toolName === 'search') {
-                observer?.onSearchComplete?.(0); // Count not easily available here
+                observer?.onSearchComplete?.(lastSeenSearchCount);
             }
         }
     });

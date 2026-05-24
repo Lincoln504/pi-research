@@ -5,7 +5,7 @@ import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { shutdownKnowledgeStore } from './knowledge/index.ts';
-import { healthRegistry, clearHealthCheckCache } from './healthcheck/index.ts';
+import { healthRegistry } from './healthcheck/index.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
@@ -122,8 +122,6 @@ export default function (pi: ExtensionAPI) {
   // 3. clearAllSessionState (runs third - fast)
   // 4. resetTerminalState (runs first - fast, prevents ghost character leaks on reload)
   shutdownManager.register(async () => {
-    // Clear health check cache before shutdown to ensure clean state on next startup
-    clearHealthCheckCache();
     await stopBrowserManager();
   });
 

@@ -15,8 +15,9 @@ vi.mock('../../src/logger.ts', () => ({
 vi.mock('../../src/healthcheck/index.ts', () => ({
   healthRegistry: {
     runAll: vi.fn().mockResolvedValue({ success: true, components: [] }),
+    isCritical: vi.fn().mockReturnValue(true),
   },
-  clearHealthCheckCache: vi.fn(),
+  runHealthCheck: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 vi.mock('../../src/utils/error-tracker.ts', () => ({
@@ -56,10 +57,9 @@ describe('research-config command routing', () => {
     expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('cleared'), 'info');
   });
 
-  it('routes "health history" command correctly', async () => {
-    // This calls getHealthSummary which we might need to mock if it's not handled
+  it('routes "health history" command to informational message', async () => {
     await handleResearchConfigCommand('health history', mockCtx, mockPi as any);
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Health history'), 'info');
+    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('no longer supported'), 'info');
   });
 
   it('routes unknown section to error notification', async () => {

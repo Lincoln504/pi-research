@@ -1,6 +1,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { runHealthCheck, clearHealthCheckCache } from '../../../src/healthcheck/index.ts';
+import { runHealthCheck } from '../../../src/healthcheck/index.ts';
 import { isBrowserAvailable, runBrowserHealthCheck } from '../../../src/infrastructure/browser-manager.ts';
 import { getSchedulerInstance } from '../../../src/core/internal-state.ts';
 
@@ -31,7 +31,6 @@ vi.mock('../../../src/core/internal-state.ts', () => ({
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearHealthCheckCache();
     // Default to active scheduler to trigger full checks in existing tests
     vi.mocked(getSchedulerInstance).mockReturnValue({} as any);
   });

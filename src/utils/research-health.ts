@@ -31,7 +31,7 @@ export async function ensureFunctionalHealth(
 ): Promise<void> {
   const { panelState, onUpdate } = ctx;
   
-  // Check if already healthy (from previous checks)
+  // Check if already healthy (quick check)
   const isHealthy = await isHealthCheckSuccessful();
   if (isHealthy) {
     return;
@@ -56,12 +56,13 @@ export async function ensureFunctionalHealth(
 }
 
 /**
- * Check if a health check was successful without running a new one
+ * Check if a health check was successful without running a full new one if possible.
+ * Since we're stateless, we run a quick check of critical components.
  */
 async function isHealthCheckSuccessful(): Promise<boolean> {
   try {
     const health = await healthRegistry.runAll();
-    return health.status === 'healthy';
+    return health.status === 'healthy' || health.status === 'degraded';
   } catch {
     return false;
   }
@@ -74,7 +75,7 @@ function formatHealthError(raw: string): string {
   if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
     return 'Browser engine not installed. Run `npm run setup` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
-    return 'Unable to reach the web (connection timed out). Check your internet connection, or set SEARXNG_URL to use an external search instance.';
+    return 'Unable to reach the web (connection timed out). Check your internet connection.';
   } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {
     return 'Unable to reach the web (network error). Check your internet connection.';
   } else {

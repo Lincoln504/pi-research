@@ -2,6 +2,7 @@
  * Health Check Module
  *
  * Validates system capabilities using the central health registry.
+ * This module is stateless and does not cache results.
  */
 
 import { logger } from '../logger.ts';
@@ -11,18 +12,12 @@ import { isBrowserAvailable, runBrowserHealthCheck } from '../infrastructure/bro
 import { getSharedStateManager } from '../infrastructure/state-manager.ts';
 import { getEmbedder } from '../knowledge/index.ts';
 import { healthRegistry } from './registry.ts';
-export { healthRegistry } from './registry.ts';
-import { recordHealthCheck, getHealthSummary } from './persistence.ts';
-import {
-  getHealthCheckPending,
-  setHealthCheckPending,
-  getHealthCheckFailureCount,
-  incrementHealthCheckFailureCount,
-  resetHealthCheckFailureCount,
-  isHealthCheckBackoffActive,
-  getHealthCheckBackoffRemainingMs,
-} from '../core/health-cache-manager.ts';
 
+export { healthRegistry } from './registry.ts';
+
+/**
+ * Result of a high-level system health check
+ */
 export interface HealthCheckResult {
   success: boolean;
   searchOk: boolean;
@@ -30,6 +25,10 @@ export interface HealthCheckResult {
   error?: string;
   timestamp: string;
 }
+
+// ============================================================================
+// Component Registration
+// ============================================================================
 
 // Register Browser Pool Check
 healthRegistry.register('BrowserPool', async () => {
@@ -69,7 +68,6 @@ healthRegistry.register('KnowledgeStore', async () => {
     // Lazy-aware health check: if not initialized, we check if the store is open
     // but don't force a model load to GPU just for the health check.
     if (!embedder.isInitialized()) {
-        const { isKnowledgeStoreReady } = await import('../knowledge/index.ts');
         return { 
             healthy: true, 
             diagnostic: { 
@@ -133,50 +131,18 @@ healthRegistry.register('ErrorTracker', async () => {
   }
 }, { timeoutMs: 1000, critical: false }); // Not critical - errors are informational
 
+// ============================================================================
+// High-level Actions
+// ============================================================================
 
-
-
-
+/**
+ * Execute all registered health checks and return a unified result.
+ * This is stateless and does not cache results.
+ */
 export async function runHealthCheck(): Promise<HealthCheckResult> {
-  const pending = getHealthCheckPending();
-  if (pending) return pending;
-
-  const promise = performActualCheck();
-  setHealthCheckPending(promise);
-  
-  try {
-    const result = await promise;
-    if (!result.success) {
-      setHealthCheckPending(null);
-      incrementHealthCheckFailureCount();
-    } else {
-      const failureCount = getHealthCheckFailureCount();
-      if (failureCount > 0) {
-        logger.log(`[healthcheck] Check succeeded after ${failureCount} failures, resetting backoff`);
-      }
-      resetHealthCheckFailureCount();
-    }
-    return result;
-  } catch (error) {
-    setHealthCheckPending(null);
-    throw error;
-  }
-}
-
-async function performActualCheck(): Promise<HealthCheckResult> {
-  // Wait for backoff if active
-  if (isHealthCheckBackoffActive()) {
-    const waitMs = getHealthCheckBackoffRemainingMs();
-    logger.warn(`[healthcheck] Backing off for ${waitMs}ms due to previous failure(s)`);
-    await new Promise(resolve => setTimeout(resolve, waitMs));
-  }
-
   logger.log('[healthcheck] Starting System Health Checks...');
 
   const systemHealth = await healthRegistry.runAll();
-
-  // Record health check for monitoring
-  recordHealthCheck(systemHealth);
   
   const result: HealthCheckResult = {
     success: systemHealth.status === 'healthy' || systemHealth.status === 'degraded',
@@ -195,12 +161,8 @@ async function performActualCheck(): Promise<HealthCheckResult> {
   }
 
   if (systemHealth.status === 'unhealthy') {
-      const failedCritical = systemHealth.components.find(c => !c.healthy && c.component === 'BrowserPool'); // Currently only BrowserPool is critical
+      const failedCritical = systemHealth.components.find(c => !c.healthy && healthRegistry.isCritical(c.component));
       logger.error('[healthcheck] System validation failed:', failedCritical?.error);
-
-      // Log health summary for diagnostics
-      const summary = getHealthSummary();
-      logger.info(`[healthcheck] Health summary: ${summary.healthy}/${summary.total} healthy, ${summary.degraded} degraded, ${summary.unhealthy} unhealthy`);
   } else {
       logger.log('[healthcheck] ALL SYSTEMS GO. Ready for research.');
   }
@@ -208,6 +170,9 @@ async function performActualCheck(): Promise<HealthCheckResult> {
   return result;
 }
 
+/**
+ * Returns true if the critical system components are healthy.
+ */
 export async function isHealthCheckSuccessful(): Promise<boolean> {
   try {
     const health = await runHealthCheck();
@@ -215,19 +180,4 @@ export async function isHealthCheckSuccessful(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Clear the health check cache
- * This resets all backoff state and pending checks
- */
-export function clearHealthCheckCache(): void {
-  // Import the health cache manager to avoid circular dependency
-  // We use a dynamic import here to ensure the module is loaded when needed
-  import('../core/health-cache-manager.ts').then(mod => {
-    mod.clearHealthCheckCache();
-    logger.debug('[healthcheck] Cache cleared');
-  }).catch(err => {
-    logger.error('[healthcheck] Failed to clear health check cache:', err);
-  });
 }

@@ -189,21 +189,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
               await healthModule.runHealthCheck({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
               this.clearStatus();
             }},
-            { id: 'history', label: 'View History', description: 'Show recent health check results', action: async () => {
-              this.showStatus('Loading health history...');
-              await healthModule.showHealthHistory({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
-              this.clearStatus();
-            }},
-            { id: 'summary', label: 'View Summary', description: 'Show health statistics', action: async () => {
-              this.showStatus('Loading health summary...');
-              await healthModule.showHealthSummary({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
-              this.clearStatus();
-            }},
-            { id: 'clear', label: 'Clear Cache', description: 'Clear health check cache', action: async () => {
-              healthModule.clearHealthCache({ ui: ctx.ui, hasUI: ctx.hasUI ?? false });
-              this.showStatus('Health check cache cleared');
-              setTimeout(() => this.clearStatus(), 2000);
-            }},
             { id: 'back', label: '← Back to Main', description: 'Return to main menu', action: () => {
               this.currentSection = 'main';
               this.selectedIndex = 0;

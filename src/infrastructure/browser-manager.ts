@@ -22,7 +22,6 @@ import {
   isSchedulerRestartInProgress,
   setSchedulerRestartInProgress,
 } from '../core/internal-state.ts';
-import { setHealthCheckPending } from '../core/health-cache-manager.ts';
 import type { NodeError, BrowserTask } from '../types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -129,11 +128,6 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
     setSchedulerInitializationPromise(null);
     cachedSchedulerVersion = null;
     initializationPromise = null;
-
-    // Clear the health check singleton cache so the next research run re-validates the
-    // browser. The scheduler restart means the pool is being torn down; a cached
-    // "health OK" result would be stale and could let a dead pool go undetected.
-    setHealthCheckPending(null);
 
     // Find and clear any stale scheduler processes BEFORE clearing state.
     // Only clear if the registered PID is dead or belongs to this process — never
