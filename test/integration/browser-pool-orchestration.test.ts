@@ -34,7 +34,7 @@ function isNetworkUnavailable(text: string): boolean {
   return text.includes('network unavailable') || text.includes('Network unavailable');
 }
 
-describe.skip('Browser Pool Orchestration', () => {
+describe('Browser Pool Orchestration', () => {
   let testContext: TestContext;
 
   beforeAll(async () => {
@@ -49,14 +49,10 @@ describe.skip('Browser Pool Orchestration', () => {
     // Ensure clean state before each test
     if (testContext.lifecycleInitialized) {
       logger.log('[test] Cleaning up before test...');
-      await stopBrowserManager().catch(() => {
-        // Ignore errors during cleanup
-      });
-      // Additional delay after stopBrowserManager to allow worker processes to
+      await testContext.beforeEach();
+      // Additional delay after cleanup to allow worker processes to
       // finish their Playwright browser/context teardown before the next test
-      // starts a fresh pool. stopBrowserManager already waits for pool.destroy()
-      // (up to 10s) + 1.5s IPC drain, but an extra buffer guards against any
-      // residual OS-level process cleanup.
+      // starts a fresh pool.
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   });
@@ -64,9 +60,7 @@ describe.skip('Browser Pool Orchestration', () => {
   afterEach(async () => {
     // Ensure clean state after each test
     if (testContext.lifecycleInitialized) {
-      await stopBrowserManager().catch(() => {
-        // Ignore errors during cleanup
-      });
+      await testContext.afterEach();
     }
   });
 

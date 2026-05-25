@@ -25,6 +25,8 @@ describe('Extended Tools Integration', () => {
     skipTests: () => true,
     init: async () => {},
     shutdown: async () => {},
+    beforeEach: async () => {},
+    afterEach: async () => {},
   };
 
   beforeAll(async () => {
@@ -60,7 +62,7 @@ describe('Extended Tools Integration', () => {
       });
       
       expect(tool.parameters).toBeDefined();
-      expect(tool.parameters.type).toBe('object');
+      expect((tool.parameters as any).type).toBe('object');
     });
   });
 
@@ -93,7 +95,7 @@ describe('Extended Tools Integration', () => {
       expect(firstContent).toHaveProperty('type', 'text');
       expect(firstContent).toHaveProperty('text');
       
-      const text = firstContent.text as string;
+      const text = (firstContent as any).text as string;
       expect(text).toContain('Security Vulnerability Search Results');
       expect(text).toContain('CVE-2024-21626');
       
@@ -204,7 +206,7 @@ describe('Extended Tools Integration', () => {
         mockExtensionCtx as any
       );
       expect(result.details).toMatchObject({ error: 'invalid_parameters' });
-      expect(result.content[0].text).toContain('Invalid parameters');
+      expect((result.content[0] as any).text).toContain('Invalid parameters');
     });
 
     it('should handle invalid database names gracefully', async () => {

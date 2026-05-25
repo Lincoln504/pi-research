@@ -45,7 +45,7 @@ interface RecoveryTestResult {
 // Test Implementation
 // ============================================================================
 
-describe.skip('Error Recovery and Resilience', () => {
+describe('Error Recovery and Resilience', () => {
   let testContext: TestContext;
   let testDbDir: string;
   const embedder = makeSyntheticEmbedder();

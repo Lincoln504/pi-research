@@ -39,9 +39,9 @@ import { logger } from '../../../src/logger.ts';
 
 describe('browser-search', () => {
   const mockSearchResults: SearchResult[] = [
-    { title: 'Result 1', url: 'https://example.com/1', snippet: 'Snippet 1' },
-    { title: 'Result 2', url: 'https://example.com/2', snippet: 'Snippet 2' },
-    { title: 'Result 3', url: 'https://example.com/3', snippet: 'Snippet 3' },
+    { title: 'Result 1', url: 'https://example.com/1', content: 'Snippet 1' },
+    { title: 'Result 2', url: 'https://example.com/2', content: 'Snippet 2' },
+    { title: 'Result 3', url: 'https://example.com/3', content: 'Snippet 3' },
   ];
 
   beforeEach(() => {
@@ -86,7 +86,7 @@ describe('browser-search', () => {
       const queries = ['valid query 1', '', '  ', 'valid query 2'];
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
         // Valid queries get a result; empty/whitespace never reach the worker (filtered before dispatch)
-        return [{ title: 'Result', url: `https://example.com/${encodeURIComponent(q)}`, snippet: 'test' }];
+        return [{ title: 'Result', url: `https://example.com/${encodeURIComponent(q)}`, content: 'test' }];
       });
 
       const result = await performSearch(queries);
@@ -202,7 +202,7 @@ describe('browser-search', () => {
       // Return different URLs for different queries
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
         return [
-          { title: `Result for ${q}`, url: `https://example.com/${q}`, snippet: 'Snippet' },
+          { title: `Result for ${q}`, url: `https://example.com/${q}`, content: 'Content' },
         ];
       });
 
@@ -223,10 +223,10 @@ describe('browser-search', () => {
       // Return overlapping URLs
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
         const base = [
-          { title: 'Shared Result', url: 'https://example.com/shared', snippet: 'Shared' },
+          { title: 'Shared Result', url: 'https://example.com/shared', content: 'Shared' },
         ];
         const unique = [
-          { title: `Unique to ${q}`, url: `https://example.com/${q}`, snippet: 'Unique' },
+          { title: `Unique to ${q}`, url: `https://example.com/${q}`, content: 'Unique' },
         ];
         return [...base, ...unique];
       });
@@ -262,7 +262,7 @@ describe('browser-search', () => {
       expect(result.get('working')).toEqual(mockSearchResults);
       expect(result.get('failing')).toEqual([]);
       expect(logger.error).toHaveBeenCalled();
-      expect(logger.error.mock.calls[0][0]).toContain('[Search]');
+      expect(vi.mocked(logger.error).mock.calls[0][0]).toContain('[Search]');
     });
 
     it('should continue with other queries after one fails', async () => {
@@ -292,7 +292,7 @@ describe('browser-search', () => {
 
       try {
         await performSearch(['test']);
-        fail('Should have thrown');
+        throw new Error('Should have thrown');
       } catch (error) {
         expect(String(error)).toContain('all 1 queries returned no results');
         expect(String(error)).toContain('Browser workers may be unavailable');
@@ -312,7 +312,7 @@ describe('browser-search', () => {
     it('should handle null results from workers', async () => {
       // Need at least one successful query to avoid total failure
       vi.mocked(runWorkerSearch).mockImplementation(async (q) => {
-        if (q === 'null') return null;
+        if (q === 'null') return null as any;
         return mockSearchResults;
       });
 
@@ -326,8 +326,8 @@ describe('browser-search', () => {
   describe('result handling', () => {
     it('should deduplicate URLs within same query results', async () => {
       vi.mocked(runWorkerSearch).mockResolvedValue([
-        { title: 'Result 1', url: 'https://example.com/1', snippet: 'Snippet' },
-        { title: 'Result 2', url: 'https://example.com/1', snippet: 'Duplicate URL' },
+        { title: 'Result 1', url: 'https://example.com/1', content: 'Content' },
+        { title: 'Result 2', url: 'https://example.com/1', content: 'Duplicate URL' },
       ]);
 
       const result = await performSearch(['test']);
@@ -338,7 +338,7 @@ describe('browser-search', () => {
 
     it('should preserve result structure', async () => {
       const customResults: SearchResult[] = [
-        { title: 'Test', url: 'https://test.com', snippet: 'Test snippet' },
+        { title: 'Test', url: 'https://test.com', content: 'Test snippet' },
       ];
       vi.mocked(runWorkerSearch).mockResolvedValue(customResults);
 
@@ -390,7 +390,7 @@ describe('browser-search', () => {
       await performSearch(['working', 'failing']);
 
       expect(logger.error).toHaveBeenCalled();
-      expect(logger.error.mock.calls[0][0]).toContain('[Search]');
+      expect(vi.mocked(logger.error).mock.calls[0][0]).toContain('[Search]');
     });
   });
 });

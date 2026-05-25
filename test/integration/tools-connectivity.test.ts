@@ -24,6 +24,8 @@ describe('Search and Scrape Tools Connectivity', () => {
     skipTests: () => true,
     init: async () => {},
     shutdown: async () => {},
+    beforeEach: async () => {},
+    afterEach: async () => {},
   };
 
   beforeAll(async () => {
@@ -76,7 +78,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       
       const firstContent = result.content[0];
       expect(firstContent).toHaveProperty('type', 'text');
-      expect(typeof firstContent.text).toBe('string');
+      expect(typeof (firstContent as any).text).toBe('string');
     });
 
     it('should return markdown formatted results with expected sections', async () => {

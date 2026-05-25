@@ -30,30 +30,30 @@ interface LoadTestConfig {
 }
 
 const QUICK_LOAD_CONFIG: LoadTestConfig = {
-  concurrency: parseInt(process.env.LOAD_TEST_CONCURRENCY || '5'),
-  duration: parseInt(process.env.LOAD_TEST_DURATION || '30000'),
-  maxMemoryIncreaseMB: parseInt(process.env.LOAD_TEST_MAX_MEMORY_MB || '50'),
-  maxFileHandleIncrease: parseInt(process.env.LOAD_TEST_MAX_FDS || '10'),
-  minSuccessRate: parseFloat(process.env.LOAD_TEST_MIN_SUCCESS_RATE || '0.7'),
-  maxAverageLatencyMs: parseInt(process.env.LOAD_TEST_MAX_LATENCY || '5000'),
+  concurrency: parseInt(process.env['LOAD_TEST_CONCURRENCY'] || '5'),
+  duration: parseInt(process.env['LOAD_TEST_DURATION'] || '30000'),
+  maxMemoryIncreaseMB: parseInt(process.env['LOAD_TEST_MAX_MEMORY_MB'] || '50'),
+  maxFileHandleIncrease: parseInt(process.env['LOAD_TEST_MAX_FDS'] || '10'),
+  minSuccessRate: parseFloat(process.env['LOAD_TEST_MIN_SUCCESS_RATE'] || '0.7'),
+  maxAverageLatencyMs: parseInt(process.env['LOAD_TEST_MAX_LATENCY'] || '5000'),
 };
 
 const STANDARD_LOAD_CONFIG: LoadTestConfig = {
-  concurrency: parseInt(process.env.LOAD_TEST_CONCURRENCY || '10'),
-  duration: parseInt(process.env.LOAD_TEST_DURATION || '60000'),
-  maxMemoryIncreaseMB: parseInt(process.env.LOAD_TEST_MAX_MEMORY_MB || '100'),
-  maxFileHandleIncrease: parseInt(process.env.LOAD_TEST_MAX_FDS || '20'),
-  minSuccessRate: parseFloat(process.env.LOAD_TEST_MIN_SUCCESS_RATE || '0.6'),
-  maxAverageLatencyMs: parseInt(process.env.LOAD_TEST_MAX_LATENCY || '10000'),
+  concurrency: parseInt(process.env['LOAD_TEST_CONCURRENCY'] || '10'),
+  duration: parseInt(process.env['LOAD_TEST_DURATION'] || '60000'),
+  maxMemoryIncreaseMB: parseInt(process.env['LOAD_TEST_MAX_MEMORY_MB'] || '100'),
+  maxFileHandleIncrease: parseInt(process.env['LOAD_TEST_MAX_FDS'] || '20'),
+  minSuccessRate: parseFloat(process.env['LOAD_TEST_MIN_SUCCESS_RATE'] || '0.6'),
+  maxAverageLatencyMs: parseInt(process.env['LOAD_TEST_MAX_LATENCY'] || '10000'),
 };
 
 const STRESS_LOAD_CONFIG: LoadTestConfig = {
-  concurrency: parseInt(process.env.LOAD_TEST_CONCURRENCY || '20'),
-  duration: parseInt(process.env.LOAD_TEST_DURATION || '120000'),
-  maxMemoryIncreaseMB: parseInt(process.env.LOAD_TEST_MAX_MEMORY_MB || '200'),
-  maxFileHandleIncrease: parseInt(process.env.LOAD_TEST_MAX_FDS || '30'),
-  minSuccessRate: parseFloat(process.env.LOAD_TEST_MIN_SUCCESS_RATE || '0.4'),
-  maxAverageLatencyMs: parseInt(process.env.LOAD_TEST_MAX_LATENCY || '20000'),
+  concurrency: parseInt(process.env['LOAD_TEST_CONCURRENCY'] || '20'),
+  duration: parseInt(process.env['LOAD_TEST_DURATION'] || '120000'),
+  maxMemoryIncreaseMB: parseInt(process.env['LOAD_TEST_MAX_MEMORY_MB'] || '200'),
+  maxFileHandleIncrease: parseInt(process.env['LOAD_TEST_MAX_FDS'] || '30'),
+  minSuccessRate: parseFloat(process.env['LOAD_TEST_MIN_SUCCESS_RATE'] || '0.4'),
+  maxAverageLatencyMs: parseInt(process.env['LOAD_TEST_MAX_LATENCY'] || '20000'),
 };
 
 // ============================================================================
@@ -254,7 +254,6 @@ describe('Load Tests: Concurrent Research Sessions', () => {
           memoryAfterMB: snapshotAfter.heapUsedMB,
           fileHandlesBefore: snapshotBefore.fileHandles,
           fileHandlesAfter: snapshotAfter.fileHandles,
-          documentCount: 5,
           hadInterference: false,
         };
       } catch (error) {
@@ -270,7 +269,6 @@ describe('Load Tests: Concurrent Research Sessions', () => {
           memoryAfterMB: snapshotAfter.heapUsedMB,
           fileHandlesBefore: snapshotBefore.fileHandles,
           fileHandlesAfter: snapshotAfter.fileHandles,
-          documentCount: 0,
           error: error as Error,
           hadInterference: false,
         };
@@ -409,7 +407,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
       assertLoadTestMetrics(metrics);
 
       expect(metrics.totalSessions).toBe(config.concurrency);
-    }, config.duration);
+    }, QUICK_LOAD_CONFIG.duration);
   });
 
   describe('Standard Load Test', () => {
@@ -441,7 +439,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
       expect(metrics.totalSessions).toBe(config.concurrency);
       expect(metrics.sessionsByDepth[0]?.count).toBeGreaterThan(0);
       expect(metrics.sessionsByDepth[1]?.count).toBeGreaterThan(0);
-    }, config.duration);
+    }, STANDARD_LOAD_CONFIG.duration);
   });
 
   describe('Stress Load Test', () => {
@@ -482,14 +480,14 @@ describe('Load Tests: Concurrent Research Sessions', () => {
         p95: metrics.p95DurationMs,
         p99: metrics.p99DurationMs,
       });
-    }, config.duration);
+    }, STRESS_LOAD_CONFIG.duration);
   });
 
   describe('Sustained Load Test', () => {
     it('should handle sustained load over time without degradation', async () => {
       const config = {
         ...STANDARD_LOAD_CONFIG,
-        duration: parseInt(process.env.LOAD_TEST_DURATION || '90000'),
+        duration: parseInt(process.env['LOAD_TEST_DURATION'] || '90000'),
       };
 
       logger.info(`[load test] Sustained load test: duration=${config.duration}ms`);
@@ -539,7 +537,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
 
       // Last batch should not be more than 2x slower than first batch
       expect(degradationRatio).toBeLessThan(2.0);
-    }, config.duration);
+    }, parseInt(process.env['LOAD_TEST_DURATION'] || '90000'));
   });
 
   describe('Resource Contention Measurement', () => {
@@ -590,6 +588,6 @@ describe('Load Tests: Concurrent Research Sessions', () => {
       expect(metrics.totalFileHandleIncrease).toBe(
         snapshotAfter.fileHandles - snapshotBefore.fileHandles
       );
-    }, config.duration);
+    }, QUICK_LOAD_CONFIG.duration);
   });
 });

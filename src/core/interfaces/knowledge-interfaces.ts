@@ -3,6 +3,7 @@
  */
 
 import type { IService } from '../service-registry.ts';
+import type { IngestionItem } from '../../knowledge/writer-queue.ts';
 
 /**
  * Embedder interface for text embedding operations
@@ -36,7 +37,7 @@ export interface IKnowledgeStore extends IService {
  */
 export interface IWriterQueue extends IService {
   drain(): Promise<void>;
-  enqueue(item: any): void;
+  enqueue(item: IngestionItem): void;
 }
 
 /**

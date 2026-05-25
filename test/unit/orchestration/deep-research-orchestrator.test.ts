@@ -105,6 +105,7 @@ describe('DeepResearchOrchestrator', () => {
       updatePlanForRound: vi.fn(),
       getCurrentPlan: vi.fn(() => null),
       getTotalResearchersPlanned: vi.fn(() => 0),
+      incrementTotalResearchersPlanned: vi.fn(),
       addToQueryHistory: vi.fn(),
       clearPlanningState: vi.fn(),
     };
@@ -272,5 +273,95 @@ describe('DeepResearchOrchestrator', () => {
 
     expect(onRoundStart).toHaveBeenCalledWith(1);
     expect(onRoundStart).toHaveBeenCalledWith(2); // Final synthesis round
+  });
+
+  it('should increment totalResearchersPlanned after each delegate round', async () => {
+    let callCount = 0;
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          action: 'delegate',
+          researchers: [
+            { id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] },
+            { id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] },
+          ],
+          allQueries: ['q1', 'q2'],
+        };
+      }
+      return { action: 'synthesize', content: 'Done' };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await orchestrator.run();
+
+    // Should have incremented by 2 (number of researchers in the delegate plan)
+    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(2);
+  });
+
+  it('should record query history after each delegate round', async () => {
+    let callCount = 0;
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          action: 'delegate',
+          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1', 'q2'] }],
+          allQueries: ['q1', 'q2'],
+        };
+      }
+      return { action: 'synthesize', content: 'Done' };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await orchestrator.run();
+
+    expect(mockPlanningService.addToQueryHistory).toHaveBeenCalledWith(['q1', 'q2']);
+  });
+
+  it('should pass getCurrentPlan as previousPlan to updatePlanForRound', async () => {
+    const mockPreviousPlan = { action: 'delegate' as const, researchers: [], allQueries: ['prev-q'] };
+    // First call: getCurrentPlan returns null (initial state)
+    // After first plan, getCurrentPlan returns the plan
+    let callCount = 0;
+    mockPlanningService.getCurrentPlan.mockImplementation(() => {
+      return callCount > 0 ? mockPreviousPlan : null;
+    });
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          action: 'delegate',
+          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+          allQueries: ['q1'],
+        };
+      }
+      return { action: 'synthesize', content: 'Done' };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await orchestrator.run();
+
+    // First call should pass null (initial state)
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ previousPlan: null })
+    );
+    // Second call (or final synthesis) should pass the previous plan
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ previousPlan: mockPreviousPlan })
+    );
+  });
+
+  it('should not increment totalResearchersPlanned on synthesize action', async () => {
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      return { action: 'synthesize', content: 'Direct result' };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+    await orchestrator.run();
+
+    expect(mockPlanningService.incrementTotalResearchersPlanned).not.toHaveBeenCalled();
   });
 });

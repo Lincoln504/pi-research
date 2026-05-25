@@ -15,9 +15,9 @@ describe('Graceful shutdown', () => {
     const calls: string[] = [];
 
     // Register tasks in order
-    manager.register(() => calls.push('first'));
-    manager.register(() => calls.push('second'));
-    manager.register(() => calls.push('third'));
+    manager.register(() => { calls.push('first'); });
+    manager.register(() => { calls.push('second'); });
+    manager.register(() => { calls.push('third'); });
 
     // Run cleanup - should execute in reverse order
     await manager.runCleanup('test-order');
@@ -31,11 +31,11 @@ describe('Graceful shutdown', () => {
     const manager = new ShutdownManager();
     const calls: string[] = [];
 
-    manager.register(() => calls.push('first'));
+    manager.register(() => { calls.push('first'); });
     manager.register(() => {
       throw new Error('cleanup failed');
     });
-    manager.register(() => calls.push('third'));
+    manager.register(() => { calls.push('third'); });
 
     // Should not throw and should execute all non-failing tasks
     await expect(manager.runCleanup('test-error')).resolves.not.toThrow();

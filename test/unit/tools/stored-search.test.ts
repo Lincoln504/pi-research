@@ -24,7 +24,8 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
   }),
 }));
 
-import { isKnowledgeStoreReady } from '../../../src/knowledge/index.ts';
+// isKnowledgeStoreReady is provided by the vi.mock above
+const { isKnowledgeStoreReady } = await import('../../../src/knowledge/index.ts') as any;
 
 function makeTool() {
   return createStoredSearchTool({ ctx: {} as any });

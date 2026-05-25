@@ -30,7 +30,7 @@ describe('links tool', () => {
       aspectResults: new Map(),
       completedRounds: 0,
       synthesisResults: null,
-    } as SystemResearchState;
+    } as unknown as SystemResearchState;
 
     mockCtx = {
       cwd: '/test/dir',
@@ -56,8 +56,8 @@ describe('links tool', () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
 
       expect(tool.parameters).toBeDefined();
-      expect(tool.parameters.properties).toHaveProperty('action');
-      expect(tool.parameters.properties).toHaveProperty('query');
+      expect((tool.parameters as any).properties).toHaveProperty('action');
+      expect((tool.parameters as any).properties).toHaveProperty('query');
     });
 
     it('should include prompt guidelines', () => {
@@ -72,10 +72,10 @@ describe('links tool', () => {
   describe('list action', () => {
     it('should list all scraped links', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'list' });
+      const result = await tool.execute('call-1', { action: 'list' }, undefined, undefined, {} as any);
 
       expect(result.content).toHaveLength(1);
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (3 found)');
       expect(text).toContain('https://example.com/article1');
       expect(text).toContain('https://example.org/guide');
@@ -84,9 +84,9 @@ describe('links tool', () => {
 
     it('should number links sequentially', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'list' });
+      const result = await tool.execute('call-1', { action: 'list' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('1. https://example.com/article1');
       expect(text).toContain('2. https://example.org/guide');
       expect(text).toContain('3. https://github.com/repo');
@@ -94,7 +94,7 @@ describe('links tool', () => {
 
     it('should return details with count', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'list' });
+      const result = await tool.execute('call-1', { action: 'list' }, undefined, undefined, {} as any);
 
       expect(result.details).toEqual({
         count: 3,
@@ -105,9 +105,9 @@ describe('links tool', () => {
     it('should handle empty pool gracefully', async () => {
       resetScrapedLinks(testResearchId);
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'list' });
+      const result = await tool.execute('call-1', { action: 'list' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (0 found)');
       expect(text).toContain('No links found in the pool.');
       expect(result.details).toEqual({ count: 0, action: 'list' });
@@ -117,9 +117,9 @@ describe('links tool', () => {
   describe('search action', () => {
     it('should filter links by keyword', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'search', query: 'github' });
+      const result = await tool.execute('call-1', { action: 'search', query: 'github' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (1 found)');
       expect(text).toContain('https://github.com/repo');
       expect(text).not.toContain('example.com');
@@ -129,18 +129,18 @@ describe('links tool', () => {
     it('should be case-insensitive', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
 
-      const result1 = await tool.execute('call-1', { action: 'search', query: 'GITHUB' });
-      const result2 = await tool.execute('call-2', { action: 'search', query: 'Github' });
+      const result1 = await tool.execute('call-1', { action: 'search', query: 'GITHUB' }, undefined, undefined, {} as any);
+      const result2 = await tool.execute('call-2', { action: 'search', query: 'Github' }, undefined, undefined, {} as any);
 
-      expect((result1.content[0]!.text as string)).toContain('https://github.com/repo');
-      expect((result2.content[0]!.text as string)).toContain('https://github.com/repo');
+      expect(((result1.content[0] as any).text as string)).toContain('https://github.com/repo');
+      expect(((result2.content[0] as any).text as string)).toContain('https://github.com/repo');
     });
 
     it('should handle multiple matches', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'search', query: 'example' });
+      const result = await tool.execute('call-1', { action: 'search', query: 'example' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (2 found)');
       expect(text).toContain('https://example.com/article1');
       expect(text).toContain('https://example.org/guide');
@@ -149,9 +149,9 @@ describe('links tool', () => {
 
     it('should return no results for non-matching query', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'search', query: 'nonexistent' });
+      const result = await tool.execute('call-1', { action: 'search', query: 'nonexistent' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (0 found)');
       expect(text).toContain('No links found matching "nonexistent".');
       expect(result.details).toEqual({ count: 0, action: 'search' });
@@ -159,18 +159,18 @@ describe('links tool', () => {
 
     it('should handle empty query parameter', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'search', query: '' });
+      const result = await tool.execute('call-1', { action: 'search', query: '' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (3 found)');
       expect(result.details).toEqual({ count: 3, action: 'search' });
     });
 
     it('should handle missing query parameter', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'search' });
+      const result = await tool.execute('call-1', { action: 'search' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (3 found)');
       expect(result.details).toEqual({ count: 3, action: 'search' });
     });
@@ -179,17 +179,17 @@ describe('links tool', () => {
   describe('parameter validation', () => {
     it('should reject invalid action parameter', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'invalid' } as any);
+      const result = await tool.execute('call-1', { action: 'invalid' } as any, undefined, undefined, {} as any);
 
-      expect(result.content[0]!.text).toContain('Invalid parameters for links tool');
+      expect((result.content[0] as any).text).toContain('Invalid parameters for links tool');
       expect(result.details).toEqual({ error: 'invalid_parameters' });
     });
 
     it('should reject missing action parameter', async () => {
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', {} as any);
+      const result = await tool.execute('call-1', {} as any, undefined, undefined, {} as any);
 
-      expect(result.content[0]!.text).toContain('Invalid parameters for links tool');
+      expect((result.content[0] as any).text).toContain('Invalid parameters for links tool');
       expect(result.details).toEqual({ error: 'invalid_parameters' });
     });
   });
@@ -202,9 +202,9 @@ describe('links tool', () => {
 
       mockState.researchId = otherResearchId;
       const tool = createLinksTool({ ctx: mockCtx, getGlobalState: () => mockState });
-      const result = await tool.execute('call-1', { action: 'list' });
+      const result = await tool.execute('call-1', { action: 'list' }, undefined, undefined, {} as any);
 
-      const text = result.content[0]!.text as string;
+      const text = (result.content[0] as any).text as string;
       expect(text).toContain('Global Scraped Links (1 found)');
       expect(text).toContain('https://other.com');
       expect(text).not.toContain('github.com');

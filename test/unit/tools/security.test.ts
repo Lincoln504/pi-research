@@ -56,7 +56,7 @@ describe('tools/security', () => {
 
       const result = await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
       expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
-      expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
+      expect((result.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
     });
   });
 
@@ -66,7 +66,7 @@ describe('tools/security', () => {
       // Missing required `terms` field
       const result = await tool.execute('test-id', {} as any, undefined, undefined, undefined as any);
       expect(result.details).toMatchObject({ error: 'invalid_parameters' });
-      expect(result.content[0].text).toContain('Invalid parameters');
+      expect((result.content[0] as any).text).toContain('Invalid parameters');
     });
   });
 
@@ -77,8 +77,8 @@ describe('tools/security', () => {
         totalVulnerabilities: 3,
         totalDatabases: 2,
         results: {
-          nvd: { vulnerabilities: [], count: 2, duration: 100, error: null },
-          osv: { vulnerabilities: [], count: 1, duration: 50, error: null },
+          nvd: { vulnerabilities: [], count: 2, error: undefined },
+          osv: { vulnerabilities: [], count: 1, error: undefined },
         },
         duration: 150,
       });
@@ -86,9 +86,9 @@ describe('tools/security', () => {
       const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const result = await tool.execute('test-id', { terms: ['CVE-2024-1234'] }, undefined, undefined, undefined as any);
 
-      expect(result.content[0].text).toContain('Security Vulnerability Search Results');
-      expect(result.content[0].text).toContain('Total Vulnerabilities Found:**');
-      expect(result.content[0].text).toContain('CVE-2024-1234');
+      expect((result.content[0] as any).text).toContain('Security Vulnerability Search Results');
+      expect((result.content[0] as any).text).toContain('Total Vulnerabilities Found:**');
+      expect((result.content[0] as any).text).toContain('CVE-2024-1234');
     });
 
     it('should return formatted error when searchSecurityDatabases throws', async () => {
@@ -98,8 +98,8 @@ describe('tools/security', () => {
       const tool = createSecuritySearchTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const result = await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
 
-      expect(result.content[0].text).toContain('Security Vulnerability Search Failed');
-      expect(result.content[0].text).toContain('API unavailable');
+      expect((result.content[0] as any).text).toContain('Security Vulnerability Search Failed');
+      expect((result.content[0] as any).text).toContain('API unavailable');
       expect(result.details).toMatchObject({ error: 'API unavailable' });
     });
 

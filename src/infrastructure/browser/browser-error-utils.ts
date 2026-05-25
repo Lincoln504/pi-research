@@ -22,7 +22,11 @@ export function isTransientSocketError(error: unknown): boolean {
         err.message.includes('ETIMEDOUT') ||
         err.message.includes('timed out') ||
         err.message.includes('pool busy') ||
-        err.message.includes('unreachable')
+        err.message.includes('unreachable') ||
+        // WorkerPoolManager throws this during the window between forceSchedulerRestart
+        // clearing the scheduler reference and the old pool's 1500ms drain completing.
+        // It is a transient state — retry after a short delay succeeds once drain finishes.
+        err.message.includes('Worker pool is shutting down')
     );
 }
 

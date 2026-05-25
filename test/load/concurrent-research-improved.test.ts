@@ -31,23 +31,23 @@ interface LoadTestConfig {
 }
 
 const QUICK_LOAD_CONFIG: LoadTestConfig = {
-  concurrency: parseInt(process.env.LOAD_TEST_CONCURRENCY || '5'),
-  duration: parseInt(process.env.LOAD_TEST_DURATION || '30000'),
-  maxMemoryIncreaseMB: parseInt(process.env.LOAD_TEST_MAX_MEMORY_MB || '50'),
-  maxFileHandleIncrease: parseInt(process.env.LOAD_TEST_MAX_FDS || '10'),
-  minSuccessRate: parseFloat(process.env.LOAD_TEST_MIN_SUCCESS_RATE || '0.7'),
-  maxAverageLatencyMs: parseInt(process.env.LOAD_TEST_MAX_LATENCY || '5000'),
-  maxSessionInterferenceRate: parseFloat(process.env.LOAD_TEST_MAX_INTERFERENCE || '0.1'),
+  concurrency: parseInt(process.env['LOAD_TEST_CONCURRENCY'] || '5'),
+  duration: parseInt(process.env['LOAD_TEST_DURATION'] || '30000'),
+  maxMemoryIncreaseMB: parseInt(process.env['LOAD_TEST_MAX_MEMORY_MB'] || '50'),
+  maxFileHandleIncrease: parseInt(process.env['LOAD_TEST_MAX_FDS'] || '10'),
+  minSuccessRate: parseFloat(process.env['LOAD_TEST_MIN_SUCCESS_RATE'] || '0.7'),
+  maxAverageLatencyMs: parseInt(process.env['LOAD_TEST_MAX_LATENCY'] || '5000'),
+  maxSessionInterferenceRate: parseFloat(process.env['LOAD_TEST_MAX_INTERFERENCE'] || '0.1'),
 };
 
 const STANDARD_LOAD_CONFIG: LoadTestConfig = {
-  concurrency: parseInt(process.env.LOAD_TEST_CONCURRENCY || '10'),
-  duration: parseInt(process.env.LOAD_TEST_DURATION || '60000'),
-  maxMemoryIncreaseMB: parseInt(process.env.LOAD_TEST_MAX_MEMORY_MB || '100'),
-  maxFileHandleIncrease: parseInt(process.env.LOAD_TEST_MAX_FDS || '20'),
-  minSuccessRate: parseFloat(process.env.LOAD_TEST_MIN_SUCCESS_RATE || '0.6'),
-  maxAverageLatencyMs: parseInt(process.env.LOAD_TEST_MAX_LATENCY || '10000'),
-  maxSessionInterferenceRate: parseFloat(process.env.LOAD_TEST_MAX_INTERFERENCE || '0.15'),
+  concurrency: parseInt(process.env['LOAD_TEST_CONCURRENCY'] || '10'),
+  duration: parseInt(process.env['LOAD_TEST_DURATION'] || '60000'),
+  maxMemoryIncreaseMB: parseInt(process.env['LOAD_TEST_MAX_MEMORY_MB'] || '100'),
+  maxFileHandleIncrease: parseInt(process.env['LOAD_TEST_MAX_FDS'] || '20'),
+  minSuccessRate: parseFloat(process.env['LOAD_TEST_MIN_SUCCESS_RATE'] || '0.6'),
+  maxAverageLatencyMs: parseInt(process.env['LOAD_TEST_MAX_LATENCY'] || '10000'),
+  maxSessionInterferenceRate: parseFloat(process.env['LOAD_TEST_MAX_INTERFERENCE'] || '0.15'),
 };
 
 // ============================================================================
@@ -469,7 +469,7 @@ describe('Load Tests: Concurrent Research Sessions with Validation', () => {
       assertLoadTestMetrics(metrics);
 
       expect(metrics.totalSessions).toBe(config.concurrency);
-    }, config.duration);
+    }, QUICK_LOAD_CONFIG.duration);
   });
 
   describe('Standard Load Test with Validation', () => {
@@ -501,7 +501,7 @@ describe('Load Tests: Concurrent Research Sessions with Validation', () => {
       expect(metrics.totalSessions).toBe(config.concurrency);
       expect(metrics.sessionsByDepth[0]?.count).toBeGreaterThan(0);
       expect(metrics.sessionsByDepth[1]?.count).toBeGreaterThan(0);
-    }, config.duration);
+    }, STANDARD_LOAD_CONFIG.duration);
   });
 
   describe('Session Isolation Validation', () => {
@@ -534,7 +534,7 @@ describe('Load Tests: Concurrent Research Sessions with Validation', () => {
         uniqueSessions: uniqueSessionIds.size,
         stateConsistencyRate: metrics.stateConsistencyRate,
       });
-    }, config.duration);
+    }, QUICK_LOAD_CONFIG.duration);
   });
 
   describe('Resource Usage Validation', () => {
@@ -581,6 +581,6 @@ describe('Load Tests: Concurrent Research Sessions with Validation', () => {
       // Verify resource limits
       expect(metrics.totalMemoryIncreaseMB).toBeLessThanOrEqual(config.maxMemoryIncreaseMB);
       expect(metrics.totalFileHandleIncrease).toBeLessThanOrEqual(config.maxFileHandleIncrease);
-    }, config.duration);
+    }, QUICK_LOAD_CONFIG.duration);
   });
 });

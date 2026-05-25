@@ -356,6 +356,11 @@ export class PlanningService implements IPlanningService {
     return this.totalResearchersPlanned;
   }
 
+  incrementTotalResearchersPlanned(count: number): void {
+    this.totalResearchersPlanned += count;
+    logger.debug(`[${this.name}] totalResearchersPlanned incremented to ${this.totalResearchersPlanned}`);
+  }
+
   getTeamSize(complexity: 1 | 2 | 3): number {
     return getTeamSize(complexity);
   }

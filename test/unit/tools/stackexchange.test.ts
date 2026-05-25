@@ -62,7 +62,7 @@ describe('tools/stackexchange', () => {
 
       const result = await tool.execute('test-id', { command: 'search', query: 'test' }, undefined, undefined, undefined as any);
       expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
-      expect(result.content[0].text).toContain('GATHERING LIMIT REACHED');
+      expect((result.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
     });
   });
 
@@ -72,7 +72,7 @@ describe('tools/stackexchange', () => {
       // Missing required `command` field
       const result = await tool.execute('test-id', {} as any, undefined, undefined, undefined as any);
       expect(result.details).toMatchObject({ error: 'invalid_parameters' });
-      expect(result.content[0].text).toContain('Invalid parameters');
+      expect((result.content[0] as any).text).toContain('Invalid parameters');
     });
   });
 
@@ -87,7 +87,7 @@ describe('tools/stackexchange', () => {
       const tool = createStackexchangeTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const result = await tool.execute('test-id', { command: 'search', query: 'async await' }, undefined, undefined, undefined as any);
 
-      expect(result.content[0].text).toContain('Result text here');
+      expect((result.content[0] as any).text).toContain('Result text here');
     });
 
     it('should return formatted error when stackexchangeCommand throws', async () => {
@@ -97,8 +97,8 @@ describe('tools/stackexchange', () => {
       const tool = createStackexchangeTool({ ctx: createMockContext(), tracker: createMockTracker() });
       const result = await tool.execute('test-id', { command: 'search', query: 'test' }, undefined, undefined, undefined as any);
 
-      expect(result.content[0].text).toContain('Stack Exchange Search Failed');
-      expect(result.content[0].text).toContain('Rate limit exceeded');
+      expect((result.content[0] as any).text).toContain('Stack Exchange Search Failed');
+      expect((result.content[0] as any).text).toContain('Rate limit exceeded');
       expect(result.details).toMatchObject({ command: 'search', error: 'Rate limit exceeded' });
     });
 

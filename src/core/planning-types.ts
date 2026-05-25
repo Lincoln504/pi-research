@@ -26,7 +26,7 @@ export const ResearcherConfigSchema = Type.Object({
 });
 
 export const ResearchPlanSchema = Type.Object({
-    action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate')])),
+    action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate'), Type.Literal('wait')])),
     researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
     allQueries: Type.Optional(Type.Array(Type.String())),
     content: Type.Optional(Type.String())

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resetServiceContainer, registerService } from '../../../src/core/service-registry.ts';
+import { resetServiceContainer, registerService, ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Create shared mocks for browser functions (hoisted for vi.mock)
@@ -47,7 +47,7 @@ vi.mock('pdf-oxide-wasm', () => {
       free = () => {};
     }
   };
-}, { condition: () => true });
+});
 
 vi.mock('@kreuzberg/html-to-markdown-node', () => ({
   convertWithVisitor: vi.fn(async (html: string) => html),
@@ -69,7 +69,7 @@ describe('scrapers', () => {
       ServiceNames.SCHEDULER,
       () => ({
         name: 'scheduler',
-        lifecycle: 'initialized',
+        lifecycle: ServiceLifecycle.INITIALIZED,
         async initialize() {},
         async dispose() {},
         async runSearch() { return []; },

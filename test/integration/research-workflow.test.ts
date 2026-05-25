@@ -5,7 +5,7 @@
  * These are integration tests that require the browser and knowledge store.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { QuickResearchOrchestrator } from '../../src/orchestration/quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-orchestrator.ts';
 import { getConfig } from '../../src/config.ts';
@@ -104,6 +104,18 @@ describe('End-to-End Research Workflows', () => {
     testContext = await setupLifecycle();
     testDbDir = path.join(os.tmpdir(), `pi-research-workflow-${Date.now()}`);
   }, 30000);
+
+  beforeEach(async () => {
+    if (testContext.lifecycleInitialized) {
+      await testContext.beforeEach();
+    }
+  });
+
+  afterEach(async () => {
+    if (testContext.lifecycleInitialized) {
+      await testContext.afterEach();
+    }
+  });
 
   afterAll(async () => {
     await teardownLifecycle(testContext);

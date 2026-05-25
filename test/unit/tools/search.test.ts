@@ -4,9 +4,9 @@ import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 // Mock the search module
 vi.mock('../../../src/web-research/search.ts', () => ({
-  search: vi.fn(async (queries, _config, _signal, onProgress) => {
+  search: vi.fn(async (queries: string[], _config: any, _signal: any, onProgress: any) => {
     if (onProgress) onProgress(queries.length * 2); // simulate finding links
-    return queries.map(q => ({ query: q, results: [{ title: 'T', url: 'U', content: 'C' }] }));
+    return queries.map((q: string) => ({ query: q, results: [{ title: 'T', url: 'U', content: 'C' }] }));
   }),
 }));
 
@@ -27,16 +27,16 @@ describe('tools/search', () => {
   it('should create tool with correct metadata', () => {
     const tool = createSearchTool(mockOptions);
     expect(tool.name).toBe('search');
-    expect(tool.promptGuidelines[0]).toContain('5-30 queries');
+    expect(tool.promptGuidelines![0]).toContain('5-30 queries');
   });
 
   it('should cap queries at 40 if too many are provided', async () => {
     const { search } = await import('../../../src/web-research/search.ts');
     const tool = createSearchTool(mockOptions);
     const manyQueries = Array(50).fill('q');
-    
-    await tool.execute('id', { queries: manyQueries }, undefined);
-    
+
+    await tool.execute('id', { queries: manyQueries }, undefined, undefined, {} as any);
+
     expect(search).toHaveBeenCalledWith(
       expect.arrayContaining(Array(40).fill('q')),
       undefined, // options.config
@@ -48,7 +48,7 @@ describe('tools/search', () => {
 
   it('should report progress during execution', async () => {
     const tool = createSearchTool(mockOptions);
-    await tool.execute('id', { queries: ['q1', 'q2'] }, undefined);
+    await tool.execute('id', { queries: ['q1', 'q2'] }, undefined, undefined, {} as any);
     expect(mockOptions.onProgress).toHaveBeenCalledWith(4);
   });
 
@@ -57,19 +57,18 @@ describe('tools/search', () => {
     vi.mocked(search).mockRejectedValueOnce(new Error('API Down'));
 
     const tool = createSearchTool(mockOptions);
-    const result = await tool.execute('id', { queries: ['q'] }, undefined);
+    const result = await tool.execute('id', { queries: ['q'] }, undefined, undefined, {} as any);
 
-    expect(result.content[0].text).toContain('Search Failed');
-    expect(result.content[0].text).toContain('API Down');
+    expect((result.content[0] as any).text).toContain('Search Failed');
+    expect((result.content[0] as any).text).toContain('API Down');
     expect(result.details).toMatchObject({ error: 'API Down' });
   });
 
   it('should throw error on second call', async () => {
     const tool = createSearchTool(mockOptions);
-    await tool.execute('id1', { queries: ['q1'] }, undefined);
+    await tool.execute('id1', { queries: ['q1'] }, undefined, undefined, {} as any);
 
-    const result = await tool.execute('id2', { queries: ['q2'] }, undefined);
+    const result = await tool.execute('id2', { queries: ['q2'] }, undefined, undefined, {} as any);
     expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
   });
 });
-

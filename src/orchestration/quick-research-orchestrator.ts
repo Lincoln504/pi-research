@@ -66,12 +66,16 @@ export class QuickResearchOrchestrator {
     if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
         const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
-        const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
-        if (historicalUrls.length > 0) {
-          storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
-            'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
-            historicalUrls.map(u => `- ${u}`).join('\n') +
-            '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
+        if (!store) {
+          logger.warn('[QuickOrchestrator] Knowledge store service not available');
+        } else {
+          const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
+          if (historicalUrls.length > 0) {
+            storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
+              'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
+              historicalUrls.map(u => `- ${u}`).join('\n') +
+              '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
+          }
         }
       } catch (err) {
         logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
@@ -206,29 +210,33 @@ export class QuickResearchOrchestrator {
       if (this.config.KNOWLEDGE_STORE_ENABLED) {
         try {
           const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
-          const citations = parseCitations(result);
-          if (citations.length === 0) {
-            logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
-          }
-          let enqueued = 0;
-          for (const cit of citations) {
-            if (cit.url && cit.description) {
-              writer.enqueue({
-                url: normalizeUrl(cit.url),
-                markdown: cit.description,
-                content: getCachedScrapedContent(this.options.researchId, cit.url),
-                metadata: {
-                  ingestionType: 'synthesis-description',
-                  source: 'researcher',
-                  synthesizedAt: new Date().toISOString()
-                }
-              });
-              enqueued++;
+          if (!writer) {
+            logger.warn('[QuickOrchestrator] Writer queue service not available');
+          } else {
+            const citations = parseCitations(result);
+            if (citations.length === 0) {
+              logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
             }
+            let enqueued = 0;
+            for (const cit of citations) {
+              if (cit.url && cit.description) {
+                writer.enqueue({
+                  url: normalizeUrl(cit.url),
+                  markdown: cit.description,
+                  content: getCachedScrapedContent(this.options.researchId, cit.url),
+                  metadata: {
+                    ingestionType: 'synthesis-description',
+                    source: 'researcher',
+                    synthesizedAt: new Date().toISOString()
+                  }
+                });
+                enqueued++;
+              }
+            }
+            // Drain so concurrent or subsequent sessions see these entries immediately
+            // rather than relying solely on shutdownKnowledgeStore's drain.
+            if (enqueued > 0) await writer.drain();
           }
-          // Drain so concurrent or subsequent sessions see these entries immediately
-          // rather than relying solely on shutdownKnowledgeStore's drain.
-          if (enqueued > 0) await writer.drain();
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
         }

@@ -77,7 +77,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const { sessionId, researchId, observer } = orchestratorOptions;
 
     // Obtain the planning service once for all researchers in this round
-    const planningService = await getService<any>(ServiceNames.PLANNING);
+    let planningService: any;
+    try {
+      planningService = await getService<any>(ServiceNames.PLANNING);
+    } catch (err) {
+      logger.error('[ResearchOrchestrationService] Failed to get planning service:', err);
+      throw new Error('Planning service not available. Research cannot continue.', { cause: err });
+    }
 
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
@@ -177,6 +183,12 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       const { getResearchSynthesisService } = await import('./research-session-manager.ts');
       const synthesisService = await getResearchSynthesisService();
       const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
+      
+      if (!writer) {
+        logger.warn('[ResearchOrchestrationService] Writer queue not available, skipping link descriptions');
+        return;
+      }
+      
       const roundPrefix = `${round}.`;
       let enqueued = 0;
 
@@ -194,7 +206,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           if (content) {
             await writer.enqueue({
               url: normalizeUrl(link.url),
-              text: content,
+              markdown: content,
               metadata: {
                 researchId,
                 round,

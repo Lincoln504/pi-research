@@ -20,7 +20,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
       - run: npm run lint
 
   type-check:
@@ -31,11 +31,10 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
       - run: npm run type-check
 
-  unit-test:
-    needs: [lint, type-check]
+  type-check-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,11 +42,23 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
+      - run: npm run type-check:tests
+
+  unit-test:
+    needs: [lint, type-check, type-check-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
       - run: npm run test:unit
 
   integration-test:
-    needs: [lint, type-check]
+    needs: [lint, type-check, type-check-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -58,7 +69,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
       - run: npm run test:integration
 
   validate:
@@ -69,7 +80,7 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
       - name: Validate package.json
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
       - name: Verify npm package

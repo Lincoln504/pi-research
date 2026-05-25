@@ -19,7 +19,7 @@ describe('tools/grep', () => {
     const tracker = createMockTracker();
     const spy = vi.spyOn(tracker, 'recordCall');
     const tool = createGrepTool({ tracker });
-    await tool.execute('id', { pattern: 'createGrepTool', path: 'src/tools/grep.ts' }, {} as any);
+    await tool.execute('id', { pattern: 'createGrepTool', path: 'src/tools/grep.ts' }, {} as any, undefined, {} as any);
     expect(spy).toHaveBeenCalledWith('grep');
   });
 
@@ -27,21 +27,21 @@ describe('tools/grep', () => {
     const tracker = new ToolUsageTracker({ gathering: 1 });
     tracker.recordCall('grep');
     const tool = createGrepTool({ tracker });
-    const result = await tool.execute('id', { pattern: 'x' }, {} as any);
+    const result = await tool.execute('id', { pattern: 'x' }, {} as any, undefined, {} as any);
     expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
-    expect(result.content[0]!.text).toContain('GATHERING LIMIT REACHED');
+    expect((result.content[0] as any).text).toContain('GATHERING LIMIT REACHED');
   });
 
   it('returns error for invalid parameters', async () => {
     const tool = createGrepTool({ tracker: createMockTracker() });
-    const result = await tool.execute('id', { notAPattern: 'x' }, {} as any);
-    expect(result.content[0]!.text).toContain('Invalid parameters');
+    const result = await tool.execute('id', { notAPattern: 'x' }, {} as any, undefined, {} as any);
+    expect((result.content[0] as any).text).toContain('Invalid parameters');
   });
 
   it('rejects path traversal outside workspace', async () => {
     const tool = createGrepTool({ tracker: createMockTracker() });
     await expect(
-      tool.execute('id', { pattern: 'test', path: '../../../etc/passwd' }, {} as any)
+      tool.execute('id', { pattern: 'test', path: '../../../etc/passwd' }, {} as any, undefined, {} as any)
     ).rejects.toThrow('Path outside workspace');
   });
 
@@ -52,8 +52,10 @@ describe('tools/grep', () => {
       'id',
       { pattern: 'createGrepTool', path: 'src/tools/grep.ts' },
       {} as any,
+      undefined,
+      {} as any,
     );
-    expect(result.content[0]!.text).toContain('createGrepTool');
-    expect(result.content[0]!.text).toContain('Exit Code:** 0');
+    expect((result.content[0] as any).text).toContain('createGrepTool');
+    expect((result.content[0] as any).text).toContain('Exit Code:** 0');
   });
 });

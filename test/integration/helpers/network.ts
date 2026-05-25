@@ -16,6 +16,10 @@ const NETWORK_ERROR_PATTERNS: readonly RegExp[] = [
     /throttle_violation/i,
     /too many requests/i,
     /rate limit/i,
+    // HTML error responses from APIs (application-level failures)
+    /<\!DOCTYPE/i,
+    /<html/i,
+    /unexpected token/i,
 ];
 
 /**

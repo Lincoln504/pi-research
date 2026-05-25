@@ -7,7 +7,7 @@
  */
 
 import { logger } from '../../logger.ts';
-import { getService } from '../../core/service-registry.ts';
+import { tryGetService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
@@ -21,7 +21,14 @@ import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
  */
 export async function stopBrowserManager(): Promise<void> {
   try {
-    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+    // Try to get the service synchronously first to avoid errors if not initialized
+    const schedulerService = tryGetService<SchedulerService>(ServiceNames.SCHEDULER);
+    
+    if (!schedulerService) {
+      logger.debug('[BrowserLifecycle] Scheduler service not available, nothing to stop');
+      return;
+    }
+    
     const instance = schedulerService.getSchedulerInstance();
 
     if (instance instanceof BrowserTaskScheduler) {

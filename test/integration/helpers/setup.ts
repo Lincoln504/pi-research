@@ -28,6 +28,8 @@ export interface TestContext {
   skipTests: () => boolean;
   init: () => Promise<void>;
   shutdown: () => Promise<void>;
+  beforeEach: () => Promise<void>;
+  afterEach: () => Promise<void>;
 }
 
 /**
@@ -67,6 +69,31 @@ export async function setupLifecycle(): Promise<TestContext> {
     lifecycleInitialized: true,
     skipTests: () => false,
     init: async () => {},
+    beforeEach: async () => {
+      // Reset service instances (not registrations) before each test
+      // This ensures clean state without losing service registrations
+      try {
+        const { tryGetService } = await import('../../../src/core/service-registry.ts');
+        const { ServiceNames } = await import('../../../src/core/service-interfaces.ts');
+        const { SchedulerService } = await import('../../../src/core/scheduler-service.ts');
+        
+        // Reset scheduler service if it exists
+        const schedulerService = tryGetService<InstanceType<typeof SchedulerService>>(ServiceNames.SCHEDULER);
+        if (schedulerService && schedulerService.getSchedulerInstance()) {
+          await stopBrowserManager();
+        }
+      } catch (err) {
+        logger.debug('[test] Error during beforeEach cleanup:', err);
+      }
+    },
+    afterEach: async () => {
+      // Clean up after each test
+      try {
+        await stopBrowserManager();
+      } catch (err) {
+        logger.debug('[test] Error during afterEach cleanup:', err);
+      }
+    },
     shutdown: async () => {
       logger.log('[test] Shutting down browser manager and disposing services...');
       await stopBrowserManager();
@@ -80,6 +107,8 @@ function createUninitializedContext(logger: any): TestContext {
     lifecycleInitialized: false,
     skipTests: () => true,
     init: async () => {},
+    beforeEach: async () => {},
+    afterEach: async () => {},
     shutdown: async () => {
       logger.log('[test] Lifecycle not initialized, skipping teardown');
     },

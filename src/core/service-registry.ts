@@ -285,6 +285,10 @@ class ServiceContainer {
 
   /**
    * Dispose all services
+   * 
+   * NOTE: This method disposes service instances but KEEPS them registered.
+   * This allows services to be re-initialized on next access if needed.
+   * Use reset() to completely clear the service registry.
    */
   async disposeAll(): Promise<void> {
     if (this.isDisposing) {
@@ -296,22 +300,29 @@ class ServiceContainer {
       logger.log('[ServiceContainer] Disposing all services (sequential, reverse order)...');
     }
 
-    // Get service registrations in reverse order to respect dependencies
-    const registrations = Array.from(this.services.entries()).reverse();
+    try {
+      // Get service registrations in reverse order to respect dependencies
+      const registrations = Array.from(this.services.entries()).reverse();
 
-    for (const [name, registration] of registrations) {
-      if (registration.instance && registration.instance.dispose) {
-        try {
-          await registration.instance.dispose();
-        } catch (err: unknown) {
-          logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
+      for (const [name, registration] of registrations) {
+        if (registration.instance && registration.instance.dispose) {
+          try {
+            await registration.instance.dispose();
+          } catch (err: unknown) {
+            logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
+          }
         }
+        // Clear instance but keep registration
+        registration.instance = null;
+        registration.initializationPromise = null;
       }
-    }
-
-    this.services.clear();
-    if (this.defaultOptions.enableLogging) {
-      logger.log('[ServiceContainer] All services disposed');
+    } finally {
+      // Always reset disposal flag even if disposal throws
+      // This prevents permanent lock if a service's dispose() method fails
+      this.isDisposing = false;
+      if (this.defaultOptions.enableLogging) {
+        logger.log('[ServiceContainer] All services disposed (registrations preserved)');
+      }
     }
   }
 
@@ -374,8 +385,9 @@ class ServiceContainer {
       }
     }
 
-    // Clear all registrations
+    // Clear all registrations (complete reset, unlike disposeAll)
     this.services.clear();
+    this.isDisposing = false;
 
     if (this.defaultOptions.enableLogging) {
       logger.debug('[ServiceContainer] Container reset complete');

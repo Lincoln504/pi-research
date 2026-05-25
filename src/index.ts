@@ -5,7 +5,7 @@ import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
-import { getConfig } from './config.ts';
+import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
@@ -85,6 +85,15 @@ export default async function (pi: ExtensionAPI) {
     logger.error('[pi-research] ✗ Critical error during service initialization:', err);
     // Don't throw - allow extension to load with degraded functionality
     // Tools will handle missing services gracefully
+  }
+
+  // Validate config at startup for early misconfiguration feedback
+  try {
+    validateConfig();
+    logger.debug('[pi-research] ✓ Config validated');
+  } catch (err) {
+    logger.error(`[pi-research] ⚠ Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
+    // Don't throw — allow extension to load; tool execution will also validate and surface the error
   }
 
   // Global uncaught exception handler to catch synchronous errors that escape all promise handlers.

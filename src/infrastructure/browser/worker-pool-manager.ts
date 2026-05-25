@@ -48,6 +48,13 @@ export class WorkerPoolManager implements IService {
             return this.pool;
         }
 
+        // Fast-fail if a shutdown is in progress — the caller should retry after
+        // the shutdown completes (isShuttingDown is reset to false on completion).
+        // This prevents wasting time creating a pool only to immediately destroy it.
+        if (this.isShuttingDown) {
+            throw new Error('Worker pool is shutting down');
+        }
+
         // Use a promise to coalesce concurrent initialization calls
         if (this.poolInitializationPromise) {
             return this.poolInitializationPromise;
@@ -96,7 +103,8 @@ export class WorkerPoolManager implements IService {
                     }
                 });
 
-                // Race check: if shutdown() was called while we were initializing the pool
+                // Secondary race check: if shutdown() was called concurrent with the
+                // async pool construction above (between the early check and here).
                 if (this.isShuttingDown) {
                     logger.warn('[WorkerPoolManager] Pool initialized but is already shutting down. Destroying...');
                     await this.pool.destroy().catch(() => {});
@@ -170,6 +178,10 @@ export class WorkerPoolManager implements IService {
         this.poolInitializationPromise = null;
         this.currentWorkerCount = null;
         this.consecutiveErrors = 0;
+        // Reset so this instance can be re-used after shutdown — the service
+        // registry keeps the same WorkerPoolManager instance across scheduler
+        // restarts, so without this reset ensurePool() would permanently throw.
+        this.isShuttingDown = false;
     }
 
     async initialize(): Promise<void> {

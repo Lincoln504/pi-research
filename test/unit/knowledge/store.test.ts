@@ -60,7 +60,7 @@ describe('KnowledgeStore', () => {
     expect(results[0].url).toBe('https://example.com');
     expect(results[0].text).toBe('Hello world');
     expect(results[0].content).toBe('full page content here');
-    expect(results[0].metadata.title).toBe('Test');
+    expect(results[0].metadata['title']).toBe('Test');
     expect(results[0].timestamp).toBe(timestamp);
   });
 

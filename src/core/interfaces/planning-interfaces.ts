@@ -9,7 +9,7 @@ import type { Model } from '@mariozechner/pi-ai';
  * Research plan structure returned by the coordinator/evaluator
  */
 export interface ResearchPlan {
-  action?: 'synthesize' | 'delegate';
+  action?: 'synthesize' | 'delegate' | 'wait';
   researchers?: ResearcherConfig[];
   allQueries?: string[];
   content?: string;
@@ -84,6 +84,7 @@ export interface IPlanningService extends IService {
   addToQueryHistory(queries: string[]): void;
   getCurrentPlan(): ResearchPlan | null;
   getTotalResearchersPlanned(): number;
+  incrementTotalResearchersPlanned(count: number): void;
   getTeamSize(complexity: 1 | 2 | 3): number;
   getQueryBudget(complexity: 1 | 2 | 3): number;
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string;

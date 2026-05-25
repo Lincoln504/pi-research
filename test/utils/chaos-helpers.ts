@@ -6,7 +6,7 @@
  * and reusable across different test suites.
  */
 
-import { vi } from 'vitest';
+import { vi, expect } from 'vitest';
 
 // ============================================================================
 // Randomized Delay Injection
@@ -456,10 +456,10 @@ export function createFailingMock<T>(
   successCount: number,
   error: Error = new Error('Mock failure after threshold')
 ): {
-  mock: vi.Mock<Promise<T>>;
+  mock: ReturnType<typeof vi.fn>;
   verify: () => void;
 } {
-  const mock = vi.fn<Promise<T>>();
+  const mock = vi.fn();
   let calls = 0;
 
   mock.mockImplementation(async () => {
@@ -485,8 +485,8 @@ export function createFailingMock<T>(
 export function createDelayedMock<T>(
   delayMs: number,
   value: T
-): vi.Mock<Promise<T>> {
-  return vi.fn<Promise<T>>().mockImplementation(async () => {
+): ReturnType<typeof vi.fn> {
+  return vi.fn().mockImplementation(async () => {
     await new Promise(resolve => setTimeout(resolve, delayMs));
     return value;
   });
@@ -499,8 +499,8 @@ export function createIntermittentMock<T>(
   successProbability: number,
   successValue: T,
   error: Error = new Error('Intermittent mock failure')
-): vi.Mock<Promise<T>> {
-  return vi.fn<Promise<T>>().mockImplementation(async () => {
+): ReturnType<typeof vi.fn> {
+  return vi.fn().mockImplementation(async () => {
     if (Math.random() < successProbability) {
       return successValue;
     }

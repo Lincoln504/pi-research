@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runHealthCheck } from '../../../src/healthcheck/index.ts';
 import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
-import { registerService, resetServiceContainer } from '../../../src/core/service-registry.ts';
+import { registerService, resetServiceContainer, ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock dependencies
@@ -75,7 +75,7 @@ describe('healthcheck', () => {
       ServiceNames.SCHEDULER,
       () => ({
         name: 'scheduler',
-        lifecycle: 'initialized',
+        lifecycle: ServiceLifecycle.INITIALIZED,
         async initialize() {},
         async dispose() {},
         async runSearch() { return []; },
@@ -100,7 +100,7 @@ describe('healthcheck', () => {
       ServiceNames.KNOWLEDGE_STORE,
       () => ({
         name: 'knowledge-store',
-        lifecycle: 'initialized',
+        lifecycle: ServiceLifecycle.INITIALIZED,
         isReady: () => true,
         async initialize() {},
         async dispose() {},
@@ -120,7 +120,7 @@ describe('healthcheck', () => {
       ServiceNames.STATE_MANAGER,
       () => ({
         name: 'state-manager',
-        lifecycle: 'initialized',
+        lifecycle: ServiceLifecycle.INITIALIZED,
         async initialize() {},
         async dispose() {},
         async getMetrics() {

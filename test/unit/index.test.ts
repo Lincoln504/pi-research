@@ -85,7 +85,7 @@ describe('extension entrypoint', () => {
 
   it('registers research tool', async () => {
     const { pi } = createPiMock();
-    await activate(pi as any, {} as any);
+    await activate(pi as any);
 
     expect(mocks.createResearchTool).toHaveBeenCalledTimes(1);
     expect(pi.registerTool).toHaveBeenCalledWith(
@@ -95,7 +95,7 @@ describe('extension entrypoint', () => {
 
   it('augments system prompt during before_agent_start when research intent detected', async () => {
     const { pi, handlers } = createPiMock();
-    await activate(pi as any, {} as any);
+    await activate(pi as any);
 
     const event = { systemPrompt: 'ORIGINAL', prompt: 'research something' };
     const result = await handlers.get('before_agent_start')?.(event, {});
@@ -106,7 +106,7 @@ describe('extension entrypoint', () => {
 
   it('does not augment system prompt if no research intent detected', async () => {
     const { pi, handlers } = createPiMock();
-    await activate(pi as any, {} as any);
+    await activate(pi as any);
 
     const event = { systemPrompt: 'ORIGINAL', prompt: 'just fix code' };
     const result = await handlers.get('before_agent_start')?.(event, {});
@@ -118,7 +118,7 @@ describe('extension entrypoint', () => {
   describe('/research slash command', () => {
     it('registers the research command', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       expect(pi.registerCommand).toHaveBeenCalledWith(
         'research',
@@ -129,7 +129,7 @@ describe('extension entrypoint', () => {
 
     it('directly invokes the research tool and sends result to chat', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       mockExecute.mockResolvedValueOnce({
         content: [{ type: 'text', text: '## Research Result\n\nFound interesting data.' }],
@@ -159,7 +159,7 @@ describe('extension entrypoint', () => {
 
     it('shows a success notification after completion', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       mockExecute.mockResolvedValueOnce({
         content: [{ type: 'text', text: 'Done' }],
@@ -175,7 +175,7 @@ describe('extension entrypoint', () => {
 
     it('does nothing when called with empty args', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       const ctx = makeCtx();
       await commands.get('research')!.handler('   ', ctx);
@@ -186,7 +186,7 @@ describe('extension entrypoint', () => {
 
     it('handles tool execution errors gracefully', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       mockExecute.mockRejectedValueOnce(new Error('Model API rate limit (429)'));
 
@@ -210,7 +210,7 @@ describe('extension entrypoint', () => {
 
     it('handles non-Error throws gracefully', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       mockExecute.mockRejectedValueOnce('string error');
 
@@ -227,7 +227,7 @@ describe('extension entrypoint', () => {
 
     it('sends the error details correctly when research fails', async () => {
       const { pi, commands } = createPiMock();
-      await activate(pi as any, {} as any);
+      await activate(pi as any);
 
       mockExecute.mockRejectedValueOnce(new Error('Rate limited'));
 

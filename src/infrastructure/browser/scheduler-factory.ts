@@ -9,7 +9,7 @@ import * as crypto from 'node:crypto';
 import type { Config } from '../../config.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
-import { getService } from '../../core/service-registry.ts';
+import { getService, tryGetService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
@@ -23,7 +23,13 @@ import type { IScheduler } from './browser-client.ts';
  * This should be called when configuration changes are detected.
  */
 export async function forceSchedulerRestart(forceClearRemoteState: boolean = false): Promise<void> {
-    const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+    // Try to get scheduler service - if not available, log and return gracefully
+    const schedulerService = tryGetService<SchedulerService>(ServiceNames.SCHEDULER);
+    
+    if (!schedulerService) {
+        logger.warn('[Scheduler] Scheduler service not available for restart');
+        return;
+    }
 
     if (schedulerService.isSchedulerRestartInProgress()) {
         logger.log('[Scheduler] Restart already in progress, skipping concurrent call.');
@@ -90,7 +96,9 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
  * Handles leader election and client/server mode switching.
  */
 export async function getScheduler(config?: Config): Promise<IScheduler> {
+    // getService() throws if service is not available (never returns null)
     const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+    
     const currentVersion = generateSchedulerVersion(config);
     let existing = schedulerService.getSchedulerInstance();
     const cachedVersion = schedulerService.getSchedulerVersion();

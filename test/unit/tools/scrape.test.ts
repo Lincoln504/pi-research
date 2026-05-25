@@ -4,7 +4,7 @@ import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock the web-scraper module
 vi.mock('../../../src/web-research/web-scraper.ts', () => ({
-  scrape: vi.fn(async (urls) => urls.map(url => ({ url, success: true, markdown: `This is a longer content string from ${url} that exceeds the minimum 100 character requirement for successful scraping validation to pass properly`, source: 'fetch' }))),
+  scrape: vi.fn(async (urls: any) => urls.map((url: any) => ({ url, success: true, markdown: `This is a longer content string from ${url} that exceeds the minimum 100 character requirement for successful scraping validation to pass properly`, source: 'fetch' }))),
   scrapeSingle: vi.fn(),
   getDependencyStatus: vi.fn(() => ({ playwrightAvailable: false })),
 }));
@@ -31,7 +31,7 @@ const mockKnowledgeStore = {
 };
 
 vi.mock('../../../src/core/service-registry.ts', () => ({
-  getService: vi.fn(async (name) => {
+  getService: vi.fn(async (name: any) => {
     if (name === ServiceNames.KNOWLEDGE_STORE) {
       return {
         isReady: vi.fn().mockReturnValue(true),
@@ -75,13 +75,14 @@ describe('tools/scrape', () => {
   it('should scrape URLs and return markdown results', async () => {
     const { scrape } = await import('../../../src/web-research/web-scraper.ts');
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined, undefined, {} as any);
 
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text).toContain('Scrape Results');
-    expect(result.content[0].text).toContain('https://example.com/1');
-    expect(result.details).toMatchObject({
+    expect((result.content[0] as any).text).toContain('Scrape Results');
+    expect((result.content[0] as any).text).toContain('https://example.com/1');
+    const details = result.details as any;
+    expect(details).toMatchObject({
       total: 1,
       successful: 1,
       failed: 0,
@@ -94,53 +95,55 @@ describe('tools/scrape', () => {
   it('should handle multiple URLs', async () => {
     const { scrape } = await import('../../../src/web-research/web-scraper.ts');
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined, undefined, {} as any);
 
-    expect(result.details.total).toBe(2);
-    expect(result.details.successful).toBe(2);
-    expect(result.details.fresh).toBe(2);
+    const details = result.details as any;
+    expect(details.total).toBe(2);
+    expect(details.successful).toBe(2);
+    expect(details.fresh).toBe(2);
     expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined);
   });
 
   it('should return error for invalid parameters', async () => {
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { invalid: 'param' }, undefined);
+    const result = await tool.execute('call-1', { invalid: 'param' }, undefined, undefined, {} as any);
 
     expect(result.content).toHaveLength(1);
-    expect(result.content[0].text).toContain('Invalid parameters');
+    expect((result.content[0] as any).text).toContain('Invalid parameters');
     expect(result.details).toMatchObject({ error: 'invalid_params' });
   });
 
   it('should return error for empty URLs array', async () => {
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: [] }, undefined);
+    const result = await tool.execute('call-1', { urls: [] }, undefined, undefined, {} as any);
 
     expect(result.content).toHaveLength(1);
-    expect(result.content[0].text).toContain('Invalid parameters');
+    expect((result.content[0] as any).text).toContain('Invalid parameters');
     // Typebox validates minItems: 1, so empty array fails validation
   });
 
   it('should handle failed scrapes', async () => {
     const { scrape } = await import('../../../src/web-research/web-scraper.ts');
-    scrape.mockResolvedValueOnce([
+    (scrape as any).mockResolvedValueOnce([
       { url: 'https://example.com/1', success: true, markdown: 'valid content longer than 100 chars with plenty of padding to ensure it passes the minimum length check', source: 'fetch' },
       { url: 'https://example.com/2', success: false, error: 'HTTP 404', markdown: '', source: 'fetch' },
     ]);
 
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined, undefined, {} as any);
 
-    expect(result.details.total).toBe(2);
-    expect(result.details.successful).toBe(1);
-    expect(result.details.failed).toBe(1);
-    expect(result.content[0].text).toContain('Scrape Results (1 successful)');
-    expect(result.content[0].text).toContain('Failed to Scrape (1 failed)');
+    const details = result.details as any;
+    expect(details.total).toBe(2);
+    expect(details.successful).toBe(1);
+    expect(details.failed).toBe(1);
+    expect((result.content[0] as any).text).toContain('Scrape Results (1 successful)');
+    expect((result.content[0] as any).text).toContain('Failed to Scrape (1 failed)');
   });
 
   it('should use maxConcurrency from parameters', async () => {
     const { scrape } = await import('../../../src/web-research/web-scraper.ts');
     const tool = createScrapeTool(mockOptions);
-    await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined);
+    await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined, undefined, {} as any);
 
     expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined);
   });

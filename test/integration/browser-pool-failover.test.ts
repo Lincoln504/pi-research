@@ -35,7 +35,7 @@ import type { SearchResult } from '../../src/web-research/types.ts';
 // Skip tests if browser is not available
 const shouldSkip = () => !isBrowserAvailable();
 
-describe.skip('Browser Pool Failover', () => {
+describe('Browser Pool Failover', () => {
   let testContext: TestContext;
 
   beforeAll(async () => {

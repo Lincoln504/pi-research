@@ -5,7 +5,7 @@
  * Services are now managed centrally instead of module-level singletons.
  */
 
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import type { ResearchSynthesisService } from './research-synthesis-service.ts';
@@ -30,15 +30,25 @@ export async function getResearchSynthesisService(): Promise<ResearchSynthesisSe
  * Call this at the end of each research session
  */
 export async function cleanupResearchServices(): Promise<void> {
+  // Cleanup session service
   const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE).catch(() => null);
   if (sessionService) {
     await sessionService.cleanup();
   }
-  // Note: ResearchSynthesisService doesn't have a cleanup method, just clearReports
+  
+  // Clear synthesis reports (ResearchSynthesisService doesn't have a cleanup method, just clearReports)
   const synthesisService = await getService<ResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE).catch(() => null);
   if (synthesisService) {
     synthesisService.clearReports();
   }
+  
+  // Clear planning state to prevent accumulation across research runs
+  const planningService = tryGetService<any>(ServiceNames.PLANNING);
+  if (planningService && typeof planningService.clearPlanningState === 'function') {
+    planningService.clearPlanningState();
+    logger.debug('[ResearchSessionManager] Cleared planning state');
+  }
+  
   logger.debug('[ResearchSessionManager] Cleaned up research services');
 }
 

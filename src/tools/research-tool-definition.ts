@@ -287,6 +287,9 @@ export function createResearchTool(): ToolDefinition {
             // Restore previous logger
             setLogger(previousLogger);
             await cleanup();
+            if (tuiManager) {
+              tuiManager.dispose();
+            }
           }
         });
 

@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
-import type { ExtensionContext } from '../../../src/types/extension-context.ts';
-import type { Model } from '../../../src/types/llm.ts';
+import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { Model, Api } from '@mariozechner/pi-ai';
 import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 /**
@@ -27,13 +27,16 @@ export function createMockExtensionContext(overrides: Partial<ExtensionContext> 
 /**
  * Creates a mock Model for unit tests.
  */
-export function createMockModel(overrides: Partial<Model> = {}): Model {
+export function createMockModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
   return {
     id: 'test-model',
     name: 'Test Model',
     provider: 'openai',
+    api: 'openai-completions',
+    baseUrl: 'https://api.openai.com/v1',
+    reasoning: false,
     ...overrides,
-  };
+  } as Model<Api>;
 }
 
 /**

@@ -59,7 +59,7 @@ describe('Embedder WebGPU Fallback', () => {
     vi.mocked(pipeline).mockRejectedValueOnce(webGpuError);
     
     // Second call should succeed with CPU
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
 
@@ -68,7 +68,7 @@ describe('Embedder WebGPU Fallback', () => {
     
     // Create a new embedder - it should skip WebGPU and use CPU directly
     const embedder2 = new Embedder({ model: 'test-model', device: 'webgpu' });
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -84,7 +84,7 @@ describe('Embedder WebGPU Fallback', () => {
     const embedder1 = new Embedder({ model: 'test-model', device: 'webgpu' });
     const webGpuError = new Error('WebGPU validation failed: invalid buffer binding');
     vi.mocked(pipeline).mockRejectedValueOnce(webGpuError);
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -96,7 +96,7 @@ describe('Embedder WebGPU Fallback', () => {
     
     // New embedder should try WebGPU again
     const embedder2 = new Embedder({ model: 'test-model', device: 'webgpu' });
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -114,7 +114,7 @@ describe('Embedder WebGPU Fallback', () => {
     vi.mocked(pipeline).mockRejectedValueOnce(oomError);
     
     // Second call succeeds with CPU
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
 
@@ -128,7 +128,7 @@ describe('Embedder WebGPU Fallback', () => {
     const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
     
     // Pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -137,7 +137,7 @@ describe('Embedder WebGPU Fallback', () => {
     vi.mocked(mockPipelineFn).mockRejectedValueOnce(validationError);
     
     // CPU fallback pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       // Return a fresh mock that works
       return vi.fn(async (text: string | string[], _options: any) => {
         const dimensions = 384;
@@ -165,7 +165,7 @@ describe('Embedder WebGPU Fallback', () => {
     const embedder = new Embedder({ model: 'Qwen3-Embedding-0.6B', device: 'webgpu' });
     
     // Pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -174,7 +174,7 @@ describe('Embedder WebGPU Fallback', () => {
     vi.mocked(mockPipelineFn).mockRejectedValueOnce(decoderError);
     
     // CPU fallback pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return vi.fn(async (text: string | string[], _options: any) => {
         return { data: new Float32Array(384).fill(3), dims: [1, 384] };
       });
@@ -206,7 +206,7 @@ describe('Embedder WebGPU Fallback', () => {
     const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
     
     // Pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return mockPipelineFn;
     });
     
@@ -215,7 +215,7 @@ describe('Embedder WebGPU Fallback', () => {
     vi.mocked(mockPipelineFn).mockRejectedValueOnce(webGpuError);
     
     // CPU fallback pipeline load succeeds
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       return vi.fn(async () => {
         throw new Error('CPU warmup failed');
       });

@@ -236,7 +236,7 @@ describe('Embedder', () => {
 
   it('should reraise pipeline errors, remain uninitialized, and allow retry', async () => {
     const { pipeline } = await import('@huggingface/transformers');
-    vi.mocked(pipeline)
+    (vi.mocked(pipeline) as any)
       .mockRejectedValueOnce(new Error('model download failed'))
       .mockImplementationOnce(async () => mockPipelineFn);
 
@@ -254,8 +254,8 @@ describe('Embedder', () => {
     const { pipeline } = await import('@huggingface/transformers');
     
     // First call to pipeline (initialization) succeeds with WebGPU
-    vi.mocked(pipeline).mockImplementationOnce(async () => mockPipelineFn);
-    
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => mockPipelineFn);
+
     const embedder = new Embedder({ model: 'test-model', device: 'webgpu' });
     await embedder.initialize();
     
@@ -263,7 +263,7 @@ describe('Embedder', () => {
     mockPipelineFn.mockRejectedValueOnce(new Error('WebGPU OUT_OF_DEVICE_MEMORY'));
     
     // Setup second pipeline initialization (for recovery) to succeed with CPU
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       // Return a fresh mock that works
       return vi.fn(async () => ({ data: new Float32Array(384).fill(9), dims: [1, 384] }));
     });
@@ -407,7 +407,7 @@ describe('GPU lock behavior', () => {
     sm.acquireGpuLock.mockResolvedValue(false);
     const { pipeline } = await import('@huggingface/transformers');
     let deviceUsed: string | undefined;
-    vi.mocked(pipeline).mockImplementationOnce(async (_task, _model, opts: any) => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async (_task: any, _model: any, opts: any) => {
       deviceUsed = opts?.device;
       return mockPipelineFn;
     });
@@ -491,7 +491,7 @@ describe('cache-aware initialization', () => {
     const { pipeline } = await import('@huggingface/transformers');
     let allowRemoteAtCallTime: boolean | undefined;
 
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       allowRemoteAtCallTime = mockEnv.allowRemoteModels;
       return mockPipelineFn;
     });
@@ -504,7 +504,7 @@ describe('cache-aware initialization', () => {
 
   it('restores allowRemoteModels after successful init', async () => {
     const { pipeline } = await import('@huggingface/transformers');
-    vi.mocked(pipeline).mockImplementationOnce(async () => mockPipelineFn);
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => mockPipelineFn);
 
     mockEnv.allowRemoteModels = true;
     const embedder = new Embedder({ model: 'test-model' });
@@ -531,7 +531,7 @@ describe('cache-aware initialization', () => {
     // Simulate missing model file
     mockAccess.mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 
-    vi.mocked(pipeline).mockImplementationOnce(async () => {
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
       allowRemoteAtCallTime = mockEnv.allowRemoteModels;
       return mockPipelineFn;
     });
