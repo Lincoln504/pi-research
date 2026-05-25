@@ -5,17 +5,24 @@
  * Provides clean interface for cross-process state management.
  */
 
-import { ServiceLifecycle } from '../core/service-registry.ts';
+import { ServiceLifecycle, getService } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import type { IStateManager } from '../core/service-interfaces.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IStateManager, IProcessLifecycle } from '../core/service-interfaces.ts';
 import type {
   StateMetrics,
-  LegacySessionInfo,
   SingletonState,
 } from '../infrastructure/state-manager.ts';
+import type { GPUResourceService } from '../infrastructure/gpu-resource-service.ts';
+import type { StateSessionManager } from '../infrastructure/state-session-manager.ts';
+import type { StateBrowserManager } from '../infrastructure/state-browser-manager.ts';
+import type { StateMetricsCollector } from '../infrastructure/state-metrics.ts';
+import type { StateValidator } from '../infrastructure/state-validator.ts';
+import type { FileLockService } from '../infrastructure/file-lock-service.ts';
+import type { StateBackupManager } from '../infrastructure/state-backup-manager.ts';
 
 // Import the actual state manager implementation (static import)
-import { StateManager, getSharedStateManager as getSharedStateManagerImpl } from '../infrastructure/state-manager.ts';
+import { StateManager } from '../infrastructure/state-manager.ts';
 
 /**
  * State Manager Service Implementation
@@ -35,8 +42,27 @@ export class StateManagerService implements IStateManager {
     this.lifecycle = ServiceLifecycle.INITIALIZING;
     logger.debug('[StateManagerService] Initializing...');
 
-    // Get the shared state manager instance
-    this._stateManager = getSharedStateManagerImpl();
+    // Resolve all dependencies
+    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE);
+    const fileLockService = await getService<FileLockService>(ServiceNames.FILE_LOCK_SERVICE);
+    const backupManager = await getService<StateBackupManager>(ServiceNames.STATE_BACKUP_MANAGER);
+    const gpuResourceService = await getService<GPUResourceService>(ServiceNames.GPU_RESOURCE_SERVICE);
+    const sessionManager = await getService<StateSessionManager>(ServiceNames.STATE_SESSION_MANAGER);
+    const browserManager = await getService<StateBrowserManager>(ServiceNames.STATE_BROWSER_MANAGER);
+    const metricsCollector = await getService<StateMetricsCollector>(ServiceNames.STATE_METRICS_COLLECTOR);
+    const validator = await getService<StateValidator>(ServiceNames.STATE_VALIDATOR);
+
+    // Instantiate state manager with injected dependencies
+    this._stateManager = new StateManager({
+      processLifecycle,
+      fileLockService,
+      backupManager,
+      gpuResourceService,
+      sessionManager,
+      browserManager,
+      metricsCollector,
+      validator,
+    });
 
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.debug('[StateManagerService] Initialized');
@@ -186,29 +212,6 @@ export class StateManagerService implements IStateManager {
     return this.getStateManager().cleanup();
   }
 
-  // Backward compatibility methods
-
-  /**
-   * Get a session by ID (backward compatible)
-   */
-  async getSession(sessionId: string): Promise<LegacySessionInfo | null> {
-    return this.getStateManager().getSession(sessionId);
-  }
-
-  /**
-   * Update the activity timestamp for a session (backward compatible)
-   */
-  async updateActivity(sessionId: string): Promise<void> {
-    return this.getStateManager().updateActivity(sessionId);
-  }
-
-  /**
-   * Get all sessions (backward compatible)
-   */
-  async getAllSessions(): Promise<{ [sessionId: string]: LegacySessionInfo }> {
-    return this.getStateManager().getAllSessions();
-  }
-
   /**
    * Get the state file path
    */
@@ -229,45 +232,4 @@ export class StateManagerService implements IStateManager {
   getBackupDirPath(): string {
     return this.getStateManager().getBackupDirPath();
   }
-}
-
-// ============================================================================
-// Singleton Accessor (for backward compatibility)
-// ============================================================================
-
-let _stateManagerServiceInstance: StateManagerService | null = null;
-
-/**
- * Get or create the state manager service instance
- */
-export function getStateManagerService(): StateManagerService {
-  if (!_stateManagerServiceInstance) {
-    _stateManagerServiceInstance = new StateManagerService();
-    _stateManagerServiceInstance.initialize().catch(err => {
-      logger.error('[StateManagerService] Failed to initialize:', err);
-    });
-  }
-  return _stateManagerServiceInstance;
-}
-
-/**
- * Reset the state manager service instance
- * Primarily used for testing
- */
-export function resetStateManagerService(): void {
-  if (_stateManagerServiceInstance) {
-    _stateManagerServiceInstance.dispose().catch(err => {
-      logger.error('[StateManagerService] Failed to dispose:', err);
-    });
-  }
-  _stateManagerServiceInstance = null;
-}
-
-/**
- * Get the shared state manager (backward compatibility)
- * This function delegates to the service
- */
-export function getSharedStateManager(): StateManager {
-  const service = getStateManagerService();
-  return service.getStateManager();
 }

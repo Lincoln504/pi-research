@@ -17,6 +17,12 @@ export type { IEmbedder, IKnowledgeStore, IWriterQueue, IMetricsSnapshot, IMetri
 // State manager interfaces
 export type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 
+// Process interfaces
+export type { IProcessLifecycle } from './interfaces/process-interfaces.ts';
+
+// Orchestration interfaces
+export type { IResearchOrchestration } from './interfaces/orchestration-interfaces.ts';
+
 // Planning interfaces
 export type { ResearchPlan, ResearcherConfig, SessionContext, GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions, IPlanningService } from './interfaces/planning-interfaces.ts';
 

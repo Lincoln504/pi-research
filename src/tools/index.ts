@@ -65,10 +65,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       ...resolvedOptions,
       onProgress: options.onSearchProgress,
     }),
-    createScrapeTool({
-      ...resolvedOptions,
-      onLinksScraped: options.onLinksScraped,
-    }),
+    createScrapeTool(resolvedOptions),
     createLinksTool(resolvedOptions),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),

@@ -3,6 +3,7 @@
  */
 
 import type { IService } from '../service-registry.ts';
+import type { Model } from '@mariozechner/pi-ai';
 
 /**
  * Research plan structure returned by the coordinator/evaluator
@@ -39,9 +40,7 @@ export interface SessionContext {
 export interface GeneratePlanOptions {
   query: string;
   complexity: 1 | 2 | 3;
-  model: any;
-  config: any;
-  sessionContext: SessionContext;
+  model: Model<any>;
   signal?: AbortSignal;
   historicalLinksSection?: string;
 }
@@ -53,8 +52,7 @@ export interface GenerateQueriesOptions {
   researcher: ResearcherConfig;
   query: string;
   complexity: 1 | 2 | 3;
-  model: any;
-  config: any;
+  model: Model<any>;
   signal?: AbortSignal;
 }
 
@@ -62,13 +60,11 @@ export interface GenerateQueriesOptions {
  * Options for updating plan for next round
  */
 export interface UpdatePlanOptions {
-  currentPlan: ResearchPlan | null;
   reports: Map<string, string>;
   round: number;
   query: string;
   complexity: 1 | 2 | 3;
-  model: any;
-  config: any;
+  model: Model<any>;
   signal?: AbortSignal;
   previousPlan: ResearchPlan | null;
   totalResearchersPlanned: number;

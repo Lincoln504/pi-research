@@ -21,15 +21,10 @@ export async function loadPipelineWithTimeout(
 ): Promise<{ pipeline: FeatureExtractionPipeline; errorMessage: string }> {
   const errorMessage = `Model load timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
 
-  const pipelinePromise = Promise.resolve(pipeline('feature-extraction', model, {
+  const pipelinePromise = pipeline('feature-extraction', model, {
     device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
     ...(useCache === false ? { use_cache: false } : {}),
-  }));
-
-  pipelinePromise.then((p: DisposablePipeline) => {
-    // Dispose orphaned pipelines
-    try { p.dispose(); } catch { /* ignore */ }
-  }).catch(() => {});
+  });
 
   const loadedPipeline = await logger.runCapturingStderr(async () => {
     return await withTimeout(pipelinePromise, timeoutMs, errorMessage);

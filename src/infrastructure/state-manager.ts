@@ -1,19 +1,13 @@
 /**
- * State Manager
+ * Shared State Manager
  *
- * Refactored state management that delegates to specialized services.
- * Maintains backward compatibility while providing clean separation of concerns.
+ * Core implementation for cross-process state management.
+ * Manages the state file, locking, backups, and provides APIs for
+ * session and browser management.
  *
- * This class manages:
- * - State file persistence (read/write/update)
- * - Session lifecycle management
- * - Browser server coordination
- * - Backup and recovery
- *
- * Delegates to:
- * - FileLockService for cross-process locking
- * - ProcessLifecycleService for PID checks
- * - GPUResourceService for GPU locking
+ * This implementation is decomposed into several sub-managers:
+ * - FileLockService for file locking
+ * - GPUResourceService for GPU lock management
  * - StateSessionManager for session operations
  * - StateBrowserManager for browser operations
  * - StateBackupManager for backup/recovery
@@ -27,46 +21,51 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
+import process from 'node:process';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { FileLockService } from './file-lock-service.ts';
-import { ProcessLifecycleService, getSharedProcessLifecycleService } from './process-lifecycle-service.ts';
-import { GPUResourceService } from './gpu-resource-service.ts';
-import { StateBackupManager } from './state-backup-manager.ts';
-import { StateBrowserManager } from './state-browser-manager.ts';
-import { StateSessionManager } from './state-session-manager.ts';
-import { StateMetricsCollector } from './state-metrics.ts';
-import { StateValidator } from './state-validator.ts';
-import { StateSessionApi } from './state-session-api.ts';
-import { StateBrowserApi } from './state-browser-api.ts';
+import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
 import type {
   StateMetrics,
-  SessionInfo,
   SingletonState,
-  LegacySessionInfo,
-  LegacyState,
 } from './types/state-types.ts';
+import { FileLockService } from './file-lock-service.ts';
+import type { GPUResourceService } from './gpu-resource-service.ts';
+import { StateBackupManager } from './state-backup-manager.ts';
+import type { StateBrowserManager } from './state-browser-manager.ts';
+import type { StateSessionManager } from './state-session-manager.ts';
+import type { StateMetricsCollector } from './state-metrics.ts';
+import type { StateValidator } from './state-validator.ts';
+import { StateSessionApi } from './state-session-api.ts';
+import { StateBrowserApi } from './state-browser-api.ts';
 
-// Re-export for backward compatibility
-export type { StateMetrics, SessionInfo, SingletonState, LegacySessionInfo, LegacyState };
+// Re-export commonly used types
+export type { StateMetrics, SingletonState } from './types/state-types.ts';
+
+export interface StateManagerOptions {
+  stateDir?: string;
+  processLifecycle: IProcessLifecycle;
+  gpuResourceService: GPUResourceService;
+  sessionManager: StateSessionManager;
+  browserManager: StateBrowserManager;
+  metricsCollector: StateMetricsCollector;
+  validator: StateValidator;
+  fileLockService: FileLockService;
+  backupManager: StateBackupManager;
+}
 
 /**
- * StateManager class for managing singleton state with file-based storage,
- * file locking, backup system, and corruption recovery.
+ * Shared State Manager Implementation
  */
 export class StateManager {
-  // Path configuration
-  private readonly stateFilePath: string;
-  private readonly lockDirPath: string;
-  private readonly backupDirPath: string;
-  private readonly lockFilePath: string;
+  private stateFilePath: string;
+  private lockDirPath: string;
+  private backupDirPath: string;
+  private lockFilePath: string;
 
-  // Backup configuration
-  private readonly maxBackups: number = 5;
-
-  // Services
+  // Sub-services (injected via constructor)
   private readonly fileLockService: FileLockService;
-  private readonly processLifecycle: ProcessLifecycleService;
+  private readonly processLifecycle: IProcessLifecycle;
   private readonly gpuResourceService: GPUResourceService;
   private readonly sessionApi: StateSessionApi;
   private readonly browserApi: StateBrowserApi;
@@ -74,7 +73,21 @@ export class StateManager {
   private readonly metricsCollector: StateMetricsCollector;
   private readonly validator: StateValidator;
 
-  constructor(stateDir?: string) {
+  constructor(options: StateManagerOptions) {
+    const {
+      stateDir: providedStateDir,
+      processLifecycle,
+      fileLockService,
+      gpuResourceService,
+      sessionManager,
+      browserManager,
+      backupManager,
+      metricsCollector,
+      validator,
+    } = options;
+    
+    let stateDir = providedStateDir;
+    
     if (!stateDir) {
       const homeDir = os.homedir();
       stateDir = path.join(homeDir, '.pi', 'state');
@@ -85,25 +98,15 @@ export class StateManager {
     this.backupDirPath = path.join(stateDir, 'backups');
     this.lockFilePath = path.join(this.lockDirPath, 'research-state.lock');
 
-    // Initialize services
-    this.fileLockService = new FileLockService({
-      lockFilePath: this.lockFilePath,
-    });
-    this.processLifecycle = getSharedProcessLifecycleService();
-    this.gpuResourceService = new GPUResourceService({
-      processLifecycle: this.processLifecycle,
-    });
-    const sessionManager = new StateSessionManager(this.processLifecycle);
-    const browserManager = new StateBrowserManager();
+    // Use injected services
+    this.fileLockService = fileLockService;
+    this.processLifecycle = processLifecycle;
+    this.gpuResourceService = gpuResourceService;
     this.sessionApi = new StateSessionApi(sessionManager);
     this.browserApi = new StateBrowserApi(browserManager);
-    this.backupManager = new StateBackupManager(
-      this.stateFilePath,
-      this.backupDirPath,
-      this.maxBackups
-    );
-    this.metricsCollector = new StateMetricsCollector();
-    this.validator = new StateValidator();
+    this.backupManager = backupManager;
+    this.metricsCollector = metricsCollector;
+    this.validator = validator;
   }
 
   /**
@@ -118,65 +121,42 @@ export class StateManager {
 
     for (const dir of dirs) {
       try {
-        await fs.mkdir(dir, { mode: 0o700, recursive: true });
-      } catch (error: unknown) {
-        if (error instanceof Error && 'code' in error) {
-          const errnoError = error as NodeJS.ErrnoException;
-          if (errnoError.code !== 'EEXIST') {
-            throw new Error(`Failed to create directory ${dir}: ${errnoError.message}`, { cause: error });
-          }
-        } else {
-          throw new Error(`Failed to create directory ${dir}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-        }
+        await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      } catch (err) {
+        logger.error(`[StateManager] Failed to create directory ${dir}:`, err);
+        throw err;
       }
     }
   }
 
   /**
-   * Get the default state object
+   * Get the default state
    */
   private getDefaultState(): SingletonState {
     return {
       version: 1,
-      containerId: '',
-      containerName: '',
+      containerId: crypto.randomBytes(16).toString('hex'),
+      containerName: 'pi-research-shared-state',
       port: 0,
       sessions: {},
       lastUpdated: Date.now(),
     };
   }
 
+  // ==================== Core State Operations ====================
+
   /**
-   * Read the state from the file system with lock protection
+   * Read the state from the file system
    */
   public async readState(): Promise<SingletonState> {
     await this.ensureDirectories();
-    const startTime = Date.now();
-    try {
-      const result = await this.fileLockService.withLock(() => this._readState());
-      const duration = Date.now() - startTime;
-      metrics.observe('state_operation_duration_ms', duration, { operation: 'read', status: 'success' });
-      metrics.increment('state_operations_total', 1, { operation: 'read', status: 'success' });
-      return result;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      metrics.observe('state_operation_duration_ms', duration, { operation: 'read', status: 'error' });
-      metrics.increment('state_operations_total', 1, { operation: 'read', status: 'error' });
-      throw error;
-    }
-  }
-
-  /**
-   * Internal read without lock acquisition (caller must hold lock)
-   */
-  public async _readState(): Promise<SingletonState> {
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;
       this.validator.validateState(state);
       return state as SingletonState;
     } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error) {
+      if (typeof error === 'object' && error !== null && 'code' in error) {
         const errnoError = error as NodeJS.ErrnoException;
         if (errnoError.code === 'ENOENT') {
           return this.getDefaultState();
@@ -248,14 +228,14 @@ export class StateManager {
   }
 
   /**
-   * Update state atomically using an updater function (read-modify-write pattern)
+   * Update state atomically using an updater function
    */
   public async updateState(updater: (state: SingletonState) => SingletonState | Promise<SingletonState>): Promise<void> {
     await this.ensureDirectories();
     const startTime = Date.now();
     try {
       await this.fileLockService.withLock(async () => {
-        const currentState = await this._readState();
+        const currentState = await this.readState();
         const newState = await updater(currentState);
         await this._writeState(newState);
       });
@@ -270,7 +250,7 @@ export class StateManager {
     }
   }
 
-  // ==================== Session Management ====================
+  // ==================== Session API ====================
 
   public async addSession(sessionId: string, param: number | string): Promise<void> {
     await this.sessionApi.addSession(sessionId, param, this.updateState.bind(this), process.pid);
@@ -288,19 +268,7 @@ export class StateManager {
     return this.sessionApi.cleanupStaleSessions(timeoutMs, this.readState.bind(this), this.updateState.bind(this));
   }
 
-  public async getSession(sessionId: string): Promise<LegacySessionInfo | null> {
-    return this.sessionApi.getSession(sessionId, this.readState.bind(this));
-  }
-
-  public async updateActivity(sessionId: string): Promise<void> {
-    await this.sessionApi.updateActivity(sessionId, this.updateState.bind(this));
-  }
-
-  public async getAllSessions(): Promise<{ [sessionId: string]: LegacySessionInfo }> {
-    return this.sessionApi.getAllSessions(this.readState.bind(this));
-  }
-
-  // ==================== Browser Management ====================
+  // ==================== Browser API ====================
 
   public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
     return this.browserApi.getBrowserServer(this.readState.bind(this));
@@ -314,37 +282,29 @@ export class StateManager {
     await this.browserApi.clearBrowserServer(this.updateState.bind(this));
   }
 
-  public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock: boolean = false): Promise<boolean> {
-    const readFn = skipLock ? this._readState.bind(this) : this.readState.bind(this);
-    return this.browserApi.isPidAlive(
-      pid,
-      expectedSchedulerId,
-      readFn,
-      this.processLifecycle.isProcessAlive.bind(this.processLifecycle)
-    );
+  // ==================== Process API ====================
+
+  public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean> {
+    return this.processLifecycle.isPidAlive(pid, expectedSchedulerId, {
+      getState: this.readState.bind(this),
+      skipLock,
+      getSchedulerIdFromState: (state: SingletonState) => state.browserServer?.schedulerId,
+    });
   }
 
-  // ==================== GPU Lock Management ====================
+  // ==================== GPU Lock API ====================
 
-  public async acquireGpuLock(sessionId?: string, timeoutMs: number = 30000): Promise<boolean> {
-    return this.gpuResourceService.acquireGpuLock(
-      (updater) => this.updateState(updater),
-      sessionId,
-      timeoutMs
-    );
+  public async acquireGpuLock(sessionId?: string, timeoutMs?: number): Promise<boolean> {
+    return this.gpuResourceService.acquireGpuLock(this.updateState.bind(this), sessionId, timeoutMs);
   }
 
-  public async releaseGpuLock(pid: number = process.pid): Promise<void> {
-    await this.gpuResourceService.releaseGpuLock(
-      (updater) => this.updateState(updater),
-      pid
-    );
+  public async releaseGpuLock(pid?: number): Promise<void> {
+    await this.gpuResourceService.releaseGpuLock(this.updateState.bind(this), pid);
   }
 
   public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {
-    return this.gpuResourceService.getGpuOwner(
-      () => this.readState()
-    );
+    const state = await this.readState();
+    return state.gpuOwner || null;
   }
 
   // ==================== Metrics ====================
@@ -390,23 +350,11 @@ export class StateManager {
     return this.fileLockService;
   }
 
-  getProcessLifecycleService(): ProcessLifecycleService {
+  getProcessLifecycleService(): IProcessLifecycle {
     return this.processLifecycle;
   }
 
   getGpuResourceService(): GPUResourceService {
     return this.gpuResourceService;
   }
-}
-
-/**
- * Global singleton StateManager instance
- */
-let _sharedStateManager: StateManager | null = null;
-
-export function getSharedStateManager(): StateManager {
-  if (!_sharedStateManager) {
-    _sharedStateManager = new StateManager();
-  }
-  return _sharedStateManager;
 }

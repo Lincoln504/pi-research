@@ -15,9 +15,6 @@ export interface IStateManager extends IService {
   removeSession(sessionId: string): Promise<void>;
   updateHeartbeat(sessionId: string): Promise<void>;
   cleanupStaleSessions(timeoutMs: number): Promise<number>;
-  getSession(sessionId: string): Promise<any | null>;
-  updateActivity(sessionId: string): Promise<void>;
-  getAllSessions(): Promise<{ [sessionId: string]: any }>;
   getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null>;
   setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void>;
   clearBrowserServer(): Promise<void>;

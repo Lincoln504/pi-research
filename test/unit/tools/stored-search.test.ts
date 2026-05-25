@@ -3,6 +3,7 @@ import { createStoredSearchTool } from '../../../src/tools/stored-search.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 const mockSearch = vi.fn();
+const mockIsReady = vi.fn().mockReturnValue(true);
 
 vi.mock('../../../src/knowledge/index.ts', () => ({
   isKnowledgeStoreReady: vi.fn(),
@@ -12,7 +13,12 @@ vi.mock('../../../src/knowledge/index.ts', () => ({
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getService: vi.fn(async (name) => {
     if (name === ServiceNames.KNOWLEDGE_STORE) {
-      return { search: mockSearch };
+      return {
+        search: mockSearch,
+        isReady: mockIsReady,
+        initialize: vi.fn().mockResolvedValue(undefined),
+        getStore: vi.fn().mockResolvedValue({ search: mockSearch }),
+      };
     }
     throw new Error(`Service ${name} not mocked`);
   }),
@@ -26,11 +32,13 @@ function makeTool() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockIsReady.mockReturnValue(true);
 });
 
 describe('stored_search tool', () => {
   it('returns initializing message when store is not ready', async () => {
     vi.mocked(isKnowledgeStoreReady).mockReturnValue(false);
+    mockIsReady.mockReturnValue(false);
     const tool = makeTool();
     const result = await tool.execute('id', { query: 'test' }, undefined, undefined, {} as any);
     expect(result.details).toEqual({ status: 'initializing' });

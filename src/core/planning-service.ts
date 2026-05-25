@@ -51,13 +51,16 @@ export class PlanningService implements IPlanningService {
   }
 
   async initialize(ctx?: any): Promise<void> {
-    if (this.isInitialized) {
+    if (this.isInitialized && !ctx) {
       logger.debug(`[${this.name}] Already initialized`);
       return;
     }
 
+    if (ctx) {
+      this.ctx = ctx;
+    }
+
     this.lifecycle = ServiceLifecycle.INITIALIZING;
-    this.ctx = ctx;
     this.isInitialized = true;
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.log(`[${this.name}] Initialized`);

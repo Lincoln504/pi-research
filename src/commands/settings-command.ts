@@ -5,29 +5,23 @@
  * - View current settings
  * - Interactive settings editor
  * - Reset to defaults
+ * - Clear knowledge store cache
  */
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI, ExtensionUIContext } from '@mariozechner/pi-coding-agent';
 import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
 import { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } from '../config.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
+import { SUPPORTED_MODELS, clearKnowledgeStore } from '../knowledge/index.ts';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import * as os from 'node:os';
-import {
-  isKnowledgeStoreReady,
-  SUPPORTED_MODELS,
-  clearKnowledgeStore,
-} from '../knowledge/index.ts';
-import { getService } from '../core/service-registry.ts';
-import { ServiceNames, IKnowledgeStore } from '../core/service-interfaces.ts';
 
 export interface CommandContext {
-  ui: {
-    notify: (message: string, type: string) => void;
-    custom?: any;
-  };
+  ui: ExtensionUIContext;
   hasUI?: boolean;
-  cwd?: string;
 }
 
 /**
@@ -40,57 +34,111 @@ export async function handleSettingsAction(
   pi: ExtensionAPI
 ): Promise<void> {
   switch (action) {
+    case 'show':
     case 'view':
     case undefined:
-      await showSettings(ctx, pi);
+      await showSettingsSummary(ctx, pi);
       break;
     case 'edit':
       await showSettingsEditor(ctx, pi);
       break;
     case 'reset':
-      resetSettings(ctx);
+      await resetSettings(ctx);
+      break;
+    case 'clear-cache':
+      await clearCacheAction(ctx);
       break;
     default:
-      ctx.ui.notify(`Unknown settings action: ${action}. Use: view, edit, reset`, 'error');
+      ctx.ui.notify(`Unknown settings action: ${action}. Use: show, edit, reset, clear-cache`, 'error');
   }
 }
 
 /**
- * Display current settings
+ * Show a summary of current research settings
  */
-export async function showSettings(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
+export async function showSettingsSummary(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
   const config = getConfig();
-  const outputLines: string[] = [];
   
-  outputLines.push('## Current Settings');
-  outputLines.push('');
-  outputLines.push('### Research Configuration');
-  outputLines.push(`- Default Research Depth: ${config.DEFAULT_RESEARCH_DEPTH}`);
-  outputLines.push(`- Max Concurrent Researchers: ${config.MAX_CONCURRENT_RESEARCHERS}`);
-  outputLines.push(`- Max Scrape Batches: ${config.MAX_SCRAPE_BATCHES}`);
-  outputLines.push(`- Researcher Timeout: ${(config.RESEARCHER_TIMEOUT_MS / 1000).toFixed(0)}s`);
-  outputLines.push('');
-  outputLines.push('### Browser Configuration');
-  outputLines.push(`- Worker Threads: ${config.WORKER_THREADS}`);
-  outputLines.push(`- Worker Concurrency: ${config.WORKER_CONCURRENCY}`);
-  outputLines.push('');
-  outputLines.push('### Knowledge Store');
-  outputLines.push(`- Enabled: ${config.KNOWLEDGE_STORE_ENABLED}`);
-  outputLines.push(`- Embedding Model: ${config.EMBEDDING_MODEL}`);
-  outputLines.push(`- Embedding Device: ${config.EMBEDDING_DEVICE}`);
-  outputLines.push(`- Cache TTL: ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS} days`);
-  outputLines.push('');
-  outputLines.push(`### Configuration File`);
-  outputLines.push(`- Path: ${getEnvFilePath().replace(os.homedir(), '~')}`);
+  // pi-research model cache directory
+  const xdgCacheBase = process.env['XDG_CACHE_HOME'];
+  const piModelCache = pathmod.join(
+    xdgCacheBase ?? pathmod.join(os.homedir(), '.cache'),
+    'pi-research', 'models'
+  );
+
+  function isModelCached(modelId: string): boolean {
+    const onnxDir = pathmod.join(piModelCache, ...modelId.split('/'), 'onnx');
+    try {
+      return fss.readdirSync(onnxDir).some(f => f.endsWith('.onnx'));
+    } catch {
+      return false;
+    }
+  }
+
+  const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
+  const dbDir = pathmod.join(process.env['XDG_DATA_HOME'] || pathmod.join(os.homedir(), '.local', 'share'), 'pi-research', 'knowledge_db');
+
+  // Fetch knowledge store entry count
+  let storeCountLabel = '';
+  if (config.KNOWLEDGE_STORE_ENABLED) {
+    try {
+      const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+      if (service.isReady()) {
+        const store = await service.getStore();
+        const n = await store.count();
+        storeCountLabel = ` (${n} entries)`;
+      } else if (fss.existsSync(dbDir)) {
+        const lancedb = await import('@lancedb/lancedb');
+        const db = await lancedb.connect(dbDir);
+        const tableNames = await db.tableNames();
+        if (tableNames.includes('knowledge')) {
+          const table = await db.openTable('knowledge');
+          const n = await table.countRows();
+          storeCountLabel = ` (${n} entries)`;
+        } else {
+          storeCountLabel = ' (0 entries)';
+        }
+      } else {
+        storeCountLabel = ' (0 entries)';
+      }
+    } catch {
+      storeCountLabel = ' (? entries)';
+    }
+  }
+
+  const outputLines = [
+    '## Research Extension Settings',
+    '',
+    `**Environment File:** \`${envDisplayPath}\``,
+    '',
+    '### 🌐 Web Research',
+    `- **Concurrency:** ${config.MAX_CONCURRENT_RESEARCHERS} researchers, ${config.WORKER_THREADS} browser workers`,
+    `- **Search Engine:** DuckDuckGo Lite (via managed pool)`,
+    `- **Timeouts:** Researcher: ${Math.round(config.RESEARCHER_TIMEOUT_MS / 1000)}s`,
+    '',
+    '### 🧠 Knowledge Store',
+    `- **Status:** ${config.KNOWLEDGE_STORE_ENABLED ? 'Enabled' : 'Disabled'}${storeCountLabel}`,
+    `- **Current Model:** \`${config.EMBEDDING_MODEL}\` (${isModelCached(config.EMBEDDING_MODEL) ? '✅ Cached' : '☁️ Online'})`,
+    `- **Cache TTL:** ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS} days`,
+    '',
+    '### 🧪 Supported Embedding Models',
+  ];
+
+  for (const m of SUPPORTED_MODELS) {
+    const cached = isModelCached(m.id);
+    const current = m.id === config.EMBEDDING_MODEL;
+    outputLines.push(`${current ? '**' : ''}- \`${m.id}\`${m.multilingual ? ' (multilingual)' : ''} ${cached ? '✅' : '☁️'}${current ? '**' : ''}`);
+  }
+
+  outputLines.push('', '*Legend: ✅ = model files cached locally, ☁️ = needs download on first use*');
 
   pi.sendMessage({
-    customType: 'settings-result',
+    customType: 'settings-summary',
     content: outputLines.join('\n'),
     display: true,
-    details: { config },
   });
 
-  ctx.ui.notify('Settings displayed', 'info');
+  ctx.ui.notify('Research settings displayed', 'info');
 }
 
 /**
@@ -125,30 +173,34 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
 
   // Fetch knowledge store entry count
   let storeCountLabel = '';
-  if (config.KNOWLEDGE_STORE_ENABLED) {
-    if (isKnowledgeStoreReady()) {
+  const updateStoreCount = async () => {
+    if (config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const st = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
-        const n = await st.count();
-        storeCountLabel = ` (${n} entries)`;
-      } catch { /* non-fatal */ }
-    } else if (fss.existsSync(dbDir)) {
-      try {
-        const lancedb = await import('@lancedb/lancedb');
-        const db = await lancedb.connect(dbDir);
-        const tableNames = await db.tableNames();
-        if (tableNames.includes('knowledge')) {
-          const table = await db.openTable('knowledge');
-          const n = await table.countRows();
+        const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+        if (service.isReady()) {
+          const store = await service.getStore();
+          const n = await store.count();
           storeCountLabel = ` (${n} entries)`;
+        } else if (fss.existsSync(dbDir)) {
+          const lancedb = await import('@lancedb/lancedb');
+          const db = await lancedb.connect(dbDir);
+          const tableNames = await db.tableNames();
+          if (tableNames.includes('knowledge')) {
+            const table = await db.openTable('knowledge');
+            const n = await table.countRows();
+            storeCountLabel = ` (${n} entries)`;
+          } else {
+            storeCountLabel = ' (0 entries)';
+          }
         } else {
           storeCountLabel = ' (0 entries)';
         }
       } catch { storeCountLabel = ' (? entries)'; }
     } else {
-      storeCountLabel = ' (0 entries)';
+      storeCountLabel = '';
     }
-  }
+  };
+  await updateStoreCount();
 
   type ConfigKey = keyof typeof config;
   
@@ -198,15 +250,6 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
       label: 'Max Concurrent',
       description: '(Researchers)',
       min: 1, max: 5, displayMin: 1, displayMax: 5, step: 1,
-      toDisplay: (v) => v, fromDisplay: (v) => v,
-      format: (v) => v.toString(),
-    },
-    {
-      type: 'number',
-      key: 'DEFAULT_RESEARCH_DEPTH',
-      label: 'Default Depth',
-      description: '(0=quick 1-3=deep)',
-      min: 0, max: 3, displayMin: 0, displayMax: 3, step: 1,
       toDisplay: (v) => v, fromDisplay: (v) => v,
       format: (v) => v.toString(),
     },
@@ -277,7 +320,7 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
       get description() { return `(Delete all knowledge${storeCountLabel})`; },
       action: async () => {
         await clearKnowledgeStore();
-        storeCountLabel = ' (0 entries)';
+        await updateStoreCount();
       },
       hidden: () => !config.KNOWLEDGE_STORE_ENABLED,
     },
@@ -491,7 +534,19 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
 /**
  * Reset settings to defaults
  */
-export function resetSettings(ctx: CommandContext): void {
+export async function resetSettings(ctx: CommandContext): Promise<void> {
   resetConfig();
   ctx.ui.notify('Settings reset to defaults (reload required)', 'warning');
+}
+
+/**
+ * Clear knowledge store action
+ */
+async function clearCacheAction(ctx: CommandContext): Promise<void> {
+  try {
+    await clearKnowledgeStore();
+    ctx.ui.notify('Knowledge store cleared', 'info');
+  } catch (err) {
+    ctx.ui.notify(`Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`, 'error');
+  }
 }

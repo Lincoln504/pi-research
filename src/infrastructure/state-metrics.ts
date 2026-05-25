@@ -6,11 +6,14 @@
 
 import type { StateMetrics, SingletonState } from './types/state-types.ts';
 import { metrics } from '../utils/metrics.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Collects metrics from state
  */
-export class StateMetricsCollector {
+export class StateMetricsCollector implements IService {
+  readonly name = 'state-metrics-collector';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
   /**
    * Get metrics about the current state
    * @param state The current state
@@ -70,5 +73,21 @@ export class StateMetricsCollector {
       containerUptime,
       lastHeartbeatAge,
     };
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 }

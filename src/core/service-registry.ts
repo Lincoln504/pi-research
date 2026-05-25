@@ -38,12 +38,12 @@ export interface IService {
   /**
    * Current lifecycle state
    */
-  readonly lifecycle: ServiceLifecycle;
+  lifecycle: ServiceLifecycle;
 
   /**
    * Initialize the service (called before first use)
    */
-  initialize?(): Promise<void> | void;
+  initialize?(ctx?: any): Promise<void> | void;
 
   /**
    * Dispose the service (called during shutdown)
@@ -143,20 +143,22 @@ class ServiceContainer {
   /**
    * Register a service, replacing any existing service
    */
-  registerAndReplace<T extends IService>(
+  async registerAndReplace<T extends IService>(
     name: string,
     factory: ServiceFactory<T>,
     options: ServiceContainerOptions = {}
-  ): void {
+  ): Promise<void> {
     const mergedOptions = { ...this.defaultOptions, ...options, allowOverwrite: true };
     
     // Dispose existing service if present
     if (this.services.has(name)) {
       const registration = this.services.get(name)!;
       if (registration.instance && registration.instance.dispose) {
-        registration.instance.dispose().catch((err: unknown) => {
+        try {
+          await registration.instance.dispose();
+        } catch (err: unknown) {
           logger.warn(`[ServiceContainer] Error disposing replaced service '${name}':`, err);
-        });
+        }
       }
     }
 
@@ -166,7 +168,7 @@ class ServiceContainer {
   /**
    * Get a service instance, initializing it if necessary
    */
-  async get<T extends IService>(name: string): Promise<T> {
+  async get<T extends IService>(name: string, ctx?: any): Promise<T> {
     if (this.isDisposing) {
       throw new Error(`Cannot get service '${name}' during container disposal`);
     }
@@ -178,6 +180,10 @@ class ServiceContainer {
 
     // Return existing instance if already initialized
     if (registration.instance) {
+      // Re-initialize if ctx is provided and service supports it
+      if (ctx && registration.instance.initialize) {
+        await registration.instance.initialize(ctx);
+      }
       return registration.instance as T;
     }
 
@@ -187,7 +193,7 @@ class ServiceContainer {
     }
 
     // Initialize the service
-    registration.initializationPromise = this._initializeService(registration);
+    registration.initializationPromise = this._initializeService(registration, ctx);
 
     try {
       const instance = await registration.initializationPromise;
@@ -286,23 +292,27 @@ class ServiceContainer {
     }
 
     this.isDisposing = true;
-    logger.log('[ServiceContainer] Disposing all services...');
+    if (this.defaultOptions.enableLogging) {
+      logger.log('[ServiceContainer] Disposing all services (sequential, reverse order)...');
+    }
 
-    const disposePromises: Promise<void>[] = [];
+    // Get service registrations in reverse order to respect dependencies
+    const registrations = Array.from(this.services.entries()).reverse();
 
-    for (const [name, registration] of this.services.entries()) {
+    for (const [name, registration] of registrations) {
       if (registration.instance && registration.instance.dispose) {
-        const promise = registration.instance.dispose().catch((err: unknown) => {
+        try {
+          await registration.instance.dispose();
+        } catch (err: unknown) {
           logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
-        });
-        disposePromises.push(promise);
+        }
       }
     }
 
-    await Promise.all(disposePromises);
-
     this.services.clear();
-    logger.log('[ServiceContainer] All services disposed');
+    if (this.defaultOptions.enableLogging) {
+      logger.log('[ServiceContainer] All services disposed');
+    }
   }
 
   /**
@@ -343,18 +353,21 @@ class ServiceContainer {
    * Reset the container, clearing all services
    * This is primarily used for testing to ensure clean state between test runs
    */
-  reset(): void {
+  async reset(): Promise<void> {
     if (this.isDisposing) {
       throw new Error('Cannot reset container while disposing');
     }
 
-    logger.debug('[ServiceContainer] Resetting container...');
+    if (this.defaultOptions.enableLogging) {
+      logger.debug('[ServiceContainer] Resetting container...');
+    }
 
-    // Dispose all instances first
-    for (const [name, registration] of this.services.entries()) {
+    // Dispose all instances in reverse order
+    const registrations = Array.from(this.services.entries()).reverse();
+    for (const [name, registration] of registrations) {
       if (registration.instance && registration.instance.dispose) {
         try {
-          registration.instance.dispose();
+          await registration.instance.dispose();
         } catch (err) {
           logger.warn(`[ServiceContainer] Error disposing service '${name}' during reset:`, err);
         }
@@ -364,30 +377,49 @@ class ServiceContainer {
     // Clear all registrations
     this.services.clear();
 
-    logger.debug('[ServiceContainer] Container reset complete');
+    if (this.defaultOptions.enableLogging) {
+      logger.debug('[ServiceContainer] Container reset complete');
+    }
   }
 
   /**
    * Internal method to initialize a service
    */
   private async _initializeService<T extends IService>(
-    registration: ServiceRegistration<T>
+    registration: ServiceRegistration<T>,
+    ctx?: any
   ): Promise<T> {
-    const instance = await registration.factory();
-    registration.instance = instance;
+    let instance: T | null = null;
+    try {
+      instance = await registration.factory();
+      registration.instance = instance;
 
-    // Call initialize hook if present
-    if (instance.initialize) {
-      await instance.initialize();
+      // Update lifecycle to initializing
+      instance.lifecycle = ServiceLifecycle.INITIALIZING;
+
+      // Call initialize hook if present
+      if (instance.initialize) {
+        await instance.initialize(ctx);
+      }
+
+      // Update lifecycle to initialized
+      instance.lifecycle = ServiceLifecycle.INITIALIZED;
+      registration.initializationPromise = null;
+
+      if (registration.options.enableLogging) {
+        logger.debug(`[ServiceContainer] Service '${instance.name}' initialized`);
+      }
+
+      return instance;
+    } catch (error) {
+      // Clean up instance on failure
+      if (instance) {
+        instance.lifecycle = ServiceLifecycle.UNINITIALIZED;
+        registration.instance = null;
+      }
+      registration.initializationPromise = null;
+      throw error;
     }
-
-    registration.initializationPromise = null;
-
-    if (registration.options.enableLogging) {
-      logger.debug(`[ServiceContainer] Service '${instance.name}' initialized`);
-    }
-
-    return instance;
   }
 }
 
@@ -431,15 +463,15 @@ export function replaceService<T extends IService>(
   name: string,
   factory: ServiceFactory<T>,
   options?: ServiceContainerOptions
-): void {
-  globalServiceContainer.registerAndReplace(name, factory, options);
+): Promise<void> {
+  return globalServiceContainer.registerAndReplace(name, factory, options);
 }
 
 /**
  * Convenience function to get a service
  */
-export function getService<T extends IService>(name: string): Promise<T> {
-  return globalServiceContainer.get<T>(name);
+export function getService<T extends IService>(name: string, ctx?: any): Promise<T> {
+  return globalServiceContainer.get<T>(name, ctx);
 }
 
 /**
@@ -488,8 +520,8 @@ export function disposeAllServices(): Promise<void> {
  * Reset the global service container
  * This is primarily used for testing to ensure clean state between test runs
  */
-export function resetServiceContainer(): void {
-  globalServiceContainer.reset();
+export function resetServiceContainer(): Promise<void> {
+  return globalServiceContainer.reset();
 }
 
 /**

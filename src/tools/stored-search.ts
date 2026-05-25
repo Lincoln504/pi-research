@@ -7,10 +7,9 @@
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { isKnowledgeStoreReady, initKnowledgeStore } from '../knowledge/index.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IKnowledgeStore } from '../core/service-interfaces.ts';
+import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
 import { getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 
@@ -36,11 +35,13 @@ export function createStoredSearchTool(_options: {
         };
       }
 
-      if (!isKnowledgeStoreReady()) {
+      const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+
+      if (!service.isReady()) {
         const config = getConfig();
         if (config.KNOWLEDGE_STORE_ENABLED) {
           // Trigger lazy initialization in background
-          initKnowledgeStore().catch(err => {
+          service.initialize().catch(err => {
             logger.warn('[stored-search] Background knowledge store initialization failed:', err);
           });
           return {
@@ -58,7 +59,7 @@ export function createStoredSearchTool(_options: {
       const p = params as Static<typeof StoredSearchParams>;
       
       try {
-        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
+        const store = await service.getStore();
         const results = await store.search(p.query, { limit: p.limit });
         
         if (results.length === 0) {

@@ -36,7 +36,7 @@ const MODEL_EXPECTATIONS: Record<string, {
   'Xenova/multilingual-e5-small': { pooling: 'mean', queryPrefix: 'query: ', documentPrefix: 'passage: ', charsPerToken: 3.5 },
   'Xenova/multilingual-e5-base':  { pooling: 'mean', queryPrefix: 'query: ', documentPrefix: 'passage: ', charsPerToken: 3.5 },
   'Xenova/bge-m3':             { pooling: 'cls', charsPerToken: 3.5 },
-  'onnx-community/embeddinggemma-300m-ONNX': { pooling: 'mean', queryPrefix: 'task: search result | query: ', documentPrefix: 'title: none | text: ', charsPerToken: 3.5 },
+  'onnx-community/embeddinggemma-300m-ONNX': { pooling: 'mean', queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query.\nQuery: ', charsPerToken: 3.5 },
   'onnx-community/Qwen3-Embedding-0.6B-ONNX': { pooling: 'last_token', queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages.\nQuery: ', maxTokens: 512, batchSize: 2, charsPerToken: 2.5 },
   'onnx-community/granite-embedding-small-english-r2-ONNX': { pooling: 'cls', maxTokens: 512, batchSize: 8 },
 };
@@ -47,7 +47,7 @@ const MODEL_EXPECTATIONS: Record<string, {
 function makeSyntheticEmbedder(dim = 64): Embedder {
   function textToVector(text: string): Float32Array {
     const v = new Float32Array(dim);
-    const h = createHash('sha256').update(text).digest();
+    const h = createHash('sha256').update(text || '').digest();
     for (let i = 0; i < dim; i++) {
       v[i] = (h[i % h.length]! / 255) * 2 - 1;
     }

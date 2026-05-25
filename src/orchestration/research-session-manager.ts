@@ -1,51 +1,28 @@
 /**
  * Research Session Manager
  *
- * Provides singleton access to research session services.
- * Each research run gets a dedicated service instance through this manager.
+ * Provides access to research session services through the service registry.
+ * Services are now managed centrally instead of module-level singletons.
  */
 
-import { ResearchSessionService } from './research-session-service.ts';
-import { ResearchSynthesisService } from './research-synthesis-service.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { ResearchSessionService } from './research-session-service.ts';
+import type { ResearchSynthesisService } from './research-synthesis-service.ts';
 import { logger } from '../logger.ts';
 
 /**
- * Service instances for the current research run
- * These are reset at the start of each new research run
- */
-let currentSessionService: ResearchSessionService | null = null;
-let currentSynthesisService: ResearchSynthesisService | null = null;
-
-/**
- * Initialize services for a new research run
- * Call this at the start of each research session
- */
-export function initializeResearchServices(): void {
-  currentSessionService = new ResearchSessionService();
-  currentSynthesisService = new ResearchSynthesisService();
-  logger.debug('[ResearchSessionManager] Initialized new research services');
-}
-
-/**
  * Get the current session service
- * @throws Error if services not initialized
  */
-export function getResearchSessionService(): ResearchSessionService {
-  if (!currentSessionService) {
-    throw new Error('Research services not initialized. Call initializeResearchServices() first.');
-  }
-  return currentSessionService;
+export async function getResearchSessionService(): Promise<ResearchSessionService> {
+  return getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
 }
 
 /**
  * Get the current synthesis service
- * @throws Error if services not initialized
  */
-export function getResearchSynthesisService(): ResearchSynthesisService {
-  if (!currentSynthesisService) {
-    throw new Error('Research services not initialized. Call initializeResearchServices() first.');
-  }
-  return currentSynthesisService;
+export async function getResearchSynthesisService(): Promise<ResearchSynthesisService> {
+  return getService<ResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
 }
 
 /**
@@ -53,17 +30,21 @@ export function getResearchSynthesisService(): ResearchSynthesisService {
  * Call this at the end of each research session
  */
 export async function cleanupResearchServices(): Promise<void> {
-  if (currentSessionService) {
-    await currentSessionService.cleanup();
-    currentSessionService = null;
+  const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE).catch(() => null);
+  if (sessionService) {
+    await sessionService.cleanup();
   }
-  currentSynthesisService = null;
+  // Note: ResearchSynthesisService doesn't have a cleanup method, just clearReports
+  const synthesisService = await getService<ResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE).catch(() => null);
+  if (synthesisService) {
+    synthesisService.clearReports();
+  }
   logger.debug('[ResearchSessionManager] Cleaned up research services');
 }
 
 /**
- * Check if services are initialized
+ * Reset services (alias for cleanup)
  */
-export function areResearchServicesInitialized(): boolean {
-  return currentSessionService !== null && currentSynthesisService !== null;
+export async function resetResearchServices(): Promise<void> {
+  await cleanupResearchServices();
 }

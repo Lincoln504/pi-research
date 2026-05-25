@@ -6,11 +6,14 @@
 
 import type { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import type { SingletonState } from './types/state-types.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Manages session operations for state
  */
-export class StateSessionManager {
+export class StateSessionManager implements IService {
+  readonly name = 'state-session-manager';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
   constructor(private readonly processLifecycle: ProcessLifecycleService) {}
 
   /**
@@ -103,39 +106,19 @@ export class StateSessionManager {
     return state;
   }
 
-  /**
-   * Get a session by ID (backward compatible)
-   * @param state The current state
-   * @param sessionId The session ID to retrieve
-   * @returns The session data or null if not found
-   */
-  getSession(state: SingletonState, sessionId: string): { lastSeen: number } | null {
-    const session = state.sessions[sessionId];
-
-    if (session === undefined) {
-      return null;
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
     }
-
-    // Return only lastSeen for backward compatibility
-    return {
-      lastSeen: session.lastSeen,
-    };
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
   }
 
-  /**
-   * Get all sessions (backward compatible)
-   * @param state The current state
-   * @returns A copy of all sessions with legacy structure
-   */
-  getAllSessions(state: SingletonState): { [sessionId: string]: { lastSeen: number } } {
-    const legacySessions: { [sessionId: string]: { lastSeen: number } } = {};
-
-    for (const [sessionId, sessionInfo] of Object.entries(state.sessions)) {
-      legacySessions[sessionId] = {
-        lastSeen: sessionInfo.lastSeen,
-      };
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
     }
-
-    return legacySessions;
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 }

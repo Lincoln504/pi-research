@@ -33,11 +33,44 @@ vi.mock('../../../src/core/internal-state.ts', () => ({
   getSchedulerInstance: vi.fn(),
 }));
 
+vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
+  KnowledgeStoreService: vi.fn().mockImplementation(() => ({
+    name: 'knowledge-store',
+    lifecycle: 'initialized',
+    isReady: () => true,
+    async initialize() {},
+    async dispose() {},
+    async getEmbedder() {
+      return {
+        isInitialized: () => false,
+        getDevice: () => 'cpu',
+        getOriginalDevice: () => 'cpu',
+      };
+    },
+    async getStore() { return {}; },
+  })),
+}));
+
+vi.mock('../../../src/infrastructure/state-manager.ts', () => ({
+  StateManager: vi.fn().mockImplementation(() => ({
+    name: 'state-manager',
+    lifecycle: 'initialized',
+    async initialize() {},
+    async dispose() {},
+    async getMetrics() {
+      return { activeSessions: 0 };
+    },
+    async getGpuOwner() {
+      return null;
+    },
+  })),
+}));
+
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    // Register mock scheduler service
+    // Register mock services
     registerService(
       ServiceNames.SCHEDULER,
       () => ({
@@ -57,7 +90,45 @@ describe('healthcheck', () => {
         isSchedulerRestartInProgress() { return false; },
         setSchedulerRestartInProgress() {},
         setSchedulerInstance() {},
+        isInitialized() { return true; },
         schedulerId: 'test',
+      }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => ({
+        name: 'knowledge-store',
+        lifecycle: 'initialized',
+        isReady: () => true,
+        async initialize() {},
+        async dispose() {},
+        async getEmbedder() {
+          return {
+            isInitialized: () => false,
+            getDevice: () => 'cpu',
+            getOriginalDevice: () => 'cpu',
+          };
+        },
+        async getStore() { return {}; },
+      }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+
+    registerService(
+      ServiceNames.STATE_MANAGER,
+      () => ({
+        name: 'state-manager',
+        lifecycle: 'initialized',
+        async initialize() {},
+        async dispose() {},
+        async getMetrics() {
+          return { activeSessions: 0 };
+        },
+        async getGpuOwner() {
+          return null;
+        },
       }),
       { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
     );
@@ -74,8 +145,7 @@ describe('healthcheck', () => {
     const result = await runHealthCheck();
 
     expect(result.success).toBe(true);
-    expect(result.searchOk).toBe(true);
-    expect(result.scrapeOk).toBe(true);
+    expect(result.status).toBe('healthy');
   });
 
   it('should fail when browser is not available', async () => {
@@ -84,8 +154,8 @@ describe('healthcheck', () => {
     const result = await runHealthCheck();
 
     expect(result.success).toBe(false);
-    expect(result.searchOk).toBe(false);
-    expect(result.error).toContain('Browser binaries');
+    expect(result.status).toBe('unhealthy');
+    expect(result.error).toContain('browser');
   });
 
   it('should fail when browser pool health check fails', async () => {
@@ -95,7 +165,7 @@ describe('healthcheck', () => {
     const result = await runHealthCheck();
 
     expect(result.success).toBe(false);
-    expect(result.searchOk).toBe(false);
+    expect(result.status).toBe('unhealthy');
     expect(result.error).toContain('Browser healthcheck failed');
   });
 
@@ -106,7 +176,7 @@ describe('healthcheck', () => {
     const result = await runHealthCheck();
 
     expect(result.success).toBe(false);
-    expect(result.searchOk).toBe(false);
+    expect(result.status).toBe('unhealthy');
     expect(result.error).toContain('connection refused');
   });
 });

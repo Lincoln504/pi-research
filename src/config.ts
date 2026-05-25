@@ -50,6 +50,12 @@ export interface Config {
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
   /** Timeout for embedding model initialization in milliseconds (default: 300000) */
   EMBEDDING_MODEL_INIT_TIMEOUT_MS: number;
+  /** Context fraction at which further scraping is blocked (0–1, default: 0.45) */
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: number;
+  /** Estimated tokens consumed by a single scrape batch URL (default: 10000) */
+  AVG_TOKENS_PER_SCRAPE: number;
+  /** Maximum concurrent URLs fetched in a single scrape batch (default: 3) */
+  MAX_CONCURRENT_SCRAPES: number;
 }
 
 export const DEFAULTS: Config = {
@@ -70,6 +76,9 @@ export const DEFAULTS: Config = {
   EMBEDDING_DEVICE: 'webgpu',
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   EMBEDDING_MODEL_INIT_TIMEOUT_MS: 300_000, // 5 minutes
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
+  AVG_TOKENS_PER_SCRAPE: 10000,
+  MAX_CONCURRENT_SCRAPES: 3,
 };
 
 // ============================================================================
@@ -131,6 +140,9 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
+    PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
+    PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
+    PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -280,6 +292,9 @@ export function createConfig(
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE)!,
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
+    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
+    AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
+    MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
   };
 }
 
@@ -369,6 +384,21 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.EMBEDDING_MODEL_INIT_TIMEOUT_MS < 30000 || config.EMBEDDING_MODEL_INIT_TIMEOUT_MS > 1_800_000) {
     throw new Error(
       `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS must be 30000–1800000ms (30s–30min), got ${config.EMBEDDING_MODEL_INIT_TIMEOUT_MS}`,
+    );
+  }
+  if (config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING <= 0 || config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING > 1) {
+    throw new Error(
+      `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING must be > 0 and ≤ 1, got ${config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING}`,
+    );
+  }
+  if (config.AVG_TOKENS_PER_SCRAPE < 100 || config.AVG_TOKENS_PER_SCRAPE > 100000) {
+    throw new Error(
+      `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE must be 100–100000, got ${config.AVG_TOKENS_PER_SCRAPE}`,
+    );
+  }
+  if (config.MAX_CONCURRENT_SCRAPES < 1 || config.MAX_CONCURRENT_SCRAPES > 20) {
+    throw new Error(
+      `PI_RESEARCH_MAX_CONCURRENT_SCRAPES must be 1–20, got ${config.MAX_CONCURRENT_SCRAPES}`,
     );
   }
   if (config.PROXY_URL) {

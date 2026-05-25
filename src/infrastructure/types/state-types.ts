@@ -40,19 +40,3 @@ export interface SingletonState {
   schedulerVersion?: string; // Track scheduler config version for detecting changes
   gpuOwner?: { pid: number; startedAt: number; sessionId?: string };
 }
-
-/**
- * Legacy session interface for backward compatibility
- */
-export interface LegacySessionInfo {
-  lastSeen: number;
-}
-
-/**
- * Legacy state interface for backward compatibility
- */
-export interface LegacyState {
-  sessions: { [sessionId: string]: LegacySessionInfo };
-  containerExists: boolean;
-  containerPort: number;
-}

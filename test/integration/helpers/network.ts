@@ -13,6 +13,9 @@ const NETWORK_ERROR_PATTERNS: readonly RegExp[] = [
     /ERR_CONNECTION_CLOSED/i,
     /socket hang up/i,
     /EPERM: operation not permitted/i,
+    /throttle_violation/i,
+    /too many requests/i,
+    /rate limit/i,
 ];
 
 /**

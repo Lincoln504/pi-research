@@ -6,11 +6,14 @@
 
 import type { SingletonState } from './types/state-types.ts';
 import { isSessionInfo, isSingletonState } from './state-type-guards.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Validates state objects
  */
-export class StateValidator {
+export class StateValidator implements IService {
+  readonly name = 'state-validator';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
   /**
    * Validate the structure and version of a state object
    * @param state The state object to validate
@@ -76,5 +79,21 @@ export class StateValidator {
         throw new Error(`Invalid state: connectedAt for ${sessionId} must be a non-negative number, got ${sessionData.connectedAt}`);
       }
     }
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 }

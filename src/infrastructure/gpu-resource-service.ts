@@ -9,6 +9,7 @@ import type { SingletonState } from './types/state-types.ts';
 import { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * GPU Resource Service
@@ -16,17 +17,19 @@ import { metrics } from '../utils/metrics.ts';
  * Manages GPU resource locking with staleness detection and automatic recovery.
  * Ensures only one process can use GPU resources at a time.
  */
-export class GPUResourceService {
+export class GPUResourceService implements IService {
+  readonly name = 'gpu-resource-service';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
   private readonly processLifecycle: ProcessLifecycleService;
   private readonly gpuLockStaleThresholdMs: number;
 
-  constructor(options?: {
-    processLifecycle?: ProcessLifecycleService;
+  constructor(options: {
+    processLifecycle: ProcessLifecycleService;
     gpuLockStaleThresholdMs?: number;
   }) {
-    this.processLifecycle = options?.processLifecycle ?? new ProcessLifecycleService();
+    this.processLifecycle = options.processLifecycle;
     // 3 minutes balances responsiveness with tolerance for slow operations
-    this.gpuLockStaleThresholdMs = options?.gpuLockStaleThresholdMs ?? 180000;
+    this.gpuLockStaleThresholdMs = options.gpuLockStaleThresholdMs ?? 180000;
   }
 
   /**
@@ -196,6 +199,26 @@ export class GPUResourceService {
    */
   getGpuLockStaleThresholdMs(): number {
     return this.gpuLockStaleThresholdMs;
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    logger.debug('[GPUResourceService] Initializing...');
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+    logger.debug('[GPUResourceService] Initialized');
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    logger.debug('[GPUResourceService] Disposing...');
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+    logger.debug('[GPUResourceService] Disposed');
   }
 
   /**

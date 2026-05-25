@@ -34,7 +34,7 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
-import { runWorkerSearch, getMaxWorkers } from '../../../src/infrastructure/browser-manager.ts';
+import { runWorkerSearch, getMaxWorkers } from '../../../src/infrastructure/browser/index.ts';
 import { logger } from '../../../src/logger.ts';
 
 describe('browser-search', () => {

@@ -8,14 +8,12 @@
 import * as crypto from 'node:crypto';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
-import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { getCamoufoxBinaryPath } from '../browser-config.ts';
 
-const require = createRequire(import.meta.url);
-
 /**
- * Generate a version hash for the scheduler based on critical config values.
+ * Generate a version hash
+ for the scheduler based on critical config values.
  * This allows us to detect when configuration changes and invalidate the cache.
  */
 export function generateSchedulerVersion(config?: Config): string {
@@ -45,7 +43,7 @@ export function getSchedulerVersion(config?: Config): string {
  */
 export function isBrowserAvailable(): boolean {
     try {
-        require.resolve('camoufox-js');
+        import.meta.resolve('camoufox-js');
         // Also check if the binary exists in the projected path
         return existsSync(getCamoufoxBinaryPath());
     } catch {

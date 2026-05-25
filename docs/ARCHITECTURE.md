@@ -1,5 +1,73 @@
 # Architecture
 
+## Overview
+
+`pi-research` is built on a **Service Registry pattern** with **Constructor-based Dependency Injection**. All services are registered with a central registry and initialized in dependency order. This architecture provides:
+
+- **Explicit dependency management** — No hidden global state
+- **Testability** — Services can be easily mocked or replaced
+- **Lifecycle management** — Services follow proper init/dispose cycles
+- **Type safety** — Full TypeScript support
+
+## Service Registry Pattern
+
+The application uses a centralized service registry (`src/core/service-registry.ts`) as the dependency injection container:
+
+- **Registration**: Services are registered with factory functions at startup
+- **Lazy Initialization**: Services initialize on first access (unless configured as eager)
+- **Lifecycle Management**: Services implement `IService` interface with `initialize()` and `dispose()` methods
+- **Type Safety**: Services are accessed through type-safe `getService<T>()` calls
+- **Error Handling**: Failed initialization doesn't crash the extension; tools degrade gracefully
+
+### Core Services Layer
+
+The following core services form the foundation of the application:
+
+| Service | Purpose | Initialization |
+|---------|---------|----------------|
+| **PlanningService** | AI-powered research planning and query generation | Eager |
+| **SchedulerService** | Browser task scheduling and worker pool management | Lazy |
+| **HealthCheckService** | Health check caching with exponential backoff | Eager |
+| **BrowserManagerService** | Facade for scheduler and browser lifecycle | Eager |
+| **StateManagerService** | Cross-process state management and session tracking | Eager |
+| **KnowledgeStoreService** | Vector embeddings and local knowledge base | Lazy |
+| **MetricsService** | Metrics collection (counters, gauges, histograms) | Eager |
+
+### Constructor Dependency Injection
+
+All services use constructor-based dependency injection:
+
+```typescript
+// Service receives dependencies via constructor
+class SchedulerService implements IScheduler {
+  constructor(
+    private readonly stateManager: IStateManager,
+    private readonly metrics: IMetrics,
+  ) {}
+}
+
+// Factory function resolves dependencies from registry
+registerService(ServiceNames.SCHEDULER, async () => {
+  const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+  const metrics = await getService<IMetrics>(ServiceNames.METRICS);
+  return new SchedulerService(stateManager, metrics);
+});
+```
+
+## Module Structure
+
+The project is organized into clean, separated modules:
+
+- `src/core/` — Core services (ServiceRegistry, PlanningService, SchedulerService, HealthCheckService)
+- `src/infrastructure/` — Infrastructure services and browser management
+- `src/orchestration/` — Multi-agent coordination and evaluation logic
+- `src/tools/` — Research tool implementations
+- `src/web-research/` — Stealth search and scraping layers
+- `src/tui/` — Terminal UI for real-time progress
+- `src/prompts/` — System instructions for agent roles
+
+All modules use **pure ESM** (no CommonJS), with `"type": "module"` in package.json.
+
 ## Orchestration Modes
 
 Two primary modes: **Quick Mode** and **Deep Mode**.
@@ -68,6 +136,16 @@ This provides a simple, predictable limit system that can be adjusted from the T
 3.  **Stealth Engine**: `camoufox-js` provides advanced fingerprinting protection to bypass automated request detection.
 4.  **Health Check**: The system performs a robust health check at the start of research, offloaded to the worker pool, to detect IP blocks or network failures. Concurrent sessions share the same pending check result.
 
+#### Thread Worker Refactoring
+
+The thread worker infrastructure has been refactored into 4 focused modules for better maintainability:
+
+- **`thread-worker.ts`** — Main coordinator that integrates the sub-modules
+- **`thread-worker-lifecycle.ts`** — Worker process lifecycle, IPC error handling, orphan protection
+- **`thread-worker-browser.ts`** — Browser initialization, context management, cleanup
+- **`thread-worker-messaging.ts`** — Task execution (search, scrape, healthcheck) and result formatting
+- **`thread-worker-types.ts`** — Shared TypeScript type definitions
+
 ### Output File Location
 Research reports are saved as Markdown files with a collision-guarded naming scheme: `pi-research-{sanitized-query}-{hash}.md`. The destination is resolved based on the session's working directory, prioritizing `research/` or `docs/` subdirectories if they exist.
 
@@ -86,9 +164,14 @@ To provide a modern, high-fidelity experience, `pi-research` utilizes advanced t
 
 ## Project Structure
 
+- `src/core/`: Core services (ServiceRegistry, PlanningService, SchedulerService, HealthCheckService)
 - `src/orchestration/`: Multi-agent coordination and evaluation logic.
 - `src/infrastructure/`: Browser management, thread pooling, and singleton state.
 - `src/tools/`: Implementation of the research tool suite.
 - `src/web-research/`: Stealth search and scraping layers.
 - `src/tui/`: Terminal UI for real-time progress tracking.
 - `src/prompts/`: System instructions for the various agent roles.
+
+## Service Architecture
+
+For detailed information about the service registry, dependency injection, and all registered services, see [SERVICE_ARCHITECTURE.md](SERVICE_ARCHITECTURE.md).

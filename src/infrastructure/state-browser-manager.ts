@@ -5,11 +5,14 @@
  */
 
 import type { SingletonState } from './types/state-types.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Manages browser server information in state
  */
-export class StateBrowserManager {
+export class StateBrowserManager implements IService {
+  readonly name = 'state-browser-manager';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
   /**
    * Get the current browser server information
    * @param state The current state
@@ -69,5 +72,21 @@ export class StateBrowserManager {
     }
 
     return true;
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 }

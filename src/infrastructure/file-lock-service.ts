@@ -7,8 +7,11 @@
 
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
+import * as pathmod from 'node:path';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import type { IService } from '../core/service-registry.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 
 /**
  * Lock configuration options
@@ -32,7 +35,11 @@ export interface FileLockOptions {
  * Provides cross-process file locking with UUID-based ownership verification.
  * Handles stale lock detection and cleanup.
  */
-export class FileLockService {
+export class FileLockService implements IService {
+  readonly name = 'file-lock-service';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+  private _initialized = false;
+
   private readonly lockFilePath: string;
   private readonly lockTimeout: number;
   private readonly lockRetries: number;
@@ -49,14 +56,32 @@ export class FileLockService {
     this.lockRetries = options.lockRetries ?? 100;
     this.lockRetryDelay = options.lockRetryDelay ?? 100;
     this.lockStaleThreshold = options.lockStaleThreshold ?? 30000;
+  }
+
+  async initialize(): Promise<void> {
+    if (this._initialized) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+
+    // Ensure lock directory exists
+    try {
+      const lockDir = pathmod.dirname(this.lockFilePath);
+      await fs.mkdir(lockDir, { recursive: true, mode: 0o700 });
+    } catch (err) {
+      logger.warn(`[FileLockService] Failed to create lock directory: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     // Clean up any stale locks on initialization (fire and forget)
-    this.cleanupStaleLocksOnStartup().catch((error: unknown) => {
-      logger.warn(
-        '[FileLockService] Failed to cleanup stale locks on startup:',
-        error instanceof Error ? error.message : String(error)
-      );
-    });
+    await this.cleanupStaleLocksOnStartup();
+    this._initialized = true;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    await this.cleanup();
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 
   /**
@@ -96,11 +121,19 @@ export class FileLockService {
     let contentionCount = 0;
 
     for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
+      // Use a LOCAL handle variable so that concurrent acquireLock() calls on
+      // the same instance cannot close each other's file handle through the
+      // shared this.lockHandle field. We only promote to this.lockHandle after
+      // the lock is fully and successfully acquired.
+      let handle: import('node:fs/promises').FileHandle | null = null;
       try {
         // Open lock file and write UUID immediately (atomic)
-        this.lockHandle = await fs.open(this.lockFilePath, 'wx');
-        await this.lockHandle.write(this.lockUuid);
-        await this.lockHandle.sync(); // Ensure UUID is written to disk
+        handle = await fs.open(this.lockFilePath, 'wx');
+        await handle.write(this.lockUuid);
+        await handle.sync(); // Ensure UUID is written to disk
+
+        // Fully acquired — commit to instance state
+        this.lockHandle = handle;
 
         const duration = Date.now() - startTime;
         metrics.observe('state_lock_acquire_duration_ms', duration);
@@ -111,6 +144,16 @@ export class FileLockService {
         }
         return;
       } catch (error: unknown) {
+        // Close the locally-opened handle only (never touch this.lockHandle here)
+        if (handle) {
+          try {
+            await handle.close();
+          } catch {
+            // Ignore close error
+          }
+          handle = null;
+        }
+
         if (error instanceof Error && 'code' in error) {
           const errnoError = error as NodeJS.ErrnoException;
           if (errnoError.code === 'EEXIST') {
@@ -155,11 +198,18 @@ export class FileLockService {
               }
             }
 
-            // Wait before retrying
-            if (Date.now() - startTime < this.lockTimeout) {
-              await this.sleep(this.lockRetryDelay);
-              continue;
+            // Check timeout before sleeping
+            if (Date.now() - startTime >= this.lockTimeout) {
+              const duration = Date.now() - startTime;
+              metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
+              metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
+              throw new Error(
+                `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms`,
+              );
             }
+
+            await this.sleep(this.lockRetryDelay);
+            continue;
           }
         }
         const duration = Date.now() - startTime;

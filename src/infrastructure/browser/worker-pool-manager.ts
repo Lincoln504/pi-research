@@ -14,6 +14,7 @@ import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { ensureBrowserCacheDir, getBrowserEnv } from '../browser-config.ts';
 import { getMaxWorkers } from './browser-configuration.ts';
+import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,7 +22,10 @@ const __dirname = dirname(__filename);
 /**
  * Worker pool manager for browser operations.
  */
-export class WorkerPoolManager {
+export class WorkerPoolManager implements IService {
+    readonly name = 'worker-pool-manager';
+    lifecycle = ServiceLifecycle.UNINITIALIZED;
+
     private pool: any | null = null;
     private poolInitializationPromise: Promise<any> | null = null;
     private currentWorkerCount: number | null = null;
@@ -166,5 +170,26 @@ export class WorkerPoolManager {
         this.poolInitializationPromise = null;
         this.currentWorkerCount = null;
         this.consecutiveErrors = 0;
+    }
+
+    async initialize(): Promise<void> {
+        if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+            return;
+        }
+        this.lifecycle = ServiceLifecycle.INITIALIZING;
+        logger.debug('[WorkerPoolManager] Initializing...');
+        this.lifecycle = ServiceLifecycle.INITIALIZED;
+        logger.debug('[WorkerPoolManager] Initialized');
+    }
+
+    async dispose(): Promise<void> {
+        if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+            return;
+        }
+        this.lifecycle = ServiceLifecycle.DISPOSING;
+        logger.debug('[WorkerPoolManager] Disposing...');
+        await this.shutdown();
+        this.lifecycle = ServiceLifecycle.DISPOSED;
+        logger.debug('[WorkerPoolManager] Disposed');
     }
 }

@@ -12,193 +12,148 @@
 
 import type { ResearchPlan } from '../core/service-interfaces.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
-import type { ResearchObserver } from './research-observer.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
 import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger } from '../logger.ts';
-import { metrics } from '../utils/metrics.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IWriterQueue } from '../core/service-interfaces.ts';
+import type { IWriterQueue, IResearchOrchestration } from '../core/service-interfaces.ts';
 import { getCachedScrapedContent, normalizeUrl } from '../utils/shared-links.ts';
-import {
-  RESEARCHER_LAUNCH_DELAY_MS,
-} from '../constants.ts';
-import { shouldStopResearch } from '../utils/session-state.ts';
 import { runResearcher } from './researcher-executor.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 
 /**
  * Research Orchestration Service
  *
  * Handles core orchestration logic for multi-round research.
  */
-export class ResearchOrchestrationService {
+export class ResearchOrchestrationService implements IResearchOrchestration {
+  readonly name = ServiceNames.RESEARCH_ORCHESTRATION;
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
+  async initialize(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+  async dispose(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+  }
+
   /**
    * Distribute search results to researchers based on query matching
    * @param plan - Research plan with researchers and queries
    * @param results - Search results from queries
    * @returns Map of researcher ID -> array of URLs
    */
-  distributeResults(plan: ResearchPlan, results: QueryResultWithError[]): Map<string, string[]> {
+  async distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[]): Promise<Map<string, string[]>> {
     const startTime = Date.now();
+    const queryToResults = new Map(results.map(r => [r.query, r.results || []]));
     const linkMap = new Map<string, string[]>();
-    if (!plan.researchers) return linkMap;
 
-    plan.researchers.forEach((r) => {
-      const ownedLinks: string[] = [];
-      const rQueries = new Set(
-        r.queries
-          .map((q: string) => q.toLowerCase().trim())
-          .filter(q => q.length > 0)
-      );
-
-      const rQueriesArr = Array.from(rQueries);
-
-      results.forEach((res) => {
-        const resQuery = String(res.query ?? '').toLowerCase().trim();
-        if (resQuery.length === 0) return;
-
-        let matched = rQueries.has(resQuery);
-
-        if (!matched) {
-          for (let i = 0; i < rQueriesArr.length; i++) {
-            const rq = rQueriesArr[i] as string;
-            if (resQuery.includes(rq) || rq.includes(resQuery)) {
-              matched = true;
-              break;
-            }
-          }
+    for (const researcher of plan.researchers || []) {
+      const researcherUrls = new Set<string>();
+      for (const query of researcher.queries || []) {
+        const queryResults = queryToResults.get(query) || [];
+        for (const res of queryResults) {
+          researcherUrls.add(res.url);
         }
-
-        if (matched) {
-          const items = res.results ?? [];
-          for (let i = 0; i < items.length; i++) {
-            const url = items[i]?.url;
-            if (url) ownedLinks.push(url);
-          }
-        }
-      });
-      linkMap.set(String(r.id), Array.from(new Set(ownedLinks)));
-    });
+      }
+      linkMap.set(String(researcher.id), Array.from(researcherUrls));
+    }
 
     logger.debug(`[ResearchOrchestrationService] Distributed ${results.length} results in ${Date.now() - startTime}ms`);
     return linkMap;
   }
 
   /**
-   * Run multiple researchers in parallel with concurrency control
-   * @param options - Options for running researchers
+   * Run researchers concurrently with launch delay
+   * @param options - Run options
+   * @param researcherLinks - Optional map of researcher ID -> search results
    */
-  async runResearchersParallel(options: RunResearchersOptions): Promise<void> {
-    const {
-      configs,
-      linksMap,
-      sessionId,
-      researchId,
-      round,
-      query,
-      complexity,
-      ctx,
-      model,
-      researchConfig: config,
-      planningService,
-      observer,
-      signal,
-      sessionStart,
-    } = options;
+  async runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>): Promise<void> {
+    const { plan, options: orchestratorOptions, currentRound, signal } = options;
+    const { sessionId, researchId, observer } = orchestratorOptions;
 
-    const queue = [...configs];
+    const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
-    const { MAX_CONCURRENT_RESEARCHERS } = config;
-    let lastLaunchTime = 0;
 
-    while (queue.length > 0 || active.size > 0) {
-      if (signal?.aborted) throw new Error('Research aborted.');
+    for (const configItem of researchers) {
+      if (signal?.aborted) break;
 
-      while (active.size < MAX_CONCURRENT_RESEARCHERS && queue.length > 0) {
-        const now = Date.now();
-        const timeSinceLastLaunch = now - lastLaunchTime;
-        if (lastLaunchTime > 0 && timeSinceLastLaunch < RESEARCHER_LAUNCH_DELAY_MS) {
-          await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS - timeSinceLastLaunch));
-        }
+      const promise = (async () => {
+        const id = String(configItem.id);
+        try {
+          const initialLinks = researcherLinks?.get(id) || [];
+          const historicalUrls = configItem.historicalLinks || [];
 
-        const configItem = queue.shift()!;
-        lastLaunchTime = Date.now();
-        const links = linksMap.get(String(configItem.id)) || [];
-        const histLinks = configItem.historicalLinks || [];
-
-        const p = runResearcher({
-          config: configItem,
-          initialLinks: links,
-          historicalUrls: histLinks,
-          sessionId,
-          researchId,
-          round,
-          query,
-          complexity,
-          ctx,
-          model,
-          researchConfig: config,
-          planningService,
-          observer,
-          signal,
-          sessionStart,
-        }).catch((err) => {
-          const errMsg = err.message || String(err);
-          logger.error(`[ResearchOrchestrationService] Researcher ${configItem.id} failed: ${errMsg}`);
-          observer?.onResearcherFailure?.(String(configItem.id), errMsg);
-          import('../utils/session-state.ts').then(({ recordResearcherFailure }) => {
-            recordResearcherFailure(sessionId, researchId, String(configItem.id));
+          await runResearcher({
+            ...orchestratorOptions,
+            configItem,
+            initialLinks,
+            historicalUrls,
+            currentRound,
+            signal
           });
-        }).finally(() => {
-          active.delete(p);
-        });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
+          
+          // Record failure for stopping logic
+          const { recordResearcherFailure } = await import('../utils/session-state.ts');
+          recordResearcherFailure(sessionId, researchId, id);
+          
+          // Notify observer
+          observer?.onResearcherFailure?.(id, errMsg);
+        }
+      })();
 
-        active.add(p);
+      active.add(promise);
+
+      // Throttled launch to prevent resource spikes
+      const RESEARCHER_LAUNCH_DELAY_MS = orchestratorOptions.config?.RESEARCHER_LAUNCH_DELAY_MS ?? 1000;
+      if (RESEARCHER_LAUNCH_DELAY_MS > 0 && researchers.indexOf(configItem) < researchers.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
       }
 
       if (active.size > 0) {
-        await Promise.race(active);
-
+        // We use Promise.race to keep concurrency controlled if we had a limit here,
+        // but currently we launch all with a delay. 
+        // We still check if we should stop after each launch.
+        
+        const { shouldStopResearch } = await import('../utils/session-state.ts');
         if (shouldStopResearch(sessionId, researchId)) {
-          const sessionService = (await import('./research-session-manager.ts')).getResearchSessionService();
+          const { getResearchSessionService } = await import('./research-session-manager.ts');
+          const sessionService = await getResearchSessionService();
           await sessionService.abortAllSessions();
 
           throw new Error('Research stopped due to excessive infrastructure failures. Multiple researchers failed.');
         }
       }
     }
+    
+    // Wait for remaining researchers
+    await Promise.all(active);
   }
 
   /**
    * Run a search burst for the given queries
    * @param queries - Array of search queries
    * @param config - Research configuration
-   * @param observer - Optional observer for progress callbacks
    * @param signal - Optional abort signal
+   * @param onProgress - Optional progress callback
    * @returns Search results
    */
   async runSearchBurst(
     queries: string[],
     config: any,
-    complexity: 1 | 2 | 3,
-    observer?: ResearchObserver,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onProgress?: (links: number) => void
   ): Promise<QueryResultWithError[]> {
-    observer?.onSearchStart?.(queries);
-    const searchStartMs = Date.now();
-    const searchResults = await search(queries, config, signal, (links) => {
-      observer?.onSearchProgress?.(links);
-    });
-    const searchDuration = Date.now() - searchStartMs;
-    metrics.observe('research_search_latency_ms', searchDuration, { mode: 'deep', complexity: String(complexity) });
-    const totalResults = searchResults.reduce((acc, r) => acc + (r.results?.length || 0), 0);
-    metrics.observe('research_search_results_total', totalResults, { mode: 'deep', complexity: String(complexity) });
-    observer?.onSearchComplete?.(totalResults);
+    const results = await search(queries, config, signal, onProgress);
+    const totalResults = results.reduce((sum, r) => sum + (r.results?.length || 0), 0);
     logger.info(`[ResearchOrchestrationService] Search burst completed. Total results: ${totalResults}`);
-    return searchResults;
+    return results;
   }
 
   /**
@@ -211,28 +166,33 @@ export class ResearchOrchestrationService {
     if (!config.KNOWLEDGE_STORE_ENABLED) return;
 
     try {
-      const synthesisService = (await import('./research-session-manager.ts')).getResearchSynthesisService();
+      const { getResearchSynthesisService } = await import('./research-session-manager.ts');
+      const synthesisService = await getResearchSynthesisService();
       const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
       const roundPrefix = `${round}.`;
       let enqueued = 0;
 
       for (const [key, report] of synthesisService.getAllReports().entries()) {
         if (!key.startsWith(roundPrefix)) continue;
-        const citations = parseCitations(report);
-        if (citations.length === 0) {
+
+        const links = parseCitations(report);
+        if (links.length === 0) {
           logger.warn(`[ResearchOrchestrationService] Researcher ${key} produced no parseable CITED LINKS - no descriptions stored`);
+          continue;
         }
-        for (const cit of citations) {
-          if (cit.url && cit.description) {
-            writer.enqueue({
-              url: normalizeUrl(cit.url),
-              markdown: cit.description,
-              content: getCachedScrapedContent(researchId, cit.url),
+
+        for (const link of links) {
+          const content = getCachedScrapedContent(researchId, link.url);
+          if (content) {
+            await writer.enqueue({
+              url: normalizeUrl(link.url),
+              text: content,
               metadata: {
-                ingestionType: 'synthesis-description',
-                source: 'researcher',
-                sourceOrigin: cit.source,
-                synthesizedAt: new Date().toISOString(),
+                researchId,
+                round,
+                researcherId: key,
+                description: link.description,
+                sourceOrigin: link.url,
               }
             });
             enqueued++;
@@ -251,33 +211,29 @@ export class ResearchOrchestrationService {
   /**
    * Run health check and log status
    * @param round - Current round number
+   * @param _researchId - Research ID (optional)
+   * @returns Promise<boolean> - True if healthy or degraded, false if unhealthy
    */
-  async runHealthCheck(round: number): Promise<void> {
-    if (round <= 1) return;
+  async checkHealth(round: number, _researchId?: string): Promise<boolean> {
+    if (round <= 1) return true;
 
     try {
       const health = await healthRegistry.runAll();
       if (health.status === 'healthy') {
         logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: ✅ All systems operational`);
+        return true;
       } else if (health.status === 'degraded') {
         const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
         logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: ⚠️ Degraded (${degraded.join(', ')})`);
+        return true;
       } else {
         const failed = health.components.filter(c => !c.healthy).map(c => c.component);
         logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: ❌ Unhealthy (${failed.join(', ')})`);
+        return false;
       }
     } catch (err) {
       logger.warn('[ResearchOrchestrationService] Failed to check health status:', err);
+      return true; // Don't stop research on health check error
     }
-  }
-
-  /**
-   * Get elapsed time since start
-   * @param startTime - Start time in milliseconds
-   * @returns Formatted elapsed time string
-   */
-  getElapsedTime(startTime: number): string {
-    const s = Math.round((Date.now() - startTime) / 1000);
-    return `+${s}s`;
   }
 }

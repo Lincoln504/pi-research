@@ -12,12 +12,8 @@ import type { IEmbedder, IKnowledgeStore, IWriterQueue } from '../core/service-i
 
 // Static imports from knowledge module
 import {
-  initKnowledgeStore as initKnowledgeStoreInternal,
-  shutdownKnowledgeStore as shutdownKnowledgeStoreInternal,
+  createKnowledgeStoreComponents,
   clearKnowledgeStore as clearKnowledgeStoreInternal,
-  getEmbedder as getKnowledgeEmbedder,
-  getStore as getKnowledgeStoreInternal,
-  getWriterQueue as getKnowledgeWriterQueueInternal,
   SUPPORTED_MODELS,
   getModelEmbedderConfig as getKnowledgeModelEmbedderConfig,
   getModelChunkConfig as getKnowledgeModelChunkConfig,
@@ -53,13 +49,12 @@ export class KnowledgeStoreService implements IService {
 
     this._initializationPromise = (async () => {
       try {
-        // Import and initialize the knowledge store
-        await initKnowledgeStoreInternal();
+        // Create the knowledge store components
+        const components = await createKnowledgeStoreComponents();
 
-        // Get the initialized components
-        this._embedder = await getKnowledgeEmbedder();
-        this._store = await getKnowledgeStoreInternal();
-        this._writerQueue = await getKnowledgeWriterQueueInternal();
+        this._embedder = components.embedder;
+        this._store = components.store;
+        this._writerQueue = components.writerQueue;
 
         const originalDevice = this._embedder?.getOriginalDevice() ?? '(unknown)';
         const actualDevice = this._embedder?.isInitialized() ? (this._embedder.getDevice() ?? '(deferred)') : '(deferred)';
@@ -80,7 +75,7 @@ export class KnowledgeStoreService implements IService {
   }
 
   async dispose(): Promise<void> {
-    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED || this.lifecycle === ServiceLifecycle.UNINITIALIZED) {
       return;
     }
 
@@ -88,8 +83,17 @@ export class KnowledgeStoreService implements IService {
     logger.debug('[KnowledgeStoreService] Disposing...');
 
     try {
-      // Import and shutdown the knowledge store
-      await shutdownKnowledgeStoreInternal();
+      if (this._writerQueue) {
+        await this._writerQueue.dispose?.();
+      }
+      
+      if (this._store) {
+        await this._store.close();
+      }
+
+      if (this._embedder) {
+        await this._embedder.dispose?.();
+      }
 
       this._embedder = null;
       this._store = null;
@@ -170,8 +174,7 @@ export class KnowledgeStoreService implements IService {
   async embed(text: string): Promise<number[]> {
     const embedder = await this.getEmbedder();
     const result = await embedder.embed(text);
-    // Convert Float32Array to number array if needed
-    return Array.isArray(result) ? result : Array.from(result);
+    return Array.from(result);
   }
 
   /**
@@ -180,20 +183,20 @@ export class KnowledgeStoreService implements IService {
   async embedMany(texts: string[]): Promise<number[][]> {
     const embedder = await this.getEmbedder();
     const results = await embedder.embedMany(texts);
-    // Convert Float32Array to number array if needed
-    return results.map(r => Array.isArray(r) ? r : Array.from(r));
+    return results.map(r => Array.from(r));
   }
 
   /**
    * Clear the knowledge store
    */
   async clear(): Promise<void> {
+    // Shutdown first to release locks
+    await this.dispose();
+    
+    // Clear the storage
     await clearKnowledgeStoreInternal();
     
-    // Re-initialize after clearing
-    this._embedder = null;
-    this._store = null;
-    this._writerQueue = null;
+    // Reset state
     this.lifecycle = ServiceLifecycle.UNINITIALIZED;
   }
 
@@ -225,92 +228,4 @@ export class KnowledgeStoreService implements IService {
   getModelChunkConfig(modelId: string): { chunkSize: number; overlapPct: number } {
     return getKnowledgeModelChunkConfig(modelId);
   }
-}
-
-// ============================================================================
-// Singleton Accessor (for backward compatibility)
-// ============================================================================
-
-let _knowledgeStoreServiceInstance: KnowledgeStoreService | null = null;
-
-/**
- * Get or create the knowledge store service instance
- */
-export function getKnowledgeStoreService(): KnowledgeStoreService {
-  if (!_knowledgeStoreServiceInstance) {
-    _knowledgeStoreServiceInstance = new KnowledgeStoreService();
-    _knowledgeStoreServiceInstance.initialize().catch(err => {
-      logger.error('[KnowledgeStoreService] Failed to initialize:', err);
-    });
-  }
-  return _knowledgeStoreServiceInstance;
-}
-
-/**
- * Reset the knowledge store service instance
- * Primarily used for testing
- */
-export function resetKnowledgeStoreService(): void {
-  if (_knowledgeStoreServiceInstance) {
-    _knowledgeStoreServiceInstance.dispose().catch(err => {
-      logger.error('[KnowledgeStoreService] Failed to dispose:', err);
-    });
-  }
-  _knowledgeStoreServiceInstance = null;
-}
-
-/**
- * Get the embedder (backward compatibility)
- */
-export async function getEmbedder(): Promise<IEmbedder> {
-  const service = getKnowledgeStoreService();
-  return service.getEmbedder();
-}
-
-/**
- * Get the store (backward compatibility)
- */
-export async function getStore(): Promise<IKnowledgeStore> {
-  const service = getKnowledgeStoreService();
-  return service.getStore();
-}
-
-/**
- * Get the writer queue (backward compatibility)
- */
-export async function getWriterQueue(): Promise<IWriterQueue> {
-  const service = getKnowledgeStoreService();
-  return service.getWriterQueue();
-}
-
-/**
- * Check if knowledge store is ready (backward compatibility)
- */
-export function isKnowledgeStoreReady(): boolean {
-  const service = getKnowledgeStoreService();
-  return service.isReady();
-}
-
-/**
- * Initialize knowledge store (backward compatibility)
- */
-export async function initKnowledgeStore(): Promise<void> {
-  const service = getKnowledgeStoreService();
-  return service.initialize();
-}
-
-/**
- * Shutdown knowledge store (backward compatibility)
- */
-export async function shutdownKnowledgeStore(): Promise<void> {
-  const service = getKnowledgeStoreService();
-  return service.dispose();
-}
-
-/**
- * Clear knowledge store (backward compatibility)
- */
-export async function clearKnowledgeStore(): Promise<void> {
-  const service = getKnowledgeStoreService();
-  return service.clear();
 }

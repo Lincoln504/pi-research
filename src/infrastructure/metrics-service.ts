@@ -207,45 +207,5 @@ export class MetricsService implements IService {
   }
 }
 
-// ============================================================================
-// Singleton Accessor (for backward compatibility)
-// ============================================================================
-
-let _metricsServiceInstance: MetricsService | null = null;
-
-/**
- * Get or create the metrics service instance
- */
-export function getMetricsService(): MetricsService {
-  if (!_metricsServiceInstance) {
-    _metricsServiceInstance = new MetricsService();
-    _metricsServiceInstance.initialize().catch(err => {
-      logger.error('[MetricsService] Failed to initialize:', err);
-    });
-  }
-  return _metricsServiceInstance;
-}
-
-/**
- * Reset the metrics service instance
- * Primarily used for testing
- */
-export function resetMetricsService(): void {
-  if (_metricsServiceInstance) {
-    _metricsServiceInstance.dispose().catch(err => {
-      logger.error('[MetricsService] Failed to dispose:', err);
-    });
-  }
-  _metricsServiceInstance = null;
-}
-
-/**
- * Get the global metrics registry (backward compatibility)
- */
-export function getMetrics(): MetricsRegistry {
-  const service = getMetricsService();
-  return service.getRegistry();
-}
-
-// Re-export convenience functions from utils/metrics.ts
-export { type Labels, MetricsRegistry } from '../utils/metrics.ts';
+    // Re-export convenience functions from utils/metrics.ts
+    export { type Labels, MetricsRegistry } from '../utils/metrics.ts';

@@ -5,9 +5,12 @@
  * Allows tests to skip gracefully when dependencies (e.g. camoufox) are not available.
  */
 
-import { isBrowserAvailable, stopBrowserManager } from '../../../src/infrastructure/browser-manager.ts';
+import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
+import { stopBrowserManager } from '../../../src/infrastructure/browser-cleanup.ts';
 import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';
+import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
+import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
 
 async function importLogger() {
   try {
@@ -41,13 +44,33 @@ export async function setupLifecycle(): Promise<TestContext> {
 
   logger.log('[test] Browser available, initializing integration test lifecycle...');
   
+  // Initialize Service Registry
+  try {
+    registerCoreServices();
+    registerInfrastructureServices();
+    // Provide a mock context for services that need it (like PlanningService)
+    const mockCtx = {
+      cwd: process.cwd(),
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
+        hasConfiguredAuth: () => true,
+      },
+    };
+    await initializeCoreServices(mockCtx);
+    logger.log('[test] Service Registry initialized for integration tests');
+  } catch (err) {
+    logger.error('[test] Failed to initialize Service Registry:', err);
+    // Don't throw here, let individual tests fail if they need services
+  }
+  
   return {
     lifecycleInitialized: true,
     skipTests: () => false,
     init: async () => {},
     shutdown: async () => {
-      logger.log('[test] Shutting down browser manager...');
+      logger.log('[test] Shutting down browser manager and disposing services...');
       await stopBrowserManager();
+      await disposeCoreServices();
     },
   };
 }

@@ -8,11 +8,17 @@ import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import { logger } from '../logger.ts';
+import type { IService } from '../core/service-registry.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
 
 /**
  * Manages backup and recovery for state files
  */
-export class StateBackupManager {
+export class StateBackupManager implements IService {
+  readonly name = 'state-backup-manager';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+  private _initialized = false;
+
   private readonly stateFilePath: string;
   private readonly backupDirPath: string;
   private readonly maxBackups: number;
@@ -21,6 +27,23 @@ export class StateBackupManager {
     this.stateFilePath = stateFilePath;
     this.backupDirPath = backupDirPath;
     this.maxBackups = maxBackups;
+  }
+
+  async initialize(): Promise<void> {
+    if (this._initialized) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    // Ensure backup directory exists
+    await fs.mkdir(this.backupDirPath, { recursive: true, mode: 0o700 });
+    this._initialized = true;
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    // Nothing to dispose
+    this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 
   /**
@@ -36,6 +59,9 @@ export class StateBackupManager {
         // No state file to backup
         return;
       }
+
+      // Ensure backup directory exists
+      await fs.mkdir(this.backupDirPath, { recursive: true, mode: 0o700 });
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupFileName = `research-state-${timestamp}.json`;
@@ -128,8 +154,13 @@ export class StateBackupManager {
   async writeDefaultState(): Promise<void> {
     const defaultState = this.getDefaultState();
     defaultState.lastUpdated = Date.now();
+    
+    // Ensure parent directory exists
+    const stateDir = path.dirname(this.stateFilePath);
+    await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
+
     const tempFile = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
-    const tempPath = path.join(path.dirname(this.stateFilePath), tempFile);
+    const tempPath = path.join(stateDir, tempFile);
     await fs.writeFile(tempPath, JSON.stringify(defaultState, null, 2), 'utf-8');
     await fs.rename(tempPath, this.stateFilePath);
   }

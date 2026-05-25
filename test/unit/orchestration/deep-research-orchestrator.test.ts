@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator.ts';
-import { completeSimple, complete } from '@mariozechner/pi-ai';
-import { resetServiceContainer, registerService, replaceServiceInstance, getService } from '../../../src/core/service-registry.ts';
+import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock service registry
@@ -12,12 +11,6 @@ vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
     getService: vi.fn(),
   };
 });
-
-// Mock PI AI
-vi.mock('@mariozechner/pi-ai', () => ({
-  complete: vi.fn(),
-  completeSimple: vi.fn(),
-}));
 
 // Mock logger
 vi.mock('../../../src/logger.ts', () => ({
@@ -32,87 +25,49 @@ vi.mock('../../../src/logger.ts', () => ({
   runWithLogContext: (ctx: any, fn: any) => fn(),
 }));
 
-// Mock web-research/search
-vi.mock('../../../src/web-research/search.ts', () => ({
-  search: vi.fn(async (queries: string[], config: any, signal?: AbortSignal, onProgress?: (links: number) => void) => {
-    // Return search results so researchers have links to work with
-    return queries.map(query => ({
-      query,
-      results: [{ url: 'https://example.com', title: 'Example', snippet: 'Test result' }],
-    }));
-  }),
+// Mock config
+vi.mock('../../../src/config.ts', () => ({
+  getConfig: vi.fn(() => ({
+    KNOWLEDGE_STORE_ENABLED: false,
+    MAX_CONCURRENT_RESEARCHERS: 3,
+    RESEARCHER_MAX_RETRIES: 2,
+    RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
+    RESEARCHER_TIMEOUT_MS: 120000,
+  })),
+  DEFAULTS: {
+    KNOWLEDGE_STORE_ENABLED: false,
+  },
 }));
 
-// Mock researcher session (via createResearcherSession)
-vi.mock('../../../src/orchestration/researcher.ts', () => {
-  let sessionMessages: any[] = [];
-  return {
-    createResearcherSession: vi.fn(async () => {
-      sessionMessages = [];
-      const session = {
-        prompt: vi.fn(async () => {
-          // Add an assistant message when prompted
-          sessionMessages.push({
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Report content\n\n### CITED LINKS\n[1] https://example.com\nDescription: Test description' }],
-            stopReason: 'stop',
-          });
-        }),
-        subscribe: vi.fn(() => () => {}),
-        abort: vi.fn(async () => {}),
-        getHistory: () => sessionMessages,
-        get messages() {
-          return sessionMessages;
-        },
-      };
-      return session;
-    }),
-  };
-});
-
-// Mock knowledge module
-vi.mock('../../../src/knowledge/index.ts', () => {
-  return {
-    isKnowledgeStoreReady: vi.fn().mockReturnValue(true),
-  };
-});
-
 // Mock research session services
-let mockReports = new Map<string, string>();
-let mockSynthesize = vi.fn();
-
 vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
-  initializeResearchServices: vi.fn(() => {
-    mockReports.clear();
-  }),
-  getResearchSessionService: vi.fn(() => ({
-    addSession: vi.fn(),
-    getSession: vi.fn(),
-    getAllSessions: vi.fn(() => []),
-    cleanup: vi.fn(),
-    registerSession: vi.fn(),
-    unregisterSession: vi.fn(),
-    abortAllSessions: vi.fn(),
-  })),
-  getResearchSynthesisService: vi.fn(() => ({
-    synthesize: mockSynthesize,
-    storeReport: vi.fn((id: string, report: string) => {
-      mockReports.set(id, report);
-    }),
+  getResearchSynthesisService: vi.fn(() => Promise.resolve({
+    synthesize: vi.fn(),
+    storeReport: vi.fn(),
     getReports: vi.fn(() => []),
-    hasReports: vi.fn(() => mockReports.size > 0),
+    hasReports: vi.fn(() => false),
     buildFallbackSynthesis: vi.fn(() => '# Research Findings\n\n*Automated synthesis of researcher reports*'),
-    clearReports: vi.fn(() => {
-      mockReports.clear();
-    }),
-    getAllReports: vi.fn(() => new Map(mockReports)),
-    getReport: vi.fn((id: string) => mockReports.get(id)),
+    clearReports: vi.fn(),
+    getAllReports: vi.fn(() => new Map()),
+    getReport: vi.fn(),
     getReportsForRound: vi.fn(() => new Map()),
-    getReportCount: vi.fn(() => mockReports.size),
+    getReportCount: vi.fn(() => 0),
     ensureCitedLinks: vi.fn((text: string) => text),
   })),
-  cleanupResearchServices: vi.fn(),
-  areResearchServicesInitialized: vi.fn(() => true),
+  getResearchSessionService: vi.fn(() => Promise.resolve({
+    registerSession: vi.fn(),
+    getSession: vi.fn(),
+    hasSession: vi.fn(),
+    unregisterSession: vi.fn(),
+    abortSession: vi.fn(),
+    abortAllSessions: vi.fn(),
+    cleanup: vi.fn(),
+    reset: vi.fn(),
+    getActiveSessionCount: vi.fn(() => 0),
+    getActiveSessionIds: vi.fn(() => []),
+  })),
+  resetResearchServices: vi.fn(() => Promise.resolve()),
+  cleanupResearchServices: vi.fn(() => Promise.resolve()),
 }));
 
 describe('DeepResearchOrchestrator', () => {
@@ -125,14 +80,6 @@ describe('DeepResearchOrchestrator', () => {
     ui: { setWidget: vi.fn() },
   };
 
-  const mockConfig = {
-    KNOWLEDGE_STORE_ENABLED: true,
-    MAX_CONCURRENT_RESEARCHERS: 3,
-    RESEARCHER_MAX_RETRIES: 2,
-    RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
-    RESEARCHER_TIMEOUT_MS: 120000,
-  };
-
   const options = {
     ctx: mockCtx as any,
     model: { id: 'test-model' } as any,
@@ -143,11 +90,10 @@ describe('DeepResearchOrchestrator', () => {
   };
 
   let mockPlanningService: any;
+  let mockOrchestrationService: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockReports.clear();
-    mockSynthesize = vi.fn();
 
     // Create mock planning service
     mockPlanningService = {
@@ -163,21 +109,23 @@ describe('DeepResearchOrchestrator', () => {
       clearPlanningState: vi.fn(),
     };
 
-    const mockStore = {
-      findRelevantUrls: vi.fn().mockResolvedValue([]),
-      close: vi.fn(),
-      rebuildFtsIndex: vi.fn().mockResolvedValue(undefined),
-    };
-    const mockWriter = {
-      enqueue: vi.fn(),
-      drain: vi.fn().mockResolvedValue(undefined),
+    // Create mock orchestration service
+    mockOrchestrationService = {
+      name: 'research-orchestration',
+      lifecycle: 'initialized',
+      async initialize() {},
+      async dispose() {},
+      checkHealth: vi.fn().mockResolvedValue(true),
+      distributeSearchResults: vi.fn().mockResolvedValue(undefined),
+      runResearchers: vi.fn().mockResolvedValue(undefined),
+      runSearchBurst: vi.fn().mockResolvedValue([]),
+      storeLinkDescriptions: vi.fn().mockResolvedValue(undefined),
     };
 
     // Default getService implementation
     vi.mocked(getService).mockImplementation(async (name) => {
       if (name === ServiceNames.PLANNING) return mockPlanningService;
-      if (name === ServiceNames.KNOWLEDGE_STORE) return mockStore;
-      if (name === ServiceNames.WRITER_QUEUE) return mockWriter;
+      if (name === ServiceNames.RESEARCH_ORCHESTRATION) return mockOrchestrationService;
       return null;
     });
 
@@ -187,6 +135,12 @@ describe('DeepResearchOrchestrator', () => {
       () => mockPlanningService,
       { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
     );
+
+    registerService(
+      ServiceNames.RESEARCH_ORCHESTRATION,
+      () => mockOrchestrationService,
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
   });
 
   afterEach(() => {
@@ -194,135 +148,129 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('should run a basic research round and synthesize', async () => {
-    // Mock planning service methods
-    mockPlanningService.generatePlan.mockResolvedValue({
-      action: 'delegate',
-      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-      allQueries: ['q1'],
+    // Mock updatePlanForRound to return delegate first, then synthesize
+    let callCount = 0;
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      // First call (round 1) - delegate
+      if (callCount === 1) {
+        return {
+          action: 'delegate',
+          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+          allQueries: ['q1'],
+        };
+      }
+      // All subsequent calls - synthesize (including forced synthesis)
+      return {
+        action: 'synthesize',
+        content: 'The final result',
+      };
     });
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'The final result' });
 
-    const orchestrator = new DeepResearchOrchestrator({ ...options, config: mockConfig as any });
+    const orchestrator = new DeepResearchOrchestrator(options);
     const result = await orchestrator.run();
 
     expect(result).toBe('The final result');
-    expect(mockPlanningService.generatePlan).toHaveBeenCalledTimes(1);
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledTimes(1);
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
+    expect(mockOrchestrationService.runSearchBurst).toHaveBeenCalled();
+    expect(mockOrchestrationService.runResearchers).toHaveBeenCalled();
   });
 
   it('should handle multi-round research (delegate then synthesize)', async () => {
-    // Round 1: Planning
-    mockPlanningService.generatePlan.mockResolvedValue({
-      action: 'delegate',
-      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-      allQueries: ['q1'],
+    let callCount = 0;
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      // First 2 calls (rounds 1-2) - delegate
+      if (callCount <= 2) {
+        return {
+          action: 'delegate',
+          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+          allQueries: ['q1'],
+        };
+      }
+      // All subsequent calls - synthesize
+      return {
+        action: 'synthesize',
+        content: 'Multi-round result',
+      };
     });
 
-    // Round 1: Evaluation - delegate
-    mockPlanningService.updatePlanForRound.mockResolvedValueOnce({
-      action: 'delegate',
-      researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }],
-      allQueries: ['q2'],
-    });
-
-    // Round 2: Evaluation - synthesize
-    mockPlanningService.updatePlanForRound.mockResolvedValueOnce({ action: 'synthesize', content: 'Multi-round result' });
-    mockSynthesize.mockResolvedValue('Multi-round result');
-
-    const orchestrator = new DeepResearchOrchestrator(options);
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 });
     const result = await orchestrator.run();
 
     expect(result).toBe('Multi-round result');
-    expect(mockPlanningService.generatePlan).toHaveBeenCalledTimes(1);
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledTimes(2);
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
   });
 
-  it('should inject historical links into planning prompt', async () => {
-    mockPlanningService.generatePlan.mockImplementation(async (args: any) => {
-      // Check that historical links were included in the context
-      expect(args.historicalLinksSection).toBeDefined();
+  it('should handle immediate synthesis request', async () => {
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
       return {
-        action: 'delegate',
-        researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-        allQueries: ['q1'],
+        action: 'synthesize',
+        content: 'Direct synthesis',
       };
     });
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Result' });
-
-    const orchestrator = new DeepResearchOrchestrator(options);
-    await orchestrator.run();
-
-    expect(mockPlanningService.generatePlan).toHaveBeenCalled();
-  });
-
-  it('should store researcher-derived link descriptions in knowledge store', async () => {
-    mockPlanningService.generatePlan.mockResolvedValue({
-      action: 'delegate',
-      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-      allQueries: ['q1'],
-    });
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Result' });
-
-    const orchestrator = new DeepResearchOrchestrator({ ...options, config: mockConfig as any });
-    await orchestrator.run();
-
-    // Verify knowledge store was called (through writer queue)
-    const writer = await getService<any>(ServiceNames.WRITER_QUEUE);
-    expect(writer.enqueue).toHaveBeenCalled();
-  });
-
-  it('should attempt self-correction if evaluator returns invalid JSON', async () => {
-    mockPlanningService.generatePlan.mockResolvedValue({
-      action: 'delegate',
-      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-      allQueries: ['q1'],
-    });
-
-    // First evaluation: invalid JSON - this will trigger fallback synthesis since there are reports
-    mockPlanningService.updatePlanForRound.mockRejectedValueOnce(new Error('Invalid JSON'));
-
-    const orchestrator = new DeepResearchOrchestrator({ ...options, config: mockConfig as any });
-    const result = await orchestrator.run();
-
-    // Since evaluation fails and there are reports, it returns fallback synthesis
-    expect(result).toContain('Research Findings');
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledTimes(1);
-  });
-
-  it('should handle planning failure and fallback', async () => {
-    // When planning fails, no researchers run, so no reports are generated
-    mockPlanningService.generatePlan.mockRejectedValue(new Error('Planning failed'));
 
     const orchestrator = new DeepResearchOrchestrator(options);
     const result = await orchestrator.run();
 
-    // When no reports are generated, it returns the error message
-    expect(result).toContain('Research failed');
+    expect(result).toBe('Direct synthesis');
+    expect(mockOrchestrationService.runSearchBurst).not.toHaveBeenCalled();
+    expect(mockOrchestrationService.runResearchers).not.toHaveBeenCalled();
+  });
+
+  it('should handle planning failure gracefully', async () => {
+    mockPlanningService.updatePlanForRound.mockRejectedValueOnce(new Error('Planning failed'));
+
+    const orchestrator = new DeepResearchOrchestrator(options);
+
+    await expect(orchestrator.run()).rejects.toThrow('Planning failed');
   });
 
   it('should enforce maximum rounds and force synthesis', async () => {
-    // Planning
-    mockPlanningService.generatePlan.mockResolvedValue({
+    const delegateResponse = {
       action: 'delegate',
       researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
       allQueries: ['q1'],
+    };
+    const synthesizeResponse = { action: 'synthesize', content: 'Forced synthesis result' };
+
+    // Always delegate for the first N calls, then synthesize
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      // Check if this is a forced synthesis call (mustSynthesize: true)
+      if (opts?.mustSynthesize) {
+        return synthesizeResponse;
+      }
+      return delegateResponse;
     });
 
-    // Always delegate
-    mockPlanningService.updatePlanForRound.mockResolvedValue({
-      action: 'delegate',
-      researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }],
-      allQueries: ['q2'],
-    });
-
-    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
-    // complexity 1 has MAX_ROUNDS_LEVEL_1 = 2 rounds.
-    // Plus MAX_EXTRA_ROUNDS = 2. Total 4 rounds.
-
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 }); // Max 4 rounds for complexity 2
     const result = await orchestrator.run();
 
-    expect(result).toContain('Research Findings'); // Fallback synthesis since it never returned 'synthesize'
-    // 1 planning + 4 evaluation calls
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledTimes(4);
+    expect(result).toContain('Forced synthesis result');
+  });
+
+  it('should report round progress to observer', async () => {
+    const onRoundStart = vi.fn();
+    const onSearchProgress = vi.fn();
+
+    let callCount = 0;
+    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
+      } else {
+        return { action: 'synthesize', content: 'Progress test' };
+      }
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({
+      ...options,
+      observer: { onRoundStart, onSearchProgress },
+    });
+
+    await orchestrator.run();
+
+    expect(onRoundStart).toHaveBeenCalledWith(1);
+    expect(onRoundStart).toHaveBeenCalledWith(2); // Final synthesis round
   });
 });

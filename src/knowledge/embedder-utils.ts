@@ -5,7 +5,6 @@
  */
 
 import { env as hfEnv } from '@huggingface/transformers';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import * as os from 'node:os';
 
@@ -71,12 +70,6 @@ export function markWebGpuFallback(): void {
  */
 export function initializeONNXEnv(): void {
   hfEnv.cacheDir = getModelCacheDir();
-
-  try {
-    const _nodeRequire = createRequire(import.meta.url);
-    const { env: ortEnv } = _nodeRequire('onnxruntime-common') as { env: { logLevel?: string } };
-    if (ortEnv) ortEnv.logLevel = 'error';
-  } catch { /* ignore */ }
 
   try {
     const envObj = hfEnv as unknown as HFEnv;

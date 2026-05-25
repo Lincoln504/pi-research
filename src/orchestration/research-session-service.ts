@@ -10,6 +10,7 @@
 
 import type { AgentSession } from '@mariozechner/pi-coding-agent';
 import { logger } from '../logger.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Session entry with abort capability
@@ -24,7 +25,10 @@ export interface SessionEntry {
  *
  * Manages the lifecycle of researcher agent sessions.
  */
-export class ResearchSessionService {
+export class ResearchSessionService implements IService {
+  readonly name = 'research-session-service';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
   private activeSessions = new Map<string, SessionEntry>();
 
   /**
@@ -109,5 +113,26 @@ export class ResearchSessionService {
    */
   reset(): void {
     this.activeSessions.clear();
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    logger.debug('[ResearchSessionService] Initializing...');
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+    logger.debug('[ResearchSessionService] Initialized');
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    logger.debug('[ResearchSessionService] Disposing...');
+    await this.cleanup();
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+    logger.debug('[ResearchSessionService] Disposed');
   }
 }

@@ -3,18 +3,98 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { StateManager } from '../../../src/infrastructure/state-manager.ts';
+import { ProcessLifecycleService } from '../../../src/infrastructure/process-lifecycle-service.ts';
+import { GPUResourceService } from '../../../src/infrastructure/gpu-resource-service.ts';
+import { StateSessionManager } from '../../../src/infrastructure/state-session-manager.ts';
+import { StateBrowserManager } from '../../../src/infrastructure/state-browser-manager.ts';
+import { StateMetricsCollector } from '../../../src/infrastructure/state-metrics.ts';
+import { StateValidator } from '../../../src/infrastructure/state-validator.ts';
+import { FileLockService } from '../../../src/infrastructure/file-lock-service.ts';
+import { StateBackupManager } from '../../../src/infrastructure/state-backup-manager.ts';
 
 describe('StateManager Integration-style Tests', () => {
   const testDir = path.join(os.tmpdir(), `pi-test-state-${Date.now()}`);
   let manager: StateManager;
+  let processLifecycle: ProcessLifecycleService;
+  let fileLockService: FileLockService;
+  let backupManager: StateBackupManager;
+  let gpuResourceService: GPUResourceService;
+  let sessionManager: StateSessionManager;
+  let browserManager: StateBrowserManager;
+  let metricsCollector: StateMetricsCollector;
+  let validator: StateValidator;
 
   beforeEach(async () => {
     // Ensure fresh test directory
     await fs.mkdir(testDir, { recursive: true });
-    manager = new StateManager(testDir);
+
+    // Create a process lifecycle service for tests
+    processLifecycle = new ProcessLifecycleService();
+    await processLifecycle.initialize();
+
+    // Create file lock service
+    const lockDirPath = path.join(testDir, '.locks');
+    await fs.mkdir(lockDirPath, { recursive: true });
+    fileLockService = new FileLockService({
+      lockFilePath: path.join(lockDirPath, 'research-state.lock'),
+    });
+    await fileLockService.initialize();
+
+    // Create backup manager
+    const backupDirPath = path.join(testDir, 'backups');
+    await fs.mkdir(backupDirPath, { recursive: true });
+    backupManager = new StateBackupManager(
+      path.join(testDir, 'research-state.json'),
+      backupDirPath,
+      10 // maxBackups
+    );
+    await backupManager.initialize();
+
+    // Create all required dependencies
+    gpuResourceService = new GPUResourceService({ processLifecycle });
+    await gpuResourceService.initialize();
+
+    sessionManager = new StateSessionManager(processLifecycle);
+    await sessionManager.initialize();
+
+    browserManager = new StateBrowserManager();
+    await browserManager.initialize();
+
+    metricsCollector = new StateMetricsCollector();
+    await metricsCollector.initialize();
+
+    validator = new StateValidator();
+    await validator.initialize();
+
+    // Create state manager with all dependencies
+    manager = new StateManager({
+      stateDir: testDir,
+      processLifecycle,
+      fileLockService,
+      backupManager,
+      gpuResourceService,
+      sessionManager,
+      browserManager,
+      metricsCollector,
+      validator,
+    });
   });
 
   afterEach(async () => {
+    // Cleanup state manager
+    try {
+      await manager.cleanup();
+    } catch { /* ignore cleanup errors */ }
+    
+    // Cleanup all services
+    for (const service of [validator, metricsCollector, browserManager, sessionManager, gpuResourceService, processLifecycle]) {
+      if (service) {
+        try {
+          await service.dispose();
+        } catch { /* ignore */ }
+      }
+    }
+    
     // Cleanup test directory
     try {
       await fs.rm(testDir, { recursive: true, force: true });
@@ -109,9 +189,12 @@ describe('StateManager Integration-style Tests', () => {
     await manager.addSession('stale-session', 'container');
     
     // Artificially age the session in state file
-    const state = await manager.readState();
-    state.sessions['stale-session']!.lastSeen = Date.now() - 10000; // 10s old
-    await manager.writeState(state);
+    await manager.updateState(async (state) => {
+      if (state.sessions['stale-session']) {
+        state.sessions['stale-session'].lastSeen = Date.now() - 10000; // 10s old
+      }
+      return state;
+    });
     
     // Cleanup with 5s timeout
     const removed = await manager.cleanupStaleSessions(5000);
@@ -144,16 +227,89 @@ describe('StateManager Integration-style Tests', () => {
 describe('StateManager GPU lock', () => {
   const testDir = path.join(os.tmpdir(), `pi-test-gpu-lock-${Date.now()}`);
   let manager: StateManager;
+  let processLifecycle: ProcessLifecycleService;
+  let fileLockService: FileLockService;
+  let backupManager: StateBackupManager;
+  let gpuResourceService: GPUResourceService;
+  let sessionManager: StateSessionManager;
+  let browserManager: StateBrowserManager;
+  let metricsCollector: StateMetricsCollector;
+  let validator: StateValidator;
 
   beforeEach(async () => {
     await fs.mkdir(testDir, { recursive: true });
-    manager = new StateManager(testDir);
+
+    // Create a process lifecycle service for tests
+    processLifecycle = new ProcessLifecycleService();
+    await processLifecycle.initialize();
+
+    // Create file lock service
+    const lockDirPath = path.join(testDir, '.locks');
+    await fs.mkdir(lockDirPath, { recursive: true });
+    fileLockService = new FileLockService({
+      lockFilePath: path.join(lockDirPath, 'research-state.lock'),
+    });
+    await fileLockService.initialize();
+
+    // Create backup manager
+    const backupDirPath = path.join(testDir, 'backups');
+    await fs.mkdir(backupDirPath, { recursive: true });
+    backupManager = new StateBackupManager(
+      path.join(testDir, 'research-state.json'),
+      backupDirPath,
+      10 // maxBackups
+    );
+    await backupManager.initialize();
+
+    // Create all required dependencies
+    gpuResourceService = new GPUResourceService({ processLifecycle });
+    await gpuResourceService.initialize();
+
+    sessionManager = new StateSessionManager(processLifecycle);
+    await sessionManager.initialize();
+
+    browserManager = new StateBrowserManager();
+    await browserManager.initialize();
+
+    metricsCollector = new StateMetricsCollector();
+    await metricsCollector.initialize();
+
+    validator = new StateValidator();
+    await validator.initialize();
+
+    // Create state manager with all dependencies
+    manager = new StateManager({
+      stateDir: testDir,
+      processLifecycle,
+      fileLockService,
+      backupManager,
+      gpuResourceService,
+      sessionManager,
+      browserManager,
+      metricsCollector,
+      validator,
+    });
   });
 
   afterEach(async () => {
+    // Cleanup state manager
+    try {
+      await manager.cleanup();
+    } catch { /* ignore cleanup errors */ }
+
+    // Cleanup all services
+    for (const service of [validator, metricsCollector, browserManager, sessionManager, gpuResourceService, backupManager, fileLockService, processLifecycle]) {
+      if (service) {
+        try {
+          await service.dispose();
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Cleanup test directory
     try {
       await fs.rm(testDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
+    } catch { /* ignore cleanup errors */ }
   });
 
   it('acquireGpuLock returns true and persists owner to state', async () => {

@@ -162,16 +162,19 @@ describe('Knowledge Store Migrations', () => {
         {
           url: 'https://example.com/ml',
           text: 'Machine learning algorithms for pattern recognition',
-          metadata: { chunkIndex: 0 },
+          metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' },
           timestamp: Date.now(),
         },
         {
           url: 'https://example.com/ai',
           text: 'Artificial intelligence and neural networks',
-          metadata: { chunkIndex: 0 },
+          metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' },
           timestamp: Date.now(),
         },
       ]);
+
+      // Small delay to ensure documents are indexed
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Perform search before migration
       const resultsBefore = await store.search('machine learning', { limit: 5 });

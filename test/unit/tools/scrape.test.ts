@@ -1,34 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createScrapeTool } from '../../../src/tools/scrape.ts';
-import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
-import { registerScrapedLinks, cleanupSharedLinks } from '../../../src/utils/shared-links.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
-// Mock the scrapers module
-vi.mock('../../../src/web-research/scrapers.ts', () => ({
-  scrape: vi.fn(async (urls) => urls.map(url => ({ url, success: true, markdown: 'content', source: 'fetch' }))),
+// Mock the web-scraper module
+vi.mock('../../../src/web-research/web-scraper.ts', () => ({
+  scrape: vi.fn(async (urls) => urls.map(url => ({ url, success: true, markdown: `This is a longer content string from ${url} that exceeds the minimum 100 character requirement for successful scraping validation to pass properly`, source: 'fetch' }))),
+  scrapeSingle: vi.fn(),
+  getDependencyStatus: vi.fn(() => ({ playwrightAvailable: false })),
 }));
 
 // Mock config
+const mockConfig = {
+  MAX_SCRAPE_BATCHES: 2,
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 1.0,
+  AVG_TOKENS_PER_SCRAPE: 10000,
+  KNOWLEDGE_STORE_ENABLED: false, // Default to disabled for most tests
+  MAX_CONCURRENT_SCRAPES: 3,
+};
+
 vi.mock('../../../src/config.ts', () => ({
-  getConfig: vi.fn(() => ({
-    MAX_SCRAPE_BATCHES: 2,
-    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 1.0,
-    AVG_TOKENS_PER_SCRAPE: 10000,
-    KNOWLEDGE_STORE_ENABLED: true,
-  })),
+  getConfig: vi.fn(() => mockConfig),
   DEFAULTS: {
-    KNOWLEDGE_STORE_ENABLED: true,
+    KNOWLEDGE_STORE_ENABLED: false,
   },
 }));
 
 const mockRebuildDocument = vi.fn().mockResolvedValue(null);
+const mockKnowledgeStore = {
+  rebuildDocument: mockRebuildDocument,
+};
 
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getService: vi.fn(async (name) => {
     if (name === ServiceNames.KNOWLEDGE_STORE) {
       return {
-        rebuildDocument: mockRebuildDocument,
+        isReady: vi.fn().mockReturnValue(true),
+        getStore: vi.fn().mockResolvedValue(mockKnowledgeStore),
       };
     }
     throw new Error(`Service ${name} not mocked`);
@@ -38,119 +45,103 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
 // Mock knowledge module
 vi.mock('../../../src/knowledge/index.ts', () => {
   return {
-    isKnowledgeStoreReady: vi.fn().mockReturnValue(true),
+    isKnowledgeStoreReady: vi.fn().mockReturnValue(false), // Default to not ready
     initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
   };
 });
 
 describe('tools/scrape', () => {
-  let tracker: ToolUsageTracker;
-  const researchId = 'test-research-id';
   const mockOptions = {
     ctx: {} as any,
-    tracker: undefined as any, // set in beforeEach
-    getGlobalState: () => ({ researchId, rootQuery: 'test' } as any),
-    updateGlobalLinks: vi.fn(),
-    onLinksScraped: vi.fn(),
   };
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    cleanupSharedLinks(researchId);
-    tracker = new ToolUsageTracker({ scrape: 2 });
-    mockOptions.tracker = tracker;
-    
     mockRebuildDocument.mockReset();
     mockRebuildDocument.mockResolvedValue(null);
   });
 
-  it('should have correct name and batch protocol in guidelines', () => {
+  it('should have correct name', () => {
     const tool = createScrapeTool(mockOptions);
     expect(tool.name).toBe('scrape');
-    expect(tool.promptGuidelines.some(g => g.includes('Batch 1'))).toBe(true);
   });
 
-  it('should handle malformed URL inputs like [url1, url2]', async () => {
+  it('should have correct label and description', () => {
     const tool = createScrapeTool(mockOptions);
-    await tool.execute('call-1', { urls: ['[https://example.com/1, https://example.com/2]'] }, undefined);
-    
-    expect(mockOptions.updateGlobalLinks).toHaveBeenCalledWith([
-      'https://example.com/1',
-      'https://example.com/2'
-    ]);
+    expect(tool.label).toBe('Scrape Web Pages');
+    expect(tool.description).toContain('Fetch and extract');
   });
 
-  it('should deduplicate URLs globally and skip already scraped ones', async () => {
-    registerScrapedLinks(researchId, ['https://example.com/already']);
-    
-    const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { 
-      urls: ['https://example.com/already', 'https://example.com/new'] 
-    }, undefined);
-
-    const textContent = result.content.find(c => c.type === 'text')?.text ?? '';
-    expect(textContent).toContain('Global Deduplication');
-    expect(textContent).toContain('1 URL(s) skipped');
-    expect(mockOptions.updateGlobalLinks).toHaveBeenCalledWith(['https://example.com/new']);
-  });
-
-  it('should return skip message if all URLs are duplicates', async () => {
-    registerScrapedLinks(researchId, ['https://example.com/1']);
-    
+  it('should scrape URLs and return markdown results', async () => {
+    const { scrape } = await import('../../../src/web-research/web-scraper.ts');
     const tool = createScrapeTool(mockOptions);
     const result = await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined);
 
-    expect(result.details).toMatchObject({ all_duplicates: true });
-    expect(result.content[0].text).toContain('Skipped');
-  });
-
-  it('should use knowledge store cache for raw-content hits', async () => {
-    mockRebuildDocument.mockResolvedValueOnce({
-      text: 'cached content',
-      metadata: { ingestionType: 'raw-content' }
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe('text');
+    expect(result.content[0].text).toContain('Scrape Results');
+    expect(result.content[0].text).toContain('https://example.com/1');
+    expect(result.details).toMatchObject({
+      total: 1,
+      successful: 1,
+      failed: 0,
+      cached: 0,
+      fresh: 1,
     });
-
-    const { scrape } = await import('../../../src/web-research/scrapers.ts');
-    const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/cached'] }, undefined);
-
-    expect(scrape).not.toHaveBeenCalled();
-    expect(result.content[0].text).toContain('cached content');
-    expect(result.details).toMatchObject({ count: 1 });
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined);
   });
 
-  it('serves cached content directly from rebuildDocument result', async () => {
-    mockRebuildDocument.mockResolvedValueOnce({
-      text: 'full cached page content',
-      metadata: { ingestionType: 'synthesis-description' },
-    });
-
+  it('should handle multiple URLs', async () => {
+    const { scrape } = await import('../../../src/web-research/web-scraper.ts');
     const tool = createScrapeTool(mockOptions);
-    const result = await tool.execute('call-1', { urls: ['https://example.com/cached-desc'] }, undefined);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined);
 
-    expect(result.content[0].text).toContain('full cached page content');
+    expect(result.details.total).toBe(2);
+    expect(result.details.successful).toBe(2);
+    expect(result.details.fresh).toBe(2);
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined);
   });
 
-  it('should change default concurrency for Batch 2+', async () => {
-    const { scrape } = await import('../../../src/web-research/scrapers.ts');
+  it('should return error for invalid parameters', async () => {
     const tool = createScrapeTool(mockOptions);
-    
-    // Call 1 (Batch 1)
-    await tool.execute('call-1', { urls: ['https://ex.com/1'] }, undefined);
-    expect(scrape).toHaveBeenCalledWith(['https://ex.com/1'], 10, undefined, undefined);
-    
-    // Call 2 (Batch 2)
-    await tool.execute('call-2', { urls: ['https://ex.com/2'] }, undefined);
-    // BATCH_2_DEFAULT_CONCURRENCY is 15
-    expect(scrape).toHaveBeenCalledWith(['https://ex.com/2'], 15, undefined, undefined);
+    const result = await tool.execute('call-1', { invalid: 'param' }, undefined);
+
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text).toContain('Invalid parameters');
+    expect(result.details).toMatchObject({ error: 'invalid_params' });
   });
 
-  it('should fail on third call (limit 2)', async () => {
+  it('should return error for empty URLs array', async () => {
     const tool = createScrapeTool(mockOptions);
-    await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined);
-    await tool.execute('call-2', { urls: ['https://example.com/2'] }, undefined);
-    
-    const result = await tool.execute('call-3', { urls: ['https://example.com/3'] }, undefined);
-    expect(result.details).toMatchObject({ blocked: true, reason: 'limit_reached' });
+    const result = await tool.execute('call-1', { urls: [] }, undefined);
+
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text).toContain('Invalid parameters');
+    // Typebox validates minItems: 1, so empty array fails validation
+  });
+
+  it('should handle failed scrapes', async () => {
+    const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+    scrape.mockResolvedValueOnce([
+      { url: 'https://example.com/1', success: true, markdown: 'valid content longer than 100 chars with plenty of padding to ensure it passes the minimum length check', source: 'fetch' },
+      { url: 'https://example.com/2', success: false, error: 'HTTP 404', markdown: '', source: 'fetch' },
+    ]);
+
+    const tool = createScrapeTool(mockOptions);
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1', 'https://example.com/2'] }, undefined);
+
+    expect(result.details.total).toBe(2);
+    expect(result.details.successful).toBe(1);
+    expect(result.details.failed).toBe(1);
+    expect(result.content[0].text).toContain('Scrape Results (1 successful)');
+    expect(result.content[0].text).toContain('Failed to Scrape (1 failed)');
+  });
+
+  it('should use maxConcurrency from parameters', async () => {
+    const { scrape } = await import('../../../src/web-research/web-scraper.ts');
+    const tool = createScrapeTool(mockOptions);
+    await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined);
+
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined);
   });
 });

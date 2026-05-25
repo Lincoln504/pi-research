@@ -9,8 +9,6 @@ import { getConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
-import { stopBrowserManager } from './infrastructure/browser-cleanup.ts';
-import { getClientAgent } from './infrastructure/browser/client-agent.ts';
 import { resetTerminalState } from './utils/terminal-state.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
@@ -72,7 +70,7 @@ export default async function (pi: ExtensionAPI) {
   let initializationResult: { initialized: string[]; failed: string[] } | null = null;
   try {
     logger.log('[pi-research] Waiting for core services to initialize...');
-    initializationResult = await initializeCoreServices();
+    initializationResult = await initializeCoreServices(pi);
     
     // Verify critical services are ready
     if (initializationResult.failed.length > 0) {
@@ -166,55 +164,29 @@ export default async function (pi: ExtensionAPI) {
 
   // Register cleanup tasks in the order they should run in reverse:
   // Tasks run in REVERSE order of registration (last registered runs first)
-  //
-  // Execution order (reverse of registration):
-  // 1. stopBrowserManager (runs last - slow, up to 10s for pool destruction)
-  // 2. destroy HTTP agent (runs second)
-  // 3. clearAllSessionState (runs third - fast)
-  // 4. resetTerminalState (runs fourth - fast, prevents ghost character leaks on reload)
-  // 5. disposeCoreServices (runs first - disposes all registered services including KnowledgeStore)
-  //
-  // NOTE: shutdownKnowledgeStore() is NOT registered separately because disposeCoreServices()
-  // already handles disposal of the KnowledgeStoreService. Double-disposal causes errors.
-  shutdownManager.register(async () => {
-    await stopBrowserManager();
-  });
 
-  // Destroy HTTP agent to prevent socket leaks on all shutdown paths
-  shutdownManager.register(() => {
-    const clientAgent = getClientAgent();
-    if (clientAgent) {
-      clientAgent.destroy();
-      logger.log('[pi-research] HTTP agent destroyed');
-    }
-  });
-
-  // Clear all session state on shutdown to ensure timeouts are cleared
-  shutdownManager.register(() => {
-    clearAllSessionState();
-  });
-
-  // FIX #4: Reset terminal state on shutdown to prevent ghost character leaks
-  // This is crucial for /reload scenarios where terminal protocol responses
-  // might arrive after the extension stops but before the new instance starts.
+  // 1. Reset terminal state on shutdown to prevent ghost character leaks
   shutdownManager.register(async () => {
     try {
       await resetTerminalState();
       logger.debug('[pi-research] Terminal state reset on shutdown');
     } catch (_error) {
-      // Ignore terminal reset errors - stdout might be closed
+      // Ignore terminal reset errors
     }
   });
 
-  // Dispose all core services first (runs before all other cleanup)
-  // This ensures services are properly disposed before their dependencies are cleaned up
+  // 2. Clear all session state on shutdown
+  shutdownManager.register(() => {
+    clearAllSessionState();
+  });
+
+  // 3. Dispose all core services (runs FIRST in execution order because it is registered last)
   shutdownManager.register(async () => {
     try {
       await disposeCoreServices();
-      logger.log('[pi-research] Core services disposed');
+      logger.log('[pi-research] All services disposed');
     } catch (err) {
       logger.error('[pi-research] Failed to dispose core services:', err);
-      // Continue with cleanup - don't block shutdown
     }
   });
 
@@ -309,28 +281,10 @@ export default async function (pi: ExtensionAPI) {
   //   /research-config                    - Opens interactive TUI menu
   //   /research-config <section>          - Direct access to section (health|errors|knowledge|settings|metrics)
   //   /research-config <section> <action>  - Direct action (e.g., health run, errors clear)
-  //   
-  // Backward compatibility: old commands still work (e.g., /health, /errors)
   pi.registerCommand('research-config', {
     description: 'Research configuration and management (health, errors, knowledge, settings, metrics)',
     handler: async (args, ctx) => {
       await handleResearchConfigCommand(args, ctx, pi);
-    },
-  });
-
-  // Register backward compatibility aliases for old commands
-  // These routes are handled by the consolidated research-config command
-  pi.registerCommand('health', {
-    description: 'Run system health checks',
-    handler: async (args, ctx) => {
-      await handleResearchConfigCommand(`health run ${args}`, ctx, pi);
-    },
-  });
-
-  pi.registerCommand('knowledge-migrate', {
-    description: 'Migrate knowledge store (alias for: /research-config knowledge migrate)',
-    handler: async (args, ctx) => {
-      await handleResearchConfigCommand(`knowledge migrate ${args}`, ctx, pi);
     },
   });
 

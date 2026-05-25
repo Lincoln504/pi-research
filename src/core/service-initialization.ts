@@ -10,6 +10,7 @@ import { ServiceNames } from './service-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { HealthCheckService } from './health-check-service.ts';
 import { PlanningService } from './planning-service.ts';
+import { ResearchOrchestrationService } from '../orchestration/research-orchestration-service.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -51,6 +52,17 @@ export function registerCoreServices(): void {
     }
   );
 
+  // Register Research Orchestration Service
+  registerService(
+    ServiceNames.RESEARCH_ORCHESTRATION,
+    () => new ResearchOrchestrationService(),
+    {
+      lazyInitialization: true,
+      allowOverwrite: false,
+      enableLogging: true,
+    }
+  );
+
   logger.debug('[ServiceInitialization] All core services registered');
 }
 
@@ -58,14 +70,9 @@ export function registerCoreServices(): void {
  * Initialize all core services
  * This is called early in the application startup
  *
- * Services are initialized in dependency order:
- * - Services marked with lazyInitialization: false are eagerly initialized
- * - Other services are initialized lazily on first use
- *
- * Note: Infrastructure services (Metrics, StateManager, HealthCheckCache, BrowserManager)
- * are always initialized early as they form the foundation for other services.
+ * @param ctx - Optional extension context to pass to services
  */
-export async function initializeCoreServices(): Promise<{ initialized: string[]; failed: string[] }> {
+export async function initializeCoreServices(ctx?: any): Promise<{ initialized: string[]; failed: string[] }> {
   logger.log('[ServiceInitialization] Initializing core services...');
 
   const initialized: string[] = [];
@@ -74,6 +81,15 @@ export async function initializeCoreServices(): Promise<{ initialized: string[];
   // Critical infrastructure services (always initialize early)
   const criticalInfrastructure = [
     { name: ServiceNames.METRICS, label: 'Metrics Service' },
+    { name: ServiceNames.PROCESS_LIFECYCLE, label: 'Process Lifecycle Service' },
+    { name: ServiceNames.STATE_PATH_CONFIGURATION, label: 'State Path Configuration' },
+    { name: ServiceNames.FILE_LOCK_SERVICE, label: 'File Lock Service' },
+    { name: ServiceNames.STATE_BACKUP_MANAGER, label: 'State Backup Manager' },
+    { name: ServiceNames.STATE_SESSION_MANAGER, label: 'State Session Manager' },
+    { name: ServiceNames.STATE_BROWSER_MANAGER, label: 'State Browser Manager' },
+    { name: ServiceNames.STATE_METRICS_COLLECTOR, label: 'State Metrics Collector' },
+    { name: ServiceNames.STATE_VALIDATOR, label: 'State Validator' },
+    { name: ServiceNames.GPU_RESOURCE_SERVICE, label: 'GPU Resource Service' },
     { name: ServiceNames.STATE_MANAGER, label: 'State Manager Service' },
     { name: ServiceNames.HEALTH_CHECK_CACHE, label: 'Health Check Cache Service' },
   ];
@@ -87,6 +103,8 @@ export async function initializeCoreServices(): Promise<{ initialized: string[];
   const lazyServices = [
     ServiceNames.SCHEDULER,
     ServiceNames.KNOWLEDGE_STORE,
+    ServiceNames.RESEARCH_ORCHESTRATION,
+    ServiceNames.WORKER_POOL_MANAGER,
   ];
 
   try {
@@ -95,10 +113,8 @@ export async function initializeCoreServices(): Promise<{ initialized: string[];
     for (const service of criticalInfrastructure) {
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
-        const svc = await getService<any>(service.name);
-        if (svc.initialize) {
-          await svc.initialize();
-        }
+        // getService will call initialize(ctx) if not already initialized
+        await getService<any>(service.name, ctx);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
       } catch (err) {
@@ -114,10 +130,7 @@ export async function initializeCoreServices(): Promise<{ initialized: string[];
     for (const service of eagerServices) {
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
-        const svc = await getService<any>(service.name);
-        if (svc.initialize) {
-          await svc.initialize();
-        }
+        await getService<any>(service.name, ctx);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
       } catch (err) {

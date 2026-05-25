@@ -115,7 +115,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       },
     });
 
-    const sessionService = getResearchSessionService();
+    const sessionService = await getResearchSessionService();
     sessionService.registerSession(id, session, () => session.abort().catch(() => {}));
 
     const subscription = session.subscribe((event: any) => {
@@ -182,7 +182,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round) });
       logger.debug(`[ResearcherExecutor] Researcher ${id} Final Response:\n${responseText}`);
 
-      const synthesisService = getResearchSynthesisService();
+      const synthesisService = await getResearchSynthesisService();
       synthesisService.storeReport(`${round}.${id}`, responseText);
 
       observer?.onResearcherComplete?.(id, responseText);

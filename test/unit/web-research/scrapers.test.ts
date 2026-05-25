@@ -16,7 +16,7 @@ vi.mock('../../../src/web-research/utils.ts', () => ({
   }),
 }));
 
-vi.mock('../../../src/infrastructure/browser-manager.ts', () => ({
+vi.mock('../../../src/infrastructure/browser/index.ts', () => ({
   runBrowserTask: mockRunBrowserTask,
   runBrowserHealthCheck: mockRunBrowserHealthCheck,
   runWorkerSearch: mockRunWorkerSearch,
@@ -143,7 +143,7 @@ describe('scrapers', () => {
         text: async () => '<html><head><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/js/CHL_CORE/v1"></script></head></html>',
       }));
       
-      const { runBrowserTask } = await import('../../../src/infrastructure/browser-manager.ts');
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
       vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser also blocked'));
 
       const result = await scrapeSingle('https://protected-site.com/page');
@@ -159,7 +159,7 @@ describe('scrapers', () => {
         text: async () => '<p>Too short.</p>',
       }));
 
-      const { runBrowserTask } = await import('../../../src/infrastructure/browser-manager.ts');
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
       vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser also returned stub'));
 
       const result = await scrapeSingle('https://other-site.com/stub');
@@ -173,7 +173,7 @@ describe('scrapers', () => {
     it('falls back to browser when fetch fails', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network failure')));
       
-      const { runBrowserTask } = await import('../../../src/infrastructure/browser-manager.ts');
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
       vi.mocked(runBrowserTask).mockResolvedValue({
         html: '<p>Content from browser. ' + 
               'Word word word word word word word word word word ' +
@@ -194,7 +194,7 @@ describe('scrapers', () => {
     it('returns failure if both fetch and browser fail', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Fetch failed')));
       
-      const { runBrowserTask } = await import('../../../src/infrastructure/browser-manager.ts');
+      const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
       vi.mocked(runBrowserTask).mockRejectedValue(new Error('Browser failed'));
 
       const result = await scrapeSingle('https://example.com/total-fail');

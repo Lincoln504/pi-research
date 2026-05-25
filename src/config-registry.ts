@@ -41,32 +41,3 @@ export function parseCommandArgs(args: string): CommandArgs {
  * Known sections for routing
  */
 export const KNOWN_SECTIONS = ['health', 'knowledge', 'settings', 'metrics'] as const;
-
-/**
- * Backward compatibility command map
- */
-export interface CommandMap {
-  [key: string]: () => Promise<void>;
-}
-
-export function createBackwardCompatibilityMap(
-  context: any,
-  pi: any,
-  healthModule: any,
-  knowledgeModule: any
-): CommandMap {
-  return {
-    'health-clear': () => {
-      healthModule.clearHealthCache(context);
-      return Promise.resolve();
-    },
-    'health-history': () => {
-      healthModule.showHealthHistory(context, pi);
-      return Promise.resolve();
-    },
-    'knowledge-migrate': () => {
-      knowledgeModule.handleKnowledgeMigration(undefined, context);
-      return Promise.resolve();
-    },
-  };
-}

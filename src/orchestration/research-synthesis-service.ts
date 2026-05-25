@@ -11,13 +11,17 @@
 
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger } from '../logger.ts';
+import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
 /**
  * Research Synthesis Service
  *
  * Aggregates researcher reports and builds final synthesis.
  */
-export class ResearchSynthesisService {
+export class ResearchSynthesisService implements IService {
+  readonly name = 'research-synthesis-service';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
   private reports = new Map<string, string>();
 
   /**
@@ -186,5 +190,26 @@ export class ResearchSynthesisService {
    */
   reset(): void {
     this.reports.clear();
+  }
+
+  async initialize(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.INITIALIZING;
+    logger.debug('[ResearchSynthesisService] Initializing...');
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+    logger.debug('[ResearchSynthesisService] Initialized');
+  }
+
+  async dispose(): Promise<void> {
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
+      return;
+    }
+    this.lifecycle = ServiceLifecycle.DISPOSING;
+    logger.debug('[ResearchSynthesisService] Disposing...');
+    this.reports.clear();
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+    logger.debug('[ResearchSynthesisService] Disposed');
   }
 }

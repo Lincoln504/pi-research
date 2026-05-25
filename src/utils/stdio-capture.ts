@@ -117,8 +117,7 @@ function createConsolePatch(level: string, logFile: string, hasSufficientDiskSpa
       message: args.map(formatArg).join(' '),
     };
     try {
-      const { appendFileSync } = require('node:fs');
-      appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+      fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
     } catch { /* ignore */ }
   };
 }
@@ -137,7 +136,6 @@ export async function captureStdio<T>(
 
   isAnyLoggerCapturingOutput = true;
 
-  const { appendFileSync } = require('node:fs');
   const decoder = new TextDecoder();
 
   // Save originals
@@ -204,7 +202,7 @@ export async function captureStdio<T>(
       message: message.trim(),
     };
     try {
-      appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+      fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
     } catch { /* ignore */ }
 
     if (typeof cb === 'function') cb();
@@ -231,7 +229,7 @@ export async function captureStdio<T>(
         message: message.trim(),
       };
       try {
-        appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+        fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
       } catch { /* ignore */ }
 
       const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
@@ -260,7 +258,7 @@ export async function captureStdio<T>(
         message: message.trim(),
       };
       try {
-        appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+        fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
       } catch { /* ignore */ }
 
       const cb = typeof encodingOrCb === 'function' ? encodingOrCb : callback;
@@ -302,7 +300,7 @@ export async function captureStdio<T>(
               message: message.trim(),
             };
             try {
-              appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
+              fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
             } catch { /* ignore */ }
             return (typeof chunk === 'string' ? Buffer.from(chunk).length : (chunk as any).length);
           }

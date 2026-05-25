@@ -14,7 +14,6 @@ import { getService } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
-import type { IService } from './service-registry.ts';
 import type { ISchedulerFactory } from './scheduler-factory.ts';
 
 
@@ -30,23 +29,6 @@ export interface ISchedulerInstance {
   shutdown(): Promise<void>;
   schedulerId?: string;
   [key: string]: any;
-}
-
-// ============================================================================
-// Singleton Scheduler Service Instance
-// ============================================================================
-
-let _schedulerServiceInstance: SchedulerService | null = null;
-
-/**
- * Get the singleton SchedulerService instance
- * This is the only way to access the scheduler service across the application
- */
-export function getSchedulerService(): SchedulerService {
-  if (!_schedulerServiceInstance) {
-    _schedulerServiceInstance = new SchedulerService();
-  }
-  return _schedulerServiceInstance;
 }
 
 // ============================================================================
@@ -70,7 +52,7 @@ interface ISchedulerInternal {
  * Wraps the browser scheduler with proper service lifecycle management
  * All state is managed within the instance - no module-level state
  */
-export class SchedulerService implements IService {
+export class SchedulerService implements IScheduler {
   readonly name = 'scheduler';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
@@ -134,18 +116,17 @@ export class SchedulerService implements IService {
     this.lifecycle = ServiceLifecycle.DISPOSING;
     logger.debug('[SchedulerService] Disposing...');
 
-    // Shutdown the scheduler if it exists
-    if (this._scheduler?.shutdown) {
-      try {
-        await this._scheduler.shutdown();
-        logger.debug('[SchedulerService] Scheduler shutdown complete');
-      } catch (err) {
-        logger.warn('[SchedulerService] Error during scheduler shutdown:', err);
-      }
-      this._scheduler = null;
+    try {
+      // Import stopBrowserManager dynamically to avoid circular dependencies
+      const { stopBrowserManager } = await import('../infrastructure/browser/browser-lifecycle.ts');
+      await stopBrowserManager();
+      logger.debug('[SchedulerService] Browser manager stopped');
+    } catch (err) {
+      logger.warn('[SchedulerService] Error during browser manager shutdown:', err);
     }
 
-    // Clear shared state
+    // Clear internal state
+    this._scheduler = null;
     this._sharedState = {
       schedulerInstance: null,
       schedulerVersion: null,

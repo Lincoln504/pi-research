@@ -2,7 +2,6 @@
  * Browser Infrastructure - Public API
  *
  * This module exports all browser-related functionality.
- * Provides backward compatibility with the original browser-manager API.
  */
 
 // Configuration utilities
@@ -41,6 +40,7 @@ export {
     runWorkerSearch,
 } from './task-execution-service.ts';
 
-// For backward compatibility, also export with the old names
-export { generateSchedulerVersion as _internalGenerateSchedulerVersion } from './browser-configuration.ts';
-export { getSchedulerVersion as _internalGetSchedulerVersion } from './browser-configuration.ts';
+// Lifecycle management
+export {
+    stopBrowserManager,
+} from './browser-lifecycle.ts';

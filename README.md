@@ -107,12 +107,26 @@ Run `/research-config` in pi to edit these settings interactively.
 **Commands**
 - `npm run lint` / `npm run lint:fix` — Code quality
 - `npm run type-check` — TypeScript verification
-- `npm run test:unit` — Unit tests
-- `npm run test:integration` — Integration tests
+- `npm run test:unit` — Unit tests (844 tests)
+- `npm run test:integration` — Integration tests (219 tests)
 - `npm run test:coverage` — Coverage report
 
+**Architecture**
+- **Service Registry Pattern**: Centralized dependency injection container manages all services
+- **Constructor DI**: All services use constructor-based dependency injection for testability
+- **Pure ESM**: The project uses ES Modules (`"type": "module"` in package.json)
+- **Core Services**: PlanningService, SchedulerService, HealthCheckService, and more provide foundation functionality
+
 ---
+
+## Test Status
+
+- **Unit Tests**: 844 passing tests across 58 test files
+- **Integration Tests**: 219 passing tests across 9 test files (49 skipped)
+- **Module System**: Pure ESM (no CommonJS dependencies)
 
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design information.
+
+See [docs/SERVICE_ARCHITECTURE.md](docs/SERVICE_ARCHITECTURE.md) for service registry and dependency injection details.

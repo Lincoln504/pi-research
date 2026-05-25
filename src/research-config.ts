@@ -78,28 +78,6 @@ async function routeDirectAction(
     return;
   }
 
-  // Map old command names to new equivalents (backward compatibility)
-  const commandMap: Record<string, () => Promise<void>> = {
-    'health-clear': () => {
-      healthModule.clearHealthCache(ctx);
-      return Promise.resolve();
-    },
-    'health-history': () => {
-      healthModule.showHealthHistory(ctx, pi);
-      return Promise.resolve();
-    },
-    'knowledge-migrate': () => {
-      knowledgeModule.handleKnowledgeMigration(params[0], ctx);
-      return Promise.resolve();
-    },
-  };
-
-  // Check for backward compatibility aliases
-  if (section && commandMap[section]) {
-    await commandMap[section]();
-    return;
-  }
-
   if (section) {
     ctx.ui.notify(`Unknown section: ${section}. Use /research-config for help.`, 'error');
   }
@@ -109,7 +87,7 @@ async function routeDirectAction(
 // Health Management Actions (delegated to health-command module)
 // ============================================================================
 
-export { handleHealthAction, runHealthCheck, showHealthHistory, showHealthSummary, clearHealthCache } from './commands/health-command.ts';
+export { handleHealthAction, runHealthCheck } from './commands/health-command.ts';
 
 // ============================================================================
 // Knowledge Store Actions (delegated to knowledge-command module)
@@ -121,7 +99,7 @@ export { handleKnowledgeAction, showKnowledgeStatus, handleKnowledgeMigration, s
 // Settings Actions (delegated to settings-command module)
 // ============================================================================
 
-export { handleSettingsAction, showSettings, showSettingsEditor, resetSettings } from './commands/settings-command.ts';
+export { handleSettingsAction, showSettingsSummary } from './commands/settings-command.ts';
 
 // ============================================================================
 // Metrics Actions (delegated to metrics-command module)
@@ -202,18 +180,8 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
           settings: [
             { id: 'view', label: 'View Settings', description: 'Show current configuration', action: async () => {
               this.showStatus('Loading settings...');
-              await settingsModule.showSettings({ ui: ctx.ui, hasUI: ctx.hasUI ?? false, cwd: ctx.cwd }, pi);
+              await settingsModule.showSettingsSummary({ ui: ctx.ui }, pi);
               this.clearStatus();
-            }},
-            { id: 'edit', label: 'Edit Settings', description: 'Interactive configuration editor', action: async () => {
-              this.showStatus('Opening settings editor...');
-              await settingsModule.showSettingsEditor(ctx, pi);
-              this.clearStatus();
-            }},
-            { id: 'reset', label: 'Reset to Defaults', description: 'Reset all settings to defaults', action: () => {
-              settingsModule.resetSettings({ ui: ctx.ui, hasUI: ctx.hasUI ?? false, cwd: ctx.cwd });
-              this.showStatus('Settings reset (reload required)');
-              setTimeout(() => this.clearStatus(), 3000);
             }},
             { id: 'back', label: '← Back to Main', description: 'Return to main menu', action: () => {
               this.currentSection = 'main';

@@ -2,473 +2,118 @@
  * Poolifier Worker
  *
  * Executes search and scrape tasks in worker processes using Camoufox.
+ *
+ * This module coordinates the worker lifecycle, browser management,
+ * and task execution using extracted sub-modules.
  */
 
 import { ClusterWorker } from 'poolifier';
-import { createRequire } from 'node:module';
-import * as fs from 'node:fs';
-import process from 'node:process';
-import cluster from 'node:cluster';
 import crypto from 'node:crypto';
-import { getRandomRealisticUA } from '../utils/user-agent.ts';
 
-const require = createRequire(import.meta.url);
-
-// Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
-if (cluster.isWorker && cluster.worker) {
-    cluster.worker.on('error', (err: any) => {
-        if (err && err.code === 'ERR_IPC_CHANNEL_CLOSED') {
-            return;
-        }
-        throw err;
-    });
-}
+// Import extracted modules
+import {
+  setWorkerId as setLifecycleWorkerId,
+  setupIpcErrorHandler,
+  setupOrphanProtection,
+  createKillHandler,
+  setBrowserCleanup,
+} from './thread-worker-lifecycle.ts';
+import {
+  setWorkerId,
+  initBrowser,
+  getContext,
+  resetBrowser,
+  cleanupBrowser,
+} from './thread-worker-browser.ts';
+import {
+  setWorkerId as setMessagingWorkerId,
+  executeSearchTask,
+  executeScrapeTask,
+  executeHealthCheck,
+  shouldResetBrowser,
+} from './thread-worker-messaging.ts';
+import type { TaskData, TaskResult } from './thread-worker-types.ts';
 
 // Generate a random ID for this worker process to track distribution in logs
 const workerId = crypto.randomBytes(2).toString('hex');
 
-// Orphaned worker protection: If parent dies, kill the worker.
-// This works cross-platform (Linux, Mac, Windows) in Node.js.
-let orphanCheckTimer: NodeJS.Timeout | null = null;
-if (process.ppid) {
-    orphanCheckTimer = setInterval(async () => {
-        try {
-            // signal 0 checks if the process is alive
-            process.kill(process.ppid, 0);
-        } catch (_e) {
-            // If error is thrown, the parent process is likely dead or unreachable
-            logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
-            // FIX: Await cleanup to prevent browser/context leaks
-            if (context) await context.close().catch(() => {});
-            if (browser) await browser.close().catch(() => {});
-            // Clear the orphan check timer to prevent it from keeping the event loop alive
-            if (orphanCheckTimer) {
-                clearInterval(orphanCheckTimer);
-                orphanCheckTimer = null;
-            }
-            process.exit(1);
-        }
-    }, 10000);
-    if (orphanCheckTimer) orphanCheckTimer.unref();
-    }
+// Set worker ID in all modules
+setLifecycleWorkerId(workerId);
+setWorkerId(workerId);
+setMessagingWorkerId(workerId);
+
+// Setup IPC error handler
+setupIpcErrorHandler();
+
+// Setup browser cleanup callback for lifecycle module
+setBrowserCleanup(cleanupBrowser);
+
+// Setup orphaned worker protection
+setupOrphanProtection();
 
 /**
- * File-based logger for workers that mirrors the main process format
+ * Main task execution function
  */
-function logToDebugFile(level: string, ...args: any[]): void {
-    const logFile = process.env['PI_RESEARCH_LOG_FILE'];
-    if (!logFile) return;
-
-    try {
-        const timestamp = new Date().toISOString();
-        const entry = {
-            timestamp,
-            level,
-            workerId,
-            message: args.map(arg => {
-                if (arg instanceof Error) return arg.stack || arg.message;
-                if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg);
-                return String(arg);
-            }).join(' ')
-        };
-        fs.appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
-    } catch {
-        // ignore
-    }
-}
-
-// Warm browser: Reuse browser instance across tasks.
-let browser: any = null;
-let context: any = null;
-let initPromise: Promise<void> | null = null;
-
-async function initBrowser(): Promise<void> {
-    const isBrowserConnected = () => {
-        try {
-            return browser && typeof browser.isConnected === 'function' && browser.isConnected();
-        } catch {
-            return false;
-        }
-    };
-
-    if (isBrowserConnected() && context) return;
-
-    if (initPromise) return initPromise;
-
-    initPromise = (async () => {
-        try {
-            if (!isBrowserConnected() || !context) {
-                logToDebugFile('INFO', `[Worker-${workerId}] Initializing browser instance...`);
-
-                let CamoufoxModule: any;
-                try {
-                    CamoufoxModule = require('camoufox-js');
-                } catch (e: any) {
-                    throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
-                }
-
-                const { Camoufox } = CamoufoxModule;
-
-                // Launch browser without user_data_dir so Playwright creates an isolated
-                // temp profile per instance. This avoids persistent-context semantics
-                // (where context.browser() returns null) and the profile-lock contention
-                // that came with sharing a single user_data_dir path.
-                const launchedBrowser = await Camoufox({
-                    headless: true,
-                    humanize: true,
-
-                    // ENHANCED STEALTH OPTIONS
-                    addons: [
-                        'stealth',           // Core stealth features
-                        'canvas',            // Canvas fingerprint protection
-                        'webgl',             // WebGL fingerprint spoofing
-                        'fonts',             // Font fingerprint randomization
-                        'audio',             // Audio context spoofing
-                        'media',             // Media device spoofing
-                        'locale',            // Locale/language mimicking
-                        'permissions',       // Permission spoofing
-                    ],
-
-                    // Screen properties to mimic real display
-                    screen: {
-                        width: 1920,
-                        height: 1080,
-                        colorDepth: 24,
-                        pixelRatio: 1,
-                    },
-
-                    // Locale and timezone to match a real user
-                    locale: 'en-US',
-                    timezone: 'America/New_York',
-
-                    // Geolocation (optional, can be randomized)
-                    geolocation: {
-                        latitude: 40.7128,  // New York City
-                        longitude: -74.0060,
-                    },
-
-                    // Use realistic User-Agent
-                    userAgent: getRandomRealisticUA(),
-
-                    // Disable automation indicators that Cloudflare detects
-                    exclude: [
-                        '--enable-automation',
-                        '--disable-blink-features=AutomationControlled',
-                    ],
-                });
-
-                context = await launchedBrowser.newContext({
-                    viewport: { width: 1920, height: 1080 },
-                });
-
-                browser = launchedBrowser;
-                logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
-            }
-        } catch (e: any) {
-            // Close any partially-launched browser to avoid orphaning the process.
-            if (browser && typeof browser.close === 'function') {
-                browser.close().catch(() => {});
-            }
-            browser = null;
-            context = null;
-            const msg = e instanceof Error ? e.message : String(e);
-
-            if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
-                throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them.`, { cause: e });
-            }
-
-            throw e;
-        } finally {
-            initPromise = null;
-        }
-    })();
-
-    return initPromise;
-}
-
-async function extractSearchResults(page: any): Promise<any[]> {
-    return await page.evaluate(() => {
-        // @ts-ignore - document is available in browser context
-        const found: any[] = [];
-        // @ts-ignore - document is available in browser context
-        const links = Array.from(document.querySelectorAll('a.result-link'));
-        links.forEach((link: any) => {
-            const row = link.closest('tr');
-            const snippet = row?.nextElementSibling?.querySelector('td.result-snippet')?.textContent?.trim() || '';
-            const title = link.textContent?.trim() || '';
-            let url = link.href;
-            try {
-                const u = new URL(url);
-                const uddg = u.searchParams.get('uddg');
-                if (uddg) url = decodeURIComponent(uddg || '');
-            } catch {
-                // ignore
-            }
-            if (title && url && !url.includes('duckduckgo.com') && url.startsWith('http')) {
-                found.push({ title, url, content: snippet });
-            }
-        });
-        return found;
-    });
-}
-
-async function executeSearchTask(_browser: any, _context: any, query: string): Promise<{ results: any[]; jitter: number }> {
-    const page = await _context.newPage();
-    const SEARCH_TIMEOUT = 25000;
-    page.setDefaultTimeout(SEARCH_TIMEOUT);
-    page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
-
-    try {
-        logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
-        // Relaxed timeout to accommodate network latency and concurrent worker load
-        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
-        await page.fill('input[name="q"]', query);
-        await Promise.all([
-            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-            page.keyboard.press('Enter')
-        ]);
-
-        const results = await extractSearchResults(page);
-
-        await page.close();
-        const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms to mimic human behavior
-        await new Promise(r => setTimeout(r, jitter));
-
-        return { results, jitter };
-    } catch (error) {
-        await page.close().catch(() => {});
-        throw error;
-    }
-}
-
-async function executeScrapeTask(_browser: any, _context: any, url: string): Promise<{ contentType: string; html?: string; buffer?: Buffer; jitter: number }> {
-    const page = await _context.newPage();
-    const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
-    page.setDefaultTimeout(SCRAPE_TIMEOUT);
-    page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
-
-    try {
-        logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
-        // High-fidelity wait: try domcontentloaded first for speed
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
-        const contentType = (await response?.headerValue('content-type')) || '';
-
-        if (contentType.includes('application/pdf')) {
-            if (!response) throw new Error(`[Worker] No response received for PDF URL: ${url}`);
-            const buffer = await response.body();
-            await page.close();
-            return { contentType, buffer, jitter: 0 };
-        }
-
-        // If it's HTML, check if we need to wait longer (JS-heavy sites)
-        let html = await page.content();
-
-        // DETECT CLOUDFLARE CHALLENGE
-        const cfPatterns = ['_cf_chl_', 'cdn-cgi/challenge-platform', 'cf_chl_opt', 'Just a moment...', 'Checking your browser before accessing'];
-        const hasCloudflare = cfPatterns.some((pattern: string) => html.includes(pattern));
-
-        if (hasCloudflare) {
-            logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge detected for: ${url}`);
-
-            // Wait up to 5 seconds for challenge to resolve
-            try {
-                await page.waitForFunction(
-                    () => {
-                        // @ts-ignore - document is available in browser context
-                        const body = document.body.innerHTML;
-                        return !body.includes('_cf_chl_') &&
-                               !body.includes('cdn-cgi/challenge-platform') &&
-                               !body.includes('cf_chl_opt') &&
-                               !body.includes('Just a moment...') &&
-                               !body.includes('Checking your browser before accessing') &&
-                               body.length > 5000; // Ensure content loaded
-                    },
-                    { timeout: 5000 }
-                );
-
-                // Challenge resolved, get updated content
-                html = await page.content();
-                logToDebugFile('INFO', `[Worker-${workerId}] Cloudflare challenge resolved for: ${url}`);
-            } catch (_waitError: any) {
-                logToDebugFile('ERROR', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
-                const error = new Error('Fetch blocked: Cloudflare challenge');
-                error.cause = _waitError;
-                throw error;
-            }
-        }
-
-        // Check if we need to wait longer for JS-heavy sites
-        const needsWait = html.length < 5000 ||
-                          html.includes('id="root"') ||
-                          html.includes('id="app"') ||
-                          html.includes('<noscript>');
-
-        if (needsWait) {
-            await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-            html = await page.content();
-        }
-
-        // Add request delay jitter to mimic human behavior
-        const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms
-        await new Promise(r => setTimeout(r, jitter));
-
-        await page.close();
-        return { contentType, html, jitter };
-    } catch (error) {
-        await page.close().catch(() => {});
-        throw error;
-    }
-}
-
-async function executeHealthCheckAttempt(_browser: any, _context: any, navTimeoutMs: number): Promise<{ success: boolean; navMs: number }> {
-    const page = await _context.newPage();
-    page.setDefaultTimeout(navTimeoutMs);
-    page.setDefaultNavigationTimeout(navTimeoutMs);
-
-    try {
-        const navStart = Date.now();
-        await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
-        const navMs = Date.now() - navStart;
-
-        if (navMs > 3000) {
-            logToDebugFile('WARN', `[Worker-${workerId}] DDG Lite navigation was slow: ${navMs}ms (expected <1s). Possible rate-limit or network congestion.`);
-        }
-
-        const title = await page.title();
-        await page.close();
-        return { success: !!title, navMs };
-    } catch (error) {
-        await page.close().catch(() => {});
-        throw error;
-    }
-}
-
-async function executeHealthCheck(_browser: any, _context: any): Promise<{ success: boolean; navMs: number }> {
-    // Nav timeout: read from env (passed through getBrowserEnv), floor at 10s.
-    // The outer BrowserTaskScheduler.runHealthCheck() has its own 45s hard deadline.
-    const configuredMs = parseInt(process.env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'] || '0', 10);
-    const HEALTH_TIMEOUT = configuredMs > 0 ? Math.max(10000, configuredMs) : 10000;
-
-    try {
-        return await executeHealthCheckAttempt(_browser, _context, HEALTH_TIMEOUT);
-    } catch (firstError: any) {
-        // One retry: if the first attempt fails, the page may have been in a bad state
-        // (challenge redirect, partial load, transient network blip). A second attempt
-        // on a fresh page helps distinguish a real outage from a one-off failure.
-        logToDebugFile('WARN', `[Worker-${workerId}] Health check attempt 1 failed: ${firstError.message}. Retrying once...`);
-        try {
-            return await executeHealthCheckAttempt(_browser, _context, HEALTH_TIMEOUT);
-        } catch (retryError: any) {
-            logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryError.message}`);
-            throw retryError;
-        }
-    }
-}
-
-interface TaskData {
-    type: string;
-    query?: string;
-    url?: string;
-    queuedAt?: number;
-    taskTimeoutMs?: number;
-}
-
-interface TaskResult {
-    results?: any[];
-    duration: number;
-    jitter?: number;
-    error?: string;
-    success?: boolean;
-    navMs?: number;
-    buffer?: Buffer;
-    html?: string;
-    contentType?: string;
-}
-
 async function runTask(data: TaskData | undefined): Promise<TaskResult> {
-    if (!data) {
-        return { error: 'No task data provided', duration: 0 };
+  if (!data) {
+    return { error: 'No task data provided', duration: 0 };
+  }
+  const { type, query, url, queuedAt, taskTimeoutMs } = data;
+  const startTime = Date.now();
+
+  // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
+  // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
+  // We should immediately drop it to prevent queue congestion.
+  if (queuedAt && taskTimeoutMs) {
+    const queueTime = startTime - queuedAt;
+    // Add a 20% buffer to reduce false positives from clock drift and deep queue conditions
+    if (queueTime > taskTimeoutMs * 1.20) {
+      return {
+        error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)`,
+        duration: queueTime
+      };
     }
-    const { type, query, url, queuedAt, taskTimeoutMs } = data;
-    const startTime = Date.now();
-    logToDebugFile('DEBUG', `[Worker-${workerId}] Received task: ${type}`);
+  }
 
-    // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
-    // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
-    // We should immediately drop it to prevent queue congestion.
-    if (queuedAt && taskTimeoutMs) {
-        const queueTime = startTime - queuedAt;
-        // Add a 20% buffer to reduce false positives from clock drift and deep queue conditions
-        if (queueTime > taskTimeoutMs * 1.20) {
-            logToDebugFile('WARN', `[Worker-${workerId}] Dropping zombie task ${type} (queued for ${queueTime}ms, timeout was ${taskTimeoutMs}ms)`);
-            return { error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)`, duration: queueTime };
-        }
+  try {
+    await initBrowser();
+    const initMs = Date.now() - startTime;
+
+    if (type === 'search') {
+      if (!query) throw new Error('Search task requires a query');
+      const result = await executeSearchTask(getContext(), query);
+      return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
     }
 
-    try {
-        await initBrowser();
-        const initMs = Date.now() - startTime;
-
-        if (type === 'search') {
-            if (!query) throw new Error('Search task requires a query');
-            const result = await executeSearchTask(browser, context, query);
-            logToDebugFile('DEBUG', `[Worker-${workerId}] Search completed in ${Date.now() - startTime}ms`);
-            return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
-        }
-
-        if (type === 'scrape') {
-            if (!url) throw new Error('Scrape task requires a URL');
-            const result = await executeScrapeTask(browser, context, url);
-            logToDebugFile('DEBUG', `[Worker-${workerId}] Scrape completed in ${Date.now() - startTime}ms`);
-            return { ...result, duration: Date.now() - startTime };
-        }
-
-        if (type === 'healthcheck') {
-            if (initMs > 3000) {
-                logToDebugFile('WARN', `[Worker-${workerId}] Browser init was slow: ${initMs}ms — leaving less headroom for DDG navigation.`);
-            }
-            const result = await executeHealthCheck(browser, context);
-            logToDebugFile('DEBUG', `[Worker-${workerId}] Healthcheck: browser init ${initMs}ms, nav ${result.navMs ?? '?'}ms`);
-            return { ...result, duration: Date.now() - startTime };
-        }
-
-        return { error: 'Unknown task type', duration: Date.now() - startTime };
-    } catch (error: any) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        logToDebugFile('ERROR', `[Worker-${workerId}] Task failed: ${errMsg}`);
-
-        // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
-        if (errMsg.includes('Target closed') ||
-            errMsg.includes('browser has disconnected') ||
-            errMsg.includes('Protocol error') ||
-            errMsg.includes('Session closed')) {
-            if (context) context.close().catch(() => {});
-            if (browser) browser.close().catch(() => {});
-            context = null;
-            browser = null;
-        }
-
-        return {
-            error: errMsg,
-            duration: Date.now() - startTime
-        };
+    if (type === 'scrape') {
+      if (!url) throw new Error('Scrape task requires a URL');
+      const result = await executeScrapeTask(getContext(), url);
+      return { ...result, duration: Date.now() - startTime };
     }
+
+    if (type === 'healthcheck') {
+      const result = await executeHealthCheck(getContext(), initMs);
+      return { ...result, duration: Date.now() - startTime };
+    }
+
+    return { error: 'Unknown task type', duration: Date.now() - startTime };
+  } catch (error: any) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+
+    // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
+    if (shouldResetBrowser(errMsg)) {
+      resetBrowser();
+    }
+
+    return {
+      error: errMsg,
+      duration: Date.now() - startTime
+    };
+  }
 }
 
 export default new ClusterWorker(runTask, {
-    killHandler: async () => {
-        logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
-        if (context) await context.close().catch(() => {});
-        if (browser) await browser.close().catch(() => {});
-        // Clear the orphan check timer to prevent it from keeping the event loop alive
-        if (orphanCheckTimer) {
-            clearInterval(orphanCheckTimer);
-            orphanCheckTimer = null;
-        }
-        // Force process exit — without this, the orphan-detection setInterval keeps
-        // the event loop alive indefinitely after the IPC channel is disconnected.
-        process.exit(0);
-    }
+  killHandler: createKillHandler(),
 });
 
 // Initialize browser when worker comes online

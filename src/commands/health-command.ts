@@ -105,16 +105,3 @@ export async function runHealthCheck(ctx: CommandContext, pi: ExtensionAPI): Pro
     ctx.ui.notify(`❌ Health check failed: ${message}`, 'error');
   }
 }
-
-// Stubs for backward compatibility in routing, though they now do nothing
-export function showHealthHistory(ctx: CommandContext, _pi: ExtensionAPI): void {
-  ctx.ui.notify('Health history is no longer supported. Health checks are now stateless.', 'info');
-}
-
-export function showHealthSummary(ctx: CommandContext, _pi: ExtensionAPI): void {
-  ctx.ui.notify('Health summary is no longer supported. Health checks are now stateless.', 'info');
-}
-
-export function clearHealthCache(ctx: CommandContext): void {
-  ctx.ui.notify('Health check cache is no longer used.', 'info');
-}

@@ -15,7 +15,7 @@ import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer } from '../browser-server.ts';
-import { WorkerPoolManager } from './worker-pool-manager.ts';
+import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from './browser-client.ts';
 import { cleanupOrphanedCamoufoxProcesses } from '../browser-cleanup.ts';
 
@@ -24,7 +24,7 @@ import { cleanupOrphanedCamoufoxProcesses } from '../browser-cleanup.ts';
  * Only the leader process has an instance of this scheduler.
  */
 export class BrowserTaskScheduler implements IScheduler {
-    private workerPoolManager: WorkerPoolManager;
+    private workerPoolManager: WorkerPoolManager | null = null;
     private server: BrowserServer | null = null;
     private leadershipTimer: any = null;
     private idleTimer: any = null;
@@ -37,38 +37,60 @@ export class BrowserTaskScheduler implements IScheduler {
         public readonly schedulerId: string,
         private readonly stateManager: IStateManager
     ) {
-        this.workerPoolManager = new WorkerPoolManager();
         this.startLeadershipCheck();
         this.resetIdleTimer();
     }
 
-    private startLeadershipCheck() {
-        if (this.leadershipTimer) return;
-        this.leadershipTimer = setInterval(async () => {
-            const serverInfo = await this.stateManager.getBrowserServer();
-            // If the state file now points to a different schedulerId, we have lost leadership
-            if (serverInfo?.schedulerId !== this.schedulerId) {
-                this.consecutiveLeadershipMisses++;
-                metrics.increment('browser_leadership_misses_total', 1);
-                metrics.setGauge('browser_is_leader', 0);
-                logger.warn(`[Scheduler] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) - ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}`);
+    private async getWorkerPoolManager(): Promise<WorkerPoolManager> {
+        if (!this.workerPoolManager) {
+            this.workerPoolManager = await getService<WorkerPoolManager>(ServiceNames.WORKER_POOL_MANAGER);
+            await this.workerPoolManager.initialize();
+        }
+        return this.workerPoolManager;
+    }
 
-                if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
-                    metrics.increment('browser_leadership_lost_total', 1);
-                    logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
-                    await this.shutdown();
+    private startLeadershipCheck() {
+        const check = async () => {
+            if (this.isShuttingDown) return;
+            
+            try {
+                const serverInfo = await this.stateManager.getBrowserServer();
+                // If the state file now points to a different schedulerId, we have lost leadership
+                if (serverInfo?.schedulerId !== this.schedulerId) {
+                    this.consecutiveLeadershipMisses++;
+                    metrics.increment('browser_leadership_misses_total', 1);
+                    metrics.setGauge('browser_is_leader', 0);
+                    logger.warn(`[Scheduler] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) - ID: ${this.schedulerId}, Current: ${serverInfo?.schedulerId}`);
+
+                    if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
+                        metrics.increment('browser_leadership_lost_total', 1);
+                        logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
+                        await this.shutdown();
+                        return; // Stop checking after shutdown
+                    }
+                } else {
+                    // Reset counter on successful leadership check
+                    if (this.consecutiveLeadershipMisses > 0) {
+                        logger.log(`[Scheduler] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
+                        this.consecutiveLeadershipMisses = 0;
+                    }
+                    metrics.setGauge('browser_is_leader', 1);
                 }
-            } else {
-                // Reset counter on successful leadership check
-                if (this.consecutiveLeadershipMisses > 0) {
-                    logger.log(`[Scheduler] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
-                    this.consecutiveLeadershipMisses = 0;
+                
+                // Decay the consecutive error counter
+                const poolManager = await this.getWorkerPoolManager();
+                poolManager.resetConsecutiveErrors();
+            } catch (err) {
+                logger.warn('[Scheduler] Leadership check error:', err);
+            } finally {
+                if (!this.isShuttingDown) {
+                    this.leadershipTimer = setTimeout(check, 30000);
+                    if (this.leadershipTimer.unref) this.leadershipTimer.unref();
                 }
-                metrics.setGauge('browser_is_leader', 1);
             }
-            // Decay the consecutive error counter to allow recovery after transient errors
-            this.workerPoolManager.resetConsecutiveErrors();
-        }, 30000); // Check leadership every 30 seconds (reduced from 60s for faster failover)
+        };
+
+        this.leadershipTimer = setTimeout(check, 30000);
         if (this.leadershipTimer.unref) this.leadershipTimer.unref();
     }
 
@@ -95,7 +117,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
-        const pool = await this.workerPoolManager.ensurePool(config);
+        const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
 
         // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
@@ -145,7 +167,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runScrape(url: string, config?: Config): Promise<any> {
-        const pool = await this.workerPoolManager.ensurePool(config);
+        const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const timeoutMs = 60000;
         let timeoutId: NodeJS.Timeout;
@@ -189,7 +211,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
-        const pool = await this.workerPoolManager.ensurePool(config);
+        const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const timeoutMs = 45000;
         let timeoutId: NodeJS.Timeout;
@@ -244,7 +266,7 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         if (this.leadershipTimer) {
-            clearInterval(this.leadershipTimer);
+            clearTimeout(this.leadershipTimer);
             this.leadershipTimer = null;
         }
 
@@ -281,7 +303,9 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         // Shutdown the worker pool
-        await this.workerPoolManager.shutdown();
+        if (this.workerPoolManager) {
+            await this.workerPoolManager.shutdown();
+        }
 
         // Clean up any orphaned Camoufox browser processes that may have been left behind
         // This handles edge cases where workers were force-killed or hung during teardown

@@ -3,6 +3,7 @@
  */
 
 import crypto from 'node:crypto';
+import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { errorTracker } from '../utils/error-tracker.ts';
 import { metrics } from '../utils/metrics.ts';
 import {
@@ -136,7 +137,6 @@ export function createNativeMarkdownConverter(
  * Create JS HTML to markdown converter (fallback)
  */
 export function createJsMarkdownConverter(): (html: string) => Promise<string> {
-  const { NodeHtmlMarkdown } = require('node-html-markdown');
   const converter = new NodeHtmlMarkdown({
     codeBlockStyle: 'fenced',
     textReplace: [[/\u00a0/g, ' ']],

@@ -10,15 +10,10 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { logger } from '../logger.ts';
-import {
-  shutdownKnowledgeStore,
-  initKnowledgeStore,
-  isKnowledgeStoreReady,
-  clearKnowledgeStore,
-} from '../knowledge/index.ts';
 import { getConfig, getDbDir } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
-import { ServiceNames, IKnowledgeStore } from '../core/service-interfaces.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
 
 export interface CommandContext {
   ui: {
@@ -35,16 +30,18 @@ export async function handleKnowledgeAction(
   ctx: CommandContext,
   pi: ExtensionAPI
 ): Promise<void> {
+  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  
   switch (action) {
     case 'status':
     case undefined:
-      showKnowledgeStatus(ctx, pi);
+      await showKnowledgeStatus(ctx, pi);
       break;
     case 'migrate':
       await handleKnowledgeMigration(_params[0], ctx);
       break;
     case 'clear':
-      await clearKnowledgeStore();
+      await service.clear();
       ctx.ui.notify('Knowledge store cleared', 'info');
       break;
     case 'count':
@@ -60,23 +57,24 @@ export async function handleKnowledgeAction(
  */
 export async function showKnowledgeStatus(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
   const config = getConfig();
+  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
   const outputLines: string[] = [];
   
   outputLines.push('## Knowledge Store Status');
   outputLines.push('');
   outputLines.push(`**Enabled:** ${config.KNOWLEDGE_STORE_ENABLED ? 'Yes' : 'No'}`);
   outputLines.push(`**Model:** ${config.EMBEDDING_MODEL}`);
-  outputLines.push(`**Device:** ${config.EMBEDDING_DEVICE}`);
+  outputLines.push(`**Device:** ${service.getDevice() || config.EMBEDDING_DEVICE}`);
   outputLines.push(`**Cache TTL:** ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS} days`);
   outputLines.push('');
 
   if (config.KNOWLEDGE_STORE_ENABLED) {
-    const ready = isKnowledgeStoreReady();
+    const ready = service.isReady();
     outputLines.push(`**Status:** ${ready ? 'Ready' : 'Not initialized'}`);
     
     if (ready) {
       try {
-        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
+        const store = await service.getStore();
         const count = await store.count();
         outputLines.push(`**Entries:** ${count}`);
       } catch (_error) {
@@ -101,13 +99,14 @@ export async function showKnowledgeStatus(ctx: CommandContext, pi: ExtensionAPI)
  * Display knowledge store entry count
  */
 export async function showKnowledgeCount(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
-  if (!isKnowledgeStoreReady()) {
+  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  if (!service.isReady()) {
     ctx.ui.notify('Knowledge store is not ready', 'warning');
     return;
   }
 
   try {
-    const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
+    const store = await service.getStore();
     const count = await store.count();
 
     pi.sendMessage({
@@ -140,8 +139,9 @@ export async function handleKnowledgeMigration(strategy: string | undefined, ctx
   try {
     process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'] = strategy;
     
-    await shutdownKnowledgeStore();
-    await initKnowledgeStore();
+    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    await service.dispose();
+    await service.initialize();
     
     delete process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
     

@@ -11,9 +11,10 @@ import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import type { Config } from '../config.ts';
-import { initKnowledgeStore } from '../knowledge/index.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;
@@ -42,7 +43,7 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
 
   // Non-blocking initialization of the knowledge store (embedding model) 
   // only when research is actually invoked.
-  initKnowledgeStore().catch(err => {
+  getService(ServiceNames.KNOWLEDGE_STORE).catch(err => {
     logger.warn('[ResearchManager] Lazy knowledge store initialization failed (non-fatal):', err);
   });
 

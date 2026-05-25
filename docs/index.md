@@ -115,9 +115,6 @@ See [Documentation Standards](development/documentation-standards.md) for:
 | `research <query>` | Interactive research with AI |
 | `/research <query>` | Direct quick research (depth 0) |
 | `/research-config` | Open configuration TUI |
-| `/health` | Run health checks |
-| `/health-clear` | Clear health check cache |
-| `/health-history` | View health check history |
 
 ### Depth Levels
 

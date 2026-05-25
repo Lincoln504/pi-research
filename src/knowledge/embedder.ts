@@ -59,6 +59,7 @@ export class Embedder {
   private useCache: boolean;
   private idleTimer: NodeJS.Timeout | null = null;
   private readonly IDLE_TIMEOUT_MS = 60 * 1000;
+  private activeEmbeddings = 0;
 
   constructor(options: EmbedderOptions) {
     this.model = options.model;
@@ -264,6 +265,7 @@ export class Embedder {
   async embed(text: string): Promise<Float32Array> {
     await this.initialize();
     this.stopIdleTimer();
+    this.activeEmbeddings++;
 
     const input = this.truncateText(this.queryPrefix ? this.queryPrefix + text : text);
     let lockAcquired = false;
@@ -295,6 +297,7 @@ export class Embedder {
       if (lockAcquired && this.stateManager) {
         await this.stateManager.releaseGpuLock().catch(() => {});
       }
+      this.activeEmbeddings--;
       this.resetIdleTimer();
     }
   }
@@ -302,6 +305,7 @@ export class Embedder {
   async embedMany(texts: string[]): Promise<Float32Array[]> {
     await this.initialize();
     this.stopIdleTimer();
+    this.activeEmbeddings++;
 
     return metrics.measure('embedMany_latency', async () => {
       const dim = this.getDimension();
@@ -350,6 +354,7 @@ export class Embedder {
         if (lockAcquired && this.stateManager) {
           await this.stateManager.releaseGpuLock().catch(() => {});
         }
+        this.activeEmbeddings--;
         this.resetIdleTimer();
       }
 
@@ -366,6 +371,14 @@ export class Embedder {
     this.gpuLockHeld = false;
     
     this.state = 'initializing';
+    
+    // Wait for other concurrent embeddings to finish before disposing the pipeline
+    const maxWaitMs = 15000;
+    const startTime = Date.now();
+    while (this.activeEmbeddings > 1 && (Date.now() - startTime) < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
     if (this.pipeline) {
       try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
       this.pipeline = null;
@@ -395,6 +408,17 @@ export class Embedder {
 
     this.state = 'disposing';
     this.disposePromise = (async () => {
+      // Wait for all active embeddings to complete
+      const maxWaitMs = 30000;
+      const startTime = Date.now();
+      while (this.activeEmbeddings > 0 && (Date.now() - startTime) < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      if (this.activeEmbeddings > 0) {
+        logger.warn(`[embedder] Disposing with ${this.activeEmbeddings} active embeddings (timed out)`);
+      }
+
       if (this.initializingPromise) {
         try {
           await this.initializingPromise;

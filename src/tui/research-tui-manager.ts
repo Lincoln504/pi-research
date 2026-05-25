@@ -19,6 +19,7 @@ import {
   refreshAllSessions,
   onSessionOrderChange,
   abortAllSessions,
+  getPiActivePanels,
 } from '../utils/session-state.ts';
 import { shouldConsumeForCleanup } from '../utils/terminal-state.ts';
 import type { ResearchPanelState } from './research-panel.ts';
@@ -119,7 +120,6 @@ export function createResearchTuiManager(
 
   // Register master update function
   registerMasterUpdate(piSessionId, () => {
-    debouncedRefresh();
     ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => {
       const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
         return getActivePanelsForSession(piSessionId);
@@ -171,8 +171,6 @@ export function createResearchTuiManager(
  * Helper function to avoid circular dependencies
  */
 function getActivePanelsForSession(piSessionId: string) {
-  // Import at runtime to avoid circular dependencies
-  const { getPiActivePanels } = require('../utils/session-state.ts');
   return getPiActivePanels(piSessionId);
 }
 

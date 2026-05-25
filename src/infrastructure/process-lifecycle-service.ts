@@ -5,12 +5,25 @@
  * Stateless service for checking if processes are alive.
  */
 
+import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
+
 /**
  * Process Lifecycle Service
  *
  * Provides utilities for checking process liveness and monitoring.
  */
-export class ProcessLifecycleService {
+export class ProcessLifecycleService implements IProcessLifecycle {
+  readonly name = 'process-lifecycle';
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
+  async initialize(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    // Stateless service
+  }
   /**
    * Check if a process is alive by sending signal 0.
    * Works on Linux, Mac, and Windows (Node.js implementation).
@@ -125,20 +138,4 @@ export class ProcessLifecycleService {
   private sleep(ms: number): Promise<void> {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
-}
-
-/**
- * Global singleton ProcessLifecycleService instance
- */
-let _sharedProcessLifecycleService: ProcessLifecycleService | null = null;
-
-/**
- * Get the shared ProcessLifecycleService instance.
- * Module-level singleton for efficiency.
- */
-export function getSharedProcessLifecycleService(): ProcessLifecycleService {
-  if (!_sharedProcessLifecycleService) {
-    _sharedProcessLifecycleService = new ProcessLifecycleService();
-  }
-  return _sharedProcessLifecycleService;
 }
