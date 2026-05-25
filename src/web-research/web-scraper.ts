@@ -51,6 +51,11 @@ async function getMarkdownConverter(): Promise<(html: string) => Promise<string>
       return createJsMarkdownConverter();
     }
   })();
+
+  // If the promise rejects (e.g. JS fallback also unavailable), clear the cache
+  // so the next call retries rather than serving the same rejection forever.
+  markdownConverterPromise.catch(() => { markdownConverterPromise = null; });
+
   return markdownConverterPromise;
 }
 

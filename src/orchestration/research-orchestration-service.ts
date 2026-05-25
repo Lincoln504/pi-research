@@ -13,6 +13,7 @@
 import type { ResearchPlan } from '../core/service-interfaces.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
+import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
 import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger } from '../logger.ts';
@@ -75,6 +76,9 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const { plan, options: orchestratorOptions, currentRound, signal } = options;
     const { sessionId, researchId, observer } = orchestratorOptions;
 
+    // Obtain the planning service once for all researchers in this round
+    const planningService = await getService<any>(ServiceNames.PLANNING);
+
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
 
@@ -89,11 +93,16 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
           await runResearcher({
             ...orchestratorOptions,
-            configItem,
+            // Correct field mappings — orchestratorOptions.config is the app Config;
+            // the per-researcher plan item goes into 'config' (overriding the spread),
+            // and the app Config moves to 'researchConfig'.
+            config: configItem,
+            researchConfig: orchestratorOptions.config,
+            round: currentRound,
+            planningService,
             initialLinks,
             historicalUrls,
-            currentRound,
-            signal
+            signal,
           });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -110,8 +119,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
       active.add(promise);
 
-      // Throttled launch to prevent resource spikes
-      const RESEARCHER_LAUNCH_DELAY_MS = orchestratorOptions.config?.RESEARCHER_LAUNCH_DELAY_MS ?? 1000;
+      // Throttled launch to prevent resource spikes (stagger by RESEARCHER_LAUNCH_DELAY_MS, skip after last)
       if (RESEARCHER_LAUNCH_DELAY_MS > 0 && researchers.indexOf(configItem) < researchers.length - 1) {
         await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
       }
