@@ -7,6 +7,7 @@ export type FetchType = (
   _init?: RequestInit,
 ) => Promise<Response>;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 declare const fetch: FetchType;
 
 // Size limits to prevent OOM attacks

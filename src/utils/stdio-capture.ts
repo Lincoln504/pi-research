@@ -69,8 +69,9 @@ function isComplexTui(message: string): boolean {
     }
   }
   
-  // Check for cursor position patterns
-  if (/\x1b\[\d+;\d+H/.test(message) || /\x1b\[\d+[ABCD]/.test(message)) {
+  // Check for cursor position patterns (ANSI ESC sequences — control chars intentional)
+  // eslint-disable-next-line no-control-regex
+  if (/\u001b\[\d+;\d+H/.test(message) || /\u001b\[\d+[ABCD]/.test(message)) {
     return true;
   }
   

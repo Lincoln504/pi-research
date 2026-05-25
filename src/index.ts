@@ -67,7 +67,7 @@ export default async function (pi: ExtensionAPI) {
   // Initialize core services BEFORE the extension becomes usable
   // This ensures all critical services are ready when tools/commands are invoked
   // Prevents race conditions where services are used before initialization
-  let initializationResult: { initialized: string[]; failed: string[] } | null = null;
+  let initializationResult: { initialized: string[]; failed: string[] };
   try {
     logger.log('[pi-research] Waiting for core services to initialize...');
     initializationResult = await initializeCoreServices(pi);

@@ -112,7 +112,8 @@ export class PlanningService implements IPlanningService {
     logger.log(`[${this.name}] Coordinator auth for model ${model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}`);
 
     let plan: ResearchPlan | null = null;
-    let lastRawPlanText = '';
+    // Definite-assignment assertion: always set in loop body before catch reads it
+    let lastRawPlanText!: string;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
@@ -154,7 +155,7 @@ export class PlanningService implements IPlanningService {
 
         metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
         break;
-      } catch (err) {
+      } catch (_err) {
         if (attempt >= 3) {
           logger.warn(`[${this.name}] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
           metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'fallback' });

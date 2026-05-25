@@ -151,7 +151,7 @@ export class FileLockService implements IService {
           } catch {
             // Ignore close error
           }
-          handle = null;
+          // handle goes out of scope at end of iteration; no need to null it
         }
 
         if (error instanceof Error && 'code' in error) {
@@ -205,6 +205,7 @@ export class FileLockService implements IService {
               metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
               throw new Error(
                 `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms`,
+                { cause: error },
               );
             }
 

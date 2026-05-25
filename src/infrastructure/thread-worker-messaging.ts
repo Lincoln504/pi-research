@@ -45,9 +45,9 @@ function logToDebugFile(level: string, ...args: any[]): void {
  */
 async function extractSearchResults(page: any): Promise<any[]> {
   return await page.evaluate(() => {
-    // @ts-ignore - document is available in browser context
     const found: any[] = [];
     // @ts-ignore - document is available in browser context
+    // eslint-disable-next-line no-undef
     const links = Array.from(document.querySelectorAll('a.result-link'));
     links.forEach((link: any) => {
       const row = link.closest('tr');
@@ -144,6 +144,7 @@ export async function executeScrapeTask(
         await page.waitForFunction(
           () => {
             // @ts-ignore - document is available in browser context
+            // eslint-disable-next-line no-undef
             const body = document.body.innerHTML;
             return !body.includes('_cf_chl_') &&
                    !body.includes('cdn-cgi/challenge-platform') &&
