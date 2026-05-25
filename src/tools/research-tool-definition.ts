@@ -224,7 +224,7 @@ export function createResearchTool(): ToolDefinition {
           const cleanup = createCleanupFunction({
             researchId: sessionResearchId,
             piSessionId,
-            masterWidgetId: '',
+            masterWidgetId: tuiManager.masterWidgetId,
             panelState,
             waveTimer: null,
             unsubOrder: null,
@@ -279,23 +279,31 @@ export function createResearchTool(): ToolDefinition {
 
             return { result: resultWithErrorSummary, tokens: panelState.totalTokens };
           } catch (error) {
-            if (aborted || internalAbort.signal.aborted) {
+            if (aborted?.aborted || internalAbort.signal.aborted) {
               return { result: 'Research cancelled.', tokens: 0 };
             }
             throw error;
           } finally {
             // Restore previous logger
             setLogger(previousLogger);
-            await cleanup();
-            if (tuiManager) {
-              tuiManager.dispose();
+            try {
+              await cleanup();
+            } catch (cleanupError) {
+              logger.error('[research] Cleanup failed (non-fatal):', cleanupError);
+            }
+            try {
+              if (tuiManager) {
+                tuiManager.dispose();
+              }
+            } catch (disposeError) {
+              logger.error('[research] TUI dispose failed (non-fatal):', disposeError);
             }
           }
         });
 
         return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens } };
       } catch (error) {
-        if (aborted || internalAbort.signal.aborted) {
+        if (aborted?.aborted || internalAbort.signal.aborted) {
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
         

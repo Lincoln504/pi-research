@@ -47,6 +47,16 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
     logger.warn('[ResearchManager] Lazy knowledge store initialization failed (non-fatal):', err);
   });
 
+  // Validate that required services are initialized and healthy
+  try {
+    const planningService = await getService(ServiceNames.PLANNING, ctx);
+    if (!planningService || !planningService.isReady) {
+      throw new Error('PlanningService is not initialized. Please restart the extension.');
+    }
+  } catch (err) {
+    throw new Error(`Required service validation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   let result: string;
   try {
     if (depth === 0) {

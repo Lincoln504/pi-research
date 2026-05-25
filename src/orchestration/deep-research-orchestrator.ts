@@ -57,6 +57,10 @@ export class DeepResearchOrchestrator {
     if (options.orchestrationService) {
       this.orchestrationService = options.orchestrationService;
     }
+    // Validate that ctx is available
+    if (!options.ctx) {
+      throw new Error('DeepResearchOrchestrator requires ExtensionContext (ctx) to be provided');
+    }
   }
 
   private async getOrchestrationService(): Promise<IResearchOrchestration> {
@@ -66,7 +70,8 @@ export class DeepResearchOrchestrator {
   }
 
   private async getPlanningService(): Promise<PlanningService> {
-    return await getService<PlanningService>(ServiceNames.PLANNING);
+    // Pass ctx to ensure PlanningService has access to modelRegistry
+    return await getService<PlanningService>(ServiceNames.PLANNING, this.options.ctx);
   }
 
   private elapsed(): string {

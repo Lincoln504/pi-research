@@ -65,16 +65,29 @@ export class QuickResearchOrchestrator {
     let storeSection = '';
     if (this.config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const store = await getService<IKnowledgeStore>(ServiceNames.KNOWLEDGE_STORE);
-        if (!store) {
+        const knowledgeStoreService = await getService<any>(ServiceNames.KNOWLEDGE_STORE);
+        if (!knowledgeStoreService) {
           logger.warn('[QuickOrchestrator] Knowledge store service not available');
         } else {
-          const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
-          if (historicalUrls.length > 0) {
-            storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
-              'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
-              historicalUrls.map(u => `- ${u}`).join('\n') +
-              '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
+          // Get the actual store from the service
+          let store;
+          if (typeof knowledgeStoreService.getStore === 'function') {
+            store = await knowledgeStoreService.getStore();
+          } else {
+            // Service might be the store itself (for backward compatibility)
+            store = knowledgeStoreService;
+          }
+          
+          if (store && typeof store.findRelevantUrls === 'function') {
+            const historicalUrls = await store.findRelevantUrls(query, { limit: 5 });
+            if (historicalUrls.length > 0) {
+              storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
+                'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
+                historicalUrls.map(u => `- ${u}`).join('\n') +
+                '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
+            }
+          } else {
+            logger.debug('[QuickOrchestrator] Knowledge store available but findRelevantUrls method not found');
           }
         }
       } catch (err) {
