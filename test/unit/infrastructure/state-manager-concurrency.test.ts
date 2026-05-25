@@ -180,9 +180,10 @@ describe('StateManager Concurrency and Lock Resilience', () => {
     await fs.writeFile(lockFilePath, 'eternal');
     
     // Mock sleep to be fast so we don't actually wait 10s in the test
-    (manager as any).lockRetryDelay = 1;
-    (manager as any).lockRetries = 10;
-    (manager as any).lockTimeout = 50;
+    // These fields live on FileLockService, not on StateManager
+    (fileLockService as any).lockRetryDelay = 1;
+    (fileLockService as any).lockRetries = 10;
+    (fileLockService as any).lockTimeout = 50;
 
     await expect(manager.updateState(s => s))
         .rejects.toThrow('Failed to acquire lock');

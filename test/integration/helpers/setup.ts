@@ -6,7 +6,7 @@
  */
 
 import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
-import { stopBrowserManager } from '../../../src/infrastructure/browser-cleanup.ts';
+import { stopBrowserManager } from '../../../src/infrastructure/browser/index.ts';
 import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';

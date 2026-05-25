@@ -525,9 +525,9 @@ describe('Load Tests: Concurrent Research Sessions', () => {
       expect(metrics.totalSessions).toBe(batchSize * batches);
 
       // Check for degradation between batches
-      const batchSize = Math.floor(allResults.length / batches);
-      const firstBatch = allResults.slice(0, batchSize);
-      const lastBatch = allResults.slice(-batchSize);
+      const degradationBatchSize = Math.floor(allResults.length / batches);
+      const firstBatch = allResults.slice(0, degradationBatchSize);
+      const lastBatch = allResults.slice(-degradationBatchSize);
 
       const firstBatchAvgDuration =
         firstBatch.reduce((sum, r) => sum + r.durationMs, 0) / firstBatch.length;
