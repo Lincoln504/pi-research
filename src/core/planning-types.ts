@@ -32,6 +32,9 @@ export const ResearchPlanSchema = Type.Object({
     content: Type.Optional(Type.String())
 });
 
+// Import observer type for planning service
+import type { ResearchObserver } from '../orchestration/research-observer.ts';
+
 /**
  * Options for generating a plan
  */
@@ -41,6 +44,7 @@ export interface GeneratePlanOptions {
   model: Model<any>;
   signal?: AbortSignal;
   historicalLinksSection?: string;
+  observer?: ResearchObserver;
 }
 
 /**
@@ -68,4 +72,5 @@ export interface UpdatePlanOptions {
   totalResearchersPlanned: number;
   mustSynthesize?: boolean;
   historicalLinksSection?: string;
+  observer?: ResearchObserver;
 }

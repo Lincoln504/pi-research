@@ -27,6 +27,9 @@ export interface CleanupContext {
   waveTimer: NodeJS.Timeout | null;
   unsubOrder: (() => void) | null;
   unsubInput: (() => void) | null;
+  // Allow updating unsubscribe functions after creation
+  unsubOrderRef?: { value: (() => void) | null };
+  unsubInputRef?: { value: (() => void) | null };
 }
 
 export interface CleanupDependencies {
@@ -56,8 +59,18 @@ export function createCleanupFunction(
   
   let cleanupCalled = false;
   let waveTimerRef = waveTimer;
-  let unsubOrderRef = unsubOrder;
-  let unsubInputRef = unsubInput;
+  
+  // Use reference objects to allow updating after creation
+  const unsubOrderContainer = cleanupCtx.unsubOrderRef || { value: unsubOrder };
+  const unsubInputContainer = cleanupCtx.unsubInputRef || { value: unsubInput };
+  
+  // Store reference objects in cleanup context for later updates
+  if (!cleanupCtx.unsubOrderRef) {
+    (cleanupCtx as any).unsubOrderRef = unsubOrderContainer;
+  }
+  if (!cleanupCtx.unsubInputRef) {
+    (cleanupCtx as any).unsubInputRef = unsubInputContainer;
+  }
 
   return async () => {
     if (cleanupCalled) return;
@@ -87,14 +100,14 @@ export function createCleanupFunction(
       panelState.waveColors = undefined;
     }
 
-    if (unsubOrderRef) {
-      unsubOrderRef();
-      unsubOrderRef = null;
+    if (unsubOrderContainer.value) {
+      unsubOrderContainer.value();
+      unsubOrderContainer.value = null;
     }
     
-    if (unsubInputRef) {
-      unsubInputRef();
-      unsubInputRef = null;
+    if (unsubInputContainer.value) {
+      unsubInputContainer.value();
+      unsubInputContainer.value = null;
     }
 
     endResearchSession(piSessionId, researchId);
@@ -126,14 +139,18 @@ export function updateWaveTimer(cleanupCtx: CleanupContext, timer: NodeJS.Timeou
  * Update the unsubOrder reference in the cleanup context
  */
 export function updateUnsubOrder(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
-  (cleanupCtx as CleanupContext & { unsubOrder?: (() => void) | null }).unsubOrder = unsub;
+  if (cleanupCtx.unsubOrderRef) {
+    cleanupCtx.unsubOrderRef.value = unsub;
+  }
 }
 
 /**
  * Update the unsubInput reference in the cleanup context
  */
 export function updateUnsubInput(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
-  (cleanupCtx as CleanupContext & { unsubInput?: (() => void) | null }).unsubInput = unsub;
+  if (cleanupCtx.unsubInputRef) {
+    cleanupCtx.unsubInputRef.value = unsub;
+  }
 }
 
 /**

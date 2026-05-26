@@ -10,8 +10,9 @@ import type { SearchResult } from '../../web-research/types.ts';
 import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
-import { browserCircuitBreaker, isTransientSocketError } from './browser-error-utils.ts';
+import { browserCircuitBreaker, isTransientSocketError, isPoolShutdownError } from './browser-error-utils.ts';
 import { getScheduler, forceSchedulerRestart } from './scheduler-factory.ts';
+import { waitForBrowserPoolIdle } from './browser-lifecycle.ts';
 
 /**
  * Dispatches a browser task to the unified worker pool.
@@ -47,10 +48,20 @@ export async function runBrowserTask<T>(
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
-            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart(true);
-            // Add a small delay before retry to allow ports to free up
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (isPoolShutdownError(error)) {
+                // Pool is temporarily draining — wait for the drain to finish.
+                // Do NOT call forceSchedulerRestart here: it would shut down the new scheduler
+                // instance and restart the drain cycle, compounding the problem.
+                logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            } else {
+                // True socket/connection error — restart the scheduler and wait for idle.
+                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                await forceSchedulerRestart(true);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            }
+            // Small buffer after pool is confirmed idle to allow port reclamation.
+            await new Promise(resolve => setTimeout(resolve, 500));
             return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
         }
         throw error;
@@ -74,9 +85,15 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
-            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart(true);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (isPoolShutdownError(error)) {
+                logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            } else {
+                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                await forceSchedulerRestart(true);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
             return runBrowserHealthCheck(config, retries - 1);
         }
         throw error;
@@ -101,9 +118,15 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
-            logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-            await forceSchedulerRestart(true);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (isPoolShutdownError(error)) {
+                logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            } else {
+                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                await forceSchedulerRestart(true);
+                await waitForBrowserPoolIdle(15000).catch(() => {});
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
             return runWorkerSearch(query, config, retries - 1);
         }
         throw error;

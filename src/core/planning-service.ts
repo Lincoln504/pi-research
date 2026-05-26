@@ -210,10 +210,13 @@ export class PlanningService implements IPlanningService {
       totalResearchersPlanned,
       mustSynthesize = false,
       historicalLinksSection = '',
+      observer,
     } = options;
 
     logger.log(`[${this.name}] Evaluating for round ${round}`);
     metrics.increment('evaluator_runs_total', 1, { complexity: String(complexity), round: String(round) });
+    
+    observer?.onEvaluationProgress?.(`Evaluating round ${round}...`);
 
     const previousQueriesSection = previousPlan?.allQueries && previousPlan.allQueries.length > 0
       ? `\n### Previous Queries (Sibling Researchers)\n${previousPlan.allQueries.map(q => `- ${q}`).join('\n')}\n`
@@ -262,6 +265,7 @@ export class PlanningService implements IPlanningService {
         const apiError = responseMetadata.errorMessage || `Model API returned stop reason: ${responseMetadata.stopReason}`;
         logger.error(`[${this.name}] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
         metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: responseMetadata.stopReason });
+        observer?.onError?.(new Error(apiError));
         throw new Error(`Evaluator model API error: ${apiError}`);
       }
 
@@ -274,6 +278,8 @@ export class PlanningService implements IPlanningService {
         const cost = response.usage.cost?.total ?? 0;
         metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
         metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
+        observer?.onEvaluationTokens?.(tokens, cost);
+        observer?.onTokensConsumed?.(tokens, cost);
       }
 
       if (text.trim()) break;

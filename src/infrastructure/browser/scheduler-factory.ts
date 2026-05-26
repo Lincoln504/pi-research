@@ -75,12 +75,25 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
         // Shut down the old scheduler in the background so its timers and pool are
         // cleaned up promptly. Fire-and-forget: a restart means the caller already
         // triggered a retry, so we do not block on the old scheduler's teardown.
+        // "Worker pool is shutting down" and "Cannot execute a task on destroying pool"
+        // errors that arise during the drain window are classified as transient errors
+        // in browser-error-utils.ts and are retried automatically by task-execution-service.ts.
         if (oldScheduler && 'schedulerId' in oldScheduler && oldScheduler.schedulerId) {
             // This is a BrowserTaskScheduler
             const scheduler = oldScheduler as any;
             if (scheduler instanceof BrowserTaskScheduler) {
-                scheduler.shutdown().catch((err) => {
+                // Fire-and-forget: do not block forceSchedulerRestart on the old pool draining.
+                // Track the promise in SchedulerService so waitForBrowserPoolIdle() can await
+                // it rather than blindly polling a flag that is set several async steps later.
+                const shutdownPromise: Promise<void> = scheduler.shutdown().catch((err: unknown) => {
                     logger.warn('[Scheduler] Error during old scheduler shutdown after restart:', err);
+                });
+                schedulerService.setPendingShutdownPromise(shutdownPromise);
+                shutdownPromise.finally(() => {
+                    // Only clear if this is still the pending promise (not superseded).
+                    if (schedulerService.getPendingShutdownPromise() === shutdownPromise) {
+                        schedulerService.setPendingShutdownPromise(null);
+                    }
                 });
             }
         }

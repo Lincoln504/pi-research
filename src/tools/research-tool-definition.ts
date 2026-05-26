@@ -17,7 +17,7 @@ import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
 import { validateConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
-import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv } from '../logger.ts';
+import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv, getLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { startResearchSession, registerSessionAbort } from '../utils/session-state.ts';
@@ -220,7 +220,7 @@ export function createResearchTool(): ToolDefinition {
             observerState
           );
 
-          // Setup cleanup
+          // Setup cleanup (will be updated with actual unsubscribe functions after TUI initialization)
           const cleanup = createCleanupFunction({
             researchId: sessionResearchId,
             piSessionId,
@@ -230,6 +230,12 @@ export function createResearchTool(): ToolDefinition {
             unsubOrder: null,
             unsubInput: null,
           }, { ctx });
+          
+          // Update cleanup with actual unsubscribe functions from TUI manager
+          const { updateUnsubOrder, updateUnsubInput } = await import('../cleanup/research-cleanup.ts');
+          updateUnsubOrder(cleanup as any, tuiManager.unsubOrder);
+          updateUnsubInput(cleanup as any, tuiManager.unsubInput);
+          // Note: wave timer will be set by the observer when searching starts
 
           // Handle abort signal
           if (aborted) {
@@ -238,8 +244,8 @@ export function createResearchTool(): ToolDefinition {
 
           // Setup scoped logging
           const researchLogger = createLogger({ researchRunId: researchId, verbose: isVerboseFromEnv() });
-          const previousLogger = logger as any; // Cast as we're swapping the global proxy target
-          setLogger(researchLogger as any);
+          const previousLogger = getLogger(); // Save the actual Logger instance, not the proxy
+          setLogger(researchLogger);
 
           // Hide working indicator
           hideWorkingIndicator(ctx);
@@ -284,19 +290,27 @@ export function createResearchTool(): ToolDefinition {
             }
             throw error;
           } finally {
-            // Restore previous logger
-            setLogger(previousLogger);
+            // Restore previous logger (wrap in try-catch to allow other cleanup to run)
+            try {
+              setLogger(previousLogger);
+            } catch (loggerRestoreError) {
+              console.error('[research] Logger restoration failed:', loggerRestoreError);
+            }
+            
+            // Run cleanup (wrap in try-catch to allow other cleanup to run)
             try {
               await cleanup();
             } catch (cleanupError) {
-              logger.error('[research] Cleanup failed (non-fatal):', cleanupError);
+              console.error('[research] Cleanup failed:', cleanupError);
             }
+            
+            // Dispose TUI manager (wrap in try-catch)
             try {
               if (tuiManager) {
                 tuiManager.dispose();
               }
             } catch (disposeError) {
-              logger.error('[research] TUI dispose failed (non-fatal):', disposeError);
+              console.error('[research] TUI dispose failed:', disposeError);
             }
           }
         });

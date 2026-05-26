@@ -21,7 +21,9 @@ export {
 // Error utilities
 export {
     isTransientSocketError,
+    isPoolShutdownError,
     browserCircuitBreaker,
+    resetBrowserCircuitBreaker,
 } from './browser-error-utils.ts';
 
 // Scheduler types
@@ -43,4 +45,5 @@ export {
 // Lifecycle management
 export {
     stopBrowserManager,
+    waitForBrowserPoolIdle,
 } from './browser-lifecycle.ts';

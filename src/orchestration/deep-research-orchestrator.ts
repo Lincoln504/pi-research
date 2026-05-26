@@ -92,6 +92,9 @@ export class DeepResearchOrchestrator {
     logger.log(`[DeepOrchestrator] Starting multi-round research (complexity ${complexity}) for: "${query}"`);
     metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(complexity) });
 
+    // Fire onStart observer event
+    observer?.onStart?.(query, complexity);
+
     const maxRounds = getMaxRounds(complexity);
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
@@ -106,6 +109,7 @@ export class DeepResearchOrchestrator {
         observer?.onRoundStart?.(this.currentRound);
 
         // Check infrastructure health
+        observer?.onPlanningStart?.(1);
         const healthy = await orchestrationService.checkHealth(this.currentRound, researchId);
         if (!healthy && this.currentRound > 1) {
             logger.warn(`[DeepOrchestrator] Infrastructure unhealthy at Round ${this.currentRound}, attempting to continue with existing data...`);
@@ -113,6 +117,7 @@ export class DeepResearchOrchestrator {
 
         // 1. Update/Generate Plan
         const synthesisService = await getResearchSynthesisService();
+        observer?.onPlanningProgress?.('Planning...');
         const plan = await planningService.updatePlanForRound({
             query: query,
             complexity,
@@ -123,6 +128,10 @@ export class DeepResearchOrchestrator {
             totalResearchersPlanned: planningService.getTotalResearchersPlanned(),
             signal
         });
+        
+        if (plan.action === 'delegate') {
+          observer?.onPlanningSuccess?.(plan);
+        }
 
         if (plan.action === 'synthesize' || this.currentRound >= maxRounds) {
             logger.log(`[DeepOrchestrator] Synthesis phase reached at Round ${this.currentRound} ${this.elapsed()}`);
@@ -131,8 +140,10 @@ export class DeepResearchOrchestrator {
 
         if (plan.action === 'wait') {
             waitRetryCount++;
+            observer?.onPlanningProgress?.(`Waiting (retry ${waitRetryCount})...`);
             if (waitRetryCount > MAX_WAIT_RETRIES) {
                 logger.error(`[DeepOrchestrator] Max wait retries (${MAX_WAIT_RETRIES}) exceeded at Round ${this.currentRound}, stopping research`);
+                observer?.onError?.(new Error('Max wait retries exceeded'));
                 throw new Error(`Max wait retries (${MAX_WAIT_RETRIES}) exceeded. The research coordinator was unable to proceed after multiple wait requests.`);
             }
             logger.debug(`[DeepOrchestrator] AI requested wait, retrying Round ${this.currentRound} in 5s (retry ${waitRetryCount}/${MAX_WAIT_RETRIES})...`);
@@ -169,13 +180,20 @@ export class DeepResearchOrchestrator {
         if (plan.allQueries && plan.allQueries.length > 0) {
             planningService.addToQueryHistory(plan.allQueries);
         }
+        
+        // Fire evaluation decision observer event
+        if (this.currentRound < maxRounds && plan.action === 'delegate') {
+          observer?.onEvaluationDecision?.('delegate', plan, this.currentRound);
+        }
 
         // 2. Search Phase (if queries generated)
         let researcherLinks: Map<string, string[]> | undefined;
         if (plan.allQueries && plan.allQueries.length > 0) {
+            observer?.onSearchStart?.(plan.allQueries);
             const results = await orchestrationService.runSearchBurst(plan.allQueries, this.config, signal, (links: number) => {
                 observer?.onSearchProgress?.(links);
             });
+            observer?.onSearchComplete?.(results.reduce((sum, r) => sum + (r.results?.length || 0), 0));
             researcherLinks = await orchestrationService.distributeSearchResults(plan, results);
         }
 
@@ -191,11 +209,17 @@ export class DeepResearchOrchestrator {
 
         // 4. Store synthesized descriptions for semantic search
         await orchestrationService.storeLinkDescriptions(this.currentRound, researchId, this.config);
+        
+        // 5. Evaluation Phase
+        observer?.onEvaluationStart?.(this.currentRound);
+        observer?.onEvaluationProgress?.('Evaluating findings...');
       }
 
       // Final Synthesis
       logger.log(`[DeepOrchestrator] Final synthesis ${this.elapsed()}`);
       observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
+      observer?.onEvaluationStart?.(maxRounds);
+      observer?.onEvaluationProgress?.('Synthesizing final report...');
 
       const synthesisServiceFinal = await getResearchSynthesisService();
       const finalReport = await planningService.updatePlanForRound({
@@ -214,12 +238,17 @@ export class DeepResearchOrchestrator {
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
       
+      // Fire onComplete observer event
+      observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
+      observer?.onComplete?.(result);
+      
       return result;
 
     } catch (error) {
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'error' });
       logger.error(`[DeepOrchestrator] Research failed: ${error instanceof Error ? error.message : String(error)}`);
+      observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     } finally {
       await cleanupResearchServices();

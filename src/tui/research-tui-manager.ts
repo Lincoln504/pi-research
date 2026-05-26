@@ -118,14 +118,11 @@ export function createResearchTuiManager(
     return undefined;
   };
 
-  // Register master update function
+  // Register master update function (triggers re-render of existing widget)
   registerMasterUpdate(piSessionId, () => {
-    ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => {
-      const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
-        return getActivePanelsForSession(piSessionId);
-      });
-      return masterPanelCreator(_tui, theme);
-    }, { placement: 'aboveEditor' });
+    // Widget is already registered in initializePanel, just trigger refresh
+    // No need to call setWidget again (causes stacking)
+    refreshAllSessions(piSessionId);
   });
 
   // Subscribe to session order changes

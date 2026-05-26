@@ -89,6 +89,10 @@ export class SchedulerService implements IScheduler {
     isRestartInProgress: false,
   };
 
+  // Tracks the fire-and-forget shutdown promise from forceSchedulerRestart so
+  // waitForBrowserPoolIdle can await it rather than blindly polling a flag.
+  private _pendingShutdownPromise: Promise<void> | null = null;
+
   // ==========================================================================
   // Service Lifecycle Methods
   // ==========================================================================
@@ -199,6 +203,21 @@ export class SchedulerService implements IScheduler {
    */
   setSchedulerRestartInProgress(inProgress: boolean): void {
     this._sharedState.isRestartInProgress = inProgress;
+  }
+
+  /**
+   * Store the promise returned by a fire-and-forget background scheduler shutdown.
+   * Call with null once the shutdown has settled.
+   */
+  setPendingShutdownPromise(promise: Promise<void> | null): void {
+    this._pendingShutdownPromise = promise;
+  }
+
+  /**
+   * Return the pending background shutdown promise, or null if none is in flight.
+   */
+  getPendingShutdownPromise(): Promise<void> | null {
+    return this._pendingShutdownPromise;
   }
 
   /**

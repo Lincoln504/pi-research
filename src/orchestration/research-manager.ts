@@ -50,11 +50,11 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
   // Validate that required services are initialized and healthy
   try {
     const planningService = await getService(ServiceNames.PLANNING, ctx);
-    if (!planningService || !planningService.isReady) {
+    if (!planningService || typeof (planningService as any).isReady !== 'function' || !(planningService as any).isReady()) {
       throw new Error('PlanningService is not initialized. Please restart the extension.');
     }
   } catch (err) {
-    throw new Error(`Required service validation failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Required service validation failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   let result: string;

@@ -21,7 +21,7 @@ import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IKnowledgeStore, IWriterQueue } from '../core/service-interfaces.ts';
+import type { IWriterQueue } from '../core/service-interfaces.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -83,7 +83,7 @@ export class QuickResearchOrchestrator {
             if (historicalUrls.length > 0) {
               storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
                 'The following URLs were found in your local knowledge store. They contain summaries of findings from previous research sessions:\n' +
-                historicalUrls.map(u => `- ${u}`).join('\n') +
+                historicalUrls.map((u: string) => `- ${u}`).join('\n') +
                 '\n\nScrape these URLs to retrieve a historical summary hint and the fresh full content.';
             }
           } else {

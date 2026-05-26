@@ -17,6 +17,7 @@ import { getResearchSessionService, getResearchSynthesisService } from './resear
 import { loadPrompt } from '../utils/prompts.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
+import type { ResearchObserver } from './research-observer.ts';
 
 /**
  * Run a single researcher with retries
@@ -37,9 +38,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     observer,
     signal,
   } = options;
+  
+  // Explicitly type the observer to satisfy TypeScript
+  const typedObserver: ResearchObserver | undefined = observer as ResearchObserver | undefined;
 
   const id = String(researcherConfig.id);
-  observer?.onResearcherStart?.(id, researcherConfig.name, researcherConfig.goal, round);
+  typedObserver?.onResearcherStart?.(id, researcherConfig.name, researcherConfig.goal, round);
   metrics.increment('researchers_launched_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
 
   const currentPlan = planningService.getCurrentPlan();
@@ -57,7 +61,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   const researcherPromptTemplate = loadPrompt('researcher', '..');
   if (initialLinks.length === 0 && historicalUrls.length === 0) {
     logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
-    observer?.onResearcherComplete?.(id, '');
+    typedObserver?.onResearcherComplete?.(id, '');
     return;
   }
 
@@ -84,7 +88,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     if (attempt > 1) {
       const delay = Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
       logger.warn(`[ResearcherExecutor] Researcher ${id} retry ${attempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
-      observer?.onResearcherProgress?.(id, `Retry ${attempt - 1}...`);
+      typedObserver?.onResearcherProgress?.(id, `Retry ${attempt - 1}...`);
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -111,7 +115,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       }),
       updateGlobalLinks: (links) => registerScrapedLinks(researchId, links),
       onSearchProgress: (links) => {
-        observer?.onResearcherProgress?.(id, `${links} Results`);
+        typedObserver?.onResearcherProgress?.(id, `${links} Results`);
       },
     });
 
@@ -130,14 +134,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
           if (tokens > 0 || cost > 0) {
             metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(complexity) });
             metrics.increment('llm_cost_total', cost, { component: 'researcher', complexity: String(complexity) });
-            observer?.onResearcherProgress?.(id, undefined, tokens, cost);
-            observer?.onTokensConsumed?.(tokens, cost);
+            typedObserver?.onResearcherProgress?.(id, undefined, tokens, cost);
+            typedObserver?.onTokensConsumed?.(tokens, cost);
           }
         }
       } else if (event.type === 'tool_execution_start') {
-        observer?.onResearcherProgress?.(id, `${event.toolName}`);
+        typedObserver?.onResearcherProgress?.(id, `${event.toolName}`);
       } else if (event.type === 'tool_execution_end') {
-        observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
+        typedObserver?.onResearcherProgress?.(id, `done:${event.toolName}`);
       }
     });
 
@@ -185,7 +189,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       const synthesisService = await getResearchSynthesisService();
       synthesisService.storeReport(`${round}.${id}`, responseText);
 
-      observer?.onResearcherComplete?.(id, responseText);
+      typedObserver?.onResearcherComplete?.(id, responseText);
       return;
     } catch (err) {
       const researcherDuration = Date.now() - researcherExecutionStartMs;

@@ -111,7 +111,7 @@ describe('WorkerPoolManager', () => {
   });
 
   describe('fast-fail during active shutdown', () => {
-    it('throws "Worker pool is shutting down" if ensurePool() is called while shutdown is still in progress', async () => {
+    it('throws "Worker pool is shutting down" if ensurePool() is called while shutdown is still in progress (no pool)', async () => {
       // Start with no pool so ensurePool() enters the creation path (not the
       // fast-return-existing-pool path).  Then simulate mid-shutdown state by
       // setting isShuttingDown = true on the bare instance.
@@ -122,6 +122,26 @@ describe('WorkerPoolManager', () => {
       await expect(manager.ensurePool()).rejects.toThrow('Worker pool is shutting down');
 
       // Clean up so subsequent tests are not affected
+      (manager as any).isShuttingDown = false;
+    });
+
+    it('throws "Worker pool is shutting down" even when a pool reference exists (pool mid-destroy)', async () => {
+      // This is the key regression guard: before the fix, ensurePool() had an
+      // early return that handed out the cached pool without checking isShuttingDown.
+      // If pool.destroy() was in progress the caller would receive a pool in
+      // "destroying" state and poolifier would throw
+      // "Cannot execute a task on destroying pool".
+      const fakePool = {} as any; // simulate a non-null pool reference
+      (manager as any).pool = fakePool;
+      (manager as any).currentWorkerCount = 1; // same as default maxWorkers mock
+      (manager as any).isShuttingDown = true;
+
+      // Should throw even though pool is non-null and worker count matches.
+      await expect(manager.ensurePool()).rejects.toThrow('Worker pool is shutting down');
+
+      // Clean up
+      (manager as any).pool = null;
+      (manager as any).currentWorkerCount = null;
       (manager as any).isShuttingDown = false;
     });
   });

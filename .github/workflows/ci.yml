@@ -60,7 +60,12 @@ jobs:
   integration-test:
     needs: [lint, type-check, type-check-tests]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Serial browser-pool tests take ~21 min locally with real browsers.
+    # In CI browsers are not installed so they skip gracefully; the
+    # non-browser (knowledge / utility) tests finish in ~2 min.
+    # The fast variant runs the parallel group concurrently with the serial
+    # group, shaving ~60-120 s off the critical path.
+    timeout-minutes: 35
     env:
       TESTCONTAINERS_RYUK_DISABLED: true
     steps:
@@ -70,7 +75,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci --legacy-peer-deps
-      - run: npm run test:integration
+      - run: npm run test:integration:fast
 
   validate:
     runs-on: ubuntu-latest

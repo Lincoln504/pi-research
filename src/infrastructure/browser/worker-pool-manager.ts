@@ -43,16 +43,20 @@ export class WorkerPoolManager implements IService {
     async ensurePool(config?: Config): Promise<any> {
         const maxWorkers = getMaxWorkers(config);
 
-        // If pool exists and worker count matches, return it immediately
-        if (this.pool && this.currentWorkerCount === maxWorkers) {
-            return this.pool;
-        }
-
         // Fast-fail if a shutdown is in progress — the caller should retry after
         // the shutdown completes (isShuttingDown is reset to false on completion).
-        // This prevents wasting time creating a pool only to immediately destroy it.
+        // This check must come BEFORE the cached-pool fast-path below because
+        // pool.destroy() may be in flight while this.pool is still non-null.
+        // Returning a mid-destroy pool would cause poolifier to throw
+        // "Cannot execute a task on destroying pool".
         if (this.isShuttingDown) {
             throw new Error('Worker pool is shutting down');
+        }
+
+        // If pool exists, worker count matches, and we are not shutting down,
+        // return the existing pool immediately.
+        if (this.pool && this.currentWorkerCount === maxWorkers) {
+            return this.pool;
         }
 
         // Use a promise to coalesce concurrent initialization calls

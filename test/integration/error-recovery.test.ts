@@ -67,7 +67,7 @@ describe('Error Recovery and Resilience', () => {
     } catch {
       // Ignore cleanup errors
     }
-  }, 30000);
+  }, 120000); // Extended timeout: browser pool drain takes ~1.5s per forceSchedulerRestart call
 
   describe('Browser Pool Recovery', () => {
     it('should recover browser pool after crash', async () => {
@@ -374,6 +374,7 @@ describe('Error Recovery and Resilience', () => {
       expect(result).toBe('success');
       expect(circuitBreaker.getState()).toBe('CLOSED');
 
+      vi.useRealTimers(); // Must restore real timers; restoreAllMocks() does NOT restore timers
       vi.restoreAllMocks();
     }, 60000);
   });
@@ -420,6 +421,7 @@ describe('Error Recovery and Resilience', () => {
       expect(result).toBe('success');
       expect(attemptCount).toBe(maxAttempts);
 
+      vi.useRealTimers(); // Must restore real timers; restoreAllMocks() does NOT restore timers
       vi.restoreAllMocks();
     }, 60000);
 
