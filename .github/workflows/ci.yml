@@ -9,11 +9,13 @@ on:
       - '**'
 
 # Cancel any in-progress run for the same branch when a new push arrives.
-# github.head_ref is set on pull_request events (the PR branch name);
-# github.ref is used for push events (e.g. refs/heads/main).
+# - On pull_request events: github.head_ref is the source branch name.
+# - On push events: github.ref is the full ref (e.g. refs/heads/main).
+# cancel-in-progress is false on the default branch so a merge to main is
+# never killed by a follow-up commit mid-run; all other branches cancel freely.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -111,4 +113,3 @@ jobs:
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
       - name: Verify npm package
         run: npm pack --dry-run 2>&1 | grep -q index.ts
-
