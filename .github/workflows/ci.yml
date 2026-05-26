@@ -66,8 +66,6 @@ jobs:
     # The fast variant runs the parallel group concurrently with the serial
     # group, shaving ~60-120 s off the critical path.
     timeout-minutes: 35
-    env:
-      TESTCONTAINERS_RYUK_DISABLED: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
