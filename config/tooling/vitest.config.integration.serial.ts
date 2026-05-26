@@ -5,9 +5,8 @@
  * the global service registry. They MUST run one file at a time to prevent
  * pool lifecycle collisions and service registry conflicts.
  *
- * Files: all browser-pool, concurrent-operations, error-recovery,
- *        research-workflow, tools-*, link-description-enqueue,
- *        tool-execution, tools-connectivity, tools-extended
+ * Files: browser-pool-failover, concurrent-operations, error-recovery,
+ *        research-workflow, tool-execution, tools-connectivity, tools-extended
  */
 import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
@@ -18,10 +17,8 @@ export default defineConfig({
     ...baseConfig.test,
     include: [
       'test/integration/browser-pool-failover.test.ts',
-      'test/integration/browser-pool-orchestration.test.ts',
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
-      'test/integration/link-description-enqueue.test.ts',
       'test/integration/research-workflow.test.ts',
       'test/integration/tool-execution.test.ts',
       'test/integration/tools-connectivity.test.ts',

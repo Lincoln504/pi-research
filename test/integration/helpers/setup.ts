@@ -11,6 +11,7 @@ import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
+import { resetServiceContainer } from '../../../src/core/service-registry.ts';
 
 async function importLogger() {
   try {
@@ -98,6 +99,12 @@ export async function setupLifecycle(): Promise<TestContext> {
       logger.log('[test] Shutting down browser manager and disposing services...');
       await stopBrowserManager();
       await disposeCoreServices();
+      // Reset the service container entirely so the next test file that calls
+      // setupLifecycle() can re-register all services cleanly.  Without this,
+      // registrations survive across test files in sequential (non-forked) mode
+      // and registerCoreServices() throws "already registered", causing the
+      // catch-block in setupLifecycle() to silently skip re-initialization.
+      await resetServiceContainer();
     },
   };
 }

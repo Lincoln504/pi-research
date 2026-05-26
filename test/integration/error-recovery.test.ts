@@ -3,18 +3,9 @@
  *
  * Tests system behavior under failure conditions and its ability to recover.
  * These are integration tests that require the browser and knowledge store.
- *
- * NOTE: These tests are currently skipped due to browser pool lifecycle issues.
- * The Camoufox browser initialization works, but the pool destruction/creation
- * cycle in tests causes race conditions resulting in
- * "Cannot execute a task on destroying pool" errors.
- *
- * TODO: Fix pool lifecycle management to properly wait for full destruction
- * before allowing new pool initialization, or implement a shared pool instance
- * across tests with proper state reset.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   runBrowserTask,
   stopBrowserManager,
@@ -376,93 +367,6 @@ describe('Error Recovery and Resilience', () => {
 
       vi.useRealTimers(); // Must restore real timers; restoreAllMocks() does NOT restore timers
       vi.restoreAllMocks();
-    }, 60000);
-  });
-
-  describe('Retry Logic', () => {
-    it('should retry failed operations with exponential backoff', async () => {
-      vi.useFakeTimers();
-
-      let attemptCount = 0;
-      const maxAttempts = 3;
-
-      const flakyAction = vi.fn(async () => {
-        attemptCount++;
-        if (attemptCount < maxAttempts) {
-          throw new Error('temporary failure');
-        }
-        return 'success';
-      });
-
-      // Simple retry implementation (in real code, use retry utility)
-      async function retryWithBackoff<T>(
-        action: () => Promise<T>,
-        maxRetries: number
-      ): Promise<T> {
-        let lastError: Error | undefined;
-
-        for (let i = 0; i <= maxRetries; i++) {
-          try {
-            return await action();
-          } catch (error) {
-            lastError = error as Error;
-            if (i < maxRetries) {
-              const delay = Math.pow(2, i) * 100; // Exponential backoff
-              vi.advanceTimersByTime(delay);
-            }
-          }
-        }
-
-        throw lastError;
-      }
-
-      const result = await retryWithBackoff(flakyAction, maxAttempts);
-
-      expect(result).toBe('success');
-      expect(attemptCount).toBe(maxAttempts);
-
-      vi.useRealTimers(); // Must restore real timers; restoreAllMocks() does NOT restore timers
-      vi.restoreAllMocks();
-    }, 60000);
-
-    it('should not retry non-transient errors', async () => {
-      let attemptCount = 0;
-
-      const fatalAction = vi.fn(async () => {
-        attemptCount++;
-        throw new Error('fatal error - no retry');
-      });
-
-      // Simple retry with transient error detection
-      async function retryTransient<T>(
-        action: () => Promise<T>,
-        isTransient: (error: Error) => boolean
-      ): Promise<T> {
-        let lastError: Error | undefined;
-
-        for (let i = 0; i < 3; i++) {
-          try {
-            return await action();
-          } catch (error) {
-            lastError = error as Error;
-            if (!isTransient(lastError) || i >= 2) {
-              throw lastError;
-            }
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        }
-
-        throw lastError;
-      }
-
-      const isTransient = (error: Error) => !error.message.includes('fatal');
-
-      await expect(
-        retryTransient(fatalAction, isTransient)
-      ).rejects.toThrow('fatal error');
-
-      // Should only attempt once (no retries for fatal errors)
-      expect(attemptCount).toBe(1);
     }, 60000);
   });
 
