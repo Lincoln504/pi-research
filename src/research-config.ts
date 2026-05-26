@@ -134,7 +134,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
           return lines;
         },
         handleInput: async (data) => {
-          if (matchesKey(data, 'escape')) {
+          if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
             if (currentSection === 'main') {
               done({ type: 'cancel' });
             } else {
@@ -145,7 +145,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
             return;
           }
 
-          if (data === '\r' || data === '\n') {
+          if (matchesKey(data, 'enter')) {
             const selected = selectList.getSelectedItem();
             if (!selected) return;
 
@@ -395,8 +395,20 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
           ];
         },
         handleInput: (data) => {
-          if (data === 's' || data === 'S') done({ type: 'submit', data: config });
-          else settingsList.handleInput(data);
+          if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
+            done({ type: 'cancel' });
+          } else if (matchesKey(data, 's') || matchesKey(data, 'enter')) {
+            // Support both 's' and 'Enter' for saving if it's the last step, 
+            // but usually 's' is preferred for settings with many values.
+            // Actually, let's stick to 's' as per hint to avoid cycle collision.
+            if (matchesKey(data, 's')) {
+                done({ type: 'submit', data: config });
+            } else {
+                settingsList.handleInput(data);
+            }
+          } else {
+            settingsList.handleInput(data);
+          }
         },
         invalidate: () => settingsList.invalidate(),
       });
