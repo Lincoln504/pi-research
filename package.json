@@ -16,7 +16,7 @@
     "!src/.env.*.local",
     "!src/knowledge_db/",
     "docs/ARCHITECTURE.md",
-    "docs/CRITICAL_FIXES.md",
+    "docs/SERVICE_ARCHITECTURE.md",
     "docs/assets/",
     "scripts/",
     "!scripts/download-models.mjs",

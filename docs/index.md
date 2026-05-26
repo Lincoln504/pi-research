@@ -39,6 +39,7 @@ System design and architectural decisions.
 - [Architecture Overview](architecture/overview.md) - High-level system architecture
 - [Architecture Decisions](architecture/decisions.md) - ADRs (Architecture Decision Records)
 - [Scope Boundaries](architecture/scope-boundaries.md) - Project scope and boundaries
+- [Service Architecture](SERVICE_ARCHITECTURE.md) - Dependency injection and service registry details
 
 ---
 
@@ -46,38 +47,8 @@ System design and architectural decisions.
 
 Developer-focused documentation.
 
-- [Development Roadmap](../DEVELOPMENT_ROADMAP.md) - Development priorities and timeline
 - [Contributing Guide](development/contributing.md) - How to contribute
 - [Documentation Standards](development/documentation-standards.md) - Documentation guidelines
-
----
-
-## Archived
-
-Temporary phase reports and investigation documents (historical reference only).
-
-- [Archive Index](archive/README.md) - List of archived documents
-
----
-
-## Legacy Documentation
-
-Root-level planning and phase reports (kept for reference):
-
-- `DEVELOPMENT_ROADMAP.md` - Development priorities
-- `PHASE1C_CIRCULAR_DEPENDENCY_FIX.md` - Circular dependency fix
-- `PHASE2B_MIGRATION_SIMPLIFICATION_REPORT.md` - Migration simplification
-- `TEST_QUALITY_IMPROVEMENT_REPORT.md` - Test quality improvements
-- `EXECUTIVE_SUMMARY.md` - Executive summary
-- `QUICK_SUMMARY.md` - Quick summary
-- `COMPLETION_CHECKLIST.md` - Completion checklist
-- `MODULARIZATION_REPORT.md` - Modularization report
-- `DE-GLOBALIZATION-REPORT.md` - De-globalization report
-- `CIRCULAR_DEPENDENCY_ANALYSIS.md` - Circular dependency analysis
-- `CIRCULAR_DEPENDENCY_VISUAL.md` - Circular dependency visualization
-- `MIGRATION_SIMPLIFICATION_PLAN.md` - Migration simplification plan
-- `MIGRATION_SIMPLIFICATION_RESULTS.md` - Migration simplification results
-- `MIGRATION_SIMPLIFICATION_SUMMARY.md` - Migration simplification summary
 
 ---
 
@@ -136,4 +107,4 @@ Each researcher has access to:
 
 ---
 
-**Last Updated:** 2026-05-23
+**Last Updated:** 2026-05-26

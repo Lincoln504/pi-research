@@ -176,16 +176,16 @@ module.exports = {
         theme: {
           graph: {
             rankdir: 'LR',
-            /* 'spline' is usually safer and looks good. */
-            splines: 'spline',
+            /* 'polyline' or 'spline' are better for large graphs.
+             * 'polyline' can be cleaner for high-density diagrams. */
+            splines: 'polyline',
             concentrate: 'true',
             fontname: 'Helvetica, Arial, sans-serif',
             fontsize: '12',
             pad: '0.5',
-            /* Horizontal spacing between rank columns */
-            ranksep: '1.5',
-            /* Vertical spacing between nodes in the same rank */
-            nodesep: '0.6',
+            /* Increased spacing to help with horizontal flow and reduce spaghetti */
+            ranksep: '2.2',
+            nodesep: '1.0',
             bgcolor: '#ffffff',
           },
           node: {
@@ -289,8 +289,8 @@ module.exports = {
             fontsize: '16',
             pad: '1.0',
             /* Significant spacing between layers */
-            ranksep: '2.0',
-            nodesep: '1.0',
+            ranksep: '3.0',
+            nodesep: '1.5',
             label: 'pi-research — architectural layer graph',
             labelloc: 't',
           },
