@@ -144,6 +144,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
           title: 'Metrics & Monitoring',
           items: [
             { value: 'view', label: 'View Metrics', description: 'Show system metrics' },
+            { value: 'clear', label: 'Clear Metrics', description: 'Reset all session statistics' },
             { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
           ]
         }
@@ -224,6 +225,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         break;
       case 'metrics':
         if (action === 'view') await metricsModule.showMetrics({ ui: ctx.ui }, pi);
+        else if (action === 'clear') await metricsModule.handleMetricsAction('clear', [], { ui: ctx.ui }, pi);
         break;
     }
   }

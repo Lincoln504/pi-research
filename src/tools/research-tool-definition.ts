@@ -17,6 +17,7 @@ import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
 import { validateConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
+import { metrics } from '../utils/metrics.ts';
 import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv, getLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
@@ -165,6 +166,9 @@ export function createResearchTool(): ToolDefinition {
       if (!query) {
         return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
       }
+
+      // Clear cumulative metrics for a fresh start (one-time run behavior)
+      metrics.clear();
 
       try {
         const researchRunResult = await (logger as any).runCapturingStderr(async () => {
