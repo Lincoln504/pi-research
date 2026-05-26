@@ -468,6 +468,10 @@ describe('Error Recovery and Resilience', () => {
 
   describe('Resource Exhaustion Recovery', () => {
     it('should handle high memory usage gracefully', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+
       // Simulate high memory usage by creating large strings
       const largeStrings: string[] = [];
       const memoryBefore = process.memoryUsage().heapUsed;
