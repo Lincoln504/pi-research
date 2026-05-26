@@ -7,7 +7,7 @@
  */
 
 /**
- * Token usage information from LLM responses
+ * Token usage and cost information from LLM responses
  */
 export interface TokenUsage {
   /** Input tokens consumed */
@@ -20,6 +20,14 @@ export interface TokenUsage {
   cacheWrite?: number;
   /** Total tokens (may be provided by some providers) */
   totalTokens?: number;
+  /** Cost details */
+  cost?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
 }
 
 /**
@@ -31,9 +39,23 @@ export interface TextContentBlock {
 }
 
 /**
+ * Thinking content block in a message (supported in newer pi-ai versions)
+ */
+export interface ThinkingContentBlock {
+  type: 'thinking';
+  thinking: string;
+  redacted?: boolean;
+}
+
+/**
+ * Message content block (can be text or thinking)
+ */
+export type MessageBlock = TextContentBlock | ThinkingContentBlock;
+
+/**
  * Message content (can be a string or array of blocks)
  */
-export type MessageContent = string | TextContentBlock[];
+export type MessageContent = string | MessageBlock[];
 
 /**
  * Filter for text content blocks from a message content array
@@ -44,6 +66,18 @@ export function isTextContentBlock(block: unknown): block is TextContentBlock {
     typeof block === 'object' &&
     (block as Record<string, unknown>)['type'] === 'text' &&
     typeof (block as Record<string, unknown>)['text'] === 'string'
+  );
+}
+
+/**
+ * Filter for thinking content blocks
+ */
+export function isThinkingContentBlock(block: unknown): block is ThinkingContentBlock {
+  return (
+    block !== null &&
+    typeof block === 'object' &&
+    (block as Record<string, unknown>)['type'] === 'thinking' &&
+    typeof (block as Record<string, unknown>)['thinking'] === 'string'
   );
 }
 
@@ -64,6 +98,22 @@ export function extractTextFromContent(content: MessageContent): string {
 }
 
 /**
+ * Extract thinking content from a message content block or string
+ */
+export function extractThinkingFromContent(content: MessageContent): string {
+  if (typeof content === 'string') {
+    return '';
+  }
+  if (Array.isArray(content)) {
+    return content
+      .filter(isThinkingContentBlock)
+      .map(block => block.thinking)
+      .join('\n');
+  }
+  return '';
+}
+
+/**
  * Parse token usage from an unknown object
  * Returns a partial usage object with any fields that were present
  */
@@ -72,7 +122,7 @@ export function parseTokenUsage(usage: unknown): Partial<TokenUsage> {
     return {};
   }
 
-  const obj = usage as Record<string, unknown>;
+  const obj = usage as Record<string, any>;
   const result: Partial<TokenUsage> = {};
 
   if (typeof obj['input'] === 'number') {
@@ -89,6 +139,9 @@ export function parseTokenUsage(usage: unknown): Partial<TokenUsage> {
   }
   if (typeof obj['totalTokens'] === 'number') {
     result.totalTokens = obj['totalTokens'];
+  }
+  if (obj['cost'] && typeof obj['cost'] === 'object') {
+    result.cost = obj['cost'];
   }
 
   return result;

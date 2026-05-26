@@ -133,6 +133,12 @@ export class PlanningService implements IPlanningService {
       }
 
       const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
+      const thinkingContent = (planResponse.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
+      
+      if (thinkingContent?.thinking) {
+        logger.debug(`[${this.name}] Coordinator Thinking:\n${thinkingContent.thinking}`);
+      }
+
       const rawPlanText = textContent?.text || '';
       lastRawPlanText = rawPlanText;
 
@@ -144,9 +150,13 @@ export class PlanningService implements IPlanningService {
         if (planResponse.usage) {
           const coordUsage = parseTokenUsage(planResponse.usage);
           const tokens = calculateTotalTokens(coordUsage);
-          const cost = planResponse.usage.cost?.total ?? 0;
+          const cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
           metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
           metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
+          
+          if (coordUsage.cacheRead) {
+            metrics.increment('llm_cache_read_tokens_total', coordUsage.cacheRead, { component: 'coordinator' });
+          }
         }
 
         metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
@@ -266,14 +276,26 @@ export class PlanningService implements IPlanningService {
       }
 
       const textContent = response.content.find((c): c is TextContent => c.type === 'text');
+      const thinkingContent = (response.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
+      
+      if (thinkingContent?.thinking) {
+        logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
+        observer?.onPlanningProgress?.('Analyzing findings...');
+      }
+
       text = textContent?.text || '';
 
       if (response.usage) {
         const evalUsage = parseTokenUsage(response.usage);
         const tokens = calculateTotalTokens(evalUsage);
-        const cost = response.usage.cost?.total ?? 0;
+        const cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
         metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
         metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
+        
+        if (evalUsage.cacheRead) {
+          metrics.increment('llm_cache_read_tokens_total', evalUsage.cacheRead, { component: 'evaluator' });
+        }
+        
         observer?.onEvaluationTokens?.(tokens, cost);
         observer?.onTokensConsumed?.(tokens, cost);
       }

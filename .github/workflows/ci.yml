@@ -37,6 +37,10 @@ jobs:
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run lint
+      - name: Audit Dependencies
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
       - name: Static Analysis
         run: npm run analyze:cloc
         continue-on-error: true
