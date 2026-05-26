@@ -40,20 +40,10 @@ jobs:
           cache: 'npm'
       - run: npm ci --legacy-peer-deps
       - run: npm run type-check
-
-  type-check-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
       - run: npm run type-check:tests
 
   unit-test:
-    needs: [lint, type-check, type-check-tests]
+    needs: [lint, type-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +55,7 @@ jobs:
       - run: npm run test:unit
 
   integration-test:
-    needs: [lint, type-check, type-check-tests]
+    needs: [lint, type-check]
     runs-on: ubuntu-latest
     # Serial browser-pool tests take ~21 min locally with real browsers.
     # In CI browsers are not installed so they skip gracefully; the
@@ -83,8 +73,10 @@ jobs:
       - run: npm run test:integration:fast
 
   dep-graph:
-    needs: [lint, type-check, type-check-tests]
+    needs: [lint, type-check]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -94,11 +86,17 @@ jobs:
       - run: sudo apt-get install -y graphviz
       - run: npm ci --legacy-peer-deps
       - run: npm run deps:generate
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dependency-graph
-          path: docs/deps.svg
-          retention-days: 30
+      - name: Commit and push docs/deps.svg
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add --force docs/deps.svg
+          if git diff --cached --quiet; then
+            echo "deps.svg unchanged, nothing to commit"
+          else
+            git commit -m "chore(ci): regenerate docs/deps.svg [skip ci]"
+            git push
+          fi
 
   validate:
     runs-on: ubuntu-latest
@@ -113,4 +111,3 @@ jobs:
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
       - name: Verify npm package
         run: npm pack --dry-run 2>&1 | grep -q index.ts
-
