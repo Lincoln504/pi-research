@@ -176,39 +176,47 @@ module.exports = {
         theme: {
           graph: {
             rankdir: 'LR',
-            splines: 'ortho',
+            /* 'spline' is usually safer and looks good. */
+            splines: 'spline',
             concentrate: 'true',
-            fontname: 'Helvetica',
-            fontsize: '11',
-            pad: '0.4',
-            ranksep: '1.0',
-            nodesep: '0.4',
+            fontname: 'Helvetica, Arial, sans-serif',
+            fontsize: '12',
+            pad: '0.5',
+            /* Horizontal spacing between rank columns */
+            ranksep: '1.5',
+            /* Vertical spacing between nodes in the same rank */
+            nodesep: '0.6',
+            bgcolor: '#ffffff',
           },
           node: {
-            fontname: 'Helvetica',
+            fontname: 'Helvetica, Arial, sans-serif',
             fontsize: '10',
             style: 'filled',
             fillcolor: '#f8fafc',
             color: '#94a3b8',
+            height: '0.3',
+            margin: '0.15,0.05',
           },
           edge: {
-            fontname: 'Helvetica',
+            fontname: 'Helvetica, Arial, sans-serif',
             fontsize: '9',
             color: '#475569',
+            arrowsize: '0.7',
+            penwidth: '1.0',
           },
           modules: [
-            // colour-code by architectural layer
+            // colour-code by architectural layer (ordered from high-level to low-level)
             {
-              criteria: { source: '^src/core/' },
-              attributes: { fillcolor: '#dbeafe', color: '#3b82f6', label: 'core' },
+              criteria: { source: '^src/tui/' },
+              attributes: { fillcolor: '#fefce8', color: '#eab308', label: 'tui' },
             },
             {
-              criteria: { source: '^src/infrastructure/' },
-              attributes: { fillcolor: '#dcfce7', color: '#22c55e', label: 'infrastructure' },
+              criteria: { source: '^src/commands/' },
+              attributes: { fillcolor: '#eff6ff', color: '#6366f1', label: 'commands' },
             },
             {
-              criteria: { source: '^src/knowledge/' },
-              attributes: { fillcolor: '#f3e8ff', color: '#a855f7', label: 'knowledge' },
+              criteria: { source: '^src/(observers|cleanup|healthcheck)/' },
+              attributes: { fillcolor: '#fff1f2', color: '#f43f5e', label: 'support' },
             },
             {
               criteria: { source: '^src/orchestration/' },
@@ -231,8 +239,16 @@ module.exports = {
               attributes: { fillcolor: '#fff7ed', color: '#f97316', label: 'stackexchange' },
             },
             {
-              criteria: { source: '^src/tui/' },
-              attributes: { fillcolor: '#fefce8', color: '#eab308', label: 'tui' },
+              criteria: { source: '^src/infrastructure/' },
+              attributes: { fillcolor: '#dcfce7', color: '#22c55e', label: 'infrastructure' },
+            },
+            {
+              criteria: { source: '^src/knowledge/' },
+              attributes: { fillcolor: '#f3e8ff', color: '#a855f7', label: 'knowledge' },
+            },
+            {
+              criteria: { source: '^src/core/' },
+              attributes: { fillcolor: '#dbeafe', color: '#3b82f6', label: 'core' },
             },
             {
               criteria: { source: '^src/utils/' },
@@ -241,14 +257,6 @@ module.exports = {
             {
               criteria: { source: '^src/types/' },
               attributes: { fillcolor: '#f8fafc', color: '#94a3b8', label: 'types' },
-            },
-            {
-              criteria: { source: '^src/commands/' },
-              attributes: { fillcolor: '#eff6ff', color: '#6366f1', label: 'commands' },
-            },
-            {
-              criteria: { source: '^src/(observers|cleanup|healthcheck)/' },
-              attributes: { fillcolor: '#fff1f2', color: '#f43f5e', label: 'support' },
             },
           ],
           dependencies: [
@@ -268,57 +276,56 @@ module.exports = {
         },
       },
 
-      /* archi: high-level layer view — one box per src/X/ folder.
-       * This is the CI artifact (docs/deps.svg). It shows the 13-layer
-       * architecture at a glance and stays under 120 KB. */
+      /* archi: high-level layer view — one box per src/X/ folder. */
       archi: {
         /* Collapse every src/X/ subtree and every node_modules package */
         collapsePattern: '^(src/[^/]+|node_modules/[^/]+)',
         theme: {
           graph: {
             rankdir: 'LR',
-            splines: 'ortho',
-            /* Merge parallel edges between the same pair of layers */
+            splines: 'spline',
             concentrate: 'true',
-            fontname: 'Helvetica',
-            fontsize: '13',
-            pad: '0.5',
-            /* Horizontal spacing between rank columns */
-            ranksep: '1.2',
-            /* Vertical spacing between nodes in the same rank */
-            nodesep: '0.6',
+            fontname: 'Helvetica, Arial, sans-serif',
+            fontsize: '16',
+            pad: '1.0',
+            /* Significant spacing between layers */
+            ranksep: '2.0',
+            nodesep: '1.0',
             label: 'pi-research — architectural layer graph',
             labelloc: 't',
           },
           node: {
-            fontname: 'Helvetica',
-            fontsize: '12',
-            style: 'filled',
+            fontname: 'Helvetica, Arial, sans-serif',
+            fontsize: '13',
+            style: 'filled,rounded',
             fillcolor: '#f8fafc',
             color: '#94a3b8',
-            /* Fixed width so all layer boxes are the same size */
-            width: '2.0',
+            width: '2.4',
+            height: '0.8',
+            shape: 'rect',
+            penwidth: '2.0',
           },
           edge: {
-            fontname: 'Helvetica',
-            fontsize: '10',
+            fontname: 'Helvetica, Arial, sans-serif',
+            fontsize: '11',
             color: '#475569',
-            arrowsize: '0.8',
+            arrowsize: '1.0',
+            penwidth: '1.5',
           },
           modules: [
-            { criteria: { source: '^src/core' },          attributes: { fillcolor: '#dbeafe', color: '#3b82f6', label: 'core' } },
-            { criteria: { source: '^src/infrastructure' }, attributes: { fillcolor: '#dcfce7', color: '#22c55e', label: 'infrastructure' } },
-            { criteria: { source: '^src/knowledge' },      attributes: { fillcolor: '#f3e8ff', color: '#a855f7', label: 'knowledge' } },
+            { criteria: { source: '^src/tui' },            attributes: { fillcolor: '#fefce8', color: '#eab308', label: 'tui' } },
+            { criteria: { source: '^src/commands' },       attributes: { fillcolor: '#eff6ff', color: '#6366f1', label: 'commands' } },
+            { criteria: { source: '^src/(observers|cleanup|healthcheck)' }, attributes: { fillcolor: '#fff1f2', color: '#f43f5e', label: 'support' } },
             { criteria: { source: '^src/orchestration' },  attributes: { fillcolor: '#fef9c3', color: '#ca8a04', label: 'orchestration' } },
             { criteria: { source: '^src/tools' },          attributes: { fillcolor: '#fee2e2', color: '#ef4444', label: 'tools' } },
             { criteria: { source: '^src/web-research' },   attributes: { fillcolor: '#ecfdf5', color: '#10b981', label: 'web-research' } },
             { criteria: { source: '^src/security' },       attributes: { fillcolor: '#fdf2f8', color: '#ec4899', label: 'security' } },
             { criteria: { source: '^src/stackexchange' },  attributes: { fillcolor: '#fff7ed', color: '#f97316', label: 'stackexchange' } },
-            { criteria: { source: '^src/tui' },            attributes: { fillcolor: '#fefce8', color: '#eab308', label: 'tui' } },
+            { criteria: { source: '^src/infrastructure' }, attributes: { fillcolor: '#dcfce7', color: '#22c55e', label: 'infrastructure' } },
+            { criteria: { source: '^src/knowledge' },      attributes: { fillcolor: '#f3e8ff', color: '#a855f7', label: 'knowledge' } },
+            { criteria: { source: '^src/core' },          attributes: { fillcolor: '#dbeafe', color: '#3b82f6', label: 'core' } },
             { criteria: { source: '^src/utils' },          attributes: { fillcolor: '#f1f5f9', color: '#64748b', label: 'utils' } },
             { criteria: { source: '^src/types' },          attributes: { fillcolor: '#f8fafc', color: '#94a3b8', label: 'types' } },
-            { criteria: { source: '^src/commands' },       attributes: { fillcolor: '#eff6ff', color: '#6366f1', label: 'commands' } },
-            { criteria: { source: '^src/(observers|cleanup|healthcheck)' }, attributes: { fillcolor: '#fff1f2', color: '#f43f5e', label: 'support' } },
           ],
           dependencies: [
             { criteria: { circular: true },                attributes: { color: '#dc2626', penwidth: '3.0', style: 'bold' } },
