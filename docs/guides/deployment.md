@@ -349,7 +349,7 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/*
 
 # Install pi (example)
-RUN npm install -g @mariozechner/pi-cli
+RUN npm install -g @earendil-works/pi-cli
 
 # Install pi-research
 RUN pi install npm:@lincoln504/pi-research
@@ -391,7 +391,7 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # Install pi (example)
-npm install -g @mariozechner/pi-cli
+npm install -g @earendil-works/pi-cli
 
 # Install pi-research
 pi install npm:@lincoln504/pi-research

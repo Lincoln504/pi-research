@@ -20,7 +20,7 @@ import { ServiceNames } from '../../src/core/service-interfaces.ts';
 import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-service.ts';
 
 // Mock pi-ai and pi-coding-agent
-vi.mock('@mariozechner/pi-ai', async (importOriginal) => {
+vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
   const actual = await importOriginal() as any;
   return {
     ...actual,
@@ -31,7 +31,7 @@ vi.mock('@mariozechner/pi-ai', async (importOriginal) => {
   };
 });
 
-vi.mock('@mariozechner/pi-coding-agent', async (importOriginal) => {
+vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   const actual = await importOriginal() as any;
   const { getService: getSvc } = await import('../../src/core/service-registry.ts');
   const { ServiceNames: names } = await import('../../src/core/service-interfaces.ts');

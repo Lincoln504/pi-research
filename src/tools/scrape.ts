@@ -9,7 +9,7 @@
  * exceeds MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING of the total context window.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { scrape } from '../web-research/web-scraper.ts';

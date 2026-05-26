@@ -4,8 +4,8 @@
  * Coordinates multi-round research using specialized services.
  */
 
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { type Model } from '@mariozechner/pi-ai';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import {

@@ -23,7 +23,7 @@ import {
   formatUsersCompact,
   formatSitesCompact,
 } from './output/compact.ts';
-import type { ExtensionContext, AgentToolResult } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 
 function notify(
   ctx: ExtensionContext,

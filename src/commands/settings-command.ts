@@ -8,8 +8,8 @@
  * - Clear knowledge store cache
  */
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
-import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { visibleWidth, truncateToWidth, matchesKey } from '@earendil-works/pi-tui';
 import { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';

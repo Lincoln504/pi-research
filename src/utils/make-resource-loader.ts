@@ -5,7 +5,7 @@
  * Both files use identical ResourceLoader implementations.
  */
 
-import type { ResourceLoader, ExtensionRuntime } from '@mariozechner/pi-coding-agent';
+import type { ResourceLoader, ExtensionRuntime } from '@earendil-works/pi-coding-agent';
 
 export function makeResourceLoader(systemPromptText: string): ResourceLoader {
   const mockRuntime: ExtensionRuntime = {

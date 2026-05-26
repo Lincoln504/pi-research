@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import type { Model, Api } from '@mariozechner/pi-ai';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { Model, Api } from '@earendil-works/pi-ai';
 import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 
 /**

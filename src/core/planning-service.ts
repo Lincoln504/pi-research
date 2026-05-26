@@ -11,7 +11,7 @@
 import type { IPlanningService, ResearchPlan, ResearcherConfig } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
-import { complete, completeSimple, type TextContent, type Message } from '@mariozechner/pi-ai';
+import { complete, completeSimple, type TextContent, type Message } from '@earendil-works/pi-ai';
 import { extractJson } from '../utils/json-utils.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';

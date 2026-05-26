@@ -1,12 +1,12 @@
 /**
  * Extended Type Definitions for pi Extension Context
  *
- * These types extend the base ExtensionContext from @mariozechner/pi-coding-agent
+ * These types extend the base ExtensionContext from @earendil-works/pi-coding-agent
  * to provide type safety for additional properties that are accessed at runtime.
  */
 
-import type { SettingsManager } from '@mariozechner/pi-coding-agent';
-export type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { SettingsManager } from '@earendil-works/pi-coding-agent';
+export type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 /**
  * Session manager interface for accessing session metadata
@@ -43,4 +43,4 @@ export interface ModelWithId {
  * Re-export AgentSessionEvent as ExtendedAgentSessionEvent for backwards compat.
  * The real SDK type has the correct shape for all event fields.
  */
-export type { AgentSessionEvent as ExtendedAgentSessionEvent } from '@mariozechner/pi-coding-agent';
+export type { AgentSessionEvent as ExtendedAgentSessionEvent } from '@earendil-works/pi-coding-agent';

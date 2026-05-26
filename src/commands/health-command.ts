@@ -5,7 +5,7 @@
  * - Run health checks
  */
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import type { CommandContext } from './command-types.ts';

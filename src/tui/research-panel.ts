@@ -6,7 +6,7 @@
  * architecture using DuckDuckGo Lite (Playwright).
  */
 
-import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
+import { type Component, visibleWidth, truncateToWidth } from '@earendil-works/pi-tui';
 import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
 import {
   formatTokens,

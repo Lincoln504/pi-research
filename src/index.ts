@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import type { NodeError, ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';

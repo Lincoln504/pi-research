@@ -3,7 +3,7 @@
  */
 
 import type { IService } from '../service-registry.ts';
-import type { Model } from '@mariozechner/pi-ai';
+import type { Model } from '@earendil-works/pi-ai';
 import type { ResearchObserver } from './observer-interfaces.ts';
 import type { ResearchPlan, ResearcherConfig } from './research-plan-types.ts';
 

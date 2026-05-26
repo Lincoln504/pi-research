@@ -11,9 +11,9 @@
  * - Knowledge store search for historical data
  */
 
-import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { createAgentSession, SessionManager } from '@mariozechner/pi-coding-agent';
-import type { Model } from '@mariozechner/pi-ai';
+import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
+import type { Model } from '@earendil-works/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../utils/tool-usage-tracker.ts';

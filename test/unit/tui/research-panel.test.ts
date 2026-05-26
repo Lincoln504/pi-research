@@ -14,7 +14,7 @@ import {
 } from '../../../src/tui/research-panel.ts';
 
 // Mock pi-tui
-vi.mock('@mariozechner/pi-tui', () => ({
+vi.mock('@earendil-works/pi-tui', () => ({
   visibleWidth: vi.fn().mockReturnValue(80),
   truncateToWidth: vi.fn().mockImplementation((s, w) => s.slice(0, w)),
 }));

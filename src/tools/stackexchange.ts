@@ -4,7 +4,7 @@
  * Search and retrieve data from Stack Exchange network via REST API v2.3.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { stackexchangeCommand } from '../stackexchange/index.ts';

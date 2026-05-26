@@ -9,7 +9,7 @@ import type {
   ToolDefinition,
   AgentToolResult,
   ExtensionContext,
-} from '@mariozechner/pi-coding-agent';
+} from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { healthRegistry } from '../healthcheck/index.ts';
 

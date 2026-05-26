@@ -5,7 +5,7 @@
  * Allows researchers to see what has already been found/scraped.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';

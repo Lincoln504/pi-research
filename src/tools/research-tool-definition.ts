@@ -10,8 +10,8 @@ import type {
   ToolDefinition,
   AgentToolResult,
   ExtensionContext,
-} from '@mariozechner/pi-coding-agent';
-import type { Model } from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-coding-agent';
+import type { Model } from '@earendil-works/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
 import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';

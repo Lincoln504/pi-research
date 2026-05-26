@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import * as nodePath from 'node:path';
 import { logger } from '../logger.ts';
-import type { ToolDefinition, AgentToolResult } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';

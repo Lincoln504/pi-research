@@ -8,7 +8,7 @@
  * - Clear knowledge store
  */
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
 import { getConfig, getDbDir } from '../config.ts';
 import { getService } from '../core/service-registry.ts';

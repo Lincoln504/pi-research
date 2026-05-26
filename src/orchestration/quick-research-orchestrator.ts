@@ -8,8 +8,8 @@
 import { 
     type ExtensionContext, 
     type AgentSessionEvent 
-} from '@mariozechner/pi-coding-agent';
-import { type Model } from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-coding-agent';
+import { type Model } from '@earendil-works/pi-ai';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';

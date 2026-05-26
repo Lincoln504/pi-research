@@ -212,14 +212,14 @@ vi.mock('../../src/utils/research-export.ts', () => ({
   appendExportMessage: vi.fn((result, path, cost) => `${result}\n\nExported to: ${path}`),
 }));
 
-vi.mock('@mariozechner/pi-coding-agent', () => ({
+vi.mock('@earendil-works/pi-coding-agent', () => ({
   SessionManager: { inMemory: vi.fn(() => ({})) },
   SettingsManager: { inMemory: vi.fn(() => ({})) },
   createAgentSession: vi.fn(),
   createReadTool: vi.fn(),
 }));
 
-vi.mock('@mariozechner/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai', () => ({
   complete: vi.fn(async () => ({
     content: [{ type: 'text', text: '2' }],
     usage: { totalTokens: 10 },
@@ -229,7 +229,7 @@ vi.mock('@mariozechner/pi-ai', () => ({
 // Import mocked modules
 import * as panel from '../../src/tui/research-panel.ts';
 import { createResearcherSession } from '../../src/orchestration/researcher.ts';
-import { complete } from '@mariozechner/pi-ai';
+import { complete } from '@earendil-works/pi-ai';
 import { createResearchTuiManager, hideWorkingIndicator, showWorkingIndicator } from '../../src/tui/research-tui-manager.ts';
 
 // ============================================================================

@@ -4,7 +4,7 @@
  * Helper functions for working with PI sessions
  */
 
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ExtendedExtensionContext, SessionManager } from '../types/extension-context.ts';
 
 export interface PiSessionMetadata {

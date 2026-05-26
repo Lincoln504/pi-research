@@ -4,7 +4,7 @@
  * Query the local knowledge store for information across sessions.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { getService } from '../core/service-registry.ts';

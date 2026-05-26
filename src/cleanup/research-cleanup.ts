@@ -8,7 +8,7 @@
  * - Shared links cleanup
  */
 
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
 import {
   endResearchSession,

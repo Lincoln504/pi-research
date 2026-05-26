@@ -2,7 +2,7 @@
  * LLM-Related Type Definitions
  *
  * Shared type definitions for LLM responses, usage, and message content.
- * These types complement the types from @mariozechner/pi-ai and provide
+ * These types complement the types from @earendil-works/pi-ai and provide
  * more specific typing for our use cases.
  */
 

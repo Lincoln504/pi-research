@@ -4,7 +4,7 @@
  * Search security vulnerability databases (NVD, CISA KEV, GitHub Advisories, OSV).
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { searchSecurityDatabases } from '../security/index.ts';

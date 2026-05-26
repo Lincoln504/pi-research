@@ -5,10 +5,10 @@
  * These tools are used by both direct tool calls and researcher agents.
  */
 
-import type { ToolDefinition, ExtensionContext } from '@mariozechner/pi-coding-agent';
+import type { ToolDefinition, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { createReadTool } from '@mariozechner/pi-coding-agent';
+import { createReadTool } from '@earendil-works/pi-coding-agent';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
 import { createLinksTool } from './links.ts';

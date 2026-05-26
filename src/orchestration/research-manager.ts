@@ -5,8 +5,8 @@
  * Agnostic of TUI, requires ExtensionContext.
  */
 
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import { type Model } from '@mariozechner/pi-ai';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { type Model } from '@earendil-works/pi-ai';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
 import type { ResearchObserver } from './research-observer.ts';
