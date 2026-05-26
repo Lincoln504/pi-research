@@ -8,20 +8,11 @@
 import * as http from 'node:http';
 import type { Config } from '../../config.ts';
 import type { SearchResult } from '../../web-research/types.ts';
+import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { getClientAgent } from './client-agent.ts';
 import type { NodeError } from '../../types/index.ts';
-
-/**
- * Scheduler interface that both BrowserTaskScheduler and BrowserClient implement.
- */
-export interface IScheduler {
-    runSearch(query: string, config?: Config): Promise<SearchResult[]>;
-    runScrape(url: string, config?: Config): Promise<unknown>;
-    runHealthCheck(config?: Config): Promise<{ success: boolean }>;
-    shutdown(): Promise<void>;
-}
 
 /**
  * HTTP client that communicates with a remote scheduler.

@@ -31,7 +31,7 @@ export {
 } from './browser-error-utils.ts';
 
 // Scheduler types
-export type { IScheduler } from './browser-client.ts';
+export type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 
 // Scheduler factory
 export {

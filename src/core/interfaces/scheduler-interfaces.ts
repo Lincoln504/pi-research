@@ -34,13 +34,15 @@ export interface ISchedulerInternals extends IService {
 }
 
 /**
- * Scheduler search result
+ * Scheduler search result — matches the shape returned by the browser
+ * infrastructure layer (BrowserTaskScheduler / BrowserClient).
  */
 export interface SearchResult {
   title: string;
   url: string;
-  snippet: string;
-  [key: string]: any;
+  content: string;
+  engine?: string;
+  score?: number;
 }
 
 /**

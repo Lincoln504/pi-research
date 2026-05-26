@@ -16,7 +16,7 @@ import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interf
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer } from '../browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
-import type { IScheduler } from './browser-client.ts';
+import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses } from '../browser-cleanup.ts';
 
 /**

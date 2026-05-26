@@ -16,7 +16,7 @@ import type { IStateManager } from '../../core/interfaces/state-manager-interfac
 import { generateSchedulerVersion } from './config.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
-import type { IScheduler } from './browser-client.ts';
+import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 
 /**
  * Force a restart of the scheduler by clearing the global cache and state.
