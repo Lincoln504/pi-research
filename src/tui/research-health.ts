@@ -10,7 +10,7 @@ import {
   addSlice,
   activateSlice,
   removeSlice,
-} from '../tui/research-panel.ts';
+} from './research-panel.ts';
 
 export interface HealthCheckContext {
   panelState: any;

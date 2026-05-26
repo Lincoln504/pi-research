@@ -7,7 +7,7 @@
  */
 
 import { type Component, visibleWidth, truncateToWidth } from '@mariozechner/pi-tui';
-import type { Theme, ResearchPanelState } from './research-panel-types.ts';
+import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
 import {
   formatTokens,
   renderProgressPct,
@@ -21,7 +21,7 @@ import { generateWaveFill } from './research-panel-wave.ts';
 /**
  * Re-export types for convenience
  */
-export type { Theme, SliceState, ResearchPanelState, ResearchProgress } from './research-panel-types.ts';
+export type { Theme, SliceState, ResearchPanelState, ResearchProgress } from '../types/research-panel-types.ts';
 
 /**
  * Re-export state management functions

@@ -4,7 +4,7 @@
  * Functions for formatting tokens, costs, and progress.
  */
 
-import type { ResearchProgress } from './research-panel-types.ts';
+import type { ResearchProgress } from '../types/research-panel-types.ts';
 
 /**
  * Format tokens for display

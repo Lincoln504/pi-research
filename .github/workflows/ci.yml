@@ -130,6 +130,10 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+      # Validate architectural rules (no graphviz required — fast, fails on violations)
+      - name: Check dependency rules
+        run: npm run deps:check
+      # Regenerate the SVG and commit only if it changed
       - run: sudo apt-get install -y graphviz
       - run: npm run deps:generate
       - name: Commit and push docs/deps.svg

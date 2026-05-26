@@ -4,7 +4,7 @@
  * Handles the wave animation logic for the research panel header.
  */
 
-import type { Theme } from './research-panel-types.ts';
+import type { Theme } from '../types/research-panel-types.ts';
 import { parseAnsiFgColor, indexToRgb, cycleHslSaturationLightness } from './research-panel-color-utils.ts';
 
 /**

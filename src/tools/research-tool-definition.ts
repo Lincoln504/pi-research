@@ -25,7 +25,7 @@ import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 
-import { ensureFunctionalHealth, createHealthMonitor } from '../utils/research-health.ts';
+import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { errorTracker, type ErrorReport } from '../utils/error-tracker.ts';
 
 /**

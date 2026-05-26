@@ -17,20 +17,10 @@ import {
 } from '../utils/session-state.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
 import { resetTerminalState } from '../utils/terminal-state.ts';
-import type { ResearchPanelState } from '../tui/research-panel.ts';
+import type { CleanupContext } from '../types/index.ts';
+import type { ResearchPanelState } from '../types/research-panel-types.ts';
 
-export interface CleanupContext {
-  researchId: string;
-  piSessionId: string;
-  masterWidgetId: string;
-  panelState: ResearchPanelState;
-  waveTimer: NodeJS.Timeout | null;
-  unsubOrder: (() => void) | null;
-  unsubInput: (() => void) | null;
-  // Allow updating unsubscribe functions after creation
-  unsubOrderRef?: { value: (() => void) | null };
-  unsubInputRef?: { value: (() => void) | null };
-}
+export type { CleanupContext };
 
 export interface CleanupDependencies {
   ctx: ExtensionContext;

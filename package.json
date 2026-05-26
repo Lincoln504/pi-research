@@ -73,7 +73,10 @@
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "models:download": "node scripts/download-models.mjs",
     "models:download:force": "node scripts/download-models.mjs --force",
-    "deps:generate": "madge --image docs/deps.svg --extensions ts --ts-config tsconfig.json src/index.ts"
+    "deps:check": "depcruise --config .dependency-cruiser.cjs --output-type err-long src",
+    "deps:generate": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg > docs/deps.svg",
+    "deps:generate:archi": "depcruise --config .dependency-cruiser.cjs --output-type archi src | dot -T svg > docs/deps-archi.svg",
+    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg | depcruise-wrap-stream-in-html > docs/deps.html"
   },
   "pi": {
     "extensions": [
@@ -118,8 +121,8 @@
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "dependency-cruiser": "^17.4.2",
     "eslint": "^10.1.0",
-    "madge": "^8.0.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }

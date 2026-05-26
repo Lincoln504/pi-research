@@ -6,7 +6,7 @@
 
 import type {
   ResearchPanelState,
-} from './research-panel-types.ts';
+} from '../types/research-panel-types.ts';
 
 /**
  * Add a new researcher column

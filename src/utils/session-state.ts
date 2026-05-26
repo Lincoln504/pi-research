@@ -8,7 +8,7 @@
 import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
-import type { ResearchPanelState } from '../tui/research-panel.ts';
+import type { ResearchPanelState } from '../types/research-panel-types.ts';
 
 /**
  * State container for a single Pi session

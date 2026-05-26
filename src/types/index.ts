@@ -44,7 +44,20 @@ export interface BrowserTask {
   [key: string]: unknown;
 }
 
-export type { CleanupContext } from '../cleanup/research-cleanup.ts';
+/**
+ * Context object threaded through cleanup operations for a research session.
+ */
+export interface CleanupContext {
+  researchId: string;
+  piSessionId: string;
+  masterWidgetId: string;
+  panelState: import('./research-panel-types.ts').ResearchPanelState;
+  waveTimer: NodeJS.Timeout | null;
+  unsubOrder: (() => void) | null;
+  unsubInput: (() => void) | null;
+  unsubOrderRef?: { value: (() => void) | null };
+  unsubInputRef?: { value: (() => void) | null };
+}
 
 /**
  * Research message from observer events
