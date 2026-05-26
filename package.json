@@ -72,7 +72,8 @@
     "install:browsers": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "models:download": "node scripts/download-models.mjs",
-    "models:download:force": "node scripts/download-models.mjs --force"
+    "models:download:force": "node scripts/download-models.mjs --force",
+    "deps:generate": "madge --image docs/deps.svg --extensions ts --ts-config tsconfig.json src/index.ts"
   },
   "pi": {
     "extensions": [

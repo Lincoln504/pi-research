@@ -57,6 +57,7 @@ knowledge_db/
 shared-links-pool-*.json
 pi-research-*.md
 deps.svg
+docs/deps.svg
 ts-errors*.log
 test-results.txt
 
