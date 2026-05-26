@@ -8,6 +8,13 @@ on:
     branches:
       - '**'
 
+# Cancel any in-progress run for the same branch when a new push arrives.
+# github.head_ref is set on pull_request events (the PR branch name);
+# github.ref is used for push events (e.g. refs/heads/main).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
