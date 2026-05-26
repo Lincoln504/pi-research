@@ -5,8 +5,6 @@
  * Session-scoped (in-memory) storage that's cleared between research runs.
  */
 
-import { logger } from '../logger.ts';
-
 /**
  * Error context information for tracking where errors occur
  */
@@ -118,7 +116,7 @@ export class ErrorTracker {
     }
 
     // Log to debug (error tracking is operational, not an error itself)
-    logger.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
+    console.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
   }
 
   /**

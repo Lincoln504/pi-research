@@ -9,43 +9,8 @@
 
 import type { Config } from '../config.ts';
 import type { IService } from './service-registry.ts';
-
-/**
- * Minimal scheduler interface - only the methods needed by the Core layer.
- * The actual schedulers implement this interface (or a compatible one).
- * We use this minimal interface to avoid circular dependencies.
- */
-export interface IScheduler {
-  /**
-   * Run a search query
-   */
-  runSearch(query: string, config?: Config): Promise<any[]>;
-
-  /**
-   * Scrape a URL
-   */
-  runScrape(url: string, config?: Config): Promise<any>;
-
-  /**
-   * Run a health check
-   */
-  runHealthCheck(config?: Config): Promise<{ success: boolean }>;
-
-  /**
-   * Shutdown the scheduler
-   */
-  shutdown(): Promise<void>;
-
-  /**
-   * Reset idle timer (for scheduler instances)
-   */
-  resetIdleTimerOnActivity?(): void;
-
-  /**
-   * Optional scheduler ID
-   */
-  schedulerId?: string;
-}
+import type { IScheduler } from './interfaces/scheduler-interfaces.ts';
+export type { IScheduler };
 
 /**
  * Scheduler Factory Interface

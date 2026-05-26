@@ -3,7 +3,16 @@
  */
 
 import type { IService } from '../service-registry.ts';
-import type { IngestionItem } from '../../knowledge/writer-queue.ts';
+
+/**
+ * Item to be ingested into the knowledge store
+ */
+export interface IngestionItem {
+  url: string;
+  markdown: string;
+  content?: string;
+  metadata?: Record<string, any>;
+}
 
 /**
  * Embedder interface for text embedding operations

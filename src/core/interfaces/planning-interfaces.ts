@@ -4,29 +4,11 @@
 
 import type { IService } from '../service-registry.ts';
 import type { Model } from '@mariozechner/pi-ai';
-import { Type } from 'typebox';
-import type { ResearchObserver } from '../../orchestration/research-observer.ts';
+import type { ResearchObserver } from './observer-interfaces.ts';
+import type { ResearchPlan, ResearcherConfig } from './research-plan-types.ts';
 
-/**
- * Research plan structure returned by the coordinator/evaluator
- */
-export interface ResearchPlan {
-  action?: 'synthesize' | 'delegate' | 'wait';
-  researchers?: ResearcherConfig[];
-  allQueries?: string[];
-  content?: string;
-}
-
-/**
- * Individual researcher configuration
- */
-export interface ResearcherConfig {
-  id: string | number;
-  name: string;
-  goal: string;
-  queries: string[];
-  historicalLinks?: string[];
-}
+export type { ResearchPlan, ResearcherConfig };
+export { ResearcherConfigSchema, ResearchPlanSchema } from './research-plan-types.ts';
 
 /**
  * Session context for planning operations
@@ -99,22 +81,3 @@ export interface IPlanningService extends IService {
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
   clearPlanningState(): void;
 }
-
-// ============================================================================
-// TypeBox Schemas for Validation
-// ============================================================================
-
-export const ResearcherConfigSchema = Type.Object({
-  id: Type.Union([Type.String(), Type.Number()]),
-  name: Type.String(),
-  goal: Type.String(),
-  queries: Type.Array(Type.String()),
-  historicalLinks: Type.Optional(Type.Array(Type.String()))
-});
-
-export const ResearchPlanSchema = Type.Object({
-  action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate'), Type.Literal('wait')])),
-  researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
-  allQueries: Type.Optional(Type.Array(Type.String())),
-  content: Type.Optional(Type.String())
-});

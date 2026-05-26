@@ -4,9 +4,18 @@
 
 import type { IService } from '../service-registry.ts';
 import type { Config } from '../../config.ts';
-import type { ResearchPlan } from './planning-interfaces.ts';
+import type { ResearchPlan, ResearcherConfig } from './planning-interfaces.ts';
 import type { QueryResultWithError } from '../../web-research/types.ts';
-import type { RunResearchersOptions } from '../../orchestration/orchestration-types.ts';
+
+/**
+ * Options for running researchers in parallel
+ */
+export interface RunResearchersOptions {
+  plan: { researchers?: ResearcherConfig[] };
+  options: { sessionId: string; researchId: string } & any;
+  currentRound: number;
+  signal?: AbortSignal;
+}
 
 /**
  * Research Orchestration Service Interface

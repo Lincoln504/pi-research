@@ -15,21 +15,9 @@ import { ServiceNames } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
 import type { ISchedulerFactory } from './scheduler-factory.ts';
+import type { ISchedulerInstance, ISchedulerInternals } from './interfaces/scheduler-interfaces.ts';
 
-
-
-// ============================================================================
-// Scheduler Instance Interface (minimal to avoid circular dependencies)
-// ============================================================================
-
-/**
- * Scheduler instance interface (minimal to avoid circular dependencies)
- */
-export interface ISchedulerInstance {
-  shutdown(): Promise<void>;
-  schedulerId?: string;
-  [key: string]: any;
-}
+export type { ISchedulerInstance };
 
 // ============================================================================
 // Scheduler Service Implementation
@@ -52,7 +40,7 @@ interface ISchedulerInternal {
  * Wraps the browser scheduler with proper service lifecycle management
  * All state is managed within the instance - no module-level state
  */
-export class SchedulerService implements IScheduler {
+export class SchedulerService implements IScheduler, ISchedulerInternals {
   readonly name = 'scheduler';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 

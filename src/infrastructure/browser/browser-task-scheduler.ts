@@ -12,7 +12,7 @@ import { metrics } from '../../utils/metrics.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
-import { SchedulerService } from '../../core/scheduler-service.ts';
+import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer } from '../browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
@@ -271,7 +271,7 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         // Clear reference immediately to prevent new tasks from using this scheduler
-        const schedulerService = await getService<SchedulerService>(ServiceNames.SCHEDULER);
+        const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER);
         const currentScheduler = schedulerService.getSchedulerInstance();
         if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
             schedulerService.setSchedulerInstance(null);

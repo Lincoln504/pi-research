@@ -9,7 +9,7 @@
 import { logger } from '../../logger.ts';
 import { tryGetService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
-import { SchedulerService } from '../../core/scheduler-service.ts';
+import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 
@@ -24,7 +24,7 @@ import type { WorkerPoolManager } from './worker-pool-manager.ts';
 export async function stopBrowserManager(): Promise<void> {
   try {
     // Try to get the service synchronously first to avoid errors if not initialized
-    const schedulerService = tryGetService<SchedulerService>(ServiceNames.SCHEDULER);
+    const schedulerService = tryGetService<ISchedulerInternals>(ServiceNames.SCHEDULER);
     
     if (!schedulerService) {
       logger.debug('[BrowserLifecycle] Scheduler service not available, nothing to stop');
@@ -82,7 +82,7 @@ export async function waitForBrowserPoolIdle(maxWaitMs = 15000): Promise<void> {
   // quickly-resolving no-op promise (WorkerPoolManager.shutdown() is already running and
   // returns immediately on the second call). To guard against this, we always fall through
   // to Phase 2 and poll isPoolShuttingDown() after the promise resolves.
-  const schedulerService = tryGetService<SchedulerService>(ServiceNames.SCHEDULER);
+  const schedulerService = tryGetService<ISchedulerInternals>(ServiceNames.SCHEDULER);
   const pendingShutdown = schedulerService?.getPendingShutdownPromise();
   if (pendingShutdown) {
     const remainingMs = maxWaitMs - (Date.now() - start);

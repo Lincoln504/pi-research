@@ -3,6 +3,35 @@
  */
 
 import type { IService } from '../service-registry.ts';
+import type { Config } from '../../config.ts';
+
+/**
+ * Minimal scheduler instance interface — the raw scheduler object returned
+ * by the factory and stored inside SchedulerService.
+ */
+export interface ISchedulerInstance {
+  shutdown(): Promise<void>;
+  schedulerId?: string;
+}
+
+/**
+ * Internal state management methods exposed by SchedulerService.
+ * Used by browser-lifecycle.ts and the infrastructure scheduler factory to manage
+ * scheduler instance state without creating a circular import on the SchedulerService class.
+ * Extends IService so it satisfies the tryGetService<T extends IService> constraint.
+ */
+export interface ISchedulerInternals extends IService {
+  getSchedulerInstance(): ISchedulerInstance | null;
+  setSchedulerInstance(instance: ISchedulerInstance | null): void;
+  getSchedulerVersion(): string | null;
+  setSchedulerVersion(version: string | null): void;
+  getSchedulerInitializationPromise(): Promise<ISchedulerInstance> | null;
+  setSchedulerInitializationPromise(promise: Promise<ISchedulerInstance> | null): void;
+  getPendingShutdownPromise(): Promise<void> | null;
+  setPendingShutdownPromise(promise: Promise<void> | null): void;
+  isSchedulerRestartInProgress(): boolean;
+  setSchedulerRestartInProgress(inProgress: boolean): void;
+}
 
 /**
  * Scheduler search result
@@ -17,12 +46,13 @@ export interface SearchResult {
 /**
  * Base scheduler interface
  */
-export interface IScheduler extends IService {
-  runSearch(query: string, config?: any): Promise<SearchResult[]>;
-  runScrape(url: string, config?: any): Promise<any>;
-  runHealthCheck(config?: any): Promise<{ success: boolean }>;
+export interface IScheduler {
+  runSearch(query: string, config?: Config): Promise<any[]>;
+  runScrape(url: string, config?: Config): Promise<any>;
+  runHealthCheck(config?: Config): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
   resetIdleTimerOnActivity?(): void;
+  schedulerId?: string;
 }
 
 /**

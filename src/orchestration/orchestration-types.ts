@@ -3,19 +3,7 @@
  */
 
 import type { ResearcherConfig } from '../core/service-interfaces.ts';
-
-/**
- * Options for running researchers in parallel
- */
-export interface RunResearchersOptions {
-  plan: { researchers?: ResearcherConfig[] };
-  options: {
-    sessionId: string;
-    researchId: string;
-  } & any;
-  currentRound: number;
-  signal?: AbortSignal;
-}
+export type { RunResearchersOptions } from '../core/interfaces/orchestration-interfaces.ts';
 
 /**
  * Options for running a single researcher

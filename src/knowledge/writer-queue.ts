@@ -5,18 +5,13 @@ import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
-import type { IWriterQueue } from '../core/interfaces/knowledge-interfaces.ts';
+import type { IWriterQueue, IngestionItem } from '../core/interfaces/knowledge-interfaces.ts';
+
+export type { IngestionItem };
 
 export interface WriterQueueOptions {
   store: KnowledgeStore;
   chunker?: Chunker;
-}
-
-export interface IngestionItem {
-  url: string;
-  markdown: string;
-  content?: string;
-  metadata?: Record<string, any>;
 }
 
 export class WriterQueue implements IWriterQueue {
