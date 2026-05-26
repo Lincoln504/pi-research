@@ -28,8 +28,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - run: npm run lint
 
   type-check:
@@ -39,8 +44,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - run: npm run type-check
       - run: npm run type-check:tests
 
@@ -52,8 +62,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - run: npm run test:unit
 
   integration-test:
@@ -70,8 +85,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - run: npm run test:integration:fast
 
   dep-graph:
@@ -84,9 +104,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - run: sudo apt-get install -y graphviz
-      - run: npm ci --legacy-peer-deps
       - run: npm run deps:generate
       - name: Commit and push docs/deps.svg
         run: |
@@ -107,8 +132,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
       - name: Validate package.json
         run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
       - name: Verify npm package
