@@ -80,14 +80,12 @@ COMMIT_MESSAGE*.txt
 
 # Runtime knowledge store database (generated at runtime)
 knowledge_db/
+src/knowledge_db/
 
-# Refactoring artifacts
-# deps.svg     — archi layer view; committed to docs/ by CI only
-# deps-detail.svg — full 190-module dot graph; local only (too large to review in git)
-deps.svg
-docs/deps-detail.svg
+# Refactoring artifacts & temporary logs
 ts-errors*.log
 test-results.txt
+integration-test-run.log
 
 # Session planning / chat artifacts (never belong in source history)
 planchat.txt

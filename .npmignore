@@ -4,8 +4,11 @@
 .gitattributes
 .github/
 .nvmrc
-config/
-tsconfig.json
+config/tooling/
+tsconfig*.json
+vitest.config*.ts
+eslint.config.js
+.dependency-cruiser.cjs
 
 # Tests
 test/
@@ -22,7 +25,6 @@ testing-results/
 testing/*-results/
 
 # Build artifacts
-dist/
 build/
 out/
 *.tsbuildinfo
@@ -54,12 +56,12 @@ COMMIT_MESSAGE*.txt
 
 # Runtime generated files (never publish)
 knowledge_db/
+src/knowledge_db/
 shared-links-pool-*.json
 pi-research-*.md
-deps.svg
-docs/deps.svg
 ts-errors*.log
 test-results.txt
+integration-test-run.log
 
 # Session / planning artifacts
 planchat.txt
