@@ -22,6 +22,7 @@ import * as knowledgeModule from './commands/knowledge-command.ts';
 import * as settingsModule from './commands/settings-command.ts';
 import * as metricsModule from './commands/metrics-command.ts';
 import { clearKnowledgeStore } from './knowledge/index.ts';
+import { getConfig, saveConfig, resetConfig } from './config.ts';
 
 // ============================================================================
 // Command Handler
@@ -106,14 +107,28 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         noMatch: (text: string) => theme.fg('error', text),
       };
 
+      const currentDepth = getConfig().DEFAULT_RESEARCH_DEPTH;
+      const depthLabels: Record<number, string> = { 0: 'Quick', 1: 'Normal', 2: 'Deep', 3: 'Ultra' };
+
       const sections: Record<string, { title: string, items: SelectItem[] }> = {
         main: {
           title: 'Research Configuration',
           items: [
+            { value: 'depth', label: 'Default Research Depth', description: `Current: ${depthLabels[currentDepth] || currentDepth} (${currentDepth})` },
             { value: 'health', label: 'Health Management', description: 'System health checks and monitoring' },
             { value: 'knowledge', label: 'Knowledge Store', description: 'Manage persistent memory' },
             { value: 'settings', label: 'System Settings', description: 'View and modify configuration' },
             { value: 'metrics', label: 'Metrics & Monitoring', description: 'View system metrics' },
+          ]
+        },
+        depth: {
+          title: 'Default Research Depth',
+          items: [
+            { value: '0', label: '0: Quick', description: 'Single pass, fast research' },
+            { value: '1', label: '1: Normal', description: 'Coordinated, thorough research' },
+            { value: '2', label: '2: Deep', description: 'Multi-round, exhaustive research' },
+            { value: '3', label: '3: Ultra', description: 'Maximum depth, extreme rigor' },
+            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
           ]
         },
         health: {
@@ -211,6 +226,16 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
   if (result?.type === 'action') {
     const { section, action } = result;
     switch (section) {
+      case 'depth':
+        if (action !== 'back') {
+          const depth = parseInt(action, 10);
+          const config = getConfig();
+          config.DEFAULT_RESEARCH_DEPTH = depth;
+          saveConfig(config);
+          resetConfig();
+          ctx.ui.notify(`Default research depth set to ${action}`, 'info');
+        }
+        break;
       case 'health':
         if (action === 'run') await healthModule.runHealthCheck({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
         break;
