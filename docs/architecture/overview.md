@@ -467,17 +467,26 @@ The project maintains automated dependency visualizations to ensure architectura
 
 A high-level view showing the relationships between major architectural layers (`core`, `infrastructure`, `orchestration`, `tools`, `tui`, etc.). This graph is optimized for **horizontal flow** and **logical layering**, using significant spacing and logical grouping to ensure a clean, readable architectural stack.
 
-### Detailed Module Graph
+### Detailed Module Graph (Madge)
 
 **File:** `docs/deps.svg`
 
-A comprehensive, file-level dependency graph showing every module in the `src/` directory. Optimized for horizontal readability, it uses **polyline edges** and **generous spacing** to maintain clarity even with hundreds of modules.
+A comprehensive, file-level dependency graph generated using **Madge**. This graph focuses on the structural dependencies between files, helping to identify circular dependencies and understand the module resolution tree.
+
+### UML Class Diagram (tsuml2)
+
+**File:** `docs/uml.svg`
+
+A detailed UML class diagram generated using **tsuml2**. It visualizes the relationships between classes, interfaces, and types, including heritage (inheritance/implementation) and associations. This is particularly useful for understanding the Service Registry pattern and the core service interfaces.
 
 **Generation:**
 ```bash
-# Generate the detailed module graph (docs/deps.svg)
+# Generate the detailed module graph
 npm run deps:generate
 
+# Generate the UML class diagram
+npm run deps:generate:uml
+```
 # Generate the high-level layer graph (docs/deps-archi.svg)
 npm run deps:generate:archi
 ```
@@ -493,4 +502,4 @@ npm run deps:generate:archi
 
 ---
 
-**Last Updated:** 2026-05-23
+**Last Updated:** 2026-05-26

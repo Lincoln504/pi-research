@@ -41,6 +41,12 @@ System design and architectural decisions.
 - [Scope Boundaries](architecture/scope-boundaries.md) - Project scope and boundaries
 - [Service Architecture](SERVICE_ARCHITECTURE.md) - Dependency injection and service registry details
 
+### Visualizations
+
+- [File Dependency Graph](deps.svg) - Detailed module-level dependencies (Madge)
+- [Architectural Layers](deps-archi.svg) - High-level architectural layering (Dependency Cruiser)
+- [UML Class Diagram](uml.svg) - Detailed class and interface relationships (tsuml2)
+
 ---
 
 ## Development
