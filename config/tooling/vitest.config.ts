@@ -24,6 +24,11 @@ export default defineConfig({
       ],
       reportOnFailure: true,
     },
+    // In GitHub Actions, add verbose so skipped test names appear in the log
+    // alongside the auto-generated github-actions summary table.
+    reporters: process.env['GITHUB_ACTIONS']
+      ? ['verbose', 'github-actions']
+      : ['verbose'],
     testTimeout: 60000,
     hookTimeout: 30000,
     teardownTimeout: 10000,
