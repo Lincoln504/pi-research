@@ -134,8 +134,8 @@ describe('TUI Research Panel', () => {
     });
 
     it('should format cost correctly', () => {
-      expect(_formatCost(0.1234)).toBe('$0.1234');
-      expect(_formatCost(0.001)).toBe('$0.001');
+      expect(_formatCost(0.1234)).toBe('$0.123');
+      expect(_formatCost(0.001)).toBe('$0.0010');
       expect(_formatCost(1.5)).toBe('$1.50');
     });
 

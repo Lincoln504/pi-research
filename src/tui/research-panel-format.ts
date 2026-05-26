@@ -33,11 +33,9 @@ export function renderProgressPct(progress: ResearchProgress | undefined): strin
  */
 export function formatCost(cost: number): string {
   if (cost === 0) return '$0.00';
-  if (cost < 0.0001) return '<$0.01';
-  if (cost < 1) {
-    const s = cost.toFixed(4);
-    return `$${parseFloat(s)}`;
-  }
+  if (cost < 0.0001) return '<$0.0001';
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  if (cost < 1) return `$${cost.toFixed(3)}`;
   if (cost < 100) return `$${cost.toFixed(2)}`;
   return `$${Math.round(cost)}`;
 }

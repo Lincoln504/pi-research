@@ -100,7 +100,12 @@ function renderPanelBlock(
   });
 
   const numSlices = sliceIds.length;
-  const MAX_VISIBLE_SLICES = 6;
+  
+  // Dynamically calculate MAX_VISIBLE_SLICES based on width
+  // Each column needs at least 3 chars (1 wall + 2 content) for minimal visibility
+  const minColWidth = 3;
+  const maxPossibleSlices = Math.max(1, Math.floor(rightInner / (minColWidth + 1)));
+  const MAX_VISIBLE_SLICES = Math.min(6, maxPossibleSlices);
 
   const showIndicator = numSlices > MAX_VISIBLE_SLICES;
   const hiddenCount = showIndicator ? numSlices - MAX_VISIBLE_SLICES : 0;
@@ -162,6 +167,9 @@ function renderPanelBlock(
         const leftPad = Math.floor(sideWidth / 2);
         const rightPad = sideWidth - leftPad;
         topPart = '─'.repeat(leftPad) + ' ' + labelStr + ' ' + '─'.repeat(rightPad);
+      } else if (w >= 1 && labelStr.length > 0) {
+        // Tight space: show first char of label if possible
+        topPart = labelStr[0]!.slice(0, w).padEnd(w, '─');
       } else {
         topPart = '─'.repeat(w);
       }

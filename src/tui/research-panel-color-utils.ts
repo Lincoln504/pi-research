@@ -16,19 +16,16 @@
 export function parseAnsiFgColor(
   ansiCode: string
 ): { type: '256' | 'rgb' | 'basic'; index?: number; r?: number; g?: number; b?: number } | null {
-  // ESC character for ANSI escape sequences
-  const ESC = '\x1b';
-
-  // Match \x1b[38;5;Nm (256-color)
-  const pattern256 = ESC + '\\[38;5;(\\d+)m';
-  const match256 = ansiCode.match(pattern256);
+  // Match \x1b[38;5;N... (256-color)
+  // eslint-disable-next-line no-control-regex
+  const match256 = ansiCode.match(/\x1b\[38;5;(\d+)/);
   if (match256 && match256[1] !== undefined) {
     return { type: '256', index: parseInt(match256[1], 10) };
   }
 
-  // Match \x1b[38;2;r;g;bm (truecolor)
-  const patternRgb = ESC + '\\[38;2;(\\d+);(\\d+);(\\d+)m';
-  const matchRgb = ansiCode.match(patternRgb);
+  // Match \x1b[38;2;r;g;b... (truecolor)
+  // eslint-disable-next-line no-control-regex
+  const matchRgb = ansiCode.match(/\x1b\[38;2;(\d+);(\d+);(\d+)/);
   if (matchRgb && matchRgb[1] !== undefined && matchRgb[2] !== undefined && matchRgb[3] !== undefined) {
     return {
       type: 'rgb',
@@ -38,9 +35,9 @@ export function parseAnsiFgColor(
     };
   }
 
-  // Match basic colors \x1b[30-37m
-  const patternBasic = ESC + '\\[3([0-7])m';
-  const matchBasic = ansiCode.match(patternBasic);
+  // Match basic colors \x1b[30-37...
+  // eslint-disable-next-line no-control-regex
+  const matchBasic = ansiCode.match(/\x1b\[3([0-7])/);
   if (matchBasic && matchBasic[1] !== undefined) {
     return { type: 'basic', index: parseInt(matchBasic[1], 10) };
   }
@@ -324,7 +321,7 @@ export function derive256Gradient(baseIndex: number, steps: number): string[] {
   if (!baseRgb) {
     // Fallback to a simple gradient if base color is invalid
     for (let i = 0; i < steps; i++) {
-      colors.push(`\\x1b[38;5;${Math.floor((i / steps) * 255)}m`);
+      colors.push(`\x1b[38;5;${Math.floor((i / steps) * 255)}m`);
     }
     return colors;
   }
@@ -333,7 +330,7 @@ export function derive256Gradient(baseIndex: number, steps: number): string[] {
   for (let i = 0; i < steps; i++) {
     const rgb = cycleHslSaturationLightness(baseRgb.r, baseRgb.g, baseRgb.b, i, steps);
     const index256 = rgbTo256(rgb.r, rgb.g, rgb.b);
-    colors.push(`\\x1b[38;5;${index256}m`);
+    colors.push(`\x1b[38;5;${index256}m`);
   }
 
   return colors;
@@ -347,7 +344,7 @@ export function deriveRgbGradient(r: number, g: number, b: number, steps: number
 
   for (let i = 0; i < steps; i++) {
     const rgb = cycleHslSaturationLightness(r, g, b, i, steps);
-    colors.push(`\\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m`);
+    colors.push(`\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m`);
   }
 
   return colors;

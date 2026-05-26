@@ -191,7 +191,13 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         break;
       case 'knowledge':
         if (action === 'status') await showKnowledgeStatusAction(ctx, pi);
-        else if (action === 'clear') await clearKnowledgeStore();
+        else if (action === 'clear') {
+            const confirmed = await ctx.ui.confirm('Are you sure you want to clear the entire Knowledge Store? This cannot be undone.');
+            if (confirmed) {
+                await clearKnowledgeStore();
+                ctx.ui.notify('Knowledge Store cleared', 'info');
+            }
+        }
         break;
       case 'settings':
         if (action === 'edit') await showSettingsEditorAction(ctx, pi);
@@ -301,6 +307,13 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
       values: ['1', '2', '3', '4', '5'],
     },
     {
+      id: 'MAX_SCRAPE_BATCHES',
+      label: 'Scrape Batches',
+      description: 'Max scrape batches per researcher (0 for unlimited)',
+      currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'Unlimited' : String(config.MAX_SCRAPE_BATCHES),
+      values: ['Unlimited', '1', '2', '3', '5', '10', '15'],
+    },
+    {
       id: 'WORKER_THREADS',
       label: 'Worker Threads',
       description: 'Number of parallel browser workers for search and scraping',
@@ -329,6 +342,13 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
       values: ['webgpu', 'cpu'],
     },
     {
+      id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
+      label: 'Cache TTL (days)',
+      description: 'How long to keep cached research findings (1-365 days)',
+      currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+      values: ['7', '14', '30', '60', '90', '180', '365'],
+    },
+    {
       id: 'RESEARCHER_TIMEOUT_MS',
       label: 'Timeout (min)',
       description: 'Per-researcher timeout in minutes (3-30 min)',
@@ -353,7 +373,8 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
         listTheme,
         (id, newValue) => {
           if (id === 'KNOWLEDGE_STORE_ENABLED') config.KNOWLEDGE_STORE_ENABLED = newValue === 'ON';
-          else if (id === 'MAX_CONCURRENT_RESEARCHERS' || id === 'WORKER_THREADS') (config as any)[id] = parseInt(newValue, 10);
+          else if (id === 'MAX_CONCURRENT_RESEARCHERS' || id === 'WORKER_THREADS' || id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') (config as any)[id] = parseInt(newValue, 10);
+          else if (id === 'MAX_SCRAPE_BATCHES') config.MAX_SCRAPE_BATCHES = newValue === 'Unlimited' ? 0 : parseInt(newValue, 10);
           else if (id === 'RESEARCHER_TIMEOUT_MS') config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
           else (config as any)[id] = newValue;
           tui.requestRender();
@@ -370,11 +391,11 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
             ...settingsList.render(width - 4),
             theme.fg('muted', ' ──────────────────────────────'),
             theme.fg('muted', ` Config: ${envDisplayPath}`),
-            theme.fg('muted', ' [Enter] Save & Exit   [Esc] Cancel'),
+            theme.fg('muted', ' [s] Save & Exit        [Esc] Cancel'),
           ];
         },
         handleInput: (data) => {
-          if (data === '\r' || data === '\n') done({ type: 'submit', data: config });
+          if (data === 's' || data === 'S') done({ type: 'submit', data: config });
           else settingsList.handleInput(data);
         },
         invalidate: () => settingsList.invalidate(),
