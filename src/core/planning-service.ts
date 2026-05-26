@@ -11,7 +11,7 @@
 import type { IPlanningService, ResearchPlan, ResearcherConfig } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
-import { complete, completeSimple, type TextContent, type Message } from '@earendil-works/pi-ai';
+import { complete, completeSimple, calculateCost, type TextContent, type Message, type ThinkingLevel } from '@earendil-works/pi-ai';
 import { extractJson } from '../utils/json-utils.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
@@ -119,10 +119,19 @@ export class PlanningService implements IPlanningService {
 
       logger.debug(`[${this.name}] Coordinator attempt ${attempt}`);
 
+      const reasoning: ThinkingLevel = 'medium';
+
       const planResponse = await complete(model, {
         systemPrompt: basePlanningPrompt + retryHint,
         messages,
-      }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+      }, { 
+        apiKey: auth.apiKey, 
+        headers: auth.headers, 
+        signal,
+        // Cast to any because complete's ProviderStreamOptions may not strictly include reasoning,
+        // but the underlying provider implementations in pi-ai will pick it up.
+        ...({ reasoning } as any)
+      });
 
       const planMetadata = planResponse as LLMResponseMetadata;
       if (planMetadata.stopReason === 'error' || planMetadata.stopReason === 'aborted') {
@@ -150,13 +159,16 @@ export class PlanningService implements IPlanningService {
         if (planResponse.usage) {
           const coordUsage = parseTokenUsage(planResponse.usage);
           const tokens = calculateTotalTokens(coordUsage);
-          const cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
+          
+          // Ultra-accurate cost calculation
+          let cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
+          if (cost === 0 && tokens > 0) {
+              const calculatedCost = calculateCost(model, planResponse.usage);
+              cost = calculatedCost.total;
+          }
+
           metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
           metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
-          
-          if (coordUsage.cacheRead) {
-            metrics.increment('llm_cache_read_tokens_total', coordUsage.cacheRead, { component: 'coordinator' });
-          }
         }
 
         metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
@@ -260,11 +272,13 @@ export class PlanningService implements IPlanningService {
       : '';
     const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
 
+    const reasoning: ThinkingLevel = 'medium';
+
     let text = '';
     for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
       const response = await completeSimple(model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }]
-      }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+        messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
+      }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning });
 
       const responseMetadata = response as LLMResponseMetadata;
       if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
@@ -288,13 +302,16 @@ export class PlanningService implements IPlanningService {
       if (response.usage) {
         const evalUsage = parseTokenUsage(response.usage);
         const tokens = calculateTotalTokens(evalUsage);
-        const cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
+        
+        // Ultra-accurate cost calculation
+        let cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
+        if (cost === 0 && tokens > 0) {
+            const calculatedCost = calculateCost(model, response.usage);
+            cost = calculatedCost.total;
+        }
+
         metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
         metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
-        
-        if (evalUsage.cacheRead) {
-          metrics.increment('llm_cache_read_tokens_total', evalUsage.cacheRead, { component: 'evaluator' });
-        }
         
         observer?.onEvaluationTokens?.(tokens, cost);
         observer?.onTokensConsumed?.(tokens, cost);

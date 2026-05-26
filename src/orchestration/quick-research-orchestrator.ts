@@ -9,7 +9,7 @@ import {
     type ExtensionContext, 
     type AgentSessionEvent 
 } from '@earendil-works/pi-coding-agent';
-import { type Model } from '@earendil-works/pi-ai';
+import { type Model, calculateCost } from '@earendil-works/pi-ai';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
@@ -149,11 +149,28 @@ export class QuickResearchOrchestrator {
         if (event.type === 'message_end') {
             const msg = event.message as unknown as ResearchMessage;
             if (msg?.['role'] !== 'assistant') return;
-            const rawUsage = msg['usage'] as { cost?: { total: number } } | undefined;
+
+            // Log thinking content if present
+            const content = msg['content'];
+            if (Array.isArray(content)) {
+                const thinking = content.find(c => c.type === 'thinking');
+                if (thinking?.thinking) {
+                    logger.debug(`[QuickOrchestrator] Researcher Thinking:\n${thinking.thinking}`);
+                }
+            }
+
+            const rawUsage = msg['usage'] as any;
             if (rawUsage) {
                 const parsed = parseTokenUsage(rawUsage);
                 const tokens = calculateTotalTokens(parsed);
-                const cost: number = rawUsage.cost?.total ?? 0;
+                
+                // Ultra-accurate cost calculation
+                let cost = parsed.cost?.total ?? rawUsage.cost?.total ?? 0;
+                if (cost === 0 && tokens > 0) {
+                    const calculatedCost = calculateCost(model, rawUsage);
+                    cost = calculatedCost.total;
+                }
+
                 if (tokens > 0 || cost > 0) {
                     metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });
                     metrics.increment('llm_cost_total', cost, { component: 'quick_researcher', complexity: '0' });
