@@ -82,8 +82,10 @@ COMMIT_MESSAGE*.txt
 knowledge_db/
 
 # Refactoring artifacts
-# deps.svg — generated locally by `npm run deps:generate`; committed to docs/ by CI only
+# deps.svg     — archi layer view; committed to docs/ by CI only
+# deps-detail.svg — full 190-module dot graph; local only (too large to review in git)
 deps.svg
+docs/deps-detail.svg
 ts-errors*.log
 test-results.txt
 

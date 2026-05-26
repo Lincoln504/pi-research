@@ -177,9 +177,12 @@ module.exports = {
           graph: {
             rankdir: 'LR',
             splines: 'ortho',
+            concentrate: 'true',
             fontname: 'Helvetica',
             fontsize: '11',
             pad: '0.4',
+            ranksep: '1.0',
+            nodesep: '0.4',
           },
           node: {
             fontname: 'Helvetica',
@@ -265,11 +268,63 @@ module.exports = {
         },
       },
 
-      /* archi: high-level view — collapse each src/X/ to a single node */
+      /* archi: high-level layer view — one box per src/X/ folder.
+       * This is the CI artifact (docs/deps.svg). It shows the 13-layer
+       * architecture at a glance and stays under 120 KB. */
       archi: {
+        /* Collapse every src/X/ subtree and every node_modules package */
         collapsePattern: '^(src/[^/]+|node_modules/[^/]+)',
         theme: {
-          graph: { rankdir: 'LR', splines: 'ortho' },
+          graph: {
+            rankdir: 'LR',
+            splines: 'ortho',
+            /* Merge parallel edges between the same pair of layers */
+            concentrate: 'true',
+            fontname: 'Helvetica',
+            fontsize: '13',
+            pad: '0.5',
+            /* Horizontal spacing between rank columns */
+            ranksep: '1.2',
+            /* Vertical spacing between nodes in the same rank */
+            nodesep: '0.6',
+            label: 'pi-research — architectural layer graph',
+            labelloc: 't',
+          },
+          node: {
+            fontname: 'Helvetica',
+            fontsize: '12',
+            style: 'filled',
+            fillcolor: '#f8fafc',
+            color: '#94a3b8',
+            /* Fixed width so all layer boxes are the same size */
+            width: '2.0',
+          },
+          edge: {
+            fontname: 'Helvetica',
+            fontsize: '10',
+            color: '#475569',
+            arrowsize: '0.8',
+          },
+          modules: [
+            { criteria: { source: '^src/core' },          attributes: { fillcolor: '#dbeafe', color: '#3b82f6', label: 'core' } },
+            { criteria: { source: '^src/infrastructure' }, attributes: { fillcolor: '#dcfce7', color: '#22c55e', label: 'infrastructure' } },
+            { criteria: { source: '^src/knowledge' },      attributes: { fillcolor: '#f3e8ff', color: '#a855f7', label: 'knowledge' } },
+            { criteria: { source: '^src/orchestration' },  attributes: { fillcolor: '#fef9c3', color: '#ca8a04', label: 'orchestration' } },
+            { criteria: { source: '^src/tools' },          attributes: { fillcolor: '#fee2e2', color: '#ef4444', label: 'tools' } },
+            { criteria: { source: '^src/web-research' },   attributes: { fillcolor: '#ecfdf5', color: '#10b981', label: 'web-research' } },
+            { criteria: { source: '^src/security' },       attributes: { fillcolor: '#fdf2f8', color: '#ec4899', label: 'security' } },
+            { criteria: { source: '^src/stackexchange' },  attributes: { fillcolor: '#fff7ed', color: '#f97316', label: 'stackexchange' } },
+            { criteria: { source: '^src/tui' },            attributes: { fillcolor: '#fefce8', color: '#eab308', label: 'tui' } },
+            { criteria: { source: '^src/utils' },          attributes: { fillcolor: '#f1f5f9', color: '#64748b', label: 'utils' } },
+            { criteria: { source: '^src/types' },          attributes: { fillcolor: '#f8fafc', color: '#94a3b8', label: 'types' } },
+            { criteria: { source: '^src/commands' },       attributes: { fillcolor: '#eff6ff', color: '#6366f1', label: 'commands' } },
+            { criteria: { source: '^src/(observers|cleanup|healthcheck)' }, attributes: { fillcolor: '#fff1f2', color: '#f43f5e', label: 'support' } },
+          ],
+          dependencies: [
+            { criteria: { circular: true },                attributes: { color: '#dc2626', penwidth: '3.0', style: 'bold' } },
+            { criteria: { 'rules[0].severity': 'error' },  attributes: { color: '#dc2626', penwidth: '2.0', style: 'dashed' } },
+            { criteria: { 'rules[0].severity': 'warn' },   attributes: { color: '#d97706', penwidth: '1.5', style: 'dashed' } },
+          ],
         },
       },
     },

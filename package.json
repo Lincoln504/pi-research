@@ -74,9 +74,9 @@
     "models:download": "node scripts/download-models.mjs",
     "models:download:force": "node scripts/download-models.mjs --force",
     "deps:check": "depcruise --config .dependency-cruiser.cjs --output-type err-long src",
-    "deps:generate": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg > docs/deps.svg",
-    "deps:generate:archi": "depcruise --config .dependency-cruiser.cjs --output-type archi src | dot -T svg > docs/deps-archi.svg",
-    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg | depcruise-wrap-stream-in-html > docs/deps.html"
+    "deps:generate": "depcruise --config .dependency-cruiser.cjs --output-type archi src | dot -T svg > docs/deps.svg",
+    "deps:generate:detail": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg > docs/deps-detail.svg",
+    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type x-dot-webpage src > docs/deps.html"
   },
   "pi": {
     "extensions": [
