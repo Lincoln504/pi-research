@@ -18,7 +18,7 @@ export interface IEmbedder {
 }
 
 /**
- * Knowledge store interface for storage operations
+ * Knowledge store interface for raw storage operations (the inner LanceDB store).
  */
 export interface IKnowledgeStore extends IService {
   open(): Promise<void>;
@@ -30,6 +30,20 @@ export interface IKnowledgeStore extends IService {
   findRelevantUrls(query: string, options?: { limit?: number }): Promise<string[]>;
   rebuildDocument(url: string): Promise<any | null>;
   findDocumentsByUrl(url: string): Promise<any[]>;
+}
+
+/**
+ * Service-level interface for the knowledge store service wrapper.
+ * This is the type for the object registered in the service registry under
+ * ServiceNames.KNOWLEDGE_STORE. It manages the embedder, store, and writer
+ * queue lifecycle, and provides access to the inner IKnowledgeStore.
+ */
+export interface IKnowledgeStoreService extends IService {
+  isReady(): boolean;
+  getDevice(): string | null;
+  getStore(): Promise<IKnowledgeStore>;
+  getEmbedder(): Promise<IEmbedder>;
+  clear(): Promise<void>;
 }
 
 /**

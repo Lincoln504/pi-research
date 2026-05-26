@@ -5,6 +5,8 @@
  * Used to decouple the research logic from the TUI/UI implementation.
  */
 
+import type { ResearchPlan } from '../core/interfaces/planning-interfaces.ts';
+
 export interface ResearchObserver {
   onStart?(query: string, complexity: number): void;
   
@@ -12,7 +14,7 @@ export interface ResearchObserver {
   onPlanningStart?(attempt: number): void;
   onPlanningProgress?(status: string): void;
   onPlanningTokens?(tokens: number, cost: number): void;
-  onPlanningSuccess?(plan: any): void;
+  onPlanningSuccess?(plan: ResearchPlan): void;
   
   // Research phase (rounds)
   onRoundStart?(round: number): void;
@@ -30,7 +32,7 @@ export interface ResearchObserver {
   onEvaluationStart?(round: number): void;
   onEvaluationProgress?(status: string): void;
   onEvaluationTokens?(tokens: number, cost: number): void;
-  onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: any, round?: number): void;
+  onEvaluationDecision?(action: 'synthesize' | 'delegate', plan?: ResearchPlan, round?: number): void;
   
   // Synthesis/Completion
   onComplete?(result: string): void;

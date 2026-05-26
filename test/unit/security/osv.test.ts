@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchOSV, getOSVById } from '../../../src/security/osv.ts';
+import { searchOSV, getOSVById } from '../../../src/security/osv-client.ts';
 
 describe('OSV Client', () => {
   beforeEach(() => {

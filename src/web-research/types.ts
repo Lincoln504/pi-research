@@ -18,9 +18,10 @@ export interface QueryResultWithError {
 export type Layer = 'fetch' | 'playwright+camoufox';
 
 export interface ScrapeLayerResult {
+  source: 'fetch' | 'playwright';
+  layer: 'fetch' | 'playwright' | 'playwright+camoufox';
   markdown: string;
-  source: string;
-  layer: Layer;
+  error?: string;
 }
 
 // Search result type

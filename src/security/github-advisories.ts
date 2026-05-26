@@ -11,7 +11,7 @@
  * - X-RateLimit-Reset: Unix timestamp when limit resets
  */
 
-import type { Advisory, GitHubResult } from './advisory-types.ts';
+import type { Advisory, GitHubResult } from './types.ts';
 import type { GitHubAdvisoryRaw } from './github-advisory-types.ts';
 import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';

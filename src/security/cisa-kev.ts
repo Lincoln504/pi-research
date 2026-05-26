@@ -7,10 +7,19 @@
  */
 
 import type { Vulnerability, CisaKevResult } from './types.ts';
-import { createTimeoutSignal } from '../web-research/retry-utils.ts';
+import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
+import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
 
 const CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+
+// Circuit breaker to prevent cascading failures
+const cisaCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  resetTimeoutMs: 30000,
+  name: 'CISA KEV API',
+  isTransientError: isTransientError
+});
 
 // ============================================================================
 // Type Definitions for CISA KEV API
@@ -104,6 +113,41 @@ function extractCisaKevItems(data: unknown): readonly CisaKevItem[] {
 // ============================================================================
 
 /**
+ * Fetch with retry and circuit breaker for resilience
+ */
+async function fetchWithRetryImpl(url: string, options: RequestInit): Promise<Response> {
+  const endpoint = 'cisa_kev_feed';
+  return cisaCircuitBreaker.execute(async () => {
+    return retryWithBackoff(
+      async () => {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
+          error.status = response.status;
+          metrics.increment('cisa_kev_errors_total', 1, { endpoint, status_code: response.status.toString() });
+          throw error;
+        }
+        metrics.increment('cisa_kev_requests_total', 1, { endpoint, status: 'success' });
+        return response;
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 1000,
+        maxDelay: 10000,
+        label: 'CISA KEV API',
+        isTransientError: (error) => {
+          const status = (error as Error & { status?: number })?.status;
+          if (typeof status === 'number') {
+            return status === 429 || status === 403 || status >= 500;
+          }
+          return isTransientError(error);
+        },
+      },
+    );
+  });
+}
+
+/**
  * Fetch and search CISA KEV catalog
  *
  * @param terms - CVE IDs to search for (optional)
@@ -124,20 +168,13 @@ export async function searchCisaKev(
   let error: string | undefined = undefined;
 
   try {
-    const response: Response = await fetch(CISA_KEV_URL, {
+    const response: Response = await fetchWithRetryImpl(CISA_KEV_URL, {
       headers: {
         'User-Agent': 'pi-research/2.0',
         'Accept': 'application/json',
       },
       signal: createTimeoutSignal(30000), // 30s timeout
     });
-
-    if (!response.ok) {
-      metrics.increment('cisa_kev_errors_total', 1, { status_code: response.status.toString() });
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    metrics.increment('cisa_kev_requests_total', 1, { status: 'success' });
 
     const data: unknown = await response.json();
 

@@ -25,7 +25,7 @@ import {
 import { type Config, getConfig } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 
@@ -177,7 +177,7 @@ export function createScrapeTool(options: {
       // Attempt to retrieve from knowledge-store cache if enabled
       if (config.KNOWLEDGE_STORE_ENABLED) {
         try {
-          const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
           const store = await service.getStore();
 
           for (const url of finalUrls) {
@@ -195,7 +195,7 @@ export function createScrapeTool(options: {
             logger.log(`[scrape] Cache: ${cachedResults.length} full-text hit(s) out of ${finalUrls.length} URL(s)`);
           }
         } catch (err) {
-          const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE).catch(() => null);
+          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE).catch(() => null);
           if (!service?.isReady()) {
             metrics.increment('tool_scrape_cache_errors_total', 1, { reason: 'store_not_ready' });
             logger.warn(`[scrape] Knowledge store not initialized — all ${finalUrls.length} URL(s) will be scraped fresh`);

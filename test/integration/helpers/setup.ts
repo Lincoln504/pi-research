@@ -5,7 +5,7 @@
  * Allows tests to skip gracefully when dependencies (e.g. camoufox) are not available.
  */
 
-import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
+import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
 import { stopBrowserManager } from '../../../src/infrastructure/browser/index.ts';
 import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';

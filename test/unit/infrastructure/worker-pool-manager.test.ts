@@ -28,15 +28,16 @@ vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({ WORKER_CONCURRENCY: 1 })),
 }));
 
-vi.mock('../../../src/infrastructure/browser-config.ts', () => ({
+// Consolidated mock for browser/config.ts (merged from browser-config.ts + browser-configuration.ts)
+vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   ensureBrowserCacheDir: vi.fn(),
   getBrowserEnv: vi.fn(() => ({})),
-}));
-
-// Stub out getMaxWorkers so we control the worker count without real config
-vi.mock('../../../src/infrastructure/browser/browser-configuration.ts', () => ({
+  getBrowserCacheDir: vi.fn(() => '/tmp/test-browser-cache'),
+  getCamoufoxBinaryPath: vi.fn(() => '/tmp/test-browser-cache/camoufox'),
   getMaxWorkers: vi.fn(() => 2),
   generateSchedulerVersion: vi.fn(() => 'v1'),
+  getSchedulerVersion: vi.fn(() => 'v1'),
+  isBrowserAvailable: vi.fn(() => true),
 }));
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,27 @@
  * Type definitions for security database integrations
  */
 
+/**
+ * Standardized advisory interface (mutable version for GitHub API)
+ */
+export interface Advisory {
+  id: string;
+  source: 'github' | 'nvd' | 'osv';
+  severity: string;
+  summary: string;
+  description: string;
+  published: string;
+  modified: string;
+  cveId?: string;
+  references: string[];
+  affectedPackages: string[];
+  cvssScore?: number;
+  cvssVector?: string;
+  cwes?: string[];
+  knownExploited?: boolean;
+  fixes?: string[];
+}
+
 export interface Vulnerability {
   readonly id: string;
   readonly source: string;
@@ -24,48 +45,35 @@ export interface Vulnerability {
   readonly requiredAction?: string;
 }
 
-export interface Advisory {
-  readonly id: string;
-  readonly source: string;
-  readonly severity: string;
-  readonly summary: string;
-  readonly description?: string;
-  readonly published: string;
-  readonly modified: string;
-  readonly cveId?: string;
-  readonly references: readonly string[];
-  readonly affectedPackages: readonly string[];
-}
-
 export interface NVDResult {
-  readonly count: number;
-  readonly vulnerabilities: readonly Vulnerability[];
-  readonly error?: string;
+  count: number;
+  vulnerabilities: Vulnerability[];
+  error?: string;
 }
 
 export interface CisaKevResult {
-  readonly count: number;
-  readonly vulnerabilities: readonly Vulnerability[];
-  readonly error?: string;
+  count: number;
+  vulnerabilities: Vulnerability[];
+  error?: string;
 }
 
 export interface GitHubResult {
-  readonly count: number;
-  readonly advisories: readonly Advisory[];
-  readonly error?: string;
+  count: number;
+  advisories: Advisory[];
+  error?: string;
 }
 
 export interface OSVResult {
-  readonly count: number;
-  readonly vulnerabilities: readonly Vulnerability[];
-  readonly error?: string;
+  count: number;
+  vulnerabilities: Vulnerability[];
+  error?: string;
 }
 
 export interface SecurityDatabaseResults {
-  readonly nvd?: NVDResult;
-  readonly cisa_kev?: CisaKevResult;
-  readonly github?: GitHubResult;
-  readonly osv?: OSVResult;
+  nvd?: NVDResult;
+  cisa_kev?: CisaKevResult;
+  github?: GitHubResult;
+  osv?: OSVResult;
 }
 
 export interface SecuritySearchParams {
@@ -79,10 +87,10 @@ export interface SecuritySearchParams {
 }
 
 export interface SecuritySearchResult {
-  readonly results: SecurityDatabaseResults;
-  readonly totalDatabases: number;
-  readonly totalVulnerabilities: number;
-  readonly duration: number;
+  results: SecurityDatabaseResults;
+  totalDatabases: number;
+  totalVulnerabilities: number;
+  duration: number;
 }
 
 // ============================================================================
@@ -95,12 +103,12 @@ export interface INVDClient {
 }
 
 export interface NVDSearchOptions {
-  readonly severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  readonly maxResults?: number;
-  readonly includeExploited?: boolean;
-  readonly cweId?: string;
-  readonly startDate?: string;
-  readonly endDate?: string;
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  maxResults?: number;
+  includeExploited?: boolean;
+  cweId?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface ICisaKevClient {
@@ -108,9 +116,9 @@ export interface ICisaKevClient {
 }
 
 export interface CisaKevSearchOptions {
-  readonly vendor?: string;
-  readonly product?: string;
-  readonly maxResults?: number;
+  vendor?: string;
+  product?: string;
+  maxResults?: number;
 }
 
 export interface IGitHubAdvisoriesClient {
@@ -119,10 +127,10 @@ export interface IGitHubAdvisoriesClient {
 }
 
 export interface GitHubSearchOptions {
-  readonly ecosystem?: string;
-  readonly severity?: string;
-  readonly maxResults?: number;
-  readonly repo?: string;
+  ecosystem?: string;
+  severity?: string;
+  maxResults?: number;
+  repo?: string;
 }
 
 export interface IOSVClient {
@@ -131,8 +139,8 @@ export interface IOSVClient {
 }
 
 export interface OSVSearchOptions {
-  readonly ecosystem?: string;
-  readonly severity?: string;
-  readonly maxResults?: number;
-  readonly includeAffected?: boolean;
+  ecosystem?: string;
+  severity?: string;
+  maxResults?: number;
+  includeAffected?: boolean;
 }

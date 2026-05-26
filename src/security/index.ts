@@ -23,10 +23,10 @@ import type {
   OSVResult,
 } from './types.ts';
 import { REQUEST_DELAY_MS_NVD, REQUEST_DELAY_MS_OTHER } from '../constants.ts';
-import { searchNVD, getCVEById } from './nvd.ts';
+import { searchNVD, getCVEById } from './nvd-client.ts';
 import { searchCisaKev } from './cisa-kev.ts';
 import { searchGitHubAdvisories, getAdvisoryById } from './github-advisories.ts';
-import { searchOSV, getOSVById } from './osv.ts';
+import { searchOSV, getOSVById } from './osv-client.ts';
 
 // ============================================================================
 // Type Definitions
@@ -277,7 +277,7 @@ export function getDatabaseInfo(): DatabaseInfo {
   };
 }
 
-export { searchNVD } from './nvd.ts';
+export { searchNVD } from './nvd-client.ts';
 export { searchCisaKev } from './cisa-kev.ts';
 export { searchGitHubAdvisories } from './github-advisories.ts';
-export { searchOSV } from './osv.ts';
+export { searchOSV } from './osv-client.ts';

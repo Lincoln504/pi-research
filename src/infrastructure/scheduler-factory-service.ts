@@ -11,7 +11,7 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 import type { IService } from '../core/service-registry.ts';
 import type { ISchedulerFactory, IScheduler } from '../core/scheduler-factory.ts';
 import { getScheduler as _getScheduler } from './browser/scheduler-factory.ts';
-import { getSchedulerVersion as _getSchedulerVersion } from './browser/browser-configuration.ts';
+import { getSchedulerVersion as _getSchedulerVersion } from './browser/config.ts';
 import { forceSchedulerRestart as _forceSchedulerRestart } from './browser/scheduler-factory.ts';
 
 /**

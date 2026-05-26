@@ -10,18 +10,15 @@ import * as os from 'node:os';
 
 import type { HFEnv } from './embedder-types.ts';
 import { logger } from '../logger.ts';
+import { withTimeout as retryWithTimeout } from '../web-research/retry-utils.ts';
 
 /**
- * Timeout wrapper for promises
+ * Timeout wrapper for promises (re-exports from retry-utils.ts)
  */
 export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-      if (timer.unref) timer.unref(); 
-    }),
-  ]);
+  // Normalize via Promise.resolve() to handle HuggingFace pipeline thenables
+  // that are not standard Promises (retry-utils calls .then() directly).
+  return retryWithTimeout(Promise.resolve(promise), timeoutMs, errorMessage, undefined);
 }
 
 /**

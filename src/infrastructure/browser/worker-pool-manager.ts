@@ -12,8 +12,7 @@ import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
-import { ensureBrowserCacheDir, getBrowserEnv } from '../browser-config.ts';
-import { getMaxWorkers } from './browser-configuration.ts';
+import { ensureBrowserCacheDir, getBrowserEnv, getMaxWorkers } from './config.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 const __filename = fileURLToPath(import.meta.url);

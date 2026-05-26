@@ -54,11 +54,13 @@ describe('WriterQueue', () => {
     expect(docs[0].content).toBe('full page markdown here');
   });
 
-  it('raw-content items are skipped and never written to the store', async () => {
+  it('raw-content items are written to the store (no special-case guard)', async () => {
+    // The raw-content guard was removed: all ingestion types are now processed.
+    // Nothing in production creates raw-content items, but if one is enqueued it
+    // should be persisted rather than silently dropped.
     queue.enqueue({ url: 'https://test.com', markdown: 'full scraped page', metadata: { ingestionType: 'raw-content' } });
     await queue.drain();
-    expect(mockStore.addDocuments).not.toHaveBeenCalled();
-    expect(mockStore.findByUrl).not.toHaveBeenCalled();
+    expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 
   it('should deduplicate same content for matching ingestionType', async () => {

@@ -7,12 +7,7 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { metrics } from '../utils/metrics.ts';
-
-export interface CommandContext {
-  ui: {
-    notify: (message: string, type: string) => void;
-  };
-}
+import type { CommandContext } from './command-types.ts';
 
 /**
  * Handle metrics-related actions

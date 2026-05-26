@@ -15,7 +15,7 @@ import { complete, completeSimple, type TextContent, type Message } from '@mario
 import { extractJson } from '../utils/json-utils.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
-import type { GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions } from './planning-types.ts';
+import type { GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions } from './interfaces/planning-interfaces.ts';
 import type { LLMResponseMetadata } from '../types/index.ts';
 import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -36,8 +36,6 @@ export class PlanningService implements IPlanningService {
   readonly name = 'PlanningService';
   lifecycle = ServiceLifecycle.UNINITIALIZED as ServiceLifecycle;
 
-  private isInitialized = false;
-
   // Planning state
   private currentPlan: ResearchPlan | null = null;
   private queryHistory: string[] = [];
@@ -51,7 +49,7 @@ export class PlanningService implements IPlanningService {
   }
 
   async initialize(ctx?: any): Promise<void> {
-    if (this.isInitialized && !ctx) {
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED && !ctx) {
       logger.debug(`[${this.name}] Already initialized`);
       return;
     }
@@ -61,7 +59,6 @@ export class PlanningService implements IPlanningService {
     }
 
     this.lifecycle = ServiceLifecycle.INITIALIZING;
-    this.isInitialized = true;
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.log(`[${this.name}] Initialized`);
   }
@@ -71,14 +68,13 @@ export class PlanningService implements IPlanningService {
   }
 
   isReady(): boolean {
-    return this.isInitialized;
+    return this.lifecycle === ServiceLifecycle.INITIALIZED;
   }
 
   async dispose(): Promise<void> {
     this.lifecycle = ServiceLifecycle.DISPOSING;
     this.clearPlanningState();
     this.ctx = undefined;
-    this.isInitialized = false;
     this.lifecycle = ServiceLifecycle.DISPOSED;
     logger.log(`[${this.name}] Disposed`);
   }

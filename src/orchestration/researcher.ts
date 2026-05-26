@@ -25,7 +25,7 @@ export interface CreateResearcherSessionOptions {
   cwd: string;
   ctxModel: Model<any> | undefined;
   modelRegistry: ModelRegistry;
-  settingsManager: SettingsManager;
+  settingsManager?: SettingsManager | undefined;
   systemPrompt: string;
   extensionCtx: ExtensionContext;
   // Optional: real closures for global state management

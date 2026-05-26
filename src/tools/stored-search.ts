@@ -9,7 +9,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 
@@ -35,15 +35,18 @@ export function createStoredSearchTool(_options: {
         };
       }
 
-      const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
 
       if (!service.isReady()) {
         const config = getConfig();
         if (config.KNOWLEDGE_STORE_ENABLED) {
           // Trigger lazy initialization in background
-          service.initialize().catch(err => {
-            logger.warn('[stored-search] Background knowledge store initialization failed:', err);
-          });
+          const initPromise = service.initialize?.();
+          if (initPromise) {
+            initPromise.catch(err => {
+              logger.warn('[stored-search] Background knowledge store initialization failed:', err);
+            });
+          }
           return {
             content: [{ type: 'text', text: 'Knowledge store is initializing, try again shortly.' }],
             details: { status: 'initializing' },

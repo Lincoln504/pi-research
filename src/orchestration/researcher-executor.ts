@@ -96,7 +96,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      settingsManager: extendedCtx['settingsManager'] ?? undefined as any,
+      settingsManager: extendedCtx['settingsManager'],
       systemPrompt: prompt,
       extensionCtx: ctx,
       noSearch: true,

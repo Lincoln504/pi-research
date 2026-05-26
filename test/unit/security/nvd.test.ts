@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { searchNVD, getCVEById } from '../../../src/security/nvd.ts';
+import { searchNVD, getCVEById } from '../../../src/security/nvd-client.ts';
 
 describe('NVD Client', () => {
   beforeEach(() => {

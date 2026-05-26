@@ -7,8 +7,8 @@
 import { logger } from '../logger.ts';
 import { Value } from 'typebox/value';
 import { extractJson } from '../utils/json-utils.ts';
-import type { ResearchPlan, ResearcherConfig } from './planning-types.ts';
-import { ResearchPlanSchema } from './planning-types.ts';
+import type { ResearchPlan, ResearcherConfig } from './interfaces/planning-interfaces.ts';
+import { ResearchPlanSchema } from './interfaces/planning-interfaces.ts';
 import {
   MAX_TEAM_SIZE_LEVEL_1,
   MAX_TEAM_SIZE_LEVEL_2,

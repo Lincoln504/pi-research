@@ -4,8 +4,8 @@
  * Dependencies are managed by npm via package.json.
  */
 
-import { getDependencyStatus } from './scrapers.ts';
-import { getCamoufoxBinaryPath, getBrowserCacheDir } from '../infrastructure/browser-config.ts';
+import { getDependencyStatus } from './web-scraper.ts';
+import { getCamoufoxBinaryPath, getBrowserCacheDir } from '../infrastructure/browser/config.ts';
 import { existsSync } from 'node:fs';
 
 /**

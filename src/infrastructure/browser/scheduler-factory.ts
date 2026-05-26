@@ -13,7 +13,7 @@ import { getService, tryGetService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import { SchedulerService } from '../../core/scheduler-service.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
-import { generateSchedulerVersion } from './browser-configuration.ts';
+import { generateSchedulerVersion } from './config.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
 import type { IScheduler } from './browser-client.ts';

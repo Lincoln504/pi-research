@@ -13,13 +13,8 @@ import { logger } from '../logger.ts';
 import { getConfig, getDbDir } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
-
-export interface CommandContext {
-  ui: {
-    notify: (message: string, type: string) => void;
-  };
-}
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
+import type { CommandContext } from './command-types.ts';
 
 /**
  * Handle knowledge-related actions
@@ -30,7 +25,7 @@ export async function handleKnowledgeAction(
   ctx: CommandContext,
   pi: ExtensionAPI
 ): Promise<void> {
-  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
   
   switch (action) {
     case 'status':
@@ -57,7 +52,7 @@ export async function handleKnowledgeAction(
  */
 export async function showKnowledgeStatus(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
   const config = getConfig();
-  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
   const outputLines: string[] = [];
   
   outputLines.push('## Knowledge Store Status');
@@ -99,7 +94,7 @@ export async function showKnowledgeStatus(ctx: CommandContext, pi: ExtensionAPI)
  * Display knowledge store entry count
  */
 export async function showKnowledgeCount(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
-  const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
   if (!service.isReady()) {
     ctx.ui.notify('Knowledge store is not ready', 'warning');
     return;
@@ -139,9 +134,13 @@ export async function handleKnowledgeMigration(strategy: string | undefined, ctx
   try {
     process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'] = strategy;
     
-    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-    await service.dispose();
-    await service.initialize();
+    const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    if (service.dispose) {
+      await service.dispose();
+    }
+    if (service.initialize) {
+      await service.initialize();
+    }
     
     delete process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
     

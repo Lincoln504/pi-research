@@ -114,16 +114,3 @@ export interface Site {
   icon_url?: string;
 }
 
-// Command parameters
-export interface CommandParams {
-  command: 'search' | 'get' | 'user' | 'site';
-  query?: string;
-  id?: string | number;
-  site: string;
-  limit: number;
-  format: 'table' | 'json' | 'compact';
-  tags?: string | null;
-  full: boolean;
-  minimal: boolean;
-}
-

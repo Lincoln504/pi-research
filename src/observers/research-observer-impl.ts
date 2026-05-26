@@ -10,7 +10,7 @@
  */
 
 import type { ResearchObserver } from '../orchestration/research-observer.ts';
-import type { ResearchState } from '../types/index.ts';
+
 import { getUnitsPerResearcher, LEAD_EVAL_UNITS } from '../constants.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';
 import {
@@ -345,7 +345,7 @@ export function createObserverState(): ObserverState {
 /**
  * Stop wave animation in the observer
  */
-export function stopObserverWaveAnimation(state: ObserverState, panelState: ResearchState): void {
+export function stopObserverWaveAnimation(state: ObserverState, panelState: ResearchPanelState): void {
   if (state.waveTimer) {
     clearInterval(state.waveTimer);
     state.waveTimer = null;

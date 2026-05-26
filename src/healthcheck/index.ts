@@ -6,12 +6,12 @@
  */
 
 import { getConfig } from '../config.ts';
-import { isBrowserAvailable } from '../infrastructure/browser/browser-configuration.ts';
+import { isBrowserAvailable } from '../infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames, IStateManager } from '../core/service-interfaces.ts';
 import { SchedulerService } from '../core/scheduler-service.ts';
-import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { healthRegistry } from './registry.ts';
 
 // Register Browser Capability Check
@@ -51,7 +51,7 @@ healthRegistry.register('KnowledgeStore', async () => {
     return { healthy: true, diagnostic: { status: 'disabled in config' } };
   }
   try {
-    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const embedder = await service.getEmbedder();
     
     // Lazy-aware health check: if not initialized, we check if the store is open

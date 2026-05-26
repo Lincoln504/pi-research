@@ -123,7 +123,7 @@ export class QuickResearchOrchestrator {
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      settingsManager: undefined as any,
+      settingsManager: (ctx as any).settingsManager,
       systemPrompt: prompt,
       extensionCtx: ctx,
       getGlobalState: (): SystemResearchState => ({

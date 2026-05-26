@@ -10,7 +10,11 @@ export {
     getMaxWorkers,
     getSchedulerVersion,
     isBrowserAvailable,
-} from './browser-configuration.ts';
+    getCamoufoxBinaryPath,
+    getBrowserCacheDir,
+    getBrowserEnv,
+    ensureBrowserCacheDir,
+} from './config.ts';
 
 // Client agent
 export {

@@ -8,21 +8,17 @@
  * - Clear knowledge store cache
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { visibleWidth, truncateToWidth, matchesKey } from '@mariozechner/pi-tui';
 import { getConfig, validateConfig, saveConfig, resetConfig, getEnvFilePath } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import { KnowledgeStoreService } from '../infrastructure/knowledge-store-service.ts';
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { SUPPORTED_MODELS, clearKnowledgeStore } from '../knowledge/index.ts';
 import * as fss from 'node:fs';
 import * as pathmod from 'node:path';
 import * as os from 'node:os';
-
-export interface CommandContext {
-  ui: ExtensionUIContext;
-  hasUI?: boolean;
-}
+import type { ExtendedCommandContext } from './command-types.ts';
 
 /**
  * Handle settings-related actions
@@ -30,7 +26,7 @@ export interface CommandContext {
 export async function handleSettingsAction(
   action: string | undefined,
   _params: string[],
-  ctx: CommandContext,
+  ctx: ExtendedCommandContext,
   pi: ExtensionAPI
 ): Promise<void> {
   switch (action) {
@@ -56,7 +52,7 @@ export async function handleSettingsAction(
 /**
  * Show a summary of current research settings
  */
-export async function showSettingsSummary(ctx: CommandContext, pi: ExtensionAPI): Promise<void> {
+export async function showSettingsSummary(ctx: ExtendedCommandContext, pi: ExtensionAPI): Promise<void> {
   const config = getConfig();
   
   // pi-research model cache directory
@@ -82,7 +78,7 @@ export async function showSettingsSummary(ctx: CommandContext, pi: ExtensionAPI)
   let storeCountLabel = '';
   if (config.KNOWLEDGE_STORE_ENABLED) {
     try {
-      const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
       if (service.isReady()) {
         const store = await service.getStore();
         const n = await store.count();
@@ -144,7 +140,7 @@ export async function showSettingsSummary(ctx: CommandContext, pi: ExtensionAPI)
 /**
  * Interactive settings editor
  */
-export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI): Promise<void> {
+export async function showSettingsEditor(ctx: ExtendedCommandContext, _pi: ExtensionAPI): Promise<void> {
   if (!ctx.hasUI) {
     ctx.ui.notify('Settings editor requires interactive mode', 'error');
     return;
@@ -176,7 +172,7 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
   const updateStoreCount = async () => {
     if (config.KNOWLEDGE_STORE_ENABLED) {
       try {
-        const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+        const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
         if (service.isReady()) {
           const store = await service.getStore();
           const n = await store.count();
@@ -534,7 +530,7 @@ export async function showSettingsEditor(ctx: CommandContext, _pi: ExtensionAPI)
 /**
  * Reset settings to defaults
  */
-export async function resetSettings(ctx: CommandContext): Promise<void> {
+export async function resetSettings(ctx: ExtendedCommandContext): Promise<void> {
   resetConfig();
   ctx.ui.notify('Settings reset to defaults (reload required)', 'warning');
 }
@@ -542,7 +538,7 @@ export async function resetSettings(ctx: CommandContext): Promise<void> {
 /**
  * Clear knowledge store action
  */
-async function clearCacheAction(ctx: CommandContext): Promise<void> {
+async function clearCacheAction(ctx: ExtendedCommandContext): Promise<void> {
   try {
     await clearKnowledgeStore();
     ctx.ui.notify('Knowledge store cleared', 'info');

@@ -156,7 +156,7 @@ export function isSingleGitHubAdvisory(value: unknown): value is GitHubAdvisoryR
   return 'ghsa_id' in value || 'summary' in value;
 }
 
-import { type Advisory } from './advisory-types.ts';
+import { type Advisory } from './types.ts';
 
 /**
  * Extract affected packages from an advisory item

@@ -24,7 +24,7 @@ import { startResearchSession, registerSessionAbort } from '../utils/session-sta
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
-import type { ResearchState } from '../types/index.ts';
+
 import { ensureFunctionalHealth, createHealthMonitor } from '../utils/research-health.ts';
 import { errorTracker, type ErrorReport } from '../utils/error-tracker.ts';
 
@@ -268,7 +268,7 @@ export function createResearchTool(): ToolDefinition {
             }
 
             // Stop wave animation
-            stopObserverWaveAnimation(observerState, panelState as unknown as ResearchState);
+            stopObserverWaveAnimation(observerState, panelState);
 
             const exportPath = await exportResearchReport(sanitizedQuery, result, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
             const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;

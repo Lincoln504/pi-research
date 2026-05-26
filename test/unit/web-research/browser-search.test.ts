@@ -16,7 +16,7 @@ vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => (
 }));
 
 // Mock the browser-configuration module
-vi.mock('../../../src/infrastructure/browser/browser-configuration.ts', () => ({
+vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   getMaxWorkers: vi.fn(() => 4),
   isBrowserAvailable: vi.fn(() => true),
   getSchedulerVersion: vi.fn(() => '1.0.0'),

@@ -5,7 +5,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { getCamoufoxBinaryPath } from '../infrastructure/browser-config.ts';
+import { getCamoufoxBinaryPath } from '../infrastructure/browser/config.ts';
 
 /**
  * Common module checking utility

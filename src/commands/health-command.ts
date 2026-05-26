@@ -8,14 +8,7 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { logger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
-
-export interface CommandContext {
-  ui: {
-    notify: (message: string, type: string) => void;
-  };
-  hasUI?: boolean;
-  cwd?: string;
-}
+import type { CommandContext } from './command-types.ts';
 
 /**
  * Handle health-related actions

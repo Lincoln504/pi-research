@@ -71,14 +71,12 @@ jobs:
         run: npm ci --legacy-peer-deps
       - run: npm run test:unit
 
-  integration-test:
+  integration-test-fast:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
-    # Serial browser-pool tests take ~21 min locally with real browsers.
-    # In CI browsers are not installed so they skip gracefully; the
-    # non-browser (knowledge / utility) tests finish in ~2 min.
-    # The fast variant runs the parallel group concurrently with the serial
-    # group, shaving ~60-120 s off the critical path.
+    # Runs the parallel and serial groups concurrently to minimise wall-clock time.
+    # In CI browsers are not installed so browser-pool tests skip gracefully;
+    # knowledge / utility tests finish in ~2 min.
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +91,27 @@ jobs:
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run test:integration:fast
+
+  integration-test-full:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    # Runs the complete integration suite sequentially (parallel group first,
+    # then serial group) to catch ordering-dependent failures that the fast
+    # concurrent run might mask.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run test:integration
 
   dep-graph:
     needs: [lint, type-check]

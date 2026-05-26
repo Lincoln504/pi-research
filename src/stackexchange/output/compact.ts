@@ -28,8 +28,8 @@ export function formatAnswersCompact(answers: Answer[]): string {
   let index = 1;
   for (const a of answers) {
     const accepted = a.is_accepted ? '✓' : ' ';
-    const authorName = a.owner?.display_name ?? 'Unknown';
-    lines.push(`${index}. ${accepted} by ${authorName} (${a.score} pts)`);
+    const displayName = a.owner?.display_name ?? 'Unknown';
+    lines.push(`${index}. ${accepted} by ${displayName} (${a.score} pts)`);
     index++;
   }
   return lines.join('\n');

@@ -1,7 +1,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runHealthCheck } from '../../../src/healthcheck/index.ts';
-import { isBrowserAvailable } from '../../../src/infrastructure/browser/browser-configuration.ts';
+import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
 import { registerService, resetServiceContainer, ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
@@ -21,7 +21,7 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
-vi.mock('../../../src/infrastructure/browser/browser-configuration.ts', () => ({
+vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   isBrowserAvailable: vi.fn(),
 }));
 

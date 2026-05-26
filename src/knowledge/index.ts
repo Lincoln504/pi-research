@@ -201,6 +201,9 @@ export async function createKnowledgeStoreComponents(): Promise<KnowledgeStoreCo
       inflightEmbedder = null;
       return { embedder, store, writerQueue };
     } catch (err) {
+      // Reset inflightEmbedder to null so the next retry creates a fresh instance
+      inflightEmbedder = null;
+      
       const givingUp = attempt === MAX_INIT_RETRIES;
       if (givingUp) {
         throw err;

@@ -34,6 +34,12 @@ export function createStackexchangeTool(options: {
       minimum: 1,
       maximum: 100,
     })),
+    maxPages: Type.Optional(Type.Number({
+      description: 'Maximum pages to fetch for pagination (1-10, default: 5)',
+      default: 5,
+      minimum: 1,
+      maximum: 10,
+    })),
     format: Type.Optional(Type.String({
       description: 'Output format: table, json, or compact (default: table)',
       default: 'table',
@@ -46,7 +52,7 @@ export function createStackexchangeTool(options: {
   return {
     name: 'stackexchange',
     label: 'Stack Exchange Search',
-    description: 'Search and retrieve data from Stack Exchange network via REST API v2.3 (anonymous: 300 requests/day, with key: 10,000 requests/day)',
+    description: 'Search and retrieve data from Stack Exchange network via REST API v2.3 with pagination support (anonymous: 300 requests/day, with key: 10,000 requests/day)',
     promptSnippet: 'Search Stack Overflow and other Stack Exchange sites for questions, answers, and user information',
     promptGuidelines: [
       'Available for finding technical answers on Stack Overflow',
@@ -54,6 +60,7 @@ export function createStackexchangeTool(options: {
       'Works with any Stack Exchange site (Stack Overflow, SuperUser, AskUbuntu, etc.)',
       'Anonymous access: 300 requests/day. Set STACKEXCHANGE_API_KEY env var for 10,000/day.',
       'Use tags to filter by specific topics.',
+      'Use maxPages parameter to control pagination for search results (default: 5 pages).',
       `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
     parameters: StackExchangeParams,

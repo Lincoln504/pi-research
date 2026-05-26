@@ -26,7 +26,7 @@ vi.mock('../../../src/infrastructure/browser/index.ts', () => ({
   forceSchedulerRestart: vi.fn(),
 }));
 
-// Also mock task-execution-service since that's what scrapers.ts actually imports
+// Also mock task-execution-service since that's what web-scraper.ts actually imports
 vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({
   runBrowserTask: mockRunBrowserTask,
   runBrowserHealthCheck: mockRunBrowserHealthCheck,
@@ -55,7 +55,7 @@ vi.mock('@kreuzberg/html-to-markdown-node', () => ({
   JsCodeBlockStyle: { Backticks: {} },
 }));
 
-import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } from '../../../src/web-research/scrapers.ts';
+import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';
 
 describe('scrapers', () => {
   beforeEach(() => {

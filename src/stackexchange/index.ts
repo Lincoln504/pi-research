@@ -18,7 +18,7 @@ import {
   formatUsersTable,
   formatSitesTable,
   formatCompactQuestions,
-} from './output/index.ts';
+} from './output/table.ts';
 import {
   formatUsersCompact,
   formatSitesCompact,

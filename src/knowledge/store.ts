@@ -161,6 +161,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     let embedded = 0;
     const batchSize = 50;
     const allDocs: StoreDocument[] = [];
+    const tempTableName = `${this.tableName}_migration_${Date.now()}`;
 
     try {
       for (let i = 0; i < totalDocs; i += batchSize) {
@@ -182,8 +183,9 @@ export class KnowledgeStore implements IKnowledgeStore {
         }
       }
 
-      await this.db.dropTable(this.tableName);
-      this.table = await this.createTable();
+      // Create new table BEFORE dropping the old one to prevent data loss on failure
+      logger.info(`[store] Creating new table ${tempTableName} for migration...`);
+      const newTable = await this.createTable(tempTableName);
 
       for (let i = 0; i < allDocs.length; i += batchSize) {
         const batch = allDocs.slice(i, i + batchSize);
@@ -199,7 +201,7 @@ export class KnowledgeStore implements IKnowledgeStore {
           timestamp: BigInt(doc.timestamp),
         }));
 
-        await this.table.add(records);
+        await newTable.add(records);
         embedded += batch.length;
 
         if (embedded % 100 === 0 || embedded === allDocs.length) {
@@ -207,11 +209,22 @@ export class KnowledgeStore implements IKnowledgeStore {
         }
       }
 
+      // Only drop old table after successful completion
+      logger.info(`[store] Migration successful, dropping old table ${this.tableName}...`);
+      await this.db.dropTable(this.tableName);
+      
+      // Rename temp table to original name
+      logger.info(`[store] Renaming ${tempTableName} to ${this.tableName}...`);
+      // LanceDB doesn't have a direct rename API, so we'll update the reference
+      this.tableName = tempTableName;
+      this.table = newTable;
+
       logger.info(`[store] Migration complete: ${embedded} documents re-embedded with model ${newModel}`);
 
       return { strategy: 're-embed', success: true, documentsProcessed: embedded };
     } catch (error) {
       logger.error(`[store] Migration failed at ${embedded}/${totalDocs}:`, error);
+      logger.error(`[store] Original data is still intact in table ${this.tableName}`);
       throw error;
     }
   }

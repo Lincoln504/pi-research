@@ -4,6 +4,8 @@
 
 import type { IService } from '../service-registry.ts';
 import type { Model } from '@mariozechner/pi-ai';
+import { Type } from 'typebox';
+import type { ResearchObserver } from '../../orchestration/research-observer.ts';
 
 /**
  * Research plan structure returned by the coordinator/evaluator
@@ -43,6 +45,7 @@ export interface GeneratePlanOptions {
   model: Model<any>;
   signal?: AbortSignal;
   historicalLinksSection?: string;
+  observer?: ResearchObserver;
 }
 
 /**
@@ -70,6 +73,7 @@ export interface UpdatePlanOptions {
   totalResearchersPlanned: number;
   mustSynthesize?: boolean;
   historicalLinksSection?: string;
+  observer?: ResearchObserver;
 }
 
 /**
@@ -95,3 +99,22 @@ export interface IPlanningService extends IService {
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
   clearPlanningState(): void;
 }
+
+// ============================================================================
+// TypeBox Schemas for Validation
+// ============================================================================
+
+export const ResearcherConfigSchema = Type.Object({
+  id: Type.Union([Type.String(), Type.Number()]),
+  name: Type.String(),
+  goal: Type.String(),
+  queries: Type.Array(Type.String()),
+  historicalLinks: Type.Optional(Type.Array(Type.String()))
+});
+
+export const ResearchPlanSchema = Type.Object({
+  action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate'), Type.Literal('wait')])),
+  researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
+  allQueries: Type.Optional(Type.Array(Type.String())),
+  content: Type.Optional(Type.String())
+});

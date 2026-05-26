@@ -73,9 +73,6 @@ export class WriterQueue implements IWriterQueue {
   private async ingest(item: IngestionItem): Promise<void> {
     const incomingType = (item.metadata?.['ingestionType'] as string | undefined) ?? 'synthesis-description';
 
-    // Raw-content is no longer persisted — content is stored on synthesis-description rows.
-    if (incomingType === 'raw-content') return;
-
     const hash = createHash('sha256').update(item.markdown).digest('hex');
 
     if (this.options.store.isStoreClosed()) {

@@ -3,8 +3,9 @@
  *
  * Provides automatic error pattern detection and grouping for research operations.
  * Session-scoped (in-memory) storage that's cleared between research runs.
- * Primary output is log files via console.log() statements.
  */
+
+import { logger } from '../logger.ts';
 
 /**
  * Error context information for tracking where errors occur
@@ -116,8 +117,8 @@ export class ErrorTracker {
       pattern.contexts.shift();
     }
 
-    // Log to console (primary output mechanism)
-    console.log(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
+    // Log to debug (error tracking is operational, not an error itself)
+    logger.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
   }
 
   /**
