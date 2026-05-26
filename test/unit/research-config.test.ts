@@ -25,7 +25,7 @@ vi.mock('../../src/config.ts', () => ({
   resetConfig: vi.fn(),
 }));
 
-describe('research-config command routing', () => {
+describe('research-config command', () => {
   const mockCtx = {
     ui: {
       notify: vi.fn(),
@@ -42,18 +42,21 @@ describe('research-config command routing', () => {
     vi.clearAllMocks();
   });
 
-  it('routes "health history" command to informational message', async () => {
-    await handleResearchConfigCommand('health history', mockCtx, mockPi as any);
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('no longer supported'), 'info');
+  it('opens interactive TUI menu and ignores any arguments', async () => {
+    await handleResearchConfigCommand('some random args', mockCtx, mockPi as any);
+    
+    // Should call ui.custom to open the menu
+    expect(mockCtx.ui.custom).toHaveBeenCalled();
+    
+    // Should NOT call notify for "unknown section" anymore because args are ignored
+    expect(mockCtx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it('routes unknown section to error notification', async () => {
-    await handleResearchConfigCommand('unknown-section', mockCtx, mockPi as any);
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Unknown section'), 'error');
-  });
-
-  it('routes unknown action in known section to error notification', async () => {
-    await handleResearchConfigCommand('health unknown-action', mockCtx, mockPi as any);
-    expect(mockCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Unknown health action'), 'error');
+  it('requires UI mode to open the menu', async () => {
+    const noUiCtx = { ...mockCtx, hasUI: false };
+    await handleResearchConfigCommand('', noUiCtx, mockPi as any);
+    
+    expect(noUiCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('requires UI mode'), 'error');
+    expect(noUiCtx.ui.custom).not.toHaveBeenCalled();
   });
 });

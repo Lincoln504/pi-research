@@ -461,12 +461,6 @@ src/
 
 The project maintains automated dependency visualizations to ensure architectural integrity and assist in onboarding.
 
-### Architectural Layer Graph
-
-**File:** `docs/deps-archi.svg`
-
-A high-level view showing the relationships between major architectural layers (`core`, `infrastructure`, `orchestration`, `tools`, `tui`, etc.). This graph is optimized for **horizontal flow** and **logical layering**, using significant spacing and logical grouping to ensure a clean, readable architectural stack.
-
 ### Detailed Module Graph (Madge)
 
 **File:** `docs/deps.svg`
@@ -486,9 +480,6 @@ npm run deps:generate
 
 # Generate the UML class diagram
 npm run deps:generate:uml
-```
-# Generate the high-level layer graph (docs/deps-archi.svg)
-npm run deps:generate:archi
 ```
 
 ---

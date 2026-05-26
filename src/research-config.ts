@@ -1,28 +1,28 @@
 /**
  * Research Configuration Command
  *
- * Consolidated command that provides:
- * - Health Management (run)
- * - Knowledge Store (status, migrate, clear, configure)
- * - System Settings (view, modify, reset, save/load)
- * - Metrics & Monitoring (view, enable/disable, configure)
+ * Consolidated interactive TUI menu for managing pi-research.
+ * Provides a unified hub for:
+ * - Default Research Depth
+ * - System Health Monitoring
+ * - Knowledge Store Management
+ * - Core System Settings
+ * - Run-Scoped Metrics
  *
  * Usage:
- * - /research-config                    - Opens interactive TUI menu
- * - /research-config <section>          - Direct access to section (e.g., health)
- * - /research-config <section> <action> - Direct action (e.g., health run)
+ * - /research-config  - Opens interactive TUI menu
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { matchesKey, SelectList, Box, type SelectItem } from '@earendil-works/pi-tui';
-import { parseCommandArgs, KNOWN_SECTIONS as knownSections } from './config-registry.ts';
-import type { ConfigSection } from './types/index.ts';
-import * as healthModule from './commands/health-command.ts';
-import * as knowledgeModule from './commands/knowledge-command.ts';
-import * as settingsModule from './commands/settings-command.ts';
-import * as metricsModule from './commands/metrics-command.ts';
-import { clearKnowledgeStore } from './knowledge/index.ts';
-import { getConfig, saveConfig, resetConfig } from './config.ts';
+import { matchesKey, SelectList, SettingsList, Box, type SelectItem, type SettingItem } from '@earendil-works/pi-tui';
+import { getConfig, saveConfig, resetConfig, getEnvFilePath } from './config.ts';
+import { healthRegistry } from './healthcheck/index.ts';
+import { getService } from './core/service-registry.ts';
+import { ServiceNames } from './core/service-interfaces.ts';
+import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
+import { SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
+import { metrics } from './utils/metrics.ts';
+import * as os from 'node:os';
 
 // ============================================================================
 // Command Handler
@@ -32,56 +32,15 @@ import { getConfig, saveConfig, resetConfig } from './config.ts';
  * Main command handler for /research-config
  */
 export async function handleResearchConfigCommand(
-  args: string,
+  _args: string,
   ctx: any,
   pi: ExtensionAPI
 ): Promise<void> {
-  const parsed = parseCommandArgs(args);
-
-  // If no arguments, show interactive TUI
-  if (!parsed.section) {
-    await showInteractiveMenu(ctx, pi);
+  if (!ctx.hasUI) {
+    ctx.ui.notify('Interactive menu requires UI mode', 'error');
     return;
   }
-
-  // Direct action routing
-  await routeDirectAction(parsed, ctx, pi);
-}
-
-/**
- * Route direct action to appropriate handler
- */
-async function routeDirectAction(
-  parsed: any,
-  ctx: any,
-  pi: ExtensionAPI
-): Promise<void> {
-  const section = parsed.section;
-  const action = parsed.action;
-  const params = parsed.params || [];
-
-  // New section-based routing (Preferred)
-  if (section && (knownSections as readonly string[]).includes(section as ConfigSection)) {
-    switch (section) {
-      case 'health':
-        await healthModule.handleHealthAction(action, params, ctx, pi);
-        break;
-      case 'knowledge':
-        await knowledgeModule.handleKnowledgeAction(action, params, ctx, pi);
-        break;
-      case 'settings':
-        await settingsModule.handleSettingsAction(action, params, ctx, pi);
-        break;
-      case 'metrics':
-        await metricsModule.handleMetricsAction(action, params, ctx, pi);
-        break;
-    }
-    return;
-  }
-
-  if (section) {
-    ctx.ui.notify(`Unknown section: ${section}. Use /research-config for help.`, 'error');
-  }
+  await showInteractiveMenu(ctx, pi);
 }
 
 // ============================================================================
@@ -92,11 +51,6 @@ async function routeDirectAction(
  * Show interactive TUI menu for research configuration
  */
 async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
-  if (!ctx.hasUI) {
-    ctx.ui.notify('Interactive menu requires UI mode', 'error');
-    return;
-  }
-
   const result = await ctx.ui.custom(
     (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
       const selectTheme = {
@@ -142,7 +96,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
           title: 'Knowledge Store',
           items: [
             { value: 'status', label: 'View Status', description: 'Show knowledge store status' },
-            { value: 'count', label: 'View Entry Count', description: 'Show number of stored entries' },
             { value: 'clear', label: 'Clear Store', description: 'Delete all knowledge store data' },
             { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
           ]
@@ -150,7 +103,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         settings: {
           title: 'System Settings',
           items: [
-            { value: 'view', label: 'View Settings Summary', description: 'Show current configuration' },
             { value: 'edit', label: 'Open Settings Editor', description: 'Interactive configuration editor' },
             { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
           ]
@@ -207,7 +159,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
                 selectList = new SelectList(sections['main']!.items, 10, selectTheme);
                 tui.requestRender();
               } else {
-                // Execute action
                 done({ type: 'action', section: currentSection, action: selected.value });
               }
             }
@@ -226,38 +177,220 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
   if (result?.type === 'action') {
     const { section, action } = result;
     switch (section) {
-      case 'depth':
-        if (action !== 'back') {
-          const depth = parseInt(action, 10);
-          const config = getConfig();
-          config.DEFAULT_RESEARCH_DEPTH = depth;
-          saveConfig(config);
-          resetConfig();
-          ctx.ui.notify(`Default research depth set to ${action}`, 'info');
-        }
+      case 'depth': {
+        const depth = parseInt(action, 10);
+        const config = getConfig();
+        config.DEFAULT_RESEARCH_DEPTH = depth;
+        saveConfig(config);
+        resetConfig();
+        ctx.ui.notify(`Default research depth set to ${action}`, 'info');
         break;
+      }
       case 'health':
-        if (action === 'run') await healthModule.runHealthCheck({ ui: ctx.ui, hasUI: ctx.hasUI ?? false }, pi);
+        if (action === 'run') await runHealthCheckAction(ctx, pi);
         break;
       case 'knowledge':
-        if (action === 'status') await knowledgeModule.showKnowledgeStatus({ ui: ctx.ui }, pi);
-        else if (action === 'count') await knowledgeModule.showKnowledgeCount({ ui: ctx.ui }, pi);
+        if (action === 'status') await showKnowledgeStatusAction(ctx, pi);
         else if (action === 'clear') await clearKnowledgeStore();
         break;
       case 'settings':
-        if (action === 'view') await settingsModule.showSettingsSummary({ ui: ctx.ui }, pi);
-        else if (action === 'edit') await settingsModule.showSettingsEditor(ctx, pi);
+        if (action === 'edit') await showSettingsEditorAction(ctx, pi);
         break;
       case 'metrics':
-        if (action === 'view') await metricsModule.showMetrics({ ui: ctx.ui }, pi);
-        else if (action === 'clear') await metricsModule.handleMetricsAction('clear', [], { ui: ctx.ui }, pi);
+        if (action === 'view') await showMetricsAction(ctx, pi);
+        else if (action === 'clear') {
+            metrics.clear();
+            ctx.ui.notify('Metrics cleared', 'info');
+        }
         break;
     }
   }
+}
 
-  // Handle special submenu results
-  if (result?.type === 'submenu' && result.section === 'knowledge-migrate') {
-    // Show migration options in a follow-up dialog or return to main
-    ctx.ui.notify('Use: /research-config knowledge migrate <drop|re-embed|continue>', 'info');
+// ============================================================================
+// Action Handlers (Internal)
+// ============================================================================
+
+async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
+  ctx.ui.notify('Running health checks...', 'info');
+  try {
+    const systemHealth = await healthRegistry.runAll();
+    const outputLines: string[] = [];
+    outputLines.push('## System Health Status');
+    outputLines.push('');
+
+    const statusIcon = systemHealth.status === 'healthy' ? '✅' :
+                      systemHealth.status === 'degraded' ? '⚠️' : '❌';
+    outputLines.push(`**${statusIcon} Status: ${systemHealth.status.toUpperCase()}**`);
+    outputLines.push('');
+
+    for (const component of systemHealth.components) {
+      const icon = component.healthy ? '✅' : '❌';
+      outputLines.push(`${icon} **${component.component}**`);
+      if (component.error) outputLines.push(`  - Error: ${component.error}`);
+      outputLines.push(`  - Duration: ${component.durationMs.toFixed(0)}ms`);
+      outputLines.push('');
+    }
+
+    pi.sendMessage({
+      customType: 'health-result',
+      content: outputLines.join('\n'),
+      display: true,
+      details: { health: systemHealth },
+    });
+    ctx.ui.notify(`Health check complete: ${systemHealth.status}`, 'info');
+  } catch (error: any) {
+    ctx.ui.notify(`Health check failed: ${error.message}`, 'error');
+  }
+}
+
+async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<void> {
+  try {
+    const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const store = await service.getStore();
+    const count = await store.count();
+    
+    pi.sendMessage({
+      customType: 'knowledge-status',
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${getConfig().EMBEDDING_MODEL}\n- **Device:** ${getConfig().EMBEDDING_DEVICE}`,
+      display: true,
+    });
+  } catch (error: any) {
+    ctx.ui.notify(`Failed to get knowledge status: ${error.message}`, 'error');
+  }
+}
+
+async function showMetricsAction(_ctx: any, pi: ExtensionAPI): Promise<void> {
+  const snapshot = metrics.getSnapshot();
+  const outputLines: string[] = ['## System Metrics', ''];
+  
+  if (Object.keys(snapshot.counters).length === 0 && Object.keys(snapshot.gauges).length === 0 && Object.keys(snapshot.histograms).length === 0) {
+    outputLines.push('_No metrics recorded in the current session._');
+  } else {
+    if (Object.keys(snapshot.counters).length > 0) {
+      outputLines.push('### 🔢 Counters');
+      for (const [key, value] of Object.entries(snapshot.counters)) outputLines.push(`- **${key}:** ${value}`);
+      outputLines.push('');
+    }
+    if (Object.keys(snapshot.histograms).length > 0) {
+      outputLines.push('### 📊 Histograms');
+      for (const [key, stats] of Object.entries(snapshot.histograms)) {
+        outputLines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
+      }
+    }
+  }
+
+  pi.sendMessage({
+    customType: 'metrics-result',
+    content: outputLines.join('\n'),
+    display: true,
+    details: { metrics: snapshot },
+  });
+}
+
+async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<void> {
+  const config = { ...getConfig() }; // Work on a copy
+  const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
+
+  const initialItems: SettingItem[] = [
+    {
+      id: 'MAX_CONCURRENT_RESEARCHERS',
+      label: 'Max Concurrent',
+      description: 'Maximum researchers allowed to run simultaneously (1-5)',
+      currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
+      values: ['1', '2', '3', '4', '5'],
+    },
+    {
+      id: 'WORKER_THREADS',
+      label: 'Worker Threads',
+      description: 'Number of parallel browser workers for search and scraping',
+      currentValue: String(config.WORKER_THREADS),
+      values: ['1', '2', '4', '8', '12', '16'],
+    },
+    {
+      id: 'KNOWLEDGE_STORE_ENABLED',
+      label: 'Knowledge Store',
+      description: 'Enable or disable persistent research memory',
+      currentValue: config.KNOWLEDGE_STORE_ENABLED ? 'ON' : 'OFF',
+      values: ['ON', 'OFF'],
+    },
+    {
+      id: 'EMBEDDING_MODEL',
+      label: 'Embed Model',
+      description: 'Model used for knowledge store embeddings (⚠ Changing clears DB)',
+      currentValue: config.EMBEDDING_MODEL,
+      values: SUPPORTED_MODELS.map(m => m.id),
+    },
+    {
+      id: 'EMBEDDING_DEVICE',
+      label: 'Embed Device',
+      description: 'Hardware device for embeddings (webgpu is 3-9x faster)',
+      currentValue: config.EMBEDDING_DEVICE,
+      values: ['webgpu', 'cpu'],
+    },
+    {
+      id: 'RESEARCHER_TIMEOUT_MS',
+      label: 'Timeout (min)',
+      description: 'Per-researcher timeout in minutes (3-30 min)',
+      currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
+      values: ['3', '5', '10', '15', '20', '30'],
+    },
+  ];
+
+  const result = await ctx.ui.custom(
+    (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
+      const listTheme = {
+        label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('text', text),
+        value: (text: string, selected: boolean) => selected ? theme.fg('accent', `[ ${text} ]`) : theme.fg('muted', `  ${text}  `),
+        description: (text: string) => theme.fg('muted', ` ${text}`),
+        cursor: theme.fg('accent', '► '),
+        hint: (text: string) => theme.fg('muted', ` ${text}`),
+      };
+
+      const settingsList = new SettingsList(
+        initialItems,
+        10,
+        listTheme,
+        (id, newValue) => {
+          if (id === 'KNOWLEDGE_STORE_ENABLED') config.KNOWLEDGE_STORE_ENABLED = newValue === 'ON';
+          else if (id === 'MAX_CONCURRENT_RESEARCHERS' || id === 'WORKER_THREADS') (config as any)[id] = parseInt(newValue, 10);
+          else if (id === 'RESEARCHER_TIMEOUT_MS') config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+          else (config as any)[id] = newValue;
+          tui.requestRender();
+        },
+        () => done({ type: 'cancel' })
+      );
+
+      const box = new Box(2, 1);
+      box.addChild({
+        render: (width) => {
+          return [
+            theme.fg('accent', ' pi-research Configuration'),
+            theme.fg('muted', ' ──────────────────────────────'),
+            ...settingsList.render(width - 4),
+            theme.fg('muted', ' ──────────────────────────────'),
+            theme.fg('muted', ` Config: ${envDisplayPath}`),
+            theme.fg('muted', ' [Enter] Save & Exit   [Esc] Cancel'),
+          ];
+        },
+        handleInput: (data) => {
+          if (data === '\r' || data === '\n') done({ type: 'submit', data: config });
+          else settingsList.handleInput(data);
+        },
+        invalidate: () => settingsList.invalidate(),
+      });
+
+      return box;
+    }
+  );
+
+  if (result && result.type === 'submit' && result.data) {
+    try {
+      saveConfig(result.data);
+      resetConfig();
+      ctx.ui.notify('Configuration updated and saved', 'info');
+    } catch (e: any) {
+      ctx.ui.notify(`Invalid config: ${e.message}`, 'error');
+    }
   }
 }

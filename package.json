@@ -73,7 +73,6 @@
     "models:download:force": "node scripts/download-models.mjs --force",
     "deps:check": "depcruise --config .dependency-cruiser.cjs --output-type err-long src",
     "deps:generate": "madge --image docs/deps.svg src/index.ts",
-    "deps:generate:archi": "depcruise --config .dependency-cruiser.cjs --output-type archi src | dot -T svg > docs/deps-archi.svg",
     "deps:generate:uml": "tsuml2 --glob \"./src/**/*.ts\" -o \"docs/uml.svg\"",
     "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type x-dot-webpage src > docs/deps.html",
     "analyze:cloc": "cloc ./src --md --out docs/CLOC.md",

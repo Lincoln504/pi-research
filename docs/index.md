@@ -44,7 +44,6 @@ System design and architectural decisions.
 ### Visualizations
 
 - [File Dependency Graph](deps.svg) - Detailed module-level dependencies (Madge)
-- [Architectural Layers](deps-archi.svg) - High-level architectural layering (Dependency Cruiser)
 - [UML Class Diagram](uml.svg) - Detailed class and interface relationships (tsuml2)
 - [Code Statistics](CLOC.md) - Lines of code breakdown (cloc)
 
