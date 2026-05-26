@@ -75,7 +75,10 @@
     "deps:generate": "madge --image docs/deps.svg src/index.ts",
     "deps:generate:archi": "depcruise --config .dependency-cruiser.cjs --output-type archi src | dot -T svg > docs/deps-archi.svg",
     "deps:generate:uml": "tsuml2 --glob \"./src/**/*.ts\" -o \"docs/uml.svg\"",
-    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type x-dot-webpage src > docs/deps.html"
+    "deps:report": "depcruise --config .dependency-cruiser.cjs --output-type x-dot-webpage src > docs/deps.html",
+    "analyze:cloc": "cloc ./src --md --out docs/CLOC.md",
+    "analyze:dependencies": "npm-check",
+    "analyze:compatibility": "depngn"
   },
   "pi": {
     "extensions": [
@@ -120,9 +123,12 @@
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "@vitest/coverage-v8": "^4.1.2",
+    "cloc": "^2.6.0-cloc",
     "dependency-cruiser": "^17.4.2",
+    "depngn": "^0.6.0",
     "eslint": "^10.1.0",
     "madge": "^8.0.0",
+    "npm-check": "^6.0.1",
     "tsuml2": "^0.17.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"

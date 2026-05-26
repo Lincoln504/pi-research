@@ -36,6 +36,9 @@ jobs:
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run lint
+      - name: Static Analysis
+        run: npm run analyze:cloc
+        continue-on-error: true
 
   type-check:
     runs-on: ubuntu-latest
