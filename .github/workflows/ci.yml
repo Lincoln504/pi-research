@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+# Cancel any in-progress run for the same branch when a new push arrives.
+# - On pull_request events: github.head_ref is the source branch name.
+# - On push events: github.ref is the full ref (e.g. refs/heads/main).
+# cancel-in-progress is false on the default branch so a merge to main is
+# never killed by a follow-up commit mid-run; all other branches cancel freely.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ONNXRUNTIME_NODE_SKIP_BINARIES: 1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run lint
+      - name: Audit Dependencies
+        run: npm audit --audit-level=high
+
+      - name: Static Analysis
+        run: npm run analyze:cloc
+        continue-on-error: true
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run type-check
+      - run: npm run type-check:tests
+
+  unit-test:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run test:unit
+
+  integration-test-fast:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    # Runs the parallel and serial groups concurrently to minimise wall-clock time.
+    # In CI browsers are not installed so browser-pool tests skip gracefully;
+    # knowledge / utility tests finish in ~2 min.
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run test:integration:fast
+
+  integration-test-full:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    # Runs the complete integration suite sequentially (parallel group first,
+    # then serial group) to catch ordering-dependent failures that the fast
+    # concurrent run might mask.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - run: npm run test:integration
+
+  dep-graph:
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      # Validate architectural rules (no graphviz required — fast, fails on violations)
+      - name: Check dependency rules
+        run: npm run deps:check
+      # Regenerate the detailed dependency SVG and commit only if it changed
+      - run: sudo apt-get install -y graphviz
+      - run: npm run deps:generate
+      - name: Commit and push docs/deps.svg
+        # Skip push on fork PRs: GitHub does not grant contents:write to fork
+        # workflows, so git push would fail. The dep-graph still runs and the
+        # SVG is regenerated locally — we just don't commit it back.
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add --force docs/deps.svg
+          if git diff --cached --quiet; then
+            echo "docs/deps.svg unchanged, nothing to commit"
+          else
+            git commit -m "chore(ci): regenerate docs/deps.svg (detailed module graph) [skip ci]"
+            git push
+          fi
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/cache@v4
+        id: cache-modules
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.cache-modules.outputs.cache-hit != 'true'
+        run: npm ci --legacy-peer-deps
+      - name: Validate package.json
+        run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
+      - name: Verify npm package
+        run: npm pack --dry-run 2>&1 | grep -q index.ts
