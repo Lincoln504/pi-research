@@ -141,7 +141,7 @@ describe('extension entrypoint', () => {
 
       expect(mockExecute).toHaveBeenCalledWith(
         'mock-uuid-123',
-        { query: 'what is typescript', depth: 0 },
+        { query: 'what is typescript', depth: 1 },
         undefined,
         undefined,
         expect.any(Object),

@@ -71,15 +71,18 @@ export function isKittyProtocolResponse(data: string): boolean {
 }
 
 /**
- * Check if a string appears to be a CSI (Control Sequence Introducer) sequence.
+ * Check if a string appears to be a CSI (Control Sequence Introducer) sequence
+ * or a DEC private-mode / application-keypad sequence.
  *
- * CSI sequences: ESC [ ...
+ * - Standard CSI:          ESC [  (cursor movement, colors, mode settings, etc.)
+ * - Normal Keypad mode:    ESC >  (DEC)
+ * - Alternate Keypad mode: ESC =  (DEC)
  *
  * @param data - Input string to check
- * @returns true if this looks like a CSI sequence
+ * @returns true if this looks like a CSI or DEC keypad escape sequence
  */
 export function isCSISequence(data: string): boolean {
-  return data.startsWith('\u001b[') || data.startsWith('\u001b[');
+  return data.startsWith('\u001b[') || data.startsWith('\u001b>') || data.startsWith('\u001b=');
 }
 
 /**

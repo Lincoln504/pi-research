@@ -117,6 +117,11 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
+        // Activity on the server should keep the idle timer alive. This matters when
+        // this process is the leader and another process (BrowserClient) is calling
+        // us via HTTP — getScheduler() only resets the timer on the caller side,
+        // so we must also reset it here on every inbound operation.
+        this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
 
@@ -167,6 +172,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runScrape(url: string, config?: Config): Promise<any> {
+        this.resetIdleTimer(); // Keep server alive while clients are actively scraping
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const timeoutMs = 60000;
@@ -211,6 +217,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
+        this.resetIdleTimer(); // Keep server alive during active health-checks from clients
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         const timeoutMs = 45000;

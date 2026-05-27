@@ -22,6 +22,10 @@ export type { ResearchObserver } from './orchestration/research-observer.ts';
 export { normalizeUrl } from './utils/shared-links.ts';
 export { resetConfig, getConfig, setConfig } from './config.ts';
 
+// Programmatic SDK Exports
+export * from './sdk.ts';
+export { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
+
 import {
   MAX_TEAM_SIZE_LEVEL_1,
   MAX_TEAM_SIZE_LEVEL_2,

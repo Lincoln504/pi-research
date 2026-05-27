@@ -89,7 +89,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     if (attempt > 1) {
       const delay = Math.min(1000 * Math.pow(2, attempt - 2), config.RESEARCHER_MAX_RETRY_DELAY_MS);
       logger.warn(`[ResearcherExecutor] Researcher ${id} retry ${attempt - 1}/${config.RESEARCHER_MAX_RETRIES} after ${delay}ms`);
-      typedObserver?.onResearcherProgress?.(id, `Retry ${attempt - 1}...`);
+      typedObserver?.onResearcherProgress?.(id, 'retry');
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -116,7 +116,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       }),
       updateGlobalLinks: (links) => registerScrapedLinks(researchId, links),
       onSearchProgress: (links) => {
-        typedObserver?.onResearcherProgress?.(id, `${links} Results`);
+        typedObserver?.onResearcherProgress?.(id, `${links} results`);
       },
     });
 

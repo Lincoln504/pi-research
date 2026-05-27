@@ -15,7 +15,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
 import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
-import { validateConfig } from '../config.ts';
+import { validateConfig, getConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
 import { metrics } from '../utils/metrics.ts';
 import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv, getLogger } from '../logger.ts';
@@ -110,11 +110,10 @@ export function createResearchTool(): ToolDefinition {
         description: 'Research query or topic to investigate',
       }),
       depth: Type.Optional(Type.Integer({
-        minimum: 0,
+        minimum: 1,
         maximum: 3,
         description: [
-          'Research complexity 0-3.',
-          '0: Quick (single pass, fast)',
+          'Research complexity 1-3.',
           '1: Normal (coordinated, thorough)',
           '2: Deep (multi-round, exhaustive)',
           '3: Ultra (maximum depth, extreme rigor)',
@@ -137,14 +136,16 @@ export function createResearchTool(): ToolDefinition {
       if (rawDepth !== undefined && rawDepth !== null) {
         if (typeof rawDepth === 'string') {
           const parsed = parseInt(rawDepth, 10);
-          normalized['depth'] = isNaN(parsed) ? 0 : Math.max(0, Math.min(3, parsed));
+          normalized['depth'] = isNaN(parsed) ? 1 : Math.max(1, Math.min(3, parsed));
         } else if (typeof rawDepth === 'number') {
-          normalized['depth'] = Math.max(0, Math.min(3, rawDepth));
+          normalized['depth'] = Math.max(1, Math.min(3, rawDepth));
         } else {
-          normalized['depth'] = 0;
+          normalized['depth'] = 1;
         }
       } else {
-        normalized['depth'] = 0;
+        // No depth argument provided — fall back to the configured default depth
+        // rather than always hardcoding 1, so user config is honoured.
+        normalized['depth'] = Math.max(1, getConfig().DEFAULT_RESEARCH_DEPTH);
       }
 
       return normalized;

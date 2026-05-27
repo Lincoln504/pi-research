@@ -6,6 +6,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import * as net from 'node:net';
 import type { Config } from '../../config.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
@@ -17,6 +18,32 @@ import { generateSchedulerVersion } from './config.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
+
+/**
+ * Probe whether a TCP port is accepting connections.
+ *
+ * isPidAlive() only checks if the OS process exists — the PID may still be live
+ * while the HTTP server is closed or the port has been reassigned. A brief TCP
+ * connect confirms that the remote end is actually listening before we hand back
+ * a BrowserClient that would otherwise ECONNREFUSED on first use.
+ */
+async function isPortListening(port: number, timeoutMs = 2000): Promise<boolean> {
+    return new Promise((resolve) => {
+        const socket = new net.Socket();
+        let settled = false;
+        const settle = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            resolve(ok);
+        };
+        socket.setTimeout(timeoutMs);
+        socket.once('connect', () => settle(true));
+        socket.once('error', () => settle(false));
+        socket.once('timeout', () => settle(false));
+        socket.connect(port, '127.0.0.1');
+    });
+}
 
 /**
  * Force a restart of the scheduler by clearing the global cache and state.
@@ -167,20 +194,32 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
 
                     // Fall through to start a new scheduler
                 } else {
-                    // Version matches, use existing scheduler
-                    logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
-                    const client = new BrowserClient(serverInfo.port);
-
-                    // Race check: if initializationPromise was cleared (restart), don't set reference
-                    if (schedulerService.getSchedulerInitializationPromise() === p) {
-                        schedulerService.setSchedulerInstance(client);
-                        schedulerService.setSchedulerVersion(currentVersion);
+                    // Version matches — but confirm the port is actually listening before
+                    // creating a BrowserClient. isPidAlive() only checks the OS process;
+                    // the port may have closed (crash, port reuse) even if the PID is alive.
+                    const portOk = await isPortListening(serverInfo.port);
+                    if (!portOk) {
+                        logger.warn(`[Scheduler] PID ${serverInfo.pid} is alive but port ${serverInfo.port} is not listening — clearing stale state and starting fresh.`);
+                        await stateManager.clearBrowserServer().catch((e) => {
+                            logger.warn('[Scheduler] Failed to clear stale browser server state:', e);
+                        });
+                        // Fall through to start a new scheduler
                     } else {
-                        logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
-                        await client.shutdown().catch(() => {});
-                        throw new Error('Initialization superseded');
+                        // Port confirmed: use the existing scheduler
+                        logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
+                        const client = new BrowserClient(serverInfo.port);
+
+                        // Race check: if initializationPromise was cleared (restart), don't set reference
+                        if (schedulerService.getSchedulerInitializationPromise() === p) {
+                            schedulerService.setSchedulerInstance(client);
+                            schedulerService.setSchedulerVersion(currentVersion);
+                        } else {
+                            logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
+                            await client.shutdown().catch(() => {});
+                            throw new Error('Initialization superseded');
+                        }
+                        return client;
                     }
-                    return client;
                 }
             }
         }

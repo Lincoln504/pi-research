@@ -294,7 +294,7 @@ export class PlanningService implements IPlanningService {
       
       if (thinkingContent?.thinking) {
         logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
-        observer?.onPlanningProgress?.('Analyzing findings...');
+        observer?.onPlanningProgress?.('analyzing');
       }
 
       text = textContent?.text || '';

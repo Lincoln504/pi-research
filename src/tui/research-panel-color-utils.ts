@@ -264,9 +264,12 @@ export function applyCurve(t: number, curve: number): number {
 }
 
 /**
- * Cycle HSL saturation and lightness for gradient generation
+ * Cycle HSL saturation and lightness for gradient generation.
  *
- * Creates a gradient that cycles through variations while maintaining hue.
+ * Sawtooth wave: stepIndex=0 → full brightness → stepIndex→totalSteps → 65% brightness.
+ * Saturation barely moves (98%→100%). Only lightness varies, so the hue is preserved.
+ * An easeIn curve (power 2.2) spreads frames perceptually: bright drops fast,
+ * mid-dark range gets more dwell time.
  */
 export function cycleHslSaturationLightness(
   baseR: number,
@@ -275,30 +278,33 @@ export function cycleHslSaturationLightness(
   stepIndex: number,
   totalSteps: number
 ): { r: number; g: number; b: number } {
-  // Convert to HSL
   const hsl = rgbToHsl(baseR, baseG, baseB);
 
-  // Create smooth transitions
-  const t = stepIndex / (totalSteps - 1 || 1);
+  // Sawtooth: progress 0→1 over the cycle, then snaps back
+  const progress = (stepIndex % totalSteps) / totalSteps;
+  const linearFactor = 1 - progress; // 1.0 (bright) → 0.0 (dark)
 
-  // Vary saturation and lightness smoothly
-  // Start with base values, then cycle through variations
-  const sVar = Math.sin(t * Math.PI * 2) * 0.3; // ±30% saturation variation
-  const lVar = Math.cos(t * Math.PI * 2) * 0.2; // ±20% lightness variation
+  // easeIn (2.2): fast initial brightness drop, slow approach to dark end —
+  // perceptually even spacing across the brightness range
+  const curvedFactor = Math.pow(linearFactor, 2.2);
 
-  // Apply variations with bounds checking
-  const newS = Math.max(0, Math.min(1, hsl.s + sVar));
-  const newL = Math.max(0, Math.min(1, hsl.l + lVar));
+  // Lightness: 100% of base (bright) → 65% of base (dark)
+  const newL = hsl.l * (0.65 + 0.35 * curvedFactor);
+  // Saturation: minimal movement (98% → 100%), preserves hue identity
+  const newS = hsl.s * (0.98 + 0.02 * curvedFactor);
 
-  // Convert back to RGB
   return hslToRgb(hsl.h, newS, newL);
 }
 
 /**
- * Smooth falloff function for gradient generation
+ * Smooth exponential falloff for gradient generation.
+ *
+ * t = 0 → 1.0 (bright, at head)
+ * t = 1 → 0.0 (dark, far from head)
+ * power = 0.7 → stays bright longer before falling off
  */
 export function smoothFalloff(t: number, power: number = 0.7): number {
-  return Math.pow(Math.sin(t * Math.PI / 2), power);
+  return Math.pow(1 - t, power);
 }
 
 /**

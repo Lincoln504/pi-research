@@ -38,19 +38,17 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 **Always specify a depth.** Judge it from the user's language and task complexity.
 
 **User says a depth word (highest priority):**
-- "quick" / "brief" / "simple" → `depth: 0`
+- "quick" / "brief" / "simple" → `depth: 1`
 - "normal" / "moderate" / "standard" → `depth: 1`
 - "deep" / "thorough" / "in-depth" → `depth: 2` (never depth 3)
 - "ultra" / "exhaustive" / "comprehensive" / "deep-dive" → `depth: 3`
 
 **User says nothing about depth — judge complexity:**
-- `depth: 0` — Simple facts, lookups, news, definitions, "what is X". This covers ~85%+ of queries. Single session: runs 20–30 targeted search queries then scrapes the best sources.
-- `depth: 1` — Moderate scope: comparisons, overviews, background research.
+- `depth: 1` — Simple facts, lookups, news, definitions, "what is X", overviews, background research. This covers ~95%+ of queries.
 - `depth: 2` — Complex multi-faceted topics: policy analysis, tech evaluations, academic-style research.
 - `depth: 3` — Never without explicit user request.
 
 **How depth works internally:**
-- `depth: 0` (Quick) — One direct agent session. Fast, definitive answers for simple queries.
 - `depth: 1-3` — AI-orchestrated: coordinator plans a team, researchers execute, evaluator decides whether to continue deeper. Team size and number of rounds scale with complexity. The coordinator and evaluator dynamically determine how many researchers are needed each round — it's not a fixed number.
 
 **Max siblings per round by depth:**
@@ -78,4 +76,4 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 - Example: You can call `research("bananas")` and `research("oranges")` in the same response.
 - Emitting multiple calls in parallel is preferred over sequential turns for distinct topics.
 
-**Do NOT escalate depth just because a topic is broad** — depth 0 (quick mode) handles most cases well, and the higher depths have their own internal decomposition.
+**Do NOT escalate depth just because a topic is broad** — depth 1 handles most cases well, and the higher depths have their own internal decomposition.

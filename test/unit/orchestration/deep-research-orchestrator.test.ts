@@ -524,21 +524,31 @@ describe('DeepResearchOrchestrator', () => {
   it('should fire onPlanningProgress with wait status when plan returns wait action', async () => {
     const onPlanningProgress = vi.fn();
     const onError = vi.fn();
-    let callCount = 0;
 
     mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
       // Always return wait — will hit MAX_WAIT_RETRIES (5) and throw
       return { action: 'wait' };
     });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onPlanningProgress, onError } });
 
-    await expect(orchestrator.run()).rejects.toThrow('Max wait retries');
-    // onPlanningProgress should have been called with wait status messages
-    const waitCalls = onPlanningProgress.mock.calls.filter(c => String(c[0]).startsWith('Waiting'));
-    expect(waitCalls.length).toBeGreaterThan(0);
+    // Use fake timers so the 5-second wait between retries resolves immediately
+    vi.useFakeTimers();
+    try {
+      const runPromise = orchestrator.run();
+      // Drain all pending timers (each retry schedules one 5s setTimeout)
+      // Loop up to MAX_WAIT_RETRIES+2 times to be safe
+      for (let i = 0; i < 8; i++) {
+        await vi.runAllTimersAsync();
+      }
+      await expect(runPromise).rejects.toThrow('Max wait retries');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // onPlanningProgress should have been called (with 'analyzing' for wait retries)
+    expect(onPlanningProgress).toHaveBeenCalled();
     // onError should fire when the exception propagates
     expect(onError).toHaveBeenCalled();
-  });
+  }, 15000);
 });

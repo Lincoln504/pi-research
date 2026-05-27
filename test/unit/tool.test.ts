@@ -294,28 +294,18 @@ describe('createResearchTool', () => {
     vi.clearAllMocks();
   });
 
-  describe('Quick Mode Branching (depth: 0) vs Deep Mode (depth: 1-3)', () => {
-    it('calls runResearch with correct query and depth=0', async () => {
-      const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
-
-      expect(runResearch).toHaveBeenCalledWith(
-        expect.objectContaining({ query: 'test', depth: 0 }),
-        expect.any(AbortSignal),
-      );
-    });
-
+  describe('Normal Mode (depth: 1) vs Deep Mode (depth: 2-3)', () => {
     it('calls runResearch with correct query and depth=1', async () => {
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'deep topic', depth: 1 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect(runResearch).toHaveBeenCalledWith(
-        expect.objectContaining({ query: 'deep topic', depth: 1 }),
+        expect.objectContaining({ query: 'test', depth: 1 }),
         expect.any(AbortSignal),
       );
     });
 
-    it('does not mutate console methods on successful quick research', async () => {
+    it('does not mutate console methods on successful research', async () => {
       const originalConsole = {
         log: console.log,
         info: console.info,
@@ -325,7 +315,7 @@ describe('createResearchTool', () => {
       };
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect(console.log).toBe(originalConsole.log);
       expect(console.info).toBe(originalConsole.info);
@@ -337,7 +327,7 @@ describe('createResearchTool', () => {
     it('creates TUI panel with the query text and model name before calling runResearch', async () => {
       const context = createMockContext();
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'panel test query', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'panel test query', depth: 1 }, undefined, undefined, context);
 
       // Panel is initialised with the query and the model id from the context
       expect(panel.createInitialPanelState).toHaveBeenCalledWith(
@@ -354,7 +344,7 @@ describe('createResearchTool', () => {
   });
 
   describe('depth → complexity mapping passed to runResearch', () => {
-    it.each([0, 1, 2, 3] as const)('passes depth %i directly as complexity', async (depth) => {
+    it.each([1, 2, 3] as const)('passes depth %i directly as complexity', async (depth) => {
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', depth }, undefined, undefined, createMockContext());
 
@@ -431,7 +421,7 @@ describe('createResearchTool', () => {
       vi.mocked(runResearch).mockRejectedValue(new Error('Research failed'));
       
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect((result.content[0] as any).text).toContain('Research failed');
     });
@@ -444,7 +434,7 @@ describe('createResearchTool', () => {
       vi.mocked(runResearch).mockRejectedValue(new DOMException('Aborted', 'AbortError'));
       
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 0 }, signal, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', depth: 1 }, signal, undefined, createMockContext());
 
       // The actual error message from the implementation
       expect((result.content[0] as any).text).toContain('Research cancelled.');
@@ -466,25 +456,25 @@ describe('createResearchTool', () => {
       expect(args.depth).toBe(3);
     });
 
-    it('clamps depth to minimum of 0', () => {
+    it('clamps depth to minimum of 1', () => {
       const tool = createResearchTool();
       const args = tool.prepareArguments!({ query: 'test', depth: -1 } as any) as any;
 
-      expect(args.depth).toBe(0);
+      expect(args.depth).toBe(1);
     });
 
-    it('defaults depth to 0 when not provided', () => {
+    it('defaults depth to 1 when not provided', () => {
       const tool = createResearchTool();
       const args = tool.prepareArguments!({ query: 'test' }) as any;
 
-      expect(args.depth).toBe(0);
+      expect(args.depth).toBe(1);
     });
 
     it('handles invalid string depth', () => {
       const tool = createResearchTool();
       const args = tool.prepareArguments!({ query: 'test', depth: 'invalid' } as any) as { depth: number };
 
-      expect(args.depth).toBe(0);
+      expect(args.depth).toBe(1);
     });
   });
 
@@ -525,7 +515,7 @@ describe('createResearchTool', () => {
       const context = createMockContext();
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       expect(runResearch).toHaveBeenCalledWith(
         expect.objectContaining({ model: context.model }),
@@ -542,7 +532,7 @@ describe('createResearchTool', () => {
       };
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 0, model: 'custom-model' }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1, model: 'custom-model' }, undefined, undefined, context);
 
       // The tool should have looked up and passed the explicit model object to runResearch
       expect(runResearch).toHaveBeenCalledWith(
@@ -559,7 +549,7 @@ describe('createResearchTool', () => {
       };
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'test', depth: 0, model: 'nonexistent' }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1, model: 'nonexistent' }, undefined, undefined, context);
 
       // Registry lookup fails; tool falls back to ctx.model
       expect(runResearch).toHaveBeenCalledWith(
@@ -576,7 +566,7 @@ describe('createResearchTool', () => {
 
       controller.abort();
 
-      await tool.execute('id', { query: 'test', depth: 0 }, controller.signal, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, controller.signal, undefined, createMockContext());
 
       // Should complete without throwing even when signal is already aborted
       expect(runResearch).toHaveBeenCalled();
@@ -588,7 +578,7 @@ describe('createResearchTool', () => {
       const context = createMockContext();
       const tool = createResearchTool();
 
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       // The tool installs a terminal input listener for escape/Ctrl+C abort
       expect(context.ui.onTerminalInput).toHaveBeenCalledWith(expect.any(Function));
@@ -599,7 +589,7 @@ describe('createResearchTool', () => {
     it('starts research session', async () => {
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       // Session management functions should be called
       // Note: These are mocked but we can verify the flow
@@ -610,7 +600,7 @@ describe('createResearchTool', () => {
       const context = createMockContext();
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       expect(panel.createInitialPanelState).toHaveBeenCalledWith(
         expect.any(String),
@@ -624,7 +614,7 @@ describe('createResearchTool', () => {
     it('creates initial panel state', async () => {
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect(panel.createInitialPanelState).toHaveBeenCalled();
     });
@@ -633,7 +623,7 @@ describe('createResearchTool', () => {
       const context = createMockContext();
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       expect(context.ui.setWorkingVisible).toHaveBeenCalledWith(false);
     });
@@ -642,7 +632,7 @@ describe('createResearchTool', () => {
       const context = createMockContext();
       const tool = createResearchTool();
 
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, context);
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       // The TUI manager now handles registration of master update handler
       expect(createResearchTuiManager).toHaveBeenCalledWith(
@@ -660,7 +650,7 @@ describe('createResearchTool', () => {
       vi.mocked(validateAndSanitizeQuery).mockReturnValueOnce('sanitized query');
 
       const tool = createResearchTool();
-      await tool.execute('id', { query: 'raw<script>', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'raw<script>', depth: 1 }, undefined, undefined, createMockContext());
 
       // runResearch should receive the sanitised value, not the raw one
       expect(runResearch).toHaveBeenCalledWith(
@@ -675,7 +665,7 @@ describe('createResearchTool', () => {
       const { healthRegistry } = await import('../../src/healthcheck/index.ts');
       const tool = createResearchTool();
 
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       // The mocked healthRegistry.runAll returns { status: 'healthy' }.
       // The tool should proceed to runResearch without blocking.
@@ -691,7 +681,7 @@ describe('createResearchTool', () => {
     it('passes observer to runResearch', async () => {
       const tool = createResearchTool();
       
-      await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect(runResearch).toHaveBeenCalledWith(
         expect.objectContaining({ observer: expect.any(Object) }),
@@ -703,7 +693,7 @@ describe('createResearchTool', () => {
   describe('Result Structure', () => {
     it('returns proper result structure', async () => {
       const tool = createResearchTool();
-      const result = await tool.execute('id', { query: 'test', depth: 0 }, undefined, undefined, createMockContext());
+      const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
       expect(result).toHaveProperty('content');
       expect(result).toHaveProperty('details');

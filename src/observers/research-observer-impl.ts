@@ -60,7 +60,7 @@ export function createResearchObserver(
         state.quickSliceLabel = `researching: ${truncatedQuery}`;
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
-        updateSliceStatus(panelState, state.quickSliceLabel, 'Researching...');
+        updateSliceStatus(panelState, state.quickSliceLabel, 'researching');
         
         const units = getUnitsPerResearcher();
         panelState['progress'] = { expected: units, made: 0 };
@@ -73,7 +73,7 @@ export function createResearchObserver(
         addSlice(panelState, 'coord', `coordinator`, false);
         activateSlice(panelState, 'coord');
       }
-      updateSliceStatus(panelState, 'coord', attempt > 1 ? `Planning (retry ${attempt-1})...` : 'Planning...');
+      updateSliceStatus(panelState, 'coord', 'analyzing');
       debouncedRefresh();
     },
 
@@ -125,7 +125,7 @@ export function createResearchObserver(
           reactivateSlice(panelState, sliceId);
           activateSlice(panelState, sliceId); // Ensure not queued
       }
-      updateSliceStatus(panelState, sliceId, 'Searching...');
+      updateSliceStatus(panelState, sliceId, 'searching');
       panelState.isSearching = true;
 
       // Start wave animation timer
@@ -155,7 +155,7 @@ export function createResearchObserver(
           sliceId = 'eval';
       }
       
-      updateSliceStatus(panelState, sliceId, `${count} Results`);
+      updateSliceStatus(panelState, sliceId, `${count} results`);
       debouncedRefresh();
     },
 
@@ -179,7 +179,7 @@ export function createResearchObserver(
           sliceId = 'eval';
       }
       
-      updateSliceStatus(panelState, sliceId, `${count} Results`);
+      updateSliceStatus(panelState, sliceId, `${count} results`);
 
       if (panelState.slices.has('coord')) {
         completeSlice(panelState, 'coord');
@@ -269,7 +269,7 @@ export function createResearchObserver(
           progressCredits.set(id, unitsPerResearcher);
         }
       }
-      updateSliceStatus(panelState, displayNum, 'Failed');
+      updateSliceStatus(panelState, displayNum, 'failed');
       completeSlice(panelState, displayNum);
       debouncedRefresh();
     },

@@ -117,7 +117,7 @@ export class DeepResearchOrchestrator {
 
         // 1. Update/Generate Plan
         const synthesisService = await getResearchSynthesisService();
-        observer?.onPlanningProgress?.('Planning...');
+        observer?.onPlanningProgress?.('analyzing');
         const plan = await planningService.updatePlanForRound({
             query: query,
             complexity,
@@ -126,7 +126,8 @@ export class DeepResearchOrchestrator {
             reports: synthesisService.getAllReports(),
             previousPlan: planningService.getCurrentPlan(),
             totalResearchersPlanned: planningService.getTotalResearchersPlanned(),
-            signal
+            signal,
+            observer,
         });
         
         if (plan.action === 'delegate') {
@@ -140,7 +141,7 @@ export class DeepResearchOrchestrator {
 
         if (plan.action === 'wait') {
             waitRetryCount++;
-            observer?.onPlanningProgress?.(`Waiting (retry ${waitRetryCount})...`);
+            observer?.onPlanningProgress?.('analyzing');
             if (waitRetryCount > MAX_WAIT_RETRIES) {
                 logger.error(`[DeepOrchestrator] Max wait retries (${MAX_WAIT_RETRIES}) exceeded at Round ${this.currentRound}, stopping research`);
                 observer?.onError?.(new Error('Max wait retries exceeded'));
@@ -199,27 +200,32 @@ export class DeepResearchOrchestrator {
 
         // 3. Researcher Phase
         if (plan.researchers && plan.researchers.length > 0) {
+            // Pass this.config (the resolved Config) rather than this.options (where
+            // options.config may be undefined). runResearcher accesses researchConfig.RESEARCHER_MAX_RETRIES
+            // and similar fields — passing undefined crashes immediately.
             await orchestrationService.runResearchers({
                 plan,
-                options: this.options,
+                options: { ...this.options, config: this.config },
                 currentRound: this.currentRound,
                 signal
             }, researcherLinks);
         }
 
         // 4. Store synthesized descriptions for semantic search
-        await orchestrationService.storeLinkDescriptions(this.currentRound, researchId, this.config);
-        
-        // 5. Evaluation Phase
+        // Show embedding indicator in eval box while embedding runs
         observer?.onEvaluationStart?.(this.currentRound);
-        observer?.onEvaluationProgress?.('Evaluating findings...');
+        observer?.onEvaluationProgress?.('embedding');
+        await orchestrationService.storeLinkDescriptions(this.currentRound, researchId, this.config);
+
+        // 5. Evaluation Phase
+        observer?.onEvaluationProgress?.('eval');
       }
 
       // Final Synthesis
       logger.log(`[DeepOrchestrator] Final synthesis ${this.elapsed()}`);
       observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
       observer?.onEvaluationStart?.(maxRounds);
-      observer?.onEvaluationProgress?.('Synthesizing final report...');
+      observer?.onEvaluationProgress?.('eval');
 
       const synthesisServiceFinal = await getResearchSynthesisService();
       const finalReport = await planningService.updatePlanForRound({
@@ -231,7 +237,8 @@ export class DeepResearchOrchestrator {
           previousPlan: planningService.getCurrentPlan(),
           totalResearchersPlanned: planningService.getTotalResearchersPlanned(),
           mustSynthesize: true,
-          signal
+          signal,
+          observer,
       });
 
       const result = finalReport.content || 'Research completed but no summary was generated.';

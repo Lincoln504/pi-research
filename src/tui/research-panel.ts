@@ -395,7 +395,11 @@ export function createMasterResearchPanel(
         });
       },
       invalidate(): void {
-        // Master widget is refreshed explicitly via masterUpdateRegistry
+        // Propagate up the component tree so the framework's render pipeline
+        // is triggered. The master widget refresh is also driven explicitly via
+        // masterUpdateRegistry, but parent-propagation ensures compatibility
+        // with any framework path that calls invalidate() directly.
+        (component as any).parent?.invalidate?.();
       }
     };
     return component;

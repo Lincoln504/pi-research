@@ -118,11 +118,15 @@ export function createResearchTuiManager(
     return undefined;
   };
 
-  // Register master update function (triggers re-render of existing widget)
+  // Register master update function (re-registers the widget to trigger a render)
+  // setExtensionWidget() removes the old widget before adding the new one — no stacking.
+  // Calling refreshAllSessions() here would cause an infinite loop:
+  //   debouncedRefresh → refreshAllSessions → masterUpdate → refreshAllSessions → …
   registerMasterUpdate(piSessionId, () => {
-    // Widget is already registered in initializePanel, just trigger refresh
-    // No need to call setWidget again (causes stacking)
-    refreshAllSessions(piSessionId);
+    const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
+      return getActivePanelsForSession(piSessionId);
+    });
+    ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => masterPanelCreator(_tui, theme), { placement: 'aboveEditor' });
   });
 
   // Subscribe to session order changes

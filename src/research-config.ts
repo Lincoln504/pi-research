@@ -62,7 +62,7 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
       };
 
       const currentDepth = getConfig().DEFAULT_RESEARCH_DEPTH;
-      const depthLabels: Record<number, string> = { 0: 'Quick', 1: 'Normal', 2: 'Deep', 3: 'Ultra' };
+      const depthLabels: Record<number, string> = { 1: 'Normal', 2: 'Deep', 3: 'Ultra' };
 
       const sections: Record<string, { title: string, items: SelectItem[] }> = {
         main: {
@@ -78,7 +78,6 @@ async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
         depth: {
           title: 'Default Research Depth',
           items: [
-            { value: '0', label: '0: Quick', description: 'Single pass, fast research' },
             { value: '1', label: '1: Normal', description: 'Coordinated, thorough research' },
             { value: '2', label: '2: Deep', description: 'Multi-round, exhaustive research' },
             { value: '3', label: '3: Ultra', description: 'Maximum depth, extreme rigor' },

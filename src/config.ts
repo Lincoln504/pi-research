@@ -67,7 +67,7 @@ export const DEFAULTS: Config = {
   HEALTH_CHECK_TIMEOUT_MS: 30000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
-  DEFAULT_RESEARCH_DEPTH: 0,
+  DEFAULT_RESEARCH_DEPTH: 1,
   MAX_SCRAPE_BATCHES: 2,
   WORKER_THREADS: 4,
   WORKER_CONCURRENCY: 3,
@@ -227,6 +227,26 @@ function parseEnvNumber(
   return parsed;
 }
 
+/**
+ * Parse an environment variable as a floating-point number.
+ * Used for fraction/ratio config values (e.g. 0.45) where parseInt would
+ * truncate valid values like "0.7" to 0, causing validation to fail.
+ */
+function parseEnvFloat(
+  env: Record<string, string | undefined>,
+  key: string,
+  defaultValue: number,
+): number {
+  const value = env[key];
+  if (value === undefined || value === '') return defaultValue;
+  const parsed = parseFloat(value);
+  if (isNaN(parsed)) {
+    logger.warn(`[config] Invalid float for ${key}: "${value}", using default ${defaultValue}`);
+    return defaultValue;
+  }
+  return parsed;
+}
+
 function parseEnvString(
   env: Record<string, string | undefined>,
   key: string,
@@ -292,7 +312,7 @@ export function createConfig(
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE)!,
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
-    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
+    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvFloat(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
   };
@@ -343,9 +363,9 @@ export function validateConfig(config: Config = getConfig()): void {
       `PI_RESEARCH_RESEARCHER_MAX_RETRY_DELAY_MS must be 1000–60000ms, got ${config.RESEARCHER_MAX_RETRY_DELAY_MS}`,
     );
   }
-  if (config.DEFAULT_RESEARCH_DEPTH < 0 || config.DEFAULT_RESEARCH_DEPTH > 3) {
+  if (config.DEFAULT_RESEARCH_DEPTH < 1 || config.DEFAULT_RESEARCH_DEPTH > 3) {
     throw new Error(
-      `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH must be 0–3, got ${config.DEFAULT_RESEARCH_DEPTH}`,
+      `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH must be 1–3, got ${config.DEFAULT_RESEARCH_DEPTH}`,
     );
   }
   if (config.MAX_SCRAPE_BATCHES < 0 || config.MAX_SCRAPE_BATCHES > 99) {

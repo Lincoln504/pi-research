@@ -45,8 +45,8 @@ export interface ResearchPanelState {
   statusMessage?: string;
   /** Animation frame counter for traveling wave effect during search */
   waveFrame?: number;
-  /** Persistent color codes for wave animation (one per position) */
-  waveColors?: string[];
+  /** Last-visit frame per position for wave animation decay */
+  waveColors?: number[];
   /** Timer for wave animation */
   waveTimer?: NodeJS.Timeout | null;
   /** Flag indicating whether completed researchers should be cleared */
