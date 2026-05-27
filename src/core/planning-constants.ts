@@ -43,23 +43,3 @@ export const QUERY_BUDGET_BY_COMPLEXITY = {
   3: MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
 } as const;
 
-/**
- * Get team size for complexity level
- */
-export function getTeamSize(complexity: 1 | 2 | 3): number {
-  return TEAM_SIZE_BY_COMPLEXITY[complexity];
-}
-
-/**
- * Get max rounds for complexity level
- */
-export function getMaxRounds(complexity: 1 | 2 | 3): number {
-  return MAX_ROUNDS_BY_COMPLEXITY[complexity];
-}
-
-/**
- * Get query budget for complexity level
- */
-export function getQueryBudget(complexity: 1 | 2 | 3): number {
-  return QUERY_BUDGET_BY_COMPLEXITY[complexity];
-}
