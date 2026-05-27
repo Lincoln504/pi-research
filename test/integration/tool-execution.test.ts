@@ -84,23 +84,26 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle missing depth parameter', () => {
       const tool = createResearchTool();
-      
+
       const args = tool.prepareArguments!({
         query: 'test query',
       }) as any;
 
       expect(args.query).toBe('test query');
-      expect(args.depth).toBe(0); // Should default to 0
+      // Tool schema enforces minimum: 1; depth 0 is SDK-only (not exposed via tool).
+      // Missing depth falls back to DEFAULT_RESEARCH_DEPTH (1) clamped to ≥1.
+      expect(args.depth).toBe(1);
     });
 
     it('should handle invalid depth values', () => {
       const tool = createResearchTool();
-      
+
       const args1 = tool.prepareArguments!({
         query: 'test query',
         depth: 'invalid',
       }) as any;
-      expect(args1.depth).toBe(0);
+      // Unparseable string → safe fallback of 1 (minimum valid depth)
+      expect(args1.depth).toBe(1);
 
       const args2 = tool.prepareArguments!({
         query: 'test query',
@@ -112,7 +115,8 @@ describe('Tool Execution After Service Registry Refactor', () => {
         query: 'test query',
         depth: -1,
       }) as any;
-      expect(args3.depth).toBe(0); // Should cap at 0
+      // Below-minimum depth clamped to 1 (minimum valid depth for this tool)
+      expect(args3.depth).toBe(1);
     });
   });
 

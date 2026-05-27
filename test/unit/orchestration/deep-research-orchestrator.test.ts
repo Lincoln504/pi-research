@@ -536,12 +536,18 @@ describe('DeepResearchOrchestrator', () => {
     vi.useFakeTimers();
     try {
       const runPromise = orchestrator.run();
+      // Attach the rejection handler BEFORE advancing any timers.
+      // This eliminates the "unhandled rejection" window that appears if the
+      // orchestrator rejects between a runAllTimersAsync() tick and the
+      // expect(...).rejects assertion being evaluated — which causes a non-zero
+      // vitest exit even when the test itself passes.
+      const settled = expect(runPromise).rejects.toThrow('Max wait retries');
       // Drain all pending timers (each retry schedules one 5s setTimeout)
       // Loop up to MAX_WAIT_RETRIES+2 times to be safe
       for (let i = 0; i < 8; i++) {
         await vi.runAllTimersAsync();
       }
-      await expect(runPromise).rejects.toThrow('Max wait retries');
+      await settled;
     } finally {
       vi.useRealTimers();
     }
