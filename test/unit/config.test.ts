@@ -103,13 +103,102 @@ describe('config (refactored)', () => {
   });
 
   describe('validateConfig', () => {
-    it('should validate default config', () => {
+    it('should validate default config without throwing', () => {
       expect(() => validateConfig()).not.toThrow();
     });
 
-    it('should throw for RESEARCHER_TIMEOUT_MS below minimum', () => {
+    it('should throw for RESEARCHER_TIMEOUT_MS below minimum (180000)', () => {
       const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '60000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be 180000–1800000ms');
+      expect(() => validateConfig(config)).toThrow('180000–1800000ms');
+    });
+
+    it('should throw for RESEARCHER_TIMEOUT_MS above maximum (1800000)', () => {
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '9999999' }, {});
+      expect(() => validateConfig(config)).toThrow('180000–1800000ms');
+    });
+
+    it('should throw for MAX_CONCURRENT_RESEARCHERS below 1', () => {
+      const config = createConfig({ PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS: '0' }, {});
+      expect(() => validateConfig(config)).toThrow('1–5');
+    });
+
+    it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
+      const config = createConfig({ PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS: '6' }, {});
+      expect(() => validateConfig(config)).toThrow('1–5');
+    });
+
+    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–3', () => {
+      const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
+      expect(() => validateConfig(low)).toThrow('1–3');
+      const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
+      expect(() => validateConfig(high)).toThrow('1–3');
+    });
+
+    it('should throw for WORKER_CONCURRENCY outside 1–10', () => {
+      const low = createConfig({ PI_RESEARCH_WORKER_CONCURRENCY: '0' }, {});
+      expect(() => validateConfig(low)).toThrow('1–10');
+    });
+
+    it('should throw for EMBEDDING_DEVICE with an unsupported value', () => {
+      const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cuda' }, {});
+      expect(() => validateConfig(config)).toThrow('webgpu, cpu');
+    });
+
+    it('should accept EMBEDDING_DEVICE of "webgpu"', () => {
+      const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'webgpu' }, {});
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should accept EMBEDDING_DEVICE of "cpu"', () => {
+      const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cpu' }, {});
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 20000', () => {
+      const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '5000' }, {});
+      expect(() => validateConfig(config)).toThrow('20000–120000ms');
+    });
+
+    it('should throw for HEALTH_CHECK_TIMEOUT_MS above 120000', () => {
+      const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '200000' }, {});
+      expect(() => validateConfig(config)).toThrow('20000–120000ms');
+    });
+  });
+
+  describe('setConfig / resetConfig', () => {
+    it('setConfig persists and getConfig returns the new value', () => {
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '300000' }, {});
+      setConfig(config);
+      expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(300000);
+    });
+
+    it('resetConfig causes getConfig to re-read defaults from env', () => {
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '300000' }, {});
+      setConfig(config);
+      resetConfig();
+      // After reset, getConfig() rebuilds from env (cleared in beforeEach), giving defaults
+      expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
+    });
+  });
+
+  describe('env parsing edge cases', () => {
+    it('ignores non-numeric values for numeric fields and uses defaults', () => {
+      // createConfig uses parseInt which returns NaN for non-numeric strings;
+      // parseEnvNumber falls back to the default value
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: 'not-a-number' }, {});
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
+    });
+
+    it('parses the minimum-valid RESEARCHER_TIMEOUT_MS (180000) without error', () => {
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180000' }, {});
+      expect(() => validateConfig(config)).not.toThrow();
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
+    });
+
+    it('parses the maximum-valid RESEARCHER_TIMEOUT_MS (1800000) without error', () => {
+      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '1800000' }, {});
+      expect(() => validateConfig(config)).not.toThrow();
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(1800000);
     });
   });
 });

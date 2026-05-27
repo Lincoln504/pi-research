@@ -107,7 +107,7 @@ Run `/research-config` in pi to edit these settings interactively.
 **Commands**
 - `npm run lint` / `npm run lint:fix` — Code quality
 - `npm run type-check` — TypeScript verification
-- `npm run test:unit` — Unit tests (1029 tests)
+- `npm run test:unit` — Unit tests (1115 tests)
 - `npm run test:integration` — Integration tests (219 tests)
 - `npm run test:coverage` — Coverage report
 
@@ -121,7 +121,7 @@ Run `/research-config` in pi to edit these settings interactively.
 
 ## Test Status
 
-- **Unit Tests**: 1029 passing tests across 67 test files
+- **Unit Tests**: 1115 passing tests across 69 test files
 - **Integration Tests**: 219 passing tests across 12 test files (49 skipped)
 - **Module System**: Pure ESM (no CommonJS dependencies)
 
