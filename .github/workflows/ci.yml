@@ -124,6 +124,7 @@ jobs:
   dep-graph:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

@@ -160,7 +160,7 @@ async function executeSearch(
   const query = params['query'] as string | undefined;
   const site = (params['site'] as string | undefined) ?? config.defaultSite;
   const limit = Math.min((params['limit'] as number | undefined) ?? 10, 100);
-  const maxPages = (params['maxPages'] as number | undefined) ?? 5; // FIX: Add pagination support
+  const maxPages = (params['maxPages'] as number | undefined) ?? 5;
   const tagsInput = params['tags'] as string | null;
   // Convert tags: "tag1,tag2" is converted to semicolon-separated for API
   const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0).join(';') : undefined;
@@ -168,7 +168,6 @@ async function executeSearch(
   const allQuestions: Question[] = [];
   const pageSize = Math.min(30, Math.ceil(limit / maxPages)); // Up to 30 per page
   
-  // FIX: Paginate through results
   for (let page = 1; page <= maxPages && allQuestions.length < limit; page++) {
     // Build query parameters with pagination
     const queryParams = {

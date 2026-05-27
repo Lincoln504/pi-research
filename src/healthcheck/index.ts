@@ -117,13 +117,6 @@ export async function runHealthCheck() {
 }
 
 /**
- * Perform a full system health check (alias)
- */
-export async function checkHealth() {
-  return runHealthCheck();
-}
-
-/**
  * Export health registry for external use
  */
 export { healthRegistry };

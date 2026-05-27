@@ -102,6 +102,7 @@ export class PlanningService implements IPlanningService {
       .replace('{COMPLEXITY_GUIDANCE}', complexityGuidance)
       .replace('{{historical_links_section}}', historicalLinksSection);
 
+    if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before generating plans`);
     const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
 
@@ -264,6 +265,7 @@ export class PlanningService implements IPlanningService {
       })
       .join('\n\n---\n\n');
 
+    if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before updating plans`);
     const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
 

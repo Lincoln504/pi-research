@@ -64,28 +64,43 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     return;
   }
 
-  globalModel = options.model;
-  globalApiKey = options.apiKey;
-  globalCwd = options.cwd || process.cwd();
-
-  // Apply config overrides
+  // Apply config overrides and validate BEFORE touching any global state.
+  // Validation errors must not leave the SDK in a partially-mutated state.
   if (options.config) {
     const currentConfig = getConfig();
     setConfig({ ...currentConfig, ...options.config });
   }
-
-  // Validate config
   validateConfig();
 
-  // Register and initialize services
-  registerCoreServices();
-  registerInfrastructureServices();
+  // Set globals only after validation has passed
+  globalModel = options.model;
+  globalApiKey = options.apiKey;
+  globalCwd = options.cwd || process.cwd();
 
-  const mockCtx = createMockContext();
-  await initializeCoreServices(mockCtx);
+  try {
+    // Register and initialize services
+    registerCoreServices();
+    registerInfrastructureServices();
 
-  isInitialized = true;
-  logger.log('[SDK] Research SDK initialized successfully');
+    const mockCtx = createMockContext();
+    await initializeCoreServices(mockCtx);
+
+    isInitialized = true;
+    logger.log('[SDK] Research SDK initialized successfully');
+  } catch (err) {
+    // Roll back global state and attempt to clean up any partially-registered
+    // services so that re-calling initResearchSDK() can succeed.
+    globalModel = null;
+    globalApiKey = undefined;
+    globalCwd = process.cwd();
+    try {
+      await disposeCoreServices();
+    } catch {
+      // Best-effort cleanup; ignore secondary errors
+    }
+    logger.error('[SDK] Initialization failed, rolling back state:', err);
+    throw err;
+  }
 }
 
 /**
@@ -95,7 +110,8 @@ export async function runDeepResearch(query: string, options: RunOptions = {}): 
   ensureInitialized();
 
   const depth = options.depth ?? 1;
-  const complexity = options.complexity ?? ((depth as any) || 1);
+  // depth is ResearchDepth (0|1|2|3); depth 0 is quick-only so clamp to 1 if not explicit
+  const complexity = options.complexity ?? (depth >= 1 ? (depth as 1 | 2 | 3) : 1);
   const researchId = createResearchRunId();
   const sessionId = `sdk-${Date.now()}`;
   const observer = new HeadlessObserver(options.observer);
@@ -144,12 +160,17 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
 export async function disposeResearchSDK(): Promise<void> {
   if (!isInitialized) return;
 
-  await shutdownManager.runCleanup('sdk_dispose');
-  await disposeCoreServices();
-  
-  isInitialized = false;
-  globalModel = null;
-  globalApiKey = undefined;
+  // Reset flags in finally so they clear even if cleanup throws.
+  // Keeping isInitialized=true until finally ensures the SDK is not considered
+  // "uninitialized" while mid-dispose (prevents re-init races).
+  try {
+    await shutdownManager.runCleanup('sdk_dispose');
+    await disposeCoreServices();
+  } finally {
+    isInitialized = false;
+    globalModel = null;
+    globalApiKey = undefined;
+  }
   logger.log('[SDK] Research SDK disposed');
 }
 

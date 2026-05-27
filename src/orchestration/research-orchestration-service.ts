@@ -81,15 +81,30 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     try {
       planningService = await getService<any>(ServiceNames.PLANNING);
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // If the service container is already disposing (SIGTERM during active research),
+      // return gracefully rather than throwing — the research run is ending anyway.
+      if (errMsg.includes('during container disposal') || options.signal?.aborted) {
+        logger.info('[ResearchOrchestrationService] Service container disposing — skipping researchers gracefully');
+        return;
+      }
       logger.error('[ResearchOrchestrationService] Failed to get planning service:', err);
       throw new Error('Planning service not available. Research cannot continue.', { cause: err });
     }
 
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
+    // Honour MAX_CONCURRENT_RESEARCHERS — prevents resource spikes when a plan has many researchers.
+    const maxConcurrent: number = (orchestratorOptions.config as any)?.MAX_CONCURRENT_RESEARCHERS ?? 3;
 
     for (const configItem of researchers) {
       if (signal?.aborted) break;
+
+      // Enforce the concurrency cap before launching the next researcher.
+      // Wait for one slot to free up when we're at capacity.
+      if (active.size >= maxConcurrent) {
+        await Promise.race(active);
+      }
 
       const promise = (async () => {
         const id = String(configItem.id);
@@ -113,16 +128,19 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
-          
+
           // Record failure for stopping logic
           const { recordResearcherFailure } = await import('../utils/session-state.ts');
           recordResearcherFailure(sessionId, researchId, id);
-          
+
           // Notify observer
           observer?.onResearcherFailure?.(id, errMsg);
         }
       })();
 
+      // Prune the promise from the active set when it settles so Promise.race works
+      // correctly and active.size stays accurate for the concurrency cap.
+      promise.finally(() => active.delete(promise));
       active.add(promise);
 
       // Throttled launch to prevent resource spikes (stagger by RESEARCHER_LAUNCH_DELAY_MS, skip after last)
@@ -130,22 +148,16 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
       }
 
-      if (active.size > 0) {
-        // We use Promise.race to keep concurrency controlled if we had a limit here,
-        // but currently we launch all with a delay. 
-        // We still check if we should stop after each launch.
-        
-        const { shouldStopResearch } = await import('../utils/session-state.ts');
-        if (shouldStopResearch(sessionId, researchId)) {
-          const { getResearchSessionService } = await import('./research-session-manager.ts');
-          const sessionService = await getResearchSessionService();
-          await sessionService.abortAllSessions();
+      const { shouldStopResearch } = await import('../utils/session-state.ts');
+      if (shouldStopResearch(sessionId, researchId)) {
+        const { getResearchSessionService } = await import('./research-session-manager.ts');
+        const sessionService = await getResearchSessionService();
+        await sessionService.abortAllSessions();
 
-          throw new Error('Research stopped due to excessive infrastructure failures. Multiple researchers failed.');
-        }
+        throw new Error('Research stopped due to excessive infrastructure failures. Multiple researchers failed.');
       }
     }
-    
+
     // Wait for remaining researchers
     await Promise.all(active);
   }
@@ -204,7 +216,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         for (const link of links) {
           const content = getCachedScrapedContent(researchId, link.url);
           if (content) {
-            await writer.enqueue({
+            writer.enqueue({
               url: normalizeUrl(link.url),
               markdown: content,
               metadata: {

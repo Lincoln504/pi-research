@@ -9,6 +9,8 @@ import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import type { Embedder } from './embedder.ts';
 import * as fs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
+import * as path from 'node:path';
 import { getConfig } from '../config.ts';
 import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -211,13 +213,26 @@ export class KnowledgeStore implements IKnowledgeStore {
 
       // Only drop old table after successful completion
       logger.info(`[store] Migration successful, dropping old table ${this.tableName}...`);
-      await this.db.dropTable(this.tableName);
-      
-      // Rename temp table to original name
-      logger.info(`[store] Renaming ${tempTableName} to ${this.tableName}...`);
-      // LanceDB doesn't have a direct rename API, so we'll update the reference
-      this.tableName = tempTableName;
-      this.table = newTable;
+      const canonicalName = this.tableName;
+      await this.db.dropTable(canonicalName);
+
+      // LanceDB has no rename API, but its tables are plain directories on disk.
+      // Rename the temp directory to the canonical table name so that the next
+      // process start finds 'knowledge' (not 'knowledge_migration_<ts>').
+      logger.info(`[store] Renaming ${tempTableName} to ${canonicalName}...`);
+      try {
+        const tempDir = path.join(this.options.dbDir, `${tempTableName}.lance`);
+        const canonicalDir = path.join(this.options.dbDir, `${canonicalName}.lance`);
+        await fsPromises.rename(tempDir, canonicalDir);
+        // Reopen the canonical table so this.table reflects the renamed path
+        this.table = await this.db.openTable(canonicalName);
+      } catch (renameErr) {
+        // If rename fails (cross-device, permissions, etc.) fall back to keeping
+        // the temp name — still better than losing data.
+        logger.warn(`[store] Directory rename failed, keeping temp table name: ${renameErr}`);
+        this.tableName = tempTableName;
+        this.table = newTable;
+      }
 
       logger.info(`[store] Migration complete: ${embedded} documents re-embedded with model ${newModel}`);
 

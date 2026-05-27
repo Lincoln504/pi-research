@@ -62,6 +62,45 @@ export function markWebGpuFallback(): void {
   hasWebGpuFallbackOccurred = true;
 }
 
+// Global embedder reference for process-exit cleanup.
+// Stores the active Embedder instance so the beforeExit handler can call dispose()
+// before the Node.js process tears down the ONNX C++ runtime's global logger.
+// Without this, an active InferenceSession accessed after C++ teardown triggers
+// `terminate called after throwing OnnxRuntimeException: Attempt to use DefaultLogger
+// but none has been registered` — an uncatchable crash via std::terminate.
+let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
+
+/**
+ * Register an Embedder instance for process-exit cleanup.
+ * Called by Embedder constructor.
+ */
+export function registerGlobalEmbedder(e: { dispose: () => Promise<void> }): void {
+  globalEmbedderRef = e;
+}
+
+/**
+ * Unregister the global Embedder reference.
+ * Called by Embedder.dispose() once cleanup is complete.
+ */
+export function unregisterGlobalEmbedder(): void {
+  globalEmbedderRef = null;
+}
+
+// Belt-and-suspenders fallback for graceful (no-signal) exits.
+// Node re-fires 'beforeExit' as long as async work keeps the event loop alive,
+// so awaiting dispose() inside this handler works correctly for clean exits.
+//
+// For SIGTERM / SIGINT / process.exit() paths the primary disposal route is the
+// service container (KnowledgeStoreService.dispose → Embedder.dispose), which is
+// already properly awaited by the shutdown manager in those flows.
+process.on('beforeExit', async () => {
+  if (globalEmbedderRef) {
+    const ref = globalEmbedderRef;
+    globalEmbedderRef = null; // Clear first to prevent re-entry
+    try { await ref.dispose(); } catch { /* ignore */ }
+  }
+});
+
 /**
  * Initialize the ONNX environment
  */

@@ -28,8 +28,11 @@ export class GPUResourceService implements IService {
     gpuLockStaleThresholdMs?: number;
   }) {
     this.processLifecycle = options.processLifecycle;
-    // 3 minutes balances responsiveness with tolerance for slow operations
-    this.gpuLockStaleThresholdMs = options.gpuLockStaleThresholdMs ?? 180000;
+    // 120 seconds: must exceed the sum of (batch lock acquisition timeout 45s) +
+    // (typical batch embedding run time ≤60s) so the stale-reclaim path never fires
+    // while a live process is mid-embedding.  Still much better than the previous
+    // 180s default — a dead-process lock is reclaimed within 2 minutes instead of 3.
+    this.gpuLockStaleThresholdMs = options.gpuLockStaleThresholdMs ?? 120000;
   }
 
   /**
@@ -47,7 +50,6 @@ export class GPUResourceService implements IService {
     timeoutMs: number = 30000
   ): Promise<boolean> {
     const startTime = Date.now();
-    const retryDelay = 500;
     let retryCount = 0;
 
     while (Date.now() - startTime < timeoutMs) {
@@ -108,7 +110,10 @@ export class GPUResourceService implements IService {
       }
 
       retryCount++;
-      // Check if we still have time to wait
+      // Exponential backoff: 100ms → 200ms → 400ms → 800ms → 1600ms → 2000ms, capped.
+      // Exponent is clamped at 5 to prevent Math.pow(2, largeN) → Infinity.
+      // Avoids thundering-herd when multiple processes are all waiting for the lock.
+      const retryDelay = Math.min(100 * Math.pow(2, Math.min(retryCount - 1, 5)), 2000);
       if (Date.now() - startTime + retryDelay < timeoutMs) {
         await this.sleep(retryDelay);
       } else {

@@ -24,6 +24,15 @@ export async function loadPipelineWithTimeout(
   const pipelinePromise = pipeline('feature-extraction', model, {
     device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
     ...(useCache === false ? { use_cache: false } : {}),
+    // Clamp ONNX intra-op thread pool to 2 threads per session.
+    // Default (0) = one thread per physical CPU core. With multiple concurrent
+    // processes each loading their own pipeline, the default spawns N_cores * N_procs
+    // threads that all busy-spin simultaneously, saturating the CPU.
+    // 2 threads gives adequate within-op parallelism without thrashing.
+    session_options: {
+      intraOpNumThreads: 2,
+      interOpNumThreads: 1,
+    },
   });
 
   const loadedPipeline = await logger.runCapturingStderr(async () => {
@@ -135,6 +144,10 @@ export async function loadModelOnCPU(
       pipeline('feature-extraction', model, {
         device: 'cpu',
         ...(useCache === false ? { use_cache: false } : {}),
+        session_options: {
+          intraOpNumThreads: 2,
+          interOpNumThreads: 1,
+        },
       }),
       initializationTimeoutMs,
       'CPU fallback model load timed out'

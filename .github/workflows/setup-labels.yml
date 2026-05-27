@@ -3,8 +3,6 @@ name: Setup Labels
 on:
   push:
     branches: [ main ]
-    paths:
-      - '.github/labels.yml'
 
 permissions:
   contents: read
@@ -23,7 +21,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
             const labels = [
               { name: 'bug', color: 'd73a4a', description: 'Something is not working' },
               { name: 'enhancement', color: 'a2eeef', description: 'New feature or enhancement' },

@@ -121,12 +121,12 @@ Run `/research-config` in pi to edit these settings interactively.
 
 ## Test Status
 
-- **Unit Tests**: 844 passing tests across 58 test files
-- **Integration Tests**: 219 passing tests across 9 test files (49 skipped)
+- **Unit Tests**: 961 passing tests across 65 test files
+- **Integration Tests**: 219 passing tests across 12 test files (49 skipped)
 - **Module System**: Pure ESM (no CommonJS dependencies)
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design information.
+See [docs/architecture/overview.md](docs/architecture/overview.md) for detailed design information.
 
 See [docs/SERVICE_ARCHITECTURE.md](docs/SERVICE_ARCHITECTURE.md) for service registry and dependency injection details.

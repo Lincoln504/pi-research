@@ -10,7 +10,7 @@ import type { SearchResult } from '../../web-research/types.ts';
 import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
-import { browserCircuitBreaker, isTransientSocketError, isPoolShutdownError } from './browser-error-utils.ts';
+import { browserCircuitBreaker, isTransientSocketError, isPoolShutdownError, isTaskTimeoutError, isCloudflareBlockError } from './browser-error-utils.ts';
 import { getScheduler, forceSchedulerRestart } from './scheduler-factory.ts';
 import { waitForBrowserPoolIdle } from './browser-lifecycle.ts';
 
@@ -40,7 +40,7 @@ export async function runBrowserTask<T>(
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
         });
     } catch (error: any) {
-        if (retries > 0 && isTransientSocketError(error)) {
+        if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
                 operation: type,
@@ -78,7 +78,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
             return await scheduler.runHealthCheck(config);
         });
     } catch (error: any) {
-        if (retries > 0 && isTransientSocketError(error)) {
+        if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
                 operation: 'healthcheck',
@@ -110,7 +110,7 @@ export async function runWorkerSearch(query: string, config?: Config, retries = 
             return await scheduler.runSearch(query, config);
         });
     } catch (error: any) {
-        if (retries > 0 && isTransientSocketError(error)) {
+        if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
                 operation: 'search',

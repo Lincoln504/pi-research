@@ -11,7 +11,7 @@
  * - tui/research-tui-manager.ts - TUI coordination
  * - observers/research-observer-impl.ts - Research lifecycle observer
  * - cleanup/research-cleanup.ts - Session cleanup logic
- * - utils/research-health.ts - Health check helpers
+ * - tui/research-health.ts - Health check helpers
  * - utils/pi-session.ts - PI session metadata helpers
  */
 

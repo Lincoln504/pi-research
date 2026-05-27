@@ -101,3 +101,6 @@ planchat.txt
 CIRCULAR_*.md
 ZERO_SCOPE_CREEP_REMEDIATION.md
 VERIFICATION_REPORT.md
+
+# Test quality audit / planning docs (generated, not source)
+test/quality/

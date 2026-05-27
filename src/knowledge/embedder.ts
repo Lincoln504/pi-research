@@ -22,6 +22,8 @@ import {
   markWebGpuFallback,
   getModelCacheDir,
   getHFEnv,
+  registerGlobalEmbedder,
+  unregisterGlobalEmbedder,
 } from './embedder-utils.ts';
 import {
   isWebGpuDeviceError,
@@ -78,6 +80,10 @@ export class Embedder {
     if (hasWebGpuFallback() && this.originalDevice === 'webgpu' && this.device === 'cpu') {
       logger.info('[embedder] Skipping WebGPU (previous fallback detected), using CPU directly');
     }
+
+    // Register this instance so the beforeExit handler can dispose it before
+    // the ONNX C++ runtime tears down its global logger singleton (prevents crash).
+    registerGlobalEmbedder(this);
   }
 
   private resetIdleTimer(): void {
@@ -270,9 +276,9 @@ export class Embedder {
     const input = this.truncateText(this.queryPrefix ? this.queryPrefix + text : text);
     let lockAcquired = false;
     if (this.device === 'webgpu' && this.stateManager) {
-      lockAcquired = await this.stateManager.acquireGpuLock(undefined, 120_000);
+      lockAcquired = await this.stateManager.acquireGpuLock(undefined, 15_000);
       if (!lockAcquired) {
-        logger.warn('[embedder] GPU per-call lock timeout after 120s — proceeding without lock');
+        logger.warn('[embedder] GPU per-call lock timeout after 15s — proceeding without lock');
       }
     }
     try {
@@ -313,9 +319,9 @@ export class Embedder {
 
       let lockAcquired = false;
       if (this.device === 'webgpu' && this.stateManager) {
-        lockAcquired = await this.stateManager.acquireGpuLock(undefined, 300_000);
+        lockAcquired = await this.stateManager.acquireGpuLock(undefined, 45_000);
         if (!lockAcquired) {
-          logger.warn('[embedder] GPU batch lock timeout after 300s — proceeding without lock');
+          logger.warn('[embedder] GPU batch lock timeout after 45s — proceeding without lock');
         }
       }
 
@@ -363,6 +369,11 @@ export class Embedder {
   }
 
   private async recoverToCpu(): Promise<void> {
+    // Guard: if disposal has already started, skip recovery — the embedder is going away.
+    if (this.state === 'disposing' || this.state === 'idle') {
+      logger.debug('[embedder] recoverToCpu called during disposal/idle — skipping');
+      return;
+    }
     logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
     
     markWebGpuFallback();
@@ -446,6 +457,9 @@ export class Embedder {
 
       this.state = 'idle';
       this.disposePromise = null;
+
+      // Unregister from the global beforeExit handler — cleanup is done.
+      unregisterGlobalEmbedder();
     })();
 
     return this.disposePromise;

@@ -32,9 +32,9 @@ export interface Config {
   TUI_REFRESH_DEBOUNCE_MS: number;
   /** Console restore delay after research in milliseconds (default: 15000) */
   CONSOLE_RESTORE_DELAY_MS: number;
-  /** Default depth for /research command (0-3, default: 0) */
+  /** Default depth for /research command (1-3, default: 1) */
   DEFAULT_RESEARCH_DEPTH: number;
-  /** Maximum scrape batches per researcher (0-16, 0=unlimited, default: 2) */
+  /** Maximum scrape batches per researcher (0-99, 0=unlimited, default: 2) */
   MAX_SCRAPE_BATCHES: number;
   /** Number of parallel browser workers for search and scraping (default: 4) */
   WORKER_THREADS: number;

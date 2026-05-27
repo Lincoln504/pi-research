@@ -154,14 +154,16 @@ export class DeepResearchOrchestrator {
                 throw new Error('Research cancelled');
             }
             await new Promise<void>((resolve, reject) => {
-                const timeout = setTimeout(() => resolve(), 5000);
                 const onAbort = () => {
                     clearTimeout(timeout);
                     reject(new Error('Research cancelled'));
                 };
+                const timeout = setTimeout(() => {
+                    signal?.removeEventListener('abort', onAbort);
+                    resolve();
+                }, 5000);
+                if ((timeout as any).unref) (timeout as any).unref();
                 signal?.addEventListener('abort', onAbort, { once: true });
-                // Remove listener when sleep resolves naturally
-                setTimeout(() => signal?.removeEventListener('abort', onAbort), 5000);
             });
             
             this.currentRound--; // Retry this round

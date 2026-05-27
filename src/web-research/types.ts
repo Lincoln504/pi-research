@@ -34,5 +34,6 @@ export interface SearchResult {
 }
 
 // Timeouts
-export const PRIMARY_SCRAPER_TIMEOUT = 10000;  // fetch layer
+/** Timeout for the lightweight fetch layer only (not the full playwright scraper path). */
+export const FETCH_LAYER_TIMEOUT = 10000;
 

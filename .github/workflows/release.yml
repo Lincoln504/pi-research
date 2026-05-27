@@ -32,7 +32,7 @@ jobs:
 
       - name: Build and pack
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm pack
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
@@ -79,7 +79,7 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
       - run: npm run lint
       - run: npm run type-check
       - run: npm run test:unit

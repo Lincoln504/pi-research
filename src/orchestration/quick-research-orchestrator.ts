@@ -279,6 +279,7 @@ export class QuickResearchOrchestrator {
       const sessionDuration = Date.now() - sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'error' });
       metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'error' });
+      observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     } finally {
       subscription();

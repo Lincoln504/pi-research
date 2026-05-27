@@ -224,6 +224,7 @@ export class BrowserTaskScheduler implements IScheduler {
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+            if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: { success: boolean; error?: string };
