@@ -15,7 +15,7 @@ import type { StoreDocument } from './store-types.ts';
 export async function addDocumentsToStore(
   table: lancedb.Table,
   docs: StoreDocument[],
-  embedder: { embedMany(texts: string[]): Promise<Float32Array[]> },
+  embedder: { embedMany(texts: string[]): Promise<(Float32Array | number[])[]> },
   isClosing: () => boolean
 ): Promise<void> {
   if (docs.length === 0) return;
@@ -59,7 +59,7 @@ export async function addDocumentsToStore(
  */
 export async function searchStore(
   table: lancedb.Table,
-  embedder: { embed(query: string): Promise<Float32Array> },
+  embedder: { embed(query: string): Promise<Float32Array | number[]> },
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
   limit: number
@@ -150,7 +150,7 @@ export async function findDocumentsByUrl(
  */
 export async function findRelevantUrls(
   table: lancedb.Table,
-  embedder: { embed(query: string): Promise<Float32Array> },
+  embedder: { embed(query: string): Promise<Float32Array | number[]> },
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
   limit: number

@@ -262,9 +262,8 @@ export class Embedder {
     return this.originalDevice;
   }
 
-  getDimension(): number {
-    if (this.dimension !== null) return this.dimension;
-    throw new Error('Embedder not initialized (dimension unknown)');
+  getDimension(): number | null {
+    return this.dimension;
   }
 
   private pipelineOpts(): { pooling: 'mean' | 'cls' | 'last_token'; normalize: boolean; use_cache?: boolean } {
@@ -327,6 +326,7 @@ export class Embedder {
 
     return metrics.measure('embedMany_latency', async () => {
       const dim = this.getDimension();
+      if (dim === null) throw new Error('Embedder not initialized (dimension unknown)');
       const results: Float32Array[] = [];
 
       let lockAcquired = false;

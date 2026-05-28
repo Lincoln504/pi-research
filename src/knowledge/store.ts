@@ -7,7 +7,7 @@
 import * as lancedb from '@lancedb/lancedb';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
-import type { Embedder } from './embedder.ts';
+import type { IEmbedder } from '../core/interfaces/knowledge-interfaces.ts';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
@@ -23,7 +23,7 @@ import type { IKnowledgeStore } from '../core/interfaces/knowledge-interfaces.ts
 
 export interface StoreOptions {
   dbDir: string;
-  embedder: Embedder;
+  embedder: IEmbedder;
   modelName: string;
   migrationStrategy?: MigrationStrategy;
 }
@@ -74,7 +74,7 @@ export class KnowledgeStore implements IKnowledgeStore {
           // Fix for FixedSizeList: check type name or use any if lancedb doesn't export it
           if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
             const dim = (vectorField.type as any).listSize;
-            if ((this.options.embedder as any).dimension === null) {
+            if (this.options.embedder.getDimension() === null) {
               (this.options.embedder as any).dimension = dim;
               logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
             }
@@ -251,6 +251,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   private async createTable(name: string = this.tableName): Promise<lancedb.Table> {
     if (!this.db) throw new Error('Database not connected');
     const dim = this.options.embedder.getDimension();
+    if (dim === null) throw new Error('[store] Cannot create table: embedder dimension unknown (not yet initialized)');
     return createStoreTable(this.db, name, dim, this.options.modelName);
   }
 

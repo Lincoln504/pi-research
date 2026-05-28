@@ -1,0 +1,270 @@
+/**
+ * Embedding Server
+ *
+ * Wraps a single Embedder instance behind an HTTP server so all other
+ * processes can share one GPU context. Mirrors BrowserTaskScheduler.
+ */
+
+import * as http from 'node:http';
+import { logger } from '../../logger.ts';
+import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
+import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
+import type { Embedder } from '../../knowledge/embedder.ts';
+
+// ---------------------------------------------------------------------------
+// SerialQueue — ensures embed/embedMany never run concurrently on the GPU
+// ---------------------------------------------------------------------------
+
+class SerialQueue {
+  private running = false;
+  private readonly tasks: Array<() => Promise<void>> = [];
+
+  enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.tasks.push(async () => {
+        try {
+          resolve(await fn());
+        } catch (e) {
+          reject(e);
+        }
+      });
+      if (!this.running) void this.pump();
+    });
+  }
+
+  private async pump(): Promise<void> {
+    this.running = true;
+    while (this.tasks.length > 0) {
+      await this.tasks.shift()!();
+    }
+    this.running = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// EmbeddingServer
+// ---------------------------------------------------------------------------
+
+export class EmbeddingServer implements IEmbedder {
+  private server: http.Server | null = null;
+  private leadershipTimer: ReturnType<typeof setTimeout> | null = null;
+  private consecutiveLeadershipMisses = 0;
+  private readonly LEADERSHIP_MISS_THRESHOLD = 3;
+  private isShuttingDown = false;
+  private readonly queue = new SerialQueue();
+
+  // Public dimension field so store.ts can set it via `(embedder as any).dimension = dim`
+  dimension: number | null = null;
+
+  constructor(
+    private readonly embedder: Embedder,
+    private readonly stateManager: IStateManager,
+    public readonly serverId: string,
+  ) {
+    // Leadership check is started externally (by embedding-factory) after the
+    // election is won. Starting it here would cause false misses because model
+    // init (inside startServer) can take longer than the 30s check interval.
+  }
+
+  // ---- IEmbedder ----
+
+  getDevice(): string {
+    return this.embedder.isInitialized() ? this.embedder.getDevice() : 'unknown';
+  }
+
+  getOriginalDevice(): string {
+    return this.embedder.isInitialized() ? this.embedder.getOriginalDevice() : 'unknown';
+  }
+
+  getDimension(): number | null {
+    if (this.dimension !== null) return this.dimension;
+    return this.embedder.isInitialized() ? this.embedder.getDimension() : null;
+  }
+
+  isInitialized(): boolean {
+    return this.embedder.isInitialized();
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    return this.queue.enqueue(() => this.embedder.embed(text));
+  }
+
+  async embedMany(texts: string[]): Promise<(Float32Array | number[])[]> {
+    return this.queue.enqueue(() => this.embedder.embedMany(texts));
+  }
+
+  async dispose(): Promise<void> {
+    return this.shutdown();
+  }
+
+  // ---- Server lifecycle ----
+
+  async startServer(): Promise<number> {
+    await this.embedder.initialize();
+
+    // Capture dimension after initialization
+    this.dimension = this.embedder.getDimension();
+
+    return new Promise((resolve, reject) => {
+      this.server = http.createServer((req, res) => {
+        void this.handleRequest(req, res);
+      });
+
+      this.server.listen(0, '127.0.0.1', () => {
+        const addr = this.server?.address();
+        if (addr && typeof addr === 'object') {
+          logger.info(`[EmbeddingServer] Listening on http://127.0.0.1:${addr.port} (serverId: ${this.serverId})`);
+          resolve(addr.port);
+        } else {
+          reject(new Error('[EmbeddingServer] Failed to get server port'));
+        }
+      });
+
+      this.server.on('error', (err) => {
+        logger.error('[EmbeddingServer] Server error:', err);
+        reject(err);
+      });
+    });
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+
+    if (this.leadershipTimer) {
+      clearTimeout(this.leadershipTimer);
+      this.leadershipTimer = null;
+    }
+
+    // Clear our registration if we still own it
+    try {
+      const serverInfo = await this.stateManager.getEmbeddingServer();
+      if (serverInfo?.serverId === this.serverId) {
+        await this.stateManager.clearEmbeddingServer().catch((err) => {
+          logger.warn('[EmbeddingServer] Failed to clear embedding server state:', err);
+        });
+      }
+    } catch (err) {
+      logger.warn('[EmbeddingServer] Could not read embedding server state during shutdown:', err);
+    }
+
+    if (this.server) {
+      await new Promise<void>((resolve) => {
+        this.server!.close(() => {
+          this.server = null;
+          resolve();
+        });
+      }).catch(() => { this.server = null; });
+    }
+
+    await this.embedder.dispose().catch((err) => {
+      logger.warn('[EmbeddingServer] Error disposing embedder:', err);
+    });
+  }
+
+  // ---- Leadership check ----
+
+  startLeadershipCheck(): void {
+    const check = async () => {
+      if (this.isShuttingDown) return;
+      try {
+        const serverInfo = await this.stateManager.getEmbeddingServer();
+        if (serverInfo?.serverId !== this.serverId) {
+          this.consecutiveLeadershipMisses++;
+          logger.warn(
+            `[EmbeddingServer] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) — ` +
+            `expected ${this.serverId}, found ${serverInfo?.serverId ?? 'none'}`,
+          );
+          if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
+            logger.error('[EmbeddingServer] Leadership lost, shutting down...');
+            void this.shutdown();
+            return;
+          }
+        } else {
+          if (this.consecutiveLeadershipMisses > 0) {
+            logger.log(`[EmbeddingServer] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
+            this.consecutiveLeadershipMisses = 0;
+          }
+        }
+      } catch (err) {
+        logger.warn('[EmbeddingServer] Leadership check error:', err);
+      } finally {
+        if (!this.isShuttingDown) {
+          this.leadershipTimer = setTimeout(check, 30_000);
+          if (this.leadershipTimer.unref) this.leadershipTimer.unref();
+        }
+      }
+    };
+
+    this.leadershipTimer = setTimeout(check, 30_000);
+    if (this.leadershipTimer.unref) this.leadershipTimer.unref();
+  }
+
+  // ---- HTTP request handler ----
+
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const MAX_BODY_SIZE = 50 * 1024 * 1024; // 50 MB
+
+    let body = '';
+    req.on('data', (chunk: Buffer) => {
+      body += chunk;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy(new Error('Payload too large'));
+      }
+    });
+
+    req.on('error', (err) => {
+      logger.error('[EmbeddingServer] Request stream error:', err);
+    });
+
+    await new Promise<void>((resolve) => {
+      req.on('end', async () => {
+        try {
+          if (req.method === 'GET' && req.url === '/health') {
+            const payload = {
+              status: 'ok',
+              device: this.getDevice(),
+              dimension: this.getDimension(),
+            };
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(payload));
+            resolve();
+            return;
+          }
+
+          if (req.method !== 'POST') {
+            res.writeHead(405);
+            res.end('Method Not Allowed');
+            resolve();
+            return;
+          }
+
+          const data = JSON.parse(body);
+
+          switch (req.url) {
+            case '/embed': {
+              const result = await this.queue.enqueue(() => this.embedder.embed(data.text as string));
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ data: Array.from(result) }));
+              break;
+            }
+            case '/embedMany': {
+              const results = await this.queue.enqueue(() => this.embedder.embedMany(data.texts as string[]));
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ results: results.map(r => Array.from(r)) }));
+              break;
+            }
+            default:
+              res.writeHead(404);
+              res.end('Not Found');
+          }
+        } catch (error) {
+          logger.error('[EmbeddingServer] Error handling request:', error);
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        resolve();
+      });
+    });
+  }
+}

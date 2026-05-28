@@ -20,6 +20,7 @@ export interface IngestionItem {
 export interface IEmbedder {
   getDevice(): string | null;
   getOriginalDevice(): string | null;
+  getDimension(): number | null;
   isInitialized(): boolean;
   embed(text: string): Promise<Float32Array | number[]>;
   embedMany(texts: string[]): Promise<(Float32Array | number[])[]>;

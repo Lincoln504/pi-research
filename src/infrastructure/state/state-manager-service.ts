@@ -178,6 +178,20 @@ export class StateManagerService implements IStateManager {
   }
 
   /**
+   * Get the current embedding server information
+   */
+  async getEmbeddingServer(): Promise<{ port: number; pid: number; serverId: string } | null> {
+    return this.getStateManager().getEmbeddingServer();
+  }
+
+  /**
+   * Clear the embedding server information
+   */
+  async clearEmbeddingServer(): Promise<void> {
+    return this.getStateManager().clearEmbeddingServer();
+  }
+
+  /**
    * Check if a process is alive
    */
   async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean> {

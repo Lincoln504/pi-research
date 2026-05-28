@@ -282,6 +282,20 @@ export class StateManager {
     await this.browserApi.clearBrowserServer(this.updateState.bind(this));
   }
 
+  // ==================== Embedding Server API ====================
+
+  public async getEmbeddingServer(): Promise<{ port: number; pid: number; serverId: string } | null> {
+    const state = await this.readState();
+    return state.embeddingServer ?? null;
+  }
+
+  public async clearEmbeddingServer(): Promise<void> {
+    await this.updateState((state) => {
+      delete state.embeddingServer;
+      return state;
+    });
+  }
+
   // ==================== Process API ====================
 
   public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean> {

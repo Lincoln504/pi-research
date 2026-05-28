@@ -87,8 +87,8 @@ describe('Embedder', () => {
     expect(embedder.getDimension()).toBe(384);
   });
 
-  it('should throw from getDimension before initialization if dimension unknown', () => {
-    expect(() => embedder.getDimension()).toThrow('dimension unknown');
+  it('should return null from getDimension before initialization', () => {
+    expect(embedder.getDimension()).toBeNull();
   });
 
   it('should default to mean pooling and no prefix', async () => {

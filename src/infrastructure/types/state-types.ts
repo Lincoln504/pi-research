@@ -39,4 +39,5 @@ export interface SingletonState {
   browserServer?: { port: number; pid: number; schedulerId?: string };
   schedulerVersion?: string; // Track scheduler config version for detecting changes
   gpuOwner?: { pid: number; startedAt: number; sessionId?: string };
+  embeddingServer?: { port: number; pid: number; serverId: string };
 }
