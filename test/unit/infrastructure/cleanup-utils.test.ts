@@ -84,7 +84,7 @@ describe('cleanup-utils', () => {
 
   describe('cleanupStaleProfiles', () => {
     it('removes stale profiles older than threshold', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a stale profile (older than 30 days)
       const staleProfile = createProfile('stale-profile-123', STALE_AGE_MS);
@@ -100,7 +100,7 @@ describe('cleanup-utils', () => {
     });
 
     it('preserves active profiles younger than threshold', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create an active profile (newer than 30 days)
       const activeProfile = createProfile('active-profile-456', ACTIVE_AGE_MS);
@@ -116,7 +116,7 @@ describe('cleanup-utils', () => {
     });
 
     it('removes only stale profiles when mixed with active ones', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create multiple profiles with different ages
       const stale1 = createProfile('stale-1', STALE_AGE_MS);
@@ -137,7 +137,7 @@ describe('cleanup-utils', () => {
     });
 
     it('handles empty cache directory', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Don't create any profiles
       const result = await cleanupStaleProfiles(testCacheDir);
@@ -147,7 +147,7 @@ describe('cleanup-utils', () => {
     });
 
     it('handles non-existent cache directory gracefully', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       const nonExistentDir = path.join(testBaseDir, 'does-not-exist');
       const result = await cleanupStaleProfiles(nonExistentDir);
@@ -158,7 +158,7 @@ describe('cleanup-utils', () => {
     });
 
     it('ignores non-profile directories', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a stale profile and a non-profile directory
       const staleProfile = createProfile('stale-123', STALE_AGE_MS);
@@ -174,7 +174,7 @@ describe('cleanup-utils', () => {
     });
 
     it('counts errors when removal fails', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a stale profile
       const staleProfile = createProfile('stale-readonly', STALE_AGE_MS);
@@ -201,7 +201,7 @@ describe('cleanup-utils', () => {
     });
 
     it('handles profiles at the threshold boundary', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a profile exactly at the threshold (should be preserved)
       // 1 minute under threshold — reliably active despite test execution time and fs mtime precision
@@ -217,7 +217,7 @@ describe('cleanup-utils', () => {
     });
 
     it('handles profile with missing required files', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a directory without profile files (should still be treated as a profile)
       const incompleteProfile = path.join(testCacheDir, 'incomplete-profile');
@@ -234,7 +234,7 @@ describe('cleanup-utils', () => {
     });
 
     it('handles very old profiles (months old)', async () => {
-      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/cleanup-utils.ts');
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
       // Create a profile that's 90 days old
       const veryOldProfile = createProfile('ancient', 90 * MS_PER_DAY);

@@ -6,6 +6,7 @@
  */
 
 import type { Config } from '../../config.ts';
+import { getConfig } from '../../config.ts';
 import type { SearchResult } from '../../web-research/types.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
@@ -14,10 +15,10 @@ import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
-import { BrowserServer } from '../browser-server.ts';
+import { BrowserServer } from './browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
-import { cleanupOrphanedCamoufoxProcesses } from '../browser-cleanup.ts';
+import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
 
 /**
  * Browser task scheduler - manages the worker pool and executes tasks.
@@ -127,7 +128,7 @@ export class BrowserTaskScheduler implements IScheduler {
 
         // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
         // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
-        const timeoutMs = 30000;
+        const timeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);

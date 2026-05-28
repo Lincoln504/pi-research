@@ -2,15 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { StateManager } from '../../../src/infrastructure/state-manager.ts';
+import { StateManager } from '../../../src/infrastructure/state/state-manager.ts';
 import { ProcessLifecycleService } from '../../../src/infrastructure/process-lifecycle-service.ts';
 import { GPUResourceService } from '../../../src/infrastructure/gpu-resource-service.ts';
-import { StateSessionManager } from '../../../src/infrastructure/state-session-manager.ts';
-import { StateBrowserManager } from '../../../src/infrastructure/state-browser-manager.ts';
-import { StateMetricsCollector } from '../../../src/infrastructure/state-metrics.ts';
-import { StateValidator } from '../../../src/infrastructure/state-validator.ts';
+import { StateSessionManager } from '../../../src/infrastructure/state/state-session-manager.ts';
+import { StateBrowserManager } from '../../../src/infrastructure/state/state-browser-manager.ts';
+import { StateMetricsCollector } from '../../../src/infrastructure/state/state-metrics.ts';
+import { StateValidator } from '../../../src/infrastructure/state/state-validator.ts';
 import { FileLockService } from '../../../src/infrastructure/file-lock-service.ts';
-import { StateBackupManager } from '../../../src/infrastructure/state-backup-manager.ts';
+import { StateBackupManager } from '../../../src/infrastructure/state/state-backup-manager.ts';
 
 describe('StateManager Integration-style Tests', () => {
   const testDir = path.join(os.tmpdir(), `pi-test-state-${Date.now()}`);

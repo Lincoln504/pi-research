@@ -10,6 +10,7 @@ export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
+    name: 'load',
     include: ['test/load/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
     pool: 'forks',

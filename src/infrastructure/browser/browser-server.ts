@@ -1,6 +1,6 @@
 import * as http from 'node:http';
-import { logger } from '../logger.ts';
-import type { SearchResult } from '../web-research/types.ts';
+import { logger } from '../../logger.ts';
+import type { SearchResult } from '../../web-research/types.ts';
 
 export interface BrowserServerOptions {
     onSearch: (query: string) => Promise<SearchResult[]>;

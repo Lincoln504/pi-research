@@ -79,7 +79,7 @@ export class WorkerPoolManager implements IService {
                 const browserEnv = getBrowserEnv();
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, '../thread-worker.ts'), {
+                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.ts'), {
                     env: browserEnv,
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;

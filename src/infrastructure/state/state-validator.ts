@@ -4,9 +4,9 @@
  * Validates state structure and values.
  */
 
-import type { SingletonState } from './types/state-types.ts';
+import type { SingletonState } from '../types/state-types.ts';
 import { isSessionInfo, isSingletonState } from './state-type-guards.ts';
-import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 /**
  * Validates state objects

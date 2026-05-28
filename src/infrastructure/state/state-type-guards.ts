@@ -7,7 +7,7 @@
 import type {
   SessionInfo,
   SingletonState,
-} from './types/state-types.ts';
+} from '../types/state-types.ts';
 
 /**
  * Type guard to check if a value is a SingletonState

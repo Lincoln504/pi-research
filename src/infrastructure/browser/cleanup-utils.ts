@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { logger } from '../logger.ts';
+import { logger } from '../../logger.ts';
 
 const DEFAULT_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 

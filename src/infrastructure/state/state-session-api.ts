@@ -5,7 +5,7 @@
  * This separates the public API from the internal session manager.
  */
 
-import type { SingletonState } from './types/state-types.ts';
+import type { SingletonState } from '../types/state-types.ts';
 import type { StateSessionManager } from './state-session-manager.ts';
 
 /**

@@ -10,6 +10,7 @@ import {
   runBrowserTask,
   stopBrowserManager,
   forceSchedulerRestart,
+  waitForBrowserPoolIdle,
 } from '../../src/infrastructure/browser/index.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { getConfig } from '../../src/config.ts';
@@ -136,8 +137,8 @@ describe('Error Recovery and Resilience', () => {
       // Force restart
       await forceSchedulerRestart();
 
-      // Small delay for restart
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for restart to complete
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Should work after restart
       const result2 = await runBrowserTask<any>(
@@ -166,8 +167,8 @@ describe('Error Recovery and Resilience', () => {
         forceSchedulerRestart(),
       ]);
 
-      // Delay for restart to complete
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Wait for restart to complete
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Pool should still work
       const result = await runBrowserTask<any>(

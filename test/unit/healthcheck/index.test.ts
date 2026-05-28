@@ -51,7 +51,7 @@ vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
   })),
 }));
 
-vi.mock('../../../src/infrastructure/state-manager.ts', () => ({
+vi.mock('../../../src/infrastructure/state/state-manager.ts', () => ({
   StateManager: vi.fn().mockImplementation(() => ({
     name: 'state-manager',
     lifecycle: 'initialized',

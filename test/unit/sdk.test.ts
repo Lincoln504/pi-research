@@ -110,7 +110,7 @@ describe('SDK Lifecycle', () => {
     mockQuickRun.mockClear().mockResolvedValue('quick result');
     vi.mocked(registerCoreServices).mockClear();
     vi.mocked(registerInfrastructureServices).mockClear();
-    vi.mocked(initializeCoreServices).mockClear().mockResolvedValue(undefined);
+    vi.mocked(initializeCoreServices).mockClear().mockResolvedValue({ initialized: [], failed: [] });
     vi.mocked(disposeCoreServices).mockClear().mockResolvedValue(undefined);
     vi.mocked(setConfig).mockClear();
     vi.mocked(validateConfig).mockClear();

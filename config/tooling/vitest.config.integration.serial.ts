@@ -15,6 +15,7 @@ export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
+    name: 'integration-serial',
     include: [
       'test/integration/browser-pool-failover.test.ts',
       'test/integration/concurrent-operations.test.ts',

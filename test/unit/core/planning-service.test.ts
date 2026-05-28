@@ -39,6 +39,7 @@ vi.mock('../../../src/utils/inject-date.ts', () => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 import { complete, completeSimple } from '@earendil-works/pi-ai';
+import type { StopReason } from '@earendil-works/pi-ai';
 
 const STUB_MODEL = { id: 'test-model' } as any;
 
@@ -49,11 +50,20 @@ const MOCK_CTX = {
 };
 
 /** Build a mock `complete()` response with text content. */
-function makeCompleteResponse(text: string, stopReason = 'stop') {
+function makeCompleteResponse(text: string, stopReason: StopReason = 'stop') {
   return {
-    content: [{ type: 'text', text }],
-    usage: { input_tokens: 100, output_tokens: 50 },
+    role: 'assistant' as const,
+    content: [{ type: 'text' as const, text }],
+    api: 'anthropic-messages' as const,
+    provider: 'anthropic',
+    model: 'test-model',
+    usage: {
+      input: 100, output: 50,
+      cacheRead: 0, cacheWrite: 0, totalTokens: 150,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
     stopReason,
+    timestamp: 0,
   };
 }
 
@@ -345,20 +355,20 @@ describe('PlanningService', () => {
       const bare = new PlanningService();
       await bare.initialize(); // no ctx
       await expect(bare.generatePlan({
-        query: 'test', complexity: 1, model: STUB_MODEL,
+        sessionId: 'test-session', query: 'test', complexity: 1, model: STUB_MODEL,
       })).rejects.toThrow('Not initialized with ctx');
     });
 
     it('throws if model auth fails', async () => {
       vi.mocked(MOCK_CTX.modelRegistry.getApiKeyAndHeaders).mockResolvedValueOnce({ ok: false, error: 'unauthorized' });
       await expect(service.generatePlan({
-        query: 'test', complexity: 1, model: STUB_MODEL,
+        sessionId: 'test-session', query: 'test', complexity: 1, model: STUB_MODEL,
       })).rejects.toThrow('auth failed');
     });
 
     it('returns a valid plan when LLM returns well-formed JSON', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(2)));
-      const plan = await service.generatePlan({ query: 'test query', complexity: 1, model: STUB_MODEL });
+      const plan = await service.generatePlan({ sessionId: 'test-session', query: 'test query', complexity: 1, model: STUB_MODEL });
       expect(plan.action).toBe('delegate');
       expect(plan.researchers!.length).toBeGreaterThan(0);
     });
@@ -378,7 +388,7 @@ describe('PlanningService', () => {
 
     it('falls back to a single-researcher plan after 3 failed JSON parse attempts', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse('not valid json at all'));
-      const plan = await service.generatePlan({ query: 'what is rust', complexity: 1, model: STUB_MODEL });
+      const plan = await service.generatePlan({ sessionId: 'test-session', query: 'what is rust', complexity: 1, model: STUB_MODEL });
       // Fallback is always a 1-researcher delegate plan
       expect(plan.action).toBe('delegate');
       expect(plan.researchers).toHaveLength(1);
@@ -386,7 +396,7 @@ describe('PlanningService', () => {
 
     it('calls complete() up to 3 times before falling back', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse('invalid json'));
-      await service.generatePlan({ query: 'q', complexity: 1, model: STUB_MODEL });
+      await service.generatePlan({ sessionId: 'test-session', query: 'q', complexity: 1, model: STUB_MODEL });
       expect(vi.mocked(complete)).toHaveBeenCalledTimes(3);
     });
 
@@ -394,14 +404,14 @@ describe('PlanningService', () => {
       vi.mocked(complete)
         .mockResolvedValueOnce(makeCompleteResponse('bad json'))
         .mockResolvedValueOnce(makeCompleteResponse(validDelegatePlanJson(1)));
-      const plan = await service.generatePlan({ query: 'q', complexity: 1, model: STUB_MODEL });
+      const plan = await service.generatePlan({ sessionId: 'test-session', query: 'q', complexity: 1, model: STUB_MODEL });
       expect(plan.action).toBe('delegate');
       expect(vi.mocked(complete)).toHaveBeenCalledTimes(2);
     });
 
     it('throws immediately when the model returns an error stop reason', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse('', 'error'));
-      await expect(service.generatePlan({ query: 'q', complexity: 1, model: STUB_MODEL }))
+      await expect(service.generatePlan({ sessionId: 'test-session', query: 'q', complexity: 1, model: STUB_MODEL }))
         .rejects.toThrow('Coordinator model API error');
     });
 
@@ -416,7 +426,7 @@ describe('PlanningService', () => {
         allQueries: ['q'],
       });
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse(planJson));
-      const plan = await service.generatePlan({ query: 'q', complexity: 1, model: STUB_MODEL });
+      const plan = await service.generatePlan({ sessionId: 'test-session', query: 'q', complexity: 1, model: STUB_MODEL });
       expect(plan.researchers!.length).toBeLessThanOrEqual(maxSize);
     });
   });

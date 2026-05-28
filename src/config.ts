@@ -56,6 +56,8 @@ export interface Config {
   AVG_TOKENS_PER_SCRAPE: number;
   /** Maximum concurrent URLs fetched in a single scrape batch (default: 3) */
   MAX_CONCURRENT_SCRAPES: number;
+  /** Timeout for a single browser task (search/scrape) in milliseconds (default: 30000) */
+  BROWSER_TASK_TIMEOUT_MS: number;
 }
 
 export const DEFAULTS: Config = {
@@ -79,6 +81,7 @@ export const DEFAULTS: Config = {
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
   AVG_TOKENS_PER_SCRAPE: 10000,
   MAX_CONCURRENT_SCRAPES: 3,
+  BROWSER_TASK_TIMEOUT_MS: 45000,
 };
 
 // ============================================================================
@@ -143,6 +146,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
+    PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -315,6 +319,7 @@ export function createConfig(
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvFloat(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
+    BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
   };
 }
 

@@ -7,9 +7,9 @@
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
-import { logger } from '../logger.ts';
-import type { IService } from '../core/service-registry.ts';
-import { ServiceLifecycle } from '../core/service-registry.ts';
+import { logger } from '../../logger.ts';
+import type { IService } from '../../core/service-registry.ts';
+import { ServiceLifecycle } from '../../core/service-registry.ts';
 
 /**
  * Manages backup and recovery for state files

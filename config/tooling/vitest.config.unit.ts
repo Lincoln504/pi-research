@@ -11,6 +11,7 @@ export default defineConfig({
   ...baseConfig,
   test: {
     ...baseConfig.test,
+    name: 'unit',
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
     pool: 'forks',

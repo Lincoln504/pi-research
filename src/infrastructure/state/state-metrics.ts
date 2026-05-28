@@ -4,9 +4,9 @@
  * Handles metrics collection for the StateManager.
  */
 
-import type { StateMetrics, SingletonState } from './types/state-types.ts';
-import { metrics } from '../utils/metrics.ts';
-import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import type { StateMetrics, SingletonState } from '../types/state-types.ts';
+import { metrics } from '../../utils/metrics.ts';
+import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 /**
  * Collects metrics from state

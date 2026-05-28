@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { logger } from '../logger.ts';
+import { logger } from '../../logger.ts';
 
 const execAsync = promisify(exec);
 

@@ -4,9 +4,9 @@
  * Handles session lifecycle and cleanup operations for the StateManager.
  */
 
-import type { ProcessLifecycleService } from './process-lifecycle-service.ts';
-import type { SingletonState } from './types/state-types.ts';
-import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import type { ProcessLifecycleService } from '../process-lifecycle-service.ts';
+import type { SingletonState } from '../types/state-types.ts';
+import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 /**
  * Manages session operations for state

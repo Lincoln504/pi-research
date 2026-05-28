@@ -8,8 +8,8 @@
 
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { IService } from '../core/service-registry.ts';
-import { ServiceLifecycle } from '../core/service-registry.ts';
+import type { IService } from '../../core/service-registry.ts';
+import { ServiceLifecycle } from '../../core/service-registry.ts';
 
 export interface StatePaths {
   stateFilePath: string;

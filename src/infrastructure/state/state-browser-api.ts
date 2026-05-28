@@ -5,7 +5,7 @@
  */
 
 import type { StateBrowserManager } from './state-browser-manager.ts';
-import type { SingletonState } from './types/state-types.ts';
+import type { SingletonState } from '../types/state-types.ts';
 
 /**
  * Provides browser server management operations

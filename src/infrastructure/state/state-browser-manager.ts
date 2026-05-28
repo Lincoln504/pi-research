@@ -4,8 +4,8 @@
  * Handles browser server coordination within the state.
  */
 
-import type { SingletonState } from './types/state-types.ts';
-import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import type { SingletonState } from '../types/state-types.ts';
+import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 
 /**
  * Manages browser server information in state

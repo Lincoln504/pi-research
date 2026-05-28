@@ -22,15 +22,15 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import process from 'node:process';
-import { logger } from '../logger.ts';
-import { metrics } from '../utils/metrics.ts';
-import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
+import { logger } from '../../logger.ts';
+import { metrics } from '../../utils/metrics.ts';
+import type { IProcessLifecycle } from '../../core/interfaces/process-interfaces.ts';
 import type {
   StateMetrics,
   SingletonState,
-} from './types/state-types.ts';
-import { FileLockService } from './file-lock-service.ts';
-import type { GPUResourceService } from './gpu-resource-service.ts';
+} from '../types/state-types.ts';
+import { FileLockService } from '../file-lock-service.ts';
+import type { GPUResourceService } from '../gpu-resource-service.ts';
 import { StateBackupManager } from './state-backup-manager.ts';
 import type { StateBrowserManager } from './state-browser-manager.ts';
 import type { StateSessionManager } from './state-session-manager.ts';
@@ -40,7 +40,7 @@ import { StateSessionApi } from './state-session-api.ts';
 import { StateBrowserApi } from './state-browser-api.ts';
 
 // Re-export commonly used types
-export type { StateMetrics, SingletonState } from './types/state-types.ts';
+export type { StateMetrics, SingletonState } from '../types/state-types.ts';
 
 export interface StateManagerOptions {
   stateDir?: string;

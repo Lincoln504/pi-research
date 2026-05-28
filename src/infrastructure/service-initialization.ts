@@ -9,21 +9,21 @@
 import { registerService, getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import { SchedulerFactoryService } from './scheduler-factory-service.ts';
-import { StateManagerService } from './state-manager-service.ts';
+import { StateManagerService } from './state/state-manager-service.ts';
 import { KnowledgeStoreService } from './knowledge-store-service.ts';
 import { MetricsService } from './metrics-service.ts';
 import { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import { GPUResourceService } from './gpu-resource-service.ts';
-import { StateSessionManager } from './state-session-manager.ts';
-import { StateBrowserManager } from './state-browser-manager.ts';
-import { StateMetricsCollector } from './state-metrics.ts';
-import { StateValidator } from './state-validator.ts';
+import { StateSessionManager } from './state/state-session-manager.ts';
+import { StateBrowserManager } from './state/state-browser-manager.ts';
+import { StateMetricsCollector } from './state/state-metrics.ts';
+import { StateValidator } from './state/state-validator.ts';
 import { WorkerPoolManager } from './browser/worker-pool-manager.ts';
 import { ResearchSessionService } from '../orchestration/research-session-service.ts';
 import { ResearchSynthesisService } from '../orchestration/research-synthesis-service.ts';
-import { StatePathConfiguration } from './state-path-configuration.ts';
+import { StatePathConfiguration } from './state/state-path-configuration.ts';
 import { FileLockService } from './file-lock-service.ts';
-import { StateBackupManager } from './state-backup-manager.ts';
+import { StateBackupManager } from './state/state-backup-manager.ts';
 import { logger } from '../logger.ts';
 
 /**

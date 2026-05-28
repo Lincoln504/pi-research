@@ -5,24 +5,24 @@
  * Provides clean interface for cross-process state management.
  */
 
-import { ServiceLifecycle, getService } from '../core/service-registry.ts';
-import { logger } from '../logger.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IStateManager, IProcessLifecycle } from '../core/service-interfaces.ts';
+import { ServiceLifecycle, getService } from '../../core/service-registry.ts';
+import { logger } from '../../logger.ts';
+import { ServiceNames } from '../../core/service-interfaces.ts';
+import type { IStateManager, IProcessLifecycle } from '../../core/service-interfaces.ts';
 import type {
   StateMetrics,
   SingletonState,
-} from '../infrastructure/state-manager.ts';
-import type { GPUResourceService } from '../infrastructure/gpu-resource-service.ts';
-import type { StateSessionManager } from '../infrastructure/state-session-manager.ts';
-import type { StateBrowserManager } from '../infrastructure/state-browser-manager.ts';
-import type { StateMetricsCollector } from '../infrastructure/state-metrics.ts';
-import type { StateValidator } from '../infrastructure/state-validator.ts';
-import type { FileLockService } from '../infrastructure/file-lock-service.ts';
-import type { StateBackupManager } from '../infrastructure/state-backup-manager.ts';
+} from './state-manager.ts';
+import type { GPUResourceService } from '../gpu-resource-service.ts';
+import type { StateSessionManager } from './state-session-manager.ts';
+import type { StateBrowserManager } from './state-browser-manager.ts';
+import type { StateMetricsCollector } from './state-metrics.ts';
+import type { StateValidator } from './state-validator.ts';
+import type { FileLockService } from '../file-lock-service.ts';
+import type { StateBackupManager } from './state-backup-manager.ts';
 
 // Import the actual state manager implementation (static import)
-import { StateManager } from '../infrastructure/state-manager.ts';
+import { StateManager } from './state-manager.ts';
 
 /**
  * State Manager Service Implementation

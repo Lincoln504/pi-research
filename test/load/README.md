@@ -14,13 +14,16 @@ Tests for verifying no session interference when running multiple research sessi
 - Rapid consecutive session starts without interference
 - Session success rates under concurrent load
 - Detection and reporting of interference between sessions
+- Enhanced behavior validation and state consistency checks
 
 **Metrics Measured:**
 - Total/successful/failed sessions
 - Success rate per depth level
-- Average/min/max duration per session
+- Average/P50/P95/P99 duration per session
 - Interference detection
 - Query isolation verification
+- State consistency across parallel sessions
+- Memory and file handle delta per session
 
 ### 2. high-volume-embedding.test.ts
 Tests for validating embedding throughput, memory usage, and memory leak detection when processing large numbers of documents.
@@ -61,48 +64,6 @@ Tests for validating concurrent API request handling across all security APIs an
 - Average/P50/P95/P99 latency
 - Rate limit count per API
 - Request handling under burst patterns
-
-### 4. throughput.test.ts
-Comprehensive tests for measuring system throughput including documents per second, queries per second, scrape operations per second, and latency percentiles.
-
-**Key Test Scenarios:**
-- Documents per second throughput (100, 500, 1000 documents)
-- Queries per second throughput (50, 100, 200 queries)
-- Scrape operations per second throughput (20, 50, 100 scrapes)
-- Mixed workload throughput (adds + searches + scrapes)
-- Latency percentiles under load
-- Sustained throughput over time
-- Concurrent operation throughput
-
-**Metrics Measured:**
-- Documents/queries/scrapes per second
-- Average/P50/P95/P99 latency
-- Throughput scaling with volume
-- Sustained performance over time
-- Concurrent operation throughput
-- Per-operation latency statistics
-
-### 5. rate-limit-handling.test.ts
-Tests for validating graceful handling of rate limits (HTTP 429) including backoff behavior and queue overflow handling.
-
-**Key Test Scenarios:**
-- Graceful exit on 429 rate limit
-- Backoff behavior under pressure
-- Queue overflow under high load
-- Exponential backoff with jitter
-- Rate limit recovery after cooldown
-- Graceful degradation under sustained load
-- Concurrent requests with rate limiting
-- Queue overflow recovery after processing
-
-**Metrics Measured:**
-- Total attempts and success rate
-- Rate limit hits
-- Average retries per success
-- Total backoff time
-- Graceful exit count
-- Queue overflow count
-- Recovery success rates
 
 ## Running the Tests
 
