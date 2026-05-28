@@ -106,7 +106,7 @@ function makeOptions(overrides: Partial<RunResearcherOptions> = {}): RunResearch
   return {
     config: DEFAULT_RESEARCHER_CONFIG,      // ResearcherConfig (id, name, goal, queries)
     initialLinks: ['https://example.com/article1'],
-    historicalUrls: [],
+    historicalUrls: [], sessionId: 'test-session',
     researchId: 'test-research-id',
     round: 1,
     query: 'What is TypeScript?',
@@ -141,7 +141,7 @@ describe('runResearcher', () => {
 
   describe('skip guard', () => {
     it('returns without prompting when both initialLinks and historicalUrls are empty', async () => {
-      await runResearcher(makeOptions({ initialLinks: [], historicalUrls: [] }));
+      await runResearcher(makeOptions({ initialLinks: [], historicalUrls: [], sessionId: 'test-session' }));
       expect(mockPrompt).not.toHaveBeenCalled();
     });
 
@@ -149,7 +149,7 @@ describe('runResearcher', () => {
       const onResearcherComplete = vi.fn();
       await runResearcher(makeOptions({
         initialLinks: [],
-        historicalUrls: [],
+        historicalUrls: [], sessionId: 'test-session',
         observer: { onResearcherComplete } as any,
       }));
       expect(onResearcherComplete).toHaveBeenCalledWith(expect.any(String), '');
@@ -160,7 +160,7 @@ describe('runResearcher', () => {
       const config = { id: 'r42', name: 'R42', goal: 'g', queries: [] };
       await runResearcher(makeOptions({
         initialLinks: [],
-        historicalUrls: [],
+        historicalUrls: [], sessionId: 'test-session',
         config,
         observer: { onResearcherComplete } as any,
       }));
@@ -168,7 +168,7 @@ describe('runResearcher', () => {
     });
 
     it('proceeds when only initialLinks is non-empty', async () => {
-      await runResearcher(makeOptions({ initialLinks: ['https://x.com'], historicalUrls: [] }));
+      await runResearcher(makeOptions({ initialLinks: ['https://x.com'], historicalUrls: [], sessionId: 'test-session' }));
       expect(mockPrompt).toHaveBeenCalledOnce();
     });
 
@@ -232,6 +232,7 @@ describe('runResearcher', () => {
       await runResearcher(makeOptions());
       expect(mockStoreReport).toHaveBeenCalledOnce();
       expect(mockStoreReport).toHaveBeenCalledWith(
+        'test-session',
         expect.stringContaining('1.'), // round.id format
         'mock researcher report content'
       );

@@ -29,23 +29,23 @@ export async function getResearchSynthesisService(): Promise<ResearchSynthesisSe
  * Cleanup and reset services for the current research run
  * Call this at the end of each research session
  */
-export async function cleanupResearchServices(): Promise<void> {
+export async function cleanupResearchServices(sessionId?: string): Promise<void> {
   // Cleanup session service
   const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE).catch(() => null);
   if (sessionService) {
-    await sessionService.cleanup();
+    await sessionService.cleanup(sessionId);
   }
   
   // Clear synthesis reports (ResearchSynthesisService doesn't have a cleanup method, just clearReports)
   const synthesisService = await getService<ResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE).catch(() => null);
   if (synthesisService) {
-    synthesisService.clearReports();
+    synthesisService.clearReports(sessionId);
   }
   
   // Clear planning state to prevent accumulation across research runs
   const planningService = tryGetService<any>(ServiceNames.PLANNING);
   if (planningService && typeof planningService.clearPlanningState === 'function') {
-    planningService.clearPlanningState();
+    planningService.clearPlanningState(sessionId);
     logger.debug('[ResearchSessionManager] Cleared planning state');
   }
   
@@ -55,6 +55,6 @@ export async function cleanupResearchServices(): Promise<void> {
 /**
  * Reset services (alias for cleanup)
  */
-export async function resetResearchServices(): Promise<void> {
-  await cleanupResearchServices();
+export async function resetResearchServices(sessionId?: string): Promise<void> {
+  await cleanupResearchServices(sessionId);
 }

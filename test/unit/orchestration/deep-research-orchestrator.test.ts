@@ -296,7 +296,7 @@ describe('DeepResearchOrchestrator', () => {
     await orchestrator.run();
 
     // Should have incremented by 2 (number of researchers in the delegate plan)
-    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(2);
+    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(expect.any(String), 2);
   });
 
   it('should record query history after each delegate round', async () => {
@@ -316,7 +316,7 @@ describe('DeepResearchOrchestrator', () => {
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
 
-    expect(mockPlanningService.addToQueryHistory).toHaveBeenCalledWith(['q1', 'q2']);
+    expect(mockPlanningService.addToQueryHistory).toHaveBeenCalledWith('test-session', ['q1', 'q2']);
   });
 
   it('should pass getCurrentPlan as previousPlan to updatePlanForRound', async () => {

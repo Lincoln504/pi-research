@@ -32,20 +32,33 @@ import {
   generateResearchers,
 } from './planning-utils.ts';
 
+interface PlanningState {
+  currentPlan: ResearchPlan | null;
+  queryHistory: string[];
+  totalResearchersPlanned: number;
+}
+
 export class PlanningService implements IPlanningService {
   readonly name = 'PlanningService';
   lifecycle = ServiceLifecycle.UNINITIALIZED as ServiceLifecycle;
 
-  // Planning state
-  private currentPlan: ResearchPlan | null = null;
-  private queryHistory: string[] = [];
-  private totalResearchersPlanned: number = 0;
+  // Planning state mapped by sessionId
+  private sessions = new Map<string, PlanningState>();
 
   // Dependencies
   private ctx?: any;
 
   constructor() {
     this.lifecycle = ServiceLifecycle.UNINITIALIZED;
+  }
+
+  private getState(sessionId: string): PlanningState {
+    let state = this.sessions.get(sessionId);
+    if (!state) {
+      state = { currentPlan: null, queryHistory: [], totalResearchersPlanned: 0 };
+      this.sessions.set(sessionId, state);
+    }
+    return state;
   }
 
   async initialize(ctx?: any): Promise<void> {
@@ -73,7 +86,7 @@ export class PlanningService implements IPlanningService {
 
   async dispose(): Promise<void> {
     this.lifecycle = ServiceLifecycle.DISPOSING;
-    this.clearPlanningState();
+    this.sessions.clear();
     this.ctx = undefined;
     this.lifecycle = ServiceLifecycle.DISPOSED;
     logger.log(`[${this.name}] Disposed`);
@@ -84,9 +97,9 @@ export class PlanningService implements IPlanningService {
   // ========================================================================
 
   async generatePlan(options: GeneratePlanOptions): Promise<ResearchPlan> {
-    const { query, complexity, model, signal, historicalLinksSection = '' } = options;
+    const { sessionId, query, complexity, model, signal, historicalLinksSection = '' } = options;
 
-    logger.log(`[${this.name}] Generating plan for complexity ${complexity}`);
+    logger.log(`[${this.name}] Generating plan for complexity ${complexity} (Session: ${sessionId})`);
     metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity) });
 
     const maxTeamSize = getTeamSize(complexity);
@@ -109,7 +122,6 @@ export class PlanningService implements IPlanningService {
     logger.log(`[${this.name}] Coordinator auth for model ${model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}`);
 
     let plan: ResearchPlan | null = null;
-    // Definite-assignment assertion: always set in loop body before catch reads it
     let lastRawPlanText!: string;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -129,8 +141,6 @@ export class PlanningService implements IPlanningService {
         apiKey: auth.apiKey, 
         headers: auth.headers, 
         signal,
-        // Cast to any because complete's ProviderStreamOptions may not strictly include reasoning,
-        // but the underlying provider implementations in pi-ai will pick it up.
         ...({ reasoning } as any)
       });
 
@@ -161,7 +171,6 @@ export class PlanningService implements IPlanningService {
           const coordUsage = parseTokenUsage(planResponse.usage);
           const tokens = calculateTotalTokens(coordUsage);
           
-          // Ultra-accurate cost calculation
           let cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
           if (cost === 0 && tokens > 0) {
               const calculatedCost = calculateCost(model, planResponse.usage);
@@ -189,18 +198,16 @@ export class PlanningService implements IPlanningService {
       throw new Error('Coordinator failed to plan any researchers.');
     }
 
-    // Cap team size
     if (plan.researchers.length > maxTeamSize) {
       plan.researchers = plan.researchers.slice(0, maxTeamSize);
       plan.allQueries = plan.researchers.flatMap(r => r.queries);
     }
 
-    // Cap researcher queries
     plan = capResearcherQueries(plan, complexity, this.name);
 
-    // Update state
-    this.currentPlan = plan;
-    this.totalResearchersPlanned += plan.researchers?.length ?? 0;
+    const state = this.getState(sessionId);
+    state.currentPlan = plan;
+    state.totalResearchersPlanned += plan.researchers?.length ?? 0;
 
     logger.log(`[${this.name}] Generated plan with ${plan.researchers?.length || 0} researcher(s)`);
     metrics.observe('coordinator_researchers_planned', plan.researchers?.length || 0, { complexity: String(complexity) });
@@ -219,6 +226,7 @@ export class PlanningService implements IPlanningService {
 
   async updatePlanForRound(options: UpdatePlanOptions): Promise<ResearchPlan> {
     const {
+      sessionId,
       reports,
       round,
       query,
@@ -232,7 +240,7 @@ export class PlanningService implements IPlanningService {
       observer,
     } = options;
 
-    logger.log(`[${this.name}] Evaluating for round ${round}`);
+    logger.log(`[${this.name}] Evaluating for round ${round} (Session: ${sessionId})`);
     metrics.increment('evaluator_runs_total', 1, { complexity: String(complexity), round: String(round) });
     
     observer?.onEvaluationProgress?.(`Evaluating round ${round}...`);
@@ -305,7 +313,6 @@ export class PlanningService implements IPlanningService {
         const evalUsage = parseTokenUsage(response.usage);
         const tokens = calculateTotalTokens(evalUsage);
         
-        // Ultra-accurate cost calculation
         let cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
         if (cost === 0 && tokens > 0) {
             const calculatedCost = calculateCost(model, response.usage);
@@ -349,8 +356,6 @@ export class PlanningService implements IPlanningService {
           plan.researchers = plan.researchers.filter(r => r && typeof r === 'object' && Array.isArray(r.queries));
           if (plan.researchers.length === 0) {
             plan.action = 'synthesize';
-          } else {
-            // We'll update totalResearchersPlanned in the orchestrator
           }
         }
         plan.allQueries = (plan.researchers ?? []).flatMap(r => r.queries);
@@ -367,7 +372,7 @@ export class PlanningService implements IPlanningService {
       plan.action = 'synthesize';
     }
 
-    this.currentPlan = plan;
+    this.getState(sessionId).currentPlan = plan;
 
     return plan.action !== 'synthesize' && Array.isArray(plan.researchers) && plan.researchers.length > 0 && !mustSynthesize
       ? this.capResearcherQueries(plan, complexity)
@@ -378,30 +383,32 @@ export class PlanningService implements IPlanningService {
   // Query History Methods
   // ========================================================================
 
-  getQueryHistory(): string[] {
-    return [...this.queryHistory];
+  getQueryHistory(sessionId: string): string[] {
+    return [...this.getState(sessionId).queryHistory];
   }
 
-  addToQueryHistory(queries: string[]): void {
-    this.queryHistory.push(...queries);
-    logger.debug(`[${this.name}] Added ${queries.length} queries to history (total: ${this.queryHistory.length})`);
+  addToQueryHistory(sessionId: string, queries: string[]): void {
+    const state = this.getState(sessionId);
+    state.queryHistory.push(...queries);
+    logger.debug(`[${this.name}] Added ${queries.length} queries to history (total: ${state.queryHistory.length}) for session ${sessionId}`);
   }
 
   // ========================================================================
   // State Management Methods
   // ========================================================================
 
-  getCurrentPlan(): ResearchPlan | null {
-    return this.currentPlan;
+  getCurrentPlan(sessionId: string): ResearchPlan | null {
+    return this.getState(sessionId).currentPlan;
   }
 
-  getTotalResearchersPlanned(): number {
-    return this.totalResearchersPlanned;
+  getTotalResearchersPlanned(sessionId: string): number {
+    return this.getState(sessionId).totalResearchersPlanned;
   }
 
-  incrementTotalResearchersPlanned(count: number): void {
-    this.totalResearchersPlanned += count;
-    logger.debug(`[${this.name}] totalResearchersPlanned incremented to ${this.totalResearchersPlanned}`);
+  incrementTotalResearchersPlanned(sessionId: string, count: number): void {
+    const state = this.getState(sessionId);
+    state.totalResearchersPlanned += count;
+    logger.debug(`[${this.name}] totalResearchersPlanned incremented to ${state.totalResearchersPlanned} for session ${sessionId}`);
   }
 
   getTeamSize(complexity: 1 | 2 | 3): number {
@@ -436,11 +443,14 @@ export class PlanningService implements IPlanningService {
     return buildFallbackCoordinatorPlan(this.name, rawText, query);
   }
 
-  clearPlanningState(): void {
-    this.currentPlan = null;
-    this.queryHistory = [];
-    this.totalResearchersPlanned = 0;
-    logger.debug(`[${this.name}] Cleared planning state`);
+  clearPlanningState(sessionId?: string): void {
+    if (sessionId) {
+      this.sessions.delete(sessionId);
+      logger.debug(`[${this.name}] Cleared planning state for session ${sessionId}`);
+    } else {
+      this.sessions.clear();
+      logger.debug(`[${this.name}] Cleared all planning state`);
+    }
   }
 
   // ========================================================================
@@ -448,7 +458,6 @@ export class PlanningService implements IPlanningService {
   // ========================================================================
 
   private estimateTokenCount(text: string): number {
-    // Rough estimation: ~4 characters per token
     return Math.ceil(text.length / 4);
   }
 }

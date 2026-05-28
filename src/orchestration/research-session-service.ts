@@ -29,41 +29,52 @@ export class ResearchSessionService implements IService {
   readonly name = 'research-session-service';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
-  private activeSessions = new Map<string, SessionEntry>();
+  // Map of sessionId -> Map<id, SessionEntry>
+  private sessions = new Map<string, Map<string, SessionEntry>>();
+
+  private getSessionMap(sessionId: string): Map<string, SessionEntry> {
+    let sessionMap = this.sessions.get(sessionId);
+    if (!sessionMap) {
+      sessionMap = new Map<string, SessionEntry>();
+      this.sessions.set(sessionId, sessionMap);
+    }
+    return sessionMap;
+  }
 
   /**
    * Register an active researcher session
    */
-  registerSession(id: string, session: AgentSession, abortFn: () => Promise<void>): void {
-    this.activeSessions.set(id, { session, abort: abortFn });
+  registerSession(sessionId: string, id: string, session: AgentSession, abortFn: () => Promise<void>): void {
+    this.getSessionMap(sessionId).set(id, { session, abort: abortFn });
   }
 
   /**
    * Get an active session by ID
    */
-  getSession(id: string): SessionEntry | undefined {
-    return this.activeSessions.get(id);
+  getSession(sessionId: string, id: string): SessionEntry | undefined {
+    return this.getSessionMap(sessionId).get(id);
   }
 
   /**
    * Check if a session is active
    */
-  hasSession(id: string): boolean {
-    return this.activeSessions.has(id);
+  hasSession(sessionId: string, id: string): boolean {
+    return this.getSessionMap(sessionId).has(id);
   }
 
   /**
    * Unregister a session (no abort)
    */
-  unregisterSession(id: string): void {
-    this.activeSessions.delete(id);
+  unregisterSession(sessionId: string, id: string): void {
+    this.getSessionMap(sessionId).delete(id);
   }
 
   /**
    * Abort and unregister a specific session
    */
-  async abortSession(id: string): Promise<void> {
-    const entry = this.activeSessions.get(id);
+  async abortSession(sessionId: string, id: string): Promise<void> {
+    const sessionMap = this.getSessionMap(sessionId);
+    const entry = sessionMap.get(id);
     if (!entry) return;
 
     try {
@@ -71,48 +82,63 @@ export class ResearchSessionService implements IService {
     } catch (err) {
       logger.warn(`[ResearchSessionService] Failed to abort session ${id}:`, err);
     }
-    this.activeSessions.delete(id);
+    sessionMap.delete(id);
   }
 
   /**
-   * Abort all active sessions
+   * Abort all active sessions for a specific sessionId, or all sessions if sessionId is omitted
    */
-  async abortAllSessions(): Promise<void> {
-    const aborts = Array.from(this.activeSessions.values()).map((entry, index) =>
-      entry.abort().catch((err) => {
-        logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
-      })
-    );
-    await Promise.all(aborts);
-    this.activeSessions.clear();
+  async abortAllSessions(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      const sessionMap = this.getSessionMap(sessionId);
+      const aborts = Array.from(sessionMap.values()).map((entry, index) =>
+        entry.abort().catch((err) => {
+          logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
+        })
+      );
+      await Promise.all(aborts);
+      sessionMap.clear();
+      this.sessions.delete(sessionId);
+    } else {
+      const aborts: Promise<void>[] = [];
+      for (const sessionMap of this.sessions.values()) {
+        aborts.push(...Array.from(sessionMap.values()).map((entry, index) =>
+          entry.abort().catch((err) => {
+            logger.warn(`[ResearchSessionService] Failed to abort session ${index}:`, err);
+          })
+        ));
+      }
+      await Promise.all(aborts);
+      this.sessions.clear();
+    }
   }
 
   /**
    * Get count of active sessions
    */
-  getActiveSessionCount(): number {
-    return this.activeSessions.size;
+  getActiveSessionCount(sessionId: string): number {
+    return this.getSessionMap(sessionId).size;
   }
 
   /**
    * Get all active session IDs
    */
-  getActiveSessionIds(): string[] {
-    return Array.from(this.activeSessions.keys());
+  getActiveSessionIds(sessionId: string): string[] {
+    return Array.from(this.getSessionMap(sessionId).keys());
   }
 
   /**
    * Clean up all sessions (alias for abortAllSessions)
    */
-  async cleanup(): Promise<void> {
-    await this.abortAllSessions();
+  async cleanup(sessionId?: string): Promise<void> {
+    await this.abortAllSessions(sessionId);
   }
 
   /**
    * Reset service state
    */
   reset(): void {
-    this.activeSessions.clear();
+    this.sessions.clear();
   }
 
   async initialize(): Promise<void> {

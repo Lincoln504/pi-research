@@ -152,7 +152,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (shouldStopResearch(sessionId, researchId)) {
         const { getResearchSessionService } = await import('./research-session-manager.ts');
         const sessionService = await getResearchSessionService();
-        await sessionService.abortAllSessions();
+        await sessionService.abortAllSessions(sessionId);
 
         throw new Error('Research stopped due to excessive infrastructure failures. Multiple researchers failed.');
       }
@@ -188,7 +188,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param researchId - Research ID
    * @param config - Research configuration
    */
-  async storeLinkDescriptions(round: number, researchId: string, config: any): Promise<void> {
+  async storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: any): Promise<void> {
     if (!config.KNOWLEDGE_STORE_ENABLED) return;
 
     try {
@@ -204,7 +204,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       const roundPrefix = `${round}.`;
       let enqueued = 0;
 
-      for (const [key, report] of synthesisService.getAllReports().entries()) {
+      for (const [key, report] of synthesisService.getAllReports(sessionId).entries()) {
         if (!key.startsWith(roundPrefix)) continue;
 
         const links = parseCitations(report);

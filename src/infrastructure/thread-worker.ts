@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import {
   setWorkerId as setLifecycleWorkerId,
   setupIpcErrorHandler,
+  setupUncaughtExceptionHandler,
   setupOrphanProtection,
   createKillHandler,
   setBrowserCleanup,
@@ -44,6 +45,9 @@ setMessagingWorkerId(workerId);
 
 // Setup IPC error handler
 setupIpcErrorHandler();
+
+// Setup uncaught exception handler
+setupUncaughtExceptionHandler();
 
 // Setup browser cleanup callback for lifecycle module
 setBrowserCleanup(cleanupBrowser);

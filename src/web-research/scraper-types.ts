@@ -70,6 +70,6 @@ export interface NativeHtmlToMarkdownModule {
     },
     visitor: Record<string, (_ctxJson?: string) => Promise<string>>,
   ): Promise<string>;
-  JsHeadingStyle: { Atx: unknown };
-  JsCodeBlockStyle: { Backticks: unknown };
+  HeadingStyle: { Atx: unknown };
+  CodeBlockStyle: { Backticks: unknown };
 }

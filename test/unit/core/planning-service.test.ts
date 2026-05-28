@@ -132,13 +132,13 @@ describe('PlanningService', () => {
 
     it('dispose() clears all planning state', async () => {
       await service.initialize(MOCK_CTX);
-      service.addToQueryHistory(['q1', 'q2']);
-      service.incrementTotalResearchersPlanned(3);
+      service.addToQueryHistory('test-session', ['q1', 'q2']);
+      service.incrementTotalResearchersPlanned('test-session', 3);
       await service.dispose();
       // Service is disposed but we can still read the (reset) fields
-      expect(service.getTotalResearchersPlanned()).toBe(0);
-      expect(service.getQueryHistory()).toHaveLength(0);
-      expect(service.getCurrentPlan()).toBeNull();
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(0);
+      expect(service.getQueryHistory('test-session')).toHaveLength(0);
+      expect(service.getCurrentPlan('test-session')).toBeNull();
     });
   });
 
@@ -150,26 +150,26 @@ describe('PlanningService', () => {
     });
 
     it('starts with an empty history', () => {
-      expect(service.getQueryHistory()).toEqual([]);
+      expect(service.getQueryHistory('test-session')).toEqual([]);
     });
 
     it('accumulates queries across multiple calls', () => {
-      service.addToQueryHistory(['q1', 'q2']);
-      service.addToQueryHistory(['q3']);
-      expect(service.getQueryHistory()).toEqual(['q1', 'q2', 'q3']);
+      service.addToQueryHistory('test-session', ['q1', 'q2']);
+      service.addToQueryHistory('test-session', ['q3']);
+      expect(service.getQueryHistory('test-session')).toEqual(['q1', 'q2', 'q3']);
     });
 
     it('returns a copy — mutations do not affect internal state', () => {
-      service.addToQueryHistory(['q1']);
-      const history = service.getQueryHistory();
+      service.addToQueryHistory('test-session', ['q1']);
+      const history = service.getQueryHistory('test-session');
       history.push('q_injected');
-      expect(service.getQueryHistory()).toHaveLength(1);
+      expect(service.getQueryHistory('test-session')).toHaveLength(1);
     });
 
     it('addToQueryHistory with empty array is a no-op', () => {
-      service.addToQueryHistory(['q1']);
-      service.addToQueryHistory([]);
-      expect(service.getQueryHistory()).toHaveLength(1);
+      service.addToQueryHistory('test-session', ['q1']);
+      service.addToQueryHistory('test-session', []);
+      expect(service.getQueryHistory('test-session')).toHaveLength(1);
     });
   });
 
@@ -179,13 +179,13 @@ describe('PlanningService', () => {
     });
 
     it('starts at 0', () => {
-      expect(service.getTotalResearchersPlanned()).toBe(0);
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(0);
     });
 
     it('increments correctly', () => {
-      service.incrementTotalResearchersPlanned(2);
-      service.incrementTotalResearchersPlanned(3);
-      expect(service.getTotalResearchersPlanned()).toBe(5);
+      service.incrementTotalResearchersPlanned('test-session', 2);
+      service.incrementTotalResearchersPlanned('test-session', 3);
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(5);
     });
   });
 
@@ -195,12 +195,12 @@ describe('PlanningService', () => {
     });
 
     it('resets queryHistory, currentPlan, and totalResearchersPlanned', () => {
-      service.addToQueryHistory(['q1', 'q2']);
-      service.incrementTotalResearchersPlanned(4);
+      service.addToQueryHistory('test-session', ['q1', 'q2']);
+      service.incrementTotalResearchersPlanned('test-session', 4);
       service.clearPlanningState();
-      expect(service.getQueryHistory()).toEqual([]);
-      expect(service.getTotalResearchersPlanned()).toBe(0);
-      expect(service.getCurrentPlan()).toBeNull();
+      expect(service.getQueryHistory('test-session')).toEqual([]);
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(0);
+      expect(service.getCurrentPlan('test-session')).toBeNull();
     });
 
     it('is idempotent — calling twice does not throw', () => {
@@ -215,7 +215,7 @@ describe('PlanningService', () => {
     });
 
     it('returns null before any plan is generated', () => {
-      expect(service.getCurrentPlan()).toBeNull();
+      expect(service.getCurrentPlan('test-session')).toBeNull();
     });
   });
 
@@ -365,15 +365,15 @@ describe('PlanningService', () => {
 
     it('sets the currentPlan after a successful generatePlan call', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
-      await service.generatePlan({ query: 'test', complexity: 1, model: STUB_MODEL });
-      expect(service.getCurrentPlan()).not.toBeNull();
-      expect(service.getCurrentPlan()!.action).toBe('delegate');
+      await service.generatePlan({ sessionId: 'test-session', query: 'test', complexity: 1, model: STUB_MODEL });
+      expect(service.getCurrentPlan('test-session')).not.toBeNull();
+      expect(service.getCurrentPlan('test-session')!.action).toBe('delegate');
     });
 
     it('increments totalResearchersPlanned by the number of researchers in the plan', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(2)));
-      await service.generatePlan({ query: 'test', complexity: 1, model: STUB_MODEL });
-      expect(service.getTotalResearchersPlanned()).toBe(2);
+      await service.generatePlan({ sessionId: 'test-session', query: 'test', complexity: 1, model: STUB_MODEL });
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(2);
     });
 
     it('falls back to a single-researcher plan after 3 failed JSON parse attempts', async () => {
@@ -425,6 +425,7 @@ describe('PlanningService', () => {
 
   describe('updatePlanForRound', () => {
     const BASE_OPTIONS = {
+      sessionId: 'test-session',
       reports: new Map([['1.1', 'Report text about the topic.']]),
       round: 1,
       query: 'test query',
@@ -499,7 +500,7 @@ describe('PlanningService', () => {
     it('updates currentPlan after a successful call', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson()));
       await service.updatePlanForRound(BASE_OPTIONS);
-      expect(service.getCurrentPlan()).not.toBeNull();
+      expect(service.getCurrentPlan('test-session')).not.toBeNull();
     });
 
     it('includes reports from multiple researchers in the prompt (verifiable via completeSimple call)', async () => {

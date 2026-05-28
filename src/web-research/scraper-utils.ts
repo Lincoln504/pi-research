@@ -125,8 +125,8 @@ export function createNativeMarkdownConverter(
 
   return async (html: string): Promise<string> => {
     const markdown = await nativeModule.convertWithVisitor(html, {
-      headingStyle: nativeModule.JsHeadingStyle.Atx,
-      codeBlockStyle: nativeModule.JsCodeBlockStyle.Backticks,
+      headingStyle: nativeModule.HeadingStyle.Atx,
+      codeBlockStyle: nativeModule.CodeBlockStyle.Backticks,
       wrap: false,
     }, visitor);
     return stripImageLinks(markdown);

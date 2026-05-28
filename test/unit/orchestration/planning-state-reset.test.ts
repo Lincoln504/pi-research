@@ -44,17 +44,17 @@ describe('Planning Service State Reset', () => {
           { id: 'r1', name: 'Test', goal: 'Goal', queries: ['q1'] }
         ]
       };
-      directSetter.currentPlan = testPlan;
+      planningService.getState('test-session').currentPlan = testPlan;
       
-      const planBefore = planningService.getCurrentPlan();
+      const planBefore = planningService.getCurrentPlan('test-session');
       expect(planBefore).not.toBeNull();
       expect(planBefore?.action).toBeDefined();
       
       // Clean up research services
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
       
       // Plan should be cleared
-      const planAfter = planningService.getCurrentPlan();
+      const planAfter = planningService.getCurrentPlan('test-session');
       expect(planAfter).toBeNull();
     });
 
@@ -64,16 +64,16 @@ describe('Planning Service State Reset', () => {
       planningService.clearPlanningState();
       
       // Add some queries to history
-      planningService.addToQueryHistory(['query1', 'query2', 'query3']);
+      planningService.addToQueryHistory('test-session', ['query1', 'query2', 'query3']);
       
-      const historyBefore = planningService.getQueryHistory();
+      const historyBefore = planningService.getQueryHistory('test-session');
       expect(historyBefore.length).toBeGreaterThan(0);
       
       // Clean up research services
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
       
       // Query history should be cleared
-      const historyAfter = planningService.getQueryHistory();
+      const historyAfter = planningService.getQueryHistory('test-session');
       expect(historyAfter.length).toBe(0);
     });
 
@@ -84,16 +84,16 @@ describe('Planning Service State Reset', () => {
       
       // Manually increment the counter (simulating researcher planning)
       const directSetter = planningService as any;
-      directSetter.totalResearchersPlanned = 3;
+      planningService.incrementTotalResearchersPlanned('test-session', 3);
       
-      const countBefore = planningService.getTotalResearchersPlanned();
+      const countBefore = planningService.getTotalResearchersPlanned('test-session');
       expect(countBefore).toBeGreaterThan(0);
       
       // Clean up research services
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
       
       // Counter should be reset to 0
-      const countAfter = planningService.getTotalResearchersPlanned();
+      const countAfter = planningService.getTotalResearchersPlanned('test-session');
       expect(countAfter).toBe(0);
     });
 
@@ -103,25 +103,25 @@ describe('Planning Service State Reset', () => {
       
       // First research run
       planningService.clearPlanningState();
-      directSetter.totalResearchersPlanned = 2;
-      planningService.addToQueryHistory(['query1', 'query2', 'query3']);
+      planningService.incrementTotalResearchersPlanned('test-session', 2);
+      planningService.addToQueryHistory('test-session', ['query1', 'query2', 'query3']);
       
-      const count1 = planningService.getTotalResearchersPlanned();
-      const history1 = planningService.getQueryHistory();
+      const count1 = planningService.getTotalResearchersPlanned('test-session');
+      const history1 = planningService.getQueryHistory('test-session');
       
       expect(count1).toBeGreaterThan(0);
       expect(history1.length).toBeGreaterThan(0);
       
       // Cleanup (simulating end of first research run)
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
       
       // Second research run
       planningService.clearPlanningState();
-      directSetter.totalResearchersPlanned = 1;
-      planningService.addToQueryHistory(['query5']);
+      planningService.incrementTotalResearchersPlanned('test-session', 1);
+      planningService.addToQueryHistory('test-session', ['query5']);
       
-      const count2 = planningService.getTotalResearchersPlanned();
-      const history2 = planningService.getQueryHistory();
+      const count2 = planningService.getTotalResearchersPlanned('test-session');
+      const history2 = planningService.getQueryHistory('test-session');
       
       // Counter should start fresh, not continue from previous run
       expect(count2).toBeGreaterThan(0);
@@ -144,17 +144,17 @@ describe('Planning Service State Reset', () => {
         ]
       };
       
-      directSetter.currentPlan = testPlan;
-      directSetter.totalResearchersPlanned = 1;
+      planningService.getState('test-session').currentPlan = testPlan;
+      planningService.incrementTotalResearchersPlanned('test-session', 1);
       
-      expect(planningService.getCurrentPlan()).not.toBeNull();
-      expect(planningService.getTotalResearchersPlanned()).toBeGreaterThan(0);
+      expect(planningService.getCurrentPlan('test-session')).not.toBeNull();
+      expect(planningService.getTotalResearchersPlanned('test-session')).toBeGreaterThan(0);
       
       // Use resetResearchServices (alias for cleanup)
-      await resetResearchServices();
+      await resetResearchServices('test-session');
       
-      expect(planningService.getCurrentPlan()).toBeNull();
-      expect(planningService.getTotalResearchersPlanned()).toBe(0);
+      expect(planningService.getCurrentPlan('test-session')).toBeNull();
+      expect(planningService.getTotalResearchersPlanned('test-session')).toBe(0);
     });
 
     it('should handle multiple cleanup calls safely', async () => {
@@ -169,15 +169,15 @@ describe('Planning Service State Reset', () => {
         ]
       };
       
-      directSetter.currentPlan = testPlan;
-      expect(planningService.getCurrentPlan()).not.toBeNull();
+      planningService.getState('test-session').currentPlan = testPlan;
+      expect(planningService.getCurrentPlan('test-session')).not.toBeNull();
       
       // Multiple cleanup calls should be safe
-      await cleanupResearchServices();
-      await cleanupResearchServices();
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
+      await cleanupResearchServices('test-session');
+      await cleanupResearchServices('test-session');
       
-      expect(planningService.getCurrentPlan()).toBeNull();
+      expect(planningService.getCurrentPlan('test-session')).toBeNull();
     });
 
     it('should maintain researcher ID sequencing within a single run', async () => {
@@ -187,25 +187,25 @@ describe('Planning Service State Reset', () => {
       planningService.clearPlanningState();
       
       // First plan
-      directSetter.totalResearchersPlanned = 2;
+      planningService.incrementTotalResearchersPlanned('test-session', 2);
       
-      const count1 = planningService.getTotalResearchersPlanned();
+      const count1 = planningService.getTotalResearchersPlanned('test-session');
       expect(count1).toBeGreaterThan(0);
       
       // Second plan in same run (simulating multi-round research)
-      directSetter.totalResearchersPlanned = 3;
+      planningService.incrementTotalResearchersPlanned('test-session', 3);
       
-      const count2 = planningService.getTotalResearchersPlanned();
+      const count2 = planningService.getTotalResearchersPlanned('test-session');
       expect(count2).toBeGreaterThan(count1); // Should increment
       
       // Cleanup between runs
-      await cleanupResearchServices();
+      await cleanupResearchServices('test-session');
       
       // New run should start fresh
       planningService.clearPlanningState();
-      directSetter.totalResearchersPlanned = 1;
+      planningService.incrementTotalResearchersPlanned('test-session', 1);
       
-      const count3 = planningService.getTotalResearchersPlanned();
+      const count3 = planningService.getTotalResearchersPlanned('test-session');
       expect(count3).toBeGreaterThan(0);
       expect(count3).toBeLessThan(count2); // Should start fresh, not continue
     });

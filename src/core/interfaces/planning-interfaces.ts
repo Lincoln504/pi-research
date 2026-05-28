@@ -22,6 +22,7 @@ export interface SessionContext {
  * Options for generating a research plan
  */
 export interface GeneratePlanOptions {
+  sessionId: string;
   query: string;
   complexity: 1 | 2 | 3;
   model: Model<any>;
@@ -45,6 +46,7 @@ export interface GenerateQueriesOptions {
  * Options for updating plan for next round
  */
 export interface UpdatePlanOptions {
+  sessionId: string;
   reports: Map<string, string>;
   round: number;
   query: string;
@@ -66,11 +68,11 @@ export interface IPlanningService extends IService {
   generateResearchers(plan: ResearchPlan, query: string, complexity: 1 | 2 | 3): ResearcherConfig[];
   generateQueries(options: GenerateQueriesOptions): Promise<string[]>;
   updatePlanForRound(options: UpdatePlanOptions): Promise<ResearchPlan>;
-  getQueryHistory(): string[];
-  addToQueryHistory(queries: string[]): void;
-  getCurrentPlan(): ResearchPlan | null;
-  getTotalResearchersPlanned(): number;
-  incrementTotalResearchersPlanned(count: number): void;
+  getQueryHistory(sessionId: string): string[];
+  addToQueryHistory(sessionId: string, queries: string[]): void;
+  getCurrentPlan(sessionId: string): ResearchPlan | null;
+  getTotalResearchersPlanned(sessionId: string): number;
+  incrementTotalResearchersPlanned(sessionId: string, count: number): void;
   getTeamSize(complexity: 1 | 2 | 3): number;
   getQueryBudget(complexity: 1 | 2 | 3): number;
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string;
@@ -79,5 +81,5 @@ export interface IPlanningService extends IService {
   capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan;
   parseJsonPlan(text: string): ResearchPlan;
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
-  clearPlanningState(): void;
+  clearPlanningState(sessionId?: string): void;
 }

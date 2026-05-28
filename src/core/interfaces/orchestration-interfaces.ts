@@ -24,6 +24,6 @@ export interface IResearchOrchestration extends IService {
   distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[]): Promise<Map<string, string[]>>;
   runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>): Promise<void>;
   runSearchBurst(queries: string[], config: Config, signal?: AbortSignal, onProgress?: (links: number) => void): Promise<QueryResultWithError[]>;
-  storeLinkDescriptions(round: number, researchId: string, config: any): Promise<void>;
+  storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: any): Promise<void>;
   checkHealth(round: number, researchId: string): Promise<boolean>;
 }

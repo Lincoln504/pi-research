@@ -84,7 +84,7 @@ export class DeepResearchOrchestrator {
    */
   async run(signal?: AbortSignal): Promise<string> {
     // Reset services for this research run
-    await resetResearchServices();
+    await resetResearchServices(this.options.sessionId);
     const { model, query, complexity, researchId, observer } = this.options;
     const orchestrationService = await this.getOrchestrationService();
     const planningService = await this.getPlanningService();
@@ -119,13 +119,14 @@ export class DeepResearchOrchestrator {
         const synthesisService = await getResearchSynthesisService();
         observer?.onPlanningProgress?.('analyzing');
         const plan = await planningService.updatePlanForRound({
+            sessionId: this.options.sessionId,
             query: query,
             complexity,
             round: this.currentRound,
             model,
-            reports: synthesisService.getAllReports(),
-            previousPlan: planningService.getCurrentPlan(),
-            totalResearchersPlanned: planningService.getTotalResearchersPlanned(),
+            reports: synthesisService.getAllReports(this.options.sessionId),
+            previousPlan: planningService.getCurrentPlan(this.options.sessionId),
+            totalResearchersPlanned: planningService.getTotalResearchersPlanned(this.options.sessionId),
             signal,
             observer,
         });
@@ -176,12 +177,12 @@ export class DeepResearchOrchestrator {
         // Track how many researchers were planned this round
         // updatePlanForRound has a comment "We'll update totalResearchersPlanned in the orchestrator"
         if (plan.action === 'delegate' && plan.researchers && plan.researchers.length > 0) {
-            planningService.incrementTotalResearchersPlanned(plan.researchers.length);
+            planningService.incrementTotalResearchersPlanned(this.options.sessionId, plan.researchers.length);
         }
 
         // Record all queries used this round for cross-round deduplication
         if (plan.allQueries && plan.allQueries.length > 0) {
-            planningService.addToQueryHistory(plan.allQueries);
+            planningService.addToQueryHistory(this.options.sessionId, plan.allQueries);
         }
         
         // Fire evaluation decision observer event
@@ -217,7 +218,7 @@ export class DeepResearchOrchestrator {
         // Show embedding indicator in eval box while embedding runs
         observer?.onEvaluationStart?.(this.currentRound);
         observer?.onEvaluationProgress?.('embedding');
-        await orchestrationService.storeLinkDescriptions(this.currentRound, researchId, this.config);
+        await orchestrationService.storeLinkDescriptions(this.options.sessionId, this.currentRound, researchId, this.config);
 
         // 5. Evaluation Phase
         observer?.onEvaluationProgress?.('eval');
@@ -231,13 +232,14 @@ export class DeepResearchOrchestrator {
 
       const synthesisServiceFinal = await getResearchSynthesisService();
       const finalReport = await planningService.updatePlanForRound({
+          sessionId: this.options.sessionId,
           query: query,
           complexity,
           round: maxRounds, // Force synthesis
           model,
-          reports: synthesisServiceFinal.getAllReports(),
-          previousPlan: planningService.getCurrentPlan(),
-          totalResearchersPlanned: planningService.getTotalResearchersPlanned(),
+          reports: synthesisServiceFinal.getAllReports(this.options.sessionId),
+          previousPlan: planningService.getCurrentPlan(this.options.sessionId),
+          totalResearchersPlanned: planningService.getTotalResearchersPlanned(this.options.sessionId),
           mustSynthesize: true,
           signal,
           observer,
@@ -260,7 +262,7 @@ export class DeepResearchOrchestrator {
       observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     } finally {
-      await cleanupResearchServices();
+      await cleanupResearchServices(this.options.sessionId);
     }
   }
 }

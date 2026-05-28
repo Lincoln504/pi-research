@@ -51,8 +51,8 @@ vi.mock('pdf-oxide-wasm', () => {
 
 vi.mock('@kreuzberg/html-to-markdown-node', () => ({
   convertWithVisitor: vi.fn(async (html: string) => html),
-  JsHeadingStyle: { Atx: {} },
-  JsCodeBlockStyle: { Backticks: {} },
+  HeadingStyle: { Atx: {} },
+  CodeBlockStyle: { Backticks: {} },
 }));
 
 import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';

@@ -39,6 +39,27 @@ export function setupIpcErrorHandler(): void {
   }
 }
 
+/**
+ * Handle Uncaught Exceptions in Worker
+ */
+export function setupUncaughtExceptionHandler(): void {
+  process.on('uncaughtException', (err: Error) => {
+    // Suppress Playwright core errors that shouldn't crash the worker
+    if (err && err.message && err.message.includes('reading \'url\'') && err.stack && err.stack.includes('coreBundle.js')) {
+      logToDebugFile('WARN', `[Worker-${workerId}] Suppressed Playwright core error: ${err.message}`);
+      return;
+    }
+    // Also suppress Playwright frame errors (reading 'frames')
+    if (err && err.message && err.message.includes('reading \'frames\'') && err.stack && err.stack.includes('coreBundle.js')) {
+      logToDebugFile('WARN', `[Worker-${workerId}] Suppressed Playwright frame error: ${err.message}`);
+      return;
+    }
+    
+    logToDebugFile('ERROR', `[Worker-${workerId}] Uncaught Exception: ${err.stack || err.message}`);
+    // Don't crash immediately unless it's critical, the worker will be replaced by poolifier if it hangs
+  });
+}
+
 // Orphaned worker protection: If parent dies, kill the worker.
 // This works cross-platform (Linux, Mac, Windows) in Node.js.
 let orphanCheckTimer: NodeJS.Timeout | null = null;
