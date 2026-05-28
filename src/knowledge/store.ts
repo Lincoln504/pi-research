@@ -446,7 +446,10 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     try {
       this.table = null;
-      this.db = null;
+      if (this.db) {
+        this.db.close();
+        this.db = null;
+      }
     } catch (err) {
       logger.error('[store] Error during close:', err);
     }

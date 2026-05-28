@@ -4,7 +4,6 @@
  * Handles browser initialization, context management, and cleanup.
  */
 
-import { getRandomRealisticUA } from '../utils/user-agent.ts';
 import * as fs from 'node:fs';
 
 let browser: any = null;
@@ -80,81 +79,24 @@ export async function initBrowser(): Promise<void> {
         // temp profile per instance. This avoids persistent-context semantics
         // (where context.browser() returns null) and the profile-lock contention
         // that came with sharing a single user_data_dir path.
-        // Try with stealth addons first, fall back to basic config if it fails
-        let launchedBrowser: any;
-        try {
-          launchedBrowser = await Camoufox({
-            headless: true,
-            humanize: true,
-
-            // ENHANCED STEALTH OPTIONS
-            addons: [
-              'stealth',           // Core stealth features
-              'canvas',            // Canvas fingerprint protection
-              'webgl',             // WebGL fingerprint spoofing
-              'fonts',             // Font fingerprint randomization
-              'audio',             // Audio context spoofing
-              'media',             // Media device spoofing
-              'locale',            // Locale/language mimicking
-              'permissions',       // Permission spoofing
-            ],
-
-            // Screen properties to mimic real display
-            screen: {
-              width: 1920,
-              height: 1080,
-              colorDepth: 24,
-              pixelRatio: 1,
-            },
-
-            // Locale and timezone to match a real user
-            locale: 'en-US',
-            timezone: 'America/New_York',
-
-            // Geolocation (optional, can be randomized)
-            geolocation: {
-              latitude: 40.7128,  // New York City
-              longitude: -74.0060,
-            },
-
-            // Use realistic User-Agent
-            userAgent: getRandomRealisticUA(),
-
-            // Disable automation indicators that Cloudflare detects
-            exclude: [
-              '--enable-automation',
-              '--disable-blink-features=AutomationControlled',
-            ],
-          });
-        } catch (stealthError: any) {
-          // Stealth addons may fail in some environments, try without them
-          logToDebugFile('WARN', `[Worker-${workerId}] Stealth addons failed, retrying without: ${stealthError.message}`);
-          launchedBrowser = await Camoufox({
-            headless: true,
-            humanize: true,
-
-            // Screen properties to mimic real display
-            screen: {
-              width: 1920,
-              height: 1080,
-              colorDepth: 24,
-              pixelRatio: 1,
-            },
-
-            // Locale and timezone to match a real user
-            locale: 'en-US',
-            timezone: 'America/New_York',
-
-            // Use realistic User-Agent
-            userAgent: getRandomRealisticUA(),
-
-            // Disable automation indicators that Cloudflare detects
-            exclude: [
-              '--enable-automation',
-              '--disable-blink-features=AutomationControlled',
-            ],
-          });
-        }
+        // Camoufox provides built-in fingerprint spoofing via humanize, os, locale,
+        // screen, and geoip options. The addons[] option is for custom Firefox
+        // extension directories only (not named strings like 'stealth').
+        // Camoufox's built-in fingerprinting handles UA, timezone, geolocation, etc.
+        // coherently. Manual overrides for those via launch options are silently
+        // ignored by Playwright; set them at context level if needed, or rely on
+        // camoufox defaults for a consistent, coordinated fingerprint.
+        const launchedBrowser = await Camoufox({
+          headless: true,
+          humanize: true,
+          locale: 'en-US',
+          screen: {
+            width: 1920,
+            height: 1080,
+            colorDepth: 24,
+            pixelRatio: 1,
+          },
+        });
 
         context = await launchedBrowser.newContext({
           viewport: { width: 1920, height: 1080 },

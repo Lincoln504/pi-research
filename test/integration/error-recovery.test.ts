@@ -5,7 +5,7 @@
  * These are integration tests that require the browser and knowledge store.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import {
   runBrowserTask,
   stopBrowserManager,

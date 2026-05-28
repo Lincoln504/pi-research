@@ -84,14 +84,18 @@ export async function searchStore(
     .toArray();
 
   const filteredResults = results
-    .map(r => ({
-      url: r.url as string,
-      text: r.text as string,
-      content: (r.content as string | null) ?? undefined,
-      metadata: JSON.parse(r.metadata as string),
-      timestamp: Number(r.timestamp),
-    }))
-    .filter(doc => doc.metadata.ingestionType === 'synthesis-description');
+    .map(r => {
+      let metadata: Record<string, unknown> = {};
+      try { metadata = JSON.parse(r.metadata as string); } catch { /* corrupted row — skip */ }
+      return {
+        url: r.url as string,
+        text: r.text as string,
+        content: (r.content as string | null) ?? undefined,
+        metadata,
+        timestamp: Number(r.timestamp),
+      };
+    })
+    .filter(doc => doc.metadata['ingestionType'] === 'synthesis-description');
 
   const duration = Date.now() - startTime;
   metrics.observe('knowledge_store_search_duration_ms', duration);
@@ -128,13 +132,17 @@ export async function findDocumentsByUrl(
     metrics.increment('knowledge_store_query_cap_hits_total', 1);
   }
 
-  return results.map(r => ({
+  return results.map(r => {
+    let metadata: Record<string, unknown> = {};
+    try { metadata = JSON.parse(r.metadata as string); } catch { /* corrupted row */ }
+    return {
     url: r.url as string,
     text: r.text as string,
     content: (r.content as string | null) ?? undefined,
-    metadata: JSON.parse(r.metadata as string),
+    metadata,
     timestamp: Number(r.timestamp),
-  }));
+    };
+  });
 }
 
 /**
