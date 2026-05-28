@@ -242,9 +242,9 @@ export function createResearchTool(): ToolDefinition {
           updateUnsubInput(cleanup as any, tuiManager.unsubInput);
           // Note: wave timer will be set by the observer when searching starts
 
-          // Handle abort signal
+          // Handle abort signal — use { once: true } so the listener is auto-removed after the first fire
           if (aborted) {
-            aborted.addEventListener('abort', () => internalAbort.abort());
+            aborted.addEventListener('abort', () => internalAbort.abort(), { once: true });
           }
 
           // Setup scoped logging

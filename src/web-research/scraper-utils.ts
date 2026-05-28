@@ -13,7 +13,6 @@ import {
   MARKDOWN_IMAGE_PATTERN,
   BOT_PATTERNS,
   INTERNAL_NETWORK_PATTERNS,
-  type NativeJsNodeContext,
   type NativeHtmlToMarkdownModule,
 } from './scraper-types.ts';
 
@@ -96,40 +95,13 @@ export function stripImageLinks(markdown: string): string {
 export function createNativeMarkdownConverter(
   nativeModule: NativeHtmlToMarkdownModule,
 ): (html: string) => Promise<string> {
-  const visitor = {
-    async visitImage(): Promise<string> {
-      return JSON.stringify({ type: 'skip' });
-    },
-    async visitLink(ctxJson?: string): Promise<string> {
-      const parsed = JSON.parse(ctxJson ?? '{}') as { href?: string };
-      const href = parsed.href;
-      if (href !== undefined && (
-        href.startsWith('data:image/') ||
-        href.match(/\.(svg|png|jpg|jpeg|gif|webp|bmp|ico)$/i) !== null
-      )) {
-        return JSON.stringify({ type: 'skip' });
-      }
-      return JSON.stringify({ type: 'continue' });
-    },
-    async visitIframe(): Promise<string> {
-      return JSON.stringify({ type: 'skip' });
-    },
-    async visitElementStart(ctxJson?: string): Promise<string> {
-      const ctx = JSON.parse(ctxJson ?? '{}') as Partial<NativeJsNodeContext>;
-      if (ctx.tagName !== undefined && (FILTERED_TAGS as readonly string[]).includes(ctx.tagName)) {
-        return JSON.stringify({ type: 'skip' });
-      }
-      return JSON.stringify({ type: 'continue' });
-    },
-  };
-
   return async (html: string): Promise<string> => {
-    const markdown = await nativeModule.convertWithVisitor(html, {
+    const result = nativeModule.convert(html, {
       headingStyle: nativeModule.HeadingStyle.Atx,
       codeBlockStyle: nativeModule.CodeBlockStyle.Backticks,
       wrap: false,
-    }, visitor);
-    return stripImageLinks(markdown);
+    });
+    return stripImageLinks(result.content ?? '');
   };
 }
 

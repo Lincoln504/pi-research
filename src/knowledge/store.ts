@@ -138,10 +138,14 @@ export class KnowledgeStore implements IKnowledgeStore {
   private async migrationDrop(_oldModel: string, newModel: string): Promise<MigrationResult> {
     logger.warn(`[store] Dropping table and recreating with model ${newModel} (data will be lost)`);
 
-    const count = await this.table!.countRows();
+    if (!this.table || !this.db) {
+      throw new Error('Table not connected');
+    }
+
+    const count = await this.table.countRows();
     logger.warn(`[store] Deleting ${count} existing documents`);
 
-    await this.db!.dropTable(this.tableName);
+    await this.db.dropTable(this.tableName);
     this.table = await this.createTable();
 
     logger.info(`[store] Migration complete: ${count} documents removed, table recreated with model ${newModel}`);

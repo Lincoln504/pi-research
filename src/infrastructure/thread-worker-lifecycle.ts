@@ -89,7 +89,9 @@ export function setupOrphanProtection(): void {
       logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
       // FIX: Await cleanup to prevent browser/context leaks
       if (cleanupBrowser) {
-        await cleanupBrowser().catch(() => {});
+        await cleanupBrowser().catch(err => {
+          logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
+        });
       }
       // Clear the orphan check timer to prevent it from keeping the event loop alive
       if (orphanCheckTimer) {
@@ -147,7 +149,9 @@ export function createKillHandler(): () => Promise<void> {
   return async () => {
     logToDebugFile('INFO', `[Worker-${workerId}] Worker shutting down`);
     if (cleanupBrowser) {
-      await cleanupBrowser().catch(() => {});
+      await cleanupBrowser().catch(err => {
+        logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during shutdown:`, err);
+      });
     }
     // Clear the orphan check timer to prevent it from keeping the event loop alive
     cleanupOrphanProtection();

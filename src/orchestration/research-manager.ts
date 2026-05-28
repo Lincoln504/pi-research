@@ -14,7 +14,7 @@ import type { Config } from '../config.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
+import { ServiceNames, type IPlanningService } from '../core/service-interfaces.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;
@@ -49,8 +49,8 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
 
   // Validate that required services are initialized and healthy
   try {
-    const planningService = await getService(ServiceNames.PLANNING, ctx);
-    if (!planningService || typeof (planningService as any).isReady !== 'function' || !(planningService as any).isReady()) {
+    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING, ctx);
+    if (!planningService || !planningService.isReady()) {
       throw new Error('PlanningService is not initialized. Please restart the extension.');
     }
   } catch (err) {

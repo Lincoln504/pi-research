@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { platform, homedir } from 'node:os';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
+import { getLogger } from '../../logger.ts';
 
 // ============================================================================
 // Binary Cache Management
@@ -50,6 +51,12 @@ export function getBrowserEnv(): NodeJS.ProcessEnv {
         env['PLAYWRIGHT_BROWSERS_PATH'] = customPath;
     } else {
         delete env['PLAYWRIGHT_BROWSERS_PATH'];
+    }
+    // Pass the session log file path so thread-workers can write lifecycle and
+    // error events to the same log. Falls back to the global log if not set.
+    const logFilePath = getLogger().getLogFilePath();
+    if (logFilePath) {
+        env['PI_RESEARCH_LOG_FILE'] = logFilePath;
     }
     return env;
 }

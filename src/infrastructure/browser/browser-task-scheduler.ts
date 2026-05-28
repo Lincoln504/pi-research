@@ -31,7 +31,7 @@ export class BrowserTaskScheduler implements IScheduler {
     private consecutiveLeadershipMisses: number = 0;
     private readonly LEADERSHIP_MISS_THRESHOLD: number = 5;
     private isShuttingDown: boolean = false;
-    private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (reduced from 30m for efficiency)
+    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — must outlast the embedding phase for large documents (can take 20+ min on CPU)
 
     constructor(
         public readonly schedulerId: string,
@@ -287,7 +287,12 @@ export class BrowserTaskScheduler implements IScheduler {
             schedulerService.setSchedulerInitializationPromise(null);
         }
 
-        const serverInfo = await this.stateManager.getBrowserServer();
+        let serverInfo: { port: number; pid: number; schedulerId?: string } | null = null;
+        try {
+            serverInfo = await this.stateManager.getBrowserServer();
+        } catch (err) {
+            logger.warn('[Scheduler] Could not read browser server state during shutdown (state manager may be disposed):', err);
+        }
         // Only clear state if this scheduler still owns it — same pid AND same schedulerId.
         // Checking pid alone is wrong when a new scheduler wins election in the same process:
         // the old scheduler's shutdown would wipe the new leader's registration.

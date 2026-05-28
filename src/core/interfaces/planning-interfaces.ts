@@ -82,4 +82,5 @@ export interface IPlanningService extends IService {
   parseJsonPlan(text: string): ResearchPlan;
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
   clearPlanningState(sessionId?: string): void;
+  isReady(): boolean;
 }

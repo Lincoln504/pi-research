@@ -26,7 +26,7 @@ import { getService } from '../core/service-registry.ts';
 import { getConfig } from '../config.ts';
 import type { Config } from '../config.ts';
 import type { PlanningService } from '../core/planning-service.ts';
-import type { IResearchOrchestration } from '../core/service-interfaces.ts';
+import type { IResearchOrchestration, ResearchPlan } from '../core/service-interfaces.ts';
 
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -98,6 +98,7 @@ export class DeepResearchOrchestrator {
     const maxRounds = getMaxRounds(complexity);
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
+    let loopSynthesisPlan: ResearchPlan | null = null;
 
     try {
       while (this.currentRound < maxRounds) {
@@ -137,6 +138,9 @@ export class DeepResearchOrchestrator {
 
         if (plan.action === 'synthesize' || this.currentRound >= maxRounds) {
             logger.log(`[DeepOrchestrator] Synthesis phase reached at Round ${this.currentRound} ${this.elapsed()}`);
+            if (plan.action === 'synthesize') {
+                loopSynthesisPlan = plan;
+            }
             break;
         }
 
@@ -224,26 +228,34 @@ export class DeepResearchOrchestrator {
         observer?.onEvaluationProgress?.('eval');
       }
 
-      // Final Synthesis
+      // Final Synthesis — reuse the plan from the loop if the evaluator already
+      // decided to synthesize (avoids a second full LLM call). Only call the
+      // evaluator again when the loop ended because maxRounds was hit without
+      // the evaluator explicitly choosing to synthesize.
       logger.log(`[DeepOrchestrator] Final synthesis ${this.elapsed()}`);
       observer?.onRoundStart?.(maxRounds + 1); // Progress indicator for synthesis
       observer?.onEvaluationStart?.(maxRounds);
       observer?.onEvaluationProgress?.('eval');
 
-      const synthesisServiceFinal = await getResearchSynthesisService();
-      const finalReport = await planningService.updatePlanForRound({
-          sessionId: this.options.sessionId,
-          query: query,
-          complexity,
-          round: maxRounds, // Force synthesis
-          model,
-          reports: synthesisServiceFinal.getAllReports(this.options.sessionId),
-          previousPlan: planningService.getCurrentPlan(this.options.sessionId),
-          totalResearchersPlanned: planningService.getTotalResearchersPlanned(this.options.sessionId),
-          mustSynthesize: true,
-          signal,
-          observer,
-      });
+      let finalReport: ResearchPlan;
+      if (loopSynthesisPlan !== null) {
+          finalReport = loopSynthesisPlan;
+      } else {
+          const synthesisServiceFinal = await getResearchSynthesisService();
+          finalReport = await planningService.updatePlanForRound({
+              sessionId: this.options.sessionId,
+              query: query,
+              complexity,
+              round: maxRounds,
+              model,
+              reports: synthesisServiceFinal.getAllReports(this.options.sessionId),
+              previousPlan: planningService.getCurrentPlan(this.options.sessionId),
+              totalResearchersPlanned: planningService.getTotalResearchersPlanned(this.options.sessionId),
+              mustSynthesize: true,
+              signal,
+              observer,
+          });
+      }
 
       const result = finalReport.content || 'Research completed but no summary was generated.';
       const sessionDuration = Date.now() - this.sessionStart;

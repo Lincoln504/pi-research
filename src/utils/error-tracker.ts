@@ -115,8 +115,6 @@ export class ErrorTracker {
       pattern.contexts.shift();
     }
 
-    // Log to debug (error tracking is operational, not an error itself)
-    console.debug(`[ErrorTracker] Tracked error pattern: ${signature} (Count: ${pattern.count})`);
   }
 
   /**

@@ -56,20 +56,16 @@ export const PRIMARY_SCRAPER_TIMEOUT = 30000;
 
 export type { ScrapeLayerResult } from './types.ts';
 
-export interface NativeJsNodeContext {
-  tagName: string;
-}
-
 export interface NativeHtmlToMarkdownModule {
-  convertWithVisitor(
+  convert(
     html: string,
-    options: {
-      headingStyle: unknown;
-      codeBlockStyle: unknown;
-      wrap: boolean;
-    },
-    visitor: Record<string, (_ctxJson?: string) => Promise<string>>,
-  ): Promise<string>;
+    options?: {
+      headingStyle?: unknown;
+      codeBlockStyle?: unknown;
+      wrap?: boolean;
+    } | null,
+    visitor?: object | null,
+  ): { content?: string };
   HeadingStyle: { Atx: unknown };
   CodeBlockStyle: { Backticks: unknown };
 }

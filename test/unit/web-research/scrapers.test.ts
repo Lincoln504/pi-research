@@ -50,7 +50,7 @@ vi.mock('pdf-oxide-wasm', () => {
 });
 
 vi.mock('@kreuzberg/html-to-markdown-node', () => ({
-  convertWithVisitor: vi.fn(async (html: string) => html),
+  convert: vi.fn((html: string) => ({ content: html })),
   HeadingStyle: { Atx: {} },
   CodeBlockStyle: { Backticks: {} },
 }));
