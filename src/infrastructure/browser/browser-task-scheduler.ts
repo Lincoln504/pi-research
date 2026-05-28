@@ -128,17 +128,20 @@ export class BrowserTaskScheduler implements IScheduler {
 
         // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
         // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
-        const timeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
+        // However, we must add a generous 120s safety buffer for the task to wait in the worker pool queue.
+        // The worker itself enforces its own strict internal timeouts for the actual browser operations.
+        const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
+        const timeoutMs = baseTimeoutMs + 120000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms`)), timeoutMs);
+            timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: { results: SearchResult[], error?: string };
         try {
             result = await Promise.race([
-                pool.execute({ type: 'search', query }),
+                pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]) as { results: SearchResult[], error?: string };
         } catch (error) {
@@ -176,17 +179,20 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer(); // Keep server alive while clients are actively scraping
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
+        // Add a generous 120s safety buffer to account for worker queueing. The worker itself
+        // enforces the actual SCRAPE_TIMEOUT_MS limit on the browser operations.
+        const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
+        const timeoutMs = baseTimeoutMs + 120000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);
+            timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: any;
         try {
             result = await Promise.race([
-                pool.execute({ type: 'scrape', url }),
+                pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]);
         } catch (error) {
@@ -221,10 +227,11 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer(); // Keep server alive during active health-checks from clients
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = 45000;
+        // Add a generous safety buffer to account for worker queueing.
+        const timeoutMs = 45000 + 60000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms`)), timeoutMs);
+            timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
