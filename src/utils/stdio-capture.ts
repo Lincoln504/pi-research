@@ -10,10 +10,42 @@ import type { LogContext } from './log-utils.ts';
 import { getLogContext, formatArg, safeJsonStringify } from './log-utils.ts';
 
 /**
- * Global flag to prevent concurrent or nested output capture, as process.stderr
- * and process.stdout are shared global resources.
+ * Session-scoped capture flags to support concurrent research runs.
+ * Maps session IDs to capture state, with a global flag as fallback.
  */
+const sessionCaptureStates = new Map<string, boolean>();
 let isAnyLoggerCapturingOutput = false;
+
+/**
+ * Check if a session is currently capturing output
+ */
+export function isSessionCapturing(sessionId?: string): boolean {
+  if (sessionId) {
+    return sessionCaptureStates.get(sessionId) ?? false;
+  }
+  return isAnyLoggerCapturingOutput;
+}
+
+/**
+ * Mark a session as capturing or not capturing
+ */
+export function setSessionCapturing(sessionId: string, capturing: boolean): void {
+  sessionCaptureStates.set(sessionId, capturing);
+  if (capturing) {
+    isAnyLoggerCapturingOutput = true;
+  } else {
+    // Update global flag based on all sessions
+    isAnyLoggerCapturingOutput = Array.from(sessionCaptureStates.values()).some(v => v);
+  }
+}
+
+/**
+ * Clear a session's capture state
+ */
+export function clearSessionCapture(sessionId: string): void {
+  sessionCaptureStates.delete(sessionId);
+  isAnyLoggerCapturingOutput = Array.from(sessionCaptureStates.values()).some(v => v);
+}
 
 /**
  * Native log patterns that should be captured
@@ -129,13 +161,20 @@ function createConsolePatch(level: string, logFile: string, hasSufficientDiskSpa
 export async function captureStdio<T>(
   logFile: string,
   hasSufficientDiskSpace: () => boolean,
-  task: () => Promise<T>
+  task: () => Promise<T>,
+  sessionId?: string
 ): Promise<T> {
-  if (!logFile || isAnyLoggerCapturingOutput) {
+  // Check if this specific session or any session is already capturing
+  const sessionCapturing = sessionId ? isSessionCapturing(sessionId) : false;
+  if (!logFile || sessionCapturing || (!sessionId && isAnyLoggerCapturingOutput)) {
     return await task();
   }
 
-  isAnyLoggerCapturingOutput = true;
+  if (sessionId) {
+    setSessionCapturing(sessionId, true);
+  } else {
+    isAnyLoggerCapturingOutput = true;
+  }
 
   const decoder = new TextDecoder();
 
@@ -325,7 +364,11 @@ export async function captureStdio<T>(
     console.warn = originalConsole.warn;
     console.error = originalConsole.error;
     console.debug = originalConsole.debug;
-    isAnyLoggerCapturingOutput = false;
+    if (sessionId) {
+      setSessionCapturing(sessionId, false);
+    } else {
+      isAnyLoggerCapturingOutput = false;
+    }
 
     // Restore FD 2
     if (fd2Redirected && savedFd2 >= 0) {

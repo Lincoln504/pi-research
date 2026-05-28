@@ -83,18 +83,13 @@ export function isPoolShutdownError(error: unknown): boolean {
     );
 }
 
+// Session-scoped circuit breaker storage to support concurrent research runs
+const sessionCircuitBreakers = new Map<string, CircuitBreaker>();
+
 /**
- * Circuit breaker for browser pool operations.
- * Handles transient socket errors with automatic retries.
- *
- * Pool-shutdown errors ("Worker pool is shutting down", "Cannot execute a task on
- * destroying pool") are expected transient states during a forceSchedulerRestart
- * drain window. They do NOT count toward the failure threshold — the pool will
- * recover on its own once the drain finishes. Only genuine connection failures
- * (ECONNREFUSED, ECONNRESET, etc.) indicate a broken service and should trip the
- * circuit.
+ * Default circuit breaker configuration
  */
-export const browserCircuitBreaker = new CircuitBreaker({
+const DEFAULT_BREAKER_CONFIG: any = {
     // Raised from 3→8: parallel search bursts of 20 queries frequently produce
     // simultaneous timeouts on slow/CF-protected sites. A threshold of 3 caused
     // the breaker to open mid-burst, blocking all subsequent requests for the round.
@@ -114,12 +109,42 @@ export const browserCircuitBreaker = new CircuitBreaker({
         // Only genuine socket-layer failures (ECONNREFUSED, ECONNRESET, etc.) trip the circuit.
         return isTransientSocketError(error);
     }
-});
+};
 
 /**
- * Reset the browser circuit breaker to CLOSED state.
+ * Get or create a session-scoped circuit breaker
+ */
+export function getBrowserCircuitBreaker(sessionId: string): CircuitBreaker {
+    let breaker = sessionCircuitBreakers.get(sessionId);
+    if (!breaker) {
+        breaker = new CircuitBreaker({ ...DEFAULT_BREAKER_CONFIG, name: `BrowserPool-${sessionId}` });
+        sessionCircuitBreakers.set(sessionId, breaker);
+    }
+    return breaker;
+}
+
+/**
+ * Clear a session's circuit breaker
+ */
+export function clearSessionCircuitBreaker(sessionId: string): void {
+    sessionCircuitBreakers.delete(sessionId);
+}
+
+/**
+ * Global fallback circuit breaker for backward compatibility
+ * @deprecated Use getBrowserCircuitBreaker(sessionId) instead
+ */
+export const browserCircuitBreaker = new CircuitBreaker(DEFAULT_BREAKER_CONFIG);
+
+/**
+ * Reset all browser circuit breakers
  * Call this in test teardown/setup to prevent cross-test circuit state bleed.
  */
-export function resetBrowserCircuitBreaker(): void {
-    browserCircuitBreaker.reset();
+export function resetBrowserCircuitBreaker(sessionId?: string): void {
+    if (sessionId) {
+        clearSessionCircuitBreaker(sessionId);
+    } else {
+        sessionCircuitBreakers.clear();
+        browserCircuitBreaker.reset();
+    }
 }

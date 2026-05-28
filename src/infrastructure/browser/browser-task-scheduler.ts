@@ -176,7 +176,7 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer(); // Keep server alive while clients are actively scraping
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        const timeoutMs = 60000;
+        const timeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms`)), timeoutMs);

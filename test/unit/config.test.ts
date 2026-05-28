@@ -140,6 +140,11 @@ describe('config (refactored)', () => {
     });
 
     it('should throw for EMBEDDING_DEVICE with an unsupported value', () => {
+      const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'invalid' }, {});
+      expect(() => validateConfig(config)).toThrow('webgpu, cpu');
+    });
+
+    it('should reject EMBEDDING_DEVICE of "cuda"', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cuda' }, {});
       expect(() => validateConfig(config)).toThrow('webgpu, cpu');
     });
@@ -152,6 +157,11 @@ describe('config (refactored)', () => {
     it('should accept EMBEDDING_DEVICE of "cpu"', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cpu' }, {});
       expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should throw for SCRAPE_TIMEOUT_MS below minimum', () => {
+      const config = createConfig({ PI_RESEARCH_SCRAPE_TIMEOUT_MS: '1000' }, {});
+      expect(() => validateConfig(config)).toThrow('5000–120000');
     });
 
     it('should throw for HEALTH_CHECK_TIMEOUT_MS below 20000', () => {

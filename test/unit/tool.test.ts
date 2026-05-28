@@ -44,6 +44,7 @@ vi.mock('../../src/logger.ts', () => ({
     runCapturingStderr: vi.fn(async (task) => await task()),
   })),
   setLogger: vi.fn(),
+  runWithLogger: vi.fn(async (_logger, fn) => await fn()),
 }));
 
 vi.mock('../../src/config.ts', () => ({

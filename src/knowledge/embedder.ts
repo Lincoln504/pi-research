@@ -24,6 +24,7 @@ import {
   getHFEnv,
   registerGlobalEmbedder,
   unregisterGlobalEmbedder,
+  initializeDawnWebGPU,
 } from './embedder-utils.ts';
 import {
   isWebGpuDeviceError,
@@ -69,17 +70,23 @@ export class Embedder {
     this.queryPrefix = options.queryPrefix ?? '';
     this.initializationTimeoutMs = options.initializationTimeoutMs ?? 120000;
     this.originalDevice = options.device ?? 'webgpu';
-    this.device = hasWebGpuFallback() && this.originalDevice === 'webgpu' ? 'cpu' : this.originalDevice;
+    
+    // Check for fallbacks
+    const isWebGpu = this.originalDevice === 'webgpu';
+
+    if (hasWebGpuFallback() && isWebGpu) {
+      this.device = 'cpu';
+      logger.info('[embedder] Skipping WebGPU (previous fallback detected), using CPU directly');
+    } else {
+      this.device = this.originalDevice;
+    }
+
     this.maxTokens = options.maxTokens ?? 512;
     this.batchSize = options.batchSize ?? 8;
     this.charsPerToken = options.charsPerToken ?? 4;
     this.documentPrefix = options.documentPrefix ?? '';
     this.stateManager = options.stateManager ?? null;
     this.useCache = options.useCache ?? true;
-
-    if (hasWebGpuFallback() && this.originalDevice === 'webgpu' && this.device === 'cpu') {
-      logger.info('[embedder] Skipping WebGPU (previous fallback detected), using CPU directly');
-    }
 
     // Register this instance so the beforeExit handler can dispose it before
     // the ONNX C++ runtime tears down its global logger singleton (prevents crash).
@@ -147,6 +154,11 @@ export class Embedder {
         } else if (acquired) {
           this.gpuLockHeld = true;
         }
+      }
+
+      // Try to initialize WebGPU via Dawn for Node.js environments
+      if (this.device === 'webgpu') {
+        await initializeDawnWebGPU();
       }
 
       const cached = await isModelCached(this.model);

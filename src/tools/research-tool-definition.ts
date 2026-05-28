@@ -18,7 +18,7 @@ import { Type } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
 import { metrics } from '../utils/metrics.ts';
-import { createResearchRunId, logger, setLogger, createLogger, isVerboseFromEnv, getLogger } from '../logger.ts';
+import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
 import { startResearchSession, registerSessionAbort } from '../utils/session-state.ts';
@@ -247,77 +247,71 @@ export function createResearchTool(): ToolDefinition {
             aborted.addEventListener('abort', () => internalAbort.abort(), { once: true });
           }
 
-          // Setup scoped logging
+          // Setup scoped logging — use AsyncLocalStorage so concurrent runs don't bleed
           const researchLogger = createLogger({ researchRunId: researchId, verbose: isVerboseFromEnv() });
-          const previousLogger = getLogger(); // Save the actual Logger instance, not the proxy
-          setLogger(researchLogger);
 
           // Hide working indicator
           hideWorkingIndicator(ctx);
 
-          try {
-            // Run research
-            const result = await runResearch({
-              ctx,
-              query: sanitizedQuery,
-              depth: (depth ?? 0) as ResearchDepth,
-              model: selectedModel as Model<any>,
-              observer,
-              sessionId: piSessionId,
-              researchId,
-            }, internalAbort.signal);
-
-            // Stop health monitor
-            if (healthMonitorInstance) {
-              healthMonitorInstance.stop();
-            }
-
-            // Stop wave animation
-            stopObserverWaveAnimation(observerState, panelState);
-
-            const exportPath = await exportResearchReport(sanitizedQuery, result, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
-            const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
-
-            // Append error summary if errors occurred during research
-            const errorReport = errorTracker.getReport();
-            let resultWithErrorSummary = finalResult;
-            if (errorReport.totalErrors > 0) {
-              resultWithErrorSummary = appendErrorSummary(finalResult, errorReport);
-            }
-
-            // Clear error tracker for next research run
-            errorTracker.clear();
-
-            return { result: resultWithErrorSummary, tokens: panelState.totalTokens };
-          } catch (error) {
-            if (aborted?.aborted || internalAbort.signal.aborted) {
-              return { result: 'Research cancelled.', tokens: 0 };
-            }
-            throw error;
-          } finally {
-            // Restore previous logger (wrap in try-catch to allow other cleanup to run)
+          const researchResult = await runWithLogger(researchLogger, async () => {
             try {
-              setLogger(previousLogger);
-            } catch (loggerRestoreError) {
-              console.error('[research] Logger restoration failed:', loggerRestoreError);
-            }
-            
-            // Run cleanup (wrap in try-catch to allow other cleanup to run)
-            try {
-              await cleanup();
-            } catch (cleanupError) {
-              console.error('[research] Cleanup failed:', cleanupError);
-            }
-            
-            // Dispose TUI manager (wrap in try-catch)
-            try {
-              if (tuiManager) {
-                tuiManager.dispose();
+              // Run research
+              const result = await runResearch({
+                ctx,
+                query: sanitizedQuery,
+                depth: (depth ?? 0) as ResearchDepth,
+                model: selectedModel as Model<any>,
+                observer,
+                sessionId: piSessionId,
+                researchId,
+              }, internalAbort.signal);
+
+              // Stop health monitor
+              if (healthMonitorInstance) {
+                healthMonitorInstance.stop();
               }
-            } catch (disposeError) {
-              console.error('[research] TUI dispose failed:', disposeError);
+
+              // Stop wave animation
+              stopObserverWaveAnimation(observerState, panelState);
+
+              const exportPath = await exportResearchReport(sanitizedQuery, result, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
+              const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
+
+              // Append error summary if errors occurred during research
+              const errorReport = errorTracker.getReport();
+              let resultWithErrorSummary = finalResult;
+              if (errorReport.totalErrors > 0) {
+                resultWithErrorSummary = appendErrorSummary(finalResult, errorReport);
+              }
+
+              // Clear error tracker for next research run
+              errorTracker.clear();
+
+              return { result: resultWithErrorSummary, tokens: panelState.totalTokens };
+            } catch (error) {
+              if (aborted?.aborted || internalAbort.signal.aborted) {
+                return { result: 'Research cancelled.', tokens: 0 };
+              }
+              throw error;
+            } finally {
+              // Run cleanup (wrap in try-catch to allow other cleanup to run)
+              try {
+                await cleanup();
+              } catch (cleanupError) {
+                console.error('[research] Cleanup failed:', cleanupError);
+              }
+
+              // Dispose TUI manager (wrap in try-catch)
+              try {
+                if (tuiManager) {
+                  tuiManager.dispose();
+                }
+              } catch (disposeError) {
+                console.error('[research] TUI dispose failed:', disposeError);
+              }
             }
-          }
+          });
+          return researchResult;
         });
 
         return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens } };

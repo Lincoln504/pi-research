@@ -250,14 +250,16 @@ export class QuickResearchOrchestrator {
             let enqueued = 0;
             for (const cit of citations) {
               if (cit.url && cit.description) {
+                const fullContent = getCachedScrapedContent(this.options.researchId, cit.url);
                 writer.enqueue({
                   url: normalizeUrl(cit.url),
                   markdown: cit.description,
-                  content: getCachedScrapedContent(this.options.researchId, cit.url),
+                  content: fullContent,
                   metadata: {
                     ingestionType: 'synthesis-description',
                     source: 'researcher',
-                    synthesizedAt: new Date().toISOString()
+                    synthesizedAt: new Date().toISOString(),
+                    fullContentSnippet: fullContent?.substring(0, 5000)
                   }
                 });
                 enqueued++;

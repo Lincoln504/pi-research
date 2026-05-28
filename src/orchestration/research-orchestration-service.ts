@@ -214,17 +214,17 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         }
 
         for (const link of links) {
-          const content = getCachedScrapedContent(researchId, link.url);
-          if (content) {
+          if (link.url && link.description) {
             writer.enqueue({
               url: normalizeUrl(link.url),
-              markdown: content,
+              markdown: link.description,
               metadata: {
                 researchId,
                 round,
                 researcherId: key,
                 description: link.description,
                 sourceOrigin: link.url,
+                fullContentSnippet: getCachedScrapedContent(researchId, link.url)?.substring(0, 5000)
               }
             });
             enqueued++;

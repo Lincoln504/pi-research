@@ -19,6 +19,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Sanitize the current process.argv before pool initialization to prevent
+ * research queries from leaking into worker process command lines.
+ * This is a temporary measure for the duration of pool creation.
+ *
+ * Note: Poolifier's FixedClusterPool uses cluster.fork() which inherits the
+ * parent's argv. We temporarily sanitize it during pool creation to minimize
+ * query exposure in worker process command lines visible via ps aux.
+ */
+function sanitizeArgvForPoolCreation(): () => void {
+    const originalArgv = [...process.argv];
+    process.argv = originalArgv.slice(0, 2);
+    return () => { process.argv = originalArgv; };
+}
+
+/**
  * Worker pool manager for browser operations.
  */
 export class WorkerPoolManager implements IService {
@@ -78,6 +93,9 @@ export class WorkerPoolManager implements IService {
                 ensureBrowserCacheDir();
                 const browserEnv = getBrowserEnv();
 
+                // Sanitize argv to prevent research query exposure in worker processes
+                const restoreArgv = sanitizeArgvForPoolCreation();
+
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
                 this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.ts'), {
                     env: browserEnv,
@@ -101,6 +119,9 @@ export class WorkerPoolManager implements IService {
                         tasksStealingOnBackPressure: true
                     }
                 });
+
+                // Restore original argv after pool is created
+                restoreArgv();
 
                 // Secondary race check: if shutdown() was called concurrent with the
                 // async pool construction above (between the early check and here).

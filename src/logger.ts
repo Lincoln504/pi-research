@@ -10,6 +10,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
 import { errorTracker, type ErrorContext } from './utils/error-tracker.ts';
 import {
@@ -160,24 +161,66 @@ export class Logger implements ILogger {
   }
 }
 
+// AsyncLocalStorage context for concurrent run isolation
+const loggerContext = new AsyncLocalStorage<Logger>();
+
+/**
+ * Run a function with a specific logger bound to the async context.
+ * All calls to getLogger() within fn (and any async work it spawns) will
+ * return this logger instance, providing proper isolation for concurrent runs.
+ */
+export function runWithLogger<T>(loggerInstance: Logger, fn: () => Promise<T>): Promise<T> {
+  return loggerContext.run(loggerInstance, fn);
+}
+
+// Session-scoped logger storage to support concurrent research runs
+// Each session gets its own logger instance to prevent log bleeding
+const sessionLoggers = new Map<string, Logger>();
 let _globalLogger: Logger | null = null;
 
-export function getLogger(): Logger {
+export function getLogger(sessionId?: string): Logger {
+  // Check async context first (used for concurrent run isolation via runWithLogger)
+  const contextLogger = loggerContext.getStore();
+  if (contextLogger) return contextLogger;
+
+  // Return session-scoped logger if sessionId is provided
+  if (sessionId) {
+    let lg = sessionLoggers.get(sessionId);
+    if (!lg) {
+      lg = new Logger({ verbose: isVerboseFromEnv(), researchRunId: sessionId });
+      sessionLoggers.set(sessionId, lg);
+    }
+    return lg;
+  }
+  // Fall back to global logger for backward compatibility
   if (!_globalLogger) {
     _globalLogger = new Logger({ verbose: isVerboseFromEnv() });
   }
   return _globalLogger;
 }
 
-export function setLogger(loggerInstance: Logger): void {
+export function setLogger(loggerInstance: Logger, sessionId?: string): void {
   if (loggerInstance && !(loggerInstance as any)[LOGGER_BRAND]) {
     throw new Error('setLogger must be called with a Logger instance, not the wrapper.');
   }
-  _globalLogger = loggerInstance;
+  if (sessionId) {
+    sessionLoggers.set(sessionId, loggerInstance);
+  } else {
+    _globalLogger = loggerInstance;
+  }
 }
 
-export function resetLogger(): void {
-  _globalLogger = null;
+export function resetLogger(sessionId?: string): void {
+  if (sessionId) {
+    sessionLoggers.delete(sessionId);
+  } else {
+    _globalLogger = null;
+    sessionLoggers.clear();
+  }
+}
+
+export function hasSessionLogger(sessionId: string): boolean {
+  return sessionLoggers.has(sessionId);
 }
 
 export function createLogger(options: Partial<LoggerOptions> = {}): Logger {

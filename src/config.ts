@@ -44,8 +44,10 @@ export interface Config {
   KNOWLEDGE_STORE_ENABLED: boolean;
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: string;
-  /** Inference backend for embeddings: 'webgpu' (Dawn/Vulkan/Metal/D3D12, 3–9× faster) or 'cpu' */
+  /** Inference backend for embeddings: 'webgpu' (Dawn/Vulkan/Metal/D3D12 via Vulkan — works on virtually all GPUs) or 'cpu' (fallback) */
   EMBEDDING_DEVICE: string;
+  /** Timeout for scraping operations in milliseconds (default: 15000) */
+  SCRAPE_TIMEOUT_MS: number;
   /** How long to keep cached scrapes in the knowledge store (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
   /** Timeout for embedding model initialization in milliseconds (default: 300000) */
@@ -76,6 +78,7 @@ export const DEFAULTS: Config = {
   KNOWLEDGE_STORE_ENABLED: true,
   EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
   EMBEDDING_DEVICE: 'webgpu',
+  SCRAPE_TIMEOUT_MS: 15000,
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   EMBEDDING_MODEL_INIT_TIMEOUT_MS: 300_000, // 5 minutes
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
@@ -141,6 +144,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: String(config.KNOWLEDGE_STORE_ENABLED),
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
+    PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
     PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
@@ -314,6 +318,7 @@ export function createConfig(
     KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_STORE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE)!,
+    SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvFloat(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
@@ -391,6 +396,11 @@ export function validateConfig(config: Config = getConfig()): void {
   if (config.KNOWLEDGE_STORE_CACHE_TTL_DAYS < 1 || config.KNOWLEDGE_STORE_CACHE_TTL_DAYS > 365) {
     throw new Error(
       `PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS must be 1–365, got ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS}`,
+    );
+  }
+  if (config.SCRAPE_TIMEOUT_MS < 5000 || config.SCRAPE_TIMEOUT_MS > 120000) {
+    throw new Error(
+      `PI_RESEARCH_SCRAPE_TIMEOUT_MS must be 5000–120000ms, got ${config.SCRAPE_TIMEOUT_MS}`,
     );
   }
   if (['webgpu', 'cpu'].indexOf(config.EMBEDDING_DEVICE) === -1) {

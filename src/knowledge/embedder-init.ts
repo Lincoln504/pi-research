@@ -22,7 +22,7 @@ export async function loadPipelineWithTimeout(
   const errorMessage = `Model load timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
 
   const pipelinePromise = pipeline('feature-extraction', model, {
-    device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'cuda' | 'dml' | 'coreml' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
+    device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
     ...(useCache === false ? { use_cache: false } : {}),
     // Clamp ONNX intra-op thread pool to 2 threads per session.
     // Default (0) = one thread per physical CPU core. With multiple concurrent

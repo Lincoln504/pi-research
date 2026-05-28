@@ -354,6 +354,13 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
+    {
+      id: 'SCRAPE_TIMEOUT_MS',
+      label: 'Scrape Timeout (s)',
+      description: 'Per-page scrape timeout in seconds (5-120s)',
+      currentValue: String(Math.round(config.SCRAPE_TIMEOUT_MS / 1000)),
+      values: ['5', '10', '15', '30', '60', '120'],
+    },
   ];
 
   const result = await ctx.ui.custom(
@@ -375,6 +382,7 @@ async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<vo
           else if (id === 'MAX_CONCURRENT_RESEARCHERS' || id === 'WORKER_THREADS' || id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') (config as any)[id] = parseInt(newValue, 10);
           else if (id === 'MAX_SCRAPE_BATCHES') config.MAX_SCRAPE_BATCHES = newValue === 'Unlimited' ? 0 : parseInt(newValue, 10);
           else if (id === 'RESEARCHER_TIMEOUT_MS') config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+          else if (id === 'SCRAPE_TIMEOUT_MS') config.SCRAPE_TIMEOUT_MS = parseInt(newValue, 10) * 1000;
           else (config as any)[id] = newValue;
           tui.requestRender();
         },
