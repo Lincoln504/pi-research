@@ -370,6 +370,9 @@ export class PlanningService implements IPlanningService {
     if (mustSynthesize && plan.action !== 'synthesize') {
       logger.warn(`[${this.name}] Evaluator tried to delegate despite reaching max rounds; forcing synthesis.`);
       plan.action = 'synthesize';
+      if (!plan.content) {
+        plan.content = text;
+      }
     }
 
     this.getState(sessionId).currentPlan = plan;
