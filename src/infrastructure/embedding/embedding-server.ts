@@ -6,7 +6,11 @@
  */
 
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { logger } from '../../logger.ts';
+import { captureStdio } from '../../utils/stdio-capture.ts';
+import { buildDefaultDebugLogPath } from '../../utils/log-utils.ts';
+import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { Embedder } from '../../knowledge/embedder.ts';
@@ -100,7 +104,19 @@ export class EmbeddingServer implements IEmbedder {
   // ---- Server lifecycle ----
 
   async startServer(): Promise<number> {
-    await this.embedder.initialize();
+    // Wrap embedder initialization in a dedicated captureStdio scope keyed by
+    // serverId. This ensures native C++ output (Dawn/ONNX limit-clamping warnings
+    // written directly to FD 2) is redirected to the log file regardless of whether
+    // a research session's outer captureStdio is already active — the serverId key
+    // bypasses the global isAnyLoggerCapturingOutput guard.
+    const diskChecker = new DiskSpaceChecker();
+    const logFile = buildDefaultDebugLogPath('embedding-server');
+    await captureStdio(
+      logFile,
+      () => diskChecker.checkDiskSpace(path.dirname(logFile)),
+      () => this.embedder.initialize(),
+      this.serverId,
+    );
 
     // Capture dimension after initialization
     this.dimension = this.embedder.getDimension();

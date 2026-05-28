@@ -60,6 +60,7 @@ export class Logger implements ILogger {
   private verbose: boolean;
   private logFile: string;
   private logDir: string;
+  private readonly sessionId: string | undefined;
   readonly [LOGGER_BRAND] = true;
 
   private readonly rotation: LogRotation;
@@ -69,6 +70,7 @@ export class Logger implements ILogger {
     this.verbose = options.verbose ?? isVerboseFromEnv();
     this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(options.researchRunId);
     this.logDir = path.dirname(this.logFile);
+    this.sessionId = options.researchRunId;
 
     this.rotation = new LogRotation(this);
     this.diskSpaceChecker = new DiskSpaceChecker();
@@ -123,7 +125,8 @@ export class Logger implements ILogger {
     return captureStdio(
       this.logFile,
       () => this.diskSpaceChecker.checkDiskSpace(this.logDir),
-      task
+      task,
+      this.sessionId
     );
   }
 

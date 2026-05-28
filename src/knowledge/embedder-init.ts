@@ -21,21 +21,24 @@ export async function loadPipelineWithTimeout(
 ): Promise<{ pipeline: FeatureExtractionPipeline; errorMessage: string }> {
   const errorMessage = `Model load timed out after ${timeoutMs}ms. Check network connection or try a smaller model.`;
 
-  const pipelinePromise = pipeline('feature-extraction', model, {
-    device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
-    ...(useCache === false ? { use_cache: false } : {}),
-    // Clamp ONNX intra-op thread pool to 2 threads per session.
-    // Default (0) = one thread per physical CPU core. With multiple concurrent
-    // processes each loading their own pipeline, the default spawns N_cores * N_procs
-    // threads that all busy-spin simultaneously, saturating the CPU.
-    // 2 threads gives adequate within-op parallelism without thrashing.
-    session_options: {
-      intraOpNumThreads: 2,
-      interOpNumThreads: 1,
-    },
-  });
-
+  // pipeline() must be created INSIDE runCapturingStderr so that the FD-level
+  // stderr redirect is in place before the native ONNX/Dawn C++ code runs.
+  // Creating the Promise outside means the background thread could write its
+  // Dawn limit-clamping warnings before captureStdio redirects FD 2.
   const loadedPipeline = await logger.runCapturingStderr(async () => {
+    const pipelinePromise = pipeline('feature-extraction', model, {
+      device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
+      ...(useCache === false ? { use_cache: false } : {}),
+      // Clamp ONNX intra-op thread pool to 2 threads per session.
+      // Default (0) = one thread per physical CPU core. With multiple concurrent
+      // processes each loading their own pipeline, the default spawns N_cores * N_procs
+      // threads that all busy-spin simultaneously, saturating the CPU.
+      // 2 threads gives adequate within-op parallelism without thrashing.
+      session_options: {
+        intraOpNumThreads: 2,
+        interOpNumThreads: 1,
+      },
+    });
     return await withTimeout(pipelinePromise, timeoutMs, errorMessage);
   });
 
@@ -140,18 +143,15 @@ export async function loadModelOnCPU(
   logger.info(`[embedder] Loading model on CPU after WebGPU error...`);
   
   const loadedPipeline = await logger.runCapturingStderr(async () => {
-    return await withTimeout(
-      pipeline('feature-extraction', model, {
-        device: 'cpu',
-        ...(useCache === false ? { use_cache: false } : {}),
-        session_options: {
-          intraOpNumThreads: 2,
-          interOpNumThreads: 1,
-        },
-      }),
-      initializationTimeoutMs,
-      'CPU fallback model load timed out'
-    );
+    const pipelinePromise = pipeline('feature-extraction', model, {
+      device: 'cpu',
+      ...(useCache === false ? { use_cache: false } : {}),
+      session_options: {
+        intraOpNumThreads: 2,
+        interOpNumThreads: 1,
+      },
+    });
+    return await withTimeout(pipelinePromise, initializationTimeoutMs, 'CPU fallback model load timed out');
   });
   
   return loadedPipeline;
