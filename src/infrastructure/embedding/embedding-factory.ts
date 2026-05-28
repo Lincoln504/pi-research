@@ -130,6 +130,14 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
             _embeddingInstance = client;
             return client;
           }
+          // Port registered but not responding — wait one more interval and re-check
+          await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+          const secondCheck = await isPortListening(info.port);
+          if (!secondCheck) {
+            logger.warn(`[EmbeddingFactory] Registered port ${info.port} is unreachable after two checks — clearing stale state`);
+            await stateManager.clearEmbeddingServer().catch(() => {});
+            break;
+          }
         }
       }
 

@@ -34,6 +34,12 @@ describe('WriterQueue', () => {
     expect(docs[0].text).toBe('description');
   });
 
+  it('should skip ingestion if markdown is empty', async () => {
+    queue.enqueue({ url: 'https://test.com', markdown: '', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+    expect(mockStore.addDocuments).not.toHaveBeenCalled();
+  });
+
   it('should store contentHash in document metadata', async () => {
     queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
     await queue.drain();

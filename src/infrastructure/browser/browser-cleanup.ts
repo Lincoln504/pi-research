@@ -210,3 +210,78 @@ export async function getActiveCamoufoxProfiles(): Promise<string[]> {
 // ============================================================================
 // Browser Manager Cleanup Functions
 // ============================================================================
+
+/**
+ * Snapshot browser PIDs that are children of the given worker PIDs
+ */
+export async function getBrowserPidsForWorkers(workerPids: number[]): Promise<number[]> {
+  const platform = os.platform();
+  const pids: number[] = [];
+  if (!workerPids || workerPids.length === 0) return pids;
+
+  try {
+    if (platform === 'darwin' || platform === 'linux') {
+      const { stdout } = await execAsync('ps -eo pid,ppid,comm | grep -E "(firefox|camoufox)" | grep -v grep').catch(() => ({ stdout: '' }));
+      const lines = stdout.trim().split('\n');
+      for (const line of lines) {
+        const match = line.trim().match(/^\s*(\d+)\s+(\d+)\s+/);
+        if (match && match[1] && match[2]) {
+          const pid = parseInt(match[1], 10);
+          const ppid = parseInt(match[2], 10);
+          if (workerPids.includes(ppid)) pids.push(pid);
+        }
+      }
+    } else if (platform === 'win32') {
+      const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq firefox.exe" /FO CSV /NH').catch(() => ({ stdout: '' }));
+      const lines = stdout.trim().split('\n');
+      for (const line of lines) {
+        if (!line.includes('firefox.exe')) continue;
+        const match = line.match(/"(\d+)"/);
+        if (!match || !match[1]) continue;
+        const pid = parseInt(match[1], 10);
+        try {
+          const { stdout: parentInfo } = await execAsync(`wmic process where ProcessId=${pid} get ParentProcessId /VALUE`);
+          const parentMatch = parentInfo.match(/ParentProcessId=(\d+)/);
+          if (parentMatch && parentMatch[1]) {
+            const ppid = parseInt(parentMatch[1], 10);
+            if (workerPids.includes(ppid)) pids.push(pid);
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`[BrowserCleanup] Failed to get browser PIDs for workers: ${msg}`);
+  }
+  return pids;
+}
+
+/**
+ * Kill specific browser processes
+ */
+export async function killBrowserProcesses(pids: number[]): Promise<void> {
+  if (!pids || pids.length === 0) return;
+  const platform = os.platform();
+  
+  for (const pid of pids) {
+    try {
+      if (platform === 'win32') {
+        await execAsync(`taskkill /PID ${pid} /F`);
+        logger.log(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
+      } else {
+        process.kill(pid, 'SIGTERM');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          process.kill(pid, 0);
+          process.kill(pid, 'SIGKILL');
+          logger.warn(`[BrowserCleanup] Force killed worker browser process: PID ${pid}`);
+        } catch {
+          logger.log(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[BrowserCleanup] Failed to kill browser process PID ${pid}: ${msg}`);
+    }
+  }
+}

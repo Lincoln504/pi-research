@@ -323,9 +323,24 @@ export class BrowserTaskScheduler implements IScheduler {
             this.server = null;
         }
 
+        let targetBrowserPids: number[] = [];
+        if (this.workerPoolManager) {
+            const pool = this.workerPoolManager.getPool();
+            if (pool && pool.workerNodes) {
+                const workerPids = pool.workerNodes.map((n: any) => n.worker?.process?.pid).filter(Boolean);
+                if (workerPids.length > 0) {
+                    targetBrowserPids = await getBrowserPidsForWorkers(workerPids);
+                }
+            }
+        }
+
         // Shutdown the worker pool
         if (this.workerPoolManager) {
             await this.workerPoolManager.shutdown();
+        }
+
+        if (targetBrowserPids.length > 0) {
+            await killBrowserProcesses(targetBrowserPids);
         }
 
         // Clean up any orphaned Camoufox browser processes that may have been left behind
