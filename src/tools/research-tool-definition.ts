@@ -298,7 +298,7 @@ export function createResearchTool(): ToolDefinition {
               try {
                 await cleanup();
               } catch (cleanupError) {
-                console.error('[research] Cleanup failed:', cleanupError);
+                logger.error('[research] Cleanup failed:', cleanupError);
               }
 
               // Dispose TUI manager (wrap in try-catch)
@@ -307,7 +307,7 @@ export function createResearchTool(): ToolDefinition {
                   tuiManager.dispose();
                 }
               } catch (disposeError) {
-                console.error('[research] TUI dispose failed:', disposeError);
+                logger.error('[research] TUI dispose failed:', disposeError);
               }
             }
           });
