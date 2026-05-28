@@ -77,24 +77,69 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
     const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
     const cfg = config ?? getConfig();
 
-    // ---- Fast path: existing leader ----
-    const serverInfo = await stateManager.getEmbeddingServer();
-    if (serverInfo) {
-      const alive = isPidAliveStatic(serverInfo.pid);
-      if (alive) {
-        const portOk = await isPortListening(serverInfo.port);
-        if (portOk) {
-          logger.info(`[EmbeddingFactory] Connecting to existing embedding server on port ${serverInfo.port}`);
-          const client = new EmbeddingClient(serverInfo.port);
-          await client.fetchHealth();
-          _embeddingInstance = client;
-          return client;
+    // ---- Phase 1: Atomically claim candidacy under the state lock ----
+    // Writing port=-1 acts as a mutex: other processes that see it will wait
+    // for the real port rather than starting their own model initialization.
+    // This prevents concurrent GPU sessions and wasted init work.
+    let iAmCandidate = false;
+    let fastPathPort: number | null = null;
+
+    await stateManager.updateState(async (state) => {
+      if (state.embeddingServer) {
+        const alive = isPidAliveStatic(state.embeddingServer.pid);
+        if (alive) {
+          // Either a real server (port > 0) or another process is initializing (port = -1)
+          fastPathPort = state.embeddingServer.port;
+          return state;
         }
-        await stateManager.clearEmbeddingServer().catch(() => {});
+        // Stale entry from a dead process — clear it
+        delete state.embeddingServer;
       }
+      // Claim the slot with sentinel port -1 to signal "initializing"
+      state.embeddingServer = { port: -1, pid: process.pid, serverId };
+      iAmCandidate = true;
+      return state;
+    });
+
+    if (!iAmCandidate) {
+      // Another process is already leader or initializing — wait for real port
+      const POLL_INTERVAL_MS = 500;
+      const POLL_TIMEOUT_MS = 120_000;
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+      logger.info(`[EmbeddingFactory] Another process is initializing (port=${fastPathPort}), waiting...`);
+
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+        const info = await stateManager.getEmbeddingServer();
+        if (!info) {
+          // Candidate died and cleared state — fall through to restart below
+          break;
+        }
+        if (!isPidAliveStatic(info.pid)) {
+          // Candidate process died without cleaning up
+          await stateManager.clearEmbeddingServer().catch(() => {});
+          break;
+        }
+        if (info.port > 0) {
+          const portOk = await isPortListening(info.port);
+          if (portOk) {
+            logger.info(`[EmbeddingFactory] Connecting to embedding server on port ${info.port}`);
+            const client = new EmbeddingClient(info.port);
+            await client.fetchHealth();
+            _embeddingInstance = client;
+            return client;
+          }
+        }
+      }
+
+      // Timed out or candidate died — attempt to claim candidacy ourselves (tail-call)
+      logger.warn('[EmbeddingFactory] Wait for embedding leader timed out or leader died, retrying...');
+      _embeddingInitPromise = null;
+      return getEmbedder(cfg);
     }
 
-    // ---- Slow path: start a candidate server, then hold election ----
+    // ---- Phase 2: We are the exclusive candidate — do model init ----
     const modelCfg = getModelEmbedderConfig(cfg.EMBEDDING_MODEL);
     const embedder = new Embedder({
       model: cfg.EMBEDDING_MODEL,
@@ -111,34 +156,22 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
     });
 
     const server = new EmbeddingServer(embedder, stateManager, serverId);
-    const port = await server.startServer();
+    let port: number;
+    try {
+      port = await server.startServer();
+    } catch (err) {
+      // Init failed — clear our placeholder so others can try
+      await stateManager.clearEmbeddingServer().catch(() => {});
+      throw err;
+    }
 
-    // ---- Compare-and-set election (atomic under the state lock) ----
-    let wonElection = false;
-    let winnerPort = port;
-
+    // ---- Phase 3: Update state with real port ----
     await stateManager.updateState(async (state) => {
-      if (state.embeddingServer) {
-        const alive = isPidAliveStatic(state.embeddingServer.pid);
-        if (alive) {
-          winnerPort = state.embeddingServer.port;
-          wonElection = false;
-          return state;
-        }
+      if (state.embeddingServer?.serverId === serverId) {
+        state.embeddingServer.port = port;
       }
-      state.embeddingServer = { port, pid: process.pid, serverId };
-      wonElection = true;
       return state;
     });
-
-    if (!wonElection) {
-      logger.info(`[EmbeddingFactory] Lost election, connecting to winner at port ${winnerPort}`);
-      await server.shutdown();
-      const client = new EmbeddingClient(winnerPort);
-      await client.fetchHealth();
-      _embeddingInstance = client;
-      return client;
-    }
 
     logger.info(`[EmbeddingFactory] Won election, serving as embedding leader on port ${port} (PID ${process.pid})`);
     // Start leadership check only after winning — model init (inside startServer)
