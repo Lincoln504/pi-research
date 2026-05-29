@@ -60,6 +60,8 @@ export interface Config {
   MAX_CONCURRENT_SCRAPES: number;
   /** Timeout for a single browser task (search/scrape) in milliseconds (default: 30000) */
   BROWSER_TASK_TIMEOUT_MS: number;
+  /** Optional model override for researcher sub-agents (e.g. "openrouter/anthropic/claude-3-5-sonnet"). Empty string = use session model. */
+  RESEARCH_MODEL?: string;
 }
 
 export const DEFAULTS: Config = {
@@ -85,6 +87,7 @@ export const DEFAULTS: Config = {
   AVG_TOKENS_PER_SCRAPE: 10000,
   MAX_CONCURRENT_SCRAPES: 3,
   BROWSER_TASK_TIMEOUT_MS: 45000,
+  RESEARCH_MODEL: '',
 };
 
 // ============================================================================
@@ -151,6 +154,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
+    PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
     // Always include PROXY_URL - empty string means "clear this value"
     PROXY_URL: config.PROXY_URL ?? '',
   };
@@ -325,6 +329,7 @@ export function createConfig(
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
+    RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
   };
 }
 

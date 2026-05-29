@@ -18,6 +18,8 @@ import {
   getModelEmbedderConfig as getKnowledgeModelEmbedderConfig,
   getModelChunkConfig as getKnowledgeModelChunkConfig,
 } from '../knowledge/index.ts';
+import { getEmbedder } from './embedding/embedding-factory.ts';
+import { getConfig } from '../config.ts';
 
 /**
  * Knowledge Store Service Implementation
@@ -50,7 +52,8 @@ export class KnowledgeStoreService implements IService {
     this._initializationPromise = (async () => {
       try {
         // Create the knowledge store components
-        const components = await createKnowledgeStoreComponents();
+        const config = getConfig();
+        const components = await createKnowledgeStoreComponents(() => getEmbedder(config));
 
         this._embedder = components.embedder;
         this._store = components.store;

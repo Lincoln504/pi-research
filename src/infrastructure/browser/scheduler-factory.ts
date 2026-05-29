@@ -7,6 +7,7 @@
 
 import * as crypto from 'node:crypto';
 import * as net from 'node:net';
+import * as path from 'node:path';
 import type { Config } from '../../config.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
@@ -14,10 +15,39 @@ import { getService, tryGetService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
+import type { StatePathConfiguration } from '../state/state-path-configuration.ts';
+import { FileLockService } from '../file-lock-service.ts';
 import { generateSchedulerVersion } from './config.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
+
+/**
+ * Global lock for browser scheduler initialization to prevent "thundering herd"
+ * where multiple concurrent researchers all try to start the leader process.
+ */
+let browserInitLock: FileLockService | null = null;
+
+/**
+ * Get the global browser initialization lock.
+ */
+async function getBrowserInitLock(): Promise<FileLockService> {
+    if (browserInitLock) return browserInitLock;
+
+    const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+    const lockFilePath = path.join(pathConfig.getLockDirPath(), 'browser-init.lock');
+
+    browserInitLock = new FileLockService({
+        lockFilePath,
+        lockTimeout: 60000, // 60s timeout for browser startup
+        lockRetries: 600,
+        lockRetryDelay: 100,
+        lockStaleThreshold: 90000, // 90s stale threshold
+    });
+
+    await browserInitLock.initialize();
+    return browserInitLock;
+}
 
 /**
  * Probe whether a TCP port is accepting connections.
@@ -163,139 +193,146 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
     let p: Promise<IScheduler>;
 
     const initializationFunction = async () => {
-        const schedulerVersion = currentVersion;
-        // Generate a unique ID for this scheduler instance to prevent PID reuse issues
-        const schedulerId = crypto.randomUUID();
+        // Use a global file-based lock to ensure only one process triggers leader election/startup at a time.
+        // This prevents the "ECONNREFUSED storm" where multiple processes independently detect a dead leader
+        // and all try to spawn their own Playwright/Camoufox instance simultaneously.
+        const lock = await getBrowserInitLock();
+        
+        return await lock.withLock(async () => {
+            const schedulerVersion = currentVersion;
+            // Generate a unique ID for this scheduler instance to prevent PID reuse issues
+            const schedulerId = crypto.randomUUID();
 
-        const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
-        const serverInfo = await stateManager.getBrowserServer();
+            const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+            const serverInfo = await stateManager.getBrowserServer();
 
-        // Race check: if another process won election while we were starting, serverInfo will be fresh
-        // but our modules might have been reloaded.
+            // Race check: if another process won election while we were starting, serverInfo will be fresh
+            // but our modules might have been reloaded.
 
-        // Check if existing scheduler has different config version
-        if (serverInfo) {
-            const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
-            if (isAlive) {
-                // Get the stored version from state
-                const state = await stateManager.readState();
-                const storedVersion = state.schedulerVersion;
+            // Check if existing scheduler has different config version
+            if (serverInfo) {
+                const isAlive = await stateManager.isPidAlive(serverInfo.pid, serverInfo.schedulerId);
+                if (isAlive) {
+                    // Get the stored version from state
+                    const state = await stateManager.readState();
+                    const storedVersion = state.schedulerVersion;
 
-                // If version mismatch, we need to restart the scheduler
-                if (storedVersion && storedVersion !== currentVersion) {
-                    logger.log(`[Scheduler] Existing scheduler has stale config (old: ${storedVersion}, new: ${currentVersion}), forcing restart...`);
+                    // If version mismatch, we need to restart the scheduler
+                    if (storedVersion && storedVersion !== currentVersion) {
+                        logger.log(`[Scheduler] Existing scheduler has stale config (old: ${storedVersion}, new: ${currentVersion}), forcing restart...`);
 
-                    if (serverInfo.pid !== process.pid) {
-                        logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
-                    }
+                        if (serverInfo.pid !== process.pid) {
+                            logger.log(`[Scheduler] Bypassing stale scheduler process (PID ${serverInfo.pid}) by clearing state...`);
+                        }
 
-                    // Clear server info from state to force a restart
-                    await stateManager.clearBrowserServer();
+                        // Clear server info from state to force a restart
+                        await stateManager.clearBrowserServer();
 
-                    // Fall through to start a new scheduler
-                } else {
-                    // Version matches — but confirm the port is actually listening before
-                    // creating a BrowserClient. isPidAlive() only checks the OS process;
-                    // the port may have closed (crash, port reuse) even if the PID is alive.
-                    const portOk = await isPortListening(serverInfo.port);
-                    if (!portOk) {
-                        logger.warn(`[Scheduler] PID ${serverInfo.pid} is alive but port ${serverInfo.port} is not listening — clearing stale state and starting fresh.`);
-                        await stateManager.clearBrowserServer().catch((e) => {
-                            logger.warn('[Scheduler] Failed to clear stale browser server state:', e);
-                        });
                         // Fall through to start a new scheduler
                     } else {
-                        // Port confirmed: use the existing scheduler
-                        logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
-                        const client = new BrowserClient(serverInfo.port);
-
-                        // Race check: if initializationPromise was cleared (restart), don't set reference
-                        if (schedulerService.getSchedulerInitializationPromise() === p) {
-                            schedulerService.setSchedulerInstance(client);
-                            schedulerService.setSchedulerVersion(currentVersion);
+                        // Version matches — but confirm the port is actually listening before
+                        // creating a BrowserClient. isPidAlive() only checks the OS process;
+                        // the port may have closed (crash, port reuse) even if the PID is alive.
+                        const portOk = await isPortListening(serverInfo.port);
+                        if (!portOk) {
+                            logger.warn(`[Scheduler] PID ${serverInfo.pid} is alive but port ${serverInfo.port} is not listening — clearing stale state and starting fresh.`);
+                            await stateManager.clearBrowserServer().catch((e) => {
+                                logger.warn('[Scheduler] Failed to clear stale browser server state:', e);
+                            });
+                            // Fall through to start a new scheduler
                         } else {
-                            logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
-                            await client.shutdown().catch(() => {});
-                            throw new Error('Initialization superseded');
+                            // Port confirmed: use the existing scheduler
+                            logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
+                            const client = new BrowserClient(serverInfo.port);
+
+                            // Race check: if initializationPromise was cleared (restart), don't set reference
+                            if (schedulerService.getSchedulerInitializationPromise() === p) {
+                                schedulerService.setSchedulerInstance(client);
+                                schedulerService.setSchedulerVersion(currentVersion);
+                            } else {
+                                logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
+                                await client.shutdown().catch(() => {});
+                                throw new Error('Initialization superseded');
+                            }
+                            return client;
                         }
-                        return client;
                     }
                 }
             }
-        }
 
-        // Slow path: start a server then atomically claim leadership via compare-and-set.
-        const scheduler = new BrowserTaskScheduler(schedulerId, stateManager);
-        let port: number;
-        try {
-            port = await scheduler.startServer();
-        } catch (error) {
-            logger.error('[Scheduler] Failed to start server, running standalone:', error);
-            if (schedulerService.getSchedulerInitializationPromise() === p) {
-                schedulerService.setSchedulerInstance(scheduler);
-                schedulerService.setSchedulerVersion(currentVersion);
-            } else {
-                await scheduler.shutdown().catch(() => {});
-                throw new Error('Initialization superseded', { cause: error });
-            }
-            return scheduler;
-        }
-
-        let wonElection = false;
-        let winnerPort = port;
-        try {
-            await stateManager.updateState(async (state) => {
-                if (state.browserServer) {
-                    const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId, true);
-                    if (alive) {
-                        winnerPort = state.browserServer.port;
-                        wonElection = false;
-                        return state;
-                    }
+            // Slow path: start a server then atomically claim leadership via compare-and-set.
+            const scheduler = new BrowserTaskScheduler(schedulerId, stateManager);
+            let port: number;
+            try {
+                port = await scheduler.startServer();
+            } catch (error) {
+                logger.error('[Scheduler] Failed to start server, running standalone:', error);
+                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                    schedulerService.setSchedulerInstance(scheduler);
+                    schedulerService.setSchedulerVersion(currentVersion);
+                } else {
+                    await scheduler.shutdown().catch(() => {});
+                    throw new Error('Initialization superseded', { cause: error });
                 }
-                state.browserServer = { port, pid: process.pid, schedulerId };
-                state.schedulerVersion = schedulerVersion; // Store current version in state
-                wonElection = true;
-                return state;
-            });
-        } catch (error) {
-            logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
+                return scheduler;
+            }
+
+            let wonElection = false;
+            let winnerPort = port;
+            try {
+                await stateManager.updateState(async (state) => {
+                    if (state.browserServer) {
+                        const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId, true);
+                        if (alive) {
+                            winnerPort = state.browserServer.port;
+                            wonElection = false;
+                            return state;
+                        }
+                    }
+                    state.browserServer = { port, pid: process.pid, schedulerId };
+                    state.schedulerVersion = schedulerVersion; // Store current version in state
+                    wonElection = true;
+                    return state;
+                });
+            } catch (error) {
+                logger.error('[Scheduler] Failed to register as leader, running standalone:', error);
+                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                    schedulerService.setSchedulerInstance(scheduler);
+                    schedulerService.setSchedulerVersion(currentVersion);
+                } else {
+                    await scheduler.shutdown().catch(() => {});
+                    throw new Error('Initialization superseded', { cause: error });
+                }
+                return scheduler;
+            }
+
+            if (!wonElection) {
+                logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
+                await scheduler.shutdown();
+                const client = new BrowserClient(winnerPort);
+                if (schedulerService.getSchedulerInitializationPromise() === p) {
+                    schedulerService.setSchedulerInstance(client);
+                    schedulerService.setSchedulerVersion(schedulerVersion);
+                } else {
+                    await client.shutdown().catch(() => {});
+                    throw new Error('Initialization superseded');
+                }
+                return client;
+            }
+
+            logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
+            logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
+            metrics.increment('browser_leadership_wins_total', 1);
             if (schedulerService.getSchedulerInitializationPromise() === p) {
                 schedulerService.setSchedulerInstance(scheduler);
-                schedulerService.setSchedulerVersion(currentVersion);
-            } else {
-                await scheduler.shutdown().catch(() => {});
-                throw new Error('Initialization superseded', { cause: error });
-            }
-            return scheduler;
-        }
-
-        if (!wonElection) {
-            logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
-            await scheduler.shutdown();
-            const client = new BrowserClient(winnerPort);
-            if (schedulerService.getSchedulerInitializationPromise() === p) {
-                schedulerService.setSchedulerInstance(client);
                 schedulerService.setSchedulerVersion(schedulerVersion);
             } else {
-                await client.shutdown().catch(() => {});
+                logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
+                await scheduler.shutdown().catch(() => {});
                 throw new Error('Initialization superseded');
             }
-            return client;
-        }
-
-        logger.log(`[Scheduler] Won election, serving as leader on port ${port} (PID ${process.pid})`);
-        logger.log(`[Scheduler] Scheduler version: ${schedulerVersion}`);
-        metrics.increment('browser_leadership_wins_total', 1);
-        if (schedulerService.getSchedulerInitializationPromise() === p) {
-            schedulerService.setSchedulerInstance(scheduler);
-            schedulerService.setSchedulerVersion(schedulerVersion);
-        } else {
-            logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
-            await scheduler.shutdown().catch(() => {});
-            throw new Error('Initialization superseded');
-        }
-        return scheduler;
+            return scheduler;
+        });
     };
 
     p = initializationFunction();

@@ -6,7 +6,6 @@ import { logger } from '../logger.ts';
 import * as fs from 'node:fs';
 import type { MigrationStrategy } from './migration.ts';
 import type { IEmbedder } from '../core/interfaces/knowledge-interfaces.ts';
-import { getEmbedder } from '../infrastructure/embedding/embedding-factory.ts';
 export { SUPPORTED_MODELS, getModelEmbedderConfig, getModelChunkConfig } from './model-config.ts';
 
 /** Migration strategy for model changes (read from env or config) */
@@ -43,7 +42,9 @@ const MAX_RETRY_DELAY_MS = 30000;
  * Initialize knowledge store components.
  * This is a factory function used by KnowledgeStoreService.
  */
-export async function createKnowledgeStoreComponents(): Promise<KnowledgeStoreComponents> {
+export async function createKnowledgeStoreComponents(
+  embedderFactory: () => Promise<IEmbedder>
+): Promise<KnowledgeStoreComponents> {
   const config = getConfig();
   if (!config.KNOWLEDGE_STORE_ENABLED) {
     throw new Error('Knowledge store is disabled in configuration');
@@ -54,9 +55,8 @@ export async function createKnowledgeStoreComponents(): Promise<KnowledgeStoreCo
     try {
       logger.info(`[knowledge] Creating Knowledge Store components (attempt ${attempt}/${MAX_INIT_RETRIES})...`);
 
-      // getEmbedder handles leader election: the winning process runs an
-      // EmbeddingServer; all others connect as EmbeddingClient instances.
-      const embedder = await getEmbedder(config);
+      // The embedderFactory handles leader election/startup via infrastructure
+      const embedder = await embedderFactory();
 
       const migrationStrategy = getMigrationStrategy();
       const store = new KnowledgeStore({

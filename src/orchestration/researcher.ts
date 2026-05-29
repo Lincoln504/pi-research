@@ -83,19 +83,34 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       config,
     });
 
-    // Default "lockdown" list to prevent researchers from using built-in dangerous tools.
-    // We use "excludeTools" instead of whitelisting to align with the new v0.77.0 mechanism.
+    // Explicit allowlist of custom tools minus dangerous built-ins.
     const defaultExclude = ['bash', 'write', 'edit', 'repl', 'git', 'terminal'];
     const mergedExclude = [...new Set([...defaultExclude, ...excludeTools])];
+
+    const tools = customTools.map(t => t.name).filter(name => !mergedExclude.includes(name));
+
+    // Prefer config.RESEARCH_MODEL for researcher sub-agents if provided.
+    let modelToUse = ctxModel;
+    if (config?.RESEARCH_MODEL) {
+      const target = config.RESEARCH_MODEL;
+      const found = modelRegistry.getAll().find(
+        m => `${m.provider}/${m.id}` === target || m.id === target
+      );
+      if (found) {
+        modelToUse = found;
+        logger.info(`[Researcher] Using RESEARCH_MODEL override: ${target}`);
+      } else {
+        logger.warn(`[Researcher] RESEARCH_MODEL '${target}' not found in registry; falling back to default.`);
+      }
+    }
 
     const result = await createAgentSession({
       cwd,
       customTools,
-      noTools: 'all', // Start with no tools enabled (built-in or otherwise)
-      excludeTools: mergedExclude, // Exclude dangerous built-ins + user exclusions
+      tools, // Explicit allowlist (BUG-1 fix)
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
-      model: ctxModel,
+      model: modelToUse,
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
       // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
@@ -109,7 +124,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     }
 
     // Log to confirm thinking level was set
-    logger.log(`[Researcher] Created session with thinkingLevel='off', model=${ctxModel?.id || 'unknown'}`);
+    logger.log(`[Researcher] Created session with thinkingLevel='off', model=${modelToUse?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');
