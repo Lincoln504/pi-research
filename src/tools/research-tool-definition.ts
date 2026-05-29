@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
   AgentToolResult,
   ExtensionContext,
+  AgentToolUpdateCallback,
 } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
@@ -123,13 +124,18 @@ export function createResearchTool(): ToolDefinition {
       model: Type.Optional(Type.String({
         description: 'Model ID to use for coordination (optional)',
       })),
+      excludeTools: Type.Optional(Type.Array(Type.String(), {
+        description: 'List of internal research tools to disable (e.g., search, scrape, grep, stored_search, security, stackexchange)',
+      })),
     }),
     renderShell: 'self',
+    executionMode: 'parallel',
     prepareArguments: (args: unknown) => {
       const rawArgs = args as Record<string, unknown>;
       const normalized: Record<string, unknown> = {
         query: rawArgs['query'] ?? '',
         model: rawArgs['model'],
+        excludeTools: rawArgs['excludeTools'],
       };
 
       const rawDepth = rawArgs['depth'];
@@ -154,10 +160,20 @@ export function createResearchTool(): ToolDefinition {
       _toolCallId: string,
       params: unknown,
       aborted: AbortSignal | undefined,
-      _onUpdate: unknown,
+      onUpdate: AgentToolUpdateCallback<any>,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, depth, model: modelId } = params as { query: string; depth?: number; model?: string };
+      const { query, depth, model: modelId, excludeTools: paramExcludeTools } = params as {
+        query: string;
+        depth?: number;
+        model?: string;
+        excludeTools?: string[];
+      };
+
+      // Inherit exclusions from parent context if possible (new in v0.77.0)
+      const parentExcludeTools = (ctx as any).excludeTools || [];
+      const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
+
       const researchId = createResearchRunId();
       const piSessionId = (ctx as any).sessionManager?.getSessionId() || 'default';
       const internalAbort = new AbortController();
@@ -215,7 +231,7 @@ export function createResearchTool(): ToolDefinition {
           healthMonitorInstance.start();
 
           // Register with session state
-          const sessionResearchId = startResearchSession(piSessionId);
+          const sessionResearchId = startResearchSession(piSessionId, researchId);
           registerSessionAbort(piSessionId, sessionResearchId, internalAbort);
 
           // Setup observer
@@ -262,8 +278,10 @@ export function createResearchTool(): ToolDefinition {
                 depth: (depth ?? 0) as ResearchDepth,
                 model: selectedModel as Model<any>,
                 observer,
+                onUpdate,
                 sessionId: piSessionId,
                 researchId,
+                excludeTools,
               }, internalAbort.signal);
 
               // Stop health monitor

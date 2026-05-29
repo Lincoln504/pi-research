@@ -162,8 +162,8 @@ export function refreshAllSessions(piSessionId: string): void {
 /**
  * Start a new research run within a Pi session
  */
-export function startResearchSession(piSessionId: string): string {
-  const researchId = generateUniqueSessionId('research');
+export function startResearchSession(piSessionId: string, customResearchId?: string): string {
+  const researchId = customResearchId || generateUniqueSessionId('research');
   const state = getPiState(piSessionId);
   state.failures.set(researchId, []);
   return researchId;

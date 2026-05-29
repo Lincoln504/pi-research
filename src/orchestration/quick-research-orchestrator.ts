@@ -7,7 +7,8 @@
 
 import { 
     type ExtensionContext, 
-    type AgentSessionEvent 
+    type AgentSessionEvent,
+    type AgentToolResult
 } from '@earendil-works/pi-coding-agent';
 import { type Model, calculateCost } from '@earendil-works/pi-ai';
 import { injectCurrentDate } from '../utils/inject-date.ts';
@@ -35,7 +36,9 @@ export interface QuickResearchOrchestratorOptions {
   sessionId: string;
   researchId: string;
   observer?: ResearchObserver;
+  onUpdate?: (update: AgentToolResult<any>) => void;
   config?: Config;
+  excludeTools?: string[];
 }
 
 export class QuickResearchOrchestrator {
@@ -46,7 +49,7 @@ export class QuickResearchOrchestrator {
   }
 
   async run(signal?: AbortSignal): Promise<string> {
-    const { query, model, ctx, observer } = this.options;
+    const { query, model, ctx, observer, onUpdate } = this.options;
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
@@ -126,6 +129,7 @@ export class QuickResearchOrchestrator {
       settingsManager: (ctx as any).settingsManager,
       systemPrompt: prompt,
       extensionCtx: ctx,
+      excludeTools: this.options.excludeTools || ['grep'],
       getGlobalState: (): SystemResearchState => ({
         version: 1,
         researchId: this.options.researchId,

@@ -66,6 +66,12 @@ deep research CVE-2024-3094 at depth 3
 
 Say **research** for a quick lookup. Say **deep research** for thorough investigation — pi selects depth 1–3 based on your query's scope and complexity, or pin it with **at depth N**.
 
+**Tool Exclusion**: Disable specific internal tools using the `--exclude-tools` flag (requires pi v0.77.0+).
+
+```bash
+pi "research AI" --exclude-tools security,stackexchange
+```
+
 A `/research <query>` slash command is also available as a shortcut — it runs quick mode (depth 0) directly.
 
 **Depth levels**:

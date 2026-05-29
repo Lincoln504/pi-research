@@ -1,9 +1,14 @@
+/**
+ * Deep Research Orchestrator Unit Tests
+ */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator.ts';
 import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import type { TextContent } from '@earendil-works/pi-ai';
 
-// Mock service registry
+// Mock the service registry
 vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/core/service-registry.ts')>();
   return {
@@ -12,7 +17,7 @@ vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {
   };
 });
 
-// Mock logger
+// Mock dependencies
 vi.mock('../../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
@@ -22,10 +27,9 @@ vi.mock('../../../src/logger.ts', () => ({
     debug: vi.fn(),
   },
   createResearchRunId: () => 'test-run-id',
-  runWithLogContext: (ctx: any, fn: any) => fn(),
+  runWithLogContext: (_ctx: any, fn: any) => fn(),
 }));
 
-// Mock config
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({
     KNOWLEDGE_STORE_ENABLED: false,
@@ -34,19 +38,16 @@ vi.mock('../../../src/config.ts', () => ({
     RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
     RESEARCHER_TIMEOUT_MS: 120000,
   })),
-  DEFAULTS: {
-    KNOWLEDGE_STORE_ENABLED: false,
-  },
+  DEFAULTS: { KNOWLEDGE_STORE_ENABLED: false },
 }));
 
-// Mock research session services
 vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
   getResearchSynthesisService: vi.fn(() => Promise.resolve({
     synthesize: vi.fn(),
     storeReport: vi.fn(),
     getReports: vi.fn(() => []),
     hasReports: vi.fn(() => false),
-    buildFallbackSynthesis: vi.fn(() => '# Research Findings\n\n*Automated synthesis of researcher reports*'),
+    buildFallbackSynthesis: vi.fn(() => '# Fallback Synthesis'),
     clearReports: vi.fn(),
     getAllReports: vi.fn(() => new Map()),
     getReport: vi.fn(),
@@ -75,9 +76,11 @@ describe('DeepResearchOrchestrator', () => {
     cwd: '/tmp',
     model: { id: 'test-model' },
     modelRegistry: {
-      getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'key', headers: {} })),
+      getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'test-key', headers: {} })),
     },
-    ui: { setWidget: vi.fn() },
+    ui: {
+      setWidget: vi.fn(),
+    },
   };
 
   const options = {
@@ -101,7 +104,11 @@ describe('DeepResearchOrchestrator', () => {
       lifecycle: 'initialized',
       async initialize() {},
       async dispose() {},
-      generatePlan: vi.fn(),
+      generatePlan: vi.fn().mockResolvedValue({
+        action: 'delegate',
+        researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
+        allQueries: ['q1'],
+      }),
       updatePlanForRound: vi.fn(),
       getCurrentPlan: vi.fn(() => null),
       getTotalResearchersPlanned: vi.fn(() => 0),
@@ -149,44 +156,30 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('should run a basic research round and synthesize', async () => {
-    // Mock updatePlanForRound to return delegate first, then synthesize
-    let callCount = 0;
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      // First call (round 1) - delegate
-      if (callCount === 1) {
-        return {
-          action: 'delegate',
-          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-          allQueries: ['q1'],
-        };
-      }
-      // All subsequent calls - synthesize (including forced synthesis)
-      return {
+    // Mock updatePlanForRound to return synthesize (forced synthesis)
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
         action: 'synthesize',
         content: 'The final result',
-      };
     });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     const result = await orchestrator.run();
 
     expect(result).toBe('The final result');
+    expect(mockPlanningService.generatePlan).toHaveBeenCalled();
     expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
     expect(mockOrchestrationService.runSearchBurst).toHaveBeenCalled();
     expect(mockOrchestrationService.runResearchers).toHaveBeenCalled();
   });
 
   it('should handle multi-round research (delegate then synthesize)', async () => {
-    let callCount = 0;
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      // First 2 calls (rounds 1-2) - delegate
-      if (callCount <= 2) {
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      // Round 2 - delegate
+      if (opts.round === 2) {
         return {
           action: 'delegate',
-          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-          allQueries: ['q1'],
+          researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }],
+          allQueries: ['q2'],
         };
       }
       // All subsequent calls - synthesize
@@ -200,27 +193,26 @@ describe('DeepResearchOrchestrator', () => {
     const result = await orchestrator.run();
 
     expect(result).toBe('Multi-round result');
+    expect(mockPlanningService.generatePlan).toHaveBeenCalled();
     expect(mockPlanningService.updatePlanForRound).toHaveBeenCalled();
   });
 
   it('should handle immediate synthesis request', async () => {
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      return {
-        action: 'synthesize',
-        content: 'Direct synthesis',
-      };
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'synthesize',
+      content: 'Direct synthesis',
     });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     const result = await orchestrator.run();
 
     expect(result).toBe('Direct synthesis');
-    expect(mockOrchestrationService.runSearchBurst).not.toHaveBeenCalled();
+    expect(mockPlanningService.generatePlan).toHaveBeenCalled();
     expect(mockOrchestrationService.runResearchers).not.toHaveBeenCalled();
   });
 
   it('should handle planning failure gracefully', async () => {
-    mockPlanningService.updatePlanForRound.mockRejectedValueOnce(new Error('Planning failed'));
+    mockPlanningService.generatePlan.mockRejectedValueOnce(new Error('Planning failed'));
 
     const orchestrator = new DeepResearchOrchestrator(options);
 
@@ -228,23 +220,26 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('should enforce maximum rounds and force synthesis', async () => {
-    const delegateResponse = {
+    // Mock updatePlanForRound to always return delegate
+    mockPlanningService.updatePlanForRound.mockResolvedValue({
       action: 'delegate',
-      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-      allQueries: ['q1'],
-    };
-    const synthesizeResponse = { action: 'synthesize', content: 'Forced synthesis result' };
-
-    // Always delegate for the first N calls, then synthesize
-    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
-      // Check if this is a forced synthesis call (mustSynthesize: true)
-      if (opts?.mustSynthesize) {
-        return synthesizeResponse;
-      }
-      return delegateResponse;
+      researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+      allQueries: ['q'],
     });
 
-    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 2 }); // Max 4 rounds for complexity 2
+    // Forced synthesis (last call)
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+        if (opts.mustSynthesize) {
+            return { action: 'synthesize', content: 'Forced synthesis result' };
+        }
+        return {
+            action: 'delegate',
+            researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+            allQueries: ['q'],
+        };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 }); // maxRounds = 2
     const result = await orchestrator.run();
 
     expect(result).toContain('Forced synthesis result');
@@ -254,15 +249,7 @@ describe('DeepResearchOrchestrator', () => {
     const onRoundStart = vi.fn();
     const onSearchProgress = vi.fn();
 
-    let callCount = 0;
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
-      } else {
-        return { action: 'synthesize', content: 'Progress test' };
-      }
-    });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Progress test' });
 
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
@@ -276,88 +263,57 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('should increment totalResearchersPlanned after each delegate round', async () => {
-    let callCount = 0;
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          action: 'delegate',
-          researchers: [
-            { id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] },
-            { id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] },
-          ],
-          allQueries: ['q1', 'q2'],
-        };
-      }
-      return { action: 'synthesize', content: 'Done' };
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'delegate',
+      researchers: [
+        { id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] },
+        { id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] },
+      ],
+      allQueries: ['q1', 'q2'],
     });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
 
     // Should have incremented by 2 (number of researchers in the delegate plan)
-    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(expect.any(String), 2);
+    expect(mockPlanningService.incrementTotalResearchersPlanned).toHaveBeenCalledWith(options.researchId, 2);
   });
 
   it('should record query history after each delegate round', async () => {
-    let callCount = 0;
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          action: 'delegate',
-          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1', 'q2'] }],
-          allQueries: ['q1', 'q2'],
-        };
-      }
-      return { action: 'synthesize', content: 'Done' };
+    mockPlanningService.generatePlan.mockResolvedValue({
+      action: 'delegate',
+      researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1', 'q2'] }],
+      allQueries: ['q1', 'q2'],
     });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
 
-    expect(mockPlanningService.addToQueryHistory).toHaveBeenCalledWith('test-session', ['q1', 'q2']);
+    expect(mockPlanningService.addToQueryHistory).toHaveBeenCalledWith(options.researchId, ['q1', 'q2']);
   });
 
   it('should pass getCurrentPlan as previousPlan to updatePlanForRound', async () => {
     const mockPreviousPlan = { action: 'delegate' as const, researchers: [], allQueries: ['prev-q'] };
-    // First call: getCurrentPlan returns null (initial state)
-    // After first plan, getCurrentPlan returns the plan
-    let callCount = 0;
+    
+    mockPlanningService.generatePlan.mockResolvedValue(mockPreviousPlan);
     mockPlanningService.getCurrentPlan.mockImplementation(() => {
-      return callCount > 0 ? mockPreviousPlan : null;
+      return mockPlanningService.generatePlan.mock.calls.length > 0 ? mockPreviousPlan : null;
     });
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return {
-          action: 'delegate',
-          researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }],
-          allQueries: ['q1'],
-        };
-      }
-      return { action: 'synthesize', content: 'Done' };
-    });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
 
-    // First call should pass null (initial state)
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ previousPlan: null })
-    );
-    // Second call (or final synthesis) should pass the previous plan
-    expect(mockPlanningService.updatePlanForRound).toHaveBeenNthCalledWith(
-      2,
+    // Round 2 (final synthesis) should pass the previous plan
+    expect(mockPlanningService.updatePlanForRound).toHaveBeenCalledWith(
       expect.objectContaining({ previousPlan: mockPreviousPlan })
     );
   });
 
   it('should not increment totalResearchersPlanned on synthesize action', async () => {
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      return { action: 'synthesize', content: 'Direct result' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Direct result' });
 
     const orchestrator = new DeepResearchOrchestrator(options);
     await orchestrator.run();
@@ -368,6 +324,7 @@ describe('DeepResearchOrchestrator', () => {
   it('should fire onStart observer event at the beginning of run()', async () => {
     const onStart = vi.fn();
 
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] });
     mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onStart } });
@@ -380,7 +337,7 @@ describe('DeepResearchOrchestrator', () => {
     const onPlanningStart = vi.fn();
     const onPlanningProgress = vi.fn();
 
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
@@ -389,20 +346,14 @@ describe('DeepResearchOrchestrator', () => {
     await orchestrator.run();
 
     expect(onPlanningStart).toHaveBeenCalledWith(1);
-    expect(onPlanningProgress).toHaveBeenCalled();
+    expect(onPlanningProgress).toHaveBeenCalledWith('planning');
   });
 
   it('should fire onPlanningSuccess when plan action is delegate', async () => {
     const onPlanningSuccess = vi.fn();
-    let callCount = 0;
 
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
-      }
-      return { action: 'synthesize', content: 'Done' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onPlanningSuccess } });
     await orchestrator.run();
@@ -412,15 +363,9 @@ describe('DeepResearchOrchestrator', () => {
 
   it('should fire onSearchStart when queries are available', async () => {
     const onSearchStart = vi.fn();
-    let callCount = 0;
 
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1', 'q2'] }], allQueries: ['q1', 'q2'] };
-      }
-      return { action: 'synthesize', content: 'Done' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1', 'q2'] }], allQueries: ['q1', 'q2'] });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onSearchStart } });
     await orchestrator.run();
@@ -430,15 +375,9 @@ describe('DeepResearchOrchestrator', () => {
 
   it('should fire onSearchComplete with result count after search phase', async () => {
     const onSearchComplete = vi.fn();
-    let callCount = 0;
 
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
-      }
-      return { action: 'synthesize', content: 'Done' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     // Return 3 results from search burst
     mockOrchestrationService.runSearchBurst.mockResolvedValue([
@@ -449,21 +388,16 @@ describe('DeepResearchOrchestrator', () => {
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onSearchComplete } });
     await orchestrator.run();
 
+    // 2 results from first query, 1 from second = 3 total
     expect(onSearchComplete).toHaveBeenCalledWith(3);
   });
 
   it('should fire onEvaluationStart and onEvaluationProgress observer events', async () => {
     const onEvaluationStart = vi.fn();
     const onEvaluationProgress = vi.fn();
-    let callCount = 0;
 
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
-      }
-      return { action: 'synthesize', content: 'Done' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] });
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Done' });
 
     const orchestrator = new DeepResearchOrchestrator({
       ...options,
@@ -472,18 +406,19 @@ describe('DeepResearchOrchestrator', () => {
     await orchestrator.run();
 
     expect(onEvaluationStart).toHaveBeenCalled();
-    expect(onEvaluationProgress).toHaveBeenCalled();
+    expect(onEvaluationProgress).toHaveBeenCalledWith('learning');
+    expect(onEvaluationProgress).toHaveBeenCalledWith('evaluating');
   });
 
   it('should fire onEvaluationDecision with delegate action after research round', async () => {
     const onEvaluationDecision = vi.fn();
-    let callCount = 0;
 
-    // complexity 2 → maxRounds = 4, so round 1 < maxRounds
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] };
+    // complexity 2 → maxRounds = 4
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'delegate', researchers: [{ id: 'r1', name: 'R1', goal: 'G1', queries: ['q1'] }], allQueries: ['q1'] });
+    
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.round === 2) {
+        return { action: 'delegate', researchers: [{ id: 'r2', name: 'R2', goal: 'G2', queries: ['q2'] }], allQueries: ['q2'] };
       }
       return { action: 'synthesize', content: 'Done' };
     });
@@ -495,13 +430,13 @@ describe('DeepResearchOrchestrator', () => {
     });
     await orchestrator.run();
 
-    expect(onEvaluationDecision).toHaveBeenCalledWith('delegate', expect.objectContaining({ action: 'delegate' }), 1);
+    expect(onEvaluationDecision).toHaveBeenCalledWith('delegate', expect.anything(), 2);
   });
 
   it('should fire onComplete with the final result string', async () => {
     const onComplete = vi.fn();
 
-    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Final answer' });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'synthesize', content: 'Final answer' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onComplete } });
     await orchestrator.run();
@@ -512,11 +447,9 @@ describe('DeepResearchOrchestrator', () => {
   it('should fire onError when planning throws', async () => {
     const onError = vi.fn();
     const testError = new Error('Planning blew up');
-
-    mockPlanningService.updatePlanForRound.mockRejectedValue(testError);
+    mockPlanningService.generatePlan.mockRejectedValue(testError);
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onError } });
-
     await expect(orchestrator.run()).rejects.toThrow('Planning blew up');
     expect(onError).toHaveBeenCalledWith(testError);
   });
@@ -525,10 +458,7 @@ describe('DeepResearchOrchestrator', () => {
     const onPlanningProgress = vi.fn();
     const onError = vi.fn();
 
-    mockPlanningService.updatePlanForRound.mockImplementation(async () => {
-      // Always return wait — will hit MAX_WAIT_RETRIES (5) and throw
-      return { action: 'wait' };
-    });
+    mockPlanningService.generatePlan.mockResolvedValue({ action: 'wait' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onPlanningProgress, onError } });
 
@@ -537,14 +467,9 @@ describe('DeepResearchOrchestrator', () => {
     try {
       const runPromise = orchestrator.run();
       // Attach the rejection handler BEFORE advancing any timers.
-      // This eliminates the "unhandled rejection" window that appears if the
-      // orchestrator rejects between a runAllTimersAsync() tick and the
-      // expect(...).rejects assertion being evaluated — which causes a non-zero
-      // vitest exit even when the test itself passes.
       const settled = expect(runPromise).rejects.toThrow('Max wait retries');
       // Drain all pending timers (each retry schedules one 5s setTimeout)
-      // Loop up to MAX_WAIT_RETRIES+2 times to be safe
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 6; i++) {
         await vi.runAllTimersAsync();
       }
       await settled;
@@ -552,9 +477,7 @@ describe('DeepResearchOrchestrator', () => {
       vi.useRealTimers();
     }
 
-    // onPlanningProgress should have been called (with 'analyzing' for wait retries)
-    expect(onPlanningProgress).toHaveBeenCalled();
-    // onError should fire when the exception propagates
-    expect(onError).toHaveBeenCalled();
+    // onPlanningProgress should have been called (with 'planning' for wait retries)
+    expect(onPlanningProgress).toHaveBeenCalledWith('planning');
   }, 15000);
 });

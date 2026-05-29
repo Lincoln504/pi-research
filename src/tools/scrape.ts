@@ -9,7 +9,7 @@
  * exceeds MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING of the total context window.
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext, AgentToolUpdateCallback } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { scrape } from '../web-research/web-scraper.ts';
@@ -91,7 +91,7 @@ export function createScrapeTool(options: {
       'PDFs are auto-detected and extracted with high fidelity.',
     ],
     parameters: ScrapeParams,
-    async execute(_callId: string, params: unknown, signal: AbortSignal): Promise<AgentToolResult<unknown>> {
+    async execute(_callId: string, params: unknown, signal: AbortSignal, onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
       const callStartTime = Date.now();
       metrics.increment('tool_scrape_calls_total', 1);
 

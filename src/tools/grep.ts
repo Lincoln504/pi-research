@@ -154,6 +154,7 @@ export function createGrepTool(options: {
       `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
     parameters: GrepParams,
+    executionMode: 'parallel',
     async execute(
       _toolCallId: string,
       params: unknown,

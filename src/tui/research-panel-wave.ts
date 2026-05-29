@@ -33,7 +33,8 @@ import {
   hslToRgb,
 } from './research-panel-color-utils.ts';
 
-const DWELL = 3; // slow-frames to pause at each edge before reversing
+const DWELL_FRAMES = 4; // pause duration at each edge
+const PERIOD_FRAMES = 40; // total frames for one full back-and-forth cycle (twice as fast)
 
 /**
  * Resolve the theme accent colour to a full-precision RGB triple.
@@ -120,36 +121,40 @@ function ageToColor(
 }
 
 /**
- * Compute head position and direction given a slow-frame counter.
+ * Compute head position and state given a frame counter and width.
  *
- * Returns { headPos, goingRight } where headPos is in [0, available-1].
- * The head dwells DWELL slow-frames at each edge before reversing.
+ * Returns { headPos, goingRight, isDwelling }
+ * Constant duration: total period is fixed, speed scales with available width.
  */
-function computeHeadState(slowFrame: number, available: number): { headPos: number; goingRight: boolean } {
-  const M = Math.max(1, available - 1); // steps to traverse the line
-  const D = DWELL;
-  const period = 2 * (M + D);
-  const pos = slowFrame % period;
+function computeHeadState(frame: number, available: number): { headPos: number; goingRight: boolean; isDwelling: boolean } {
+  const M = Math.max(1, available - 1);
+  const D = DWELL_FRAMES;
+  const halfPeriod = PERIOD_FRAMES / 2;
+  const pos = frame % PERIOD_FRAMES;
 
   if (pos < D) {
     // Left dwell
-    return { headPos: 0, goingRight: true };
-  } else if (pos <= D + M) {
+    return { headPos: 0, goingRight: true, isDwelling: true };
+  } else if (pos < halfPeriod) {
     // Traversing left→right
-    return { headPos: pos - D, goingRight: true };
-  } else if (pos <= 2 * D + M) {
+    const traverseFrames = halfPeriod - D;
+    const progress = (pos - D) / traverseFrames;
+    return { headPos: Math.floor(progress * M), goingRight: true, isDwelling: false };
+  } else if (pos < halfPeriod + D) {
     // Right dwell
-    return { headPos: M, goingRight: false };
+    return { headPos: M, goingRight: false, isDwelling: true };
   } else {
-    // Traversing right→left:  pos in (2D+M, 2D+2M]
-    return { headPos: 2 * (D + M) - pos, goingRight: false };
+    // Traversing right→left
+    const traverseFrames = PERIOD_FRAMES - (halfPeriod + D);
+    const progress = (pos - (halfPeriod + D)) / traverseFrames;
+    return { headPos: M - Math.floor(progress * M), goingRight: false, isDwelling: false };
   }
 }
 
 /**
  * Generate the head-trails gradient wave fill string for one frame.
  *
- * waveColors stores the slowFrame when each position was last visited by the
+ * waveColors stores the waveFrame when each position was last visited by the
  * head.  On each call the head's current position is updated, and every
  * position is colored based on its decay age since the last head visit.
  *
@@ -175,38 +180,70 @@ export function generateWaveFill(
   // Trail length = ¾ of line width (at least 1)
   const trailLen = Math.max(1, Math.floor(available * 3 / 4));
 
-  // ~87 % speed (matches original commit)
-  const slowFrame = Math.floor(waveFrame * 0.87);
-
   // Initialise or resize: place last-visit far enough in the past that all
   // positions start at the dark floor.
   if (!waveColors || waveColors.length !== available) {
-    const neverVisited = slowFrame - trailLen;
+    const neverVisited = waveFrame - trailLen;
     waveColors = Array(available).fill(neverVisited) as number[];
   }
 
-  const { headPos, goingRight } = computeHeadState(slowFrame, available);
+  const { headPos, goingRight, isDwelling } = computeHeadState(waveFrame, available);
 
-  // Paint: record that the head visited headPos on this slowFrame
-  waveColors[headPos] = slowFrame;
+  // Paint the trail: we need to ensure every segment between the previous
+  // frame's head and this frame's head is colored. This prevents "gaps" on
+  // wide terminals where the head moves >1 char per frame.
+  if (waveFrame > 0) {
+    const prev = computeHeadState(waveFrame - 1, available);
+    const start = Math.min(prev.headPos, headPos);
+    const end = Math.max(prev.headPos, headPos);
+    for (let i = start; i <= end; i++) {
+      waveColors[i] = waveFrame;
+    }
+  } else {
+    waveColors[headPos] = waveFrame;
+  }
 
   // Directional head character: half-dash pointing in the direction of motion
-  //   ╶ (U+2576, BOX DRAWINGS LIGHT RIGHT) while going left→right
-  //   ╴ (U+2574, BOX DRAWINGS LIGHT LEFT)  while going right→left
-  const headChar = goingRight ? '╶' : '╴';
+  //   ╴ (U+2574, BOX DRAWINGS LIGHT LEFT)  while going left→right (connects to trail on left)
+  //   ╶ (U+2576, BOX DRAWINGS LIGHT RIGHT) while going right→left (connects to trail on right)
+  let headChar = goingRight ? '╴' : '╶';
+
+  // Solid head when dwelling (no gap)
+  if (isDwelling) {
+    headChar = (headPos === 0) ? '╶' : '─';
+  }
+
+  // Ensure head doesn't point into space at index 0 when starting movement
+  if (headPos === 0 && goingRight) {
+    headChar = '╶';
+  }
+
+  // Special edge hit characters (1-frame impact) override solid head
+  const halfPeriod = PERIOD_FRAMES / 2;
+  const pos = waveFrame % PERIOD_FRAMES;
+
+  if (pos === halfPeriod) {
+    headChar = '╼'; // Hit right edge (LIGHT LEFT AND HEAVY RIGHT)
+  } else if (pos === 0) {
+    headChar = '╺'; // Hit left edge (HEAVY RIGHT)
+  }
 
   // Build fill from per-position ages
   let fill = '';
   for (let i = 0; i < available; i++) {
-    const lastVisit = waveColors[i] ?? (slowFrame - trailLen);
-    const age = slowFrame - lastVisit;
+    const lastVisit = waveColors[i] ?? (waveFrame - trailLen);
+    const age = waveFrame - lastVisit;
 
     const rgb = ageToColor(hsl, age, trailLen);
     const color = `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m`;
 
-    const char = i === headPos ? headChar : '─';
+    // Trail at index 0 should be rounded '╶' to match header style
+    let char = (i === 0) ? '╶' : '─';
+    if (i === headPos) char = headChar;
+
     fill += `${color}${char}${resetFg}`;
   }
 
   return { fill, updatedColors: waveColors };
 }
+

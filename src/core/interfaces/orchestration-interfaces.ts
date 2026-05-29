@@ -12,7 +12,7 @@ import type { QueryResultWithError } from '../../web-research/types.ts';
  */
 export interface RunResearchersOptions {
   plan: { researchers?: ResearcherConfig[] };
-  options: { sessionId: string; researchId: string } & any;
+  options: { sessionId: string; researchId: string; excludeTools?: string[] } & any;
   currentRound: number;
   signal?: AbortSignal;
 }

@@ -13,6 +13,8 @@ You are being provided with the conversation history for context only.
 
 {{historical_links_section}}
 
+{{disabled_tools_section}}
+
 ## Complexity Level: {COMPLEXITY_LABEL}
 
 **Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on topic scope and coverage needs.

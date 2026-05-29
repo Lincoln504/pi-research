@@ -24,4 +24,5 @@ export interface RunResearcherOptions {
   observer?: any;
   signal?: AbortSignal;
   sessionStart: number;
+  excludeTools?: string[];
 }

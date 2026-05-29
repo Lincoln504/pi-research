@@ -17,15 +17,27 @@ export interface SessionManager {
 }
 
 /**
- * Extended ExtensionContext with additional properties
- * Note: We don't extend ExtensionContext to avoid type conflicts with
- * ReadonlySessionManager. This is used as a cast target only.
+ * Extended ExtensionContext with additional properties.
+ * Provides type safety for properties accessed at runtime.
  */
-export interface ExtendedExtensionContext {
-  sessionManager?: SessionManager;
-  settingsManager?: SettingsManager;
-}
-
+export interface ExtendedExtensionContext extends ExtensionContext {
+   /** Model registry for API key resolution */
+   modelRegistry: any;
+   /** Settings manager (provided in some contexts) */
+   settingsManager?: any;
+   /** Current tool exclusion list */
+   excludeTools?: string[];
+   /** Abort the current agent operation */
+   abort(): void;
+   /** Gracefully shutdown pi and exit. Available in all contexts. */
+   shutdown(): void;
+   /** Get current context usage for the active model. */
+   getContextUsage(): any;
+   /** Trigger compaction without awaiting completion. */
+   compact(options?: any): void;
+   /** Get the current effective system prompt. */
+   getSystemPrompt(): string;
+ }
 /**
  * Model with ID property and optional cost information
  */

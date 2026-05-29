@@ -124,6 +124,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
             initialLinks,
             historicalUrls,
             signal,
+            excludeTools: orchestratorOptions.excludeTools,
           });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);

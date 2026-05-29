@@ -28,6 +28,7 @@ export function createHealthTool(): ToolDefinition {
       })),
     }),
     renderShell: 'self',
+    executionMode: 'parallel',
     async execute(
       _toolCallId: string,
       params: unknown,

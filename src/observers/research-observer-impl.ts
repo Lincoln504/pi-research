@@ -73,7 +73,7 @@ export function createResearchObserver(
         addSlice(panelState, 'coord', `coordinator`, false);
         activateSlice(panelState, 'coord');
       }
-      updateSliceStatus(panelState, 'coord', 'analyzing');
+      updateSliceStatus(panelState, 'coord', attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning');
       debouncedRefresh();
     },
 
@@ -277,7 +277,7 @@ export function createResearchObserver(
     onEvaluationStart: (_round) => {
       addSlice(panelState, 'eval', 'eval', false);
       activateSlice(panelState, 'eval');
-      updateSliceStatus(panelState, 'eval', 'eval');
+      updateSliceStatus(panelState, 'eval', 'evaluating');
       debouncedRefresh();
     },
 

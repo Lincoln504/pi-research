@@ -37,6 +37,7 @@ export function createLinksTool(options: {
       'Does NOT cost a gathering or scrape call.',
     ],
     parameters: LinksParams,
+    executionMode: 'parallel',
     async execute(_callId, params): Promise<AgentToolResult<unknown>> {
       if (!Value.Check(LinksParams, params)) {
           return {

@@ -12,6 +12,8 @@ You orchestrate the next phase of research.
 
 {{historical_links_section}}
 
+{{disabled_tools_section}}
+
 ---
 
 ## Complexity-Aware Decision Thresholds

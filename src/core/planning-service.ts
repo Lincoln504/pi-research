@@ -113,7 +113,10 @@ export class PlanningService implements IPlanningService {
       .replace('{QUERY_BUDGET}', queryBudget.toString())
       .replace('{COMPLEXITY_LABEL}', complexityLabel)
       .replace('{COMPLEXITY_GUIDANCE}', complexityGuidance)
-      .replace('{{historical_links_section}}', historicalLinksSection);
+      .replace('{{historical_links_section}}', historicalLinksSection)
+      .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
+          ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
+          : '');
 
     if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before generating plans`);
     const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -125,12 +128,14 @@ export class PlanningService implements IPlanningService {
     let lastRawPlanText!: string;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
+      options.observer?.onPlanningStart?.(attempt);
       const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
       const messages: Message[] = attempt === 1
         ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${query}"` }], timestamp: Date.now() }]
         : [];
 
       logger.debug(`[${this.name}] Coordinator attempt ${attempt}`);
+      options.observer?.onPlanningProgress?.(attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning');
 
       const reasoning: ThinkingLevel = 'medium';
 
@@ -179,9 +184,11 @@ export class PlanningService implements IPlanningService {
 
           metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
           metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
+          options.observer?.onPlanningTokens?.(tokens, cost);
         }
 
         metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
+        options.observer?.onPlanningSuccess?.(plan);
         break;
       } catch (_err) {
         if (attempt >= 3) {
@@ -243,7 +250,8 @@ export class PlanningService implements IPlanningService {
     logger.log(`[${this.name}] Evaluating for round ${round} (Session: ${sessionId})`);
     metrics.increment('evaluator_runs_total', 1, { complexity: String(complexity), round: String(round) });
     
-    observer?.onEvaluationProgress?.(`Evaluating round ${round}...`);
+    observer?.onEvaluationStart?.(round);
+    observer?.onEvaluationProgress?.(round > 1 ? 'evaluating' : 'planning');
 
     const previousQueriesSection = previousPlan?.allQueries && previousPlan.allQueries.length > 0
       ? `\n### Previous Queries (Sibling Researchers)\n${previousPlan.allQueries.map(q => `- ${q}`).join('\n')}\n`
@@ -264,6 +272,9 @@ export class PlanningService implements IPlanningService {
       .replace('{ROUND_PHASE_GUIDANCE}', getRoundPhaseGuidance(round, maxRounds, complexity))
       .replace('{{previous_queries_section}}', previousQueriesSection)
       .replace('{{historical_links_section}}', historicalLinksSection)
+      .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
+          ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
+          : '')
       .replace('{NEXT_ID}', `${nextId}`);
 
     const reportsText = Array.from(reports.entries())
@@ -304,7 +315,7 @@ export class PlanningService implements IPlanningService {
       
       if (thinkingContent?.thinking) {
         logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
-        observer?.onPlanningProgress?.('analyzing');
+        observer?.onPlanningProgress?.('thinking');
       }
 
       text = textContent?.text || '';
@@ -374,6 +385,8 @@ export class PlanningService implements IPlanningService {
         plan.content = text;
       }
     }
+
+    observer?.onEvaluationDecision?.(plan.action as 'synthesize' | 'delegate', plan, round);
 
     this.getState(sessionId).currentPlan = plan;
 

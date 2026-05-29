@@ -18,7 +18,7 @@ import type { IStateManager } from '../../core/interfaces/state-manager-interfac
 import { BrowserServer } from './browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
-import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
+import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
 
 /**
  * Browser task scheduler - manages the worker pool and executes tasks.

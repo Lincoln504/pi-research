@@ -27,6 +27,7 @@ export function createStoredSearchTool(_options: {
     description: 'Query the local knowledge store for summaries of findings from previous research sessions. Use this for discovery and to find URLs that were relevant in the past.',
     promptSnippet: 'Search historical knowledge store for summaries',
     parameters: StoredSearchParams,
+    executionMode: 'parallel',
     async execute(_callId: string, params: unknown, _signal: AbortSignal): Promise<AgentToolResult<unknown>> {
       if (!Value.Check(StoredSearchParams, params)) {
         return {

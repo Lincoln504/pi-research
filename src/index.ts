@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@earendil-works/pi-coding-agent';
+import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import type { NodeError, ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
@@ -44,7 +45,16 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  logger.log('[pi-research] Activating extension...');
+  // Runtime version check (requires 0.77.0+ for excludeTools and other new features)
+  const versionParts = PI_VERSION.split('.').map(Number);
+  const major = versionParts[0] ?? 0;
+  const minor = versionParts[1] ?? 0;
+  if (major === 0 && minor < 77) {
+    logger.error(`[pi-research] pi-coding-agent v${PI_VERSION} is too old. Please update to v0.77.0 or newer.`);
+    // We still load to avoid breaking the process, but tools will fail gracefully
+  }
+
+  logger.log(`[pi-research] Activating extension (pi v${PI_VERSION})...`);
 
   // ============================================================
   // SERVICE REGISTRY INITIALIZATION
@@ -305,6 +315,11 @@ export default async function (pi: ExtensionAPI) {
   pi.on('before_agent_start', async (event: any, ctx: any) => {
     currentTurn++;
     
+    // Log streaming behavior if available (new in 0.77.0)
+    if (event.streamingBehavior) {
+      logger.debug(`[pi-research] Agent starting with streaming behavior: ${event.streamingBehavior}`);
+    }
+
     // Do not inject rules into the sub-researchers
     const isResearcher = event.systemPrompt?.toLowerCase().includes('researcher');
     if (isResearcher) {

@@ -64,6 +64,7 @@ export function createStackexchangeTool(options: {
       `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
     parameters: StackExchangeParams,
+    executionMode: 'parallel',
     async execute(
       _toolCallId,
       params,

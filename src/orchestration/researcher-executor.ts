@@ -94,6 +94,9 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       await new Promise(r => setTimeout(r, delay));
     }
 
+    const workerExclude = ['search', 'stored_search'];
+    const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
+
     const session = await createResearcherSession({
       cwd: ctx.cwd,
       ctxModel: model,
@@ -101,8 +104,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       settingsManager: extendedCtx['settingsManager'],
       systemPrompt: prompt,
       extensionCtx: ctx,
-      noSearch: true,
-      noStoredSearch: true,
+      excludeTools: mergedExclude,
       getGlobalState: (): SystemResearchState => ({
         version: 1,
         researchId,

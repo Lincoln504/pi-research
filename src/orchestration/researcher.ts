@@ -35,12 +35,8 @@ export interface CreateResearcherSessionOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
-  /** If true, the researcher will not be given the search tool. */
-  noSearch?: boolean;
-  /** If true, the researcher will not be given the stored_search tool. */
-  noStoredSearch?: boolean;
-  /** If true, the researcher will not be given the grep tool. Defaults to false. */
-  noGrep?: boolean;
+  /** List of tool names to disable for this researcher. */
+  excludeTools?: string[];
   config?: Config;
 }
 
@@ -56,9 +52,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     updateGlobalLinks,
     onLinksScraped,
     onSearchProgress,
-    noSearch,
-    noStoredSearch,
-    noGrep = false,
+    excludeTools = [],
     config,
   } = options;
 
@@ -78,7 +72,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   const globalLinks = updateGlobalLinks || (() => {});
 
   try {
-    const allTools = createResearchTools({
+    const customTools = createResearchTools({
       cwd,
       ctx: extensionCtx,
       tracker,
@@ -89,26 +83,16 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       config,
     });
 
-    // Exclude tools based on options
-    let customTools = allTools;
-    if (noSearch) {
-        customTools = customTools.filter(t => t.name !== 'search');
-    }
-    if (noStoredSearch) {
-        customTools = customTools.filter(t => t.name !== 'stored_search');
-    }
-    if (noGrep) {
-        customTools = customTools.filter(t => t.name !== 'grep');
-    }
-
-    // CRITICAL: Explicitly limit tools to ONLY what we provide.
-    // This prevents the core AgentSession from injecting default tools like 'bash', 'write', 'edit', etc.
-    const tools = customTools.map(t => t.name);
+    // Default "lockdown" list to prevent researchers from using built-in dangerous tools.
+    // We use "excludeTools" instead of whitelisting to align with the new v0.77.0 mechanism.
+    const defaultExclude = ['bash', 'write', 'edit', 'repl', 'git', 'terminal'];
+    const mergedExclude = [...new Set([...defaultExclude, ...excludeTools])];
 
     const result = await createAgentSession({
       cwd,
       customTools,
-      tools, // STRICT TOOL LOCKDOWN
+      noTools: 'all', // Start with no tools enabled (built-in or otherwise)
+      excludeTools: mergedExclude, // Exclude dangerous built-ins + user exclusions
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
       settingsManager,
       model: ctxModel,

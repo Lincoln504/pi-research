@@ -246,7 +246,9 @@ export async function getBrowserPidsForWorkers(workerPids: number[]): Promise<nu
             const ppid = parseInt(parentMatch[1], 10);
             if (workerPids.includes(ppid)) pids.push(pid);
           }
-        } catch {}
+        } catch {
+          // Ignore errors for individual process lookups
+        }
       }
     }
   } catch (err) {

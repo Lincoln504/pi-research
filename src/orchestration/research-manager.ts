@@ -5,16 +5,13 @@
  * Agnostic of TUI, requires ExtensionContext.
  */
 
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { type Model } from '@earendil-works/pi-ai';
-import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
-import type { ResearchObserver } from './research-observer.ts';
-import type { Config } from '../config.ts';
-import { logger } from '../logger.ts';
+import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getService } from '../core/service-registry.ts';
-import { ServiceNames, type IPlanningService } from '../core/service-interfaces.ts';
+import { getConfig, type Config } from '../config.ts';
+import type { ResearchObserver } from './research-observer.ts';
 
 export interface ResearchOptions {
   ctx: ExtensionContext;
@@ -22,16 +19,18 @@ export interface ResearchOptions {
   depth?: 0 | 1 | 2 | 3;
   model?: Model<any>;
   observer?: ResearchObserver;
+  onUpdate?: (update: AgentToolResult<any>) => void;
   sessionId: string;
   researchId: string;
   config?: Config;
+  excludeTools?: string[];
 }
 
 /**
  * Run a research task (Quick or Deep)
  */
 export async function runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string> {
-  const { ctx, query, depth = 0, model, observer, sessionId, researchId, config } = options;
+  const { ctx, query, depth = 0, model, observer, onUpdate, sessionId, researchId, config, excludeTools } = options;
   const selectedModel = model || ctx.model;
 
   if (!selectedModel) {
@@ -41,21 +40,7 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
   const researchStart = Date.now();
   metrics.increment('research_manager_requests_total', 1, { depth: String(depth) });
 
-  // Non-blocking initialization of the knowledge store (embedding model) 
-  // only when research is actually invoked.
-  getService(ServiceNames.KNOWLEDGE_STORE).catch(err => {
-    logger.warn('[ResearchManager] Lazy knowledge store initialization failed (non-fatal):', err);
-  });
-
-  // Validate that required services are initialized and healthy
-  try {
-    const planningService = await getService<IPlanningService>(ServiceNames.PLANNING, ctx);
-    if (!planningService || !planningService.isReady()) {
-      throw new Error('PlanningService is not initialized. Please restart the extension.');
-    }
-  } catch (err) {
-    throw new Error(`Required service validation failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
+  const researchConfig = config || getConfig();
 
   let result: string;
   try {
@@ -67,7 +52,9 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
         sessionId,
         researchId,
         observer,
-        config,
+        onUpdate,
+        config: researchConfig,
+        excludeTools,
       });
       result = await orchestrator.run(signal);
     } else {
@@ -79,7 +66,9 @@ export async function runResearch(options: ResearchOptions, signal?: AbortSignal
         sessionId,
         researchId,
         observer,
-        config,
+        onUpdate,
+        config: researchConfig,
+        excludeTools,
       });
       result = await orchestrator.run(signal);
     }
