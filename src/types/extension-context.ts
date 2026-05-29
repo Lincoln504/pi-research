@@ -5,7 +5,7 @@
  * to provide type safety for additional properties that are accessed at runtime.
  */
 
-import type { SettingsManager } from '@earendil-works/pi-coding-agent';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 export type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 /**

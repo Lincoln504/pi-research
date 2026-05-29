@@ -49,7 +49,7 @@ export class QuickResearchOrchestrator {
   }
 
   async run(signal?: AbortSignal): Promise<string> {
-    const { query, model, ctx, observer, onUpdate } = this.options;
+    const { query, model, ctx, observer } = this.options;
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);

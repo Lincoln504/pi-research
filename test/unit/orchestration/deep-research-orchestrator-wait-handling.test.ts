@@ -118,6 +118,9 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
 
       const orchestrator = new DeepResearchOrchestrator(baseOptions);
       const runPromise = orchestrator.run();
+      // Attach a no-op catch early so Node doesn't flag this as an unhandled rejection
+      // while timers are advancing. The .rejects assertion below still catches it correctly.
+      runPromise.catch(() => {});
 
       // We need 6 calls to 'wait' to exceed MAX_WAIT_RETRIES (5)
       for (let i = 0; i < 6; i++) {

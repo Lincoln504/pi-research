@@ -85,7 +85,7 @@ export class DeepResearchOrchestrator {
    * Run the multi-round research loop
    */
   async run(signal?: AbortSignal): Promise<string> {
-    const { model, query, complexity, researchId, observer, onUpdate } = this.options;
+    const { model, query, complexity, researchId, observer } = this.options;
     
     // Reset services for this specific research run ID to ensure fresh state
     await resetResearchServices(researchId);
@@ -276,7 +276,16 @@ export class DeepResearchOrchestrator {
           observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
       }
 
-      const result = finalReport.content || 'Research completed but no summary was generated.';
+      let result = finalReport.content || 'Research completed but no summary was generated.';
+      // Guard: if the LLM returned the full JSON envelope as its response text and JSON
+      // parsing failed upstream, finalReport.content may be the raw JSON string rather
+      // than the extracted markdown. Unwrap it here so docs never show the raw JSON.
+      try {
+        const parsed: unknown = JSON.parse(result);
+        if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>)['content'] === 'string') {
+          result = (parsed as Record<string, unknown>)['content'] as string;
+        }
+      } catch { /* result is not JSON — use as-is */ }
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
       

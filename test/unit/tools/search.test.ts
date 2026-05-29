@@ -41,7 +41,7 @@ describe('tools/search', () => {
       expect.arrayContaining(Array(40).fill('q')),
       undefined, // options.config
       undefined, // signal
-      mockOptions.onProgress
+      expect.any(Function) // implementation wraps onProgress in a lambda
     );
     expect(vi.mocked(search).mock.calls[0][0].length).toBe(40);
   });

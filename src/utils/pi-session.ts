@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import type { ExtendedExtensionContext, SessionManager } from '../types/extension-context.ts';
+import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 
 export interface PiSessionMetadata {
   piSessionId: string;
@@ -18,7 +18,7 @@ export interface PiSessionMetadata {
  */
 export function getPiSessionMetadata(ctx: ExtensionContext): PiSessionMetadata {
   const extendedCtx = ctx as ExtendedExtensionContext;
-  const sessionManager: SessionManager | undefined = extendedCtx.sessionManager;
+  const sessionManager = extendedCtx.sessionManager;
   
   const piSessionId = typeof sessionManager?.getSessionId === 'function' 
     ? String(sessionManager.getSessionId()) 

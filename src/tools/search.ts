@@ -4,7 +4,7 @@
  * Perform comprehensive browser-based searches (10-50 queries).
  */
 
-import type { ToolDefinition, AgentToolResult, ExtensionContext, AgentToolUpdateCallback } from '@earendil-works/pi-coding-agent';
+import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
@@ -41,7 +41,7 @@ export function createSearchTool(options: {
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
     parameters: SearchParams,
-    async execute(_callId, params, signal, onUpdate): Promise<AgentToolResult<unknown>> {
+    async execute(_callId, params, signal, _onUpdate): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
       metrics.increment('tool_search_calls_total', 1);
 

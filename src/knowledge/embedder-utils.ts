@@ -94,38 +94,17 @@ export function unregisterGlobalEmbedder(): void {
 // For SIGTERM / SIGINT / process.exit() paths the primary disposal route is the
 // service container (KnowledgeStoreService.dispose → Embedder.dispose), which is
 // already properly awaited by the shutdown manager in those flows.
-const runFinalCleanup = async () => {
+//
+// NOTE: Do NOT add SIGINT/SIGTERM handlers that call process.exit() here.
+// In the pi-research multi-process architecture, subprocesses (browser pool
+// workers, embedding servers) receive signals during normal operation. Adding
+// process.exit() calls in signal handlers would kill the parent process.
+process.on('beforeExit', async () => {
   if (globalEmbedderRef) {
     const ref = globalEmbedderRef;
     globalEmbedderRef = null; // Clear first to prevent re-entry
-    try {
-      await ref.dispose();
-      logger.log('[embedder] Global exit cleanup successful');
-    } catch (err) {
-      // Use console.error as logger might be partially disposed
-      console.error('[embedder] Global exit cleanup failed:', err);
-    }
+    try { await ref.dispose(); } catch { /* ignore */ }
   }
-};
-
-process.on('beforeExit', runFinalCleanup);
-
-// Handle hard 'exit' event. This MUST be synchronous.
-// We can't await dispose() here, but we can clear the reference to prevent
-// the C++ runtime from being accessed during teardown.
-process.on('exit', () => {
-  globalEmbedderRef = null;
-});
-
-// Secondary signal handlers to ensure we try to clean up on common termination signals
-process.on('SIGINT', async () => {
-  await runFinalCleanup();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  await runFinalCleanup();
-  process.exit(0);
 });
 
 /**

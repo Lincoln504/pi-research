@@ -91,7 +91,7 @@ export function createScrapeTool(options: {
       'PDFs are auto-detected and extracted with high fidelity.',
     ],
     parameters: ScrapeParams,
-    async execute(_callId: string, params: unknown, signal: AbortSignal, onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
+    async execute(_callId: string, params: unknown, signal: AbortSignal, _onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
       const callStartTime = Date.now();
       metrics.increment('tool_scrape_calls_total', 1);
 
