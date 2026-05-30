@@ -42,7 +42,6 @@ export function createCleanupFunction(
     panelState,
     waveTimer,
     unsubOrder,
-    unsubInput,
   } = cleanupCtx;
   
   const { ctx } = deps;
@@ -52,14 +51,10 @@ export function createCleanupFunction(
   
   // Use reference objects to allow updating after creation
   const unsubOrderContainer = cleanupCtx.unsubOrderRef || { value: unsubOrder };
-  const unsubInputContainer = cleanupCtx.unsubInputRef || { value: unsubInput };
   
   // Store reference objects in cleanup context for later updates
   if (!cleanupCtx.unsubOrderRef) {
     (cleanupCtx as any).unsubOrderRef = unsubOrderContainer;
-  }
-  if (!cleanupCtx.unsubInputRef) {
-    (cleanupCtx as any).unsubInputRef = unsubInputContainer;
   }
 
   return async () => {
@@ -94,11 +89,6 @@ export function createCleanupFunction(
       unsubOrderContainer.value();
       unsubOrderContainer.value = null;
     }
-    
-    if (unsubInputContainer.value) {
-      unsubInputContainer.value();
-      unsubInputContainer.value = null;
-    }
 
     endResearchSession(piSessionId, researchId);
     cleanupSharedLinks(researchId);
@@ -131,15 +121,6 @@ export function updateWaveTimer(cleanupCtx: CleanupContext, timer: NodeJS.Timeou
 export function updateUnsubOrder(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
   if (cleanupCtx.unsubOrderRef) {
     cleanupCtx.unsubOrderRef.value = unsub;
-  }
-}
-
-/**
- * Update the unsubInput reference in the cleanup context
- */
-export function updateUnsubInput(cleanupCtx: CleanupContext, unsub: (() => void) | null): void {
-  if (cleanupCtx.unsubInputRef) {
-    cleanupCtx.unsubInputRef.value = unsub;
   }
 }
 

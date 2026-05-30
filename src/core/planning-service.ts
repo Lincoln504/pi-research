@@ -392,18 +392,32 @@ export class PlanningService implements IPlanningService {
         }
         plan.allQueries = (plan.researchers ?? []).flatMap(r => r.queries);
       }
-      if (plan.action === 'synthesize' && !plan.content) {
-        plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
+      
+      // If synthesizing, ensure we have a clean content string
+      if (plan.action === 'synthesize') {
+        if (!plan.content) {
+            // Fall back to stripped text if content missing from valid JSON
+            plan.content = this.stripModelArtifacts(text);
+        } else {
+            // Clean up content field itself if it contains JSON/MD wrappers
+            plan.content = this.stripModelArtifacts(plan.content);
+        }
       }
     } else {
-      plan = { action: 'synthesize', content: text, researchers: [], allQueries: [] };
+      // JSON failed - assume synthesis if text present, or use whole text as fallback
+      plan = { 
+        action: 'synthesize', 
+        content: this.stripModelArtifacts(text), 
+        researchers: [], 
+        allQueries: [] 
+      };
     }
 
     if (mustSynthesize && plan.action !== 'synthesize') {
       logger.warn(`[${this.name}] Evaluator tried to delegate despite reaching max rounds; forcing synthesis.`);
       plan.action = 'synthesize';
       if (!plan.content) {
-        plan.content = text;
+        plan.content = this.stripModelArtifacts(text);
       }
     }
 
@@ -493,6 +507,36 @@ export class PlanningService implements IPlanningService {
   // ========================================================================
   // Private Helper Methods
   // ========================================================================
+
+  /**
+   * Strip LLM internal artifacts from text (Thinking blocks, JSON code blocks, etc.)
+   */
+  private stripModelArtifacts(text: string): string {
+    if (!text) return '';
+
+    let cleaned = text;
+
+    // 1. Remove thinking blocks if any (e.g., <thinking>...</thinking>)
+    cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+
+    // 2. Remove JSON code block wrappers if they wrap the whole content or parts of it
+    // Search for the longest non-empty markdown text if JSON was the main envelope
+    const jsonBlockMatch = /```json\s*([\s\S]*?)\s*```/gi;
+    const blocks = Array.from(cleaned.matchAll(jsonBlockMatch));
+    
+    if (blocks.length > 0) {
+        // If there's a content field inside the JSON, we prefer that, 
+        // but this method is used when JSON parsing itself failed or is being bypassed.
+        // For now, remove all json blocks to see if there's prose outside.
+        cleaned = cleaned.replace(jsonBlockMatch, '');
+    }
+
+    // 3. Remove other code blocks that might be wrappers
+    cleaned = cleaned.replace(/```markdown\s*([\s\S]*?)\s*```/gi, '$1');
+    cleaned = cleaned.replace(/```\s*([\s\S]*?)\s*```/gi, '$1');
+
+    return cleaned.trim();
+  }
 
   private estimateTokenCount(text: string): number {
     return Math.ceil(text.length / 4);

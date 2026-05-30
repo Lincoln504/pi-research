@@ -164,7 +164,8 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (shouldStopResearch(sessionId, researchId)) {
         const { getResearchSessionService } = await import('./research-session-manager.ts');
         const sessionService = await getResearchSessionService();
-        await sessionService.abortAllSessions(sessionId);
+        // Abort sessions specifically for this researchId, not the whole piSessionId
+        await sessionService.abortAllSessions(researchId);
 
         throw new Error('Research stopped due to excessive infrastructure failures. Multiple researchers failed.');
       }

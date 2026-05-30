@@ -2,27 +2,35 @@
  * Research Configuration Command
  *
  * Consolidated interactive TUI menu for managing pi-research.
- * Provides a unified hub for:
- * - Default Research Depth
- * - System Health Monitoring
- * - Knowledge Store Management
- * - Core System Settings
- * - Run-Scoped Metrics
+ * Mirrored after the official Pi settings experience:
+ * - Single flat scrollable list
+ * - Active item centered with description
+ * - Enter/Space to cycle values
+ * - Automatic saving on change
+ * - Search support
  *
  * Usage:
  * - /research-config  - Opens interactive TUI menu
  */
 
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { matchesKey, SelectList, SettingsList, Box, type SelectItem, type SettingItem } from '@earendil-works/pi-tui';
-import { getConfig, saveConfig, resetConfig, getEnvFilePath } from './config.ts';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { TUI } from '@earendil-works/pi-tui';
+import { 
+  SettingsList, 
+  Box, 
+  type SettingItem 
+} from '@earendil-works/pi-tui';
+import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
+import { createComponentProxy } from './tui/tui-utils.ts';
+import { getConfig, saveConfig, resetConfig } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
+import type { Theme } from './types/research-panel-types.ts';
 import { SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
 import { metrics } from './utils/metrics.ts';
-import * as os from 'node:os';
+import { logger } from './logger.ts';
 
 // ============================================================================
 // Command Handler
@@ -33,10 +41,10 @@ import * as os from 'node:os';
  */
 export async function handleResearchConfigCommand(
   _args: string,
-  ctx: any,
+  ctx: ExtensionContext,
   pi: ExtensionAPI
 ): Promise<void> {
-  if (!ctx.hasUI) {
+  if (!(ctx as any).hasUI) {
     ctx.ui.notify('Interactive menu requires UI mode', 'error');
     return;
   }
@@ -50,165 +58,248 @@ export async function handleResearchConfigCommand(
 /**
  * Show interactive TUI menu for research configuration
  */
-async function showInteractiveMenu(ctx: any, pi: ExtensionAPI): Promise<void> {
-  const result = await ctx.ui.custom(
-    (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
-      const selectTheme = {
-        selectedPrefix: (text: string) => theme.fg('accent', '► ' + text),
-        selectedText: (text: string) => theme.fg('accent', text),
-        description: (text: string) => theme.fg('muted', text),
-        scrollInfo: (text: string) => theme.fg('muted', text),
-        noMatch: (text: string) => theme.fg('error', text),
-      };
+async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
+  // Ensure the global TUI controller is initialized
+  initGlobalTuiController(ctx.ui);
 
-      const currentDepth = getConfig().DEFAULT_RESEARCH_DEPTH;
-      const depthLabels: Record<number, string> = { 1: 'Normal', 2: 'Deep', 3: 'Ultra' };
+  const config = { ...getConfig() };
+  const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
-      const sections: Record<string, { title: string, items: SelectItem[] }> = {
-        main: {
-          title: 'Research Configuration',
-          items: [
-            { value: 'depth', label: 'Default Research Depth', description: `Current: ${depthLabels[currentDepth] || currentDepth} (${currentDepth})` },
-            { value: 'health', label: 'Health Management', description: 'System health checks and monitoring' },
-            { value: 'knowledge', label: 'Knowledge Store', description: 'Manage persistent memory' },
-            { value: 'settings', label: 'System Settings', description: 'View and modify configuration' },
-            { value: 'metrics', label: 'Metrics & Monitoring', description: 'View system metrics' },
-          ]
-        },
-        depth: {
-          title: 'Default Research Depth',
-          items: [
-            { value: '1', label: '1: Normal', description: 'Coordinated, thorough research' },
-            { value: '2', label: '2: Deep', description: 'Multi-round, exhaustive research' },
-            { value: '3', label: '3: Ultra', description: 'Maximum depth, extreme rigor' },
-            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
-          ]
-        },
-        health: {
-          title: 'Health Management',
-          items: [
-            { value: 'run', label: 'Run Health Check', description: 'Execute all health checks' },
-            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
-          ]
-        },
-        knowledge: {
-          title: 'Knowledge Store',
-          items: [
-            { value: 'status', label: 'View Status', description: 'Show knowledge store status' },
-            { value: 'clear', label: 'Clear Store', description: 'Delete all knowledge store data' },
-            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
-          ]
-        },
-        settings: {
-          title: 'System Settings',
-          items: [
-            { value: 'edit', label: 'Open Settings Editor', description: 'Interactive configuration editor' },
-            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
-          ]
-        },
-        metrics: {
-          title: 'Metrics & Monitoring',
-          items: [
-            { value: 'view', label: 'View Metrics', description: 'Show system metrics' },
-            { value: 'clear', label: 'Clear Metrics', description: 'Reset all session statistics' },
-            { value: 'back', label: '← Back to Main', description: 'Return to main menu' },
-          ]
-        }
-      };
+  const initialItems: SettingItem[] = [
+    // --- Core Research Settings ---
+    {
+      id: 'DEFAULT_RESEARCH_DEPTH',
+      label: 'Research depth',
+      description: 'Default depth for new research tasks (normal, deep, ultra)',
+      currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
+      values: ['normal', 'deep', 'ultra'],
+    },
+    {
+      id: 'MAX_CONCURRENT_RESEARCHERS',
+      label: 'Max concurrent',
+      description: 'Maximum researchers allowed to run simultaneously (1-5)',
+      currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
+      values: ['1', '2', '3', '4', '5'],
+    },
+    {
+      id: 'MAX_SCRAPE_BATCHES',
+      label: 'Scrape batches',
+      description: 'Max scrape batches per researcher (0 for unlimited)',
+      currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
+      values: ['unlimited', '1', '2', '3', '5', '10', '15'],
+    },
+    {
+      id: 'WORKER_THREADS',
+      label: 'Worker threads',
+      description: 'Number of parallel browser workers for search and scraping',
+      currentValue: String(config.WORKER_THREADS),
+      values: ['1', '2', '4', '8', '12', '16'],
+    },
+    {
+      id: 'RESEARCHER_TIMEOUT_MS',
+      label: 'Timeout (min)',
+      description: 'Per-researcher timeout in minutes (3-30 min)',
+      currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
+      values: ['3', '5', '10', '15', '20', '30'],
+    },
 
-      let currentSection = 'main';
-      let selectList = new SelectList(sections['main']!.items, 10, selectTheme);
+    // --- Knowledge Store ---
+    {
+      id: 'KNOWLEDGE_STORE_ENABLED',
+      label: 'Knowledge store',
+      description: 'Enable or disable persistent research memory (RAG)',
+      currentValue: config.KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
+      values: ['true', 'false'],
+    },
+    {
+      id: 'EMBEDDING_MODEL',
+      label: 'Embed model',
+      description: 'Model used for knowledge store embeddings (Changing clears local DB)',
+      currentValue: config.EMBEDDING_MODEL,
+      values: SUPPORTED_MODELS.map(m => m.id),
+    },
+    {
+      id: 'EMBEDDING_DEVICE',
+      label: 'Embed device',
+      description: 'Hardware device for embeddings (webgpu is significantly faster)',
+      currentValue: config.EMBEDDING_DEVICE,
+      values: ['webgpu', 'cpu'],
+    },
+    {
+      id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
+      label: 'Cache TTL (days)',
+      description: 'How long to keep cached research findings (1-365 days)',
+      currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+      values: ['7', '14', '30', '60', '90', '180', '365'],
+    },
 
-      const box = new Box(2, 1);
-      box.addChild({
-        render: (width) => {
-          const section = sections[currentSection]!;
-          const lines = [
-            theme.fg('accent', ` ${section.title}`),
-            theme.fg('muted', ' ──────────────────────────────'),
-            ...selectList.render(width - 4),
-            theme.fg('muted', ' ──────────────────────────────'),
-            theme.fg('muted', ' [Enter] Select   [Esc] Back/Exit'),
-          ];
-          return lines;
-        },
-        handleInput: async (data) => {
-          if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
-            if (currentSection === 'main') {
-              done({ type: 'cancel' });
+    // --- Actions & Diagnostics ---
+    {
+      id: 'ACTION_HEALTH',
+      label: 'System health',
+      description: 'run comprehensive health checks and display results',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_KNOWLEDGE_STATUS',
+      label: 'Knowledge status',
+      description: 'run a report of current knowledge store statistics',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_KNOWLEDGE_CLEAR',
+      label: 'Clear memory',
+      description: '⚠️ run a permanent deletion of all knowledge store data',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_METRICS_VIEW',
+      label: 'View metrics',
+      description: 'run a report of session-wide performance metrics',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_METRICS_CLEAR',
+      label: 'Reset metrics',
+      description: 'run a reset of all performance counters and statistics',
+      currentValue: 'run',
+      values: ['run'],
+    },
+  ];
+
+  setInteractiveTuiActive(true);
+  try {
+    await ctx.ui.custom(
+      (tui: TUI, theme: Theme, _kb: any, done: (val: any) => void) => {
+        const listTheme = {
+          label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
+          value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
+          description: (text: string) => theme.fg('dim', text),
+          cursor: theme.fg('accent', '→ '),
+          hint: (text: string) => theme.fg('dim', text),
+        };
+
+        const settingsList = new SettingsList(
+          initialItems,
+          10,
+          listTheme,
+          async (id, newValue) => {
+            // 1. Handle Settings Changes (Auto-save)
+            let changed = true;
+            if (id === 'DEFAULT_RESEARCH_DEPTH') {
+              const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
+              config.DEFAULT_RESEARCH_DEPTH = depthMap[newValue] || 1;
+            } else if (id === 'MAX_CONCURRENT_RESEARCHERS') {
+              config.MAX_CONCURRENT_RESEARCHERS = parseInt(newValue, 10);
+            } else if (id === 'MAX_SCRAPE_BATCHES') {
+              config.MAX_SCRAPE_BATCHES = newValue === 'unlimited' ? 0 : parseInt(newValue, 10);
+            } else if (id === 'WORKER_THREADS') {
+              config.WORKER_THREADS = parseInt(newValue, 10);
+            } else if (id === 'RESEARCHER_TIMEOUT_MS') {
+              config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+            } else if (id === 'KNOWLEDGE_STORE_ENABLED') {
+              config.KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+            } else if (id === 'EMBEDDING_MODEL') {
+              config.EMBEDDING_MODEL = newValue;
+            } else if (id === 'EMBEDDING_DEVICE') {
+              config.EMBEDDING_DEVICE = newValue;
+            } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
+              config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);
             } else {
-              currentSection = 'main';
-              selectList = new SelectList(sections['main']!.items, 10, selectTheme);
-              tui.requestRender();
+              changed = false;
             }
-            return;
-          }
 
-          if (matchesKey(data, 'enter')) {
-            const selected = selectList.getSelectedItem();
-            if (!selected) return;
-
-            if (currentSection === 'main') {
-              currentSection = selected.value;
-              selectList = new SelectList(sections[currentSection]!.items, 10, selectTheme);
-              tui.requestRender();
-            } else {
-              if (selected.value === 'back') {
-                currentSection = 'main';
-                selectList = new SelectList(sections['main']!.items, 10, selectTheme);
-                tui.requestRender();
-              } else {
-                done({ type: 'action', section: currentSection, action: selected.value });
+            if (changed) {
+              try {
+                saveConfig(config);
+                resetConfig();
+              } catch (e: any) {
+                ctx.ui.notify(`Failed to save: ${e.message}`, 'error');
               }
             }
-            return;
-          }
 
-          selectList.handleInput(data);
-        },
-        invalidate: () => selectList.invalidate(),
-      });
-
-      return box;
-    }
-  );
-
-  if (result?.type === 'action') {
-    const { section, action } = result;
-    switch (section) {
-      case 'depth': {
-        const depth = parseInt(action, 10);
-        const config = getConfig();
-        config.DEFAULT_RESEARCH_DEPTH = depth;
-        saveConfig(config);
-        resetConfig();
-        ctx.ui.notify(`Default research depth set to ${action}`, 'info');
-        break;
-      }
-      case 'health':
-        if (action === 'run') await runHealthCheckAction(ctx, pi);
-        break;
-      case 'knowledge':
-        if (action === 'status') await showKnowledgeStatusAction(ctx, pi);
-        else if (action === 'clear') {
-            const confirmed = await ctx.ui.confirm('Are you sure you want to clear the entire Knowledge Store? This cannot be undone.');
-            if (confirmed) {
-                await clearKnowledgeStore();
-                ctx.ui.notify('Knowledge Store cleared', 'info');
+            // 2. Handle Actions
+            if (id === 'ACTION_HEALTH') {
+              done({ type: 'action', action: 'health' });
+            } else if (id === 'ACTION_KNOWLEDGE_STATUS') {
+              done({ type: 'action', action: 'knowledge_status' });
+            } else if (id === 'ACTION_KNOWLEDGE_CLEAR') {
+              done({ type: 'action', action: 'knowledge_clear' });
+            } else if (id === 'ACTION_METRICS_VIEW') {
+              done({ type: 'action', action: 'metrics_view' });
+            } else if (id === 'ACTION_METRICS_CLEAR') {
+              done({ type: 'action', action: 'metrics_clear' });
             }
-        }
-        break;
-      case 'settings':
-        if (action === 'edit') await showSettingsEditorAction(ctx, pi);
-        break;
-      case 'metrics':
-        if (action === 'view') await showMetricsAction(ctx, pi);
-        else if (action === 'clear') {
+
+            tui.requestRender();
+          },
+          () => done({ type: 'cancel' }),
+          { enableSearch: true }
+        );
+
+        // Box(0, 0) ensures we have full terminal width for borders
+        const box = new Box(0, 0);
+        
+        const innerComponent = {
+          render: (width: number) => {
+            const border = theme.fg('muted', '─'.repeat(width));
+            return [
+              border,
+              ...settingsList.render(width),
+              border,
+            ];
+          },
+          handleInput: (data: string) => {
+            settingsList.handleInput(data);
+            tui.requestRender();
+          },
+          invalidate: () => settingsList.invalidate(),
+        };
+
+        box.addChild(innerComponent);
+
+        return createComponentProxy(box, {
+          render: (width: number) => box.render(width),
+          handleInput: (data: string) => innerComponent.handleInput(data),
+        });
+      }
+    )
+.then(async (result: any) => {
+      // Handle actions after the TUI closes to avoid UI conflicts
+      if (result?.type === 'action') {
+        switch (result.action) {
+          case 'health':
+            await runHealthCheckAction(ctx, pi);
+            break;
+          case 'knowledge_status':
+            await showKnowledgeStatusAction(ctx, pi);
+            break;
+          case 'knowledge_clear': {
+            const confirmed = await ctx.ui.confirm('Clear Store', 'Are you sure you want to delete all knowledge store data?');
+            if (confirmed) {
+              await clearKnowledgeStore();
+              ctx.ui.notify('Knowledge store cleared', 'info');
+            }
+            break;
+          }
+          case 'metrics_view':
+            await showMetricsAction(ctx, pi);
+            break;
+          case 'metrics_clear':
             metrics.clear();
-            ctx.ui.notify('Metrics cleared', 'info');
+            ctx.ui.notify('System metrics reset', 'info');
+            break;
         }
-        break;
-    }
+      }
+    });
+  } catch (error: any) {
+    logger.error(`[Config] Menu error: ${error.message}`);
+  } finally {
+    setInteractiveTuiActive(false);
   }
 }
 
@@ -291,139 +382,4 @@ async function showMetricsAction(_ctx: any, pi: ExtensionAPI): Promise<void> {
     display: true,
     details: { metrics: snapshot },
   });
-}
-
-async function showSettingsEditorAction(ctx: any, _pi: ExtensionAPI): Promise<void> {
-  const config = { ...getConfig() }; // Work on a copy
-  const envDisplayPath = getEnvFilePath().replace(os.homedir(), '~');
-
-  const initialItems: SettingItem[] = [
-    {
-      id: 'MAX_CONCURRENT_RESEARCHERS',
-      label: 'Max Concurrent',
-      description: 'Maximum researchers allowed to run simultaneously (1-5)',
-      currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
-      values: ['1', '2', '3', '4', '5'],
-    },
-    {
-      id: 'MAX_SCRAPE_BATCHES',
-      label: 'Scrape Batches',
-      description: 'Max scrape batches per researcher (0 for unlimited)',
-      currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'Unlimited' : String(config.MAX_SCRAPE_BATCHES),
-      values: ['Unlimited', '1', '2', '3', '5', '10', '15'],
-    },
-    {
-      id: 'WORKER_THREADS',
-      label: 'Worker Threads',
-      description: 'Number of parallel browser workers for search and scraping',
-      currentValue: String(config.WORKER_THREADS),
-      values: ['1', '2', '4', '8', '12', '16'],
-    },
-    {
-      id: 'KNOWLEDGE_STORE_ENABLED',
-      label: 'Knowledge Store',
-      description: 'Enable or disable persistent research memory',
-      currentValue: config.KNOWLEDGE_STORE_ENABLED ? 'ON' : 'OFF',
-      values: ['ON', 'OFF'],
-    },
-    {
-      id: 'EMBEDDING_MODEL',
-      label: 'Embed Model',
-      description: 'Model used for knowledge store embeddings (⚠ Changing clears DB)',
-      currentValue: config.EMBEDDING_MODEL,
-      values: SUPPORTED_MODELS.map(m => m.id),
-    },
-    {
-      id: 'EMBEDDING_DEVICE',
-      label: 'Embed Device',
-      description: 'Hardware device for embeddings (webgpu is 3-9x faster)',
-      currentValue: config.EMBEDDING_DEVICE,
-      values: ['webgpu', 'cpu'],
-    },
-    {
-      id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-      label: 'Cache TTL (days)',
-      description: 'How long to keep cached research findings (1-365 days)',
-      currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
-      values: ['7', '14', '30', '60', '90', '180', '365'],
-    },
-    {
-      id: 'RESEARCHER_TIMEOUT_MS',
-      label: 'Timeout (min)',
-      description: 'Per-researcher timeout in minutes (3-30 min)',
-      currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
-      values: ['3', '5', '10', '15', '20', '30'],
-    },
-  ];
-
-  const result = await ctx.ui.custom(
-    (tui: any, theme: any, _kb: any, done: (val: any) => void) => {
-      const listTheme = {
-        label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('text', text),
-        value: (text: string, selected: boolean) => selected ? theme.fg('accent', `[ ${text} ]`) : theme.fg('muted', `  ${text}  `),
-        description: (text: string) => theme.fg('muted', ` ${text}`),
-        cursor: theme.fg('accent', '► '),
-        hint: (text: string) => theme.fg('muted', ` ${text}`),
-      };
-
-      const settingsList = new SettingsList(
-        initialItems,
-        10,
-        listTheme,
-        (id, newValue) => {
-          if (id === 'KNOWLEDGE_STORE_ENABLED') config.KNOWLEDGE_STORE_ENABLED = newValue === 'ON';
-          else if (id === 'MAX_CONCURRENT_RESEARCHERS' || id === 'WORKER_THREADS' || id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') (config as any)[id] = parseInt(newValue, 10);
-          else if (id === 'MAX_SCRAPE_BATCHES') config.MAX_SCRAPE_BATCHES = newValue === 'Unlimited' ? 0 : parseInt(newValue, 10);
-          else if (id === 'RESEARCHER_TIMEOUT_MS') config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
-
-          else (config as any)[id] = newValue;
-          tui.requestRender();
-        },
-        () => done({ type: 'cancel' })
-      );
-
-      const box = new Box(2, 1);
-      box.addChild({
-        render: (width) => {
-          return [
-            theme.fg('accent', ' pi-research Configuration'),
-            theme.fg('muted', ' ──────────────────────────────'),
-            ...settingsList.render(width - 4),
-            theme.fg('muted', ' ──────────────────────────────'),
-            theme.fg('muted', ` Config: ${envDisplayPath}`),
-            theme.fg('muted', ' [s] Save & Exit        [Esc] Cancel'),
-          ];
-        },
-        handleInput: (data) => {
-          if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
-            done({ type: 'cancel' });
-          } else if (matchesKey(data, 's') || matchesKey(data, 'enter')) {
-            // Support both 's' and 'Enter' for saving if it's the last step, 
-            // but usually 's' is preferred for settings with many values.
-            // Actually, let's stick to 's' as per hint to avoid cycle collision.
-            if (matchesKey(data, 's')) {
-                done({ type: 'submit', data: config });
-            } else {
-                settingsList.handleInput(data);
-            }
-          } else {
-            settingsList.handleInput(data);
-          }
-        },
-        invalidate: () => settingsList.invalidate(),
-      });
-
-      return box;
-    }
-  );
-
-  if (result && result.type === 'submit' && result.data) {
-    try {
-      saveConfig(result.data);
-      resetConfig();
-      ctx.ui.notify('Configuration updated and saved', 'info');
-    } catch (e: any) {
-      ctx.ui.notify(`Invalid config: ${e.message}`, 'error');
-    }
-  }
 }

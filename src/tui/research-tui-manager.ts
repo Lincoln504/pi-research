@@ -9,6 +9,8 @@
  */
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { TUI } from '@earendil-works/pi-tui';
+import type { Theme } from '../types/research-panel-types.ts';
 import {
   createMasterResearchPanel,
   createInitialPanelState,
@@ -18,10 +20,9 @@ import {
   registerMasterUpdate,
   refreshAllSessions,
   onSessionOrderChange,
-  abortAllSessions,
   getPiActivePanels,
 } from '../utils/session-state.ts';
-import { shouldConsumeForCleanup } from '../utils/terminal-state.ts';
+import { initGlobalTuiController } from './tui-controller.ts';
 import type { ResearchPanelState } from './research-panel.ts';
 
 export interface TuiContext {
@@ -39,10 +40,8 @@ export interface TuiManager {
   panelState: ResearchPanelState;
   masterWidgetId: string;
   unsubOrder: (() => void) | null;
-  unsubInput: (() => void) | null;
   debouncedRefresh: () => void;
   initializePanel: () => void;
-  handleTerminalInput: (data: string) => { consume?: boolean } | undefined;
   dispose: () => void;
 }
 
@@ -65,8 +64,10 @@ export function createResearchTuiManager(
   const masterWidgetId = `pi-research-master-${piSessionId}`;
   const panelState = createInitialPanelState(researchId, query, modelId);
   
+  // Ensure the global TUI controller is initialized (handles cancellation and protocol leaks)
+  initGlobalTuiController(ctx.ui);
+
   let unsubOrder: (() => void) | null = null;
-  let unsubInput: (() => void) | null = null;
   let refreshTimeout: NodeJS.Timeout | null = null;
   let refreshScheduled = false;
 
@@ -95,30 +96,7 @@ export function createResearchTuiManager(
       return getActivePanelsForSession(piSessionId);
     });
     
-    ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => masterPanelCreator(_tui, theme), { placement: 'aboveEditor' });
-  };
-
-  /**
-   * Handle terminal input for cancellation and cleanup
-   */
-  const handleTerminalInput = (data: string) => {
-    // Check for specific cancel keys (Escape and Ctrl+C)
-    // We trigger the abort but DO NOT consume the key here.
-    // This allows the key to fall through to other handlers (like the config TUI)
-    // so the UI stays responsive while the background tasks are cancelled.
-    if (data === '\x1b' || data === '\x03') {
-      abortAllSessions(piSessionId);
-      // Return undefined to let it fall through to other handlers/TUIs
-      return undefined;
-    }
-
-    // Consume only legitimate terminal status responses to prevent leaks.
-    // refined shouldConsumeForCleanup now allows Arrows, Enter, etc. to pass.
-    if (shouldConsumeForCleanup(data)) {
-      return { consume: true };
-    }
-
-    return undefined;
+    ctx.ui.setWidget(masterWidgetId, (tui: TUI, theme: Theme) => masterPanelCreator(tui, theme), { placement: 'aboveEditor' });
   };
 
   // Register master update function (re-registers the widget to trigger a render)
@@ -129,14 +107,11 @@ export function createResearchTuiManager(
     const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
       return getActivePanelsForSession(piSessionId);
     });
-    ctx.ui.setWidget(masterWidgetId, (_tui: any, theme: any) => masterPanelCreator(_tui, theme), { placement: 'aboveEditor' });
+    ctx.ui.setWidget(masterWidgetId, (tui: TUI, theme: Theme) => masterPanelCreator(tui, theme), { placement: 'aboveEditor' });
   });
 
   // Subscribe to session order changes
   unsubOrder = onSessionOrderChange(piSessionId, () => refreshAllSessions(piSessionId));
-
-  // Subscribe to terminal input
-  unsubInput = ctx.ui.onTerminalInput(handleTerminalInput);
 
   /**
    * Dispose of TUI resources
@@ -151,21 +126,14 @@ export function createResearchTuiManager(
       unsubOrder();
       unsubOrder = null;
     }
-    
-    if (unsubInput) {
-      unsubInput();
-      unsubInput = null;
-    }
   };
 
   return {
     panelState,
     masterWidgetId,
     unsubOrder,
-    unsubInput,
     debouncedRefresh,
     initializePanel,
-    handleTerminalInput,
     dispose,
   };
 }

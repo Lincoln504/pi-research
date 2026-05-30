@@ -6,7 +6,7 @@
  * architecture using DuckDuckGo Lite (Playwright).
  */
 
-import { type Component, visibleWidth, truncateToWidth } from '@earendil-works/pi-tui';
+import { type Component, visibleWidth, truncateToWidth, type TUI } from '@earendil-works/pi-tui';
 import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
 import {
   formatTokens,
@@ -309,12 +309,15 @@ function renderPanelBlock(
 export function createMasterResearchPanel(
   piSessionId: string,
   getActivePanelsFn?: (piSessionId: string) => ResearchPanelState[]
-): (tui: unknown, theme: Theme) => Component {
+): (tui: TUI, theme: Theme) => Component {
   const getPanels = getActivePanelsFn;
 
-  return (_tui: unknown, theme: Theme) => {
+  return (_tui: TUI, theme: Theme) => {
     const component: Component = {
       render(width: number): string[] {
+        // Safety guard for extremely narrow terminals
+        if (width < 4) return [];
+
         const panels: ResearchPanelState[] = getPanels ? getPanels(piSessionId) : [];
         if (panels.length === 0) return [];
 
@@ -396,10 +399,11 @@ export function createMasterResearchPanel(
       },
       invalidate(): void {
         // Propagate up the component tree so the framework's render pipeline
-        // is triggered. The master widget refresh is also driven explicitly via
-        // masterUpdateRegistry, but parent-propagation ensures compatibility
-        // with any framework path that calls invalidate() directly.
-        (component as any).parent?.invalidate?.();
+        // is triggered. 
+        const comp = component as Component & { parent?: { invalidate: () => void } };
+        if (comp.parent && typeof comp.parent.invalidate === 'function') {
+          comp.parent.invalidate();
+        }
       }
     };
     return component;

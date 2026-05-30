@@ -10,10 +10,11 @@ import {
   addSlice,
   activateSlice,
   removeSlice,
+  type ResearchPanelState,
 } from './research-panel.ts';
 
 export interface HealthCheckContext {
-  panelState: any;
+  panelState: ResearchPanelState;
   onUpdate: () => void;
 }
 

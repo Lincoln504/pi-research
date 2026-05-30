@@ -249,13 +249,11 @@ export function createResearchTool(): ToolDefinition {
             panelState,
             waveTimer: null,
             unsubOrder: null,
-            unsubInput: null,
           }, { ctx });
           
           // Update cleanup with actual unsubscribe functions from TUI manager
-          const { updateUnsubOrder, updateUnsubInput } = await import('../cleanup/research-cleanup.ts');
+          const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
           updateUnsubOrder(cleanup as any, tuiManager.unsubOrder);
-          updateUnsubInput(cleanup as any, tuiManager.unsubInput);
           // Note: wave timer will be set by the observer when searching starts
 
           // Handle abort signal — use { once: true } so the listener is auto-removed after the first fire

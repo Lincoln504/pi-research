@@ -54,9 +54,7 @@ export interface CleanupContext {
   panelState: import('./research-panel-types.ts').ResearchPanelState;
   waveTimer: NodeJS.Timeout | null;
   unsubOrder: (() => void) | null;
-  unsubInput: (() => void) | null;
   unsubOrderRef?: { value: (() => void) | null };
-  unsubInputRef?: { value: (() => void) | null };
 }
 
 /**

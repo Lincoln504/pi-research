@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolDefinition, AgentToolResult } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import type { NodeError, ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
@@ -11,6 +11,7 @@ import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState } from './utils/session-state.ts';
 import { resetTerminalState } from './utils/terminal-state.ts';
+import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 
@@ -58,7 +59,7 @@ export default async function (pi: ExtensionAPI) {
 
   // ============================================================
   // SERVICE REGISTRY INITIALIZATION
-  // ============================================================
+  // ============================================
   // Register all core services with the service registry
   // This must happen early so services are available for the rest of the extension
   try {
@@ -206,6 +207,7 @@ export default async function (pi: ExtensionAPI) {
   // 3. Dispose all core services (runs FIRST in execution order because it is registered last)
   shutdownManager.register(async () => {
     try {
+      disposeGlobalTuiController();
       await disposeCoreServices();
       logger.log('[pi-research] All services disposed');
     } catch (err) {
@@ -299,22 +301,20 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // /research-config — consolidated research configuration and management command
-  // Replaces: /health, /health-clear, /health-history, /errors, /errors-clear, /errors-export, /knowledge-migrate
-  // Usage:
-  //   /research-config                    - Opens interactive TUI menu
-  //   /research-config <section>          - Direct access to section (health|errors|knowledge|settings|metrics)
-  //   /research-config <section> <action>  - Direct action (e.g., health run, errors clear)
   pi.registerCommand('research-config', {
     description: 'Research configuration and management (health, errors, knowledge, settings, metrics)',
-    handler: async (args, ctx) => {
+    handler: async (args, ctx: ExtensionContext) => {
       await handleResearchConfigCommand(args, ctx, pi);
     },
   });
 
   // Dual-Sided JIT Prompt Injection (User Input + LLM Output) with Cooldown
-  pi.on('before_agent_start', async (event: any, ctx: any) => {
+  pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
     currentTurn++;
     
+    // Ensure the global TUI controller is initialized
+    initGlobalTuiController(ctx.ui);
+
     // Log streaming behavior if available (new in 0.77.0)
     if (event.streamingBehavior) {
       logger.debug(`[pi-research] Agent starting with streaming behavior: ${event.streamingBehavior}`);
