@@ -68,7 +68,7 @@ export async function runBrowserTask<T>(
             }
             // Small buffer after pool is confirmed idle to allow port reclamation.
             await new Promise(resolve => setTimeout(resolve, 500));
-            return runBrowserTask<T>(taskOrUrl, type, config, retries - 1);
+            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1);
         }
         throw error;
     }
@@ -138,7 +138,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 await waitForBrowserPoolIdle(15000).catch(() => {});
             }
             await new Promise(resolve => setTimeout(resolve, 500));
-            return runWorkerSearch(query, config, retries - 1);
+            return runWorkerSearch(query, config, signal, retries - 1);
         }
         throw error;
     }

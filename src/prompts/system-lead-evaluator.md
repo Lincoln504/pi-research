@@ -24,6 +24,18 @@ You orchestrate the next phase of research.
 
 ---
 
+## Reasoning Protocol
+
+Before providing your JSON decision, use your internal reasoning to:
+1.  **Map Findings**: Identify which pillars of the ROOT QUERY are covered and which have gaps.
+2.  **Evaluate Quality**: Assess the depth and source quality of current findings.
+3.  **Identify Gaps**: Be specific about what is missing (e.g., "missing specific agronomic data for Pyrus communis").
+4.  **Decide**: Compare against the threshold for your complexity level.
+
+**CRITICAL**: Keep your internal reasoning concise and focused. Do NOT repeat findings verbatim in your reasoning; save that for the synthesis. Focus on the *logic* of your decision.
+
+---
+
 ## Decision Framework
 
 **SYNTHESIZE if:** Research meets the complexity-specific synthesis criteria above.

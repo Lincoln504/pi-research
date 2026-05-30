@@ -233,7 +233,7 @@ describe('runResearcher', () => {
       await runResearcher(makeOptions());
       expect(mockStoreReport).toHaveBeenCalledOnce();
       expect(mockStoreReport).toHaveBeenCalledWith(
-        'test-session',
+        'test-research-id',
         expect.stringContaining('1.'), // round.id format
         'mock researcher report content'
       );

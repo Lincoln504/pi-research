@@ -139,65 +139,72 @@ export class PlanningService implements IPlanningService {
 
       const reasoning: ThinkingLevel = 'medium';
 
-      const planResponse = await complete(model, {
-        systemPrompt: basePlanningPrompt + retryHint,
-        messages,
-      }, { 
-        apiKey: auth.apiKey, 
-        headers: auth.headers, 
-        signal,
-        ...({ reasoning } as any)
-      });
-
-      const planMetadata = planResponse as LLMResponseMetadata;
-      if (planMetadata.stopReason === 'error' || planMetadata.stopReason === 'aborted') {
-        const apiError = planMetadata.errorMessage || `Model API returned stop reason: ${planMetadata.stopReason}`;
-        logger.error(`[${this.name}] Coordinator API call failed (attempt ${attempt}): ${apiError}`);
-        metrics.increment('llm_api_errors_total', 1, { component: 'coordinator', stopReason: planMetadata.stopReason });
-        throw new Error(`Coordinator model API error: ${apiError}`);
-      }
-
-      const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
-      const thinkingContent = (planResponse.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
-      
-      if (thinkingContent?.thinking) {
-        logger.debug(`[${this.name}] Coordinator Thinking:\n${thinkingContent.thinking}`);
-      }
-
-      const rawPlanText = textContent?.text || '';
-      lastRawPlanText = rawPlanText;
-
-      logger.debug(`[${this.name}] Coordinator Response:\n${rawPlanText}`);
-
       try {
-        plan = parseJsonPlan(rawPlanText, this.name);
+        const planResponse = await complete(model, {
+          systemPrompt: basePlanningPrompt + retryHint,
+          messages,
+        }, { 
+          apiKey: auth.apiKey, 
+          headers: auth.headers, 
+          signal,
+          ...({ reasoning } as any)
+        });
 
-        if (planResponse.usage) {
-          const coordUsage = parseTokenUsage(planResponse.usage);
-          const tokens = calculateTotalTokens(coordUsage);
-          
-          let cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
-          if (cost === 0 && tokens > 0) {
-              const calculatedCost = calculateCost(model, planResponse.usage);
-              cost = calculatedCost.total;
+        const planMetadata = planResponse as LLMResponseMetadata;
+        if (planMetadata.stopReason === 'error' || planMetadata.stopReason === 'aborted') {
+          const apiError = planMetadata.errorMessage || `Model API returned stop reason: ${planMetadata.stopReason}`;
+          logger.error(`[${this.name}] Coordinator API call failed (attempt ${attempt}): ${apiError}`);
+          metrics.increment('llm_api_errors_total', 1, { component: 'coordinator', stopReason: planMetadata.stopReason });
+          if (attempt >= 3) throw new Error(`Coordinator model API error: ${apiError}`);
+          continue;
+        }
+
+        const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
+        const thinkingContent = (planResponse.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
+        
+        if (thinkingContent?.thinking) {
+          logger.debug(`[${this.name}] Coordinator Thinking:\n${thinkingContent.thinking}`);
+        }
+
+        const rawPlanText = textContent?.text || '';
+        lastRawPlanText = rawPlanText;
+
+        logger.debug(`[${this.name}] Coordinator Response:\n${rawPlanText}`);
+
+        try {
+          plan = parseJsonPlan(rawPlanText, this.name);
+
+          if (planResponse.usage) {
+            const coordUsage = parseTokenUsage(planResponse.usage);
+            const tokens = calculateTotalTokens(coordUsage);
+            
+            let cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
+            if (cost === 0 && tokens > 0) {
+                const calculatedCost = calculateCost(model, planResponse.usage);
+                cost = calculatedCost.total;
+            }
+
+            metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
+            metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
+            options.observer?.onPlanningTokens?.(tokens, cost);
           }
 
-          metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
-          metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
-          options.observer?.onPlanningTokens?.(tokens, cost);
-        }
-
-        metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
-        options.observer?.onPlanningSuccess?.(plan);
-        break;
-      } catch (_err) {
-        if (attempt >= 3) {
-          logger.warn(`[${this.name}] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
-          metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'fallback' });
-          plan = buildFallbackCoordinatorPlan(this.name, lastRawPlanText, query);
+          metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'success' });
+          options.observer?.onPlanningSuccess?.(plan);
           break;
+        } catch (_err) {
+          if (attempt >= 3) {
+            logger.warn(`[${this.name}] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
+            metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'fallback' });
+            plan = buildFallbackCoordinatorPlan(this.name, lastRawPlanText, query);
+            break;
+          }
+          metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'error' });
         }
-        metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'error' });
+      } catch (err) {
+        logger.error(`[${this.name}] Coordinator unexpected error (attempt ${attempt}):`, err);
+        if (attempt >= 3) throw err;
+        await new Promise(r => setTimeout(r, 1000));
       }
     }
 
@@ -296,48 +303,62 @@ export class PlanningService implements IPlanningService {
     const reasoning: ThinkingLevel = 'medium';
 
     let text = '';
+    let lastEvalError: any = null;
+
     for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
-      const response = await completeSimple(model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
-      }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning });
+      try {
+        const response = await completeSimple(model, {
+          messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
+        }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning });
 
-      const responseMetadata = response as LLMResponseMetadata;
-      if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
-        const apiError = responseMetadata.errorMessage || `Model API returned stop reason: ${responseMetadata.stopReason}`;
-        logger.error(`[${this.name}] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
-        metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: responseMetadata.stopReason });
-        observer?.onError?.(new Error(apiError));
-        throw new Error(`Evaluator model API error: ${apiError}`);
-      }
-
-      const textContent = response.content.find((c): c is TextContent => c.type === 'text');
-      const thinkingContent = (response.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
-      
-      if (thinkingContent?.thinking) {
-        logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
-        observer?.onPlanningProgress?.('thinking');
-      }
-
-      text = textContent?.text || '';
-
-      if (response.usage) {
-        const evalUsage = parseTokenUsage(response.usage);
-        const tokens = calculateTotalTokens(evalUsage);
-        
-        let cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
-        if (cost === 0 && tokens > 0) {
-            const calculatedCost = calculateCost(model, response.usage);
-            cost = calculatedCost.total;
+        const responseMetadata = response as LLMResponseMetadata;
+        if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
+          const apiError = responseMetadata.errorMessage || `Model API returned stop reason: ${responseMetadata.stopReason}`;
+          logger.error(`[${this.name}] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
+          metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: responseMetadata.stopReason });
+          lastEvalError = new Error(`Evaluator model API error: ${apiError}`);
+          continue; // Retry on API error
         }
 
-        metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
-        metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
+        const textContent = response.content.find((c): c is TextContent => c.type === 'text');
+        const thinkingContent = (response.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
         
-        observer?.onEvaluationTokens?.(tokens, cost);
-        observer?.onTokensConsumed?.(tokens, cost);
-      }
+        if (thinkingContent?.thinking) {
+          logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
+          observer?.onPlanningProgress?.('thinking');
+        }
 
-      if (text.trim()) break;
+        text = textContent?.text || '';
+
+        if (response.usage) {
+          const evalUsage = parseTokenUsage(response.usage);
+          const tokens = calculateTotalTokens(evalUsage);
+          
+          let cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
+          if (cost === 0 && tokens > 0) {
+              const calculatedCost = calculateCost(model, response.usage);
+              cost = calculatedCost.total;
+          }
+
+          metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
+          metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
+          
+          observer?.onEvaluationTokens?.(tokens, cost);
+          observer?.onTokensConsumed?.(tokens, cost);
+        }
+
+        if (text.trim()) break;
+      } catch (err) {
+        logger.error(`[${this.name}] Evaluator unexpected error (attempt ${evalAttempt}):`, err);
+        lastEvalError = err;
+        if (evalAttempt >= 2) throw err;
+        // Small delay before retry
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    if (!text.trim() && lastEvalError) {
+      throw lastEvalError;
     }
 
     let extracted = extractJson<ResearchPlan>(text, 'any');

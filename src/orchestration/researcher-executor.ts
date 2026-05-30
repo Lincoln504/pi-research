@@ -28,7 +28,6 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     config: researcherConfig,
     initialLinks,
     historicalUrls,
-    sessionId,
     researchId,
     round,
     query,
@@ -48,7 +47,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   typedObserver?.onResearcherStart?.(id, researcherConfig.name, researcherConfig.goal, round);
   metrics.increment('researchers_launched_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
 
-  const currentPlan = planningService.getCurrentPlan(sessionId);
+  const currentPlan = planningService.getCurrentPlan(researchId);
   const previousQueriesSection = currentPlan?.allQueries && currentPlan.allQueries.length > 0
     ? `\n### Previous Queries (Sibling Researchers)\n${currentPlan.allQueries.map((q: string) => `- ${q}`).join('\n')}\n`
     : '';
@@ -124,7 +123,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     });
 
     const sessionService = await getResearchSessionService();
-    sessionService.registerSession(sessionId, id, session, () => session.abort().catch(() => {}));
+    sessionService.registerSession(researchId, id, session, () => session.abort().catch(() => {}));
 
     const subscription = session.subscribe((event: any) => {
       if (event.type === 'message_end') {
@@ -208,7 +207,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       logger.debug(`[ResearcherExecutor] Researcher ${id} Final Response:\n${responseText}`);
 
       const synthesisService = await getResearchSynthesisService();
-      synthesisService.storeReport(sessionId, `${round}.${id}`, responseText);
+      synthesisService.storeReport(researchId, `${round}.${id}`, responseText);
 
       typedObserver?.onResearcherComplete?.(id, responseText);
       return;
@@ -235,7 +234,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       await session.abort().catch((err) => {
         logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
       });
-      sessionService.unregisterSession(sessionId, id);
+      sessionService.unregisterSession(researchId, id);
     }
   }
 

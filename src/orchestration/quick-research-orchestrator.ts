@@ -149,6 +149,9 @@ export class QuickResearchOrchestrator {
       },
     });
 
+    const sessionService = await getService<any>(ServiceNames.RESEARCH_SESSION_SERVICE);
+    sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch(() => {}));
+
     const subscription = session.subscribe((event: AgentSessionEvent) => {
         if (event.type === 'message_end') {
             const msg = event.message as unknown as ResearchMessage;
@@ -293,6 +296,12 @@ export class QuickResearchOrchestrator {
         await session.abort();
       } catch (err) {
         logger.warn('[QuickOrchestrator] Failed to abort session during cleanup:', err);
+      }
+      try {
+        const sessionService = await getService<any>(ServiceNames.RESEARCH_SESSION_SERVICE);
+        sessionService.unregisterSession(this.options.researchId, 'quick');
+      } catch (err) {
+        logger.warn('[QuickOrchestrator] Failed to unregister session:', err);
       }
     }
   }
