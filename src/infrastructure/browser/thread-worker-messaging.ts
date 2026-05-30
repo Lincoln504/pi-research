@@ -171,7 +171,7 @@ export async function executeScrapeTask(
                    !body.includes('cf_chl_opt') &&
                    !body.includes('Just a moment...') &&
                    !body.includes('Checking your browser before accessing') &&
-                   body.length > 500; // Ensure content loaded
+                   body.length > 200; // Ensure content loaded
           },
           { timeout: 5000 }
         );
