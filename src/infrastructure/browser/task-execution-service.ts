@@ -44,7 +44,7 @@ export async function runBrowserTask<T>(
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
         });
     } catch (error: any) {
-        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted');
+        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted', { cause: error });
 
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
@@ -119,7 +119,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
             return await scheduler.runSearch(query, config);
         });
     } catch (error: any) {
-        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted');
+        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted', { cause: error });
 
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {

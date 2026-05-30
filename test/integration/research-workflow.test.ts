@@ -22,12 +22,14 @@ import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-
 // Mock pi-ai and pi-coding-agent
 vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
   const actual = await importOriginal() as any;
+  const mockResponse = {
+    content: [{ type: 'text', text: '{"action": "synthesize", "content": "Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic. The research was successful and all goals were met. The information gathered is authoritative and relevant. This synthesis is at least 100 characters long to satisfy the test assertions."}' }],
+    usage: { totalTokens: 100, cost: { total: 0.01 } },
+  };
   return {
     ...actual,
-    completeSimple: vi.fn().mockResolvedValue({
-      content: [{ type: 'text', text: '{"action": "synthesize", "content": "Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic. The research was successful and all goals were met. The information gathered is authoritative and relevant. This synthesis is at least 100 characters long to satisfy the test assertions."}' }],
-      usage: { totalTokens: 100, cost: { total: 0.01 } },
-    }),
+    completeSimple: vi.fn().mockResolvedValue(mockResponse),
+    complete: vi.fn().mockResolvedValue(mockResponse),
   };
 });
 

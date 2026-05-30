@@ -13,7 +13,7 @@ import { Type } from 'typebox';
  */
 export interface ResearchPlan {
   action?: 'synthesize' | 'delegate' | 'wait';
-  researchers?: ResearcherConfig[];
+  researchers: ResearcherConfig[];
   allQueries?: string[];
   content?: string;
 }
@@ -43,7 +43,7 @@ export const ResearcherConfigSchema = Type.Object({
 
 export const ResearchPlanSchema = Type.Object({
   action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate'), Type.Literal('wait')])),
-  researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
+  researchers: Type.Array(ResearcherConfigSchema),
   allQueries: Type.Optional(Type.Array(Type.String())),
   content: Type.Optional(Type.String())
 });

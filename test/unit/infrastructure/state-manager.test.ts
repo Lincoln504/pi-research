@@ -348,6 +348,6 @@ describe('StateManager GPU lock', () => {
   it('state validates gpuOwner shape — rejects invalid pid type', async () => {
     const state = await manager.readState();
     (state as any).gpuOwner = { pid: 'not-a-number', startedAt: Date.now() };
-    await expect(manager.writeState(state)).rejects.toThrow('gpuOwner');
+    await expect(manager.writeState(state)).rejects.toThrow(/Invalid state/i);
   });
 });

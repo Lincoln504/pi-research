@@ -5,6 +5,8 @@
  * Extracted to separate file to avoid circular dependencies.
  */
 
+import { Type, type Static } from 'typebox';
+
 /**
  * State metrics interface
  */
@@ -20,24 +22,40 @@ export interface StateMetrics {
 /**
  * Session information interface
  */
-export interface SessionInfo {
-  pid: number;
-  lastSeen: number;
-  connectedAt: number;
-}
+export const SessionInfoSchema = Type.Object({
+  pid: Type.Number(),
+  lastSeen: Type.Number(),
+  connectedAt: Type.Number(),
+});
+
+export type SessionInfo = Static<typeof SessionInfoSchema>;
 
 /**
  * Main state structure interface
  */
-export interface SingletonState {
-  version: 1;
-  containerId: string;
-  containerName: string;
-  port: number;
-  sessions: { [sessionId: string]: SessionInfo };
-  lastUpdated: number;
-  browserServer?: { port: number; pid: number; schedulerId?: string };
-  schedulerVersion?: string; // Track scheduler config version for detecting changes
-  gpuOwner?: { pid: number; startedAt: number; sessionId?: string };
-  embeddingServer?: { port: number; pid: number; serverId: string };
-}
+export const SingletonStateSchema = Type.Object({
+  version: Type.Literal(1),
+  containerId: Type.String(),
+  containerName: Type.String(),
+  port: Type.Number(),
+  sessions: Type.Record(Type.String(), SessionInfoSchema),
+  lastUpdated: Type.Number(),
+  browserServer: Type.Optional(Type.Object({
+    port: Type.Number(),
+    pid: Type.Number(),
+    schedulerId: Type.Optional(Type.String()),
+  })),
+  schedulerVersion: Type.Optional(Type.String()),
+  gpuOwner: Type.Optional(Type.Object({
+    pid: Type.Number(),
+    startedAt: Type.Number(),
+    sessionId: Type.Optional(Type.String()),
+  })),
+  embeddingServer: Type.Optional(Type.Object({
+    port: Type.Number(),
+    pid: Type.Number(),
+    serverId: Type.String(),
+  })),
+});
+
+export type SingletonState = Static<typeof SingletonStateSchema>;

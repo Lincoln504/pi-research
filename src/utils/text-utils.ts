@@ -131,12 +131,16 @@ export function parseCitations(report: string): Citation[] {
     let desc = '';
     let source = '';
     
-    const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
+    // Handles both plain inline format (URL — desc) and the format produced by
+    // the researcher prompt template: URL [Source: Fresh Scrape] — desc.
+    // Group 1: URL, Group 2: optional source tag contents, Group 3: description.
+    const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s+\[Source:\s*([^\]]*)\])?(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
     if (inlineMatch) {
-      url = inlineMatch[1]!.trim().replace(/[,.)]+$/, '');
-      desc = inlineMatch[2]?.trim() || '';
+      url = inlineMatch[1]!.trim().replace(/[*_~`]+$/, '').replace(/[,.)]+$/, '');
+      source = (inlineMatch[2]?.trim() || '');
+      desc = (inlineMatch[3]?.trim() || '').replace(/[*_~`]+$/, '');
     } else {
-      const candidateUrl = firstLine.split(/\s+/)[0]!.trim().replace(/[,.)]+$/, '');
+      const candidateUrl = firstLine.split(/\s+/)[0]!.trim().replace(/[*_~`]+$/, '').replace(/[,.)]+$/, '');
       if (!candidateUrl.startsWith('http')) continue;
       url = candidateUrl;
     }

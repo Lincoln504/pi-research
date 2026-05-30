@@ -44,8 +44,6 @@ Write your full report immediately after scraping is complete (or if the tool si
 The tools will return a "Budget Reached" message when limits are hit — if you see this, proceed immediately to synthesis using what you have.
 Make no further tool calls after beginning synthesis.
 
----
-
 {{coordination_section}}
 
 ---
@@ -82,7 +80,24 @@ You MUST track the origin of every piece of information you gather.
 
 ## Report Format
 
-Build your CITED LINKS list first (number every URL you scraped or tool result you used), then write the report using [N] inline citations.
+Assign each source a number as you research it. Use [N] inline citations throughout your report body. The full CITED LINKS list goes at the very end, after all topic sections.
+
+**CRITICAL — Inline Citation Rule** (for citations in the report body):
+Use plain [N] as the citation marker — do NOT bold, italicize, or apply any formatting to it.
+Example of correct inline usage: "...was established in 226 CE [3][10]."
+
+**CRITICAL — CITED LINKS Entry Format** (for the section at the bottom):
+Each entry MUST use the multi-line format below. Do NOT compress everything onto one line.
+
+✅ CORRECT:
+[1] https://example.com
+Source: Fresh Scrape (Web Search)
+Description: Covers the v4.2 release of LibX, detailing the new async API, breaking changes from v4.1, the migration path, and performance benchmarks showing 40% latency reduction.
+
+❌ WRONG — do not use this format:
+[1] https://example.com [Source: Fresh Scrape] — brief one-line summary
+
+The multi-line format is mandatory because the Description field is stored to the knowledge base for future sessions. Write 3–6 sentences of dense, factual content in each Description.
 
 **CRITICAL — Report Completeness**: Your report MUST be maximally detailed. Include every fact, figure, date, name, statistic, quote, and piece of information you found. Do NOT summarize or compress findings — include everything. A longer, more detailed report is always better. Omitting information is a failure.
 
@@ -102,7 +117,7 @@ Build your CITED LINKS list first (number every URL you scraped or tool result y
 
 ### CITED LINKS
 **MANDATORY — do not omit. List every URL you scraped or tool result you cited.**
-**CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content.
+**CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content. Do NOT bold the [N] markers.
 
 [1] https://example.com
 Source: Fresh Scrape (Web Search)

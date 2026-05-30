@@ -58,6 +58,18 @@ describe('Concurrent Operations', () => {
     testDbDir = path.join(os.tmpdir(), `pi-concurrent-ops-${Date.now()}`);
   }, 30000);
 
+  beforeEach(async () => {
+    if (testContext.lifecycleInitialized) {
+      await testContext.beforeEach();
+    }
+  });
+
+  afterEach(async () => {
+    if (testContext.lifecycleInitialized) {
+      await testContext.afterEach();
+    }
+  });
+
   afterAll(async () => {
     await teardownLifecycle(testContext);
     // Cleanup test database

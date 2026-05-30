@@ -80,7 +80,7 @@ COMMIT_MESSAGE*.txt
 
 # Runtime knowledge store database (generated at runtime)
 knowledge_db/
-src/knowledge_db/
+state_db/
 
 # Refactoring artifacts & temporary logs
 ts-errors*.log

@@ -103,6 +103,8 @@ export class DeepResearchOrchestrator {
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
     let loopSynthesisPlan: ResearchPlan | null = null;
+    // Persisted across rounds so the final forced-synthesis call can reuse the last value.
+    let historicalLinksSection = '';
 
     try {
       while (this.currentRound < maxRounds) {
@@ -119,6 +121,32 @@ export class DeepResearchOrchestrator {
             logger.warn(`[DeepOrchestrator] Infrastructure unhealthy at Round ${this.currentRound}, attempting to continue with existing data...`);
         }
 
+        // Query the knowledge store once per round so the coordinator/evaluator can
+        // distribute previously-discovered URLs to researchers via historicalLinks.
+        historicalLinksSection = '';
+        if (this.config.KNOWLEDGE_STORE_ENABLED) {
+          try {
+            const knowledgeStoreService = await getService<any>(ServiceNames.KNOWLEDGE_STORE);
+            if (knowledgeStoreService) {
+              const store = typeof knowledgeStoreService.getStore === 'function'
+                ? await knowledgeStoreService.getStore()
+                : knowledgeStoreService;
+              if (store && typeof store.findRelevantUrls === 'function') {
+                const historicalUrls: string[] = await store.findRelevantUrls(query, { limit: 10 });
+                if (historicalUrls.length > 0) {
+                  historicalLinksSection = '## Historical Knowledge Store\n' +
+                    'The following URLs are from previous research sessions on related topics. ' +
+                    'Assign them via the `historicalLinks` field to the most relevant researchers:\n' +
+                    historicalUrls.map(u => `- ${u}`).join('\n');
+                  logger.debug(`[DeepOrchestrator] Injecting ${historicalUrls.length} historical URL(s) into round ${this.currentRound} plan`);
+                }
+              }
+            }
+          } catch (err) {
+            logger.warn('[DeepOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
+          }
+        }
+
         // 1. Update/Generate Plan
         let plan: ResearchPlan;
         if (this.currentRound === 1) {
@@ -131,6 +159,8 @@ export class DeepResearchOrchestrator {
                 model,
                 signal,
                 observer,
+                historicalLinksSection,
+                excludeTools: this.options.excludeTools,
             });
         } else {
             const synthesisService = await getResearchSynthesisService();
@@ -147,6 +177,8 @@ export class DeepResearchOrchestrator {
                 totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
                 signal,
                 observer,
+                historicalLinksSection,
+                excludeTools: this.options.excludeTools,
             });
         }
         
@@ -228,9 +260,15 @@ export class DeepResearchOrchestrator {
             // Pass this.config (the resolved Config) rather than this.options (where
             // options.config may be undefined). runResearcher accesses researchConfig.RESEARCHER_MAX_RETRIES
             // and similar fields — passing undefined crashes immediately.
+            // Default excludeTools to ['grep'] if not explicitly set — mirrors QuickResearchOrchestrator
+            // so that advanced reasoning models can't waste time on developer-only tools.
             await orchestrationService.runResearchers({
                 plan,
-                options: { ...this.options, config: this.config },
+                options: {
+                    ...this.options,
+                    config: this.config,
+                    excludeTools: this.options.excludeTools || ['grep'],
+                },
                 currentRound: this.currentRound,
                 signal
             }, researcherLinks);
@@ -272,6 +310,8 @@ export class DeepResearchOrchestrator {
               mustSynthesize: true,
               signal,
               observer,
+              historicalLinksSection,
+              excludeTools: this.options.excludeTools,
           });
           observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
       }

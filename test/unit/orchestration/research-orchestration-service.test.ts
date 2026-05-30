@@ -64,6 +64,9 @@ vi.mock('../../../src/utils/session-state.ts', () => ({
 
 import { search } from '../../../src/web-research/search.ts';
 import { healthRegistry } from '../../../src/healthcheck/index.ts';
+import { getResearchSynthesisService } from '../../../src/orchestration/research-session-manager.ts';
+import { getService } from '../../../src/core/service-registry.ts';
+import { parseCitations } from '../../../src/utils/text-utils.ts';
 
 const mockSearch = search as ReturnType<typeof vi.fn>;
 const mockRunAll = healthRegistry.runAll as ReturnType<typeof vi.fn>;
@@ -280,5 +283,77 @@ describe('ResearchOrchestrationService', () => {
 
       expect(result).toBe(true);
     });
+  });
+
+  // =========================================================================
+  // storeLinkDescriptions
+  // =========================================================================
+
+  describe('storeLinkDescriptions', () => {
+    const mockSynthesisService = {
+      getAllReports: vi.fn(),
+    };
+
+    const mockWriter = {
+      enqueue: vi.fn(),
+      drain: vi.fn().mockResolvedValue(undefined),
+    };
+
+    beforeEach(() => {
+      vi.mocked(getResearchSynthesisService).mockResolvedValue(mockSynthesisService as any);
+      vi.mocked(getService).mockResolvedValue(mockWriter as any);
+    });
+
+    it('returns early if KNOWLEDGE_STORE_ENABLED is false', async () => {
+      await service.storeLinkDescriptions('s1', 1, 'r1', { KNOWLEDGE_STORE_ENABLED: false } as any);
+      expect(mockSynthesisService.getAllReports).not.toHaveBeenCalled();
+    });
+
+    it('enqueues citations from reports matching the round prefix', async () => {
+      const config = { KNOWLEDGE_STORE_ENABLED: true };
+      const reportContent = '### CITED LINKS\n[1] https://foo.com\nSource: X\nDescription: D';
+      const reports = new Map([
+        ['1.res1', reportContent],
+        ['2.res2', 'other round'],
+      ]);
+      
+      mockSynthesisService.getAllReports.mockReturnValue(reports);
+      vi.mocked(parseCitations).mockReturnValue([{ url: 'https://foo.com', description: 'D', source: 'X' }]);
+
+      await service.storeLinkDescriptions('s1', 1, 'r1', config as any);
+
+      expect(mockWriter.enqueue).toHaveBeenCalledOnce();
+      expect(mockWriter.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+        url: 'https://foo.com',
+        markdown: 'D',
+        metadata: expect.objectContaining({
+          researcherId: '1.res1',
+          round: 1,
+        }),
+      }));
+      expect(mockWriter.drain).toHaveBeenCalledOnce();
+    });
+
+    it('skips reports with no parseable citations', async () => {
+      const config = { KNOWLEDGE_STORE_ENABLED: true };
+      const reports = new Map([['1.res1', 'no citations']]);
+      
+      mockSynthesisService.getAllReports.mockReturnValue(reports);
+      vi.mocked(parseCitations).mockReturnValue([]);
+
+      await service.storeLinkDescriptions('s1', 1, 'r1', config as any);
+
+      expect(mockWriter.enqueue).not.toHaveBeenCalled();
+      expect(mockWriter.drain).not.toHaveBeenCalled();
+    });
+
+    it('handles synthesis service with no reports', async () => {
+        const config = { KNOWLEDGE_STORE_ENABLED: true };
+        mockSynthesisService.getAllReports.mockReturnValue(new Map());
+  
+        await service.storeLinkDescriptions('s1', 1, 'r1', config as any);
+  
+        expect(mockWriter.enqueue).not.toHaveBeenCalled();
+      });
   });
 });

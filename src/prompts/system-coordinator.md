@@ -8,7 +8,7 @@ Research: "{ROOT_QUERY}"
 ## CRITICAL: Goal Isolation
 You are being provided with the conversation history for context only. 
 - **STAY FOCUSED**: You must ONLY plan research for the specific goal stated above: "{ROOT_QUERY}".
-- **IGNORE OTHER TOPICS**: Do NOT plan research for other topics, islands, or tasks mentioned in the conversation history (e.g., Crete, Malta) unless they are explicitly part of the current goal "{ROOT_QUERY}".
+- **IGNORE OTHER TOPICS**: Do NOT plan research for any other topics or tasks mentioned in the conversation history unless they are explicitly part of the current goal "{ROOT_QUERY}".
 - **NO CROSS-TALK**: If the user previously asked for other research, ignore those requests now. Focus exclusively on {ROOT_QUERY}.
 
 {{historical_links_section}}

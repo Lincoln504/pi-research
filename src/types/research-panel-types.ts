@@ -8,7 +8,7 @@
  * Local Theme interface — mirrors pi-tui Theme.fg()
  */
 export interface Theme {
-  fg: (color: string, text: string) => string;
+  fg: (color: any, text: string) => string;
 }
 
 export interface SliceState {

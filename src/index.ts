@@ -335,7 +335,7 @@ export default async function (pi: ExtensionAPI) {
       // Grab the last assistant message
       const lastAssistant = [...branch].reverse().find((e: any) => e.type === 'message' && e.message.role === 'assistant');
       if (lastAssistant) {
-        needsResearch = RESEARCH_REGEX.test(JSON.stringify(lastAssistant.message.content));
+        needsResearch = RESEARCH_REGEX.test(JSON.stringify((lastAssistant as any).message.content));
       }
     }
 

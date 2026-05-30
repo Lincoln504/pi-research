@@ -232,7 +232,7 @@ describe('parseJsonPlan', () => {
 
   it('parses valid JSON in a markdown code block', () => {
     const text = '```json\n{"action":"delegate","researchers":[{"id":"1","name":"R1","goal":"g","queries":["q1"]}],"allQueries":["q1"]}\n```';
-    const plan = parseJsonPlan(text, svc);
+    const plan = parseJsonPlan(text);
     expect(plan.action).toBe('delegate');
     expect(Array.isArray(plan.researchers)).toBe(true);
     expect(plan.researchers![0]!.id).toBe('1');
@@ -240,7 +240,7 @@ describe('parseJsonPlan', () => {
 
   it('parses valid raw JSON without a code block', () => {
     const text = '{"action":"synthesize","researchers":[{"id":"2","name":"R2","goal":"g2","queries":["q2","q3"]}],"allQueries":["q2","q3"]}';
-    const plan = parseJsonPlan(text, svc);
+    const plan = parseJsonPlan(text);
     expect(plan.action).toBe('synthesize');
     expect(plan.researchers![0]!.queries).toEqual(['q2', 'q3']);
   });
@@ -254,7 +254,7 @@ describe('parseJsonPlan', () => {
       ],
       allQueries: ['qa1', 'qa2', 'qb1'],
     });
-    const plan = parseJsonPlan(text, svc);
+    const plan = parseJsonPlan(text);
     expect(plan.researchers).toHaveLength(2);
     expect(plan.researchers![0]!.id).toBe('a');
     expect(plan.researchers![1]!.id).toBe('b');
@@ -269,14 +269,14 @@ describe('parseJsonPlan', () => {
       ],
       allQueries: ['q1', 'q2'],
     });
-    const plan = parseJsonPlan(text, svc);
+    const plan = parseJsonPlan(text);
     expect(plan.researchers![0]!.id).toBe('42');
     expect(plan.researchers![1]!.id).toBe('7');
   });
 
   it('throws when researchers array is missing', () => {
     const text = JSON.stringify({ action: 'delegate', allQueries: [] });
-    expect(() => parseJsonPlan(text, svc)).toThrow(/researchers/i);
+    expect(() => parseJsonPlan(text)).toThrow(/researchers/i);
   });
 
   it('throws when a researcher has no queries array', () => {
@@ -285,15 +285,15 @@ describe('parseJsonPlan', () => {
       researchers: [{ id: '1', name: 'R1', goal: 'g' }],
       allQueries: [],
     });
-    expect(() => parseJsonPlan(text, svc)).toThrow(/queries/i);
+    expect(() => parseJsonPlan(text)).toThrow(/queries/i);
   });
 
   it('throws on completely malformed text', () => {
-    expect(() => parseJsonPlan('this is not json at all', svc)).toThrow();
+    expect(() => parseJsonPlan('this is not json at all')).toThrow();
   });
 
   it('throws on empty string', () => {
-    expect(() => parseJsonPlan('', svc)).toThrow();
+    expect(() => parseJsonPlan('')).toThrow();
   });
 });
 

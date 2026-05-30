@@ -12,7 +12,7 @@ eslint.config.js
 
 # Tests
 test/
-testing/
+test/stress/
 *.test.ts
 *.spec.ts
 
@@ -56,7 +56,7 @@ COMMIT_MESSAGE*.txt
 
 # Runtime generated files (never publish)
 knowledge_db/
-src/knowledge_db/
+state_db/
 shared-links-pool-*.json
 pi-research-*.md
 ts-errors*.log

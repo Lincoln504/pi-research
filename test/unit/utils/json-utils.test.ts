@@ -129,10 +129,11 @@ describe('extractJsonObject', () => {
     expect(result.error).toContain('No JSON object boundaries found');
   });
 
-  it('returns failure when the brace is never closed', () => {
-    const result = extractJsonObject('{"unclosed":1');
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('No matching closing brace found');
+  it('successfully salvages unclosed strings during local repair', () => {
+    // New logic now closes unclosed quotes before appending braces
+    const result = extractJsonObject('{"key": "unclosed string');
+    expect(result.success).toBe(true);
+    expect((result.value as any).key).toBe('unclosed string');
   });
 
   it('returns failure for an empty string', () => {
@@ -147,6 +148,14 @@ describe('extractJsonObject', () => {
     const val = result.value as any;
     expect(val.researchers[0].queries).toEqual(['a', 'b']);
   });
+
+  it('attempts local repair for truncated JSON', () => {
+    const text = 'Here is some text {"a": 1, "b": {"c": 2}';
+    const result = extractJsonObject(text);
+    expect(result.success).toBe(true);
+    expect(result.value).toEqual({ a: 1, b: { c: 2 } });
+    expect(result.method).toBe('raw-object');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +167,14 @@ describe('extractJsonArray', () => {
     const result = extractJsonArray('[{"id":1},{"id":2}]');
     expect(result.success).toBe(true);
     expect((result.value as any)[0].id).toBe(1);
+  });
+
+  it('attempts local repair for truncated array', () => {
+    const text = 'Results: [{"id":1}, {"id":2}';
+    const result = extractJsonArray(text);
+    expect(result.success).toBe(true);
+    expect(result.value).toHaveLength(2);
+    expect(result.method).toBe('raw-array');
   });
 
   it('fails on text that is not an array', () => {

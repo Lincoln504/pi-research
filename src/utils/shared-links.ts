@@ -59,7 +59,9 @@ export function formatLightweightLinkUpdate(
  */
 export function normalizeUrl(url: string): string {
     try {
-        const parsed = new URL(url);
+        // Strip trailing markdown markers if any (e.g. trailing **)
+        const cleanUrl = url.trim().replace(/[*_~`]+$/, '');
+        const parsed = new URL(cleanUrl);
         // Force https for deduplication purposes (http and https usually point to the same content)
         parsed.protocol = 'https:';
         // Remove hash fragments

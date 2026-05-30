@@ -39,7 +39,7 @@ describe('TUI Research Panel', () => {
 
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator(undefined, mockTheme);
+      const component = componentCreator({} as any, mockTheme);
       const lines = component.render(80);
 
       const headerLine = lines[0];
@@ -52,7 +52,7 @@ describe('TUI Research Panel', () => {
       
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator(undefined, mockTheme);
+      const component = componentCreator({} as any, mockTheme);
       const lines = component.render(80);
       
       const headerLine = lines[0];
@@ -68,7 +68,7 @@ describe('TUI Research Panel', () => {
 
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator(undefined, mockTheme);
+      const component = componentCreator({} as any, mockTheme);
       const lines = component.render(80);
 
       const headerLine = lines[0];

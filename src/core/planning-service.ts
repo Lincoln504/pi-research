@@ -13,9 +13,11 @@ import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
 import { complete, completeSimple, calculateCost, type TextContent, type Message, type ThinkingLevel } from '@earendil-works/pi-ai';
 import { extractJson } from '../utils/json-utils.ts';
+import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import type { GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions } from './interfaces/planning-interfaces.ts';
+import { ResearchPlanSchema } from './interfaces/planning-interfaces.ts';
 import type { LLMResponseMetadata } from '../types/index.ts';
 import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -127,11 +129,13 @@ export class PlanningService implements IPlanningService {
     let plan: ResearchPlan | null = null;
     let lastRawPlanText!: string;
 
+    const coordUserMessage = `Please plan a research team for: "${query}"`;
+
     for (let attempt = 1; attempt <= 3; attempt++) {
       options.observer?.onPlanningStart?.(attempt);
       const retryHint = attempt > 1 ? '\n\n**RETRY**: Your previous JSON was malformed. Ensure you return ONLY valid JSON in a code block.' : '';
       const messages: Message[] = attempt === 1
-        ? [{ role: 'user', content: [{ type: 'text', text: `Please plan a research team for: "${query}"` }], timestamp: Date.now() }]
+        ? [{ role: 'user', content: [{ type: 'text', text: coordUserMessage }], timestamp: Date.now() }]
         : [];
 
       logger.debug(`[${this.name}] Coordinator attempt ${attempt}`);
@@ -172,7 +176,7 @@ export class PlanningService implements IPlanningService {
         logger.debug(`[${this.name}] Coordinator Response:\n${rawPlanText}`);
 
         try {
-          plan = parseJsonPlan(rawPlanText, this.name);
+          plan = parseJsonPlan(rawPlanText);
 
           if (planResponse.usage) {
             const coordUsage = parseTokenUsage(planResponse.usage);
@@ -193,6 +197,22 @@ export class PlanningService implements IPlanningService {
           options.observer?.onPlanningSuccess?.(plan);
           break;
         } catch (_err) {
+          // Attempt agentic salvage
+          const salvaged = await repairJsonWithLlm<ResearchPlan>(rawPlanText, completeSimple, auth, {
+            model,
+            context: coordUserMessage,
+            schema: ResearchPlanSchema,
+            serviceName: this.name,
+            signal
+          });
+
+          if (salvaged) {
+            plan = salvaged;
+            metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'salvaged' });
+            options.observer?.onPlanningSuccess?.(plan);
+            break;
+          }
+
           if (attempt >= 3) {
             logger.warn(`[${this.name}] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
             metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'fallback' });
@@ -362,19 +382,17 @@ export class PlanningService implements IPlanningService {
     }
 
     let extracted = extractJson<ResearchPlan>(text, 'any');
-    const estimatedTokens = this.estimateTokenCount(evalUserMessage) + this.estimateTokenCount(text);
-    const correctionSafe = estimatedTokens < 100_000;
-
-    if (!extracted.success && text.trim() && correctionSafe) {
-      logger.warn(`[${this.name}] Evaluator JSON parse failed; attempting self-correction`);
-      const correctionMsg = `${evalUserMessage}\n\n---\n\nYOUR PREVIOUS RESPONSE (not valid JSON):\n${text}\n\n---\n\nReturn ONLY a valid JSON object now. No prose before or after.`;
-      const corrResponse = await completeSimple(model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: correctionMsg }], timestamp: Date.now() }]
-      }, { apiKey: auth.apiKey, headers: auth.headers, signal });
-      const corrText = corrResponse.content.find((c): c is TextContent => c.type === 'text');
-      if (corrText?.text?.trim()) {
-        extracted = extractJson<ResearchPlan>(corrText.text, 'any');
-        if (extracted.success) text = corrText.text;
+    
+    if (!extracted.success && text.trim()) {
+      const salvaged = await repairJsonWithLlm<ResearchPlan>(text, completeSimple, auth, {
+        model,
+        context: evalUserMessage,
+        schema: ResearchPlanSchema,
+        serviceName: this.name,
+        signal
+      });
+      if (salvaged) {
+        extracted = { success: true, value: salvaged, method: 'raw-object' };
       }
     }
 
@@ -487,7 +505,7 @@ export class PlanningService implements IPlanningService {
   }
 
   parseJsonPlan(text: string): ResearchPlan {
-    return parseJsonPlan(text, this.name);
+    return parseJsonPlan(text);
   }
 
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan {
@@ -536,9 +554,5 @@ export class PlanningService implements IPlanningService {
     cleaned = cleaned.replace(/```\s*([\s\S]*?)\s*```/gi, '$1');
 
     return cleaned.trim();
-  }
-
-  private estimateTokenCount(text: string): number {
-    return Math.ceil(text.length / 4);
   }
 }

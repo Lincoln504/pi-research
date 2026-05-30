@@ -153,8 +153,7 @@ export class StateManager {
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;
-      this.validator.validateState(state);
-      return state as SingletonState;
+      return this.validator.validateState(state);
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const errnoError = error as NodeJS.ErrnoException;
@@ -169,8 +168,7 @@ export class StateManager {
         try {
           const recovered = await fs.readFile(this.stateFilePath, 'utf-8');
           const recoveredState = JSON.parse(recovered) as unknown;
-          this.validator.validateState(recoveredState);
-          return recoveredState as SingletonState;
+          return this.validator.validateState(recoveredState);
         } catch {
           return this.getDefaultState();
         }

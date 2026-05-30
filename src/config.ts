@@ -99,7 +99,7 @@ export function getEnvFilePath(): string {
 }
 
 export function getDbDir(): string {
-  return path.join(EXTENSION_DIR, 'knowledge_db');
+  return path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
 }
 
 function parseDotEnv(content: string): Record<string, string> {

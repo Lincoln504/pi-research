@@ -57,8 +57,9 @@ export function extractJsonFromCodeBlocks<T = unknown>(
 /**
  * Walk forward from `start` tracking brace depth, respecting JSON string literals.
  * Returns the index of the matching closing `}`, or -1 if not found.
+ * Also returns whether the walk ended while inside a string literal.
  */
-function findMatchingBracket(text: string, start: number): number {
+function findMatchingBracket(text: string, start: number): { index: number; inString: boolean } {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -74,10 +75,25 @@ function findMatchingBracket(text: string, start: number): number {
     if (ch === open) depth++;
     else if (ch === close) {
       depth--;
-      if (depth === 0) return i;
+      if (depth === 0) return { index: i, inString: false };
     }
   }
-  return -1;
+  return { index: -1, inString };
+}
+
+/**
+ * Deterministically repair common JSON formation errors:
+ * 1. Replace smart quotes (“, ”, ‘, ’) with standard quotes.
+ * 2. Remove trailing commas before closing braces/brackets.
+ */
+function preRepairJson(jsonStr: string): string {
+  return jsonStr
+    // 1. Replace smart quotes
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    // 2. Remove trailing commas (only if they are followed by } or ] while NOT in a string)
+    // This is a bit tricky with regex but works for most common cases
+    .replace(/,\s*([}\]])/g, '$1');
 }
 
 /**
@@ -103,17 +119,38 @@ export function extractJsonObject<T = unknown>(
     };
   }
 
-  const objEnd = findMatchingBracket(text, objStart);
+  const { index: objEnd, inString } = findMatchingBracket(text, objStart);
+
   if (objEnd === -1) {
+    // Attempt local repair for truncated JSON
+    logger.debug('[json-utils] JSON object truncated; attempting local repair');
+    let partialText = text.slice(objStart);
+    
+    // If we were inside a string, we MUST close it first
+    if (inString) {
+        partialText += '"';
+    }
+
+    for (let i = 1; i <= 15; i++) {
+      try {
+        const candidate = preRepairJson(partialText + '}'.repeat(i));
+        const parsed = JSON.parse(candidate);
+        logger.debug(`[json-utils] JSON object truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing braces`);
+        return { success: true, value: parsed as T, method: 'raw-object' };
+      } catch {
+        continue;
+      }
+    }
+    
     return {
       success: false,
       value: undefined,
-      error: 'No matching closing brace found',
+      error: 'No matching closing brace found and local repair failed',
     };
   }
 
   try {
-    const jsonStr = text.slice(objStart, objEnd + 1);
+    const jsonStr = preRepairJson(text.slice(objStart, objEnd + 1));
     const parsed = JSON.parse(jsonStr);
     return { success: true, value: parsed as T, method: 'raw-object' };
   } catch (err) {
@@ -148,17 +185,38 @@ export function extractJsonArray<T = unknown>(
     };
   }
 
-  const arrEnd = findMatchingBracket(text, arrStart);
+  const { index: arrEnd, inString } = findMatchingBracket(text, arrStart);
   if (arrEnd === -1) {
+    // Attempt local repair for truncated JSON
+    logger.debug('[json-utils] JSON array truncated; attempting local repair');
+    let partialText = text.slice(arrStart);
+    
+    if (inString) {
+        partialText += '"';
+    }
+
+    for (let i = 1; i <= 15; i++) {
+      try {
+        const candidate = preRepairJson(partialText + ']'.repeat(i));
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) {
+          logger.debug(`[json-utils] JSON array truncated; salvaged by appending ${inString ? 'quote and ' : ''}${i} closing brackets`);
+          return { success: true, value: parsed as T[], method: 'raw-array' };
+        }
+      } catch {
+        continue;
+      }
+    }
+
     return {
       success: false,
       value: undefined,
-      error: 'No matching closing bracket found',
+      error: 'No matching closing bracket found and local repair failed',
     };
   }
 
   try {
-    const jsonStr = text.slice(arrStart, arrEnd + 1);
+    const jsonStr = preRepairJson(text.slice(arrStart, arrEnd + 1));
     const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) {
       return {

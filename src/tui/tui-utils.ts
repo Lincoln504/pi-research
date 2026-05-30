@@ -43,13 +43,12 @@ export function createComponentProxy(
  * crashing if a single widget fails to render.
  */
 export function createSafeWidget(
-  piSessionId: string,
   factory: (tui: TUI, theme: Theme) => Component
 ): (tui: TUI, theme: Theme) => Component {
   return (tui: TUI, theme: Theme) => {
     try {
       return factory(tui, theme);
-    } catch (error) {
+    } catch {
       // Fallback component on error
       return {
         render: () => ['[TUI Error]'],

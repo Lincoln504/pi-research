@@ -94,6 +94,7 @@ export function isCSIResponse(data: string): boolean {
   }
 
   // Cursor position report (matches \u001b[\d+;\d+R)
+  // eslint-disable-next-line no-control-regex
   if (/^\u001b\[\d+;\d+R$/.test(data)) {
     return true;
   }

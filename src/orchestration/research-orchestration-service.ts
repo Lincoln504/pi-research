@@ -21,6 +21,7 @@ import { healthRegistry } from '../healthcheck/index.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IWriterQueue, IResearchOrchestration } from '../core/service-interfaces.ts';
+import type { Config } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
@@ -197,12 +198,16 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
   /**
    * Store link descriptions to knowledge store for a specific round
+   * @param sessionId - Session identifier
    * @param round - Round number
    * @param researchId - Research ID
    * @param config - Research configuration
    */
-  async storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: any): Promise<void> {
-    if (!config.KNOWLEDGE_STORE_ENABLED) return;
+  async storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: Config): Promise<void> {
+    if (config.KNOWLEDGE_STORE_ENABLED !== true) {
+      logger.debug('[ResearchOrchestrationService] Knowledge store disabled, skipping link descriptions');
+      return;
+    }
 
     try {
       const { getResearchSynthesisService } = await import('./research-session-manager.ts');
@@ -216,15 +221,24 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       
       const roundPrefix = `${round}.`;
       let enqueued = 0;
+      let researcherCount = 0;
 
-      for (const [key, report] of synthesisService.getAllReports(sessionId).entries()) {
+      const allReports = synthesisService.getAllReports(sessionId);
+      if (allReports.size === 0) {
+        logger.warn(`[ResearchOrchestrationService] No reports found in synthesis service for session ${sessionId} round ${round}`);
+      }
+
+      for (const [key, report] of allReports.entries()) {
         if (!key.startsWith(roundPrefix)) continue;
+        researcherCount++;
 
         const links = parseCitations(report);
         if (links.length === 0) {
           logger.warn(`[ResearchOrchestrationService] Researcher ${key} produced no parseable CITED LINKS - no descriptions stored`);
           continue;
         }
+
+        logger.debug(`[ResearchOrchestrationService] Storing ${links.length} citations for researcher ${key}`);
 
         for (const link of links) {
           if (link.url && link.description) {
@@ -246,7 +260,10 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       if (enqueued > 0) {
+        logger.info(`[ResearchOrchestrationService] Enqueued ${enqueued} citations from ${researcherCount} researchers for round ${round}`);
         await writer.drain();
+      } else if (researcherCount > 0) {
+        logger.warn(`[ResearchOrchestrationService] No valid citations found among ${researcherCount} researchers in round ${round}`);
       }
     } catch (err) {
       logger.warn('[ResearchOrchestrationService] Failed to store link descriptions (non-fatal):', err);

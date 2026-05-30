@@ -146,7 +146,7 @@ You are in the late phase of research. Set a higher threshold for delegation:
 /**
  * Parse JSON from LLM response into ResearchPlan
  */
-export function parseJsonPlan(text: string, serviceName: string): ResearchPlan {
+export function parseJsonPlan(text: string): ResearchPlan {
   const result = extractJson<unknown>(text, 'object');
   if (!result.success || !result.value) {
     const preview = text.length > 100 ? text.slice(0, 100) + '...' : text;
@@ -155,23 +155,26 @@ export function parseJsonPlan(text: string, serviceName: string): ResearchPlan {
 
   // Robust validation using TypeBox
   try {
-    const plan = Value.Convert(ResearchPlanSchema, result.value) as ResearchPlan;
-
-    if (!Value.Check(ResearchPlanSchema, plan)) {
-      const errors = [...Value.Errors(ResearchPlanSchema, plan)];
-      logger.warn(`[${serviceName}] Plan validation failed: ${errors.map(e => String(e.message)).join(', ')}`);
+    // 1. Convert/Coerce values (e.g. string numbers to numbers, single values to arrays if possible)
+    const coerced = Value.Convert(ResearchPlanSchema, result.value);
+    
+    // 2. Validate against schema
+    if (!Value.Check(ResearchPlanSchema, coerced)) {
+      const errors = [...Value.Errors(ResearchPlanSchema, coerced)];
+      const errorMsg = errors.map((e: any) => `${e.path}: ${e.message}`).join(', ');
+      // If validation fails, we throw to satisfy tests and ensure system integrity
+      throw new Error(`Plan validation failed: ${errorMsg}`);
     }
 
-    if (!Array.isArray(plan.researchers)) {
-      throw new Error(`Coordinator returned invalid plan: 'researchers' is not an array`);
-    }
+    const plan = coerced as ResearchPlan;
 
-    plan.researchers.forEach((r, i) => {
-      r.id = String(r.id);
-      if (!Array.isArray(r.queries)) {
-        throw new Error(`Coordinator plan researcher[${i}] (id=${r.id}) has no queries array`);
-      }
-    });
+    // 3. Post-processing
+    if (plan.researchers) {
+      plan.researchers.forEach((r) => {
+        // Coerce IDs to strings for consistency
+        r.id = String(r.id);
+      });
+    }
 
     return plan;
   } catch (err) {
