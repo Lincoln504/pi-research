@@ -159,7 +159,7 @@ export async function executeScrapeTask(
     if (hasCloudflare) {
       logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge detected for: ${url}`);
 
-      // Wait up to 15 seconds for challenge to resolve
+      // Wait up to 5 seconds for challenge to resolve
       try {
         await page.waitForFunction(
           () => {
@@ -171,9 +171,9 @@ export async function executeScrapeTask(
                    !body.includes('cf_chl_opt') &&
                    !body.includes('Just a moment...') &&
                    !body.includes('Checking your browser before accessing') &&
-                   body.length > 5000; // Ensure content loaded
+                   body.length > 1000; // Ensure content loaded
           },
-          { timeout: 15000 }
+          { timeout: 5000 }
         );
 
         // Challenge resolved, get updated content
