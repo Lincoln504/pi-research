@@ -9,6 +9,26 @@ let workerId: string = '';
 import { appendFileSync } from 'node:fs';
 
 /**
+ * Mutex lock to serialize page creation. Playwright/Firefox can deadlock if newPage()
+ * is called concurrently on the exact same context instance.
+ */
+let pageCreationLock = Promise.resolve();
+
+async function createPageSafe(context: any): Promise<any> {
+  let release!: () => void;
+  const nextLock = new Promise<void>(resolve => { release = resolve; });
+  const currentLock = pageCreationLock;
+  pageCreationLock = currentLock.then(() => nextLock);
+
+  await currentLock;
+  try {
+    return await context.newPage();
+  } finally {
+    release();
+  }
+}
+
+/**
  * Set the worker ID for logging purposes
  */
 export function setWorkerId(id: string): void {
@@ -76,7 +96,7 @@ export async function executeSearchTask(
   _context: any,
   query: string
 ): Promise<{ results: any[]; jitter: number }> {
-  const page = await _context.newPage();
+  const page = await createPageSafe(_context);
   const SEARCH_TIMEOUT = 25000;
   page.setDefaultTimeout(SEARCH_TIMEOUT);
   page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
@@ -111,7 +131,7 @@ export async function executeScrapeTask(
   _context: any,
   url: string
 ): Promise<{ contentType: string; html?: string; buffer?: Buffer; jitter: number }> {
-  const page = await _context.newPage();
+  const page = await createPageSafe(_context);
   const SCRAPE_TIMEOUT = parseInt(process.env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] || '15000', 10);
   page.setDefaultTimeout(SCRAPE_TIMEOUT);
   page.setDefaultNavigationTimeout(SCRAPE_TIMEOUT);
@@ -197,7 +217,7 @@ async function executeHealthCheckAttempt(
   _context: any,
   navTimeoutMs: number
 ): Promise<{ success: boolean; navMs: number }> {
-  const page = await _context.newPage();
+  const page = await createPageSafe(_context);
   page.setDefaultTimeout(navTimeoutMs);
   page.setDefaultNavigationTimeout(navTimeoutMs);
 
