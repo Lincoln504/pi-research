@@ -101,9 +101,20 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (signal?.aborted) break;
 
       // Enforce the concurrency cap before launching the next researcher.
-      // Wait for one slot to free up when we're at capacity.
+      // Wait for one slot to free up when we're at capacity, or abort immediately if signalled.
       if (active.size >= maxConcurrent) {
-        await Promise.race(active);
+        if (signal?.aborted) break;
+        await Promise.race([
+          ...active,
+          ...(signal ? [new Promise<void>((_, reject) => {
+            const onAbort = () => reject(new Error('Aborted'));
+            if (signal.aborted) onAbort();
+            else signal.addEventListener('abort', onAbort, { once: true });
+          })] : [])
+        ]).catch(err => {
+          if (err.message !== 'Aborted') throw err;
+        });
+        if (signal?.aborted) break;
       }
 
       const promise = (async () => {

@@ -218,6 +218,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.increment('researcher_errors_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
       lastError = err;
       const errMsg = err instanceof Error ? err.message : String(err);
+      
+      if (signal?.aborted || errMsg === 'Aborted') {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} was aborted, skipping retries.`);
+        break; // Break out of the attempt loop
+      }
+
       if (attempt < maxAttempts) {
         logger.warn(`[ResearcherExecutor] Researcher ${id} attempt ${attempt} failed: ${errMsg}; will retry`);
       } else {

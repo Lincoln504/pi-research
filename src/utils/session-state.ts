@@ -193,10 +193,24 @@ export function registerSessionAbort(piSessionId: string, researchId: string, co
  */
 export function abortAllSessions(piSessionId: string): void {
   const state = piSessions.get(piSessionId);
-  if (!state) return;
+  if (!state) {
+    logger.warn(`[session-state] No active session state found for abort request on ${piSessionId}`);
+    return;
+  }
+  
+  const count = state.aborts.size;
+  logger.info(`[session-state] Aborting ${count} research session(s) for ${piSessionId}`);
+  
   for (const controller of state.aborts.values()) {
     controller.abort();
   }
+
+  // Also abort all low-level AgentSession objects managed by the session service for immediate termination.
+  // This is a "belt and suspenders" approach to ensure immediate halt even if signal propagation is delayed.
+  import('../orchestration/research-session-manager.ts')
+    .then(m => m.getResearchSessionService())
+    .then(service => service.abortAllSessions(piSessionId))
+    .catch(err => logger.debug(`[session-state] Service-level abort skipped (likely not initialized or already cleaned up): ${err}`));
 }
 
 /**

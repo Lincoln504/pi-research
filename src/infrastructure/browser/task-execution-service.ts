@@ -21,10 +21,14 @@ export async function runBrowserTask<T>(
     taskOrUrl: string | BrowserTask,
     type: 'search' | 'scrape' = 'scrape',
     config?: Config,
+    signal?: AbortSignal,
     retries = 1
 ): Promise<T> {
+    if (signal?.aborted) throw new Error('Aborted');
+
     try {
         return await browserCircuitBreaker.execute(async () => {
+            if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config);
             if (type === 'search') {
                 const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).query;
@@ -40,6 +44,8 @@ export async function runBrowserTask<T>(
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
         });
     } catch (error: any) {
+        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted');
+
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
@@ -103,13 +109,18 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
 /**
  * Run a worker search query with retry logic.
  */
-export async function runWorkerSearch(query: string, config?: Config, retries = 1): Promise<SearchResult[]> {
+export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1): Promise<SearchResult[]> {
+    if (signal?.aborted) throw new Error('Aborted');
+    
     try {
         return await browserCircuitBreaker.execute(async () => {
+            if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config);
             return await scheduler.runSearch(query, config);
         });
     } catch (error: any) {
+        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted');
+
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',

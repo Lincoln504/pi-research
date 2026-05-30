@@ -37,12 +37,11 @@ export async function performSearch(
     const searchTasks = filteredQueries.map(async (query) => {
         if (signal?.aborted) {
             resultMap.set(query, []);
-            metrics.increment('browser_search_queries_total', 1, { status: 'aborted' });
             return;
         }
         const queryStartTime = Date.now();
         try {
-            const results = await runWorkerSearch(query, config);
+            const results = await runWorkerSearch(query, config, signal);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
             metrics.increment('browser_search_queries_total', 1, { status: 'success' });

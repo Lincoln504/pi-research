@@ -217,10 +217,10 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   }
 }
 
-async function scrapeWithStealthBrowser(_url: string, config?: Config): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
-    const result = await runBrowserTask<any>(_url, 'scrape', config);
+    const result = await runBrowserTask<any>(_url, 'scrape', config, signal);
     const browserDuration = Date.now() - browserStart;
 
     if (result.buffer) {
@@ -279,7 +279,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     if (playwrightAvailable) {
       try {
         const browserStart = Date.now();
-        const res = await scrapeWithStealthBrowser(url, config);
+        const res = await scrapeWithStealthBrowser(url, config, signal);
         const browserDuration = Date.now() - browserStart;
         const totalDuration = Date.now() - start;
         logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${totalDuration}ms)`);
