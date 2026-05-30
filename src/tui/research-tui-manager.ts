@@ -103,14 +103,17 @@ export function createResearchTuiManager(
    */
   const handleTerminalInput = (data: string) => {
     // Check for specific cancel keys (Escape and Ctrl+C)
+    // We trigger the abort but DO NOT consume the key here.
+    // This allows the key to fall through to other handlers (like the config TUI)
+    // so the UI stays responsive while the background tasks are cancelled.
     if (data === '\x1b' || data === '\x03') {
       abortAllSessions(piSessionId);
-      return { consume: true };
+      // Return undefined to let it fall through to other handlers/TUIs
+      return undefined;
     }
 
-    // Consume all escape sequences to prevent terminal state leaks
-    // This includes Kitty protocol responses, CSI sequences, OSC sequences, etc.
-    // Without this, late-arriving protocol responses leak to the shell after tool exit.
+    // Consume only legitimate terminal status responses to prevent leaks.
+    // refined shouldConsumeForCleanup now allows Arrows, Enter, etc. to pass.
     if (shouldConsumeForCleanup(data)) {
       return { consume: true };
     }

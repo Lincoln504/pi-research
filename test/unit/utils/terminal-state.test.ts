@@ -21,18 +21,23 @@ describe('terminal-state', () => {
   });
 
   describe('shouldConsumeForCleanup', () => {
-    it('should consume kitty responses', () => {
+    it('should consume kitty status responses', () => {
       expect(shouldConsumeForCleanup('\x1b[?4;1;3u')).toBe(true);
+      expect(shouldConsumeForCleanup('\x1b[?0u')).toBe(true);
     });
 
-    it('should consume CSI sequences', () => {
-      expect(shouldConsumeForCleanup('\x1b[0m')).toBe(true);
-      expect(shouldConsumeForCleanup('\x1b[1A')).toBe(true);
-      expect(shouldConsumeForCleanup('\x1b[?25h')).toBe(true);
+    it('should NOT consume interaction keys (Arrows, Kitty keys)', () => {
+      expect(shouldConsumeForCleanup('\x1b[A')).toBe(false); // Up
+      expect(shouldConsumeForCleanup('\x1b[B')).toBe(false); // Down
+      expect(shouldConsumeForCleanup('\x1b[13u')).toBe(false); // Kitty Enter
     });
 
-    it('should consume ESC character itself', () => {
-      expect(shouldConsumeForCleanup('\x1b')).toBe(true);
+    it('should consume terminal status responses (CPR)', () => {
+      expect(shouldConsumeForCleanup('\x1b[24;80R')).toBe(true); // Cursor Position Report
+    });
+
+    it('should NOT consume ESC character itself (handled by tool, not cleanup)', () => {
+      expect(shouldConsumeForCleanup('\x1b')).toBe(false);
     });
 
     it('should not consume normal text', () => {

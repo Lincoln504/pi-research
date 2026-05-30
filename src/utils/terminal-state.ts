@@ -71,18 +71,66 @@ export function isKittyProtocolResponse(data: string): boolean {
 }
 
 /**
- * Check if a string appears to be a CSI (Control Sequence Introducer) sequence
- * or a DEC private-mode / application-keypad sequence.
+ * Check if a string appears to be a CSI (Control Sequence Introducer) response.
  *
- * - Standard CSI:          ESC [  (cursor movement, colors, mode settings, etc.)
- * - Normal Keypad mode:    ESC >  (DEC)
- * - Alternate Keypad mode: ESC =  (DEC)
+ * We specifically target responses that should be consumed to prevent leaks:
+ * - Device Attributes: ESC [ ? ... c
+ * - Cursor Position:  ESC [ ... ; ... R
+ * - Kitty Status:     ESC [ ? ... u
+ *
+ * We EXCLUDE key presses that start with ESC [ but are for interaction:
+ * - Arrows:           ESC [ A, B, C, D
+ * - Nav Keys:         ESC [ 1~, etc.
+ * - Kitty Keys:       ESC [ <digits> u (no question mark)
  *
  * @param data - Input string to check
- * @returns true if this looks like a CSI or DEC keypad escape sequence
+ * @returns true if this looks like a CSI response that should be consumed
  */
-export function isCSISequence(data: string): boolean {
-  return data.startsWith('\u001b[') || data.startsWith('\u001b>') || data.startsWith('\u001b=');
+export function isCSIResponse(data: string): boolean {
+  if (!data.startsWith('\u001b[')) return false;
+
+  // Kitty status response (starts with ?)
+  if (data.startsWith('\u001b[?')) {
+    return true;
+  }
+
+  // Cursor position report (matches \u001b[\d+;\d+R)
+  if (/^\u001b\[\d+;\d+R$/.test(data)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a string appears to be an interaction key (Arrow, Nav, etc.)
+ *
+ * @param data - Input string to check
+ * @returns true if this looks like a user interaction key
+ */
+export function isInteractionKey(data: string): boolean {
+  if (!data.startsWith('\u001b')) return false;
+
+  // Single ESC is a cancel key, but we handle it separately
+  if (data === '\u001b') return false;
+
+  // Arrow keys (Normal and Application mode)
+  if (/^\u001b\[[A-D]$/.test(data) || /^\u001bO[A-D]$/.test(data)) {
+    return true;
+  }
+
+  // Navigation keys (Home, End, PgUp, PgDn, Insert, Delete)
+  if (/^\u001b\[[\d;]+~$/.test(data)) {
+    return true;
+  }
+
+  // Kitty protocol key presses (ESC [ <digits> u)
+  // Note: Responses have a '?' which is handled by isCSIResponse
+  if (/^\u001b\[\d+(?:;\d+)*u$/.test(data)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -95,8 +143,7 @@ export function isCSISequence(data: string): boolean {
  */
 export function isOSCSequence(data: string): boolean {
   return (
-    (data.startsWith('\u001b]') && data.includes('\x07')) ||
-    data.endsWith('\u001b\\')
+    (data.startsWith('\u001b]') && (data.includes('\x07') || data.includes('\u001b\\')))
   );
 }
 
@@ -115,31 +162,27 @@ export function isAPCSequence(data: string): boolean {
 /**
  * Check if a string should be consumed to prevent terminal state leaks.
  *
- * Returns true for:
- * - Kitty protocol responses
- * - CSI sequences (cursor movement, colors, etc.)
- * - OSC sequences (window title, etc.)
- * - APC sequences (application-specific commands)
- * - Any other escape sequence
+ * Returns true for terminal-generated responses that might leak to the shell,
+ * but returns false for user-initiated interaction keys.
  *
  * @param data - Input string to check
- * @returns true if this should be consumed (not forwarded to shell)
+ * @returns true if this should be consumed (not forwarded to shell/TUI)
  */
 export function shouldConsumeForCleanup(data: string): boolean {
   if (!data) return false;
 
-  // Empty or single character - only consume if it's ESC itself
+  // Never consume single characters (except handled explicitly elsewhere)
   if (data.length === 1) {
-    return data === '\u001b';
+    return false;
   }
 
-  // Kitty protocol response
-  if (isKittyProtocolResponse(data)) {
-    return true;
+  // Do NOT consume known interaction keys (Arrows, Nav keys, Kitty keys)
+  if (isInteractionKey(data)) {
+    return false;
   }
 
-  // CSI sequence (most common terminal escape sequences)
-  if (isCSISequence(data)) {
+  // Consume known terminal responses
+  if (isCSIResponse(data)) {
     return true;
   }
 
@@ -153,11 +196,9 @@ export function shouldConsumeForCleanup(data: string): boolean {
     return true;
   }
 
-  // Any other escape sequence
-  if (isEscapeSequence(data)) {
-    return true;
-  }
-
+  // For any other escape sequence, we default to NOT consuming it if it 
+  // doesn't match our known "safe to consume" response patterns.
+  // This is a "safe by default" approach to avoid breaking TUIs.
   return false;
 }
 
