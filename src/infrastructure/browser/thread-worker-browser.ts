@@ -86,7 +86,8 @@ export async function initBrowser(): Promise<void> {
         // coherently. Manual overrides for those via launch options are silently
         // ignored by Playwright; set them at context level if needed, or rely on
         // camoufox defaults for a consistent, coordinated fingerprint.
-        const launchedBrowser = await Camoufox({
+        const launchTimeoutMs = 45000;
+        const launchPromise = Camoufox({
           headless: true,
           humanize: true,
           locale: 'en-US',
@@ -98,11 +99,15 @@ export async function initBrowser(): Promise<void> {
           },
         });
 
-        context = await launchedBrowser.newContext({
-          viewport: { width: 1920, height: 1080 },
-        });
+        const launchedBrowser = await Promise.race([
+          launchPromise,
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs)
+          )
+        ]);
 
         browser = launchedBrowser;
+        context = await browser.newContext();
         logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
       }
     } catch (e: any) {

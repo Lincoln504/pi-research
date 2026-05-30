@@ -111,7 +111,7 @@ export function getCamoufoxBinaryPath(): string {
  */
 export function generateSchedulerVersion(config?: Config): string {
     const c = config || getConfig();
-    const versionString = `v2:${c.WORKER_THREADS}:${c.MAX_CONCURRENT_RESEARCHERS}`;
+    const versionString = `v2:${c.WORKER_THREADS}:${c.WORKER_CONCURRENCY}:${c.MAX_CONCURRENT_RESEARCHERS}`;
     return crypto.createHash('sha256').update(versionString).digest('hex').substring(0, 16);
 }
 

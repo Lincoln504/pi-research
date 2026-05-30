@@ -112,6 +112,7 @@ export class WorkerPoolManager implements IService {
                         }
                     },
                     workerChoiceStrategy: WorkerChoiceStrategies.ROUND_ROBIN,
+                    concurrency: workerConcurrency,
                     enableTasksQueue: true,
                     tasksQueueOptions: {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
