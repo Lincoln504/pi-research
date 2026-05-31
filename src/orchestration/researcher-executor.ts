@@ -126,7 +126,15 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     sessionService.registerSession(researchId, id, session, () => session.abort().catch(() => {}));
 
     const subscription = session.subscribe((event: any) => {
-      if (event.type === 'message_end') {
+      if (event.type === 'message_update') {
+        const ame = event.assistantMessageEvent as any;
+        if (ame?.type === 'start') {
+          const inputTokens: number = ame.partial?.usage?.input ?? 0;
+          if (inputTokens > 0) {
+            typedObserver?.onResearcherTokensHint?.(id, inputTokens);
+          }
+        }
+      } else if (event.type === 'message_end') {
         const msg = event.message as unknown as ResearchMessage;
         if (msg?.['role'] !== 'assistant') return;
 

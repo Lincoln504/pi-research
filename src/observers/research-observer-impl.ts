@@ -213,6 +213,15 @@ export function createResearchObserver(
       debouncedRefresh();
     },
 
+    onResearcherTokensHint: (id, inputTokens) => {
+      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
+      const slice = panelState.slices.get(displayNum);
+      if (slice && inputTokens > (slice.tokens || 0)) {
+        slice.tokens = inputTokens;
+      }
+      debouncedRefresh();
+    },
+
     onResearcherProgress: (id, status, tokens, cost) => {
       const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
       const unitsPerResearcher = getUnitsPerResearcher();

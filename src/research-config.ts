@@ -15,13 +15,11 @@
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { TUI } from '@earendil-works/pi-tui';
-import { 
-  SettingsList, 
-  Box, 
-  type SettingItem 
+import {
+  SettingsList,
+  type SettingItem
 } from '@earendil-works/pi-tui';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
-import { createComponentProxy } from './tui/tui-utils.ts';
 import { getConfig, saveConfig, resetConfig } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService } from './core/service-registry.ts';
@@ -188,7 +186,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   setInteractiveTuiActive(true);
   try {
     await ctx.ui.custom(
-      (tui: TUI, theme: Theme, _kb: any, done: (val: any) => void) => {
+      (_tui: TUI, theme: Theme, _kb: any, done: (val: any) => void) => {
         const listTheme = {
           label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
@@ -256,37 +254,19 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               done({ type: 'action', action: 'metrics_clear' });
             }
 
-            tui.requestRender();
           },
           () => done({ type: 'cancel' }),
           { enableSearch: true }
         );
 
-        // Box(0, 0) ensures we have full terminal width for borders
-        const box = new Box(0, 0);
-        
-        const innerComponent = {
+        return {
           render: (width: number) => {
             const border = theme.fg('muted', '─'.repeat(width));
-            return [
-              border,
-              ...settingsList.render(width),
-              border,
-            ];
+            return [border, ...settingsList.render(width), border];
           },
-          handleInput: (data: string) => {
-            settingsList.handleInput(data);
-            tui.requestRender();
-          },
+          handleInput: (data: string) => settingsList.handleInput(data),
           invalidate: () => settingsList.invalidate(),
         };
-
-        box.addChild(innerComponent);
-
-        return createComponentProxy(box, {
-          render: (width: number) => box.render(width),
-          handleInput: (data: string) => innerComponent.handleInput(data),
-        });
       }
     )
 .then(async (result: any) => {

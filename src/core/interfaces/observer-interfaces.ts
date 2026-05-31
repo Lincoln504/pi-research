@@ -27,6 +27,7 @@ export interface ResearchObserver {
   // Individual researcher agents
   onResearcherStart?(id: string, name: string, goal: string, roundNumber?: number): void;
   onResearcherProgress?(id: string, status?: string, tokens?: number, cost?: number): void;
+  onResearcherTokensHint?(id: string, inputTokens: number): void;
   onResearcherComplete?(id: string, report: string): void;
   onResearcherFailure?(id: string, error: string): void;
 
