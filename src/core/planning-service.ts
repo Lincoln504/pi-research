@@ -250,7 +250,6 @@ export class PlanningService implements IPlanningService {
 
     const state = this.getState(sessionId);
     state.currentPlan = plan;
-    state.totalResearchersPlanned += plan.researchers?.length ?? 0;
 
     logger.log(`[${this.name}] Generated plan with ${plan.researchers?.length || 0} researcher(s)`);
     metrics.observe('coordinator_researchers_planned', plan.researchers?.length || 0, { complexity: String(complexity) });

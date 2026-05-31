@@ -51,7 +51,6 @@ export function createResearchObserver(
   
   const {
     progressCredits,
-    waveTimer,
   } = state;
 
   return {
@@ -132,7 +131,7 @@ export function createResearchObserver(
 
       // Start wave animation timer
       panelState.waveFrame = 0;
-      if (waveTimer) clearInterval(waveTimer);
+      if (state.waveTimer) clearInterval(state.waveTimer);
       state.waveTimer = setInterval(() => {
         if (!panelState.isSearching) {
           clearInterval(state.waveTimer!);

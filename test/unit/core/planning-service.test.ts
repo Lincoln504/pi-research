@@ -380,10 +380,13 @@ describe('PlanningService', () => {
       expect(service.getCurrentPlan('test-session')!.action).toBe('delegate');
     });
 
-    it('increments totalResearchersPlanned by the number of researchers in the plan', async () => {
+    it('does not increment totalResearchersPlanned (orchestrator drives the counter)', async () => {
       vi.mocked(complete).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(2)));
       await service.generatePlan({ sessionId: 'test-session', query: 'test', complexity: 1, model: STUB_MODEL });
-      expect(service.getTotalResearchersPlanned('test-session')).toBe(2);
+      // The orchestrator calls incrementTotalResearchersPlanned after each round's
+      // plan is dispatched, including round 1. generatePlan itself must NOT increment
+      // to avoid double-counting round 1 researchers against MAX_TOTAL_RESEARCHERS.
+      expect(service.getTotalResearchersPlanned('test-session')).toBe(0);
     });
 
     it('falls back to a single-researcher plan after 3 failed JSON parse attempts', async () => {
