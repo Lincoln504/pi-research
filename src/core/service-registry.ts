@@ -297,24 +297,33 @@ class ServiceContainer {
 
     this.isDisposing = true;
     if (this.defaultOptions.enableLogging) {
-      logger.log('[ServiceContainer] Disposing all services (sequential, reverse order)...');
+      logger.log('[ServiceContainer] Disposing all services (optimized parallel shutdown)...');
     }
 
     try {
       // Get service registrations in reverse order to respect dependencies
       const registrations = Array.from(this.services.entries()).reverse();
 
-      for (const [name, registration] of registrations) {
-        if (registration.instance && registration.instance.dispose) {
-          try {
-            await registration.instance.dispose();
-          } catch (err: unknown) {
-            logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
+      // We parallelize disposal but group them to maintain SOME order.
+      // Infrastructure services (registered early, disposed last) often depend on each other.
+      // Orchestration services (registered late, disposed first) are usually more independent.
+      
+      // Group services into chunks of 3 for parallel disposal to balance speed and safety.
+      const CHUNK_SIZE = 3;
+      for (let i = 0; i < registrations.length; i += CHUNK_SIZE) {
+        const chunk = registrations.slice(i, i + CHUNK_SIZE);
+        await Promise.all(chunk.map(async ([name, registration]) => {
+          if (registration.instance && registration.instance.dispose) {
+            try {
+              await registration.instance.dispose();
+            } catch (err: unknown) {
+              logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
+            }
           }
-        }
-        // Clear instance but keep registration
-        registration.instance = null;
-        registration.initializationPromise = null;
+          // Clear instance but keep registration
+          registration.instance = null;
+          registration.initializationPromise = null;
+        }));
       }
     } finally {
       // Always reset disposal flag even if disposal throws

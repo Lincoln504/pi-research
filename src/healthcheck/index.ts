@@ -24,19 +24,19 @@ healthRegistry.register('BrowserCapability', async () => {
 }, { critical: true });
 
 // Register Browser Runtime Check
-healthRegistry.register('BrowserRuntime', async () => {
+healthRegistry.register('BrowserRuntime', async (options) => {
   try {
     const scheduler = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     
-    // Check if initialized but idle
-    if (!scheduler.isInitialized()) {
+    // Check if initialized but idle (unless forced)
+    if (!scheduler.isInitialized() && !options?.force) {
       return { healthy: true, diagnostic: { status: 'ready (idle)' } };
     }
     
-    // If already active, perform a real test
+    // Perform a real test
     const searchResult = await runBrowserHealthCheck();
     if (searchResult.success) {
-      return { healthy: true, diagnostic: { status: 'active' } };
+      return { healthy: true, diagnostic: { status: options?.force && !scheduler.isInitialized() ? 'initialized & active' : 'active' } };
     } else {
       return { healthy: false, error: 'Browser healthcheck failed: worker reported failure or page failed to load.' };
     }
@@ -46,7 +46,7 @@ healthRegistry.register('BrowserRuntime', async () => {
 }, { timeoutMs: 30000, critical: true });
 
 // Register Knowledge Store Check
-healthRegistry.register('KnowledgeStore', async () => {
+healthRegistry.register('KnowledgeStore', async (options) => {
   if (!getConfig().KNOWLEDGE_STORE_ENABLED) {
     return { healthy: true, diagnostic: { status: 'disabled in config' } };
   }
@@ -55,8 +55,8 @@ healthRegistry.register('KnowledgeStore', async () => {
     const embedder = await service.getEmbedder();
     
     // Lazy-aware health check: if not initialized, we check if the store is open
-    // but don't force a model load to GPU just for the health check.
-    if (!embedder.isInitialized()) {
+    // but don't force a model load to GPU just for the health check (unless forced).
+    if (!embedder.isInitialized() && !options?.force) {
         return { 
             healthy: true, 
             diagnostic: { 
@@ -64,6 +64,11 @@ healthRegistry.register('KnowledgeStore', async () => {
                 device: embedder.getOriginalDevice()
             } 
         };
+    }
+
+    // Force initialization if requested
+    if (options?.force && !embedder.isInitialized()) {
+        await embedder.embed(' ');
     }
 
     const device = embedder.getDevice();
@@ -104,8 +109,8 @@ healthRegistry.register('StateManager', async () => {
 /**
  * Perform a full system health check
  */
-export async function runHealthCheck() {
-  const result = await healthRegistry.runAll();
+export async function runHealthCheck(options?: { force?: boolean }) {
+  const result = await healthRegistry.runAll(options);
   return {
     success: result.status !== 'unhealthy',
     status: result.status,

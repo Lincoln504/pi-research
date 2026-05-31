@@ -26,11 +26,25 @@ import { getConfig, saveConfig, resetConfig } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
-import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
+import { KnowledgeStoreService } from './infrastructure/knowledge-store-service.ts';
 import type { Theme } from './types/research-panel-types.ts';
-import { SUPPORTED_MODELS, clearKnowledgeStore } from './knowledge/index.ts';
+import { SUPPORTED_MODELS } from './knowledge/index.ts';
 import { metrics } from './utils/metrics.ts';
 import { logger } from './logger.ts';
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+function formatTimeAgo(isoTimestamp: string): string {
+  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
 
 // ============================================================================
 // Command Handler
@@ -114,7 +128,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'EMBEDDING_MODEL',
       label: 'Embed model',
-      description: 'Model used for knowledge store embeddings (Changing clears local DB)',
+      description: 'Model used for knowledge store embeddings. (Changing clears local DB)\nChanging model clears DB. Downloaded models in ~/.cache/pi-research/models/',
       currentValue: config.EMBEDDING_MODEL,
       values: SUPPORTED_MODELS.map(m => m.id),
     },
@@ -151,7 +165,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'ACTION_KNOWLEDGE_CLEAR',
       label: 'Clear memory',
-      description: '⚠️ run a permanent deletion of all knowledge store data',
+      description: 'Run a permanent deletion of all knowledge store data',
       currentValue: 'run',
       values: ['run'],
     },
@@ -178,7 +192,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         const listTheme = {
           label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
-          description: (text: string) => theme.fg('dim', text),
+          description: (text: string) => {
+            return text.split('\n').map(line => {
+              if (line.includes('clears local DB') || line.includes('clears DB')) {
+                return `\x1b[33m${line}\x1b[39m`;
+              }
+              return theme.fg('dim', line);
+            }).join('\n');
+          },
           cursor: theme.fg('accent', '→ '),
           hint: (text: string) => theme.fg('dim', text),
         };
@@ -281,7 +302,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           case 'knowledge_clear': {
             const confirmed = await ctx.ui.confirm('Clear Store', 'Are you sure you want to delete all knowledge store data?');
             if (confirmed) {
-              await clearKnowledgeStore();
+              const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+              await service.clear();
               ctx.ui.notify('Knowledge store cleared', 'info');
             }
             break;
@@ -290,8 +312,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             await showMetricsAction(ctx, pi);
             break;
           case 'metrics_clear':
-            metrics.clear();
-            ctx.ui.notify('System metrics reset', 'info');
+            metrics.clearSession();
+            ctx.ui.notify('Session metrics reset', 'info');
             break;
         }
       }
@@ -310,21 +332,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
   ctx.ui.notify('Running health checks...', 'info');
   try {
-    const systemHealth = await healthRegistry.runAll();
+    const systemHealth = await healthRegistry.runAll({ force: true });
     const outputLines: string[] = [];
     outputLines.push('## System Health Status');
     outputLines.push('');
 
-    const statusIcon = systemHealth.status === 'healthy' ? '✅' :
-                      systemHealth.status === 'degraded' ? '⚠️' : '❌';
+    const statusIcon = systemHealth.status === 'healthy' ? '[OK]' :
+                      systemHealth.status === 'degraded' ? '[WARN]' : '[ERROR]';
     outputLines.push(`**${statusIcon} Status: ${systemHealth.status.toUpperCase()}**`);
     outputLines.push('');
 
     for (const component of systemHealth.components) {
-      const icon = component.healthy ? '✅' : '❌';
+      const icon = component.healthy ? '[OK]' : '[FAIL]';
       outputLines.push(`${icon} **${component.component}**`);
       if (component.error) outputLines.push(`  - Error: ${component.error}`);
-      outputLines.push(`  - Duration: ${component.durationMs.toFixed(0)}ms`);
+      outputLines.push(`  - Duration: ${component.durationMs.toFixed(1)}ms`);
       outputLines.push('');
     }
 
@@ -342,7 +364,7 @@ async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
 
 async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<void> {
   try {
-    const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
     const count = await store.count();
     
@@ -357,29 +379,99 @@ async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<vo
 }
 
 async function showMetricsAction(_ctx: any, pi: ExtensionAPI): Promise<void> {
-  const snapshot = metrics.getSnapshot();
-  const outputLines: string[] = ['## System Metrics', ''];
-  
-  if (Object.keys(snapshot.counters).length === 0 && Object.keys(snapshot.gauges).length === 0 && Object.keys(snapshot.histograms).length === 0) {
-    outputLines.push('_No metrics recorded in the current session._');
-  } else {
-    if (Object.keys(snapshot.counters).length > 0) {
-      outputLines.push('### 🔢 Counters');
-      for (const [key, value] of Object.entries(snapshot.counters)) outputLines.push(`- **${key}:** ${value}`);
-      outputLines.push('');
-    }
-    if (Object.keys(snapshot.histograms).length > 0) {
-      outputLines.push('### 📊 Histograms');
-      for (const [key, stats] of Object.entries(snapshot.histograms)) {
-        outputLines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
+  const sessionSnapshot = metrics.getSessionSnapshot();
+  const runHistory     = metrics.getRunHistory();
+  const sessionStart   = metrics.getSessionStartedAt();
+
+  const lines: string[] = ['## Pi Session Metrics', ''];
+  lines.push('Scope: current Pi session (resets when Pi exits or metrics are cleared manually)');
+  lines.push(`Session started: ${formatTimeAgo(new Date(sessionStart).toISOString())}`);
+  lines.push(`Runs this session: ${runHistory.length}`);
+  lines.push('');
+
+  // ── Session-level infrastructure data ──────────────────────────────────
+  const hasSessionCounters   = Object.keys(sessionSnapshot.counters).length > 0;
+  const hasSessionHistograms = Object.keys(sessionSnapshot.histograms).length > 0;
+
+  if (hasSessionCounters || hasSessionHistograms) {
+    lines.push('### Session Infrastructure (startup, locks, coordination)');
+    if (hasSessionCounters) {
+      for (const [key, value] of Object.entries(sessionSnapshot.counters)) {
+        lines.push(`- **${key}:** ${value}`);
       }
+    }
+    if (hasSessionHistograms) {
+      for (const [key, stats] of Object.entries(sessionSnapshot.histograms)) {
+        lines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
+      }
+    }
+    lines.push('');
+  }
+
+  // ── Per-run history ─────────────────────────────────────────────────────
+  if (runHistory.length === 0) {
+    lines.push('_No research runs in this session._');
+  } else {
+    const lastRun = runHistory[runHistory.length - 1]!;
+    const runIdShort = lastRun.runId.slice(0, 8);
+    const statusLabel = lastRun.status === 'success' ? '[OK]'
+                      : lastRun.status === 'cancelled' ? '[--]'
+                      : '[ERR]';
+
+    lines.push(`### Last Run \`${runIdShort}\``);
+    lines.push(`**Status:** ${statusLabel} ${lastRun.status} | **Duration:** ${(lastRun.durationMs / 1000).toFixed(1)}s | **Completed:** ${formatTimeAgo(new Date(lastRun.completedAt).toISOString())}`);
+    lines.push('');
+
+    const { counters, gauges, histograms } = lastRun.snapshot;
+
+    if (Object.keys(counters).length > 0) {
+      lines.push('#### Counters');
+      for (const [key, value] of Object.entries(counters)) {
+        lines.push(`- **${key}:** ${value}`);
+      }
+      lines.push('');
+    }
+
+    if (Object.keys(gauges).length > 0) {
+      lines.push('#### Gauges');
+      for (const [key, value] of Object.entries(gauges)) {
+        lines.push(`- **${key}:** ${value}`);
+      }
+      lines.push('');
+    }
+
+    if (Object.keys(histograms).length > 0) {
+      lines.push('#### Latency & Performance');
+      for (const [key, stats] of Object.entries(histograms)) {
+        lines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
+      }
+      lines.push('');
+    }
+
+    // ── Prior run compact summary ─────────────────────────────────────────
+    if (runHistory.length > 1) {
+      const prior = runHistory.slice(0, -1).slice().reverse();
+      lines.push(`### Prior Runs (${prior.length})`);
+      for (const run of prior) {
+        const icon = run.status === 'success' ? '[OK]'
+                   : run.status === 'cancelled' ? '[--]'
+                   : '[ERR]';
+        lines.push(`- ${icon} \`${run.runId.slice(0, 8)}\` ${(run.durationMs / 1000).toFixed(1)}s — ${formatTimeAgo(new Date(run.completedAt).toISOString())}`);
+      }
+      lines.push('');
     }
   }
 
   pi.sendMessage({
     customType: 'metrics-result',
-    content: outputLines.join('\n'),
+    content: lines.join('\n'),
     display: true,
-    details: { metrics: snapshot },
+    details: {
+      metrics: {
+        session: sessionSnapshot,
+        runs: runHistory,
+        sessionStartedAt: sessionStart,
+      },
+    },
   });
 }

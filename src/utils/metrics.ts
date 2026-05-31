@@ -1,17 +1,29 @@
 /**
- * Metrics Collection System
- * 
- * Supports three primary metric types:
- * - Counters: Monotonically increasing values (e.g. error counts, request counts)
- * - Gauges: Point-in-time values (e.g. active workers, queue depth)
- * - Histograms: Distributions of values (e.g. operation latency)
+ * Metrics Collection System — two-tier design
+ *
+ * Session registry: accumulates infrastructure and coordination events for the
+ * lifetime of one Pi session. Never cleared between research runs; only an
+ * explicit clearSession() / "Reset metrics" action resets it.
+ *
+ * Run registry: one per research invocation. Created fresh at tool entry,
+ * discarded after the run. A RunSummary snapshot is kept in the session-level
+ * run history (capped at MAX_RUN_HISTORY) for display.
+ *
+ * All emit callsites use the same `metrics` export — the active registry is
+ * resolved from AsyncLocalStorage. Inside runWithRunRegistry() the run
+ * registry receives the writes; outside (startup, infrastructure init) the
+ * session registry does.
+ *
+ * Metric types:
+ *  - Counter:   monotonically increasing integer (request counts, error counts)
+ *  - Gauge:     point-in-time scalar (active workers, lock held flag)
+ *  - Histogram: distribution of numeric observations (latency in ms)
  */
+
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export type Labels = Record<string, string>;
 
-/**
- * Metric histogram statistics interface
- */
 export interface IMetricHistogram {
   count: number;
   min: number;
@@ -23,20 +35,32 @@ export interface IMetricHistogram {
   p99: number;
 }
 
-/**
- * Metrics snapshot interface
- */
 export interface IMetricsSnapshot {
   counters: Record<string, number>;
   gauges: Record<string, number>;
   histograms: Record<string, IMetricHistogram>;
 }
 
+/** Immutable snapshot captured at the end of a single research run. */
+export interface RunSummary {
+  readonly runId: string;
+  readonly startedAt: number;
+  readonly completedAt: number;
+  readonly durationMs: number;
+  readonly status: 'success' | 'error' | 'cancelled';
+  readonly snapshot: IMetricsSnapshot;
+}
+
+// ── Core registry ──────────────────────────────────────────────────────────
+
+/**
+ * Low-level metrics store. Holds counters, gauges and histograms in memory.
+ * Not directly exported as the singleton — use the `metrics` export instead.
+ */
 export class MetricsRegistry {
   private counters = new Map<string, number>();
   private gauges = new Map<string, number>();
-  // Histograms store arrays of values for percentile calculation
-  private histograms = new Map<string, number[]>();
+  private histograms = new Map<string, { values: number[]; pointer: number; limit: number }>();
 
   private serializeLabels(labels?: Labels): string {
     if (!labels) return '';
@@ -49,97 +73,81 @@ export class MetricsRegistry {
     return labelStr ? `${name}{${labelStr}}` : name;
   }
 
-  /** Increment a monotonically increasing counter */
   public increment(name: string, value: number = 1, labels?: Labels): void {
     const key = this.getKey(name, labels);
-    const current = this.counters.get(key) ?? 0;
-    this.counters.set(key, current + value);
+    this.counters.set(key, (this.counters.get(key) ?? 0) + value);
   }
 
-  /** Set a point-in-time gauge value */
   public setGauge(name: string, value: number, labels?: Labels): void {
-    const key = this.getKey(name, labels);
-    this.gauges.set(key, value);
+    this.gauges.set(this.getKey(name, labels), value);
   }
 
-  /** Record a value in a histogram distribution (e.g., latency) */
   public observe(name: string, value: number, labels?: Labels): void {
     const key = this.getKey(name, labels);
-    let values = this.histograms.get(key);
-    if (!values) {
-      values = [];
-      this.histograms.set(key, values);
+    let entry = this.histograms.get(key);
+    if (!entry) {
+      entry = { values: [], pointer: 0, limit: 10_000 };
+      this.histograms.set(key, entry);
     }
-    values.push(value);
-    
-    // Prevent unbounded memory growth
-    if (values.length > 10000) {
-      values.splice(0, 5000); // Remove oldest half
+    if (entry.values.length < entry.limit) {
+      entry.values.push(value);
+    } else {
+      entry.values[entry.pointer] = value;
+      entry.pointer = (entry.pointer + 1) % entry.limit;
     }
   }
 
-  /** Utility to measure latency of an async operation */
   public async measure<T>(name: string, action: () => Promise<T>, labels?: Labels): Promise<T> {
     const start = process.hrtime.bigint();
     try {
       const result = await action();
-      const end = process.hrtime.bigint();
-      this.observe(name, Number(end - start) / 1_000_000, labels); // Record in milliseconds
+      this.observe(name, Number(process.hrtime.bigint() - start) / 1_000_000, labels);
       return result;
     } catch (error) {
-      const end = process.hrtime.bigint();
-      this.observe(name, Number(end - start) / 1_000_000, { ...labels, error: 'true' });
+      this.observe(name, Number(process.hrtime.bigint() - start) / 1_000_000, { ...labels, error: 'true' });
       this.increment(`${name}_errors_total`, 1, labels);
       throw error;
     }
   }
 
-  /** Calculate a percentile from a sorted array of numbers */
-  private percentile(sortedValues: number[], pct: number): number {
-    if (sortedValues.length === 0) return 0;
-    const index = Math.ceil((pct / 100) * sortedValues.length) - 1;
-    return sortedValues[index] ?? 0;
+  private percentile(sorted: number[], pct: number): number {
+    const len = sorted.length;
+    if (len === 0) return 0;
+    if (len === 1) return sorted[0] ?? 0;
+    if (pct <= 0) return sorted[0] ?? 0;
+    if (pct >= 100) return sorted[len - 1] ?? 0;
+    const rank = (pct / 100) * (len - 1);
+    const lo = Math.floor(rank);
+    const hi = Math.ceil(rank);
+    const w = rank - lo;
+    return (sorted[lo] ?? 0) + ((sorted[hi] ?? 0) - (sorted[lo] ?? 0)) * w;
   }
 
-  /** Retrieve a snapshot of all metrics */
   public getSnapshot(): IMetricsSnapshot {
-    const snapshot: IMetricsSnapshot = {
-      counters: {},
-      gauges: {},
-      histograms: {}
-    };
+    const snap: IMetricsSnapshot = { counters: {}, gauges: {}, histograms: {} };
 
-    for (const [key, value] of this.counters.entries()) {
-      snapshot['counters'][key] = value;
-    }
+    for (const [k, v] of this.counters) snap.counters[k] = v;
+    for (const [k, v] of this.gauges)   snap.gauges[k]   = v;
 
-    for (const [key, value] of this.gauges.entries()) {
-      snapshot['gauges'][key] = value;
-    }
-
-    for (const [key, values] of this.histograms.entries()) {
-      if (values.length === 0) continue;
-      // Note: slice and sort can be expensive on huge arrays,
-      // but bounded by the 10000 max size
-      const sorted = values.slice().sort((a, b) => a - b);
+    for (const [k, entry] of this.histograms) {
+      const vals = entry.values;
+      if (vals.length === 0) continue;
+      const sorted = vals.slice().sort((a, b) => a - b);
       const sum = sorted.reduce((a, b) => a + b, 0);
-      
-      snapshot['histograms'][key] = {
+      snap.histograms[k] = {
         count: sorted.length,
-        min: sorted[0] ?? 0,
-        max: sorted[sorted.length - 1] ?? 0,
-        avg: sum / sorted.length,
-        p50: this.percentile(sorted, 50),
-        p90: this.percentile(sorted, 90),
-        p95: this.percentile(sorted, 95),
-        p99: this.percentile(sorted, 99)
+        min:   sorted[0] ?? 0,
+        max:   sorted[sorted.length - 1] ?? 0,
+        avg:   sum / sorted.length,
+        p50:   this.percentile(sorted, 50),
+        p90:   this.percentile(sorted, 90),
+        p95:   this.percentile(sorted, 95),
+        p99:   this.percentile(sorted, 99),
       };
     }
-
-    return snapshot;
+    return snap;
   }
 
-  /** Clear all metrics */
   public clear(): void {
     this.counters.clear();
     this.gauges.clear();
@@ -147,5 +155,138 @@ export class MetricsRegistry {
   }
 }
 
-// Global default registry
-export const metrics = new MetricsRegistry();
+// ── Run-registry routing ───────────────────────────────────────────────────
+
+/** AsyncLocalStorage slot that holds the active run-scoped MetricsRegistry. */
+const runRegistryStorage = new AsyncLocalStorage<MetricsRegistry>();
+
+/**
+ * Execute `fn` with `registry` as the active run-scoped metrics target.
+ * Every `metrics.*` call inside `fn` — including all async continuations —
+ * will emit into `registry` rather than the session registry.
+ * The run context does NOT nest; a second runWithRunRegistry call inside an
+ * existing one replaces the active registry for that sub-scope.
+ */
+export function runWithRunRegistry<T>(
+  registry: MetricsRegistry,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return runRegistryStorage.run(registry, fn);
+}
+
+/**
+ * Returns the run-scoped registry if called inside a runWithRunRegistry context,
+ * undefined otherwise.
+ */
+export function getCurrentRunRegistry(): MetricsRegistry | undefined {
+  return runRegistryStorage.getStore();
+}
+
+// ── Session-level manager ──────────────────────────────────────────────────
+
+const MAX_RUN_HISTORY = 10;
+
+/**
+ * Two-tier session-scoped metrics manager (the exported `metrics` singleton).
+ *
+ * Emit methods route to the run registry when inside a runWithRunRegistry
+ * context, falling back to the session registry otherwise:
+ *
+ *   • Infrastructure events at startup / health-check time  → session registry
+ *   • Everything emitted during a research invocation        → run registry
+ *
+ * Run registries are created by the research tool, passed to runWithRunRegistry,
+ * and discarded after the run. A RunSummary snapshot is appended to _runHistory
+ * by calling recordRunSummary() after the runWithRunRegistry call returns
+ * (i.e. outside the run context, so the write goes to session scope).
+ */
+class SessionMetrics {
+  private readonly _session = new MetricsRegistry();
+  private _sessionStartedAt = Date.now();
+  private _runHistory: RunSummary[] = [];
+
+  private getActive(): MetricsRegistry {
+    return runRegistryStorage.getStore() ?? this._session;
+  }
+
+  // ── Emit API (routes to active registry) ──────────────────────────────
+
+  public increment(name: string, value: number = 1, labels?: Labels): void {
+    this.getActive().increment(name, value, labels);
+  }
+
+  public setGauge(name: string, value: number, labels?: Labels): void {
+    this.getActive().setGauge(name, value, labels);
+  }
+
+  public observe(name: string, value: number, labels?: Labels): void {
+    this.getActive().observe(name, value, labels);
+  }
+
+  public async measure<T>(name: string, action: () => Promise<T>, labels?: Labels): Promise<T> {
+    return this.getActive().measure(name, action, labels);
+  }
+
+  // ── Session-level read API ─────────────────────────────────────────────
+
+  /** Snapshot of the session registry (infrastructure / cross-run metrics). */
+  public getSessionSnapshot(): IMetricsSnapshot {
+    return this._session.getSnapshot();
+  }
+
+  /**
+   * Backwards-compatible alias for getSessionSnapshot().
+   * Callers that previously used metrics.getSnapshot() now receive the
+   * session-level data rather than an undefined blend of run + session.
+   */
+  public getSnapshot(): IMetricsSnapshot {
+    return this._session.getSnapshot();
+  }
+
+  /** Millisecond timestamp when this session started or was last reset. */
+  public getSessionStartedAt(): number {
+    return this._sessionStartedAt;
+  }
+
+  /**
+   * Ordered run summaries, oldest first. Capped at MAX_RUN_HISTORY entries.
+   * Returns a shallow copy so callers cannot mutate the internal list.
+   */
+  public getRunHistory(): readonly RunSummary[] {
+    return this._runHistory;
+  }
+
+  // ── Run lifecycle API ──────────────────────────────────────────────────
+
+  /**
+   * Append a completed run's snapshot to the history.
+   * Call this AFTER runWithRunRegistry returns so the write lands in session
+   * scope. Automatically evicts the oldest entry when the cap is reached.
+   */
+  public recordRunSummary(summary: RunSummary): void {
+    this._runHistory.push(summary);
+    if (this._runHistory.length > MAX_RUN_HISTORY) {
+      this._runHistory.shift();
+    }
+  }
+
+  // ── Reset API ──────────────────────────────────────────────────────────
+
+  /**
+   * Clear the session registry, run history, and session start timestamp.
+   * In-flight run registries are NOT affected.
+   */
+  public clearSession(): void {
+    this._session.clear();
+    this._runHistory = [];
+    this._sessionStartedAt = Date.now();
+  }
+
+  /** Backwards-compatible alias for clearSession(). */
+  public clear(): void {
+    this.clearSession();
+  }
+}
+
+/** Global session-scoped metrics instance. */
+export const metrics = new SessionMetrics();

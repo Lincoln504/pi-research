@@ -282,15 +282,15 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     try {
       const health = await healthRegistry.runAll();
       if (health.status === 'healthy') {
-        logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: ✅ All systems operational`);
+        logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
         return true;
       } else if (health.status === 'degraded') {
         const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
-        logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: ⚠️ Degraded (${degraded.join(', ')})`);
+        logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Degraded (${degraded.join(', ')})`);
         return true;
       } else {
         const failed = health.components.filter(c => !c.healthy).map(c => c.component);
-        logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: ❌ Unhealthy (${failed.join(', ')})`);
+        logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: [ERROR] Unhealthy (${failed.join(', ')})`);
         return false;
       }
     } catch (err) {

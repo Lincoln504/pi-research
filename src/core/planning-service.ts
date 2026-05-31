@@ -320,8 +320,6 @@ export class PlanningService implements IPlanningService {
       : '';
     const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
 
-    const reasoning: ThinkingLevel = 'medium';
-
     let text = '';
     let lastEvalError: any = null;
 
@@ -329,7 +327,7 @@ export class PlanningService implements IPlanningService {
       try {
         const response = await completeSimple(model, {
           messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
-        }, { apiKey: auth.apiKey, headers: auth.headers, signal, reasoning });
+        }, { apiKey: auth.apiKey, headers: auth.headers, signal });
 
         const responseMetadata = response as LLMResponseMetadata;
         if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {

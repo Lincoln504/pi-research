@@ -406,7 +406,7 @@ describe('DeepResearchOrchestrator', () => {
     await orchestrator.run();
 
     expect(onEvaluationStart).toHaveBeenCalled();
-    expect(onEvaluationProgress).toHaveBeenCalledWith('learning');
+    expect(onEvaluationProgress).toHaveBeenCalledWith('embedding');
     expect(onEvaluationProgress).toHaveBeenCalledWith('evaluating');
   });
 

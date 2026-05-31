@@ -25,6 +25,11 @@ export function createHealthTool(): ToolDefinition {
     parameters: Type.Object({
       verbose: Type.Optional(Type.Boolean({
         description: 'Show detailed diagnostic information for each component',
+        default: true,
+      })),
+      probe: Type.Optional(Type.Boolean({
+        description: 'Force liveness checks (spawns browser, loads GPU models)',
+        default: false,
       })),
     }),
     renderShell: 'self',
@@ -36,19 +41,19 @@ export function createHealthTool(): ToolDefinition {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { verbose } = params as { verbose?: boolean };
+      const { verbose = true, probe = false } = params as { verbose?: boolean; probe?: boolean };
 
       const outputLines: string[] = [];
 
       // Run health checks
       try {
-        const systemHealth = await healthRegistry.runAll();
+        const systemHealth = await healthRegistry.runAll({ force: probe });
 
         outputLines.push('## System Health Status');
         outputLines.push('');
 
-        const statusIcon = systemHealth.status === 'healthy' ? '✅' :
-                          systemHealth.status === 'degraded' ? '⚠️' : '❌';
+        const statusIcon = systemHealth.status === 'healthy' ? '[OK]' :
+                          systemHealth.status === 'degraded' ? '[WARN]' : '[ERROR]';
         const statusText = systemHealth.status === 'healthy' ? 'All systems operational' :
                           systemHealth.status === 'degraded' ? 'System degraded (non-critical issues)' :
                           'System unhealthy (critical failures)';
@@ -57,7 +62,7 @@ export function createHealthTool(): ToolDefinition {
         outputLines.push('');
 
         for (const component of systemHealth.components) {
-          const icon = component.healthy ? '✅' : '❌';
+          const icon = component.healthy ? '[OK]' : '[FAIL]';
           const criticalMark = healthRegistry.isCritical(component.component) ? ' [CRITICAL]' : '';
           outputLines.push(`${icon} **${component.component}**${criticalMark}`);
           
@@ -75,7 +80,7 @@ export function createHealthTool(): ToolDefinition {
           }
           
           if (verbose) {
-            outputLines.push(`  - Duration: ${component.durationMs.toFixed(0)}ms`);
+            outputLines.push(`  - Duration: ${component.durationMs.toFixed(1)}ms`);
           }
           outputLines.push('');
         }

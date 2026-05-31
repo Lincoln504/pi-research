@@ -53,12 +53,12 @@ describe('stackexchange/output/table', () => {
       expect(result).toContain('Found: 2 questions');
       expect(result).toContain('## Question with accepted answer');
       expect(result).toContain('**Score:** 10');
-      expect(result).toContain('**Answers:** 5 ✓');
+      expect(result).toContain('**Answers:** 5 [accepted]');
       expect(result).toContain('**Body:** Short body text');
       expect(result).toContain('## Unanswered question');
       expect(result).toContain('**Score:** 5');
       expect(result).toContain('**Answers:** 0');
-      // Unanswered doesn't have ✓ in the Answers line
+      // Unanswered has no [accepted] tag
     });
 
     it('should handle edge cases in question data', () => {
@@ -131,7 +131,7 @@ describe('stackexchange/output/table', () => {
       const result = formatAnswersTable(answers);
       expect(result).toContain('Found: 3 answers');
       expect(result).toContain('## Answer by ExpertUser');
-      expect(result).toContain('**Score:** 15 ✓ (Accepted)');
+      expect(result).toContain('**Score:** 15 [Accepted]');
       expect(result).toContain('### Answer Body');
       expect(result).toContain('Good answer');
       expect(result).toContain('## Answer by HelperUser');
@@ -151,7 +151,7 @@ describe('stackexchange/output/table', () => {
 
       const result = formatAnswersTable(answers);
       expect(result).toContain('## Answer by Unknown');
-      expect(result).toContain('**Score:** 10 ✓ (Accepted)');
+      expect(result).toContain('**Score:** 10 [Accepted]');
     });
 
     it('should handle very long answer body', () => {
@@ -212,13 +212,13 @@ describe('stackexchange/output/table', () => {
       expect(result).toContain('Found: 3 users');
       expect(result).toContain('## ExpertUser');
       expect(result).toContain('**Reputation:** 1000');
-      expect(result).toContain('**Badges:** 🥇 5 🥈 10 🥉 20');
+      expect(result).toContain('**Badges:** gold:5 silver:10 bronze:20');
       expect(result).toContain('**Location:** San Francisco');
       expect(result).toContain('**Website:** https://example.com');
       
       expect(result).toContain('## MinimalUser');
       expect(result).toContain('**Reputation:** 100');
-      expect(result).toContain('**Badges:** 🥇 0 🥈 0 🥉 0');
+      expect(result).toContain('**Badges:** gold:0 silver:0 bronze:0');
       
       expect(result).toContain('## NegativeRepUser');
       expect(result).toContain('**Reputation:** -10');
@@ -327,7 +327,7 @@ describe('stackexchange/output/table', () => {
       ];
 
       const result = formatCompactQuestions(questions);
-      expect(result).toContain('1. [Accepted question](https://stackoverflow.com/q/123) ✓');
+      expect(result).toContain('1. [Accepted question](https://stackoverflow.com/q/123) [accepted]');
       expect(result).toContain('(score: 10, answers: 5)');
       expect(result).toContain('2. [Unanswered question](https://stackoverflow.com/q/124)');
       expect(result).toContain('(score: 5, answers: 0)');

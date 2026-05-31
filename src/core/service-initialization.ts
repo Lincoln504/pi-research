@@ -116,10 +116,10 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
         // getService will call initialize(ctx) if not already initialized
         await getService<any>(service.name, ctx);
         initialized.push(service.label);
-        logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
+        logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {
         const errorMsg = `${service.label} initialization failed`;
-        logger.error(`[ServiceInitialization] ✗ ${errorMsg}:`, err);
+        logger.error(`[ServiceInitialization] FAILED: ${errorMsg}:`, err);
         failed.push(errorMsg);
         // Continue with other services even if one fails
       }
@@ -132,10 +132,10 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
         await getService<any>(service.name, ctx);
         initialized.push(service.label);
-        logger.debug(`[ServiceInitialization] ✓ ${service.label} initialized`);
+        logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {
         const errorMsg = `${service.label} initialization failed`;
-        logger.error(`[ServiceInitialization] ✗ ${errorMsg}:`, err);
+        logger.error(`[ServiceInitialization] FAILED: ${errorMsg}:`, err);
         failed.push(errorMsg);
         // Continue with other services even if one fails
       }
@@ -148,7 +148,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
 
     // Log summary
     if (failed.length === 0) {
-      logger.log(`[ServiceInitialization] ✓ All ${initialized.length} critical services initialized successfully`);
+      logger.log(`[ServiceInitialization] All ${initialized.length} critical services initialized successfully`);
     } else {
       logger.warn(`[ServiceInitialization] ⚠ ${initialized.length}/${initialized.length + failed.length} services initialized, ${failed.length} failed`);
       for (const failure of failed) {

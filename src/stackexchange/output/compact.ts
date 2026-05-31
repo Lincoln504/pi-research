@@ -12,7 +12,7 @@ export function formatQuestionsCompact(questions: Question[]): string {
   const lines: string[] = [];
   let index = 1;
   for (const q of questions) {
-    const accepted = q.accepted_answer_id ? '✓' : ' ';
+    const accepted = q.accepted_answer_id ? '[accepted]' : '         ';
     lines.push(`${index}. ${accepted} [${q.title}](${q.link}) (${q.score} pts, ${q.answer_count} ans, ${q.view_count} views)`);
     index++;
   }
@@ -27,7 +27,7 @@ export function formatAnswersCompact(answers: Answer[]): string {
   const lines: string[] = [];
   let index = 1;
   for (const a of answers) {
-    const accepted = a.is_accepted ? '✓' : ' ';
+    const accepted = a.is_accepted ? '[accepted]' : '         ';
     const displayName = a.owner?.display_name ?? 'Unknown';
     lines.push(`${index}. ${accepted} by ${displayName} (${a.score} pts)`);
     index++;
@@ -44,7 +44,7 @@ export function formatUsersCompact(users: User[]): string {
   let index = 1;
   for (const u of users) {
     const bc = u.badge_counts ?? { gold: 0, silver: 0, bronze: 0 };
-    lines.push(`${index}. ${u.display_name} (rep: ${u.reputation}, 🥇${bc.gold} 🥈${bc.silver} 🥉${bc.bronze})`);
+    lines.push(`${index}. ${u.display_name} (rep: ${u.reputation}, gold:${bc.gold} silver:${bc.silver} bronze:${bc.bronze})`);
     index++;
   }
   return lines.join('\n');

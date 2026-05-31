@@ -42,7 +42,7 @@ describe('stackexchange/output/compact', () => {
       const result = formatQuestionsCompact(questions);
 
       expect(result).toContain('1.');
-      expect(result).toContain('✓'); // Accepted answer indicator
+      expect(result).toContain('[accepted]'); // Accepted answer indicator
       expect(result).toContain('Test question with answer');
       expect(result).toContain('2.');
       expect(result).toContain('Unanswered question');
@@ -126,7 +126,7 @@ describe('stackexchange/output/compact', () => {
       const result = formatAnswersCompact(answers);
 
       expect(result).toContain('1.');
-      expect(result).toContain('✓'); // Accepted
+      expect(result).toContain('[accepted]'); // Accepted
       expect(result).toContain('by User1');
       expect(result).toContain('(15 pts)');
       
@@ -217,13 +217,13 @@ describe('stackexchange/output/compact', () => {
 
       expect(result).toContain('ExpertUser');
       expect(result).toContain('rep: 1000');
-      expect(result).toContain('🥇5');
-      expect(result).toContain('🥈10');
-      expect(result).toContain('🥉20');
+      expect(result).toContain('gold:5');
+      expect(result).toContain('silver:10');
+      expect(result).toContain('bronze:20');
       
       expect(result).toContain('NewUser');
       expect(result).toContain('rep: 1');
-      expect(result).toContain('🥇0');
+      expect(result).toContain('gold:0');
       
       expect(result).toContain('rep: -10'); // Negative reputation
     });
@@ -239,7 +239,7 @@ describe('stackexchange/output/compact', () => {
       const result = formatUsersCompact(users);
 
       expect(result).toContain('TestUser');
-      expect(result).toContain('🥇0'); // Should default to 0
+      expect(result).toContain('gold:0'); // Should default to 0
     });
 
     it('should handle unicode in display names', () => {

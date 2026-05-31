@@ -208,7 +208,7 @@ export function createGrepTool(options: {
         markdown += `**Exit Code:** ${exitCode}\n\n`;
 
         if (wasTruncated) {
-          markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+          markdown += '[Warning] Output was truncated (>10MB)\n\n';
         }
 
         if (truncated) {
@@ -247,7 +247,7 @@ export function createGrepTool(options: {
           markdown += '*Note: Using grep fallback (rg not available)*\n\n';
 
           if (wasTruncated) {
-            markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+            markdown += '[Warning] Output was truncated (>10MB)\n\n';
           }
 
           if (truncated) {
@@ -311,7 +311,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
     const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
     if (wasTruncated) {
-      markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+      markdown += '[Warning] Output was truncated (>10MB)\n\n';
     }
 
     if (truncated) {
@@ -342,7 +342,7 @@ export async function grep(pattern: string, path: string = '.', flags: string = 
       const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
 
       if (wasTruncated) {
-        markdown += '⚠️ **Output was truncated to prevent memory overflow (>10MB)**\n\n';
+        markdown += '[Warning] Output was truncated (>10MB)\n\n';
       }
 
       if (truncated) {

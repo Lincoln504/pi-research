@@ -94,10 +94,10 @@ export default async function (pi: ExtensionAPI) {
         logger.error(`[pi-research]   - ${failure}`);
       }
     } else {
-      logger.log('[pi-research] ✓ All critical services initialized and ready');
+      logger.log('[pi-research] All critical services initialized and ready');
     }
   } catch (err) {
-    logger.error('[pi-research] ✗ Critical error during service initialization:', err);
+    logger.error('[pi-research] Critical error during service initialization:', err);
     // Don't throw - allow extension to load with degraded functionality
     // Tools will handle missing services gracefully
   }
@@ -105,7 +105,7 @@ export default async function (pi: ExtensionAPI) {
   // Validate config at startup for early misconfiguration feedback
   try {
     validateConfig();
-    logger.debug('[pi-research] ✓ Config validated');
+    logger.debug('[pi-research] Config validated');
   } catch (err) {
     logger.error(`[pi-research] ⚠ Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
     // Don't throw — allow extension to load; tool execution will also validate and surface the error
@@ -280,10 +280,13 @@ export default async function (pi: ExtensionAPI) {
           customType: 'research-result',
           content: output,
           display: true,
-          details: { totalTokens: (result.details as ResearchResultDetails)?.totalTokens ?? 0 },
+          details: { 
+            totalTokens: (result.details as ResearchResultDetails)?.totalTokens ?? 0,
+            researchId: (result.details as any)?.researchId
+          },
         });
 
-        ctx.ui.notify('✅ Research complete', 'info');
+        ctx.ui.notify('Research complete', 'info');
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error('[pi-research] /research command failed:', error);
@@ -295,7 +298,7 @@ export default async function (pi: ExtensionAPI) {
           details: { error: message },
         });
 
-        ctx.ui.notify(`❌ Research failed: ${message}`, 'error');
+        ctx.ui.notify(`Research failed: ${message}`, 'error');
       }
     },
   });
@@ -379,13 +382,13 @@ export default async function (pi: ExtensionAPI) {
   setTimeout(async () => {
     try {
       const health = await healthRegistry.runAll();
-      const statusIcon = health.status === 'healthy' ? '✅' :
-                        health.status === 'degraded' ? '⚠️' : '❌';
+      const statusIcon = health.status === 'healthy' ? '[OK]' :
+                        health.status === 'degraded' ? '[WARN]' : '[ERROR]';
       const failedComponents = health.components.filter((c: any) => !c.healthy).map((c: any) => c.component).join(', ');
 
       if (health.status === 'healthy') {
         logger.log(`[pi-research] ${statusIcon} System health check passed. All components operational.`);
-      } else {
+    } else {
         logger.warn(`[pi-research] ${statusIcon} System health check: ${health.status}. Failed: ${failedComponents || 'none'}`);
       }
     } catch (error) {

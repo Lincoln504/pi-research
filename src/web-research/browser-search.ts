@@ -48,7 +48,7 @@ export async function performSearch(
             
             if (results?.length > 0) {
                 metrics.increment('browser_search_results_total', results.length);
-                logger.debug(`[Search] ✓ Worker returned ${results.length} results for: ${query}`);
+                logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
                 
                 // Deduplicate results across queries to prevent redundant scraping
                 const uniqueResults = [];

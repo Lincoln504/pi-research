@@ -18,7 +18,7 @@ import type { ResearchDepth } from '../types/index.ts';
 import { Type } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
-import { metrics } from '../utils/metrics.ts';
+import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
@@ -28,7 +28,7 @@ import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
-import { errorTracker, type ErrorReport } from '../utils/error-tracker.ts';
+import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
 
 /**
  * Format a time ago string from an ISO timestamp
@@ -60,7 +60,7 @@ function appendErrorSummary(result: string, errorReport: ErrorReport): string {
     return result;
   }
   
-  let summary = `\n\n## ⚠️ Error Summary\n\n`;
+  let summary = `\n\n## Error Summary\n\n`;
   summary += `This research encountered **${totalErrors} error(s)** across **${uniquePatterns} unique pattern(s)**.\n\n`;
   
   // Most frequent errors (top 3)
@@ -68,7 +68,7 @@ function appendErrorSummary(result: string, errorReport: ErrorReport): string {
   const topPatterns = patterns.slice(0, 3);
   for (const pattern of topPatterns) {
     const timeAgo = formatTimeAgo(pattern.lastSeen);
-    summary += `- **${pattern.count}×**: ${pattern.message} (last: ${timeAgo})\n`;
+    summary += `- **${pattern.count}x**: ${pattern.message} (last: ${timeAgo})\n`;
   }
   
   // Error types
@@ -184,11 +184,15 @@ export function createResearchTool(): ToolDefinition {
         return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
       }
 
-      // Clear cumulative metrics for a fresh start (one-time run behavior)
-      metrics.clear();
+      // Each run gets its own isolated registry; session-level counter is incremented
+      // here, outside the run context, so it lands in the session registry.
+      const runRegistry = new MetricsRegistry();
+      const runStartedAt = Date.now();
+      metrics.increment('session_runs_started_total');
 
       try {
-        const researchRunResult = await (logger as any).runCapturingStderr(async () => {
+        const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
+          (logger as any).runCapturingStderr(async () => {
           validateConfig();
 
           // When no explicit model parameter is given, use ctx.model directly.
@@ -267,7 +271,10 @@ export function createResearchTool(): ToolDefinition {
           // Hide working indicator
           hideWorkingIndicator(ctx);
 
-          const researchResult = await runWithLogger(researchLogger, async () => {
+          // Use runWithTracker to ensure all errors tracked within this async branch
+          // are isolated to this research run's tracker.
+          const sessionTracker = new ErrorTracker();
+          const researchRunResult = await runWithTracker(sessionTracker, () => runWithLogger(researchLogger, async () => {
             try {
               // Run research
               const result = await runResearch({
@@ -294,19 +301,16 @@ export function createResearchTool(): ToolDefinition {
               const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
 
               // Append error summary if errors occurred during research
-              const errorReport = errorTracker.getReport();
+              const errorReport = sessionTracker.getReport();
               let resultWithErrorSummary = finalResult;
               if (errorReport.totalErrors > 0) {
                 resultWithErrorSummary = appendErrorSummary(finalResult, errorReport);
               }
 
-              // Clear error tracker for next research run
-              errorTracker.clear();
-
-              return { result: resultWithErrorSummary, tokens: panelState.totalTokens };
+              return { result: resultWithErrorSummary, tokens: panelState.totalTokens, researchId };
             } catch (error) {
               if (aborted?.aborted || internalAbort.signal.aborted) {
-                return { result: 'Research cancelled.', tokens: 0 };
+                return { result: 'Research cancelled.', tokens: 0, researchId };
               }
               throw error;
             } finally {
@@ -326,18 +330,48 @@ export function createResearchTool(): ToolDefinition {
                 logger.error('[research] TUI dispose failed:', disposeError);
               }
             }
-          });
-          return researchResult;
+          }));
+          return researchRunResult;
+        }));  // end runCapturingStderr / runWithRunRegistry
+
+        // Snapshot the run registry now that the run context has exited.
+        // recordRunSummary() is called outside the run context so it lands
+        // in the session-level history, not back into the run registry.
+        metrics.recordRunSummary({
+          runId: researchId,
+          startedAt: runStartedAt,
+          completedAt: Date.now(),
+          durationMs: Date.now() - runStartedAt,
+          status: 'success',
+          snapshot: runRegistry.getSnapshot(),
         });
 
         return { content: [{ type: 'text', text: researchRunResult.result }], details: { totalTokens: researchRunResult.tokens } };
       } catch (error) {
         if (aborted?.aborted || internalAbort.signal.aborted) {
+          metrics.recordRunSummary({
+            runId: researchId,
+            startedAt: runStartedAt,
+            completedAt: Date.now(),
+            durationMs: Date.now() - runStartedAt,
+            status: 'cancelled',
+            snapshot: runRegistry.getSnapshot(),
+          });
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
-        
+
+        // Record error summary before returning any error response.
+        metrics.recordRunSummary({
+          runId: researchId,
+          startedAt: runStartedAt,
+          completedAt: Date.now(),
+          durationMs: Date.now() - runStartedAt,
+          status: 'error',
+          snapshot: runRegistry.getSnapshot(),
+        });
+
         const errMsg = String(error).toLowerCase();
-        
+
         // Handle rate limits gracefully
         if (errMsg.includes('429') || errMsg.includes('rate limit') || errMsg.includes('too many requests') || errMsg.includes('quota')) {
             logger.warn('[research] Run halted gracefully due to rate limit:', error);

@@ -277,7 +277,7 @@ export class DeepResearchOrchestrator {
         // 4. Store synthesized descriptions for semantic search
         // Show embedding indicator in eval box while embedding runs
         observer?.onEvaluationStart?.(this.currentRound);
-        observer?.onEvaluationProgress?.('learning');
+        observer?.onEvaluationProgress?.('embedding');
         await orchestrationService.storeLinkDescriptions(researchId, this.currentRound, researchId, this.config);
 
         // 5. Evaluation Phase

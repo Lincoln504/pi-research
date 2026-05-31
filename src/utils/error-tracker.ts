@@ -5,6 +5,8 @@
  * Session-scoped (in-memory) storage that's cleared between research runs.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 /**
  * Error context information for tracking where errors occur
  */
@@ -31,6 +33,7 @@ export interface ErrorPattern {
   firstSeen: string;
   lastSeen: string;
   contexts: ErrorContext[];
+  domainCounts: Map<string, number>;
 }
 
 /**
@@ -42,6 +45,16 @@ export interface ErrorReport {
   patterns: ErrorPattern[];
   byDomain: Map<string, number>;
   byType: Map<string, number>;
+}
+
+// Storage for isolation between concurrent research runs
+const trackerStorage = new AsyncLocalStorage<ErrorTracker>();
+
+/**
+ * Run a function with a specific ErrorTracker bound to the async context.
+ */
+export function runWithTracker<T>(tracker: ErrorTracker, fn: () => T): T {
+  return trackerStorage.run(tracker, fn);
 }
 
 /**
@@ -102,12 +115,19 @@ export class ErrorTracker {
         firstSeen: now,
         lastSeen: now,
         contexts: [],
+        domainCounts: new Map<string, number>(),
       };
       this.patterns.set(signature, pattern);
     }
 
     pattern.count++;
     pattern.lastSeen = now;
+
+    // Track domain count if available
+    if (context.domain) {
+      const currentCount = pattern.domainCounts.get(context.domain) ?? 0;
+      pattern.domainCounts.set(context.domain, currentCount + 1);
+    }
 
     // Add context to rolling buffer (keep only last 10)
     pattern.contexts.push(context);
@@ -151,18 +171,15 @@ export class ErrorTracker {
    * @returns A Map of domain names to error counts
    */
   public getErrorsByDomain(): Map<string, number> {
-    const domainCounts = new Map<string, number>();
+    const totalDomainCounts = new Map<string, number>();
 
     for (const pattern of this.patterns.values()) {
-      for (const context of pattern.contexts) {
-        const domain = context.domain;
-        if (domain) {
-          domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + pattern.count);
-        }
+      for (const [domain, count] of pattern.domainCounts.entries()) {
+        totalDomainCounts.set(domain, (totalDomainCounts.get(domain) ?? 0) + count);
       }
     }
 
-    return domainCounts;
+    return totalDomainCounts;
   }
 
   /**
@@ -200,6 +217,17 @@ export class ErrorTracker {
 }
 
 /**
- * Singleton ErrorTracker instance for use across modules
+ * Global singleton instance that proxies to the context-bound instance if available.
+ * This preserves backward compatibility while enabling isolation.
  */
-export const errorTracker = new ErrorTracker();
+const globalInstance = new ErrorTracker();
+export const errorTracker: ErrorTracker = new Proxy(globalInstance, {
+  get(target, prop, receiver) {
+    const currentTracker = trackerStorage.getStore() ?? target;
+    const value = Reflect.get(currentTracker, prop, receiver);
+    if (typeof value === 'function') {
+      return value.bind(currentTracker);
+    }
+    return value;
+  }
+});

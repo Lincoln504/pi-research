@@ -100,10 +100,12 @@ function getBaseAccentRgb(theme: Theme): { r: number; g: number; b: number } {
  * Compute the color for a given age within the trail window.
  *
  * age = 0              → full accent brightness (head just visited)
- * age = trailLen - 1   → 65 % brightness (dark floor of trail)
+ * age = trailLen - 1   → 42 % brightness (dark floor of trail)
  * age >= trailLen      → clamped to dark floor
  *
  * easeIn power-curve 2.2 for perceptually even brightness distribution.
+ * Saturation is boosted on the dark end (up to +20%) so the trail stays
+ * vivid rather than going muddy as it dims.
  */
 function ageToColor(
   hsl: { h: number; s: number; l: number },
@@ -115,8 +117,8 @@ function ageToColor(
   const linearFactor = 1 - progress;
   const curvedFactor = Math.pow(linearFactor, 2.2);       // easeIn
 
-  const newL = hsl.l * (0.65 + 0.35 * curvedFactor);
-  const newS = hsl.s * (0.98 + 0.02 * curvedFactor);
+  const newL = hsl.l * (0.42 + 0.58 * curvedFactor);
+  const newS = Math.min(1.0, hsl.s * (1.20 - 0.20 * curvedFactor));
   return hslToRgb(hsl.h, newS, newL);
 }
 

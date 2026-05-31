@@ -16,7 +16,7 @@ export function formatQuestionsTable(questions: Question[]): string {
     output += `## ${q.title}\n\n`;
     output += `- **Score:** ${q.score}\n`;
     output += `- **Views:** ${q.view_count}\n`;
-    output += `- **Answers:** ${q.answer_count}${q.accepted_answer_id ? ' ✓' : ''}\n`;
+    output += `- **Answers:** ${q.answer_count}${q.accepted_answer_id ? ' [accepted]' : ''}\n`;
     output += `- **Tags:** ${q.tags.join(', ')}\n`;
     if (q.owner) {
       output += `- **Author:** ${q.owner.display_name} (rep: ${q.owner.reputation})\n`;
@@ -45,7 +45,7 @@ export function formatAnswersTable(answers: Answer[]): string {
   for (const a of answers) {
     const authorName = a.owner?.display_name ?? 'Unknown';
     output += `## Answer by ${authorName}\n\n`;
-    output += `- **Score:** ${a.score}${a.is_accepted ? ' ✓ (Accepted)' : ''}\n`;
+    output += `- **Score:** ${a.score}${a.is_accepted ? ' [Accepted]' : ''}\n`;
     if (a.owner) {
       output += `- **Author:** ${a.owner.display_name} (rep: ${a.owner.reputation})\n`;
     }
@@ -73,7 +73,7 @@ export function formatUsersTable(users: User[]): string {
   for (const u of users) {
     output += `## ${u.display_name}\n\n`;
     output += `- **Reputation:** ${u.reputation}\n`;
-    output += `- **Badges:** 🥇 ${u.badge_counts.gold} 🥈 ${u.badge_counts.silver} 🥉 ${u.badge_counts.bronze}\n`;
+    output += `- **Badges:** gold:${u.badge_counts.gold} silver:${u.badge_counts.silver} bronze:${u.badge_counts.bronze}\n`;
     output += `- **User ID:** ${u.user_id}\n`;
     output += `- **Member since:** ${new Date(u.creation_date * 1000).toLocaleDateString()}\n`;
     if (u.location) {
@@ -115,7 +115,7 @@ export function formatCompactQuestions(questions: Question[]): string {
   let output = '';
   let index = 1;
   for (const q of questions) {
-    const accepted = q.accepted_answer_id ? '✓' : ' ';
+    const accepted = q.accepted_answer_id ? '[accepted]' : '';
     output += `${index}. [${q.title}](${q.link}) ${accepted} (score: ${q.score}, answers: ${q.answer_count})\n`;
     index++;
   }

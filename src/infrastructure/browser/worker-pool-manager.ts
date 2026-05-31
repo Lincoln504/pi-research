@@ -182,16 +182,15 @@ export class WorkerPoolManager implements IService {
                 // allow enough time for those to complete before the IPC channel closes.
                 await Promise.race([
                     this.pool.destroy(),
-                    new Promise(resolve => setTimeout(resolve, 10000))
+                    new Promise(resolve => setTimeout(resolve, 5000))
                 ]);
             } catch (e) {
                 logger.warn('[WorkerPoolManager] Pool destruction error:', e);
             }
-            // Allow time for IPC channels and worker browser teardown to complete.
-            // 200ms was insufficient: Playwright browser.close() in killed workers can
-            // take >500ms, and a new pool started immediately could inherit a partially-
-            // torn-down context.
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            // Allow a brief moment for IPC channels and worker browser teardown to complete.
+            // Reduced from 1500ms to 200ms because browser processes are now also 
+            // explicitly cleaned up by the scheduler via killBrowserProcesses.
+            await new Promise(resolve => setTimeout(resolve, 200));
             this.pool = null;
         }
 

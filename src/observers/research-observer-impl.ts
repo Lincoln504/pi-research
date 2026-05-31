@@ -95,6 +95,7 @@ export function createResearchObserver(
       const count = plan.researchers?.length || 0;
       const units = (count * unitsPerResearcher) + LEAD_EVAL_UNITS;
       panelState.progress = { expected: units, made: 0 };
+      panelState.title = plan.title?.trim() || 'Research';
       debouncedRefresh();
     },
 

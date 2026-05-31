@@ -259,31 +259,33 @@ export async function getBrowserPidsForWorkers(workerPids: number[]): Promise<nu
 }
 
 /**
- * Kill specific browser processes
+ * Kill specific browser processes in parallel
  */
 export async function killBrowserProcesses(pids: number[]): Promise<void> {
   if (!pids || pids.length === 0) return;
   const platform = os.platform();
   
-  for (const pid of pids) {
+  // Parallelize killing processes for speed
+  await Promise.all(pids.map(async (pid) => {
     try {
       if (platform === 'win32') {
         await execAsync(`taskkill /PID ${pid} /F`);
-        logger.log(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
+        logger.debug(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
       } else {
         process.kill(pid, 'SIGTERM');
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Reduce wait time for graceful exit from 500ms to 200ms
+        await new Promise(resolve => setTimeout(resolve, 200));
         try {
           process.kill(pid, 0);
           process.kill(pid, 'SIGKILL');
-          logger.warn(`[BrowserCleanup] Force killed worker browser process: PID ${pid}`);
+          logger.debug(`[BrowserCleanup] Force killed worker browser process: PID ${pid}`);
         } catch {
-          logger.log(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
+          logger.debug(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`[BrowserCleanup] Failed to kill browser process PID ${pid}: ${msg}`);
+      logger.debug(`[BrowserCleanup] Failed to kill browser process PID ${pid}: ${msg}`);
     }
-  }
+  }));
 }

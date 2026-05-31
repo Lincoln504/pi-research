@@ -99,7 +99,9 @@ export function getEnvFilePath(): string {
 }
 
 export function getDbDir(): string {
-  return path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
+  const dbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
+  // Ensure it's absolute
+  return path.isAbsolute(dbDir) ? dbDir : path.resolve(process.cwd(), dbDir);
 }
 
 function parseDotEnv(content: string): Record<string, string> {

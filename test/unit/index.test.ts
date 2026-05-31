@@ -170,7 +170,7 @@ describe('extension entrypoint', () => {
       const ctx = makeCtx({ ui: { notify } });
       await commands.get('research')!.handler('test query', ctx);
 
-      expect(notify).toHaveBeenCalledWith('✅ Research complete', 'info');
+      expect(notify).toHaveBeenCalledWith('Research complete', 'info');
     });
 
     it('does nothing when called with empty args', async () => {
@@ -203,7 +203,7 @@ describe('extension entrypoint', () => {
       );
 
       expect(notify).toHaveBeenCalledWith(
-        expect.stringContaining('❌ Research failed'),
+        expect.stringContaining('Research failed'),
         'error',
       );
     });

@@ -164,7 +164,7 @@ export function createSecuritySearchTool(options: {
       if (results.results.nvd !== undefined) {
         markdown += '## NIST NVD\n\n';
         if (results.results.nvd.error !== undefined) {
-          markdown += `❌ **Error:** ${results.results.nvd.error}\n\n`;
+          markdown += `[Error] ${results.results.nvd.error}\n\n`;
         } else {
           markdown += `Found: ${results.results.nvd.count} vulnerabilities\n\n`;
           for (const vuln of results.results.nvd.vulnerabilities.slice(0, 20)) {
@@ -179,7 +179,7 @@ export function createSecuritySearchTool(options: {
             const description = vuln.description;
             markdown += `- **Description:** ${description.length > 300 ? `${description.substring(0, 300)}...` : description}\n`;
             if (vuln.knownExploited === true) {
-              markdown += '- ⚠️ **Actively Exploited**\n';
+              markdown += '- **[Actively Exploited]**\n';
             }
             if (vuln.published !== undefined) {
               markdown += `- **Published:** ${vuln.published}\n`;
@@ -204,7 +204,7 @@ export function createSecuritySearchTool(options: {
       if (results.results.cisa_kev !== undefined) {
         markdown += '## CISA Known Exploited Vulnerabilities\n\n';
         if (results.results.cisa_kev.error !== undefined) {
-          markdown += `❌ **Error:** ${results.results.cisa_kev.error}\n\n`;
+          markdown += `[Error] ${results.results.cisa_kev.error}\n\n`;
         } else {
           markdown += `Found: ${results.results.cisa_kev.count} actively exploited vulnerabilities\n\n`;
           for (const vuln of results.results.cisa_kev.vulnerabilities.slice(0, 20)) {
@@ -237,7 +237,7 @@ export function createSecuritySearchTool(options: {
       if (results.results.github !== undefined) {
         markdown += '## GitHub Security Advisories\n\n';
         if (results.results.github.error !== undefined) {
-          markdown += `❌ **Error:** ${results.results.github.error}\n\n`;
+          markdown += `[Error] ${results.results.github.error}\n\n`;
         } else {
           markdown += `Found: ${results.results.github.count} advisories\n\n`;
           for (const adv of results.results.github.advisories.slice(0, 20)) {
@@ -269,7 +269,7 @@ export function createSecuritySearchTool(options: {
       if (results.results.osv !== undefined) {
         markdown += '## Open Source Vulnerabilities (OSV)\n\n';
         if (results.results.osv.error !== undefined) {
-          markdown += `❌ **Error:** ${results.results.osv.error}\n\n`;
+          markdown += `[Error] ${results.results.osv.error}\n\n`;
         } else {
           markdown += `Found: ${results.results.osv.count} vulnerabilities\n\n`;
           for (const vuln of results.results.osv.vulnerabilities.slice(0, 20)) {

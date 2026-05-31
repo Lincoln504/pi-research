@@ -75,7 +75,7 @@ export async function stackexchangeCommand(options: {
         'error',
       );
       return {
-        content: [{ type: 'text', text: `❌ Stack Exchange API quota exhausted (${quota.remaining}/${quota.max} remaining). Please wait until the quota resets.` }],
+        content: [{ type: 'text', text: `[Error] Stack Exchange API quota exhausted (${quota.remaining}/${quota.max} remaining). Please wait until the quota resets.` }],
         details: {
           quota,
           command,
@@ -139,7 +139,7 @@ export async function stackexchangeCommand(options: {
     const message = error instanceof Error ? error.message : String(error);
     notify(ctx, `Stack Exchange error: ${message}`, 'error');
     return {
-      content: [{ type: 'text', text: `❌ Stack Exchange error: ${message}` }],
+      content: [{ type: 'text', text: `[Error] Stack Exchange error: ${message}` }],
       details: {
         quota: client.getQuotaInfo(),
         command,

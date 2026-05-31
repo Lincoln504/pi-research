@@ -1,5 +1,3 @@
-import { metrics } from '../utils/metrics.ts';
-
 export interface HealthCheckStatus {
   component: string;
   healthy: boolean;
@@ -15,7 +13,7 @@ export interface SystemHealth {
   timestamp: string;
 }
 
-export type HealthCheckFn = () => Promise<{ healthy: boolean; error?: string; diagnostic?: Record<string, any> }>;
+export type HealthCheckFn = (options?: { force?: boolean }) => Promise<{ healthy: boolean; error?: string; diagnostic?: Record<string, any> }>;
 
 interface RegisteredCheck {
   name: string;
@@ -40,7 +38,7 @@ class HealthCheckRegistry {
     return this.checks.some(c => c.name === componentName && c.critical);
   }
 
-  public async runAll(): Promise<SystemHealth> {
+  public async runAll(options?: { force?: boolean }): Promise<SystemHealth> {
     const promises = this.checks.map(async (registeredCheck) => {
       const start = process.hrtime.bigint();
       const status: HealthCheckStatus = {
@@ -55,23 +53,18 @@ class HealthCheckRegistry {
           setTimeout(() => reject(new Error(`Health check timed out after ${registeredCheck.timeoutMs}ms`)), registeredCheck.timeoutMs);
         });
 
-        const result = await Promise.race([registeredCheck.check(), timeoutPromise]);
+        const result = await Promise.race([registeredCheck.check(options), timeoutPromise]);
         
         status.healthy = result.healthy;
         status.error = result.error;
         status.diagnostic = result.diagnostic;
         
-        if (!status.healthy) {
-          metrics.increment(`healthcheck_failures_total`, 1, { component: registeredCheck.name });
-        }
       } catch (error) {
         status.healthy = false;
         status.error = error instanceof Error ? error.message : String(error);
-        metrics.increment(`healthcheck_failures_total`, 1, { component: registeredCheck.name });
       } finally {
         const end = process.hrtime.bigint();
         status.durationMs = Number(end - start) / 1_000_000;
-        metrics.observe('healthcheck_duration_ms', status.durationMs, { component: registeredCheck.name });
       }
 
       return { status, critical: registeredCheck.critical };

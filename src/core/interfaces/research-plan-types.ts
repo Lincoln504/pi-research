@@ -16,6 +16,7 @@ export interface ResearchPlan {
   researchers: ResearcherConfig[];
   allQueries?: string[];
   content?: string;
+  title?: string;
 }
 
 /**
@@ -45,5 +46,6 @@ export const ResearchPlanSchema = Type.Object({
   action: Type.Optional(Type.Union([Type.Literal('synthesize'), Type.Literal('delegate'), Type.Literal('wait')])),
   researchers: Type.Array(ResearcherConfigSchema),
   allQueries: Type.Optional(Type.Array(Type.String())),
-  content: Type.Optional(Type.String())
+  content: Type.Optional(Type.String()),
+  title: Type.Optional(Type.String()),
 });
