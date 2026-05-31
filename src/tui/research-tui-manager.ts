@@ -84,7 +84,7 @@ export function createResearchTuiManager(
     refreshTimeout = setTimeout(() => {
       refreshScheduled = false;
       refreshAllSessions(piSessionId);
-    }, 50); // 50ms debounce
+    }, 16); // 16ms debounce — must stay below wave timer interval (33ms) to not eat frames
   };
 
   /**

@@ -140,7 +140,7 @@ export function createResearchObserver(
         }
         panelState.waveFrame = (panelState.waveFrame ?? 0) + 1;
         debouncedRefresh();
-      }, 80); // 80ms = 12.5 FPS
+      }, 33); // 33ms = ~30 FPS
       if (state.waveTimer.unref) state.waveTimer.unref();
 
       debouncedRefresh();

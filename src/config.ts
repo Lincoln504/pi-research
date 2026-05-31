@@ -19,7 +19,7 @@ const EXTENSION_DIR = path.dirname(__filename);
 export interface Config {
   /** Per-researcher timeout in milliseconds (default: 600000) */
   RESEARCHER_TIMEOUT_MS: number;
-  /** Maximum researchers allowed to run simultaneously (default: 3, max: 5) */
+  /** Maximum researchers to run simultaneously (default: 3, max: 5) */
   MAX_CONCURRENT_RESEARCHERS: number;
   /** Maximum retries per researcher request (default: 3) */
   RESEARCHER_MAX_RETRIES: number;

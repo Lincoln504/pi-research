@@ -33,8 +33,8 @@ import {
   hslToRgb,
 } from './research-panel-color-utils.ts';
 
-const DWELL_FRAMES = 4; // pause duration at each edge
-const PERIOD_FRAMES = 40; // total frames for one full back-and-forth cycle (twice as fast)
+const DWELL_FRAMES = 10; // pause duration at each edge (~330ms at 33ms/frame)
+const PERIOD_FRAMES = 98; // total frames for one full back-and-forth cycle (~30 FPS: same visual speed as 40@80ms)
 
 // Scaling constants for "static-ish" tail distance
 const REFERENCE_WIDTH = 80;

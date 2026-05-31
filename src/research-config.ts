@@ -103,7 +103,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'MAX_CONCURRENT_RESEARCHERS',
       label: 'Max concurrent',
-      description: 'Maximum researchers allowed to run simultaneously (1-5)',
+      description: 'Maximum researchers to run simultaneously (1-5)',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
     },
