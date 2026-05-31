@@ -21,6 +21,7 @@ export default defineConfig({
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
       'test/integration/research-workflow.test.ts',
+      'test/integration/shutdown-perf.test.ts',
       'test/integration/tool-execution.test.ts',
       'test/integration/tools-connectivity.test.ts',
       'test/integration/tools-extended.test.ts',

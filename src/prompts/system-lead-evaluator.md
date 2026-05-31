@@ -61,7 +61,7 @@ Use unique, targeted queries for any new researchers.
   "action": "delegate",
   "researchers": [
     { 
-      "id": "{NEXT_ID}", 
+      "id": "{ROUND_NUMBER}.1", 
       "name": "Specialty", 
       "goal": "Goal", 
       "historicalLinks": ["url 1", "url 2"],
@@ -113,7 +113,7 @@ When delegating, ensure:
 
 ## Output Requirements
 
-- **Researcher IDs**: Sequential numbers (Next: **{NEXT_ID}**).
+- **Researcher IDs**: Use Round.Index format (e.g. **{ROUND_NUMBER}.1**, **{ROUND_NUMBER}.2**).
 - **Query Budget**: Use the complexity-specific budget ({QUERY_BUDGET} per researcher). Fill each researcher's query budget completely.
 - **Team Size**: Use the maximum number of researchers ({MAX_TEAM_SIZE}) when delegating. Don't hold back — maximize parallel coverage.
 - **Synthesis Quality**: Logical topic-based structure, maximal detail, NO mention of researchers.

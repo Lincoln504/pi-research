@@ -26,6 +26,13 @@ export interface StoreOptions {
   embedder: IEmbedder;
   modelName: string;
   migrationStrategy?: MigrationStrategy;
+  /** Called when embedder connection fails — should return a fresh IEmbedder. */
+  reconnectFactory?: () => Promise<IEmbedder>;
+}
+
+function isConnectionRefused(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('ECONNREFUSED');
 }
 
 export class KnowledgeStore implements IKnowledgeStore {
@@ -255,11 +262,26 @@ export class KnowledgeStore implements IKnowledgeStore {
     return createStoreTable(this.db, name, dim, this.options.modelName);
   }
 
+  private async withEmbedderReconnect<T>(fn: (embedder: IEmbedder) => Promise<T>): Promise<T> {
+    try {
+      return await fn(this.options.embedder);
+    } catch (err) {
+      if (isConnectionRefused(err) && this.options.reconnectFactory) {
+        logger.warn('[store] Embedder server unreachable, reconnecting and retrying...');
+        this.options.embedder = await this.options.reconnectFactory();
+        return fn(this.options.embedder);
+      }
+      throw err;
+    }
+  }
+
   async addDocuments(docs: StoreDocument[]): Promise<void> {
     if (!this.table) throw new Error('Store not open');
     this.pendingOperations++;
     try {
-      await addDocumentsToStore(this.table, docs, this.options.embedder, () => this.isClosing);
+      await this.withEmbedderReconnect(embedder =>
+        addDocumentsToStore(this.table!, docs, embedder, () => this.isClosing)
+      );
     } finally {
       this.pendingOperations--;
     }
@@ -274,9 +296,11 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
     if (!this.table) throw new Error('Store not open');
-    return this.circuitBreaker.execute(async () => {
-      return searchStore(this.table!, this.options.embedder, query, this.getReranker.bind(this), options.limit ?? 5);
-    });
+    return this.circuitBreaker.execute(() =>
+      this.withEmbedderReconnect(embedder =>
+        searchStore(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 5)
+      )
+    );
   }
 
   async deleteByUrl(url: string): Promise<void> {
@@ -361,7 +385,9 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<string[]> {
     if (!this.table) throw new Error('Store not open');
-    return findRelevantUrls(this.table, this.options.embedder, query, this.getReranker.bind(this), options.limit ?? 20);
+    return this.withEmbedderReconnect(embedder =>
+      findRelevantUrls(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
+    );
   }
 
   async rebuildFtsIndex(): Promise<void> {

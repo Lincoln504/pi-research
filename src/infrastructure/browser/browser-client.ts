@@ -32,8 +32,8 @@ export class BrowserClient implements IScheduler {
 
         return new Promise((resolve, reject) => {
             const agent = getClientAgent();
-            // Increased timeout to 120s to allow for shared pool queuing delays
-            const timeoutMs = 120000;
+            // Increased timeout to 180s to allow for shared pool queuing delays
+            const timeoutMs = 180000;
             let resolved = false;
             const controller = new AbortController();
             const timer = setTimeout(() => {
@@ -108,6 +108,9 @@ export class BrowserClient implements IScheduler {
                 if (resolved) return;
                 resolved = true;
                 clearTimeout(timer);
+                
+                // If it's just a timeout abort error, the timer already rejected it.
+                if (err.name === 'AbortError') return;
                 // Enhance error message with socket-specific details
                 const nodeErr = err as NodeError;
                 let errorMsg: string;

@@ -50,20 +50,19 @@ export async function performSearch(
                 metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
                 
-                // Deduplicate results across queries to prevent redundant scraping
+                // Return all results for this query. The scrape tool and distributor 
+                // handle cross-researcher deduplication. We only ensure results 
+                // for this specific query are unique to avoid obvious waste.
                 const uniqueResults = [];
+                const localSeen = new Set<string>();
                 for (const r of results) {
-                    if (r.url) {
-                        if (!seenUrls.has(r.url)) {
-                            seenUrls.add(r.url);
-                            uniqueResults.push(r);
-                        }
+                    if (r.url && !localSeen.has(r.url)) {
+                        localSeen.add(r.url);
+                        uniqueResults.push(r);
+                        seenUrls.add(r.url);
                     }
                 }
                 resultMap.set(query, uniqueResults);
-                if (uniqueResults.length < results.length) {
-                    logger.debug(`[Search] Deduplicated ${results.length - uniqueResults.length} redundant results for: ${query}`);
-                }
             } else {
                 metrics.increment('browser_search_queries_total', 1, { status: 'no_results' });
                 resultMap.set(query, []);

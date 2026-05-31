@@ -33,6 +33,7 @@ export interface ObserverContext {
 export interface ObserverState {
   progressCredits: Map<string, number>;
   quickSliceLabel: string;
+  idToNumberMap: Map<string, string>;
   waveTimer: NodeJS.Timeout | null;
 }
 
@@ -141,6 +142,7 @@ export function createResearchObserver(
         panelState.waveFrame = (panelState.waveFrame ?? 0) + 1;
         debouncedRefresh();
       }, 80); // 80ms = 12.5 FPS
+      if (state.waveTimer.unref) state.waveTimer.unref();
 
       debouncedRefresh();
     },
@@ -202,20 +204,28 @@ export function createResearchObserver(
         panelState.needsClear = false;
       }
 
-      // Researchers from previous rounds are cleared above
-      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
+      // Map internal hierarchical ID to sequential display number for TUI
+      const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       
-      // FIX: Prevent overwriting existing slice (prevents status flicker in Quick Research)
-      if (!panelState.slices.has(displayNum)) {
-        addSlice(panelState, displayNum, displayNum, true);
+      if (!panelState.slices.has(sliceId)) {
+        let label: string;
+        if (id === 'quick') {
+          label = state.quickSliceLabel;
+        } else {
+          if (!state.idToNumberMap.has(id)) {
+            state.idToNumberMap.set(id, (state.idToNumberMap.size + 1).toString());
+          }
+          label = state.idToNumberMap.get(id)!;
+        }
+        addSlice(panelState, sliceId, label, true);
       }
-      activateSlice(panelState, displayNum);
+      activateSlice(panelState, sliceId);
       debouncedRefresh();
     },
 
     onResearcherTokensHint: (id, inputTokens) => {
-      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
-      const slice = panelState.slices.get(displayNum);
+      const sliceId = id === 'quick' ? state.quickSliceLabel : id;
+      const slice = panelState.slices.get(sliceId);
       if (slice && inputTokens > (slice.tokens || 0)) {
         slice.tokens = inputTokens;
       }
@@ -223,7 +233,7 @@ export function createResearchObserver(
     },
 
     onResearcherProgress: (id, status, tokens, cost) => {
-      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
+      const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       const unitsPerResearcher = getUnitsPerResearcher();
       
       if (status !== undefined) {
@@ -231,7 +241,7 @@ export function createResearchObserver(
             const toolName = status.slice(5);
             // Only clear status if it matches the current tool or if it's the specific tool that finished
             // For now, we clear it to signal progress, but preserve it if it's null
-            updateSliceStatus(panelState, displayNum, undefined);
+            updateSliceStatus(panelState, sliceId, undefined);
             if (panelState.progress) {
                 const current = progressCredits.get(id) ?? 0;
                 // Increment for the first tool call (setup/search) OR any scrape batch
@@ -242,19 +252,19 @@ export function createResearchObserver(
                 }
             }
         } else if (status) {
-            updateSliceStatus(panelState, displayNum, status);
+            updateSliceStatus(panelState, sliceId, status);
         }
       }
       if (tokens !== undefined && cost !== undefined) {
         panelState.totalCost += cost;
-        updateSliceTokens(panelState, displayNum, tokens, cost);
+        updateSliceTokens(panelState, sliceId, tokens, cost);
         panelState.totalTokens += tokens;
       }
       debouncedRefresh();
     },
 
     onResearcherComplete: (id, _report) => {
-      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
+      const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       if (panelState.progress) {
         const unitsPerResearcher = getUnitsPerResearcher();
         const current = progressCredits.get(id) ?? 0;
@@ -264,12 +274,12 @@ export function createResearchObserver(
           progressCredits.set(id, unitsPerResearcher);
         }
       }
-      completeSlice(panelState, displayNum);
+      completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
 
     onResearcherFailure: (id) => {
-      const displayNum = id === 'quick' ? state.quickSliceLabel : id.replace(/^r/, '');
+      const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       if (panelState.progress) {
         const unitsPerResearcher = getUnitsPerResearcher();
         const current = progressCredits.get(id) ?? 0;
@@ -279,8 +289,8 @@ export function createResearchObserver(
           progressCredits.set(id, unitsPerResearcher);
         }
       }
-      updateSliceStatus(panelState, displayNum, 'failed');
-      completeSlice(panelState, displayNum);
+      updateSliceStatus(panelState, sliceId, 'failed');
+      completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
 
@@ -348,6 +358,7 @@ export function createObserverState(): ObserverState {
   return {
     progressCredits: new Map<string, number>(),
     quickSliceLabel: '',
+    idToNumberMap: new Map<string, string>(),
     waveTimer: null,
   };
 }

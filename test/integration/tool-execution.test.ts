@@ -84,15 +84,27 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle missing depth parameter', () => {
       const tool = createResearchTool();
+      
+      // Force default depth to 1 for this test to ensure predictable fallback
+      const originalDepth = process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'];
+      process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'] = '1';
+      
+      try {
+        const args = tool.prepareArguments!({
+          query: 'test query',
+        }) as any;
 
-      const args = tool.prepareArguments!({
-        query: 'test query',
-      }) as any;
-
-      expect(args.query).toBe('test query');
-      // Tool schema enforces minimum: 1; depth 0 is SDK-only (not exposed via tool).
-      // Missing depth falls back to DEFAULT_RESEARCH_DEPTH (1) clamped to ≥1.
-      expect(args.depth).toBe(1);
+        expect(args.query).toBe('test query');
+        // Tool schema enforces minimum: 1; depth 0 is SDK-only (not exposed via tool).
+        // Missing depth falls back to DEFAULT_RESEARCH_DEPTH (1) clamped to ≥1.
+        expect(args.depth).toBe(1);
+      } finally {
+        if (originalDepth === undefined) {
+          delete process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'];
+        } else {
+          process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'] = originalDepth;
+        }
+      }
     });
 
     it('should handle invalid depth values', () => {

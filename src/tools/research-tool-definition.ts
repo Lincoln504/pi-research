@@ -289,11 +289,6 @@ export function createResearchTool(): ToolDefinition {
                 excludeTools,
               }, internalAbort.signal);
 
-              // Stop health monitor
-              if (healthMonitorInstance) {
-                healthMonitorInstance.stop();
-              }
-
               // Stop wave animation
               stopObserverWaveAnimation(observerState, panelState);
 
@@ -314,6 +309,14 @@ export function createResearchTool(): ToolDefinition {
               }
               throw error;
             } finally {
+              // Stop health monitor unconditionally
+              if (healthMonitorInstance) {
+                healthMonitorInstance.stop();
+              }
+
+              // Stop wave animation unconditionally
+              stopObserverWaveAnimation(observerState, panelState);
+
               // Run cleanup (wrap in try-catch to allow other cleanup to run)
               try {
                 await cleanup();

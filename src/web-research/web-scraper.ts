@@ -263,7 +263,6 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     const res = await scrapeWithFetch(url, signal);
     const duration = Date.now() - start;
     logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
-    metrics.increment('scrape_layer_fallbacks_total', 1);
     return { ...res, url, success: true };
   } catch (e1) {
     const fetchDuration = Date.now() - start;

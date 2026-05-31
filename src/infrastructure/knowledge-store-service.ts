@@ -18,7 +18,7 @@ import {
   getModelEmbedderConfig as getKnowledgeModelEmbedderConfig,
   getModelChunkConfig as getKnowledgeModelChunkConfig,
 } from '../knowledge/index.ts';
-import { getEmbedder } from './embedding/embedding-factory.ts';
+import { getEmbedder, clearEmbeddingInstance } from './embedding/embedding-factory.ts';
 import { getConfig } from '../config.ts';
 
 /**
@@ -53,7 +53,12 @@ export class KnowledgeStoreService implements IService {
       try {
         // Create the knowledge store components
         const config = getConfig();
-        const components = await createKnowledgeStoreComponents(() => getEmbedder(config));
+        const embedderFactory = () => getEmbedder(config);
+        const reconnectFactory = async () => {
+          clearEmbeddingInstance();
+          return getEmbedder(config);
+        };
+        const components = await createKnowledgeStoreComponents(embedderFactory, reconnectFactory);
 
         this._embedder = components.embedder;
         this._store = components.store;

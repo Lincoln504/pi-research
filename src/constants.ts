@@ -59,6 +59,9 @@ export const MAX_ROUNDS_LEVEL_1 = 2;
 export const MAX_ROUNDS_LEVEL_2 = 3;
 export const MAX_ROUNDS_LEVEL_3 = 5;
 
+/** Hard cap on cumulative researchers across all rounds to prevent runaway costs */
+export const MAX_TOTAL_RESEARCHERS = 25;
+
 
 // ==================== Timeout Constants ====================
 
@@ -104,17 +107,10 @@ export const PROGRESS_BAR_WIDTH = 18;
 
 // ==================== Orchestrator Constants ====================
 
-/**
- * Extra rounds the lead evaluator may earn beyond targetRounds when critical gaps remain.
- * Rounds targetRounds+1 through targetRounds+MAX_EXTRA_ROUNDS are "bonus" territory.
- * Round targetRounds+MAX_EXTRA_ROUNDS+1 is unreachable (hard limit).
- */
-export const MAX_EXTRA_ROUNDS = 2;
-
 /** Delay in milliseconds between launching concurrent researchers to stagger browser pool startup */
 export const RESEARCHER_LAUNCH_DELAY_MS = 1500;
 
 /** Hard cap on search queries per researcher, enforced after LLM planning */
 export const MAX_QUERIES_PER_RESEARCHER_LEVEL_1 = 10;
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 20;
-export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 30;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_2 = 15;
+export const MAX_QUERIES_PER_RESEARCHER_LEVEL_3 = 20;

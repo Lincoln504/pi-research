@@ -132,7 +132,7 @@ export function parseCitations(report: string): Citation[] {
     let source = '';
     
     // Handles both plain inline format (URL — desc) and the format produced by
-    // the researcher prompt template: URL [Source: Fresh Scrape] — desc.
+    // the researcher prompt template: URL [Source: Scrape] — desc.
     // Group 1: URL, Group 2: optional source tag contents, Group 3: description.
     const inlineMatch = /^(https?:\/\/[^\s\n]+)(?:\s+\[Source:\s*([^\]]*)\])?(?:\s*[—–-]\s*([^\n]*))?/.exec(firstLine);
     if (inlineMatch) {

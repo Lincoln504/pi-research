@@ -61,13 +61,26 @@ function isPidAliveStatic(pid: number): boolean {
 
 let _embeddingInstance: IEmbedder | null = null;
 let _embeddingInitPromise: Promise<IEmbedder> | null = null;
+let _cachedModel: string | null = null;
+let _cachedDevice: string | null = null;
 
 // ---------------------------------------------------------------------------
 // getEmbedder — public entry point
 // ---------------------------------------------------------------------------
 
 export async function getEmbedder(config?: Config): Promise<IEmbedder> {
-  if (_embeddingInstance) return _embeddingInstance;
+  const cfg = config ?? getConfig();
+
+  // If we have a cached instance, check if it matches the current config
+  if (_embeddingInstance) {
+    if (_cachedModel === cfg.EMBEDDING_MODEL && _cachedDevice === cfg.EMBEDDING_DEVICE) {
+      return _embeddingInstance;
+    }
+    logger.info(`[EmbeddingFactory] Configuration change detected (${_cachedModel} on ${_cachedDevice} -> ${cfg.EMBEDDING_MODEL} on ${cfg.EMBEDDING_DEVICE}). Disposing stale instance.`);
+    await _embeddingInstance.dispose?.();
+    _embeddingInstance = null;
+  }
+
   if (_embeddingInitPromise) return _embeddingInitPromise;
 
   let p: Promise<IEmbedder>;
@@ -75,7 +88,6 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
   const init = async (): Promise<IEmbedder> => {
     const serverId = crypto.randomUUID();
     const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
-    const cfg = config ?? getConfig();
 
     // ---- Phase 1: Atomically claim candidacy under the state lock ----
     // Writing port=-1 acts as a mutex: other processes that see it will wait
@@ -128,6 +140,8 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
             const client = new EmbeddingClient(info.port);
             await client.fetchHealth();
             _embeddingInstance = client;
+            _cachedModel = cfg.EMBEDDING_MODEL;
+            _cachedDevice = cfg.EMBEDDING_DEVICE;
             return client;
           }
           // Port registered but not responding — wait one more interval and re-check
@@ -186,6 +200,8 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
     // can exceed the 30s interval, so starting earlier would produce false misses.
     server.startLeadershipCheck();
     _embeddingInstance = server;
+    _cachedModel = cfg.EMBEDDING_MODEL;
+    _cachedDevice = cfg.EMBEDDING_DEVICE;
     return server;
   };
 
@@ -207,4 +223,6 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
 export function clearEmbeddingInstance(): void {
   _embeddingInstance = null;
   _embeddingInitPromise = null;
+  _cachedModel = null;
+  _cachedDevice = null;
 }

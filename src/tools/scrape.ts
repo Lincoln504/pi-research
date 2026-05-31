@@ -15,7 +15,7 @@ import { Value } from 'typebox/value';
 import { scrape } from '../web-research/web-scraper.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { deduplicateUrls, normalizeUrl, cacheScrapedContent } from '../utils/shared-links.ts';
+import { deduplicateUrls, normalizeUrl, cacheScrapedContent, getCachedScrapedContent } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
@@ -152,17 +152,26 @@ export function createScrapeTool(options: {
       options.tracker?.recordCall('scrape');
       const scrapeStartTime = Date.now();
 
-      // Global deduplication
+      // Global deduplication: Identify URLs already scraped in this session
       const { kept: dedupedUrls, duplicates } = deduplicateUrls(rawUrls, getGlobalState().researchId);
       const dedupNote = duplicates.length > 0
-        ? `**Global Deduplication**: ${duplicates.length} URL(s) skipped (already in pool).\n\n`
+        ? `**Global Cache Hit**: ${duplicates.length} URL(s) retrieved from session memory (already scraped).\n\n`
         : '';
       metrics.increment('tool_scrape_duplicates_total', duplicates.length);
 
-      if (dedupedUrls.length === 0) {
-        metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates' });
+      // Even for duplicates, we want to return the content if we have it in the session cache
+      const duplicateResults: { url: string; markdown: string; success: true }[] = [];
+      for (const url of duplicates) {
+        const cachedContent = getCachedScrapedContent(getGlobalState().researchId, url);
+        if (cachedContent) {
+          duplicateResults.push({ url, markdown: cachedContent, success: true });
+        }
+      }
+
+      if (dedupedUrls.length === 0 && duplicateResults.length === 0) {
+        metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates_no_content' });
         return {
-          content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool.` }],
+          content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool, but no cached content was available.` }],
           details: { all_duplicates: true },
         };
       }
@@ -226,7 +235,8 @@ export function createScrapeTool(options: {
       const failedFresh = freshResults.filter(r => !r.success);
 
       const allSuccessful = [
-        ...cachedResults.map(r => ({ ...r, success: true as const, error: undefined })),
+        ...duplicateResults.map(r => ({ ...r, error: undefined, source: 'session-cache' })),
+        ...cachedResults.map(r => ({ ...r, success: true as const, error: undefined, source: 'knowledge-store' })),
         ...successfulFresh,
       ];
 
@@ -248,8 +258,15 @@ export function createScrapeTool(options: {
       markdown += `**Successful:** ${allSuccessful.length}, **Failed:** ${failedFresh.length}, **Duration:** ${(totalDuration / 1000).toFixed(2)}s\n\n`;
 
       for (const res of allSuccessful) {
-        const isCached = cachedResults.some(c => c.url === res.url);
-        const sourceLabel = isCached ? 'Source: Knowledge Store (Cache)' : 'Source: Fresh Scrape';
+        let sourceLabel: string;
+        if ((res as any).source === 'session-cache') {
+          sourceLabel = 'Source: Session Memory (Already scraped by sibling/previous round)';
+        } else if ((res as any).source === 'knowledge-store') {
+          sourceLabel = 'Source: Knowledge Store (Local Cache)';
+        } else {
+          sourceLabel = 'Source: Scrape';
+        }
+        
         markdown += `### ${res.url}\n`;
         markdown += `**${sourceLabel}**\n\n`;
         markdown += `${res.markdown || ''}\n\n---\n\n`;

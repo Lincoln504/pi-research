@@ -76,7 +76,7 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
           cleanedCount++;
           
           // Give it a moment to exit gracefully
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 200));
           
           // Check if it's still running and force kill if needed
           try {
@@ -269,7 +269,7 @@ export async function killBrowserProcesses(pids: number[]): Promise<void> {
   await Promise.all(pids.map(async (pid) => {
     try {
       if (platform === 'win32') {
-        await execAsync(`taskkill /PID ${pid} /F`);
+        await execAsync(`taskkill /PID ${pid} /F /T`);
         logger.debug(`[BrowserCleanup] Terminated worker browser process: PID ${pid}`);
       } else {
         process.kill(pid, 'SIGTERM');

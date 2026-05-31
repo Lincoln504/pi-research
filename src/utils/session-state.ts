@@ -204,21 +204,6 @@ export function abortAllSessions(piSessionId: string): void {
   for (const controller of state.aborts.values()) {
     controller.abort();
   }
-
-  // Also abort all low-level AgentSession objects managed by the session service for immediate termination.
-  // This is a "belt and suspenders" approach to ensure immediate halt even if signal propagation is delayed.
-  // We must call it for each active researchId in this Pi session since sessions are registered under researchId.
-  const researchIds = [...state.order];
-  import('../orchestration/research-session-manager.ts')
-    .then(m => m.getResearchSessionService())
-    .then(async service => {
-      for (const rid of researchIds) {
-        await service.abortAllSessions(rid).catch(() => {});
-      }
-      // Also check the piSessionId itself for any legacy or global registrations
-      await service.abortAllSessions(piSessionId).catch(() => {});
-    })
-    .catch(err => logger.debug(`[session-state] Service-level abort skipped: ${err}`));
 }
 
 /**

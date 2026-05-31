@@ -84,11 +84,11 @@ Use both available rounds when the topic warrants it. Delegate for a second roun
   } else {
     return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive with extensive citations.
 
-- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, no meaningful gaps remain, and you have utilized most of your available round budget (4+ rounds).
+- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, no meaningful gaps remain, and you have utilized most of your available round budget (3, 4, or 5 rounds).
 - **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, inadequate citations for existing findings, or areas needing deeper investigation remain. Prioritize thoroughness and citation richness over efficiency. Lean HEAVILY toward delegation for completeness.
 
-**CRITICAL FOR LEVEL 3**: Do NOT synthesize early. With ${MAX_ROUNDS_LEVEL_3} rounds available, you should typically delegate for 4-5 rounds before considering synthesis. Each round adds breadth, depth, and citation diversity. Only synthesis when you have:
-1. Multiple rounds of findings (4+ recommended)
+**CRITICAL FOR LEVEL 3**: Do NOT synthesize early. With ${MAX_ROUNDS_LEVEL_3} rounds available, you should typically delegate for 3, 4, or 5 rounds before considering synthesis. Each researcher of each round adds breadth, depth, and citation diversity. Only synthesis when you have:
+1. Multiple rounds of findings (3+ recommended)
 2. Diverse sources across all major topics (10+ distinct source domains minimum)
 3. Substantial depth per major area (not just surface coverage)
 4. Comprehensive citations throughout (every major claim supported by multiple sources)
@@ -116,7 +116,7 @@ export function getRoundPhaseGuidance(currentRound: number, maxRounds: number, c
   } else if (roundRatio <= 0.8) {
     // Middle rounds
     if (complexity === 3) {
-      return `\n\n---\n\n**Round Phase: MIDDLE (Round ${currentRound} of ${maxRounds}) — Level 3 Ultra**\n\n**STRONGLY PREFER DELEGATION.** You are in the middle phase of exhaustive research.\n- With ${maxRounds - currentRound} rounds remaining, you have substantial capacity — use it\n- Delegate to sibling researchers covering angles not yet fully explored, deeper sub-topics of what has been found, or cross-cutting themes that span multiple earlier findings\n- Further rounds should drill into specialist detail, verify findings with additional independent sources, and surface nuanced dimensions of the topic\n- Synthesize ONLY if: you have 4+ rounds of findings, 10+ distinct source domains, every major claim is multi-source verified, and you genuinely cannot identify gaps that another round would address\n- If you can name even one meaningful unexplored angle — DELEGATE`;
+      return `\n\n---\n\n**Round Phase: MIDDLE (Round ${currentRound} of ${maxRounds}) — Level 3 Ultra**\n\n**STRONGLY PREFER DELEGATION.** You are in the middle phase of exhaustive research.\n- With ${maxRounds - currentRound} rounds remaining, you have substantial capacity — use it\n- Delegate to sibling researchers covering angles not yet fully explored, deeper sub-topics of what has been found, or cross-cutting themes that span multiple earlier findings\n- Further rounds should drill into specialist detail, verify findings with additional independent sources, and surface nuanced dimensions of the topic\n- Synthesize ONLY if: you have 3, 4, or 5 rounds of findings, 10+ distinct source domains, every major claim is multi-source verified, and you genuinely cannot identify gaps that another round would address\n- If you can name even one meaningful unexplored angle — DELEGATE`;
     }
     if (complexity === 2) {
       return `\n\n---\n\n**Round Phase: MIDDLE (Round ${currentRound} of ${maxRounds})**\n\n**Level 2 (Deep) Guidance**: You are in the middle phase of deep research. Continue delegating actively — you should aim for 2-3 total rounds before synthesis. Each round adds value and depth to your findings. Don't hold back when there are still meaningful gaps or areas to explore.\n\n- Synthesize only when findings are comprehensive and no significant gaps remain that warrant another round.\n\n`;
@@ -205,11 +205,11 @@ export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, 
 
   // Hard caps per round - based on actual maximum possible queries
   // Level 1: 2 researchers x 10 queries = 20 maximum
-  // Level 2: 3 researchers x 20 queries = 60 maximum
-  // Level 3: 5 researchers x 30 queries = 150 maximum
+  // Level 2: 3 researchers x 15 queries = 45 maximum
+  // Level 3: 5 researchers x 20 queries = 100 maximum
   const ROUND_HARD_CAP = complexity === 1 ? 20
-    : complexity === 2 ? 60
-    : 150;
+    : complexity === 2 ? 45
+    : 100;
 
   if (!plan.researchers) return plan;
 

@@ -8,6 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.ts';
 
@@ -213,8 +214,10 @@ export function saveConfig(config: Config): void {
       }
     }
 
+    const tempPath = `${p}.tmp.${crypto.randomUUID()}`;
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, outLines.join('\n'), 'utf-8');
+    fs.writeFileSync(tempPath, outLines.join('\n'), 'utf-8');
+    fs.renameSync(tempPath, p);
     logger.info('[config] Saved to', p);
   } catch (err) {
     logger.error('[config] Failed to save config:', err);
@@ -454,4 +457,3 @@ export function validateConfig(config: Config = getConfig()): void {
     }
   }
 }
-

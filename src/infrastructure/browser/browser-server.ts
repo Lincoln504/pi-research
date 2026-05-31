@@ -88,6 +88,7 @@ export class BrowserServer {
 
     async stop(): Promise<void> {
         if (this.server) {
+            this.server.closeAllConnections?.();
             return new Promise((resolve) => {
                 this.server?.close(() => {
                     this.server = null;

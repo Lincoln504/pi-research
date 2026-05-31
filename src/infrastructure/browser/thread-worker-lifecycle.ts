@@ -157,6 +157,11 @@ export function createKillHandler(): () => Promise<void> {
     cleanupOrphanProtection();
     // Force process exit — without this, the orphan-detection setInterval keeps
     // the event loop alive indefinitely after the IPC channel is disconnected.
-    process.exit(0);
+    // Delay by 100ms to allow Poolifier to send its acknowledgement over IPC
+    // before the process dies, otherwise pool.destroy() hangs for 5000ms.
+    setTimeout(() => {
+      logToDebugFile('INFO', `[Worker-${workerId}] Forcing process exit`);
+      process.exit(0);
+    }, 100).unref();
   };
 }

@@ -58,7 +58,7 @@ Make no further tool calls after beginning synthesis.
   - `grep`: Search the local codebase using Ripgrep
   - `read`: Read files from the local filesystem
 {{extra_tool_guidelines}}
-- **CODEBASE TOOLS (`grep`, `read`)**: Use these ONLY if the research topic involves specific codebase-relevant information or local implementation details that are necessary to understand the query. For general research, rely on the available web tools and scraping.
+- **CODEBASE TOOLS (`grep`, `read`)**: Use these ONLY when the research task obviously and imminently requires local codebase investigation for research context. Do NOT use `grep` or `read` for general factual, historical, scientific, or web-researchable topics — those must be answered via web search and scraping only. If in doubt, do not use codebase / local file reading tools.
 - **SPECIALIZED TOOLS (`stackexchange`, `security_search`)**: Use these ONLY when the research topic specifically requires them. Use `stackexchange` for developer/programming questions where Stack Overflow is a primary source, or when you encounter a stackoverflow.com or *.stackexchange.com URL (those domains are Cloudflare-blocked and cannot be scraped directly). Use `security_search` only for CVE lookups, vulnerability analysis, or explicit security research. Do not call these tools as general exploratory steps — the default workflow is web search and scraping only.
 - Every factual claim must have a numbered inline citation: [N] where N is the number from your CITED LINKS list. Aim for multiple citations per significant finding when possible — this strengthens the evidence base.
 - All citations must reference URLs you actually scraped — do not cite search result snippets. Prioritize primary sources and authoritative references.
@@ -92,11 +92,11 @@ Each entry MUST use the multi-line format below. Do NOT compress everything onto
 
 CORRECT format:
 [1] https://example.com
-Source: Fresh Scrape (Web Search)
+Source: Scrape
 Description: Covers the v4.2 release of LibX, detailing the new async API, breaking changes from v4.1, the migration path, and performance benchmarks showing 40% latency reduction.
 
 WRONG — do not use this format:
-[1] https://example.com [Source: Fresh Scrape] — brief one-line summary
+[1] https://example.com [Source: Scrape] — brief one-line summary
 
 The multi-line format is mandatory because the Description field is stored to the knowledge base for future sessions. Write 3–6 sentences of dense, factual content in each Description.
 
@@ -121,7 +121,7 @@ The multi-line format is mandatory because the Description field is stored to th
 **CRITICAL:** Your `Description:` for each cited link is the primary record saved to the knowledge store for future sessions. Write 3–6 sentences of dense, factual content. Do NOT bold the [N] markers.
 
 [1] https://example.com
-Source: Fresh Scrape (Web Search)
+Source: Scrape
 Description: Covers the v4.2 release of LibX...
 [2] CVE-2024-1234
 Source: Security Databases (NVD)

@@ -36,6 +36,11 @@ import {
 const DWELL_FRAMES = 4; // pause duration at each edge
 const PERIOD_FRAMES = 40; // total frames for one full back-and-forth cycle (twice as fast)
 
+// Scaling constants for "static-ish" tail distance
+const REFERENCE_WIDTH = 80;
+const REFERENCE_TAIL_DIST = 40;
+const TAIL_SCALING_EXPONENT = 0.5;
+
 /**
  * Resolve the theme accent colour to a full-precision RGB triple.
  */
@@ -100,12 +105,10 @@ function getBaseAccentRgb(theme: Theme): { r: number; g: number; b: number } {
  * Compute the color for a given age within the trail window.
  *
  * age = 0              → full accent brightness (head just visited)
- * age = trailLen - 1   → 42 % brightness (dark floor of trail)
+ * age = trailLen - 1   → 65 % brightness (dark floor of trail)
  * age >= trailLen      → clamped to dark floor
  *
  * easeIn power-curve 2.2 for perceptually even brightness distribution.
- * Saturation is boosted on the dark end (up to +20%) so the trail stays
- * vivid rather than going muddy as it dims.
  */
 function ageToColor(
   hsl: { h: number; s: number; l: number },
@@ -113,12 +116,12 @@ function ageToColor(
   trailLen: number,
 ): { r: number; g: number; b: number } {
   const clamped = Math.min(age, trailLen - 1);
-  const progress = clamped / Math.max(1, trailLen - 1); // 0.0 (bright) … 1.0 (dark)
+  const progress = Math.max(0, clamped / Math.max(1, trailLen - 1)); // 0.0 (bright) … 1.0 (dark)
   const linearFactor = 1 - progress;
   const curvedFactor = Math.pow(linearFactor, 2.2);       // easeIn
 
-  const newL = hsl.l * (0.42 + 0.58 * curvedFactor);
-  const newS = Math.min(1.0, hsl.s * (1.20 - 0.20 * curvedFactor));
+  const newL = hsl.l * (0.65 + 0.35 * curvedFactor);
+  const newS = hsl.s * (0.98 + 0.02 * curvedFactor);
   return hslToRgb(hsl.h, newS, newL);
 }
 
@@ -127,6 +130,7 @@ function ageToColor(
  *
  * Returns { headPos, goingRight, isDwelling }
  * Constant duration: total period is fixed, speed scales with available width.
+ * headPos is returned as a float for smooth interpolation.
  */
 function computeHeadState(frame: number, available: number): { headPos: number; goingRight: boolean; isDwelling: boolean } {
   const M = Math.max(1, available - 1);
@@ -141,7 +145,7 @@ function computeHeadState(frame: number, available: number): { headPos: number; 
     // Traversing left→right
     const traverseFrames = halfPeriod - D;
     const progress = (pos - D) / traverseFrames;
-    return { headPos: Math.floor(progress * M), goingRight: true, isDwelling: false };
+    return { headPos: progress * M, goingRight: true, isDwelling: false };
   } else if (pos < halfPeriod + D) {
     // Right dwell
     return { headPos: M, goingRight: false, isDwelling: true };
@@ -149,7 +153,7 @@ function computeHeadState(frame: number, available: number): { headPos: number; 
     // Traversing right→left
     const traverseFrames = PERIOD_FRAMES - (halfPeriod + D);
     const progress = (pos - (halfPeriod + D)) / traverseFrames;
-    return { headPos: M - Math.floor(progress * M), goingRight: false, isDwelling: false };
+    return { headPos: M - (progress * M), goingRight: false, isDwelling: false };
   }
 }
 
@@ -179,8 +183,18 @@ export function generateWaveFill(
   const hsl = rgbToHsl(base.r, base.g, base.b);
   const resetFg = '\x1b[39m';
 
-  // Trail length = ¾ of line width (at least 1)
-  const trailLen = Math.max(1, Math.floor(available * 3 / 4));
+  // Calculate spatial tail distance based on width using a square-root scaling law.
+  // This ensures the tail grows/shrinks slower than the width itself,
+  // providing a more "static" and consistent feel across terminal sizes.
+  const tailDistChars = REFERENCE_TAIL_DIST * Math.pow(available / REFERENCE_WIDTH, TAIL_SCALING_EXPONENT);
+
+  // Speed in chars/frame: distance covered in one traversal window.
+  const traverseFrames = (PERIOD_FRAMES / 2) - DWELL_FRAMES;
+  const speed = (available - 1) / Math.max(1, traverseFrames);
+
+  // Trail length in frames = distance / speed.
+  // This translates the desired spatial distance into the temporal decay window.
+  const trailLen = Math.max(2, tailDistChars / Math.max(0.1, speed));
 
   // Initialise or resize: place last-visit far enough in the past that all
   // positions start at the dark floor.
@@ -190,19 +204,30 @@ export function generateWaveFill(
   }
 
   const { headPos, goingRight, isDwelling } = computeHeadState(waveFrame, available);
+  const headIdx = Math.floor(headPos);
 
-  // Paint the trail: we need to ensure every segment between the previous
-  // frame's head and this frame's head is colored. This prevents "gaps" on
-  // wide terminals where the head moves >1 char per frame.
+  // Paint the trail: ensure every segment passed between the previous frame
+  // and this one is colored. We use fractional visit-times for smooth gradients
+  // even when the head moves >1 char per frame (common on wide terminals).
   if (waveFrame > 0) {
     const prev = computeHeadState(waveFrame - 1, available);
-    const start = Math.min(prev.headPos, headPos);
-    const end = Math.max(prev.headPos, headPos);
-    for (let i = start; i <= end; i++) {
-      waveColors[i] = waveFrame;
+    const startIdx = Math.min(Math.floor(prev.headPos), headIdx);
+    const endIdx = Math.max(Math.floor(prev.headPos), headIdx);
+    const dist = Math.abs(headPos - prev.headPos);
+
+    if (dist > 0.001) {
+      for (let i = startIdx; i <= endIdx; i++) {
+        // visitTime = (previous frame time) + (fraction of traversal to index i)
+        const d = Math.abs(i - prev.headPos);
+        const visitTime = (waveFrame - 1) + (d / dist);
+        waveColors[i] = visitTime;
+      }
     }
+    // Ensure the head's discrete position is always set to the current frame time
+    // for maximum brightness at the leading edge.
+    waveColors[headIdx] = waveFrame;
   } else {
-    waveColors[headPos] = waveFrame;
+    waveColors[headIdx] = waveFrame;
   }
 
   // Directional head character: half-dash pointing in the direction of motion
@@ -212,11 +237,11 @@ export function generateWaveFill(
 
   // Solid head when dwelling (no gap)
   if (isDwelling) {
-    headChar = (headPos === 0) ? '╶' : '─';
+    headChar = (headIdx === 0) ? '╶' : '─';
   }
 
   // Ensure head doesn't point into space at index 0 when starting movement
-  if (headPos === 0 && goingRight) {
+  if (headIdx === 0 && goingRight) {
     headChar = '╶';
   }
 
@@ -241,7 +266,7 @@ export function generateWaveFill(
 
     // Trail at index 0 should be rounded '╶' to match header style
     let char = (i === 0) ? '╶' : '─';
-    if (i === headPos) char = headChar;
+    if (i === headIdx) char = headChar;
 
     fill += `${color}${char}${resetFg}`;
   }

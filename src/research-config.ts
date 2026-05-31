@@ -22,9 +22,10 @@ import {
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
 import { getConfig, saveConfig, resetConfig } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
-import { getService } from './core/service-registry.ts';
+import { getService, clearService } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import { KnowledgeStoreService } from './infrastructure/knowledge-store-service.ts';
+import { clearEmbeddingInstance } from './infrastructure/embedding/embedding-factory.ts';
 import type { Theme } from './types/research-panel-types.ts';
 import { SUPPORTED_MODELS } from './knowledge/index.ts';
 import { metrics } from './utils/metrics.ts';
@@ -74,15 +75,28 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   // Ensure the global TUI controller is initialized
   initGlobalTuiController(ctx.ui);
 
+  const initialConfig = { ...getConfig() };
   const config = { ...getConfig() };
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
+
+  // Fetch knowledge store count for display
+  let knowledgeCount = 0;
+  try {
+    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const store = await service.getStore();
+    knowledgeCount = await store.count();
+  } catch (err) {
+    logger.debug('[research-config] Failed to fetch knowledge count for menu:', err);
+  }
+
+  const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
 
   const initialItems: SettingItem[] = [
     // --- Core Research Settings ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
       label: 'Research depth',
-      description: 'Default depth for new research tasks (normal, deep, ultra)',
+      description: `Default depth for the /research command (normal/deep/ultra)`,
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
@@ -96,21 +110,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'MAX_SCRAPE_BATCHES',
       label: 'Scrape batches',
-      description: 'Max scrape batches per researcher (0 for unlimited)',
+      description: `Max scrape batches per researcher (0=unlimited).\nAlways capped at ${scrapePct}% of the context window.`,
       currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
       values: ['unlimited', '1', '2', '3', '5', '10', '15'],
     },
     {
       id: 'WORKER_THREADS',
       label: 'Worker threads',
-      description: 'Number of parallel browser workers for search and scraping',
+      description: 'Number of parallel browser workers for search and scraping (1-12)',
       currentValue: String(config.WORKER_THREADS),
-      values: ['1', '2', '4', '8', '12', '16'],
+      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
     },
     {
       id: 'RESEARCHER_TIMEOUT_MS',
       label: 'Timeout (min)',
-      description: 'Per-researcher timeout in minutes (3-30 min)',
+      description: 'Per-researcher timeout in minutes (3-30)',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
@@ -119,16 +133,23 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'KNOWLEDGE_STORE_ENABLED',
       label: 'Knowledge store',
-      description: 'Enable or disable persistent research memory (RAG)',
+      description: 'Enable or disable the persistent knowledge store (RAG)',
       currentValue: config.KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
+      id: 'KNOWLEDGE_ENTRIES',
+      label: 'Store entries',
+      description: 'Total documents currently in the knowledge store',
+      currentValue: String(knowledgeCount),
+      values: [], // Read-only
+    },
+    {
       id: 'EMBEDDING_MODEL',
       label: 'Embed model',
-      description: 'Model used for knowledge store embeddings. (Changing clears local DB)\nChanging model clears DB. Downloaded models in ~/.cache/pi-research/models/',
-      currentValue: config.EMBEDDING_MODEL,
-      values: SUPPORTED_MODELS.map(m => m.id),
+      description: 'Embedding model for the knowledge store.\nChanging model clears the knowledge store.\nDownloaded to: ~/.cache/pi-research/models/',
+      currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
+      values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
     },
     {
       id: 'EMBEDDING_DEVICE',
@@ -140,7 +161,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
       label: 'Cache TTL (days)',
-      description: 'How long to keep cached research findings (1-365 days)',
+      description: 'How long to keep cached research findings in the knowledge store (1-365 days)',
       currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
       values: ['7', '14', '30', '60', '90', '180', '365'],
     },
@@ -149,35 +170,35 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'ACTION_HEALTH',
       label: 'System health',
-      description: 'run comprehensive health checks and display results',
+      description: 'Run comprehensive health checks and display results',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_KNOWLEDGE_STATUS',
       label: 'Knowledge status',
-      description: 'run a report of current knowledge store statistics',
+      description: 'Run a report of current knowledge store statistics',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_KNOWLEDGE_CLEAR',
-      label: 'Clear memory',
-      description: 'Run a permanent deletion of all knowledge store data',
+      label: 'Clear knowledge store',
+      description: 'Permanently delete all knowledge store data',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_VIEW',
       label: 'View metrics',
-      description: 'run a report of session-wide performance metrics',
+      description: 'Run a report of session-wide performance metrics',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
       label: 'Reset metrics',
-      description: 'run a reset of all performance counters and statistics',
+      description: 'Reset all session performance counters',
       currentValue: 'run',
       values: ['run'],
     },
@@ -191,12 +212,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
           description: (text: string) => {
-            return text.split('\n').map(line => {
-              if (line.includes('clears local DB') || line.includes('clears DB')) {
-                return `\x1b[33m${line}\x1b[39m`;
-              }
-              return theme.fg('dim', line);
-            }).join('\n');
+            // SettingsList calls this once per word-wrapped line (already has "  " prefix).
+            // Check for the warning keyword to highlight destructive-action lines.
+            if (text.includes('clears')) {
+              return theme.fg('warning', text);
+            }
+            return theme.fg('dim', text);
           },
           cursor: theme.fg('accent', '→ '),
           hint: (text: string) => theme.fg('dim', text),
@@ -223,7 +244,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             } else if (id === 'KNOWLEDGE_STORE_ENABLED') {
               config.KNOWLEDGE_STORE_ENABLED = newValue === 'true';
             } else if (id === 'EMBEDDING_MODEL') {
-              config.EMBEDDING_MODEL = newValue;
+              config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             } else if (id === 'EMBEDDING_DEVICE') {
               config.EMBEDDING_DEVICE = newValue;
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
@@ -270,7 +291,31 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       }
     )
 .then(async (result: any) => {
-      // Handle actions after the TUI closes to avoid UI conflicts
+      // 1. Handle Critical Config Changes (Model/Device)
+      // We do this after the TUI closes to avoid race conditions and redundant clears
+      if (config.EMBEDDING_MODEL !== initialConfig.EMBEDDING_MODEL) {
+        logger.info(`[research-config] Embedding model changed from ${initialConfig.EMBEDDING_MODEL} to ${config.EMBEDDING_MODEL}. Clearing knowledge store.`);
+        try {
+          const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+          await service.clear();
+          await clearService(ServiceNames.KNOWLEDGE_STORE);
+          clearEmbeddingInstance();
+          ctx.ui.notify('Model changed: Knowledge store cleared', 'info');
+        } catch (e: any) {
+          logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
+        }
+      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
+        logger.info(`[research-config] Embedding device changed from ${initialConfig.EMBEDDING_DEVICE} to ${config.EMBEDDING_DEVICE}. Resetting service.`);
+        try {
+          await clearService(ServiceNames.KNOWLEDGE_STORE);
+          clearEmbeddingInstance();
+          ctx.ui.notify('Device changed: Service refreshed', 'info');
+        } catch (e: any) {
+          logger.warn('[research-config] Failed to refresh service on device change:', e);
+        }
+      }
+
+      // 2. Handle Actions after the TUI closes to avoid UI conflicts
       if (result?.type === 'action') {
         switch (result.action) {
           case 'health':
@@ -284,6 +329,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             if (confirmed) {
               const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
               await service.clear();
+              clearEmbeddingInstance();
               ctx.ui.notify('Knowledge store cleared', 'info');
             }
             break;
@@ -344,13 +390,17 @@ async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
 
 async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<void> {
   try {
+    // Reset config to ensure we read the latest from file (in case TUI changed it)
+    resetConfig();
+    const config = getConfig();
+    
     const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
     const count = await store.count();
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${getConfig().EMBEDDING_MODEL}\n- **Device:** ${getConfig().EMBEDDING_DEVICE}`,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}`,
       display: true,
     });
   } catch (error: any) {

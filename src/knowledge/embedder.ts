@@ -432,7 +432,7 @@ export class Embedder {
     this.state = 'disposing';
     this.disposePromise = (async () => {
       // Wait for all active embeddings to complete
-      const maxWaitMs = 30000;
+      const maxWaitMs = 5000;
       const startTime = Date.now();
       while (this.activeEmbeddings > 0 && (Date.now() - startTime) < maxWaitMs) {
         await new Promise(resolve => setTimeout(resolve, 50));

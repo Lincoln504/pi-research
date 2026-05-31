@@ -165,6 +165,7 @@ export class EmbeddingServer implements IEmbedder {
     }
 
     if (this.server) {
+      this.server.closeAllConnections?.();
       await new Promise<void>((resolve) => {
         this.server!.close(() => {
           this.server = null;

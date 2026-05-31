@@ -21,6 +21,7 @@ import { ResearchPlanSchema } from './interfaces/planning-interfaces.ts';
 import type { LLMResponseMetadata } from '../types/index.ts';
 import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
+import { MAX_TOTAL_RESEARCHERS } from '../constants.ts';
 import {
   getTeamSize,
   getQueryBudget,
@@ -239,6 +240,14 @@ export class PlanningService implements IPlanningService {
 
     plan = capResearcherQueries(plan, complexity, this.name);
 
+    // Ensure IDs are round-prefixed (Round 1)
+    if (plan.researchers) {
+      plan.researchers = plan.researchers.map((r, i) => ({
+        ...r,
+        id: `1.${i + 1}`
+      }));
+    }
+
     const state = this.getState(sessionId);
     state.currentPlan = plan;
     state.totalResearchersPlanned += plan.researchers?.length ?? 0;
@@ -284,7 +293,6 @@ export class PlanningService implements IPlanningService {
       ? `\n### Previous Queries (Sibling Researchers)\n${previousPlan.allQueries.map(q => `- ${q}`).join('\n')}\n`
       : '';
 
-    const nextId = totalResearchersPlanned + 1;
     const maxTeamSize = getTeamSize(complexity);
     const maxRounds = getMaxRounds(complexity);
 
@@ -301,8 +309,7 @@ export class PlanningService implements IPlanningService {
       .replace('{{historical_links_section}}', historicalLinksSection)
       .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
           ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
-          : '')
-      .replace('{NEXT_ID}', `${nextId}`);
+          : '');
 
     const reportsText = Array.from(reports.entries())
       .map(([id, report]) => {
@@ -435,6 +442,23 @@ export class PlanningService implements IPlanningService {
       if (!plan.content) {
         plan.content = this.stripModelArtifacts(text);
       }
+    }
+
+    // Force synthesis if cumulative researcher limit reached
+    if (plan.action === 'delegate' && totalResearchersPlanned >= MAX_TOTAL_RESEARCHERS) {
+      logger.warn(`[${this.name}] Cumulative researcher limit reached (${MAX_TOTAL_RESEARCHERS}); forcing synthesis.`);
+      plan.action = 'synthesize';
+      plan.content = this.stripModelArtifacts(text);
+      plan.researchers = [];
+      plan.allQueries = [];
+    }
+
+    // Ensure IDs are round-prefixed (Round N)
+    if (plan.action === 'delegate' && plan.researchers) {
+      plan.researchers = plan.researchers.map((r, i) => ({
+        ...r,
+        id: `${round}.${i + 1}`
+      }));
     }
 
     observer?.onEvaluationDecision?.(plan.action as 'synthesize' | 'delegate', plan, round);

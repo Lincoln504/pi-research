@@ -266,8 +266,7 @@ export function applyCurve(t: number, curve: number): number {
 /**
  * Cycle HSL saturation and lightness for gradient generation.
  *
- * Sawtooth wave: stepIndex=0 → full brightness → stepIndex→totalSteps → 65% brightness.
- * Saturation barely moves (98%→100%). Only lightness varies, so the hue is preserved.
+ * Sawtooth wave: stepIndex=0 → full brightness/saturation → dark, desaturated end.
  * An easeIn curve (power 2.2) spreads frames perceptually: bright drops fast,
  * mid-dark range gets more dwell time.
  */
@@ -288,10 +287,10 @@ export function cycleHslSaturationLightness(
   // perceptually even spacing across the brightness range
   const curvedFactor = Math.pow(linearFactor, 2.2);
 
-  // Lightness: 100% of base (bright) → 65% of base (dark)
-  const newL = hsl.l * (0.65 + 0.35 * curvedFactor);
-  // Saturation: minimal movement (98% → 100%), preserves hue identity
-  const newS = hsl.s * (0.98 + 0.02 * curvedFactor);
+  // Lightness: 100% of base (bright) → 45% of base (dark)
+  const newL = hsl.l * (0.45 + 0.55 * curvedFactor);
+  // Saturation: 100% → 30% of base (strongly desaturated at dark end)
+  const newS = hsl.s * (0.30 + 0.70 * curvedFactor);
 
   return hslToRgb(hsl.h, newS, newL);
 }

@@ -7,6 +7,7 @@
 
 import { registerService, getService, disposeAllServices } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
+import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { HealthCheckService } from './health-check-service.ts';
 import { PlanningService } from './planning-service.ts';
@@ -171,6 +172,16 @@ export async function disposeCoreServices(): Promise<void> {
   logger.log('[ServiceInitialization] Disposing core services...');
 
   try {
+    // Clear embedding server registration before parallel disposal so the
+    // EmbeddingServer can deregister itself while the StateManager is still alive.
+    try {
+      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+      await stateManager.clearEmbeddingServer();
+      logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
+    } catch {
+      // Non-fatal: embedding server state will be cleaned up on next startup via PID check
+    }
+
     // Dispose services in reverse dependency order
     await disposeAllServices();
 

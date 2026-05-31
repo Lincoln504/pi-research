@@ -41,9 +41,12 @@ const MAX_RETRY_DELAY_MS = 30000;
 /**
  * Initialize knowledge store components.
  * This is a factory function used by KnowledgeStoreService.
+ * @param embedderFactory - Returns an IEmbedder for the initial connection.
+ * @param reconnectFactory - Returns a fresh IEmbedder when the server dies mid-session.
  */
 export async function createKnowledgeStoreComponents(
-  embedderFactory: () => Promise<IEmbedder>
+  embedderFactory: () => Promise<IEmbedder>,
+  reconnectFactory?: () => Promise<IEmbedder>
 ): Promise<KnowledgeStoreComponents> {
   const config = getConfig();
   if (!config.KNOWLEDGE_STORE_ENABLED) {
@@ -64,6 +67,7 @@ export async function createKnowledgeStoreComponents(
         embedder,
         modelName: config.EMBEDDING_MODEL,
         migrationStrategy: migrationStrategy,
+        reconnectFactory,
       });
 
       const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);

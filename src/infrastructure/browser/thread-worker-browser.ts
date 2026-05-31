@@ -157,11 +157,25 @@ export function resetBrowser(): void {
 }
 
 /**
- * Clean up browser resources
+ * Clean up browser resources with a timeout to prevent hanging
  */
 export async function cleanupBrowser(): Promise<void> {
-  if (context) await context.close().catch(() => {});
-  if (browser) await browser.close().catch(() => {});
-  context = null;
-  browser = null;
+  const timeoutMs = 2000;
+  
+  const cleanup = async () => {
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+  };
+
+  try {
+    await Promise.race([
+      cleanup(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Browser cleanup timed out')), timeoutMs))
+    ]);
+  } catch {
+    // Ignore timeout error, we just want to ensure it doesn't hang
+  } finally {
+    context = null;
+    browser = null;
+  }
 }

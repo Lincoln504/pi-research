@@ -39,7 +39,7 @@ Return ONLY a JSON block containing your full team plan and query set:
   "title": "1-2 word topic label",
   "researchers": [
     {
-      "id": "1",
+      "id": "1.1",
       "name": "[Specialty]",
       "goal": "[Focused goal]",
       "historicalLinks": ["url 1", "url 2"],
@@ -54,6 +54,7 @@ Return ONLY a JSON block containing your full team plan and query set:
 - **Breadth**: Each researcher must cover a distinct, non-overlapping angle. No two researchers should repeat the same sub-topic. Aim for maximum topical coverage.
 - **Depth**: Queries must be specific, targeted, and exhaustive — avoid generic queries. Use exact terms, dates, names, events, authoritative sources. Design queries to surface primary sources and technical documentation that will be citable in the final report.
 - **Historical Links**: Distribute all relevant historical links provided to the appropriate researchers. Include them in the `historicalLinks` array for each researcher.
+- **Researcher IDs**: Use Round.Index format (e.g. **1.1**, **1.2**).
 - **Citations**: Each researcher's queries should be designed to uncover sources that can be comprehensively cited. Prioritize queries that lead to authoritative references, data, and documented facts.
 - **Title**: Set `"title"` to 1-2 words that best name the core topic (e.g. `"iPhone 15"`, `"React Performance"`, `"PostgreSQL Replication"`). Use proper nouns and brand names where applicable. Do NOT use generic words like "research", "overview", or "options".
 - **Format**: Valid JSON only. No markdown, no explanation outside the JSON block.
