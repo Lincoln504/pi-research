@@ -89,12 +89,12 @@ Example of correct inline usage: "...was established in 226 CE [3][10]."
 **CRITICAL — CITED LINKS Entry Format** (for the section at the bottom):
 Each entry MUST use the multi-line format below. Do NOT compress everything onto one line.
 
-✅ CORRECT:
+CORRECT format:
 [1] https://example.com
 Source: Fresh Scrape (Web Search)
 Description: Covers the v4.2 release of LibX, detailing the new async API, breaking changes from v4.1, the migration path, and performance benchmarks showing 40% latency reduction.
 
-❌ WRONG — do not use this format:
+WRONG — do not use this format:
 [1] https://example.com [Source: Fresh Scrape] — brief one-line summary
 
 The multi-line format is mandatory because the Description field is stored to the knowledge base for future sessions. Write 3–6 sentences of dense, factual content in each Description.

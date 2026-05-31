@@ -49,12 +49,12 @@ export function parseAnsiFgColor(
  * Convert RGB to nearest 256-color cube or grayscale index.
  *
  * Algorithm:
- * 1. Convert RGB to 6×6×6 cube coordinates (0-5 each)
+ * 1. Convert RGB to 6x6x6 cube coordinates (0-5 each)
  * 2. Find closest grayscale (232-255)
  * 3. Return whichever is closer (with preference for cube if saturation > threshold)
  */
 export function rgbTo256(r: number, g: number, b: number): number {
-  // 6×6×6 cube values
+  // 6x6x6 cube values
   const CUBE_VALUES = [0, 95, 135, 175, 215, 255];
 
   // Find closest cube index
@@ -165,7 +165,7 @@ export function indexToRgb(index: number): { r: number; g: number; b: number } |
     return color ? { r: color[0], g: color[1], b: color[2] } : null;
   }
 
-  // 6×6×6 color cube (16-231)
+  // 6x6x6 color cube (16-231)
   if (index < 232) {
     const cubeIndex = index - 16;
     const rIdx = Math.floor(cubeIndex / 36) % 6;

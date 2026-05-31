@@ -204,9 +204,9 @@ export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, 
   const budget = getQueryBudget(complexity);
 
   // Hard caps per round - based on actual maximum possible queries
-  // Level 1: 2 researchers × 10 queries = 20 maximum
-  // Level 2: 3 researchers × 20 queries = 60 maximum
-  // Level 3: 5 researchers × 30 queries = 150 maximum
+  // Level 1: 2 researchers x 10 queries = 20 maximum
+  // Level 2: 3 researchers x 20 queries = 60 maximum
+  // Level 3: 5 researchers x 30 queries = 150 maximum
   const ROUND_HARD_CAP = complexity === 1 ? 20
     : complexity === 2 ? 60
     : 150;
