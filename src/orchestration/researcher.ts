@@ -12,7 +12,7 @@
  */
 
 import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { createAgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, SessionManager, SettingsManager as SettingsManagerClass } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
 import { makeResourceLoader } from '../utils/make-resource-loader.ts';
@@ -45,7 +45,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     cwd,
     ctxModel,
     modelRegistry,
-    settingsManager,
     systemPrompt,
     extensionCtx,
     getGlobalState,
@@ -104,12 +103,17 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       }
     }
 
+    // Build a researcher-scoped settings manager with provider retries restored to 2.
+    // v0.76.0 changed the SDK default to 0; transient network errors during long researcher
+    // runs would otherwise fail the entire researcher rather than retrying the LLM call.
+    const researcherSettings = SettingsManagerClass.inMemory({ retry: { provider: { maxRetries: 2 } } });
+
     const result = await createAgentSession({
       cwd,
       customTools,
       tools, // Explicit allowlist (BUG-1 fix)
       sessionManager: SessionManager.inMemory(), // Each researcher gets its own isolated session
-      settingsManager,
+      settingsManager: researcherSettings,
       model: modelToUse,
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
