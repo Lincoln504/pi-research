@@ -24,6 +24,8 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +48,8 @@ jobs:
 
   type-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,6 +68,8 @@ jobs:
   unit-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,6 +87,8 @@ jobs:
   integration-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
     timeout-minutes: 60
@@ -96,6 +104,8 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+      - name: Install Firefox system dependencies
+        run: npx playwright install-deps firefox
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
       - name: Integration Tests (Serial Group)
@@ -143,6 +153,8 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

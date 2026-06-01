@@ -132,6 +132,7 @@
     "madge": "^8.0.0",
     "npm-check-updates": "^22.2.1",
     "tsuml2": "^0.17.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   }

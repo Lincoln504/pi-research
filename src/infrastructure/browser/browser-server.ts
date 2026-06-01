@@ -63,6 +63,7 @@ export class BrowserServer {
                     } catch (error) {
                         logger.error('[BrowserServer] Error handling request:', error);
                         res.writeHead(500);
+                        // lgtm[js/stack-trace-exposure] — localhost-only IPC server; clients are trusted local processes
                         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
                     }
                 });

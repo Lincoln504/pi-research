@@ -81,7 +81,9 @@ async function extractSearchResults(page: any): Promise<any[]> {
       } catch {
         // ignore
       }
-      if (title && url && !url.includes('duckduckgo.com') && url.startsWith('http')) {
+      let urlHostname = '';
+        try { urlHostname = new URL(url).hostname; } catch { /* ignore malformed */ }
+        if (title && url && urlHostname !== 'duckduckgo.com' && !urlHostname.endsWith('.duckduckgo.com') && url.startsWith('http')) {
         found.push({ title, url, content: snippet });
       }
     });

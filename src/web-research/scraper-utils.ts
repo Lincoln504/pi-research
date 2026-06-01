@@ -21,9 +21,9 @@ import {
  */
 export function getRandomUserAgent(): string {
   try {
-    const buffer = crypto.randomBytes(1);
-    const byte = buffer[0];
-    const index = byte !== undefined ? Math.floor(byte / 256 * USER_AGENTS.length) : 0;
+    const buffer = crypto.randomBytes(4);
+    const uint32 = buffer.readUInt32BE(0);
+    const index = uint32 % USER_AGENTS.length;
     const userAgent = USER_AGENTS[index];
     if (!userAgent) {
       return USER_AGENTS[0]!;
@@ -142,7 +142,9 @@ export function validateContent(html: string, markdown: string, url: string): vo
   }
 
   const words = markdown.trim().split(/\s+/).filter(w => w.length > 0);
-  if (words.length < 50 && !url.includes('example.com')) {
+  let stubCheckHostname = '';
+  try { stubCheckHostname = new URL(url).hostname; } catch { /* ignore */ }
+  if (words.length < 50 && stubCheckHostname !== 'example.com') {
     metrics.increment('scrape_errors_total', 1, { error_type: 'stub_content' });
     const error = new Error(`Fetch returned stub: only ${words.length} words found.`);
     errorTracker.trackError(error, {
