@@ -29,7 +29,7 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 }));
 
 vi.mock('../../../src/utils/prompts.ts', () => ({
-  loadPrompt: vi.fn(() => 'system prompt {ROOT_QUERY} {MAX_TEAM_SIZE} {QUERY_BUDGET} {COMPLEXITY_LABEL} {COMPLEXITY_GUIDANCE} {{historical_links_section}} {ROUND_NUMBER} {MAX_ROUNDS} {ROUND_PHASE_GUIDANCE} {COMPLEXITY_GUIDANCE} {{previous_queries_section}} {{historical_links_section}}'),
+  loadPrompt: vi.fn(() => 'system prompt {ROOT_QUERY} {MAX_TEAM_SIZE} {QUERY_BUDGET} {COMPLEXITY_LABEL} {COMPLEXITY_GUIDANCE} {ROUND_NUMBER} {MAX_ROUNDS} {ROUND_PHASE_GUIDANCE} {COMPLEXITY_GUIDANCE} {{previous_queries_section}} {{disabled_tools_section}}'),
 }));
 
 vi.mock('../../../src/utils/inject-date.ts', () => ({

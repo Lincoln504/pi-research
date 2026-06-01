@@ -274,7 +274,6 @@ export class PlanningService implements IPlanningService {
       complexity,
       model,
       signal,
-      previousPlan,
       totalResearchersPlanned,
       mustSynthesize = false,
       observer,
@@ -286,8 +285,9 @@ export class PlanningService implements IPlanningService {
     observer?.onEvaluationStart?.(round);
     observer?.onEvaluationProgress?.(round > 1 ? 'evaluating' : 'planning');
 
-    const previousQueriesSection = previousPlan?.allQueries && previousPlan.allQueries.length > 0
-      ? `\n### Previous Queries (Sibling Researchers)\n${previousPlan.allQueries.map(q => `- ${q}`).join('\n')}\n`
+    const allPreviousQueries = this.getQueryHistory(sessionId);
+    const previousQueriesSection = allPreviousQueries.length > 0
+      ? `\n### All Queries Used in Previous Rounds\n${allPreviousQueries.map(q => `- ${q}`).join('\n')}\n`
       : '';
 
     const maxTeamSize = getTeamSize(complexity);

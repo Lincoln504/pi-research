@@ -9,6 +9,7 @@ import { getService, tryGetService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import type { ResearchSynthesisService } from './research-synthesis-service.ts';
+import { cleanupSharedLinks } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -49,6 +50,10 @@ export async function cleanupResearchServices(sessionId?: string): Promise<void>
     logger.debug('[ResearchSessionManager] Cleared planning state');
   }
   
+  if (sessionId) {
+    cleanupSharedLinks(sessionId);
+  }
+
   logger.debug('[ResearchSessionManager] Cleaned up research services');
 }
 
