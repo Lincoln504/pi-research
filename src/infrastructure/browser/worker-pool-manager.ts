@@ -99,6 +99,7 @@ export class WorkerPoolManager implements IService {
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
                 this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.ts'), {
                     env: browserEnv,
+                    settings: { execArgv: ['--import', 'tsx'] },
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
