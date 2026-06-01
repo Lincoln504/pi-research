@@ -106,6 +106,14 @@ jobs:
         run: npm ci --legacy-peer-deps
       - name: Install Firefox system dependencies
         run: npx playwright install-deps firefox
+      - uses: actions/cache@v4
+        id: cache-camoufox
+        with:
+          path: ~/.cache/camoufox
+          key: camoufox-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Pre-fetch Camoufox binary
+        if: steps.cache-camoufox.outputs.cache-hit != 'true'
+        run: npx camoufox-js fetch
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
       - name: Integration Tests (Serial Group)
