@@ -174,7 +174,7 @@ describe('runResearcher', () => {
     });
 
     it('proceeds when only historicalUrls is non-empty', async () => {
-      await runResearcher(makeOptions({ initialLinks: [], historicalUrls: ['https://x.com'] }));
+      await runResearcher(makeOptions({ initialLinks: [], historicalUrls: [{ url: 'https://x.com', description: 'test description' }] }));
       expect(mockPrompt).toHaveBeenCalledOnce();
     });
   });
@@ -265,9 +265,10 @@ describe('runResearcher', () => {
 
     it('includes historical URLs in the prompt when provided', async () => {
       const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
-      await runResearcher(makeOptions({ historicalUrls: ['https://hist.example.com'] }));
+      await runResearcher(makeOptions({ historicalUrls: [{ url: 'https://hist.example.com', description: 'Found info about XYZ here' }] }));
       const sessionCall = vi.mocked(createResearcherSession).mock.calls[0]![0] as any;
       expect(sessionCall.systemPrompt).toContain('https://hist.example.com');
+      expect(sessionCall.systemPrompt).toContain('Found info about XYZ here');
     });
 
     it('includes initial search result links in the prompt', async () => {

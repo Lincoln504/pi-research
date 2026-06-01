@@ -26,13 +26,13 @@ Unsupported claims are worse than acknowledged gaps.
 
 ### Step 1: Build Your Source List
 Establish your initial set of URLs to investigate by combining the historical URLs (provided in your Knowledge section) and the search results (provided in your evidence section) into a single unified pool.
-- **Historical URLs**: These were found in the local knowledge store. They represent previous findings. You should scrape them to retrieve the most current full content, using the provided historical summary as a guide for what to look for.
+- **Historical URLs**: These were found in the local knowledge store. They represent previous findings. You should scrape them to retrieve the most current full content. Each URL includes a "Previous summary" field showing what was found in the last research session — use this as a guide for what to expect when you scrape it.
 
 ### Step 2: Scrape Round 1
 Identify the 4 most promising URLs from your combined source list and scrape them. 
 Your goal is to gather a mix of previously known information and fresh data to provide a comprehensive answer.
 Prioritize primary sources, authoritative references, and pages likely to contain dense, relevant, citable information. Pay close attention to pages with original data, research, or authoritative documentation.
-- **Scrape Tool**: When you scrape a URL found in the knowledge store, the tool will provide both the fresh content and the historical summary as an advisory hint.
+- **Scrape Tool**: When you scrape a URL found in the knowledge store, the tool will provide the fresh full content, prefixed with an advisory hint from the previous session summary.
 
 ### Step 3: Discover and Scrape Round 2 (if needed)
 After Round 1, call `links` to see URLs collected by sibling researchers — they may have surfaced sources your initial evidence missed.

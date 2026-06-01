@@ -239,10 +239,17 @@ export class KnowledgeStore implements IKnowledgeStore {
         this.table = await this.db.openTable(canonicalName);
       } catch (renameErr) {
         // If rename fails (cross-device, permissions, etc.) fall back to keeping
-        // the temp name — still better than losing data.
+        // the temp name. We MUST update this.tableName so that findRelevantUrls/search
+        // continue to work, and future sessions MIGHT need manual intervention or
+        // we could implement a discovery mechanism. For now, we at least don't lose
+        // the in-memory connection to the new data.
         logger.warn(`[store] Directory rename failed, keeping temp table name: ${renameErr}`);
         this.tableName = tempTableName;
         this.table = newTable;
+        
+        // Persist the new table name if possible, or at least log it loudly.
+        // Since we don't have a metadata file for the store itself yet, we log it.
+        logger.error(`[store] CRITICAL: Migrated data is in ${tempTableName}. Next start will NOT find it automatically.`);
       }
 
       logger.info(`[store] Migration complete: ${embedded} documents re-embedded with model ${newModel}`);
@@ -350,7 +357,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     return findDocumentsByUrl(this.table, url);
   }
 
-  async rebuildDocument(url: string): Promise<{ text: string; metadata: Record<string, any> } | null> {
+  async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
     if (!this.table) throw new Error('Store not open');
 
     const startTime = Date.now();
@@ -374,19 +381,22 @@ export class KnowledgeStore implements IKnowledgeStore {
     const r = results[0];
     try {
       const metadata = JSON.parse(r.metadata as string);
+      const description: string | null = typeof metadata.description === 'string' ? metadata.description : null;
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'hit' });
       logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
-      return { text: r.content as string, metadata };
+      return { text: r.content as string, description, metadata };
     } catch {
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'parse_error' });
       return null;
     }
   }
 
-  async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<string[]> {
+  async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string }[]> {
     if (!this.table) throw new Error('Store not open');
-    return this.withEmbedderReconnect(embedder =>
-      findRelevantUrls(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
+    return this.circuitBreaker.execute(() =>
+      this.withEmbedderReconnect(embedder =>
+        findRelevantUrls(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
+      )
     );
   }
 

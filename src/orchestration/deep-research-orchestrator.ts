@@ -26,7 +26,7 @@ import { getService } from '../core/service-registry.ts';
 import { getConfig } from '../config.ts';
 import type { Config } from '../config.ts';
 import type { PlanningService } from '../core/planning-service.ts';
-import type { IResearchOrchestration, ResearchPlan } from '../core/service-interfaces.ts';
+import type { IResearchOrchestration, ResearchPlan, IKnowledgeStoreService } from '../core/service-interfaces.ts';
 
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -103,8 +103,6 @@ export class DeepResearchOrchestrator {
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
     let loopSynthesisPlan: ResearchPlan | null = null;
-    // Persisted across rounds so the final forced-synthesis call can reuse the last value.
-    let historicalLinksSection = '';
 
     try {
       while (this.currentRound < maxRounds) {
@@ -121,32 +119,6 @@ export class DeepResearchOrchestrator {
             logger.warn(`[DeepOrchestrator] Infrastructure unhealthy at Round ${this.currentRound}, attempting to continue with existing data...`);
         }
 
-        // Query the knowledge store once per round so the coordinator/evaluator can
-        // distribute previously-discovered URLs to researchers via historicalLinks.
-        historicalLinksSection = '';
-        if (this.config.KNOWLEDGE_STORE_ENABLED) {
-          try {
-            const knowledgeStoreService = await getService<any>(ServiceNames.KNOWLEDGE_STORE);
-            if (knowledgeStoreService) {
-              const store = typeof knowledgeStoreService.getStore === 'function'
-                ? await knowledgeStoreService.getStore()
-                : knowledgeStoreService;
-              if (store && typeof store.findRelevantUrls === 'function') {
-                const historicalUrls: string[] = await store.findRelevantUrls(query, { limit: 10 });
-                if (historicalUrls.length > 0) {
-                  historicalLinksSection = '## Historical Knowledge Store\n' +
-                    'The following URLs are from previous research sessions on related topics. ' +
-                    'Assign them via the `historicalLinks` field to the most relevant researchers:\n' +
-                    historicalUrls.map(u => `- ${u}`).join('\n');
-                  logger.debug(`[DeepOrchestrator] Injecting ${historicalUrls.length} historical URL(s) into round ${this.currentRound} plan`);
-                }
-              }
-            }
-          } catch (err) {
-            logger.warn('[DeepOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
-          }
-        }
-
         // 1. Update/Generate Plan
         let plan: ResearchPlan;
         if (this.currentRound === 1) {
@@ -159,7 +131,6 @@ export class DeepResearchOrchestrator {
                 model,
                 signal,
                 observer,
-                historicalLinksSection,
                 excludeTools: this.options.excludeTools,
             });
         } else {
@@ -177,7 +148,6 @@ export class DeepResearchOrchestrator {
                 totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
                 signal,
                 observer,
-                historicalLinksSection,
                 excludeTools: this.options.excludeTools,
             });
         }
@@ -244,16 +214,48 @@ export class DeepResearchOrchestrator {
             planningService.addToQueryHistory(researchId, plan.allQueries);
         }
         
-        // 2. Search Phase (if queries generated)
+        // 2. Search Phase + per-researcher store queries (run in parallel)
         let researcherLinks: Map<string, string[]> | undefined;
-        if (plan.allQueries && plan.allQueries.length > 0) {
-            observer?.onSearchStart?.(plan.allQueries);
-            const results = await orchestrationService.runSearchBurst(plan.allQueries, this.config, signal, (links: number) => {
-                observer?.onSearchProgress?.(links);
-            });
-            observer?.onSearchComplete?.(results.reduce((sum, r) => sum + (r.results?.length || 0), 0));
-            researcherLinks = await orchestrationService.distributeSearchResults(plan, results);
-        }
+        let storeLinks: Map<string, { url: string; description: string }[]> | undefined;
+
+        const searchTask = (plan.allQueries && plan.allQueries.length > 0)
+          ? (async () => {
+              observer?.onSearchStart?.(plan.allQueries!);
+              const results = await orchestrationService.runSearchBurst(plan.allQueries!, this.config, signal, (links: number) => {
+                  observer?.onSearchProgress?.(links);
+              });
+              observer?.onSearchComplete?.(results.reduce((sum, r) => sum + (r.results?.length || 0), 0));
+              researcherLinks = await orchestrationService.distributeSearchResults(plan, results);
+            })()
+          : Promise.resolve();
+
+        const storeTask = (this.config.KNOWLEDGE_STORE_ENABLED && plan.researchers && plan.researchers.length > 0)
+          ? (async () => {
+              try {
+                const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+                if (!ksService.isReady()) {
+                  logger.debug('[DeepOrchestrator] Knowledge store service not ready, skipping per-researcher store queries');
+                  return;
+                }
+                const store = await ksService.getStore();
+                if (store && typeof store.findRelevantUrls === 'function') {
+                  const storeMap = new Map<string, { url: string; description: string }[]>();
+                  await Promise.all((plan.researchers ?? []).map(async (researcher) => {
+                    const entries = await store.findRelevantUrls(researcher.goal, { limit: 4 });
+                    if (entries.length > 0) {
+                      storeMap.set(String(researcher.id), entries);
+                      logger.debug(`[DeepOrchestrator] Researcher ${researcher.id}: ${entries.length} store URL(s) from goal query`);
+                    }
+                  }));
+                  if (storeMap.size > 0) storeLinks = storeMap;
+                }
+              } catch (err) {
+                logger.warn('[DeepOrchestrator] Per-researcher store queries failed (non-fatal):', err);
+              }
+            })()
+          : Promise.resolve();
+
+        await Promise.all([searchTask, storeTask]);
 
         // 3. Researcher Phase
         if (plan.researchers && plan.researchers.length > 0) {
@@ -271,7 +273,7 @@ export class DeepResearchOrchestrator {
                 },
                 currentRound: this.currentRound,
                 signal
-            }, researcherLinks);
+            }, researcherLinks, storeLinks);
         }
 
         // 4. Store synthesized descriptions for semantic search
@@ -310,7 +312,6 @@ export class DeepResearchOrchestrator {
               mustSynthesize: true,
               signal,
               observer,
-              historicalLinksSection,
               excludeTools: this.options.excludeTools,
           });
           observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);

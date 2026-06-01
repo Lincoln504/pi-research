@@ -44,7 +44,7 @@ describe('WriterQueue', () => {
     queue.enqueue({ url: 'https://test.com', markdown: 'description', metadata: { ingestionType: 'synthesis-description' } });
     await queue.drain();
     const docs = vi.mocked(mockStore.addDocuments).mock.calls[0][0];
-    const expectedHash = createHash('sha256').update('description').digest('hex');
+    const expectedHash = createHash('sha256').update('description').update('').digest('hex');
     expect(docs[0].metadata.contentHash).toBe(expectedHash);
   });
 
@@ -70,7 +70,7 @@ describe('WriterQueue', () => {
   });
 
   it('should deduplicate same content for matching ingestionType', async () => {
-    const hash = createHash('sha256').update('description').digest('hex');
+    const hash = createHash('sha256').update('description').update('').digest('hex');
     mockStore.findByUrl.mockResolvedValue([{
       url: 'https://test.com',
       text: 'description',
@@ -82,6 +82,28 @@ describe('WriterQueue', () => {
     await queue.drain();
 
     expect(mockStore.addDocuments).not.toHaveBeenCalled();
+  });
+
+  it('should re-ingest when content changes even if description is the same', async () => {
+    const hash = createHash('sha256').update('description').update('old content').digest('hex');
+    mockStore.findByUrl.mockResolvedValue([{
+      url: 'https://test.com',
+      text: 'description',
+      metadata: { contentHash: hash, ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
+
+    // Same description, different content
+    queue.enqueue({
+      url: 'https://test.com',
+      markdown: 'description',
+      content: 'new content',  // different from 'old content'
+      metadata: { ingestionType: 'synthesis-description' },
+    });
+    await queue.drain();
+
+    expect(mockStore.deleteByUrlAndType).toHaveBeenCalledWith('https://test.com', 'synthesis-description');
+    expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 
   it('drain() returns immediately when queue is empty and not processing', async () => {

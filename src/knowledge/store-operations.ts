@@ -85,8 +85,12 @@ export async function searchStore(
 
   const filteredResults = results
     .map(r => {
-      let metadata: Record<string, unknown> = {};
-      try { metadata = JSON.parse(r.metadata as string); } catch { /* corrupted row — skip */ }
+      let metadata: Record<string, unknown>;
+      try {
+        metadata = JSON.parse(r.metadata as string) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
       return {
         url: r.url as string,
         text: r.text as string,
@@ -95,7 +99,7 @@ export async function searchStore(
         timestamp: Number(r.timestamp),
       };
     })
-    .filter(doc => doc.metadata['ingestionType'] === 'synthesis-description');
+    .filter((doc): doc is NonNullable<typeof doc> => doc !== null);
 
   const duration = Date.now() - startTime;
   metrics.observe('knowledge_store_search_duration_ms', duration);
@@ -154,7 +158,7 @@ export async function findRelevantUrls(
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
   limit: number
-): Promise<string[]> {
+): Promise<{ url: string; description: string }[]> {
   const startTime = Date.now();
   const rowCount = await table.countRows();
   if (rowCount === 0) {
@@ -173,17 +177,27 @@ export async function findRelevantUrls(
     .limit(limit)
     .toArray();
 
-  const urls = results
-    .filter(r => {
-      try { return JSON.parse(r.metadata as string).ingestionType === 'synthesis-description'; } catch { return false; }
-    })
-    .map(r => r.url as string);
-  const uniqueUrls = Array.from(new Set(urls));
+  const entries: { url: string; description: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of results) {
+    const url = r.url as string;
+    if (seen.has(url)) continue;
+    seen.add(url);
+
+    let description = '';
+    try {
+      const meta = JSON.parse(r.metadata as string);
+      description = meta.description as string ?? '';
+    } catch { /* ignore */ }
+    
+    if (!description) description = (r.text as string ?? '').substring(0, 300);
+    entries.push({ url, description });
+  }
 
   const duration = Date.now() - startTime;
   metrics.observe('knowledge_store_find_urls_duration_ms', duration);
   metrics.increment('knowledge_store_find_urls_total', 1, { status: 'success' });
-  metrics.increment('knowledge_store_urls_found_total', uniqueUrls.length);
+  metrics.increment('knowledge_store_urls_found_total', entries.length);
 
-  return uniqueUrls;
+  return entries;
 }

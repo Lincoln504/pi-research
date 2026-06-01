@@ -100,7 +100,7 @@ export class PlanningService implements IPlanningService {
   // ========================================================================
 
   async generatePlan(options: GeneratePlanOptions): Promise<ResearchPlan> {
-    const { sessionId, query, complexity, model, signal, historicalLinksSection = '' } = options;
+    const { sessionId, query, complexity, model, signal } = options;
 
     logger.log(`[${this.name}] Generating plan for complexity ${complexity} (Session: ${sessionId})`);
     metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity) });
@@ -116,7 +116,6 @@ export class PlanningService implements IPlanningService {
       .replace('{QUERY_BUDGET}', queryBudget.toString())
       .replace('{COMPLEXITY_LABEL}', complexityLabel)
       .replace('{COMPLEXITY_GUIDANCE}', complexityGuidance)
-      .replace('{{historical_links_section}}', historicalLinksSection)
       .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
           ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
           : '');
@@ -278,7 +277,6 @@ export class PlanningService implements IPlanningService {
       previousPlan,
       totalResearchersPlanned,
       mustSynthesize = false,
-      historicalLinksSection = '',
       observer,
     } = options;
 
@@ -305,7 +303,6 @@ export class PlanningService implements IPlanningService {
       .replace('{COMPLEXITY_GUIDANCE}', getEvaluatorComplexityGuidance(complexity))
       .replace('{ROUND_PHASE_GUIDANCE}', getRoundPhaseGuidance(round, maxRounds, complexity))
       .replace('{{previous_queries_section}}', previousQueriesSection)
-      .replace('{{historical_links_section}}', historicalLinksSection)
       .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
           ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
           : '');

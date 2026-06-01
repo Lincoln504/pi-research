@@ -7,6 +7,11 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
 import type { IWriterQueue, IngestionItem } from '../core/interfaces/knowledge-interfaces.ts';
 
+function isConnectionRefused(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('ECONNREFUSED');
+}
+
 export type { IngestionItem };
 
 export interface WriterQueueOptions {
@@ -53,7 +58,17 @@ export class WriterQueue implements IWriterQueue {
       try {
         await this.ingest(item);
       } catch (err) {
-        logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
+        if (isConnectionRefused(err)) {
+          logger.warn(`[writer-queue] Embedder unreachable for ${item.url}, retrying once after 2s...`);
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            await this.ingest(item);
+          } catch (retryErr) {
+            logger.error(`[writer-queue] Retry failed for ${item.url}, dropping:`, retryErr);
+          }
+        } else {
+          logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
+        }
       }
     }
 
@@ -73,7 +88,7 @@ export class WriterQueue implements IWriterQueue {
       return;
     }
 
-    const hash = createHash('sha256').update(item.markdown).digest('hex');
+    const hash = createHash('sha256').update(item.markdown).update(item.content ?? '').digest('hex');
 
     if (this.options.store.isStoreClosed()) {
       logger.warn(`[writer-queue] Skipping ingest for ${item.url} — store is closing`);

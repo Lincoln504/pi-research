@@ -27,7 +27,6 @@ export interface ResearcherConfig {
   name: string;
   goal: string;
   queries: string[];
-  historicalLinks?: string[];
 }
 
 // ============================================================================
@@ -39,7 +38,6 @@ export const ResearcherConfigSchema = Type.Object({
   name: Type.String(),
   goal: Type.String(),
   queries: Type.Array(Type.String()),
-  historicalLinks: Type.Optional(Type.Array(Type.String()))
 });
 
 export const ResearchPlanSchema = Type.Object({

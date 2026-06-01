@@ -319,11 +319,6 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
   const batchDuration = Date.now() - batchStart;
   metrics.observe('scrape_batch_latency_ms', batchDuration);
   
-  const successes = results.filter(r => r.success).length;
-  const failures = results.length - successes;
-  metrics.increment('scrape_operations_total', successes, { status: 'success' });
-  metrics.increment('scrape_operations_total', failures, { status: 'error' });
-  
   return results;
 }
 

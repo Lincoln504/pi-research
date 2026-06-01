@@ -93,7 +93,6 @@ export function createScrapeTool(options: {
     parameters: ScrapeParams,
     async execute(_callId: string, params: unknown, signal: AbortSignal, _onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
       const callStartTime = Date.now();
-      metrics.increment('tool_scrape_calls_total', 1);
 
       // Rate-limit enforcement (only when tracker is present)
       if (options.tracker) {
@@ -194,7 +193,10 @@ export function createScrapeTool(options: {
             const cacheHit = await store.rebuildDocument(normalized);
 
             if (cacheHit) {
-              cachedResults.push({ url, markdown: cacheHit.text });
+              const advisoryHint = cacheHit.description
+                ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
+                : '';
+              cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });
               const idx = urlsToFetch.indexOf(url);
               if (idx !== -1) urlsToFetch.splice(idx, 1);
             }

@@ -493,7 +493,6 @@ describe('generateResearchers', () => {
       name: 'R1',
       goal: 'do research',
       queries: ['a', 'b'],
-      historicalLinks: ['http://example.com'],
     };
     const plan = {
       action: 'delegate' as const,
@@ -506,7 +505,6 @@ describe('generateResearchers', () => {
       name: 'R1',
       goal: 'do research',
       queries: ['a', 'b'],
-      historicalLinks: ['http://example.com'],
     });
   });
 

@@ -3,6 +3,7 @@
  */
 
 import type { ResearcherConfig } from '../core/service-interfaces.ts';
+import type { StoreUrlEntry } from '../core/interfaces/knowledge-interfaces.ts';
 export type { RunResearchersOptions } from '../core/interfaces/orchestration-interfaces.ts';
 
 /**
@@ -11,7 +12,7 @@ export type { RunResearchersOptions } from '../core/interfaces/orchestration-int
 export interface RunResearcherOptions {
   config: ResearcherConfig;
   initialLinks: string[];
-  historicalUrls: string[];
+  historicalUrls: StoreUrlEntry[];
   sessionId: string;
   researchId: string;
   round: number;

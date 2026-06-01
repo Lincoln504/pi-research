@@ -20,7 +20,7 @@ import { logger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IWriterQueue, IResearchOrchestration } from '../core/service-interfaces.ts';
+import type { IWriterQueue, IKnowledgeStoreService, IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { Config } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
@@ -73,7 +73,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param options - Run options
    * @param researcherLinks - Optional map of researcher ID -> search results
    */
-  async runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>): Promise<void> {
+  async runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>, storeLinks?: Map<string, { url: string; description: string }[]>): Promise<void> {
     const { plan, options: orchestratorOptions, currentRound, signal } = options;
     const { sessionId, researchId, observer } = orchestratorOptions;
 
@@ -122,7 +122,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         const id = String(configItem.id);
         try {
           const initialLinks = researcherLinks?.get(id) || [];
-          const historicalUrls = configItem.historicalLinks || [];
+          const historicalUrls = storeLinks?.get(id) || [];
 
           await runResearcher({
             ...orchestratorOptions,
@@ -245,13 +245,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
             writer.enqueue({
               url: normalizeUrl(link.url),
               markdown: link.description,
+              content: getCachedScrapedContent(researchId, link.url) ?? undefined,
               metadata: {
                 researchId,
                 round,
                 researcherId: key,
                 description: link.description,
                 sourceOrigin: link.url,
-                fullContentSnippet: getCachedScrapedContent(researchId, link.url)?.substring(0, 5000)
               }
             });
             enqueued++;
@@ -262,6 +262,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (enqueued > 0) {
         logger.info(`[ResearchOrchestrationService] Enqueued ${enqueued} citations from ${researcherCount} researchers for round ${round}`);
         await writer.drain();
+        const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+        if (ksService.isReady()) {
+          const store = await ksService.getStore();
+          store.rebuildFtsIndex().catch(err => {
+            logger.warn('[ResearchOrchestrationService] FTS index rebuild failed (non-fatal):', err);
+          });
+        }
       } else if (researcherCount > 0) {
         logger.warn(`[ResearchOrchestrationService] No valid citations found among ${researcherCount} researchers in round ${round}`);
       }

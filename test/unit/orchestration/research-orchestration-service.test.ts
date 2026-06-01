@@ -350,10 +350,52 @@ describe('ResearchOrchestrationService', () => {
     it('handles synthesis service with no reports', async () => {
         const config = { KNOWLEDGE_STORE_ENABLED: true };
         mockSynthesisService.getAllReports.mockReturnValue(new Map());
-  
+
         await service.storeLinkDescriptions('s1', 1, 'r1', config as any);
-  
+
         expect(mockWriter.enqueue).not.toHaveBeenCalled();
       });
+  });
+
+  // =========================================================================
+  // runResearchers
+  // =========================================================================
+
+  describe('runResearchers', () => {
+    it('runResearchers passes storeLinks to each researcher as historicalUrls', async () => {
+      const { runResearcher } = await import('../../../src/orchestration/researcher-executor.ts');
+      const mockRunResearcher = vi.mocked(runResearcher);
+      mockRunResearcher.mockResolvedValue(undefined);
+
+      vi.mocked(getService).mockResolvedValue({
+        name: 'planning',
+        lifecycle: 'initialized',
+        initialize: vi.fn(),
+        dispose: vi.fn(),
+        getCurrentPlan: vi.fn().mockReturnValue(null),
+      } as any);
+
+      const plan = {
+        researchers: [{ id: 'r1', name: 'R1', goal: 'g', queries: ['q'] }],
+      };
+      const storeLinks = new Map([
+        ['r1', [{ url: 'https://store.com', description: 'Store description' }]],
+      ]);
+
+      await service.runResearchers({
+        plan: plan as any,
+        options: {
+          sessionId: 's1', researchId: 'r1',
+          config: { RESEARCHER_MAX_RETRIES: 0, RESEARCHER_MAX_RETRY_DELAY_MS: 0, RESEARCHER_TIMEOUT_MS: 5000 },
+          ctx: {},
+          model: {},
+        } as any,
+        currentRound: 1,
+      }, undefined, storeLinks);
+
+      expect(mockRunResearcher).toHaveBeenCalledOnce();
+      const callArgs = mockRunResearcher.mock.calls[0][0];
+      expect(callArgs.historicalUrls).toEqual([{ url: 'https://store.com', description: 'Store description' }]);
+    });
   });
 });

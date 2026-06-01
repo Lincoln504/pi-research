@@ -15,6 +15,14 @@ export interface IngestionItem {
 }
 
 /**
+ * A URL entry returned from the knowledge store with its description
+ */
+export interface StoreUrlEntry {
+  url: string;
+  description: string;
+}
+
+/**
  * Embedder interface for text embedding operations
  */
 export interface IEmbedder {
@@ -37,8 +45,8 @@ export interface IKnowledgeStore extends IService {
   rebuildFtsIndex(): Promise<void>;
   count(): Promise<number>;
   search(query: string, options?: { limit?: number }): Promise<any[]>;
-  findRelevantUrls(query: string, options?: { limit?: number }): Promise<string[]>;
-  rebuildDocument(url: string): Promise<any | null>;
+  findRelevantUrls(query: string, options?: { limit?: number }): Promise<StoreUrlEntry[]>;
+  rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null>;
   findDocumentsByUrl(url: string): Promise<any[]>;
 }
 

@@ -27,7 +27,6 @@ export interface GeneratePlanOptions {
   complexity: 1 | 2 | 3;
   model: Model<any>;
   signal?: AbortSignal;
-  historicalLinksSection?: string;
   observer?: ResearchObserver;
   excludeTools?: string[];
 }
@@ -57,7 +56,6 @@ export interface UpdatePlanOptions {
   previousPlan: ResearchPlan | null;
   totalResearchersPlanned: number;
   mustSynthesize?: boolean;
-  historicalLinksSection?: string;
   observer?: ResearchObserver;
   excludeTools?: string[];
 }

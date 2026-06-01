@@ -155,12 +155,30 @@ describe('KnowledgeStore', () => {
       url: 'https://example.com/doc',
       text: 'researcher description of the page',
       content: fullPageContent,
-      metadata: { ingestionType: 'synthesis-description' },
+      metadata: { ingestionType: 'synthesis-description', description: 'A test description' },
       timestamp: Date.now(),
     }]);
 
     const rebuilt = await store.rebuildDocument('https://example.com/doc');
     expect(rebuilt?.text).toBe(fullPageContent);
+    expect(rebuilt?.description).toBe('A test description');
+  });
+
+  it('rebuildDocument returns description: null when metadata has no description field', async () => {
+    await store.open();
+    const fullPageContent = 'Content without description metadata.';
+
+    await store.addDocuments([{
+      url: 'https://example.com/nodesc',
+      text: 'researcher description',
+      content: fullPageContent,
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }]);
+
+    const rebuilt = await store.rebuildDocument('https://example.com/nodesc');
+    expect(rebuilt?.text).toBe(fullPageContent);
+    expect(rebuilt?.description).toBeNull();
   });
 
   it('rebuildDocument returns null when synthesis-description row has no content field', async () => {
@@ -191,14 +209,18 @@ describe('KnowledgeStore', () => {
       { url: 'https://example.com/other', text: 'a different document entirely', metadata: { chunkIndex: 0, ingestionType: 'synthesis-description' }, timestamp: Date.now() },
     ]);
 
-    const urls = await store.findRelevantUrls('document chunk', { limit: 10 });
+    const entries = await store.findRelevantUrls('document chunk', { limit: 10 });
 
-    // Result is an array of unique URLs — no duplicates
-    const unique = new Set(urls);
-    expect(unique.size).toBe(urls.length);
+    // Result is an array of unique URL entries — no duplicates
+    const uniqueUrls = entries.map(e => e.url);
+    const unique = new Set(uniqueUrls);
+    expect(unique.size).toBe(entries.length);
     // Both source URLs should appear
-    expect(urls).toContain('https://example.com/dedup');
-    expect(urls).toContain('https://example.com/other');
+    expect(uniqueUrls).toContain('https://example.com/dedup');
+    expect(uniqueUrls).toContain('https://example.com/other');
+    // Each entry should have url and description fields
+    expect(entries[0]).toHaveProperty('url');
+    expect(typeof entries[0].description).toBe('string');
   });
 
   it('count() returns 0 before open and the number of documents after insertion', async () => {
