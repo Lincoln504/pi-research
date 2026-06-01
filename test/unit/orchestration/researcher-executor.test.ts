@@ -115,7 +115,6 @@ function makeOptions(overrides: Partial<RunResearcherOptions> = {}): RunResearch
     model: STUB_MODEL,
     researchConfig: SYSTEM_CONFIG as any,   // system config (timeouts, retries)
     planningService: STUB_PLANNING_SERVICE,
-    sessionStart: Date.now(),
     observer: undefined,
     signal: undefined,
     ...overrides,
