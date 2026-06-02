@@ -55,6 +55,13 @@ setBrowserCleanup(cleanupBrowser);
 // Setup orphaned worker protection
 setupOrphanProtection();
 
+// When both search and scrape are mocked, skip Firefox entirely in task handlers
+// and in the eager warm-up below. Firefox startup in cluster workers takes 60-90s
+// on constrained CI runners; mocked tasks don't need a real browser at all.
+const FULL_MOCK_MODE =
+  process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+  process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+
 /**
  * Main task execution function
  */
@@ -76,6 +83,27 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
         error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)`,
         duration: queueTime
       };
+    }
+  }
+
+  if (FULL_MOCK_MODE) {
+    if (type === 'search') {
+      return {
+        results: [{ title: 'Mock Result', url: 'https://example.com/mock', content: `Mock search result for: ${query ?? ''}` }],
+        duration: Date.now() - startTime,
+        jitter: 0,
+      };
+    }
+    if (type === 'scrape') {
+      return {
+        contentType: 'text/html',
+        html: `<html><body><p>Mock content for ${url ?? ''}</p></body></html>`,
+        duration: Date.now() - startTime,
+        jitter: 0,
+      };
+    }
+    if (type === 'healthcheck') {
+      return { success: true, navMs: 0, duration: Date.now() - startTime };
     }
   }
 
@@ -120,5 +148,8 @@ export default new ClusterWorker(runTask, {
   killHandler: createKillHandler(),
 });
 
-// Initialize browser when worker comes online
-initBrowser().catch(() => {});
+// Eagerly warm the browser when the worker starts. Skipped in full mock mode
+// so Firefox is never launched on constrained CI runners where startup takes 60-90s.
+if (!FULL_MOCK_MODE) {
+  initBrowser().catch(() => {});
+}

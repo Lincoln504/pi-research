@@ -531,7 +531,7 @@ describe('Concurrent Operations', () => {
       // Verify metrics
       expect(metrics.totalOperations).toBe(concurrency);
       expect(metrics.successfulOperations).toBeGreaterThan(0);
-      expect(metrics.averageDurationMs).toBeGreaterThan(0);
+      expect(metrics.averageDurationMs).toBeGreaterThanOrEqual(0); // May be <1ms in mock mode due to Date.now() resolution
       expect(metrics.maxDurationMs).toBeGreaterThanOrEqual(metrics.minDurationMs);
 
       // Note: wall-clock timing comparison (totalDuration < avgDuration * N * 0.8)
