@@ -91,7 +91,9 @@ jobs:
       contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
-    timeout-minutes: 60
+    # 90 min: real browser operations (DuckDuckGo searches via camoufox) for
+    # browser-pool-failover and related suites take 50-70 min total on CI.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
