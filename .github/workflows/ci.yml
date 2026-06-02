@@ -17,15 +17,36 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   ONNXRUNTIME_NODE_SKIP_BINARIES: 1
 
 jobs:
-  lint:
+  analyze:
+    name: Analyze
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,8 +69,6 @@ jobs:
 
   type-check:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,8 +87,6 @@ jobs:
   unit-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -87,8 +104,6 @@ jobs:
   integration-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
     # 60 min: Integration tests involve real browser launches (Camoufox) and
@@ -199,8 +214,6 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

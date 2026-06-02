@@ -73,10 +73,21 @@ export async function setupMocking(context: any): Promise<void> {
   logToDebugFile('INFO', `[Worker-${workerId}] Setting up browser mocking (Search: ${mockSearch}, Scrape: ${mockScrape})`);
 
   await context.route('**', (route: any, request: any) => {
-    const url = request.url();
+    const urlStr = request.url();
+    let url: URL;
+    try {
+      url = new URL(urlStr);
+    } catch {
+      route.continue();
+      return;
+    }
 
-    if (mockSearch && url.includes('duckduckgo.com')) {
-      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking search response for: ${url}`);
+    const isDuckDuckGo = url.hostname === 'duckduckgo.com' || 
+                         url.hostname === 'lite.duckduckgo.com' ||
+                         url.hostname.endsWith('.duckduckgo.com');
+
+    if (mockSearch && isDuckDuckGo) {
+      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking search response for: ${urlStr}`);
       route.fulfill({
         status: 200,
         contentType: 'text/html',
@@ -106,8 +117,8 @@ export async function setupMocking(context: any): Promise<void> {
       return;
     }
 
-    if (mockScrape && !url.includes('duckduckgo.com')) {
-      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking scrape response for: ${url}`);
+    if (mockScrape && !isDuckDuckGo) {
+      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking scrape response for: ${urlStr}`);
       route.fulfill({
         status: 200,
         contentType: 'text/html',

@@ -21,14 +21,9 @@ import {
  */
 export function getRandomUserAgent(): string {
   try {
-    const buffer = crypto.randomBytes(4);
-    const uint32 = buffer.readUInt32BE(0);
-    const index = uint32 % USER_AGENTS.length;
+    const index = crypto.randomInt(0, USER_AGENTS.length);
     const userAgent = USER_AGENTS[index];
-    if (!userAgent) {
-      return USER_AGENTS[0]!;
-    }
-    return userAgent!;
+    return userAgent ?? USER_AGENTS[0]!;
   } catch {
     return USER_AGENTS[0]!;
   }
