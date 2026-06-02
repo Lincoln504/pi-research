@@ -128,10 +128,11 @@ export class BrowserTaskScheduler implements IScheduler {
 
         // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
         // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
-        // However, we must add a 90s safety buffer for the task to wait in the worker pool queue.
-        // The worker itself enforces its own strict internal timeouts for the actual browser operations.
+        // The 180s safety buffer accounts for tasks sitting in the poolifier queue on
+        // constrained CI runners (2 vCPU) where browser init can take 30–50s per worker
+        // and multiple tasks may be backlogged before a slot opens.
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 90000;
+        const timeoutMs = baseTimeoutMs + 180000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
@@ -179,10 +180,11 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer(); // Keep server alive while clients are actively scraping
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        // Add a 90s safety buffer to account for worker queueing. The worker itself
-        // enforces the actual SCRAPE_TIMEOUT_MS limit on the browser operations.
+        // The 180s safety buffer accounts for tasks sitting in the poolifier queue on
+        // constrained CI runners. The worker itself enforces SCRAPE_TIMEOUT_MS on the
+        // actual browser operations.
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 90000;
+        const timeoutMs = baseTimeoutMs + 180000;
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);

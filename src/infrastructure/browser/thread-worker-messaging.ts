@@ -282,9 +282,11 @@ export async function executeScrapeTask(
       html = await page.content();
     }
 
-    // Add request delay jitter to mimic human behavior
-    const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms
-    await new Promise(r => setTimeout(r, jitter));
+    // Skip jitter in mock mode; in real browsing, add 500–1500ms to mimic human behavior
+    const jitter = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true'
+      ? 0
+      : Math.floor(Math.random() * 1000) + 500;
+    if (jitter > 0) await new Promise(r => setTimeout(r, jitter));
 
     await page.close();
     return { contentType, html, jitter };
