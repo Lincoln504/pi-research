@@ -87,7 +87,11 @@ export async function initBrowser(): Promise<void> {
         // coherently. Manual overrides for those via launch options are silently
         // ignored by Playwright; set them at context level if needed, or rely on
         // camoufox defaults for a consistent, coordinated fingerprint.
-        const launchTimeoutMs = 45000;
+        //
+        // 90s launch timeout: CI runners (2 vCPU) need up to 60s to start Firefox
+        // when it has both CPUs. The old 45s limit was too tight and caused silent
+        // init failures under resource pressure.
+        const launchTimeoutMs = 90000;
         const launchPromise = Camoufox({
           headless: true,
           humanize: true,
@@ -102,13 +106,20 @@ export async function initBrowser(): Promise<void> {
 
         const launchedBrowser = await Promise.race([
           launchPromise,
-          new Promise<never>((_, reject) => 
+          new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs)
           )
         ]);
 
         browser = launchedBrowser;
-        context = await browser.newContext();
+        // newContext() can hang if the browser process becomes unresponsive immediately
+        // after launch (e.g. OOM, GPU crash). Guard with a hard timeout.
+        context = await Promise.race([
+          browser.newContext(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Browser context creation timed out after 30000ms')), 30000)
+          )
+        ]);
         
         // Setup mocking for CI if enabled
         await setupMocking(context);

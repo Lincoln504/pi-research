@@ -163,7 +163,9 @@ jobs:
           PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
           PI_RESEARCH_MOCK_SEARCH: "true"
           PI_RESEARCH_MOCK_SCRAPE: "true"
-          PI_RESEARCH_WORKER_THREADS: "2"
+          # 1 worker so Firefox gets both vCPUs on the 2-vCPU CI runner;
+          # 2 workers competing caused per-worker startup to exceed 45s and all tasks to timeout.
+          PI_RESEARCH_WORKER_THREADS: "1"
       - name: Upload worker diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
