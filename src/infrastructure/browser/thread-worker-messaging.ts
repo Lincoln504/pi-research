@@ -61,6 +61,66 @@ function logToDebugFile(level: string, ...args: any[]): void {
 }
 
 /**
+ * Setup mocking for the browser context if configured via environment variables.
+ * This is used in CI to make integration tests fast and reliable without hitting real networks.
+ */
+export async function setupMocking(context: any): Promise<void> {
+  const mockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true';
+  const mockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+
+  if (!mockSearch && !mockScrape) return;
+
+  logToDebugFile('INFO', `[Worker-${workerId}] Setting up browser mocking (Search: ${mockSearch}, Scrape: ${mockScrape})`);
+
+  await context.route('**', (route: any, request: any) => {
+    const url = request.url();
+
+    if (mockSearch && url.includes('duckduckgo.com')) {
+      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking search response for: ${url}`);
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `
+          <html><body>
+            <form action="/lite/" method="post">
+              <input name="q" type="text">
+              <input type="submit" value="Search">
+            </form>
+            <table class="result-link">
+              <tr>
+                <td><a class="result-link" href="https://example.com/mock-result-1?uddg=https%3A%2F%2Fexample.com%2Ftarget-1">Mock Result 1</a></td>
+              </tr>
+              <tr>
+                <td class="result-snippet">This is a mocked search result snippet for testing purposes.</td>
+              </tr>
+              <tr>
+                <td><a class="result-link" href="https://example.com/mock-result-2?uddg=https%3A%2F%2Fexample.com%2Ftarget-2">Mock Result 2</a></td>
+              </tr>
+              <tr>
+                <td class="result-snippet">Another mocked snippet to verify multiple result extraction.</td>
+              </tr>
+            </table>
+          </body></html>
+        `
+      });
+      return;
+    }
+
+    if (mockScrape && !url.includes('duckduckgo.com')) {
+      logToDebugFile('DEBUG', `[Worker-${workerId}] Mocking scrape response for: ${url}`);
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `<html><body><h1>Mocked Page Content</h1><p>This content was mocked for ${url} during integration testing.</p></body></html>`
+      });
+      return;
+    }
+
+    route.continue();
+  });
+}
+
+/**
  * Extract search results from DuckDuckGo Lite page
  */
 async function extractSearchResults(page: any): Promise<any[]> {

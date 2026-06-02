@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'node:fs';
+import { setupMocking } from './thread-worker-messaging.ts';
 
 let browser: any = null;
 let context: any = null;
@@ -108,6 +109,10 @@ export async function initBrowser(): Promise<void> {
 
         browser = launchedBrowser;
         context = await browser.newContext();
+        
+        // Setup mocking for CI if enabled
+        await setupMocking(context);
+        
         logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
       }
     } catch (e: any) {

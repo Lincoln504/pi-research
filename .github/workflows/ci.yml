@@ -91,9 +91,10 @@ jobs:
       contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
-    # 90 min: real browser operations (DuckDuckGo searches via camoufox) for
-    # browser-pool-failover and related suites take 50-70 min total on CI.
-    timeout-minutes: 90
+    # 20 min: With PI_RESEARCH_MOCK_SEARCH/SCRAPE enabled, browser tests use 
+    # local Playwright interception instead of hitting real DuckDuckGo, 
+    # reducing total CI time from 70+ min to under 5 min.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -137,10 +138,15 @@ jobs:
           NODE_EOF
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
+        env:
+          PI_RESEARCH_MOCK_SEARCH: "true"
+          PI_RESEARCH_MOCK_SCRAPE: "true"
       - name: Integration Tests (Serial Group)
         run: npm run test:integration:serial
         env:
           PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
+          PI_RESEARCH_MOCK_SEARCH: "true"
+          PI_RESEARCH_MOCK_SCRAPE: "true"
       - name: Upload worker diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
