@@ -81,7 +81,7 @@ export async function setupMocking(context: any): Promise<void> {
         status: 200,
         contentType: 'text/html',
         body: `
-          <html><body>
+          <html><head><title>DuckDuckGo Lite</title></head><body>
             <form action="/lite/" method="post">
               <input name="q" type="text">
               <input type="submit" value="Search">

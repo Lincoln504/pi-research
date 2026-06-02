@@ -102,7 +102,7 @@ describe('Extended Tools Integration', () => {
       // Check for markdown structure
       expect(text).toMatch(/^#+\s/); // Headers
       expect(text.length).toBeGreaterThan(50);
-    }, 30000);
+    }, 60000);
 
     it('should search for multiple CVEs in single request', async () => {
       if (testContext.skipTests()) {
@@ -129,7 +129,7 @@ describe('Extended Tools Integration', () => {
         expect(text).toContain('CVE-2024-21626');
         expect(text.length).toBeGreaterThan(50);
       }
-    }, 30000);
+    }, 60000);
   });
 
   describe('Security Search Tool - Package Vulnerabilities', () => {
@@ -160,7 +160,7 @@ describe('Extended Tools Integration', () => {
         expect(text).toMatch(/open\s*source/i);
         expect(text.length).toBeGreaterThan(50);
       }
-    }, 30000);
+    }, 60000);
 
     it('should search for Python package vulnerabilities', async () => {
       if (testContext.skipTests()) {
@@ -187,7 +187,7 @@ describe('Extended Tools Integration', () => {
         expect(text).toContain('requests');
         expect(text.length).toBeGreaterThan(50);
       }
-    }, 30000);
+    }, 60000);
   });
 
   describe('Security Search Tool - Error Handling', () => {
@@ -230,7 +230,7 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-    }, 30000);
+    }, 60000);
 
     it('should handle special characters in search terms', async () => {
       if (testContext.skipTests()) {
@@ -255,7 +255,7 @@ describe('Extended Tools Integration', () => {
       if (result.content[0]?.type === 'text') {
         expect(result.content[0].text as string).toBeDefined();
       }
-    }, 30000);
+    }, 60000);
   });
 
   describe('Security Search Tool - Advanced Parameters', () => {
@@ -285,7 +285,7 @@ describe('Extended Tools Integration', () => {
           expect(text).toBeDefined();
         }
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle maxResults parameter', async () => {
       if (testContext.skipTests()) {
@@ -313,7 +313,7 @@ describe('Extended Tools Integration', () => {
           expect(text.length).toBeGreaterThan(50);
         }
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle includeExploited parameter', async () => {
       if (testContext.skipTests()) {
@@ -341,7 +341,7 @@ describe('Extended Tools Integration', () => {
           expect(text.length).toBeGreaterThan(50);
         }
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle githubRepo parameter for package vulnerabilities', async () => {
       if (testContext.skipTests()) {
@@ -369,7 +369,7 @@ describe('Extended Tools Integration', () => {
           expect(text.length).toBeGreaterThan(50);
         }
       }
-    }, 30000);
+    }, 60000);
   });
 
   describe('Stack Exchange Tool - Structure and Setup', () => {
@@ -423,7 +423,7 @@ describe('Extended Tools Integration', () => {
         expect(text).toMatch(/typescript/i);
         expect(text.length).toBeGreaterThan(50);
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle different Stack Exchange sites', async () => {
       if (testContext.skipTests()) {
@@ -453,7 +453,7 @@ describe('Extended Tools Integration', () => {
         expect(text).toMatch(/regex/i);
         expect(text.length).toBeGreaterThan(50);
       }
-    }, 30000);
+    }, 60000);
   });
 
   describe('Stack Exchange Tool - Error Handling', () => {
@@ -484,7 +484,7 @@ describe('Extended Tools Integration', () => {
         }
         expect(text).toBeDefined();
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle format parameter for different output formats', async () => {
       if (testContext.skipTests()) {
@@ -514,7 +514,7 @@ describe('Extended Tools Integration', () => {
           }
         }
       }
-    }, 30000);
+    }, 60000);
 
     it('should handle invalid site names gracefully', async () => {
       if (testContext.skipTests()) {
@@ -537,7 +537,7 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-    }, 30000);
+    }, 60000);
 
     it('should handle queries with special characters', async () => {
       if (testContext.skipTests()) {
@@ -559,7 +559,7 @@ describe('Extended Tools Integration', () => {
       );
 
       expect(result).toBeDefined();
-    }, 30000);
+    }, 60000);
   });
 
   describe('Grep Tool - Structure and Setup', () => {

@@ -71,21 +71,8 @@ export async function setupLifecycle(): Promise<TestContext> {
     skipTests: () => false,
     init: async () => {},
     beforeEach: async () => {
-      // Reset service instances (not registrations) before each test
-      // This ensures clean state without losing service registrations
-      try {
-        const { tryGetService } = await import('../../../src/core/service-registry.ts');
-        const { ServiceNames } = await import('../../../src/core/service-interfaces.ts');
-        const { SchedulerService } = await import('../../../src/core/scheduler-service.ts');
-        
-        // Reset scheduler service if it exists
-        const schedulerService = tryGetService<InstanceType<typeof SchedulerService>>(ServiceNames.SCHEDULER);
-        if (schedulerService && schedulerService.getSchedulerInstance()) {
-          await stopBrowserManager();
-        }
-      } catch (err) {
-        logger.debug('[test] Error during beforeEach cleanup:', err);
-      }
+      // Service Registry reset is handled in shutdown() per-file.
+      // Individual tests can still call stopBrowserManager() if they need a fresh pool.
     },
     afterEach: async () => {
       // Clean up after each test

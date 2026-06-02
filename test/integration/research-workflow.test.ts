@@ -23,7 +23,7 @@ import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-
 vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
   const actual = await importOriginal() as any;
   const mockResponse = {
-    content: [{ type: 'text', text: '{"action": "synthesize", "content": "Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic. The research was successful and all goals were met. The information gathered is authoritative and relevant. This synthesis is at least 100 characters long to satisfy the test assertions."}' }],
+    content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\n### CITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
     usage: { totalTokens: 100, cost: { total: 0.01 } },
   };
   return {

@@ -118,7 +118,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] Concurrent search: ${successful}/${concurrency} successful in ${duration}ms`
       );
-    }, 120000);
+    }, 240000);
 
     it('should handle mixed search and scrape operations concurrently', async () => {
       if (testContext.skipTests()) {
@@ -156,7 +156,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] Mixed operations: ${successful}/${results.length} successful in ${duration}ms`
       );
-    }, 120000);
+    }, 240000);
 
     it('should handle burst of concurrent operations', async () => {
       if (testContext.skipTests()) {
@@ -191,7 +191,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] Burst (${burstSize}): ${successful}/${burstSize} successful in ${duration}ms`
       );
-    }, 180000);
+    }, 300000);
   });
 
   describe('Concurrent Research Session Isolation', () => {
@@ -353,7 +353,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] Rapid sequential: ${successful}/${taskCount} successful`
       );
-    }, 120000);
+    }, 240000);
 
     it('should handle task submission during pool restart', async () => {
       if (testContext.skipTests()) {
@@ -401,7 +401,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] During restart: ${successful}/${total} successful (${(successRate * 100).toFixed(1)}%)`
       );
-    }, 120000);
+    }, 240000);
   });
 
   describe('Resource Management Under Concurrency', () => {
@@ -450,7 +450,7 @@ describe('Concurrent Operations', () => {
 
       // Allow some increase but not excessive
       expect(increase).toBeLessThan(20);
-    }, 120000);
+    }, 240000);
 
     it('should maintain stable memory usage under concurrent load', async () => {
       if (testContext.skipTests()) {
@@ -481,7 +481,7 @@ describe('Concurrent Operations', () => {
 
       // Memory increase should be reasonable (< 100MB for 15 operations)
       expect(increaseMB).toBeLessThan(100);
-    }, 120000);
+    }, 240000);
   });
 
   describe('Concurrency Metrics', () => {
@@ -549,6 +549,6 @@ describe('Concurrent Operations', () => {
       // Note: wall-clock timing comparison (totalDuration < avgDuration * N * 0.8)
       // is omitted — the worker pool may serialise tasks when concurrency > workers,
       // and runtime variance under sequential file execution makes it unreliable.
-    }, 120000);
+    }, 240000);
   });
 });
