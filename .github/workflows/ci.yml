@@ -91,10 +91,10 @@ jobs:
       contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
-    # 40 min: With PI_RESEARCH_MOCK_SEARCH/SCRAPE enabled, browser tests use 
-    # local Playwright interception instead of hitting real DuckDuckGo, 
-    # reducing total CI time significantly. Increased to 40m for safety buffer.
-    timeout-minutes: 40
+    # 20 min: With PI_RESEARCH_MOCK_SEARCH/SCRAPE enabled and worker threads
+    # limited to 1 to avoid resource contention, integration tests are 
+    # extremely fast and reliable.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -141,12 +141,14 @@ jobs:
         env:
           PI_RESEARCH_MOCK_SEARCH: "true"
           PI_RESEARCH_MOCK_SCRAPE: "true"
+          PI_RESEARCH_WORKER_THREADS: "1"
       - name: Integration Tests (Serial Group)
         run: npm run test:integration:serial
         env:
           PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
           PI_RESEARCH_MOCK_SEARCH: "true"
           PI_RESEARCH_MOCK_SCRAPE: "true"
+          PI_RESEARCH_WORKER_THREADS: "1"
       - name: Upload worker diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
