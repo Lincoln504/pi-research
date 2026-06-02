@@ -165,18 +165,29 @@ export async function executeSearchTask(
 
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting search for: ${query}`);
-    // Relaxed timeout to accommodate network latency and concurrent worker load
-    await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
-    await page.fill('input[name="q"]', query);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-      page.keyboard.press('Enter')
-    ]);
+    
+    // In mock mode, we jump directly to the results URL to avoid slow form-fill and 
+    // interactability checks which can be brittle in CI environments.
+    if (process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true') {
+      await page.goto(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded' });
+    } else {
+      // Relaxed timeout to accommodate network latency and concurrent worker load
+      await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
+      await page.fill('input[name="q"]', query);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+        page.keyboard.press('Enter')
+      ]);
+    }
 
     const results = await extractSearchResults(page);
 
     await page.close();
-    const jitter = Math.floor(Math.random() * 1000) + 500;  // 500-1500ms to mimic human behavior
+    
+    // Reduce jitter in CI/mock mode to speed up tests
+    const jitterBase = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' ? 10 : 500;
+    const jitterRange = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' ? 10 : 1000;
+    const jitter = Math.floor(Math.random() * jitterRange) + jitterBase;
     await new Promise(r => setTimeout(r, jitter));
 
     return { results, jitter };

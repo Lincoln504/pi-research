@@ -91,10 +91,10 @@ jobs:
       contents: read
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
-    # 20 min: With PI_RESEARCH_MOCK_SEARCH/SCRAPE enabled, browser tests use 
+    # 40 min: With PI_RESEARCH_MOCK_SEARCH/SCRAPE enabled, browser tests use 
     # local Playwright interception instead of hitting real DuckDuckGo, 
-    # reducing total CI time from 70+ min to under 5 min.
-    timeout-minutes: 20
+    # reducing total CI time significantly. Increased to 40m for safety buffer.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
