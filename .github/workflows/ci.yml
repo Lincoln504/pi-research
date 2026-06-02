@@ -114,10 +114,38 @@ jobs:
       - name: Pre-fetch Camoufox binary
         if: steps.cache-camoufox.outputs.cache-hit != 'true'
         run: npx camoufox-js fetch
+      # Firefox (even with headless:true) initialises GTK on startup, which
+      # requires a valid X11 display. Without one the browser process hangs
+      # waiting for a connection and every worker times out after 45 s.
+      # Xvfb is pre-installed on ubuntu-latest; we just need to start it.
+      - name: Start Xvfb virtual display
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 -ac &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          # Give Xvfb a moment to be ready before the browser workers start
+          sleep 1
+      - name: Verify camoufox launches
+        timeout-minutes: 2
+        run: |
+          node --input-type=module <<'NODE_EOF'
+          import { Camoufox } from 'camoufox-js';
+          const b = await Camoufox({ headless: true });
+          await b.close();
+          console.log('camoufox launch OK');
+          NODE_EOF
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
       - name: Integration Tests (Serial Group)
         run: npm run test:integration:serial
+        env:
+          PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
+      - name: Upload worker diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-logs-${{ github.run_id }}
+          path: /tmp/pi-workers-serial.log
+          if-no-files-found: ignore
 
   dep-graph:
     needs: [lint, type-check]
