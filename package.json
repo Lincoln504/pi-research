@@ -11,6 +11,9 @@
   },
   "files": [
     "src/",
+    "!src/.env",
+    "!src/.env.local",
+    "!src/.env.*.local",
     "docs/api/",
     "docs/guides/",
     "docs/index.md",
