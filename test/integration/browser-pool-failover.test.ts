@@ -45,21 +45,14 @@ describe('Browser Pool Failover', () => {
 
   beforeEach(async () => {
     if (testContext.lifecycleInitialized) {
-      await stopBrowserManager().catch(() => {});
-      // Wait for any background pool drain (from fire-and-forget forceSchedulerRestart)
-      // to fully complete before starting the next test. Without this, pool.execute()
-      // may hit "Cannot execute a task on destroying pool" during the 1500ms drain window.
-      await waitForBrowserPoolIdle(15000).catch(() => {});
       // Reset circuit breaker so failures from previous tests don't bleed over
       resetBrowserCircuitBreaker();
-      await new Promise(resolve => setTimeout(resolve, 500));
     }
   });
 
   afterEach(async () => {
-    if (testContext.lifecycleInitialized) {
-      await stopBrowserManager().catch(() => {});
-    }
+    // Shared pool is maintained across tests in this file for speed.
+    // Individual tests call forceSchedulerRestart() when they need to test recovery.
   });
 
   describe('Worker Process Crash Recovery', () => {

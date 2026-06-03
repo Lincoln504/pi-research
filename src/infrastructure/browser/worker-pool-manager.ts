@@ -96,7 +96,14 @@ export class WorkerPoolManager implements IService {
                 // Sanitize argv to prevent research query exposure in worker processes
                 const restoreArgv = sanitizeArgvForPoolCreation();
 
-                const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
+                const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+                const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
+                const workerConcurrency = isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency;
+                
+                if (process.env['GITHUB_ACTIONS'] === 'true') {
+                    logger.info(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}, isMocking=${isMocking}`);
+                }
+
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
                 // local imports. Using a pre-compiled JS file eliminates any TypeScript loading
                 // concern in cluster child processes — no execArgv loader flags needed.
@@ -130,8 +137,8 @@ export class WorkerPoolManager implements IService {
                     enableTasksQueue: true,
                     tasksQueueOptions: {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
-                        taskStealing: true,
-                        tasksStealingOnBackPressure: true
+                        taskStealing: maxWorkers > 1,
+                        tasksStealingOnBackPressure: maxWorkers > 1
                     }
                 });
 

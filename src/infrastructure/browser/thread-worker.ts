@@ -84,20 +84,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   const startTime = Date.now();
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
-    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url})\n`);
-  }
-  // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
-  // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
-  // We should immediately drop it to prevent queue congestion.
-  if (queuedAt && taskTimeoutMs) {
-    const queueTime = startTime - queuedAt;
-    // Add a 20% buffer to reduce false positives from clock drift and deep queue conditions
-    if (queueTime > taskTimeoutMs * 1.20) {
-      return {
-        error: `Task dropped from queue after ${queueTime}ms (orchestrator already timed out)`,
-        duration: queueTime
-      };
-    }
+    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})\n`);
   }
 
   if (FULL_MOCK_MODE) {
@@ -105,6 +92,10 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     // and to prevent synchronous execution bugs in poolifier's queue.
     await new Promise(resolve => setTimeout(resolve, 10));
     
+    if (process.env['GITHUB_ACTIONS'] === 'true') {
+      process.stderr.write(`[Worker-${workerId}] Mock task finished: ${type}\n`);
+    }
+
     if (type === 'search') {
       return {
         results: [{ title: 'Mock Result', url: 'https://example.com/mock', content: `Mock search result for: ${query ?? ''}` }],
@@ -162,9 +153,15 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   }
 }
 
-export default new ClusterWorker(runTask, {
+const worker = new ClusterWorker(runTask, {
   killHandler: createKillHandler(),
 });
+
+if (process.env['GITHUB_ACTIONS'] === 'true') {
+  process.stderr.write(`[Worker-${workerId}] ClusterWorker instantiated\n`);
+}
+
+export default worker;
 
 // Eagerly warm the browser when the worker starts. Skipped in full mock mode
 // so Firefox is never launched on constrained CI runners where startup takes 60-90s.

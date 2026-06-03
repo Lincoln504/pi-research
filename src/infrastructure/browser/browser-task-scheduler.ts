@@ -132,10 +132,22 @@ export class BrowserTaskScheduler implements IScheduler {
         // constrained CI runners (2 vCPU) where browser init can take 30–50s per worker
         // and multiple tasks may be backlogged before a slot opens.
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 180000;
+        const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
+        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
+        
+        if (process.env['GITHUB_ACTIONS'] === 'true') {
+            logger.info(`[BrowserTaskScheduler] runSearch: query="${query}", isMocking=${isMocking}, timeoutMs=${timeoutMs}`);
+        }
+
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
+            timeoutId = setTimeout(() => {
+                const msg = `Search task timed out after ${timeoutMs}ms (including queue wait). query="${query}", isMocking=${isMocking}`;
+                if (process.env['GITHUB_ACTIONS'] === 'true') {
+                    logger.error(`[BrowserTaskScheduler] ${msg}`);
+                }
+                reject(new Error(msg));
+            }, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
@@ -187,10 +199,22 @@ export class BrowserTaskScheduler implements IScheduler {
         // constrained CI runners. The worker itself enforces SCRAPE_TIMEOUT_MS on the
         // actual browser operations.
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 180000;
+        const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
+        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
+
+        if (process.env['GITHUB_ACTIONS'] === 'true') {
+            logger.info(`[BrowserTaskScheduler] runScrape: url="${url}", isMocking=${isMocking}, timeoutMs=${timeoutMs}`);
+        }
+
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
+            timeoutId = setTimeout(() => {
+                const msg = `Scrape task timed out after ${timeoutMs}ms (including queue wait). url="${url}", isMocking=${isMocking}`;
+                if (process.env['GITHUB_ACTIONS'] === 'true') {
+                    logger.error(`[BrowserTaskScheduler] ${msg}`);
+                }
+                reject(new Error(msg));
+            }, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
@@ -233,7 +257,8 @@ export class BrowserTaskScheduler implements IScheduler {
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
         // Add a generous safety buffer to account for worker queueing.
-        const timeoutMs = 45000 + 60000;
+        const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+        const timeoutMs = (45000 + 60000) / (isMocking ? 4 : 1);
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);

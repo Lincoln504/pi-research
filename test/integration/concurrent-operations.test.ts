@@ -58,6 +58,13 @@ describe('Concurrent Operations', () => {
     testDbDir = path.join(os.tmpdir(), `pi-concurrent-ops-${Date.now()}`);
   }, 30000);
 
+  beforeEach(async () => {
+    // Reset circuit breaker to ensure failures from previous tests don't 
+    // affect subsequent tests in the same file.
+    const { resetBrowserCircuitBreaker } = await import('../../src/infrastructure/browser/index.ts');
+    resetBrowserCircuitBreaker();
+  });
+
   afterAll(async () => {
     await teardownLifecycle(testContext);
     // Cleanup test database
@@ -98,6 +105,10 @@ describe('Concurrent Operations', () => {
 
       // Most should succeed (not including errors)
       const successful = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
+      if (successful === 0 && results.length > 0) {
+        const errors = results.map(r => r.status === 'fulfilled' ? (r.value?.error?.message || r.value?.error || 'Unknown Error') : r.reason);
+        console.error('[test] ALL tasks failed in this concurrent test. Errors:', JSON.stringify(errors, null, 2));
+      }
       expect(successful).toBeGreaterThan(0);
 
       // Note: wall-clock timing assertions are omitted here — real browser ops
@@ -141,6 +152,10 @@ describe('Concurrent Operations', () => {
 
       // Most should succeed (not including errors)
       const successful = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
+      if (successful === 0 && results.length > 0) {
+        const errors = results.map(r => r.status === 'fulfilled' ? (r.value?.error?.message || r.value?.error || 'Unknown Error') : r.reason);
+        console.error('[test] ALL tasks failed in this concurrent test. Errors:', JSON.stringify(errors, null, 2));
+      }
       expect(successful).toBeGreaterThan(0);
 
       logger.info(
