@@ -7,6 +7,7 @@
 
 import process from 'node:process';
 import cluster from 'node:cluster';
+import { isMainThread } from 'node:worker_threads';
 import { appendFileSync } from 'node:fs';
 
 let workerId: string = '';
@@ -29,6 +30,10 @@ export function getWorkerId(): string {
  * Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
  */
 export function setupIpcErrorHandler(): void {
+  if (!isMainThread) {
+    // In worker threads, errors are bubbled up to the parentPort
+    return;
+  }
   if (cluster.isWorker && cluster.worker) {
     cluster.worker.on('error', (err: any) => {
       if (err && err.code === 'ERR_IPC_CHANNEL_CLOSED') {
@@ -76,6 +81,12 @@ export function setBrowserCleanup(fn: () => Promise<void>): void {
  * Set up orphaned worker protection - shuts down the worker if parent process dies
  */
 export function setupOrphanProtection(): void {
+  // Orphan protection is primarily for separate processes (cluster).
+  // Threads die when the main process dies.
+  if (!isMainThread) {
+    return;
+  }
+
   if (!process.ppid) {
     return;
   }
@@ -155,13 +166,21 @@ export function createKillHandler(): () => Promise<void> {
     }
     // Clear the orphan check timer to prevent it from keeping the event loop alive
     cleanupOrphanProtection();
-    // Force process exit — without this, the orphan-detection setInterval keeps
-    // the event loop alive indefinitely after the IPC channel is disconnected.
-    // Delay by 100ms to allow Poolifier to send its acknowledgement over IPC
-    // before the process dies, otherwise pool.destroy() hangs for 5000ms.
-    setTimeout(() => {
-      logToDebugFile('INFO', `[Worker-${workerId}] Forcing process exit`);
-      process.exit(0);
-    }, 100).unref();
+
+    // In worker threads, we don't want to call process.exit() as it terminates the whole process.
+    // We only call it in cluster workers (processes).
+    if (isMainThread && !cluster.isWorker) {
+      // This is the primary process, do not exit.
+      return;
+    }
+
+    if (cluster.isWorker) {
+      // Force process exit for cluster workers — without this, the orphan-detection setInterval keeps
+      // the event loop alive indefinitely after the IPC channel is disconnected.
+      setTimeout(() => {
+        logToDebugFile('INFO', `[Worker-${workerId}] Forcing process exit (Cluster)`);
+        process.exit(0);
+      }, 100).unref();
+    }
   };
 }

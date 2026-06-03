@@ -151,6 +151,8 @@ jobs:
           await b.close();
           console.log('camoufox launch OK');
           NODE_EOF
+      - name: Build worker bundle
+        run: npm run build:worker
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
         env:

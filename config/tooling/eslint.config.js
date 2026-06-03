@@ -10,6 +10,8 @@ const config = [
       'dist/**',
       '*.d.ts',
       'examples/**',
+      // Compiled worker bundle — build artifact, not source
+      'src/infrastructure/browser/thread-worker.mjs',
     ],
   },
   // JavaScript recommended rules

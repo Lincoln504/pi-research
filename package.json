@@ -56,6 +56,7 @@
     "lint:fix": "npx eslint --config config/tooling/eslint.config.js src/ --fix",
     "type-check": "tsc --noEmit",
     "type-check:tests": "tsc --noEmit --project tsconfig.test.json",
+    "build:worker": "esbuild src/infrastructure/browser/thread-worker.ts --bundle --platform=node --format=esm --packages=external --outfile=src/infrastructure/browser/thread-worker.mjs",
     "test": "npm run test:unit",
     "test:unit": "vitest run --config config/tooling/vitest.config.unit.ts",
     "test:integration": "npm run test:integration:parallel && npm run test:integration:serial",
@@ -132,6 +133,7 @@
     "madge": "^8.0.0",
     "npm-check-updates": "^22.2.1",
     "tsuml2": "^0.17.1",
+    "esbuild": "^0.28.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

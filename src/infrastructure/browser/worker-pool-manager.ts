@@ -97,9 +97,11 @@ export class WorkerPoolManager implements IService {
                 const restoreArgv = sanitizeArgvForPoolCreation();
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.ts'), {
+                // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
+                // local imports. Using a pre-compiled JS file eliminates any TypeScript loading
+                // concern in cluster child processes — no execArgv loader flags needed.
+                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.mjs'), {
                     env: browserEnv,
-                    settings: { execArgv: ['--experimental-strip-types'] },
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
@@ -201,7 +203,7 @@ export class WorkerPoolManager implements IService {
                 logger.warn('[WorkerPoolManager] Pool destruction error:', e);
             }
             // Allow a brief moment for IPC channels and worker browser teardown to complete.
-            // Reduced from 1500ms to 200ms because browser processes are now also 
+            // Reduced from 1500ms to 200ms because browser processes are now also
             // explicitly cleaned up by the scheduler via killBrowserProcesses.
             await new Promise(resolve => setTimeout(resolve, 200));
             this.pool = null;
