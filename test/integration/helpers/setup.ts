@@ -75,12 +75,9 @@ export async function setupLifecycle(): Promise<TestContext> {
       // Individual tests can still call stopBrowserManager() if they need a fresh pool.
     },
     afterEach: async () => {
-      // Clean up after each test
-      try {
-        await stopBrowserManager();
-      } catch (err) {
-        logger.debug('[test] Error during afterEach cleanup:', err);
-      }
+      // Pool teardown happens once in shutdown() / afterAll — not per-test.
+      // Per-test stopBrowserManager() caused the f6621858 regression (8+ pool
+      // recreations per file, each requiring a 90s Firefox startup on CI).
     },
     shutdown: async () => {
       logger.log('[test] Shutting down browser manager and disposing services...');
