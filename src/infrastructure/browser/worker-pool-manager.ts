@@ -154,6 +154,7 @@ export class WorkerPoolManager implements IService {
                   setInterval(() => {
                     if (this.pool) {
                       const info = {
+                        pid: process.pid,
                         size: this.pool.workerNodes.length,
                         executingTasks: this.pool.info.executingTasks,
                         queuedTasks: this.pool.info.queuedTasks,
@@ -170,11 +171,6 @@ export class WorkerPoolManager implements IService {
 
                 // Restore original argv after pool is created
                 restoreArgv();
-
-                if (process.env['GITHUB_ACTIONS'] === 'true') {
-                    // Small delay to ensure cluster workers are fully ready before first task
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
 
                 // Secondary race check: if shutdown() was called concurrent with the
                 // async pool construction above (between the early check and here).

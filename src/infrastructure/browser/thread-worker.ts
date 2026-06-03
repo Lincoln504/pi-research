@@ -71,15 +71,13 @@ const FULL_MOCK_MODE =
 
 if (process.env['GITHUB_ACTIONS'] === 'true') {
   process.stderr.write(`[Worker-${workerId}] FULL_MOCK_MODE=${FULL_MOCK_MODE}\n`);
-  process.on('message', (msg: any) => {
-    process.stderr.write(`[Worker-${workerId}] RAW MESSAGE RECEIVED: ${JSON.stringify(msg).substring(0, 100)}\n`);
-  });
 }
 
 /**
  * Main task execution function
  */
 async function runTask(data: TaskData | undefined): Promise<TaskResult> {
+  const taskId = crypto.randomBytes(4).toString('hex');
   if (!data) {
     return { error: 'No task data provided', duration: 0 };
   }
@@ -88,16 +86,12 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
     const queueInfo = queuedAt ? ` (queuedAt=${queuedAt}, taskTimeoutMs=${taskTimeoutMs})` : '';
-    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})${queueInfo}\n`);
+    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})${queueInfo}\n`);
   }
 
   if (FULL_MOCK_MODE) {
-    // Yield the event loop to ensure IPC messages are processed correctly
-    // and to prevent synchronous execution bugs in poolifier's queue.
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
     if (process.env['GITHUB_ACTIONS'] === 'true') {
-      process.stderr.write(`[Worker-${workerId}] Mock task finished: ${type}\n`);
+      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Mock task finished: ${type}\n`);
     }
 
     if (type === 'search') {
@@ -124,26 +118,32 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     await initBrowser();
     const initMs = Date.now() - startTime;
 
+    let result: any;
     if (type === 'search') {
       if (!query) throw new Error('Search task requires a query');
-      const result = await executeSearchTask(getContext(), query);
-      return { results: result.results, duration: Date.now() - startTime, jitter: result.jitter };
-    }
-
-    if (type === 'scrape') {
+      const searchResult = await executeSearchTask(getContext(), query);
+      result = { results: searchResult.results, duration: Date.now() - startTime, jitter: searchResult.jitter };
+    } else if (type === 'scrape') {
       if (!url) throw new Error('Scrape task requires a URL');
-      const result = await executeScrapeTask(getContext(), url);
-      return { ...result, duration: Date.now() - startTime };
+      const scrapeResult = await executeScrapeTask(getContext(), url);
+      result = { ...scrapeResult, duration: Date.now() - startTime };
+    } else if (type === 'healthcheck') {
+      const healthResult = await executeHealthCheck(getContext(), initMs);
+      result = { ...healthResult, duration: Date.now() - startTime };
+    } else {
+      result = { error: 'Unknown task type', duration: Date.now() - startTime };
     }
 
-    if (type === 'healthcheck') {
-      const result = await executeHealthCheck(getContext(), initMs);
-      return { ...result, duration: Date.now() - startTime };
+    if (process.env['GITHUB_ACTIONS'] === 'true') {
+      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task finished: ${type}\n`);
     }
-
-    return { error: 'Unknown task type', duration: Date.now() - startTime };
+    return result;
   } catch (error: any) {
     const errMsg = error instanceof Error ? error.message : String(error);
+
+    if (process.env['GITHUB_ACTIONS'] === 'true') {
+      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task FAILED: ${type} - ${errMsg}\n`);
+    }
 
     // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
     if (shouldResetBrowser(errMsg)) {
