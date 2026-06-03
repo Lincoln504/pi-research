@@ -172,8 +172,11 @@ describe('Concurrent Operations', () => {
       // All should complete
       expect(results.length).toBe(burstSize);
 
-      // At least one should succeed (not including errors)
       const successful = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
+      if (successful === 0 && results.length > 0) {
+        console.error('[test] ALL tasks failed in concurrent search test:', JSON.stringify(results, null, 2));
+      }
+
       const successRate = successful / burstSize;
 
       expect(successRate).toBeGreaterThan(0); // At least one should succeed

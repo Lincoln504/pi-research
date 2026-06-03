@@ -139,13 +139,16 @@ export class BrowserTaskScheduler implements IScheduler {
             if (timeoutId.unref) timeoutId.unref();
         });
 
-        let result: { results: SearchResult[], error?: string };
+        logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
+        let result: any;
         try {
             result = await Promise.race([
                 pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
-            ]) as { results: SearchResult[], error?: string };
+            ]);
+            logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
+            logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
             metrics.increment('browser_search_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
                 component: 'browser-manager',
@@ -342,13 +345,21 @@ export class BrowserTaskScheduler implements IScheduler {
         }
 
         if (targetBrowserPids.length > 0) {
-            await killBrowserProcesses(targetBrowserPids);
+            // Add timeout to prevent hanging during process cleanup
+            await Promise.race([
+                killBrowserProcesses(targetBrowserPids),
+                new Promise(resolve => setTimeout(resolve, 10000))
+            ]);
         }
 
         // Clean up any orphaned Camoufox browser processes that may have been left behind
         // This handles edge cases where workers were force-killed or hung during teardown
+        // Add timeout to prevent hanging - orphan cleanup can find many processes on CI
         try {
-            await cleanupOrphanedCamoufoxProcesses();
+            await Promise.race([
+                cleanupOrphanedCamoufoxProcesses(),
+                new Promise(resolve => setTimeout(resolve, 15000))
+            ]);
         } catch (cleanupError) {
             const msg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
             logger.warn('[Scheduler] Failed to cleanup orphaned browsers:', msg);

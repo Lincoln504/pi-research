@@ -9,6 +9,7 @@
 
 import { ClusterWorker } from 'poolifier';
 import crypto from 'node:crypto';
+import process from 'node:process';
 
 // Import extracted modules
 import {
@@ -38,6 +39,12 @@ import type { TaskData, TaskResult } from './thread-worker-types.ts';
 // Generate a random ID for this worker process to track distribution in logs
 const workerId = crypto.randomBytes(2).toString('hex');
 
+// Diagnostic logging for CI - always log basic info to stderr
+if (process.env['GITHUB_ACTIONS'] === 'true') {
+  process.stderr.write(`[Worker-${workerId}] Process starting. PID=${process.pid}, PPID=${process.ppid}, NODE_ENV=${process.env['NODE_ENV']}\n`);
+  process.stderr.write(`[Worker-${workerId}] MOCK_SEARCH=${process.env['PI_RESEARCH_MOCK_SEARCH']}, MOCK_SCRAPE=${process.env['PI_RESEARCH_MOCK_SCRAPE']}\n`);
+}
+
 // Set worker ID in all modules
 setLifecycleWorkerId(workerId);
 setWorkerId(workerId);
@@ -62,6 +69,10 @@ const FULL_MOCK_MODE =
   process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
   process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
 
+if (process.env['GITHUB_ACTIONS'] === 'true') {
+  process.stderr.write(`[Worker-${workerId}] FULL_MOCK_MODE=${FULL_MOCK_MODE}\n`);
+}
+
 /**
  * Main task execution function
  */
@@ -72,6 +83,9 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   const { type, query, url, queuedAt, taskTimeoutMs } = data;
   const startTime = Date.now();
 
+  if (process.env['GITHUB_ACTIONS'] === 'true') {
+    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url})\n`);
+  }
   // If the task sat in the pool queue longer than the orchestrator's Promise.race timeout,
   // it's a "zombie" task. The orchestrator has already thrown an error and moved on.
   // We should immediately drop it to prevent queue congestion.
