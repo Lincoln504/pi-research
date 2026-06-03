@@ -94,14 +94,16 @@ export class WorkerPoolManager implements IService {
                 const browserEnv = getBrowserEnv();
 
                 // Sanitize argv to prevent research query exposure in worker processes
-                const restoreArgv = sanitizeArgvForPoolCreation();
+                const restoreArgv = process.env['GITHUB_ACTIONS'] === 'true' ? () => {} : sanitizeArgvForPoolCreation();
 
                 const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
                 const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
                 const workerConcurrency = isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency;
                 
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
-                    logger.info(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}, isMocking=${isMocking}`);
+                    const cluster = (await import('node:cluster')).default;
+                    process.stderr.write(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}, isMocking=${isMocking}\n`);
+                    process.stderr.write(`[WorkerPoolManager] cluster.isPrimary=${cluster.isPrimary}, cluster.isMaster=${cluster.isMaster}\n`);
                 }
 
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
@@ -145,6 +147,11 @@ export class WorkerPoolManager implements IService {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
                     }
                 });
+
+                if (process.env['GITHUB_ACTIONS'] === 'true') {
+                  this.pool.emitter?.on('ready', () => process.stderr.write('[WorkerPoolManager] Pool is READY\n'));
+                  this.pool.emitter?.on('workerNodeAdded', (data) => process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`));
+                }
 
                 // Restore original argv after pool is created
                 restoreArgv();
