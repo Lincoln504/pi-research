@@ -83,7 +83,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   if (!data) {
     return { error: 'No task data provided', duration: 0 };
   }
-  const { type, query, url, queuedAt, taskTimeoutMs } = data;
+  const { type, query, url, queuedAt: _queuedAt, taskTimeoutMs: _taskTimeoutMs } = data;
   const startTime = Date.now();
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
