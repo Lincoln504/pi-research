@@ -63,7 +63,7 @@ describe('Knowledge stack integration', () => {
   let queue: WriterQueue;
 
   beforeEach(async () => {
-    tmpDir = path.join(os.tmpdir(), `pi-knowledge-it-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `pi-knowledge-it-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     embedder = makeSyntheticEmbedder(64);
     store = await makeStore(tmpDir, embedder);
     chunker = new Chunker({ targetSize: 200, overlap: 30 });

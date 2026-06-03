@@ -53,7 +53,7 @@ describe('Knowledge Store Migrations', () => {
   let queue: WriterQueue;
 
   beforeEach(async () => {
-    tmpDir = path.join(os.tmpdir(), `pi-migration-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `pi-migration-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     embedder = makeSyntheticEmbedder(64);
     store = await makeStore(tmpDir, embedder);
     chunker = new Chunker({ targetSize: 200, overlap: 30 });
