@@ -71,7 +71,7 @@ const FULL_MOCK_MODE =
 
 if (process.env['GITHUB_ACTIONS'] === 'true') {
   process.stderr.write(`[Worker-${workerId}] FULL_MOCK_MODE=${FULL_MOCK_MODE}\n`);
-  process.on('message', (msg) => {
+  process.on('message', (msg: any) => {
     process.stderr.write(`[Worker-${workerId}] RAW MESSAGE RECEIVED: ${JSON.stringify(msg).substring(0, 100)}\n`);
   });
 }

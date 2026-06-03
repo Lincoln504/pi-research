@@ -150,7 +150,7 @@ export class WorkerPoolManager implements IService {
 
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                   this.pool.emitter?.on('ready', () => process.stderr.write('[WorkerPoolManager] Pool is READY\n'));
-                  this.pool.emitter?.on('workerNodeAdded', (data) => process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`));
+                  this.pool.emitter?.on('workerNodeAdded', (data: any) => process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`));
                 }
 
                 // Restore original argv after pool is created
