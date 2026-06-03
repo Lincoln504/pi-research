@@ -98,8 +98,7 @@ export class WorkerPoolManager implements IService {
 
                 const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
                 const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                // Reduce concurrency to 1 in CI to avoid IPC bottlenecks on constrained runners
-                const workerConcurrency = (process.env['GITHUB_ACTIONS'] === 'true') ? 1 : (isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency);
+                const workerConcurrency = isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency;
                 
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                     const cluster = (await import('node:cluster')).default;
@@ -152,22 +151,6 @@ export class WorkerPoolManager implements IService {
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                   this.pool.emitter?.on('ready', () => process.stderr.write('[WorkerPoolManager] Pool is READY\n'));
                   this.pool.emitter?.on('workerNodeAdded', (data: any) => process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`));
-                  setInterval(() => {
-                    if (this.pool) {
-                      const info = {
-                        pid: process.pid,
-                        size: this.pool.workerNodes.length,
-                        executingTasks: this.pool.info.executingTasks,
-                        queuedTasks: this.pool.info.queuedTasks,
-                        workerStates: this.pool.workerNodes.map((n: any) => ({
-                          tasks: n.usage.tasks.executing,
-                          queued: n.usage.tasks.queued,
-                          state: n.info.state
-                        }))
-                      };
-                      process.stderr.write(`[WorkerPoolManager] Pool Status: ${JSON.stringify(info)}\n`);
-                    }
-                  }, 2000).unref();
                 }
 
                 // Restore original argv after pool is created

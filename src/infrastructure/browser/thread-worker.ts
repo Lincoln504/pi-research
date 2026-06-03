@@ -60,7 +60,9 @@ setupUncaughtExceptionHandler();
 setBrowserCleanup(cleanupBrowser);
 
 // Setup orphaned worker protection
-setupOrphanProtection();
+if (process.env['GITHUB_ACTIONS'] !== 'true') {
+  setupOrphanProtection();
+}
 
 // When both search and scrape are mocked, skip Firefox entirely in task handlers
 // and in the eager warm-up below. Firefox startup in cluster workers takes 60-90s
@@ -85,15 +87,11 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   const startTime = Date.now();
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
-    const queueInfo = queuedAt ? ` (queuedAt=${queuedAt}, taskTimeoutMs=${taskTimeoutMs})` : '';
-    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})${queueInfo}\n`);
+    // Only log essential task info to avoid pipe pressure
+    process.stderr.write(`[Worker-${workerId}] Task: ${type}\n`);
   }
 
   if (FULL_MOCK_MODE) {
-    if (process.env['GITHUB_ACTIONS'] === 'true') {
-      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Mock task finished: ${type}\n`);
-    }
-
     if (type === 'search') {
       return {
         results: [{ title: 'Mock Result', url: 'https://example.com/mock', content: `Mock search result for: ${query ?? ''}` }],
