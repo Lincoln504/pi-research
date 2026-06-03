@@ -132,38 +132,23 @@ export class BrowserTaskScheduler implements IScheduler {
         // constrained CI runners (2 vCPU) where browser init can take 30–50s per worker
         // and multiple tasks may be backlogged before a slot opens.
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
-        const timeoutMs = baseTimeoutMs + (isMocking ? 180000 : 180000);
-        
-        if (process.env['GITHUB_ACTIONS'] === 'true') {
-            logger.info(`[BrowserTaskScheduler] runSearch: query="${query}", isMocking=${isMocking}, timeoutMs=${timeoutMs}`);
-        }
+        const timeoutMs = baseTimeoutMs + 180000;
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
-                const msg = `Search task timed out after ${timeoutMs}ms (including queue wait). query="${query}", isMocking=${isMocking}`;
-                if (process.env['GITHUB_ACTIONS'] === 'true') {
-                    logger.error(`[BrowserTaskScheduler] ${msg}`);
-                }
-                reject(new Error(msg));
+                reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait). query="${query}"`));
             }, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
-        if (process.env['GITHUB_ACTIONS'] === 'true') {
-            process.stderr.write(`[BrowserTaskScheduler] Calling pool.execute: type=search, query="${query}"\n`);
-        }
         let result: any;
         try {
             result = await Promise.race([
                 pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]);
-            if (process.env['GITHUB_ACTIONS'] === 'true') {
-                process.stderr.write(`[BrowserTaskScheduler] pool.execute finished: type=search, query="${query}"\n`);
-            }
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
@@ -205,37 +190,26 @@ export class BrowserTaskScheduler implements IScheduler {
         // constrained CI runners. The worker itself enforces SCRAPE_TIMEOUT_MS on the
         // actual browser operations.
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
-        const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
+        // In mock mode the scrape worker returns immediately; a tight 15s queue buffer
+        // is sufficient. In real mode the full 180s buffer accounts for browser init
+        // on constrained runners where multiple tasks may backlog before a slot opens.
+        const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
-
-        if (process.env['GITHUB_ACTIONS'] === 'true') {
-            logger.info(`[BrowserTaskScheduler] runScrape: url="${url}", isMocking=${isMocking}, timeoutMs=${timeoutMs}`);
-        }
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
-                const msg = `Scrape task timed out after ${timeoutMs}ms (including queue wait). url="${url}", isMocking=${isMocking}`;
-                if (process.env['GITHUB_ACTIONS'] === 'true') {
-                    logger.error(`[BrowserTaskScheduler] ${msg}`);
-                }
-                reject(new Error(msg));
+                reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait). url="${url}"`));
             }, timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
         });
 
         let result: any;
-        if (process.env['GITHUB_ACTIONS'] === 'true') {
-            process.stderr.write(`[BrowserTaskScheduler] Calling pool.execute: type=scrape, url="${url}"\n`);
-        }
         try {
             result = await Promise.race([
                 pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]);
-            if (process.env['GITHUB_ACTIONS'] === 'true') {
-                process.stderr.write(`[BrowserTaskScheduler] pool.execute finished: type=scrape, url="${url}"\n`);
-            }
         } catch (error) {
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {

@@ -98,12 +98,6 @@ export class WorkerPoolManager implements IService {
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 
-                if (process.env['GITHUB_ACTIONS'] === 'true') {
-                    const cluster = (await import('node:cluster')).default;
-                    process.stderr.write(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}\n`);
-                    process.stderr.write(`[WorkerPoolManager] cluster.isPrimary=${cluster.isPrimary}, cluster.isMaster=${cluster.isMaster}\n`);
-                }
-
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
                 // local imports. Using a pre-compiled JS file eliminates any TypeScript loading
                 // concern in cluster child processes — no execArgv loader flags needed.
@@ -113,9 +107,6 @@ export class WorkerPoolManager implements IService {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
                         logger.error('[WorkerPoolManager] Cluster Error:', e);
-                        if (process.env['GITHUB_ACTIONS'] === 'true') {
-                            process.stderr.write(`[WorkerPoolManager] Cluster Error: ${e.message}\n${e.stack}\n`);
-                        }
                         if (this.consecutiveErrors >= 3) {
                             metrics.increment('browser_pool_unhealthy_events_total', 1);
                             logger.error(`[WorkerPoolManager] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
@@ -127,9 +118,6 @@ export class WorkerPoolManager implements IService {
                     exitHandler: (code: number) => {
                         if (code !== 0) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
-                            if (process.env['GITHUB_ACTIONS'] === 'true') {
-                                process.stderr.write(`[WorkerPoolManager] Worker exited with code ${code}\n`);
-                            }
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
                                 logger.error(`[WorkerPoolManager] Worker pool unhealthy due to 3 consecutive exits.`);
@@ -145,24 +133,6 @@ export class WorkerPoolManager implements IService {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
                     }
                 });
-
-                if (process.env['GITHUB_ACTIONS'] === 'true') {
-                  this.pool.emitter?.on('ready', () => process.stderr.write('[WorkerPoolManager] Pool is READY\n'));
-                  this.pool.emitter?.on('workerNodeAdded', (data: any) => {
-                    process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`);
-                    const workerNode = this.pool?.workerNodes[data.workerNodeKey];
-                    if (workerNode) {
-                      const originalSend = workerNode.worker.send.bind(workerNode.worker);
-                      workerNode.worker.send = (msg: any, ...args: any[]) => {
-                        process.stderr.write(`[WorkerPoolManager] SENDING TO WORKER: ${JSON.stringify(msg).substring(0, 100)}\n`);
-                        return originalSend(msg, ...args);
-                      };
-                      workerNode.worker.on('message', (msg: any) => {
-                        process.stderr.write(`[WorkerPoolManager] MESSAGE FROM WORKER: ${JSON.stringify(msg).substring(0, 100)}\n`);
-                      });
-                    }
-                  });
-                }
 
                 // Restore original argv after pool is created
                 restoreArgv();

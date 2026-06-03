@@ -39,12 +39,6 @@ import type { TaskData, TaskResult } from './thread-worker-types.ts';
 // Generate a random ID for this worker process to track distribution in logs
 const workerId = crypto.randomBytes(2).toString('hex');
 
-// Diagnostic logging for CI - always log basic info to stderr
-if (process.env['GITHUB_ACTIONS'] === 'true') {
-  process.stderr.write(`[Worker-${workerId}] Process starting. PID=${process.pid}, PPID=${process.ppid}, NODE_ENV=${process.env['NODE_ENV']}\n`);
-  process.stderr.write(`[Worker-${workerId}] MOCK_SEARCH=${process.env['PI_RESEARCH_MOCK_SEARCH']}, MOCK_SCRAPE=${process.env['PI_RESEARCH_MOCK_SCRAPE']}\n`);
-}
-
 // Set worker ID in all modules
 setLifecycleWorkerId(workerId);
 setWorkerId(workerId);
@@ -71,30 +65,15 @@ const FULL_MOCK_MODE =
   process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
   process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
 
-if (process.env['GITHUB_ACTIONS'] === 'true') {
-  process.stderr.write(`[Worker-${workerId}] FULL_MOCK_MODE=${FULL_MOCK_MODE}\n`);
-}
-
 /**
  * Main task execution function
  */
 async function runTask(data: TaskData | undefined): Promise<TaskResult> {
-  const taskId = crypto.randomBytes(4).toString('hex');
-  
-  if (process.env['GITHUB_ACTIONS'] === 'true') {
-    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] runTask called with: ${JSON.stringify(data).substring(0, 200)}\n`);
-  }
-
   if (!data) {
     return { error: 'No task data provided', duration: 0 };
   }
   const { type, query, url, queuedAt: _queuedAt, taskTimeoutMs: _taskTimeoutMs } = data;
   const startTime = Date.now();
-
-  if (process.env['GITHUB_ACTIONS'] === 'true') {
-    // Only log essential task info to avoid pipe pressure
-    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task Type: ${type}\n`);
-  }
 
   if (FULL_MOCK_MODE) {
     if (type === 'search') {
@@ -137,16 +116,9 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
       result = { error: 'Unknown task type', duration: Date.now() - startTime };
     }
 
-    if (process.env['GITHUB_ACTIONS'] === 'true') {
-      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task finished: ${type}\n`);
-    }
     return result;
   } catch (error: any) {
     const errMsg = error instanceof Error ? error.message : String(error);
-
-    if (process.env['GITHUB_ACTIONS'] === 'true') {
-      process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task FAILED: ${type} - ${errMsg}\n`);
-    }
 
     // If the browser crashed or disconnected, clear the instance to force re-initialization on next task
     if (shouldResetBrowser(errMsg)) {
@@ -163,10 +135,6 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
 const worker = new ClusterWorker(runTask, {
   killHandler: createKillHandler(),
 });
-
-if (process.env['GITHUB_ACTIONS'] === 'true') {
-  process.stderr.write(`[Worker-${workerId}] ClusterWorker instance created\n`);
-}
 
 export default worker;
 
