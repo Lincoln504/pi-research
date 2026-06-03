@@ -113,6 +113,9 @@ export class WorkerPoolManager implements IService {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
                         logger.error('[WorkerPoolManager] Cluster Error:', e);
+                        if (process.env['GITHUB_ACTIONS'] === 'true') {
+                            process.stderr.write(`[WorkerPoolManager] Cluster Error: ${e.message}\n${e.stack}\n`);
+                        }
                         if (this.consecutiveErrors >= 3) {
                             metrics.increment('browser_pool_unhealthy_events_total', 1);
                             logger.error(`[WorkerPoolManager] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
@@ -124,6 +127,9 @@ export class WorkerPoolManager implements IService {
                     exitHandler: (code: number) => {
                         if (code !== 0) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
+                            if (process.env['GITHUB_ACTIONS'] === 'true') {
+                                process.stderr.write(`[WorkerPoolManager] Worker exited with code ${code}\n`);
+                            }
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
                                 logger.error(`[WorkerPoolManager] Worker pool unhealthy due to 3 consecutive exits.`);
@@ -137,8 +143,6 @@ export class WorkerPoolManager implements IService {
                     enableTasksQueue: true,
                     tasksQueueOptions: {
                         concurrency: workerConcurrency, // configurable via PI_RESEARCH_WORKER_CONCURRENCY
-                        taskStealing: maxWorkers > 1,
-                        tasksStealingOnBackPressure: maxWorkers > 1
                     }
                 });
 

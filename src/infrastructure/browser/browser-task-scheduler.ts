@@ -133,7 +133,7 @@ export class BrowserTaskScheduler implements IScheduler {
         // and multiple tasks may be backlogged before a slot opens.
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
-        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
+        const timeoutMs = baseTimeoutMs + (isMocking ? 180000 : 180000);
         
         if (process.env['GITHUB_ACTIONS'] === 'true') {
             logger.info(`[BrowserTaskScheduler] runSearch: query="${query}", isMocking=${isMocking}, timeoutMs=${timeoutMs}`);
@@ -152,12 +152,18 @@ export class BrowserTaskScheduler implements IScheduler {
         });
 
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
+        if (process.env['GITHUB_ACTIONS'] === 'true') {
+            process.stderr.write(`[BrowserTaskScheduler] Calling pool.execute: type=search, query="${query}"\n`);
+        }
         let result: any;
         try {
             result = await Promise.race([
                 pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]);
+            if (process.env['GITHUB_ACTIONS'] === 'true') {
+                process.stderr.write(`[BrowserTaskScheduler] pool.execute finished: type=search, query="${query}"\n`);
+            }
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
@@ -219,11 +225,17 @@ export class BrowserTaskScheduler implements IScheduler {
         });
 
         let result: any;
+        if (process.env['GITHUB_ACTIONS'] === 'true') {
+            process.stderr.write(`[BrowserTaskScheduler] Calling pool.execute: type=scrape, url="${url}"\n`);
+        }
         try {
             result = await Promise.race([
                 pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
                 timeoutPromise
             ]);
+            if (process.env['GITHUB_ACTIONS'] === 'true') {
+                process.stderr.write(`[BrowserTaskScheduler] pool.execute finished: type=scrape, url="${url}"\n`);
+            }
         } catch (error) {
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {

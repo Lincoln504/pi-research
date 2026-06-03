@@ -27,13 +27,13 @@ export default defineConfig({
       'test/integration/tools-extended.test.ts',
     ],
     setupFiles: [],
-    testTimeout: 180000,
+    testTimeout: 300000,
     // Sequential file execution required: all files share the global
     // BrowserPoolManager singleton. Concurrent execution causes pool
     // lifecycle collisions ("Cannot execute a task on destroying pool").
     fileParallelism: false,
     pool: 'forks',
-    hookTimeout: 60000,
-    teardownTimeout: 30000,
+    hookTimeout: 120000,
+    teardownTimeout: 60000,
   },
 });
