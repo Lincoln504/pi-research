@@ -84,7 +84,8 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   const startTime = Date.now();
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
-    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})\n`);
+    const queueInfo = queuedAt ? ` (queuedAt=${queuedAt}, taskTimeoutMs=${taskTimeoutMs})` : '';
+    process.stderr.write(`[Worker-${workerId}] Received task: ${type} (query=${query}, url=${url}, FULL_MOCK_MODE=${FULL_MOCK_MODE})${queueInfo}\n`);
   }
 
   if (FULL_MOCK_MODE) {
