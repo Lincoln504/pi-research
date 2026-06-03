@@ -68,7 +68,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createLinksTool(resolvedOptions),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
-    createGrepTool(resolvedOptions),
+    createGrepTool({ tracker: resolvedOptions.tracker, cwd: resolvedOptions.cwd }),
   ];
 }
 

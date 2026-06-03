@@ -1,363 +1,49 @@
 /**
- * rg_grep Tool (Ripgrep)
+ * Grep Tool
  *
- * Standalone grep tool using ripgrep (rg) or fallback to grep.
+ * Thin wrapper around the SDK's built-in grep tool that adds
+ * ToolUsageTracker budget enforcement before delegating execution.
  */
 
-import { spawn } from 'node:child_process';
-import * as nodePath from 'node:path';
-import { logger } from '../logger.ts';
-import type { ToolDefinition, AgentToolResult } from '@earendil-works/pi-coding-agent';
-import { Type, type Static } from 'typebox';
+import { createGrepToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Value } from 'typebox/value';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { MAX_GATHERING_CALLS } from '../constants.ts';
 
-const DEFAULT_MAX_BYTES = 100 * 1024; // 100KB
-const DEFAULT_MAX_LINES = 200;
-const STREAM_MAX_BYTES = 10 * 1024 * 1024; // 10MB max in stream (prevent RangeError)
-
-const GrepParams = Type.Object({
-  pattern: Type.String({ description: 'Search pattern (regex supported)' }),
-  path: Type.Optional(Type.String({ description: 'Directory to search (default: current directory)' })),
-  flags: Type.Optional(Type.String({ description: 'Additional flags for rg/grep (e.g., "-i", "-w")' })),
-});
-
-type GrepParamsType = Static<typeof GrepParams>;
-
-function truncateHead(content: string, maxBytes: number, maxLines: number): string {
-  const lines = content.split('\n');
-  const encoder = new TextEncoder();
-
-  if (lines.length <= maxLines && encoder.encode(content).length <= maxBytes) {
-    return content;
-  }
-
-  const truncatedLines = lines.slice(0, maxLines);
-  let result = truncatedLines.join('\n');
-
-  if (encoder.encode(result).length > maxBytes) {
-    let byteCount = 0;
-    const charArray: string[] = [];
-
-    for (const char of result) {
-      byteCount += encoder.encode(char).length;
-      if (byteCount > maxBytes) break;
-      charArray.push(char);
-    }
-
-    result = charArray.join('');
-  }
-
-  return result;
-}
-
-async function execCommand(
-  command: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string; exitCode: number | null; wasTruncated: boolean }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args);
-    let stdout = '';
-    let stderr = '';
-    let wasTruncated = false;
-
-    const timeout = setTimeout(() => {
-        wasTruncated = true;
-        child.kill();
-        logger.warn(`[grep] Command ${command} timed out after 30s`);
-    }, 30000);
-    // unref() to allow clean exit if this is the only timer keeping the event loop alive
-    if (timeout.unref) {
-        timeout.unref();
-    }
-
-    child.stdout?.on('data', (data) => {
-      // Check if adding this chunk would exceed stream limit
-      const chunk = data.toString();
-      if (stdout.length + chunk.length > STREAM_MAX_BYTES) {
-        // Stop collecting data to prevent RangeError
-        wasTruncated = true;
-        child.kill();
-        return;
-      }
-      stdout += chunk;
-    });
-
-    child.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      resolve({ stdout, stderr, exitCode: code, wasTruncated });
-    });
-
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-  });
-}
-
-function resolveWorkspacePath(input: string): string {
-  const root = process.cwd();
-  const resolved = nodePath.resolve(root, input);
-  if (resolved !== root && !resolved.startsWith(root + nodePath.sep)) {
-    throw new Error(`Path outside workspace: ${input}`);
-  }
-  return resolved;
-}
-
-function sanitizeInput(input: string): string[] {
-  // Simple sanitization: split on whitespace, preserve quoted strings
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (const char of input) {
-    if (char === '"' || char === "'") {
-      inQuotes = !inQuotes;
-    } else if (char === ' ' && !inQuotes) {
-      if (current) {
-        result.push(current);
-        current = '';
-      }
-    } else {
-      current += char;
-    }
-  }
-
-  if (current) {
-    result.push(current);
-  }
-
-  return result;
-}
-
-function normalizeSearchOutput(output: string): string {
-  return process.platform === 'win32' ? output.replace(/\\/g, '/') : output;
-}
-
 export function createGrepTool(options: {
   tracker: ToolUsageTracker;
+  cwd?: string;
 }): ToolDefinition {
+  const cwd = options.cwd ?? process.cwd();
+  const sdkGrep = createGrepToolDefinition(cwd);
+  const { execute: sdkExecute } = sdkGrep;
+
   return {
-    name: 'grep',
+    ...sdkGrep,
     label: 'Code Search',
-    description: 'Search codebase using ripgrep (rg) or grep fallback. Fast recursive text search.',
-    promptSnippet: 'Search codebase using ripgrep/grep',
     promptGuidelines: [
       'Available for fast recursive text search in codebases.',
-      'Pattern supports regex. Path and flags are optional.',
-      'Falls back to grep if rg is not available.',
-      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
+      'Pattern supports regex. Use glob to scope to file types (e.g., "**/*.ts").',
+      'Options: ignoreCase, literal (disable regex), context (lines around match), limit (max matches).',
+      `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools.`,
     ],
-    parameters: GrepParams,
-    executionMode: 'parallel',
-    async execute(
-      _toolCallId: string,
-      params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      _ctx: any,
-    ): Promise<AgentToolResult<unknown>> {
-      // Record call in tracker - returns false if limit reached
-      const allowed = options.tracker.recordCall('grep');
-      if (!allowed) {
-          return {
-            content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
-            details: { blocked: true, reason: 'limit_reached' },
-          };
-      }
-
-      if (!Value.Check(GrepParams, params)) {
-          return {
-            content: [{ type: 'text', text: 'Invalid parameters for grep tool.' }],
-            details: { error: 'invalid_parameters' },
-          };
-      }
-
-      const record = params as GrepParamsType;
-      const { pattern } = record;
-      const path = resolveWorkspacePath(record.path ?? '.');
-      const flags = record.flags ?? '';
-
-      if (!pattern) {
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      if (!options.tracker.recordCall('grep')) {
         return {
-          content: [{ type: 'text', text: 'Error: pattern is required' }],
-          details: {},
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
+          details: { blocked: true, reason: 'limit_reached' },
         };
       }
 
-      // Sanitize inputs to prevent shell injection
-      const flagParts = flags ? sanitizeInput(flags) : [];
-
-      // Try rg first
-      try {
-        const rgArgs = ['--no-heading', '-n', ...flagParts, '--', pattern, path];
-        const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
-
-        const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-
-        let markdown = '# Search Results (rg)\n\n';
-        markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
-        markdown += `**Pattern:** \`${pattern}\`\n`;
-        markdown += `**Path:** \`${path}\`\n`;
-        if (flags) markdown += `**Flags:** \`${flags}\`\n`;
-        markdown += `**Exit Code:** ${exitCode}\n\n`;
-
-        if (wasTruncated) {
-          markdown += '[Warning] Output was truncated (>10MB)\n\n';
-        }
-
-        if (truncated) {
-          markdown += '```\n' + truncated + '\n```';
-        } else {
-          markdown += 'No matches found.';
-        }
-
-        if (stderr) {
-          markdown += '\n\n**Stderr:**\n```\n' + stderr + '\n```';
-        }
-
+      if (!Value.Check(sdkGrep.parameters, params)) {
         return {
-          content: [{ type: 'text', text: markdown }],
-          details: {
-            command: 'rg',
-            args: rgArgs,
-            exitCode,
-            wasTruncated,
-          },
+          content: [{ type: 'text', text: 'Invalid parameters for grep tool.' }],
+          details: { error: 'invalid_parameters' },
         };
-      } catch (rgError) {
-        // rg not found, try grep
-        try {
-          const grepArgs = ['-rn', ...flagParts, '--', pattern, path];
-          const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
-
-          const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-
-          let markdown = '# Search Results (grep)\n\n';
-          markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
-          markdown += `**Pattern:** \`${pattern}\`\n`;
-          markdown += `**Path:** \`${path}\`\n`;
-          if (flags) markdown += `**Flags:** \`${flags}\`\n`;
-          markdown += `**Exit Code:** ${exitCode}\n\n`;
-          markdown += '*Note: Using grep fallback (rg not available)*\n\n';
-
-          if (wasTruncated) {
-            markdown += '[Warning] Output was truncated (>10MB)\n\n';
-          }
-
-          if (truncated) {
-            markdown += '```\n' + truncated + '\n```';
-          } else {
-            markdown += 'No matches found.';
-          }
-
-          if (stderr) {
-            markdown += '\n\n**Stderr:**\n```\n' + stderr + '\n```';
-          }
-
-          return {
-            content: [{ type: 'text', text: markdown }],
-            details: {
-              command: 'grep',
-              args: grepArgs,
-              exitCode,
-              wasTruncated,
-            },
-          };
-        } catch (grepError) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: Neither rg nor grep is available.\n\nrg error: ${rgError}\ngrep error: ${grepError}`,
-              },
-            ],
-            details: {},
-          };
-        }
       }
+
+      return sdkExecute(toolCallId, params as any, signal, onUpdate, ctx);
     },
-  };
-}
-
-/**
- * Standalone function to execute rg/grep search
- */
-export async function grep(pattern: string, path: string = '.', flags: string = ''): Promise<string> {
-  if (!pattern) {
-    throw new Error('Pattern is required');
-  }
-
-  const resolvedPath = resolveWorkspacePath(path);
-  const flagParts = flags ? sanitizeInput(flags) : [];
-
-  // Try rg first
-  try {
-    const rgArgs = ['--no-heading', '-n', ...flagParts, '--', pattern, resolvedPath];
-    const { stdout, stderr, exitCode, wasTruncated } = await execCommand('rg', rgArgs);
-
-    let markdown = '# Search Results (rg)\n\n';
-    markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
-    markdown += `**Pattern:** \`${pattern}\`\n`;
-    markdown += `**Path:** \`${resolvedPath}\`\n`;
-    if (flags) markdown += `**Flags:** \`${flags}\`\n`;
-    markdown += `**Exit Code:** ${exitCode}\n\n`;
-
-    const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-
-    if (wasTruncated) {
-      markdown += '[Warning] Output was truncated (>10MB)\n\n';
-    }
-
-    if (truncated) {
-      markdown += '```\n' + truncated + '\n```';
-    } else {
-      markdown += 'No matches found.';
-    }
-
-    if (stderr) {
-      markdown += '\n\n**Stderr:**\n```\n' + stderr + '\n```';
-    }
-
-    return markdown;
-  } catch (rgError) {
-    // rg not found, try grep
-    try {
-      const grepArgs = ['-rn', ...flagParts, '--', pattern, resolvedPath];
-      const { stdout, stderr, exitCode, wasTruncated } = await execCommand('grep', grepArgs);
-
-      let markdown = '# Search Results (grep)\n\n';
-      markdown += `**Source: Local Files (Codebase Grep)**\n\n`;
-      markdown += `**Pattern:** \`${pattern}\`\n`;
-      markdown += `**Path:** \`${resolvedPath}\`\n`;
-      if (flags) markdown += `**Flags:** \`${flags}\`\n`;
-      markdown += `**Exit Code:** ${exitCode}\n\n`;
-      markdown += '*Note: Using grep fallback (rg not available)*\n\n';
-
-      const truncated = truncateHead(normalizeSearchOutput(stdout), DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES);
-
-      if (wasTruncated) {
-        markdown += '[Warning] Output was truncated (>10MB)\n\n';
-      }
-
-      if (truncated) {
-        markdown += '```\n' + truncated + '\n```';
-      } else {
-        markdown += 'No matches found.';
-      }
-
-      if (stderr) {
-        markdown += '\n\n**Stderr:**\n```\n' + stderr + '\n```';
-      }
-
-      return markdown;
-    } catch (grepError) {
-      return `Error: Neither rg nor grep is available.\n\nrg error: ${rgError}\ngrep error: ${grepError}`;
-    }
-  }
+  } as ToolDefinition;
 }
