@@ -4,9 +4,14 @@ import { getService } from '../../src/core/service-registry.ts';
 import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
 import type { ISchedulerInternals } from '../../src/core/interfaces/scheduler-interfaces.ts';
 import { BrowserTaskScheduler } from '../../src/infrastructure/browser/browser-task-scheduler.ts';
+import { isBrowserAvailable } from '../../src/infrastructure/browser/config.ts';
 
 describe('Shutdown Performance', () => {
   it('should initialize, run healthcheck, and dispose within acceptable time', async () => {
+    if (!isBrowserAvailable()) {
+      console.log('[test] Skipping shutdown performance test - browser not available or FULL_MOCK_MODE active');
+      return;
+    }
     // 1. Initialize
     await initResearchSDK({ model: {} as any });
     

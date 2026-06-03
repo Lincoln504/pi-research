@@ -66,6 +66,7 @@
     "test:full": "npm run test:unit && npm run test:integration && npm run test:load",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.unit.ts --coverage",
+    "prepublishOnly": "npm run build:worker",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",

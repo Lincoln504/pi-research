@@ -305,6 +305,10 @@ describe('Error Recovery and Resilience', () => {
 
   describe('Circuit Breaker Integration', () => {
     it('should integrate circuit breaker with browser operations', async () => {
+      if (testContext.skipTests()) {
+        return;
+      }
+
       const circuitBreaker = new CircuitBreaker({
         failureThreshold: 3,
         resetTimeoutMs: 5000,

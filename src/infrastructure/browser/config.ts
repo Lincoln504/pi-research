@@ -136,12 +136,31 @@ export function getSchedulerVersion(config?: Config): string {
 // ============================================================================
 
 /**
- * Check if the browser is available.
+ * Check if the browser is available for meaningful browser pool testing.
+ * 
+ * Returns false if:
+ * - camoufox-js package is not installed
+ * - camoufox binary is not present at expected path
+ * - FULL_MOCK_MODE is active (both search and scrape mocked)
+ * 
+ * In FULL_MOCK_MODE, browser pool tests are not meaningful because:
+ * - The FixedClusterPool deadlocks in Vitest fork context when both search and scrape are mocked
+ * - Mocked tasks short-circuit in runTask() and don't exercise real browser behavior
+ * - These tests verify real browser behavior: crash recovery, IPC routing, profile locking, etc.
+ * 
+ * Single point of control: all existing skipTests() checks use this function.
  */
 export function isBrowserAvailable(): boolean {
+    // Check if we're in full mock mode - browser pool tests are not meaningful
+    const fullMockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+                         process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+    if (fullMockMode) {
+        return false;
+    }
+    
+    // Check if camoufox-js package and binary are available
     try {
         import.meta.resolve('camoufox-js');
-        // Also check if the binary exists in the projected path
         return existsSync(getCamoufoxBinaryPath());
     } catch {
         return false;

@@ -41,7 +41,7 @@ export async function setupLifecycle(): Promise<TestContext> {
   const { logger } = await importLogger();
   
   if (!isBrowserAvailable()) {
-    logger.warn('[test] Browser (camoufox) not available, skipping integration tests');
+    logger.warn('[test] Browser not available for integration tests (camoufox missing or FULL_MOCK_MODE active)');
     return createUninitializedContext(logger);
   }
 
