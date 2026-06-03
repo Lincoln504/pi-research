@@ -113,7 +113,7 @@ export class QuickResearchOrchestrator {
             .replace('{{store_section}}', storeSection)
             .replace('{{evidence_section}}', quickEvidenceSection)
             .replace('{{coordination_section}}', '')
-            .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).\n- `stored_search`: Query the local knowledge store for summaries of findings from previous research sessions.');
+            .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
 
         logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 

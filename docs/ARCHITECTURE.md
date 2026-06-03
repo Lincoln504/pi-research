@@ -42,16 +42,17 @@ Two orchestrators handle research sessions:
 
 Each researcher agent has access to a fixed tool set with shared budget (4 calls across gathering tools per phase):
 
-| Tool | Source | Budget |
-|------|--------|--------|
-| `search` | DuckDuckGo Lite via stealth browser | shared |
-| `scrape` | URL batch scraping via stealth browser | configurable batches |
-| `security_search` | NVD, CISA KEV, GitHub Advisories, OSV | shared |
-| `stackexchange` | Stack Exchange network | shared |
-| `grep` | Local ripgrep | shared |
-| `links` | Shared discovered-links pool (list/search) | shared |
-| `stored_search` | Local knowledge store — past research sessions | shared |
-| `read` | Local file reads (from pi-coding-agent) | shared |
+| Tool | Quick | Deep | Source |
+|------|-------|------|--------|
+| `search` | ✓ | — | DuckDuckGo Lite via stealth browser |
+| `scrape` | ✓ | ✓ | URL batch scraping via stealth browser |
+| `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
+| `stackexchange` | ✓ | ✓ | Stack Exchange network |
+| `grep` | — | ✓ | Local ripgrep |
+| `links` | ✓ | ✓ | Shared discovered-links pool (list/search) |
+| `read` | ✓ | ✓ | Local file reads (from pi-coding-agent) |
+
+In deep research, `search` is excluded from researchers — the orchestrator runs the search burst and distributes result URLs directly. In quick research, `grep` is excluded — the single researcher session is not expected to do local codebase traversal.
 
 Researchers cannot write files, run shell commands, or access the network outside these tools.
 
@@ -81,7 +82,13 @@ Workers run in `FULL_MOCK_MODE` (both `PI_RESEARCH_MOCK_SEARCH` and `PI_RESEARCH
 
 ### Knowledge Store
 
-Scraped content is embedded and stored in LanceDB for deduplication and RAG retrieval across sessions.
+Scraped content is embedded and stored in LanceDB for cross-session deduplication and RAG retrieval.
+
+**Pipeline integration** — the knowledge store is accessed at the orchestrator level, not by researcher agents directly:
+- Before each researcher starts, the orchestrator queries the store per-researcher goal and injects matching historical URLs (with summaries) into the researcher's system prompt.
+- After research completes, parsed citation URLs and descriptions are enqueued into the writer queue for the next session.
+
+This keeps the knowledge store integration deterministic and pipeline-controlled rather than relying on researchers to call it explicitly.
 
 ```
 WriterQueue (async, non-blocking)

@@ -90,7 +90,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       await new Promise(r => setTimeout(r, delay));
     }
 
-    const workerExclude = ['search', 'stored_search'];
+    const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
 
     const session = await createResearcherSession({

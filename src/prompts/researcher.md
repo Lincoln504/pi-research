@@ -70,7 +70,7 @@ Make no further tool calls after beginning synthesis.
 
 You MUST track the origin of every piece of information you gather.
 - **Web Search**: Information from fresh searches or fresh scrapes.
-- **Knowledge Store**: Information from historical URLs or `stored_search`.
+- **Knowledge Store**: Information from historical URLs (pre-injected at session start).
 - **Stack Exchange**: Information from the `stackexchange` tool.
 - **Security Databases**: Information from the `security_search` tool.
 - **Local Files**: Information from `grep` or `read` tools.

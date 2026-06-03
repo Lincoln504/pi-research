@@ -15,7 +15,6 @@ import { createLinksTool } from './links.ts';
 import { createSecuritySearchTool } from './security.ts';
 import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
-import { createStoredSearchTool } from './stored-search.ts';
 import type { Config } from '../config.ts';
 
 interface CreateToolsOptions {
@@ -70,7 +69,6 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
     createGrepTool(resolvedOptions),
-    createStoredSearchTool({ ctx: options.ctx }),
   ];
 }
 
@@ -83,4 +81,3 @@ export { createLinksTool } from './links.ts';
 export { createSecuritySearchTool } from './security.ts';
 export { createStackexchangeTool } from './stackexchange.ts';
 export { createGrepTool } from './grep.ts';
-export { createStoredSearchTool } from './stored-search.ts';

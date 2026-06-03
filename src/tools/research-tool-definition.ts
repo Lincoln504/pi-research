@@ -125,7 +125,7 @@ export function createResearchTool(): ToolDefinition {
         description: 'Model ID to use for coordination (optional)',
       })),
       excludeTools: Type.Optional(Type.Array(Type.String(), {
-        description: 'List of internal research tools to disable (e.g., search, scrape, grep, stored_search, security, stackexchange)',
+        description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange)',
       })),
     }),
     renderShell: 'self',
