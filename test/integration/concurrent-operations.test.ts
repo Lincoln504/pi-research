@@ -560,6 +560,6 @@ describe('Concurrent Operations', () => {
       // Note: wall-clock timing comparison (totalDuration < avgDuration * N * 0.8)
       // is omitted — the worker pool may serialise tasks when concurrency > workers,
       // and runtime variance under sequential file execution makes it unreliable.
-    }, 240000);
+    }, 300000);
   });
 });

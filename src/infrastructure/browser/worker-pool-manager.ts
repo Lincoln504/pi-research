@@ -94,7 +94,7 @@ export class WorkerPoolManager implements IService {
                 const browserEnv = getBrowserEnv();
 
                 // Sanitize argv to prevent research query exposure in worker processes
-                const restoreArgv = process.env['GITHUB_ACTIONS'] === 'true' ? () => {} : sanitizeArgvForPoolCreation();
+                const restoreArgv = sanitizeArgvForPoolCreation();
 
                 const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
                 const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
@@ -151,10 +151,30 @@ export class WorkerPoolManager implements IService {
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                   this.pool.emitter?.on('ready', () => process.stderr.write('[WorkerPoolManager] Pool is READY\n'));
                   this.pool.emitter?.on('workerNodeAdded', (data: any) => process.stderr.write(`[WorkerPoolManager] Worker node added: ${JSON.stringify(data)}\n`));
+                  setInterval(() => {
+                    if (this.pool) {
+                      const info = {
+                        size: this.pool.workerNodes.length,
+                        executingTasks: this.pool.info.executingTasks,
+                        queuedTasks: this.pool.info.queuedTasks,
+                        workerStates: this.pool.workerNodes.map((n: any) => ({
+                          tasks: n.usage.tasks.executing,
+                          queued: n.usage.tasks.queued,
+                          state: n.info.state
+                        }))
+                      };
+                      process.stderr.write(`[WorkerPoolManager] Pool Status: ${JSON.stringify(info)}\n`);
+                    }
+                  }, 10000).unref();
                 }
 
                 // Restore original argv after pool is created
                 restoreArgv();
+
+                if (process.env['GITHUB_ACTIONS'] === 'true') {
+                    // Small delay to ensure cluster workers are fully ready before first task
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
 
                 // Secondary race check: if shutdown() was called concurrent with the
                 // async pool construction above (between the early check and here).
