@@ -23,7 +23,7 @@ describe('config (refactored)', () => {
   beforeEach(() => {
     // Completely clear env vars that we care about
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith('PI_RESEARCH_') || key === 'PROXY_URL') {
+      if (key.startsWith('PI_RESEARCH_')) {
         delete process.env[key];
       }
     }
@@ -47,7 +47,6 @@ describe('config (refactored)', () => {
         expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(DEFAULTS.MAX_CONCURRENT_RESEARCHERS);
         expect(config.RESEARCHER_MAX_RETRIES).toBe(DEFAULTS.RESEARCHER_MAX_RETRIES);
         expect(config.RESEARCHER_MAX_RETRY_DELAY_MS).toBe(DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS);
-        expect(config.PROXY_URL).toBe(DEFAULTS.PROXY_URL);
         expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(DEFAULTS.TUI_REFRESH_DEBOUNCE_MS);
         expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(DEFAULTS.CONSOLE_RESTORE_DELAY_MS);
         expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
@@ -61,15 +60,13 @@ describe('config (refactored)', () => {
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(400000);
       });
 
-      it('should parse all custom values from env', () => {
+      it('should parse custom RESEARCHER_TIMEOUT_MS from env', () => {
         const env = {
           PI_RESEARCH_TIMEOUT_MS: '180000',
-          PROXY_URL: 'socks5://127.0.0.1:9050',
         };
         const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
-        expect(config.PROXY_URL).toBe('socks5://127.0.0.1:9050');
       });
 
       it('should parse knowledge store configuration from env', () => {

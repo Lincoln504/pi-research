@@ -29,14 +29,12 @@ All variables are optional — defaults apply if unset. Set them in `src/.env` (
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |
 | `PI_RESEARCH_MIGRATION_STRATEGY` | `drop` | drop, re-embed | What to do when embedding model changes |
 
-### API Keys & Proxy
+### API Keys
 
 | Variable | Description |
 |----------|-------------|
 | `SEARXNG_URL` | External SearXNG instance URL — skips Docker management entirely |
-| `PROXY_URL` | Proxy for outgoing requests (`socks5://`, `http://`, with optional user:pass) |
-| `BRAVE_SEARCH_API_KEY` | Brave Search paid API key |
-| `STACKEXCHANGE_API_KEY` | Stack Exchange API key — raises rate limits |
+| `STACKEXCHANGE_API_KEY` | Stack Exchange API key — raises rate limits from 300/day to 10,000/day |
 
 ### Diagnostics
 

@@ -25,8 +25,6 @@ export interface Config {
   RESEARCHER_MAX_RETRIES: number;
   /** Maximum delay between retries in milliseconds (default: 5000) */
   RESEARCHER_MAX_RETRY_DELAY_MS: number;
-  /** Proxy URL for outgoing searches and scraping (optional) */
-  PROXY_URL?: string;
   /** Health check timeout in milliseconds (default: 30000) */
   HEALTH_CHECK_TIMEOUT_MS?: number;
   /** Global TUI refresh debounce in milliseconds (default: 10) */
@@ -70,7 +68,6 @@ export const DEFAULTS: Config = {
   MAX_CONCURRENT_RESEARCHERS: 3,
   RESEARCHER_MAX_RETRIES: 3,
   RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
-  PROXY_URL: undefined,
   HEALTH_CHECK_TIMEOUT_MS: 30000,
   TUI_REFRESH_DEBOUNCE_MS: 10,
   CONSOLE_RESTORE_DELAY_MS: 15000,
@@ -158,8 +155,6 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
-    // Always include PROXY_URL - empty string means "clear this value"
-    PROXY_URL: config.PROXY_URL ?? '',
   };
 
   try {
@@ -316,7 +311,6 @@ export function createConfig(
     MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_RESEARCHERS', DEFAULTS.MAX_CONCURRENT_RESEARCHERS),
     RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES),
     RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS),
-    PROXY_URL: parseEnvString(e, 'PROXY_URL'),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS as number),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
     CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
@@ -445,15 +439,5 @@ export function validateConfig(config: Config = getConfig()): void {
     throw new Error(
       `PI_RESEARCH_MAX_CONCURRENT_SCRAPES must be 1–20, got ${config.MAX_CONCURRENT_SCRAPES}`,
     );
-  }
-  if (config.PROXY_URL) {
-    try {
-      const u = new URL(config.PROXY_URL);
-      if (u.username) u.username = '***';
-      if (u.password) u.password = '***';
-      logger.warn('[config] Proxy configured:', u.toString());
-    } catch {
-      logger.warn('[config] Proxy configured (URL not parseable — check format)');
-    }
   }
 }

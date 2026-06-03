@@ -314,7 +314,7 @@ export function getResearchStopMessage(piSessionId: string, researchId: string):
     'Troubleshooting:',
     '• Verify network connection is active',
     '• Check browser logs for automation detection signals',
-    '• Verify PROXY_URL if configured (optional): should be socks5://host:port or http://host:port',
+
     '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 6 minutes)',
     '',
     'Partial results may be available below.',

@@ -72,13 +72,12 @@ Say **research** for a quick lookup. Say **deep research** for thorough investig
 pi "research AI" --exclude-tools security,stackexchange
 ```
 
-A `/research <query>` slash command is also available as a shortcut — it runs quick mode (depth 0) directly.
+A `/research <query>` slash command is also available as a shortcut — it runs at the configured default depth (1 by default, see `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`).
 
 **Depth levels**:
 
 | Depth | Mode   | Researchers | Rounds |
 |-------|--------|-------------|--------|
-| 0     | Quick  | 1           | 1      |
 | 1     | Normal | 2           | 2      |
 | 2     | Deep   | 3           | 3      |
 | 3     | Ultra  | 5           | 5      |
@@ -97,9 +96,7 @@ Configurable via environment variables or the `/research-config` TUI dashboard. 
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
 | `PI_RESEARCH_MODEL` | _(session model)_ | Model override for researcher sub-agents |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs |
-| `PROXY_URL` | — | Proxy for outgoing requests |
-| `BRAVE_SEARCH_API_KEY` | — | Brave Search paid API key |
-| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key |
+| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key — raises rate limits |
 | `SEARXNG_URL` | — | External SearXNG URL (skips Docker) |
 
 Full variable reference: [docs/SDK.md](docs/SDK.md). Copy `.env.example` to `src/.env` to get started.

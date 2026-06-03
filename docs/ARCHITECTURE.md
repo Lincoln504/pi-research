@@ -49,6 +49,9 @@ Each researcher agent has access to a fixed tool set with shared budget (4 calls
 | `security_search` | NVD, CISA KEV, GitHub Advisories, OSV | shared |
 | `stackexchange` | Stack Exchange network | shared |
 | `grep` | Local ripgrep | shared |
+| `links` | Shared discovered-links pool (list/search) | shared |
+| `stored_search` | Local knowledge store — past research sessions | shared |
+| `read` | Local file reads (from pi-coding-agent) | shared |
 
 Researchers cannot write files, run shell commands, or access the network outside these tools.
 
