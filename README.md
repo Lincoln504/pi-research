@@ -1,4 +1,4 @@
-![pi-research banner](docs/assets/README-banner.jpg)
+![pi-research banner](docs/README-banner.jpg)
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
@@ -87,52 +87,35 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 
 ## Configuration
 
-The extension is highly configurable via environment variables in your `.env` file or the `/research-config` TUI dashboard.
+Configurable via environment variables or the `/research-config` TUI dashboard. Key variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS` | `3` | Max concurrent researchers (1-5). |
-| `PI_RESEARCH_RESEARCHER_TIMEOUT_MS` | `600000` | Per-researcher timeout in ms (default 10m). |
-| `PI_RESEARCH_WORKER_CONCURRENCY` | `3` | Browser worker processes for search and scraping (1-10). |
-| `PI_RESEARCH_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | Model for local knowledge store/RAG. |
-| `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` (Dawn/Vulkan/Metal/D3D12, 3–9× faster than CPU) or `cpu`. |
-| `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | Per-page scrape navigation timeout in ms. |
-| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `30000` | Browser health check timeout in ms (valid range: 20000–120000). |
-| `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs. |
-| `PROXY_URL` | — | Proxy for outgoing requests (e.g., `socks5://127.0.0.1:9050`). |
-| `BRAVE_SEARCH_API_KEY` | — | Brave Search API key (enables paid API engine). |
-| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key (increases rate limit). |
-| `SEARXNG_URL` | — | External SearXNG URL — skips Docker container management entirely. |
+| `PI_RESEARCH_TIMEOUT_MS` | `600000` | Per-researcher timeout (3–30 min) |
+| `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5) |
+| `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–16) |
+| `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
+| `PI_RESEARCH_MODEL` | _(session model)_ | Model override for researcher sub-agents |
+| `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs |
+| `PROXY_URL` | — | Proxy for outgoing requests |
+| `BRAVE_SEARCH_API_KEY` | — | Brave Search paid API key |
+| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key |
+| `SEARXNG_URL` | — | External SearXNG URL (skips Docker) |
 
-Run `/research-config` in pi to edit these settings interactively.
+Full variable reference: [docs/SDK.md](docs/SDK.md). Copy `.env.example` to `src/.env` to get started.
 
 ---
 
 ## Development
 
-**Commands**
-- `npm run lint` / `npm run lint:fix` — Code quality
-- `npm run type-check` — TypeScript verification
-- `npm run test:unit` — Unit tests (1115 tests)
-- `npm run test:integration` — Integration tests (219 tests)
-- `npm run test:coverage` — Coverage report
+```bash
+npm run test:unit         # 1126 unit tests, no browser required
+npm run test:integration  # requires camoufox + Xvfb on Linux
+npm run type-check        # TypeScript strict mode
+npm run lint              # ESLint
+npm run deps:check        # architectural rule enforcement
+```
 
-**Architecture**
-- **Service Registry Pattern**: Centralized dependency injection container manages all services
-- **Constructor DI**: All services use constructor-based dependency injection for testability
-- **Pure ESM**: The project uses ES Modules (`"type": "module"` in package.json)
-- **Core Services**: PlanningService, SchedulerService, HealthCheckService, and more provide foundation functionality
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for full setup, CI details, and contribution guide.
 
----
-
-## Test Status
-
-- **Unit Tests**: 1115 passing tests across 69 test files
-- **Integration Tests**: 219 passing tests across 12 test files (49 skipped)
-- **Module System**: Pure ESM (no CommonJS dependencies)
-
-## Architecture
-
-See [docs/architecture/overview.md](docs/architecture/overview.md) for detailed design information.
-
-See [docs/SERVICE_ARCHITECTURE.md](docs/SERVICE_ARCHITECTURE.md) for service registry and dependency injection details.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design and service patterns.

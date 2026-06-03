@@ -1,16 +1,19 @@
 # Development infrastructure
-# Note: published file set is controlled by the `files` field in package.json.
-# This file provides a defence-in-depth exclusion layer for paths not in `files`.
+# Note: the `files` field in package.json is the primary allowlist.
+# This file provides defence-in-depth for anything that leaks through.
 .git/
 .gitignore
 .gitattributes
 .github/
 .nvmrc
-config/tooling/
+config/
 tsconfig*.json
 vitest.config*.ts
 eslint.config.js
-.dependency-cruiser.cjs
+
+# docs/ — only SDK.md, ARCHITECTURE.md, and OVERVIEW.md are in the files allowlist.
+docs/README-banner.jpg
+docs/DEVELOPMENT.md
 
 # Tests
 test/

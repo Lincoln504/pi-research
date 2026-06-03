@@ -63,10 +63,6 @@ jobs:
       - name: Audit Dependencies
         run: npm audit --audit-level=high
 
-      - name: Static Analysis
-        run: npm run analyze:cloc
-        continue-on-error: true
-
   type-check:
     runs-on: ubuntu-latest
     steps:
@@ -194,7 +190,7 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
-      # Validate architectural rules (no graphviz required — fast, fails on violations)
+      # Validate architectural rules (fast, fails on violations)
       - name: Check dependency rules
         run: npm run deps:check
       # Regenerate the detailed dependency SVG and commit only if it changed

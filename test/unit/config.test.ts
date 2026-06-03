@@ -55,7 +55,7 @@ describe('config (refactored)', () => {
       });
 
       it('should use custom RESEARCHER_TIMEOUT_MS from env', () => {
-        const env = { PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '400000' };
+        const env = { PI_RESEARCH_TIMEOUT_MS: '400000' };
         const config = createConfig(env, {});
 
         expect(config.RESEARCHER_TIMEOUT_MS).toBe(400000);
@@ -63,7 +63,7 @@ describe('config (refactored)', () => {
 
       it('should parse all custom values from env', () => {
         const env = {
-          PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180000',
+          PI_RESEARCH_TIMEOUT_MS: '180000',
           PROXY_URL: 'socks5://127.0.0.1:9050',
         };
         const config = createConfig(env, {});
@@ -74,9 +74,9 @@ describe('config (refactored)', () => {
 
       it('should parse knowledge store configuration from env', () => {
         const env = {
-          PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'false',
+          PI_RESEARCH_KNOWLEDGE_ENABLED: 'false',
           PI_RESEARCH_EMBEDDING_MODEL: 'custom-model',
-          PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '15',
+          PI_RESEARCH_CACHE_TTL_DAYS: '15',
         };
         const config = createConfig(env, {});
 
@@ -86,11 +86,11 @@ describe('config (refactored)', () => {
       });
 
       it('should handle boolean variations in env for KNOWLEDGE_STORE_ENABLED', () => {
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'TRUE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: 'FALSE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_ENABLED: '' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true); // default
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'TRUE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'FALSE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: '' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true); // default
       });
     });
   });
@@ -108,22 +108,22 @@ describe('config (refactored)', () => {
     });
 
     it('should throw for RESEARCHER_TIMEOUT_MS below minimum (180000)', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '60000' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '60000' }, {});
       expect(() => validateConfig(config)).toThrow('180000–1800000ms');
     });
 
     it('should throw for RESEARCHER_TIMEOUT_MS above maximum (1800000)', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '9999999' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '9999999' }, {});
       expect(() => validateConfig(config)).toThrow('180000–1800000ms');
     });
 
     it('should throw for MAX_CONCURRENT_RESEARCHERS below 1', () => {
-      const config = createConfig({ PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS: '0' }, {});
+      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '0' }, {});
       expect(() => validateConfig(config)).toThrow('1–5');
     });
 
     it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
-      const config = createConfig({ PI_RESEARCH_MAX_CONCURRENT_RESEARCHERS: '6' }, {});
+      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '6' }, {});
       expect(() => validateConfig(config)).toThrow('1–5');
     });
 
@@ -177,13 +177,13 @@ describe('config (refactored)', () => {
 
   describe('setConfig / resetConfig', () => {
     it('setConfig persists and getConfig returns the new value', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '300000' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '300000' }, {});
       setConfig(config);
       expect(getConfig().RESEARCHER_TIMEOUT_MS).toBe(300000);
     });
 
     it('resetConfig causes getConfig to re-read defaults from env', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '300000' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '300000' }, {});
       setConfig(config);
       resetConfig();
       // After reset, getConfig() rebuilds from env (cleared in beforeEach), giving defaults
@@ -195,18 +195,18 @@ describe('config (refactored)', () => {
     it('ignores non-numeric values for numeric fields and uses defaults', () => {
       // createConfig uses parseInt which returns NaN for non-numeric strings;
       // parseEnvNumber falls back to the default value
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: 'not-a-number' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: 'not-a-number' }, {});
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(DEFAULTS.RESEARCHER_TIMEOUT_MS);
     });
 
     it('parses the minimum-valid RESEARCHER_TIMEOUT_MS (180000) without error', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '180000' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '180000' }, {});
       expect(() => validateConfig(config)).not.toThrow();
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
     });
 
     it('parses the maximum-valid RESEARCHER_TIMEOUT_MS (1800000) without error', () => {
-      const config = createConfig({ PI_RESEARCH_RESEARCHER_TIMEOUT_MS: '1800000' }, {});
+      const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '1800000' }, {});
       expect(() => validateConfig(config)).not.toThrow();
       expect(config.RESEARCHER_TIMEOUT_MS).toBe(1800000);
     });

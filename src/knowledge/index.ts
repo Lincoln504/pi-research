@@ -10,7 +10,7 @@ export { SUPPORTED_MODELS, getModelEmbedderConfig, getModelChunkConfig } from '.
 
 /** Migration strategy for model changes (read from env or config) */
 function getMigrationStrategy(): MigrationStrategy | undefined {
-  const strategy = process.env['PI_KNOWLEDGE_STORE_MIGRATION_STRATEGY'];
+  const strategy = process.env['PI_RESEARCH_MIGRATION_STRATEGY'];
   if (!strategy) return undefined;
   
   // Only support 'drop' and 're-embed' - simplified from 4 strategies

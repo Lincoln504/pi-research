@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "../tsconfig.json",
   "compilerOptions": {
     "noUnusedLocals": false,
     "noUnusedParameters": false,
@@ -10,13 +10,13 @@
     "types": ["node", "vitest/globals"]
   },
   "include": [
-    "src/**/*",
-    "test/**/*"
+    "../src/**/*",
+    "../test/**/*"
   ],
   "exclude": [
-    "node_modules",
-    ".tmp",
-    "dist",
-    "coverage"
+    "../node_modules",
+    "../.tmp",
+    "../dist",
+    "../coverage"
   ]
 }
