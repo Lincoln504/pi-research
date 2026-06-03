@@ -98,7 +98,8 @@ export class WorkerPoolManager implements IService {
 
                 const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
                 const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                const workerConcurrency = isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency;
+                // Reduce concurrency to 1 in CI to avoid IPC bottlenecks on constrained runners
+                const workerConcurrency = (process.env['GITHUB_ACTIONS'] === 'true') ? 1 : (isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency);
                 
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                     const cluster = (await import('node:cluster')).default;
@@ -166,7 +167,7 @@ export class WorkerPoolManager implements IService {
                       };
                       process.stderr.write(`[WorkerPoolManager] Pool Status: ${JSON.stringify(info)}\n`);
                     }
-                  }, 10000).unref();
+                  }, 2000).unref();
                 }
 
                 // Restore original argv after pool is created
