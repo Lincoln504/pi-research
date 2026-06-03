@@ -5,7 +5,7 @@
  * This is an integration test that spawns a separate Node process.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -15,16 +15,6 @@ const __dirname = dirname(__filename);
 const setupScriptPath = join(process.cwd(), 'scripts', 'setup.cjs');
 
 describe('scripts/setup.cjs integration tests', () => {
-  let testTimeout: NodeJS.Timeout;
-
-  beforeEach(() => {
-    // Set a test timeout to handle potential delays
-    testTimeout = setTimeout(() => {}, 30000); // 30 second timeout
-  });
-
-  afterEach(() => {
-    clearTimeout(testTimeout);
-  });
 
   /**
    * Helper to run setup.cjs with the given environment variables and args.

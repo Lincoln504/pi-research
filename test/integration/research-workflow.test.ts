@@ -104,7 +104,7 @@ describe('End-to-End Research Workflows', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
-    testDbDir = path.join(os.tmpdir(), `pi-research-workflow-${Date.now()}`);
+    testDbDir = path.join(os.tmpdir(), `pi-research-workflow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   }, 30000);
 
   beforeEach(async () => {

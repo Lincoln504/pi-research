@@ -45,7 +45,7 @@ describe('Error Recovery and Resilience', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
-    testDbDir = path.join(os.tmpdir(), `pi-error-recovery-${Date.now()}`);
+    testDbDir = path.join(os.tmpdir(), `pi-error-recovery-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   }, 30000);
 
   afterAll(async () => {
@@ -59,7 +59,7 @@ describe('Error Recovery and Resilience', () => {
     } catch {
       // Ignore cleanup errors
     }
-  }, 120000); // Extended timeout: browser pool drain takes ~1.5s per forceSchedulerRestart call
+  }, 120000); // Extended timeout: pool.destroy (up to 5s) + 200ms drain per forceSchedulerRestart call
 
   describe('Browser Pool Recovery', () => {
     it('should recover browser pool after crash', async () => {

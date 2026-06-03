@@ -96,13 +96,11 @@ export class WorkerPoolManager implements IService {
                 // Sanitize argv to prevent research query exposure in worker processes
                 const restoreArgv = sanitizeArgvForPoolCreation();
 
-                const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' && process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-                const baseWorkerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
-                const workerConcurrency = isMocking ? Math.max(baseWorkerConcurrency, 10) : baseWorkerConcurrency;
-                
+                const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
+
                 if (process.env['GITHUB_ACTIONS'] === 'true') {
                     const cluster = (await import('node:cluster')).default;
-                    process.stderr.write(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}, isMocking=${isMocking}\n`);
+                    process.stderr.write(`[WorkerPoolManager] Initializing pool: maxWorkers=${maxWorkers}, workerConcurrency=${workerConcurrency}\n`);
                     process.stderr.write(`[WorkerPoolManager] cluster.isPrimary=${cluster.isPrimary}, cluster.isMaster=${cluster.isMaster}\n`);
                 }
 

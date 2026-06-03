@@ -155,27 +155,31 @@ jobs:
         run: npm run build:worker
       - name: Run Poolifier Reproduction
         run: |
-          echo "import { FixedClusterPool } from 'poolifier';
-          import path from 'node:path';
-          import { fileURLToPath } from 'node:url';
+          cat > /tmp/repro_worker.mjs << 'EOF'
+          import { ClusterWorker } from 'poolifier';
 
-          const __dirname = path.dirname(fileURLToPath(import.meta.url));
-          const workerFile = path.join(__dirname, 'repro_worker.mjs');
+          async function runTask(data) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return { success: true, received: data };
+          }
+
+          export default new ClusterWorker(runTask);
+          EOF
+
+          cat > /tmp/repro_poolifier.mjs << 'EOF'
+          import { FixedClusterPool } from 'poolifier';
 
           async function run() {
-            console.log('Starting pool...');
-            const pool = new FixedClusterPool(1, workerFile, {
+            console.log('Starting poolifier smoke test...');
+            const pool = new FixedClusterPool(1, '/tmp/repro_worker.mjs', {
               enableTasksQueue: true,
-              tasksQueueOptions: {
-                concurrency: 10
-              }
+              tasksQueueOptions: { concurrency: 3 },
             });
 
-            console.log('Executing tasks...');
             const start = Date.now();
-            const tasks = Array.from({ length: 3 }, (_, i) => 
+            const tasks = Array.from({ length: 3 }, (_, i) =>
               pool.execute({ id: i }).then(res => {
-                console.log(\`Task \${i} finished in \${Date.now() - start}ms:\`, res);
+                console.log(`Task ${i} finished in ${Date.now() - start}ms`);
                 return res;
               })
             );
@@ -183,26 +187,17 @@ jobs:
             await Promise.all(tasks);
             console.log('All tasks finished. Destroying pool...');
             await pool.destroy();
-            console.log('Done.');
+            console.log('Poolifier smoke test passed.');
             process.exit(0);
           }
 
           run().catch(err => {
-            console.error('Error:', err);
+            console.error('Poolifier smoke test FAILED:', err);
             process.exit(1);
-          });" > repro_poolifier.mjs
-          
-          echo "import { ClusterWorker } from 'poolifier';
+          });
+          EOF
 
-          async function runTask(data) {
-            console.log(\`Worker received task:\`, data);
-            await new Promise(resolve => setTimeout(resolve, 100));
-            return { success: true, received: data };
-          }
-
-          export default new ClusterWorker(runTask);" > repro_worker.mjs
-          
-          node repro_poolifier.mjs
+          node /tmp/repro_poolifier.mjs
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
         env:

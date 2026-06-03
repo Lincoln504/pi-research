@@ -55,7 +55,7 @@ describe('Concurrent Operations', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
-    testDbDir = path.join(os.tmpdir(), `pi-concurrent-ops-${Date.now()}`);
+    testDbDir = path.join(os.tmpdir(), `pi-concurrent-ops-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   }, 30000);
 
   beforeEach(async () => {
@@ -76,7 +76,7 @@ describe('Concurrent Operations', () => {
     } catch {
       // Ignore cleanup errors
     }
-  }, 120000); // Extended: browser pool teardown (pool.destroy + 1.5s drain) can take ~15s
+  }, 120000); // Extended: browser pool teardown (pool.destroy up to 5s + 200ms drain) can take ~10s
 
   describe('Concurrent Browser Task Queue Management', () => {
     it('should handle multiple concurrent search operations', async () => {

@@ -1,7 +1,8 @@
 # Development infrastructure
+# Note: published file set is controlled by the `files` field in package.json.
+# This file provides a defence-in-depth exclusion layer for paths not in `files`.
 .git/
 .gitignore
-docs/
 .gitattributes
 .github/
 .nvmrc
