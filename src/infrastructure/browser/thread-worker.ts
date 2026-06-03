@@ -80,6 +80,11 @@ if (process.env['GITHUB_ACTIONS'] === 'true') {
  */
 async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   const taskId = crypto.randomBytes(4).toString('hex');
+  
+  if (process.env['GITHUB_ACTIONS'] === 'true') {
+    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] runTask called with: ${JSON.stringify(data).substring(0, 200)}\n`);
+  }
+
   if (!data) {
     return { error: 'No task data provided', duration: 0 };
   }
@@ -88,7 +93,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
 
   if (process.env['GITHUB_ACTIONS'] === 'true') {
     // Only log essential task info to avoid pipe pressure
-    process.stderr.write(`[Worker-${workerId}] Task: ${type}\n`);
+    process.stderr.write(`[Worker-${workerId}] [Task-${taskId}] Task Type: ${type}\n`);
   }
 
   if (FULL_MOCK_MODE) {
@@ -160,7 +165,7 @@ const worker = new ClusterWorker(runTask, {
 });
 
 if (process.env['GITHUB_ACTIONS'] === 'true') {
-  process.stderr.write(`[Worker-${workerId}] ClusterWorker instantiated\n`);
+  process.stderr.write(`[Worker-${workerId}] ClusterWorker instance created\n`);
 }
 
 export default worker;

@@ -153,6 +153,56 @@ jobs:
           NODE_EOF
       - name: Build worker bundle
         run: npm run build:worker
+      - name: Run Poolifier Reproduction
+        run: |
+          echo "import { FixedClusterPool } from 'poolifier';
+          import path from 'node:path';
+          import { fileURLToPath } from 'node:url';
+
+          const __dirname = path.dirname(fileURLToPath(import.meta.url));
+          const workerFile = path.join(__dirname, 'repro_worker.mjs');
+
+          async function run() {
+            console.log('Starting pool...');
+            const pool = new FixedClusterPool(1, workerFile, {
+              enableTasksQueue: true,
+              tasksQueueOptions: {
+                concurrency: 10
+              }
+            });
+
+            console.log('Executing tasks...');
+            const start = Date.now();
+            const tasks = Array.from({ length: 3 }, (_, i) => 
+              pool.execute({ id: i }).then(res => {
+                console.log(\`Task \${i} finished in \${Date.now() - start}ms:\`, res);
+                return res;
+              })
+            );
+
+            await Promise.all(tasks);
+            console.log('All tasks finished. Destroying pool...');
+            await pool.destroy();
+            console.log('Done.');
+            process.exit(0);
+          }
+
+          run().catch(err => {
+            console.error('Error:', err);
+            process.exit(1);
+          });" > repro_poolifier.mjs
+          
+          echo "import { ClusterWorker } from 'poolifier';
+
+          async function runTask(data) {
+            console.log(\`Worker received task:\`, data);
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return { success: true, received: data };
+          }
+
+          export default new ClusterWorker(runTask);" > repro_worker.mjs
+          
+          node repro_poolifier.mjs
       - name: Integration Tests (Parallel Group)
         run: npm run test:integration:parallel
         env:
