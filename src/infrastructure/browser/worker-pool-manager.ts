@@ -99,7 +99,7 @@ export class WorkerPoolManager implements IService {
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
                 this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.ts'), {
                     env: browserEnv,
-                    settings: { execArgv: ['--import', 'tsx'] },
+                    settings: { execArgv: ['--experimental-strip-types'] },
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
@@ -109,6 +109,18 @@ export class WorkerPoolManager implements IService {
                             logger.error(`[WorkerPoolManager] Worker pool may be unhealthy: ${this.consecutiveErrors} consecutive errors. Consider restarting.`);
                             if (this.onPoolError) {
                                 this.onPoolError(e, this.consecutiveErrors);
+                            }
+                        }
+                    },
+                    exitHandler: (code: number) => {
+                        if (code !== 0) {
+                            logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
+                            this.consecutiveErrors++;
+                            if (this.consecutiveErrors >= 3) {
+                                logger.error(`[WorkerPoolManager] Worker pool unhealthy due to 3 consecutive exits.`);
+                                if (this.onPoolError) {
+                                    this.onPoolError(new Error(`Worker exited with code ${code}`), this.consecutiveErrors);
+                                }
                             }
                         }
                     },

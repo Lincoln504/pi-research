@@ -87,6 +87,10 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   }
 
   if (FULL_MOCK_MODE) {
+    // Yield the event loop to ensure IPC messages are processed correctly
+    // and to prevent synchronous execution bugs in poolifier's queue.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
     if (type === 'search') {
       return {
         results: [{ title: 'Mock Result', url: 'https://example.com/mock', content: `Mock search result for: ${query ?? ''}` }],
