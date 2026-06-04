@@ -285,8 +285,7 @@ export class EmbeddingServer implements IEmbedder {
         } catch (error) {
           logger.error('[EmbeddingServer] Error handling request:', error);
           res.writeHead(500);
-          // codeql[js/stack-trace-exposure] — localhost-only IPC server; clients are trusted local processes
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })); // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
         }
         resolve();
       });
