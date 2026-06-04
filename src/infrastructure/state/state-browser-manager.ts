@@ -78,7 +78,6 @@ export class StateBrowserManager implements IService {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
       return;
     }
-    this.lifecycle = ServiceLifecycle.INITIALIZING;
     this.lifecycle = ServiceLifecycle.INITIALIZED;
   }
 
@@ -86,7 +85,6 @@ export class StateBrowserManager implements IService {
     if (this.lifecycle === ServiceLifecycle.DISPOSED) {
       return;
     }
-    this.lifecycle = ServiceLifecycle.DISPOSING;
     this.lifecycle = ServiceLifecycle.DISPOSED;
   }
 }

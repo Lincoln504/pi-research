@@ -203,7 +203,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
   }
 
   async function verifyStateConsistency(sessionId: string): Promise<boolean> {
-    return sessionId !== null && sessionId !== undefined && sessionId.length > 0;
+    return sessionId.length > 0;
   }
 
   async function verifyKnowledgeStoreAccessibility(): Promise<boolean> {

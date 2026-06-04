@@ -75,15 +75,16 @@ export async function warmupPipeline(
 export function isWebGpuDeviceError(err: unknown): boolean {
   if (!err) return false;
 
+  // Type-safe string extraction from error objects
   let msg: string;
   let stack: string;
-  
+
   if (err instanceof Error) {
-    msg = err.message || '';
-    stack = err.stack || '';
-  } else if (typeof err === 'object' && err !== null) {
-    msg = String((err as any).message || '');
-    stack = String((err as any).stack || '');
+    msg = err.message ?? '';
+    stack = err.stack ?? '';
+  } else if (typeof err === 'object') {
+    msg = String((err as any).message ?? '');
+    stack = String((err as any).stack ?? '');
     if (!msg && !stack) {
       try { msg = JSON.stringify(err); } catch { msg = String(err); }
     }

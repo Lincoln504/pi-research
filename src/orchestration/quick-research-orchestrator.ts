@@ -26,7 +26,7 @@ import type { IWriterQueue, IKnowledgeStoreService } from '../core/service-inter
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
-import type { AbortCleanup, ResearchMessage } from '../types/index.ts';
+import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 import {
   cleanupResearchServices,
@@ -223,7 +223,7 @@ export class QuickResearchOrchestrator {
                     onAbort();
                   } else {
                     signal.addEventListener('abort', onAbort, { once: true });
-                    (abortCleanup as AbortCleanup) = () => signal.removeEventListener('abort', onAbort);
+                    abortCleanup = () => signal.removeEventListener('abort', onAbort);
                   }
                 })
               ] : []),

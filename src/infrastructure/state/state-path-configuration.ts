@@ -47,13 +47,11 @@ export class StatePathConfiguration implements IService {
     if (this._initialized) {
       return;
     }
-    this.lifecycle = ServiceLifecycle.INITIALIZING;
     this._initialized = true;
     this.lifecycle = ServiceLifecycle.INITIALIZED;
   }
 
   async dispose(): Promise<void> {
-    this.lifecycle = ServiceLifecycle.DISPOSING;
     // Nothing to dispose
     this.lifecycle = ServiceLifecycle.DISPOSED;
   }

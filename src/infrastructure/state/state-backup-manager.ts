@@ -41,7 +41,6 @@ export class StateBackupManager implements IService {
   }
 
   async dispose(): Promise<void> {
-    this.lifecycle = ServiceLifecycle.DISPOSING;
     // Nothing to dispose
     this.lifecycle = ServiceLifecycle.DISPOSED;
   }

@@ -430,7 +430,7 @@ export default new ThreadWorker(runTask, {
     }
     
     generateSummary(metrics) {
-        const summary = `# Production Stress Test Summary\n\n`;
+        let summary = `# Production Stress Test Summary\n\n`;
         summary += `**Date:** ${new Date().toISOString()}\n`;
         summary += `**Configuration:** ${CONFIG.poolType}_${CONFIG.workers}w_${CONFIG.strategy}\n`;
         summary += `**Browser Mode:** WARM\n\n`;

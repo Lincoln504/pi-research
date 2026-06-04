@@ -74,7 +74,6 @@ export class PlanningService implements IPlanningService {
       this.ctx = ctx;
     }
 
-    this.lifecycle = ServiceLifecycle.INITIALIZING;
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.log(`[${this.name}] Initialized`);
   }
@@ -88,7 +87,6 @@ export class PlanningService implements IPlanningService {
   }
 
   async dispose(): Promise<void> {
-    this.lifecycle = ServiceLifecycle.DISPOSING;
     this.sessions.clear();
     this.ctx = undefined;
     this.lifecycle = ServiceLifecycle.DISPOSED;
