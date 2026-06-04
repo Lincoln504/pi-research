@@ -99,7 +99,7 @@ export function withTimeout<T>(
 ): Promise<T> {
   const combinedSignal = createTimeoutSignal(timeoutMs, signal);
 
-  logger.log(`[withTimeout] Starting ${label} with timeout ${timeoutMs}ms. External signal aborted: ${signal?.aborted ?? 'no signal'}`);
+  logger.debug(`[withTimeout] Starting ${timeoutMs}ms timeout guard (external signal: ${signal?.aborted ?? 'no signal'})`);
 
   return new Promise<T>((resolve, reject) => {
     // Early abort check: if signal is already aborted, reject immediately

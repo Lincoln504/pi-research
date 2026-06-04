@@ -326,7 +326,7 @@ export class PlanningService implements IPlanningService {
     let text = '';
     let lastEvalError: any = null;
 
-    for (let evalAttempt = 1; evalAttempt <= 2; evalAttempt++) {
+    for (let evalAttempt = 1; evalAttempt <= 3; evalAttempt++) {
       try {
         const response = await completeSimple(model, {
           messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
@@ -335,9 +335,15 @@ export class PlanningService implements IPlanningService {
         const responseMetadata = response as LLMResponseMetadata;
         if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
           const apiError = responseMetadata.errorMessage || `Model API returned stop reason: ${responseMetadata.stopReason}`;
-          logger.error(`[${this.name}] Evaluator API call failed (attempt ${evalAttempt}): ${apiError}`);
+          logger.error(`[${this.name}] Evaluator API call failed (attempt ${evalAttempt}/3): ${apiError}`);
           metrics.increment('llm_api_errors_total', 1, { component: 'evaluator', stopReason: responseMetadata.stopReason });
           lastEvalError = new Error(`Evaluator model API error: ${apiError}`);
+          if (evalAttempt < 3 && !signal?.aborted) {
+            // Exponential backoff: 2s, 4s between API error retries
+            const delay = 2000 * evalAttempt;
+            logger.warn(`[${this.name}] Retrying evaluator in ${delay / 1000}s...`);
+            await new Promise(r => setTimeout(r, delay));
+          }
           continue; // Retry on API error
         }
 
@@ -370,11 +376,13 @@ export class PlanningService implements IPlanningService {
 
         if (text.trim()) break;
       } catch (err) {
-        logger.error(`[${this.name}] Evaluator unexpected error (attempt ${evalAttempt}):`, err);
+        logger.error(`[${this.name}] Evaluator unexpected error (attempt ${evalAttempt}/3):`, err);
         lastEvalError = err;
-        if (evalAttempt >= 2) throw err;
-        // Small delay before retry
-        await new Promise(r => setTimeout(r, 1000));
+        if (evalAttempt >= 3 || signal?.aborted) throw err;
+        // Exponential backoff: 2s, 4s
+        const delay = 2000 * evalAttempt;
+        logger.warn(`[${this.name}] Retrying evaluator in ${delay / 1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
       }
     }
 
