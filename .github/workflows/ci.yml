@@ -26,7 +26,7 @@ env:
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze (CodeQL)
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -41,9 +41,42 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
+          # security-and-quality includes all security-extended checks plus
+          # code quality rules (dead code, common bugs, maintainability).
+          queries: security-and-quality
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+          # Write SARIF locally so the summary step can count findings.
+          # GitHub Security tab upload still happens via the default upload:always.
+          output: codeql-results
+
+      - name: CodeQL Summary
+        if: always()
+        run: |
+          {
+            echo "## CodeQL Security Analysis"
+            echo ""
+            SARIF=$(find codeql-results -name "*.sarif" 2>/dev/null | head -1)
+            if [ -n "$SARIF" ] && [ -f "$SARIF" ]; then
+              COUNT=$(node -e "
+                const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+                const n = (d.runs || []).reduce((s, r) => s + (r.results || []).length, 0);
+                process.stdout.write(String(n));
+              " "$SARIF" 2>/dev/null || echo "?")
+              if [ "$COUNT" = "0" ]; then
+                echo "✅ No findings detected."
+              elif [ "$COUNT" = "?" ]; then
+                echo "_Could not parse SARIF — see [Security tab](../../security/code-scanning)._"
+              else
+                echo "⚠️ **${COUNT} finding(s)** — see the [Security tab](../../security/code-scanning) for details."
+              fi
+            else
+              echo "_SARIF output not found — CodeQL may have encountered an error._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     runs-on: ubuntu-latest
@@ -61,7 +94,36 @@ jobs:
         run: npm ci --legacy-peer-deps
       - run: npm run lint
       - name: Audit Dependencies
-        run: npm audit --audit-level=high
+        run: |
+          # Run once, capture JSON for the summary step, exit with audit's code.
+          npm audit --audit-level=high --json > /tmp/audit-results.json 2>&1 || AUDIT_FAILED=$?
+          {
+            echo "## Dependency Security Audit"
+            echo ""
+            node -e "
+              const raw = require('fs').readFileSync('/tmp/audit-results.json', 'utf8');
+              const d = JSON.parse(raw);
+              const v = d.metadata?.vulnerabilities || {};
+              const total = v.total || 0;
+              if (total === 0) {
+                console.log('✅ No vulnerabilities found.');
+              } else {
+                console.log('| Severity | Count |');
+                console.log('|---|---|');
+                ['critical','high','moderate','low','info'].forEach(k => {
+                  if (v[k] > 0) console.log('| \`' + k + '\` | ' + v[k] + ' |');
+                });
+                const blocking = (v.high || 0) + (v.critical || 0);
+                console.log('');
+                if (blocking > 0) {
+                  console.log('❌ High or critical vulnerabilities found — build blocked.');
+                } else {
+                  console.log('⚠️ Low/moderate vulnerabilities only (below --audit-level=high threshold).');
+                }
+              }
+            " 2>/dev/null || echo "_Audit summary unavailable — see job log._"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit ${AUDIT_FAILED:-0}
 
   type-check:
     runs-on: ubuntu-latest

@@ -148,14 +148,35 @@ describe('healthcheck', () => {
     expect(result.status).toBe('healthy');
   });
 
-  it('should fail when browser is not available', async () => {
+  it('should fail when browser is not available and not in mock mode', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(false);
+    // Ensure mock env vars are absent so mock-mode bypass doesn't fire.
+    delete process.env['PI_RESEARCH_MOCK_SEARCH'];
+    delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
 
     const result = await runHealthCheck();
 
     expect(result.success).toBe(false);
     expect(result.status).toBe('unhealthy');
     expect(result.error).toContain('browser');
+  });
+
+  it('should pass BrowserCapability in full mock mode even when isBrowserAvailable returns false', async () => {
+    // In mock mode (both MOCK vars set), the browser pool is replaced by mocks —
+    // it IS "available", just not backed by a real Camoufox binary.
+    vi.mocked(isBrowserAvailable).mockReturnValue(false);
+    process.env['PI_RESEARCH_MOCK_SEARCH'] = 'true';
+    process.env['PI_RESEARCH_MOCK_SCRAPE'] = 'true';
+    try {
+      const result = await runHealthCheck();
+      expect(result.success).toBe(true);
+      const browserCap = result.components?.find(c => c.component === 'BrowserCapability');
+      expect(browserCap?.healthy).toBe(true);
+      expect(browserCap?.diagnostic?.status).toBe('mocked');
+    } finally {
+      delete process.env['PI_RESEARCH_MOCK_SEARCH'];
+      delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
+    }
   });
 
   it('should fail when browser pool health check fails', async () => {

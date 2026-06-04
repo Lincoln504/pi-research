@@ -43,7 +43,15 @@ export function createGrepTool(options: {
         };
       }
 
-      return sdkExecute(toolCallId, params as any, signal, onUpdate, ctx);
+      try {
+        return await sdkExecute(toolCallId, params as any, signal, onUpdate, ctx);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text', text: `Error: ${msg}` }],
+          details: { error: 'execution_error', message: msg },
+        };
+      }
     },
   } as ToolDefinition;
 }

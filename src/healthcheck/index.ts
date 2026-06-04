@@ -16,8 +16,10 @@ import { healthRegistry } from './registry.ts';
 
 // Register Browser Capability Check
 healthRegistry.register('BrowserCapability', async () => {
-  if (isBrowserAvailable()) {
-    return { healthy: true, diagnostic: { status: 'available' } };
+  const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+                   process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+  if (isBrowserAvailable() || mockMode) {
+    return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
   } else {
     return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
   }

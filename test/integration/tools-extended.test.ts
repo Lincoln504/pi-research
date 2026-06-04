@@ -595,9 +595,9 @@ describe('Extended Tools Integration', () => {
       
       if (result.content[0]?.type === 'text') {
         const text = result.content[0].text as string;
-        expect(text).toMatch(/search\s*results/i);
+        // SDK grep returns "filename:line: content" format (relative to searched dir)
         expect(text).toContain('createGrepTool');
-        expect(text).toContain('src/tools/grep.ts');
+        expect(text).toContain('grep.ts');
       }
     });
 
@@ -659,8 +659,8 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
         const text = result.content[0].text as string;
-        // Should show error message or "No matches found"
-        expect(text).toMatch(/no\s*matches|error|io\s*error/i);
+        // SDK grep throws on missing path; wrapper converts to error result
+        expect(text).toMatch(/no\s*matches|error|not\s*found/i);
       }
     });
 
