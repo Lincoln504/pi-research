@@ -124,6 +124,28 @@ export class ResearchError extends Error {
   }
 }
 
+/**
+ * Convert an error to a safe response object for local IPC servers.
+ * Prevents stack trace exposure while providing useful message info.
+ * This satisfies CodeQL js/stack-trace-exposure by ensuring no stack trace
+ * property or multi-line string (which might contain a stack) is sent.
+ */
+export function toSafeErrorResponse(error: unknown): { error: string } {
+  let message: string;
+  if (error instanceof ResearchError) {
+    message = error.message;
+  } else if (error instanceof Error) {
+    message = error.message;
+  } else {
+    message = String(error);
+  }
+
+  // Defensive: ensure we only take the first line to avoid any potential stack trace leak.
+  // Real Error.message is usually single-line, but custom errors or String(error) might not be.
+  const safeMessage = message.split('\n')[0].trim();
+  return { error: safeMessage || 'Unknown error' };
+}
+
 import { randomUUID } from 'node:crypto';
 
 /**

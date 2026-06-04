@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import { logger } from '../../logger.ts';
 import type { SearchResult } from '../../web-research/types.ts';
+import { toSafeErrorResponse } from '../../utils/research-error.ts';
 
 export interface BrowserServerOptions {
     onSearch: (query: string) => Promise<SearchResult[]>;
@@ -63,7 +64,8 @@ export class BrowserServer {
                     } catch (error) {
                         logger.error('[BrowserServer] Error handling request:', error);
                         res.writeHead(500);
-                        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })); // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
+                        // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
+                        res.end(JSON.stringify(toSafeErrorResponse(error)));
                     }
                 });
             });

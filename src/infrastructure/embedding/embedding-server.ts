@@ -14,6 +14,7 @@ import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import type { Embedder } from '../../knowledge/embedder.ts';
+import { toSafeErrorResponse } from '../../utils/research-error.ts';
 
 // ---------------------------------------------------------------------------
 // SerialQueue — ensures embed/embedMany never run concurrently on the GPU
@@ -285,7 +286,8 @@ export class EmbeddingServer implements IEmbedder {
         } catch (error) {
           logger.error('[EmbeddingServer] Error handling request:', error);
           res.writeHead(500);
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })); // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
+          // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
+          res.end(JSON.stringify(toSafeErrorResponse(error)));
         }
         resolve();
       });
