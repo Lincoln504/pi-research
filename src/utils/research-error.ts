@@ -142,7 +142,7 @@ export function toSafeErrorResponse(error: unknown): { error: string } {
 
   // Defensive: ensure we only take the first line to avoid any potential stack trace leak.
   // Real Error.message is usually single-line, but custom errors or String(error) might not be.
-  const safeMessage = message.split('\n')[0].trim();
+  const safeMessage = (message.split('\n')[0] || '').trim();
   return { error: safeMessage || 'Unknown error' };
 }
 
