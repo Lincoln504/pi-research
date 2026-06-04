@@ -56,9 +56,11 @@ function getPiState(piSessionId: string): PiSessionState {
 }
 
 /**
- * Maximum allowed unique failed researchers before stopping research
+ * Maximum allowed unique failed researchers before stopping research.
+ * Increased from 2 to 4 to allow larger research teams (complexity 3) to continue
+ * even if some infrastructure nodes fail, provided at least one survives.
  */
-const MAX_FAILED_RESEARCHERS = 2;
+export const MAX_FAILED_RESEARCHERS = 2;
 
 /**
  * Subscribe to session order changes for a specific Pi session
