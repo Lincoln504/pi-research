@@ -56,31 +56,40 @@ Run `/research-config` inside pi to edit any setting interactively. The TUI read
 `src/sdk.ts` provides a standalone API for use outside the pi CLI — scripts, CI, custom tooling. It initializes the service registry and manages lifecycle internally.
 
 ```typescript
-import { ResearchSDK } from '@lincoln504/pi-research/sdk';
-import type { SDKOptions } from '@lincoln504/pi-research/sdk';
+import { 
+  initResearchSDK, 
+  runDeepResearch, 
+  disposeResearchSDK,
+  verifyUrl,
+  repairJson
+} from '@lincoln504/pi-research';
 
-const sdk = new ResearchSDK({
-  model,           // Model<any> from @earendil-works/pi-ai
-  apiKey,          // optional: API key if not in env
-  cwd,             // optional: working directory (default: process.cwd())
-  config,          // optional: Partial<Config> overrides
-  verbose,         // optional: enable console logging
-} satisfies SDKOptions);
-
-await sdk.initialize();
-
-const result = await sdk.research({
-  query: 'solid-state battery technology',
-  depth: 2,        // 0=quick, 1=normal, 2=deep, 3=ultra
+// 1. Initialize
+await initResearchSDK({
+  model: 'openrouter/deepseek/deepseek-v4-flash', // or a Model object
+  verbose: false,
+  config: {
+    MAX_SCRAPE_BATCHES: 4,
+  }
 });
 
-console.log(result.output);    // synthesized markdown
-console.log(result.tokens);    // total tokens used
+// 2. Run Research
+const markdown = await runDeepResearch('solid-state battery technology', {
+  depth: 2, // 1-3
+});
 
-await sdk.shutdown();
+// 3. High-fidelity URL Verification (Stealth Browser)
+const exists = await verifyUrl('https://example.com/some-page');
+
+// 4. Agentic JSON Repair
+const malformed = '{ "findings": [ { "url": "..." '; // truncated
+const repaired = await repairJson(malformed, MySchema);
+
+// 5. Cleanup
+await disposeResearchSDK();
 ```
 
-The SDK handles service registration, embedder init, browser pool startup, and clean shutdown. Calling `shutdown()` is important — it drains the writer queue, closes LanceDB, and terminates workers.
+Initialization is required before calling research or verification methods. `disposeResearchSDK()` is critical — it drains the writer queue, closes LanceDB, and terminates worker processes.
 
 ---
 

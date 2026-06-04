@@ -25,7 +25,8 @@ import { shutdownManager } from './utils/shutdown-manager.ts';
 import { resetServiceContainer, getService } from './core/service-registry.ts';
 import type { ResearchDepth } from './types/index.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
-import type { IKnowledgeStoreService, IScheduler } from './core/service-interfaces.ts';
+import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
+import type { SchedulerService } from './core/scheduler-service.ts';
 import { repairJsonWithLlm } from './utils/agentic-repair.ts';
 import { completeSimple } from '@earendil-works/pi-ai';
 
@@ -120,21 +121,21 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
   // Build and cache the registry (one instance for the lifetime of this init cycle).
   globalRegistry = buildModelRegistry(parsedProvider);
 
-  // Resolve a string "provider/id" model from the registry.
-  if (typeof options.model === 'string') {
-    const [provider, ...rest] = options.model.split('/');
-    const modelId = rest.join('/');
-    if (!provider || !modelId) {
-      throw new Error(`Invalid model string "${options.model}". Expected "provider/id" e.g. "openrouter/deepseek/deepseek-v4-flash".`);
-    }
-    const found = globalRegistry.find(provider, modelId);
-    if (!found) {
-      throw new Error(`Model "${options.model}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
-    }
-    globalModel = found;
-  }
-
   try {
+    // Resolve a string "provider/id" model from the registry.
+    if (typeof options.model === 'string') {
+      const [provider, ...rest] = options.model.split('/');
+      const modelId = rest.join('/');
+      if (!provider || !modelId) {
+        throw new Error(`Invalid model string "${options.model}". Expected "provider/id" e.g. "openrouter/deepseek/deepseek-v4-flash".`);
+      }
+      const found = globalRegistry.find(provider, modelId);
+      if (!found) {
+        throw new Error(`Model "${options.model}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
+      }
+      globalModel = found;
+    }
+
     // Register and initialize services
     registerCoreServices();
     registerInfrastructureServices();
@@ -218,10 +219,10 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
 export async function verifyUrl(url: string): Promise<boolean> {
   ensureInitialized();
   try {
-    const scheduler = await getService<IScheduler>(ServiceNames.SCHEDULER);
+    const scheduler = await getService<SchedulerService>(ServiceNames.SCHEDULER);
     const result = await scheduler.runScrape(url);
     // If it didn't throw and returned something, it exists.
-    return !!result && !result.error;
+    return !!result;
   } catch {
     return false;
   }

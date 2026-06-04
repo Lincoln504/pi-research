@@ -506,8 +506,12 @@ describe('PlanningService', () => {
     });
 
     it('throws when the model returns an error stop reason', async () => {
+      vi.useFakeTimers();
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('', 'error'));
-      await expect(service.updatePlanForRound(BASE_OPTIONS)).rejects.toThrow('Evaluator model API error');
+      const promise = expect(service.updatePlanForRound(BASE_OPTIONS)).rejects.toThrow('Evaluator model API error');
+      await vi.runAllTimersAsync();
+      await promise;
+      vi.useRealTimers();
     });
 
     it('updates currentPlan after a successful call', async () => {
