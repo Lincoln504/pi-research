@@ -96,7 +96,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
     // Honour MAX_CONCURRENT_RESEARCHERS — prevents resource spikes when a plan has many researchers.
-    const maxConcurrent: number = (orchestratorOptions.config as any)?.MAX_CONCURRENT_RESEARCHERS ?? 3;
+    const maxConcurrent: number = (orchestratorOptions.config as Config)?.MAX_CONCURRENT_RESEARCHERS ?? 3;
 
     for (const configItem of researchers) {
       if (signal?.aborted) break;
