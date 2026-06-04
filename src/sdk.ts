@@ -25,7 +25,13 @@ import { shutdownManager } from './utils/shutdown-manager.ts';
 import { resetServiceContainer, getService } from './core/service-registry.ts';
 import type { ResearchDepth } from './types/index.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
-import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
+import type { IKnowledgeStoreService, IScheduler } from './core/service-interfaces.ts';
+import { repairJsonWithLlm } from './utils/agentic-repair.ts';
+import { completeSimple } from '@earendil-works/pi-ai';
+
+export { repairJsonWithLlm };
+export { getService, resetServiceContainer } from './core/service-registry.ts';
+export { ServiceNames } from './core/service-interfaces.ts';
 
 /**
  * SDK Initialization Options
@@ -204,6 +210,33 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
   });
 
   return await orchestrator.run(options.signal);
+}
+
+/**
+ * Verify if a URL exists using the browser pool (high fidelity stealth check).
+ */
+export async function verifyUrl(url: string): Promise<boolean> {
+  ensureInitialized();
+  try {
+    const scheduler = await getService<IScheduler>(ServiceNames.SCHEDULER);
+    const result = await scheduler.runScrape(url);
+    // If it didn't throw and returned something, it exists.
+    return !!result && !result.error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Repair malformed JSON using the SDK's global model.
+ */
+export async function repairJson(text: string, schema?: any): Promise<any | null> {
+  ensureInitialized();
+  return await repairJsonWithLlm(text, completeSimple, { apiKey: globalApiKey || '' }, {
+    model: globalModel,
+    schema,
+    serviceName: 'SDK-Repair',
+  });
 }
 
 /**
