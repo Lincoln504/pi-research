@@ -33,6 +33,11 @@ export async function performSearch(
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 
+    // Hard cap per query so a single Cloudflare block or hung browser worker
+    // cannot stall the entire Promise.all burst. 35 s is generous for a real
+    // search but short enough to release the burst within ~40 s worst-case.
+    const QUERY_TIMEOUT_MS = 35_000;
+
     const filteredQueries = queries.filter(q => q.trim());
     const searchTasks = filteredQueries.map(async (query) => {
         if (signal?.aborted) {
@@ -40,18 +45,28 @@ export async function performSearch(
             return;
         }
         const queryStartTime = Date.now();
+
+        // Merge the outer abort signal with a per-query deadline.
+        const timeoutController = new AbortController();
+        const timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
+        if ((timeoutId as any).unref) (timeoutId as any).unref();
+
+        const querySignal = signal
+          ? AbortSignal.any([signal, timeoutController.signal])
+          : timeoutController.signal;
+
         try {
-            const results = await runWorkerSearch(query, config, signal);
+            const results = await runWorkerSearch(query, config, querySignal);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
             metrics.increment('browser_search_queries_total', 1, { status: 'success' });
-            
+
             if (results?.length > 0) {
                 metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
-                
-                // Return all results for this query. The scrape tool and distributor 
-                // handle cross-researcher deduplication. We only ensure results 
+
+                // Return all results for this query. The scrape tool and distributor
+                // handle cross-researcher deduplication. We only ensure results
                 // for this specific query are unique to avoid obvious waste.
                 const uniqueResults = [];
                 const localSeen = new Set<string>();
@@ -69,12 +84,19 @@ export async function performSearch(
             }
         } catch (error) {
             const queryDuration = Date.now() - queryStartTime;
-            metrics.observe('browser_search_query_duration_ms', queryDuration, { status: 'error' });
-            metrics.increment('browser_search_queries_total', 1, { status: 'error' });
-            const msg = error instanceof Error ? error.message : String(error);
-            logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+            const isTimeout = timeoutController.signal.aborted && !signal?.aborted;
+            const status = isTimeout ? 'timeout' : 'error';
+            metrics.observe('browser_search_query_duration_ms', queryDuration, { status });
+            metrics.increment('browser_search_queries_total', 1, { status });
+            if (isTimeout) {
+                logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms (likely blocked): "${query}"`);
+            } else {
+                const msg = error instanceof Error ? error.message : String(error);
+                logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+            }
             resultMap.set(query, []);
         } finally {
+            clearTimeout(timeoutId);
             if (onProgress) onProgress(seenUrls.size);
         }
     });

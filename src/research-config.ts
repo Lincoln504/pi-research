@@ -223,7 +223,17 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           hint: (text: string) => theme.fg('dim', text),
         };
 
-        const settingsList = new SettingsList(
+        let settingsList: SettingsList;
+        let menuClosed = false;
+        let countRefreshTimer: ReturnType<typeof setInterval> | undefined;
+
+        const wrappedDone = (val: any) => {
+          menuClosed = true;
+          if (countRefreshTimer !== undefined) clearInterval(countRefreshTimer);
+          done(val);
+        };
+
+        settingsList = new SettingsList(
           initialItems,
           10,
           listTheme,
@@ -264,21 +274,41 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 
             // 2. Handle Actions
             if (id === 'ACTION_HEALTH') {
-              done({ type: 'action', action: 'health' });
+              wrappedDone({ type: 'action', action: 'health' });
             } else if (id === 'ACTION_KNOWLEDGE_STATUS') {
-              done({ type: 'action', action: 'knowledge_status' });
+              wrappedDone({ type: 'action', action: 'knowledge_status' });
             } else if (id === 'ACTION_KNOWLEDGE_CLEAR') {
-              done({ type: 'action', action: 'knowledge_clear' });
+              wrappedDone({ type: 'action', action: 'knowledge_clear' });
             } else if (id === 'ACTION_METRICS_VIEW') {
-              done({ type: 'action', action: 'metrics_view' });
+              wrappedDone({ type: 'action', action: 'metrics_view' });
             } else if (id === 'ACTION_METRICS_CLEAR') {
-              done({ type: 'action', action: 'metrics_clear' });
+              wrappedDone({ type: 'action', action: 'metrics_clear' });
             }
 
           },
-          () => done({ type: 'cancel' }),
+          () => wrappedDone({ type: 'cancel' }),
           { enableSearch: true }
         );
+
+        // Poll the knowledge store count every 5 s and update the display in-place.
+        // store.count() reopens the LanceDB table handle on each call so it always
+        // returns the true live count even for rows added since the menu opened.
+        const refreshCount = async () => {
+          if (menuClosed) return;
+          try {
+            const svc = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+            const store = await svc.getStore();
+            const fresh = await store.count();
+            const item = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES');
+            if (item && item.currentValue !== String(fresh)) {
+              item.currentValue = String(fresh);
+              settingsList?.invalidate();
+            }
+          } catch { /* non-fatal — leave current value */ }
+        };
+
+        countRefreshTimer = setInterval(refreshCount, 5000);
+        if ((countRefreshTimer as any).unref) (countRefreshTimer as any).unref();
 
         return {
           render: (width: number) => {

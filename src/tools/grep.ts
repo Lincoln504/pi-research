@@ -29,17 +29,17 @@ export function createGrepTool(options: {
       `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools.`,
     ],
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-      if (!options.tracker.recordCall('grep')) {
-        return {
-          content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
-          details: { blocked: true, reason: 'limit_reached' },
-        };
-      }
-
       if (!Value.Check(sdkGrep.parameters, params)) {
         return {
           content: [{ type: 'text', text: 'Invalid parameters for grep tool.' }],
           details: { error: 'invalid_parameters' },
+        };
+      }
+
+      if (!options.tracker.recordCall('grep')) {
+        return {
+          content: [{ type: 'text', text: options.tracker.getLimitMessage('grep') }],
+          details: { blocked: true, reason: 'limit_reached' },
         };
       }
 

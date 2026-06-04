@@ -436,7 +436,16 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async count(): Promise<number> {
-    if (!this.table) return 0;
+    if (!this.table || !this.db) return 0;
+    // Reopen the table handle to pick up the latest manifest version.
+    // LanceDB table handles pin to the dataset snapshot at open time; rows
+    // appended via add() since then won't appear in countRows() until the
+    // handle is refreshed. This is a cheap manifest re-read, not a full scan.
+    try {
+      this.table = await this.db.openTable(this.tableName);
+    } catch (err) {
+      logger.debug('[store] count(): failed to refresh table handle, proceeding with existing:', err);
+    }
     const count = await this.table.countRows();
     metrics.setGauge('knowledge_store_total_documents', count);
     return count;

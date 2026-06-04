@@ -628,7 +628,7 @@ describe('Extended Tools Integration', () => {
       
       const result = await tool.execute(
         'grep-case-test-1',
-        { pattern: 'CREATEGREPTOOL', flags: '-i', path: 'src/tools' },
+        { pattern: 'CREATEGREPTOOL', ignoreCase: true, path: 'src/tools' },
         undefined,
         undefined,
         mockExtensionCtx as any

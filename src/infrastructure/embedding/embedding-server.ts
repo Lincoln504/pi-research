@@ -161,7 +161,14 @@ export class EmbeddingServer implements IEmbedder {
         });
       }
     } catch (err) {
-      logger.warn('[EmbeddingServer] Could not read embedding server state during shutdown:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      // State manager is torn down before the embedding server during process exit —
+      // this is expected and harmless; log at debug to avoid noise.
+      if (msg.includes('not initialized') || msg.includes('State manager')) {
+        logger.debug('[EmbeddingServer] State manager already disposed during shutdown, skipping registration cleanup.');
+      } else {
+        logger.warn('[EmbeddingServer] Could not read embedding server state during shutdown:', err);
+      }
     }
 
     if (this.server) {

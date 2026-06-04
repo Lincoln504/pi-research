@@ -113,17 +113,20 @@ export class WorkerPoolManager implements IService {
                             if (this.onPoolError) {
                                 this.onPoolError(e, this.consecutiveErrors);
                             }
+                            this.schedulePoolReset();
                         }
                     },
                     exitHandler: (code: number) => {
-                        if (code !== 0) {
+                        // null exit code means the worker was killed intentionally (e.g. pool.destroy())
+                        if (code !== 0 && code !== null) {
                             logger.error(`[WorkerPoolManager] Worker exited with code ${code}`);
                             this.consecutiveErrors++;
                             if (this.consecutiveErrors >= 3) {
-                                logger.error(`[WorkerPoolManager] Worker pool unhealthy due to 3 consecutive exits.`);
+                                logger.error(`[WorkerPoolManager] Worker pool unhealthy due to 3 consecutive exits. Scheduling auto-recovery...`);
                                 if (this.onPoolError) {
                                     this.onPoolError(new Error(`Worker exited with code ${code}`), this.consecutiveErrors);
                                 }
+                                this.schedulePoolReset();
                             }
                         }
                     },
@@ -173,6 +176,31 @@ export class WorkerPoolManager implements IService {
      */
     resetConsecutiveErrors(): void {
         this.consecutiveErrors = 0;
+    }
+
+    /**
+     * Schedule an out-of-band pool reset. Called from poolifier event handlers
+     * where destroying the pool synchronously would deadlock. Waits 1 s so the
+     * current event-handler call-stack unwinds before the pool is destroyed.
+     */
+    private schedulePoolReset(): void {
+        if (this.isShuttingDown) return;
+        const deadPool = this.pool;
+        this.pool = null;
+        this.currentWorkerCount = null;
+        this.consecutiveErrors = 0;
+        metrics.increment('browser_pool_auto_recoveries_total', 1);
+        logger.info('[WorkerPoolManager] Pool reference dropped for auto-recovery; next ensurePool() will create a fresh pool.');
+        // Destroy the old pool asynchronously after the event handler returns.
+        const t = setTimeout(async () => {
+            try {
+                if (deadPool) await deadPool.destroy();
+                logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
+            } catch (err) {
+                logger.warn('[WorkerPoolManager] Auto-recovery: error destroying old pool:', err);
+            }
+        }, 1000);
+        if (t.unref) t.unref();
     }
 
     /**
