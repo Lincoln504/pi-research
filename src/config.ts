@@ -61,6 +61,10 @@ export interface Config {
   BROWSER_TASK_TIMEOUT_MS: number;
   /** Optional model override for researcher sub-agents (e.g. "openrouter/anthropic/claude-3-5-sonnet"). Empty string = use session model. */
   RESEARCH_MODEL?: string;
+  /** Optional directory for the knowledge store (default: ../knowledge_db relative to extension) */
+  KNOWLEDGE_STORE_DIR?: string;
+  /** Whether to use a local knowledge store directory within the current project (default: false) */
+  USE_LOCAL_KNOWLEDGE_STORE: boolean;
 }
 
 export const DEFAULTS: Config = {
@@ -86,6 +90,8 @@ export const DEFAULTS: Config = {
   MAX_CONCURRENT_SCRAPES: 3,
   BROWSER_TASK_TIMEOUT_MS: 45000,
   RESEARCH_MODEL: '',
+  KNOWLEDGE_STORE_DIR: '',
+  USE_LOCAL_KNOWLEDGE_STORE: false,
 };
 
 // ============================================================================
@@ -97,6 +103,21 @@ export function getEnvFilePath(): string {
 }
 
 export function getDbDir(): string {
+  const config = getConfig();
+
+  // 1. Explicit directory override
+  if (config.KNOWLEDGE_STORE_DIR) {
+    return path.isAbsolute(config.KNOWLEDGE_STORE_DIR) 
+      ? config.KNOWLEDGE_STORE_DIR 
+      : path.resolve(process.cwd(), config.KNOWLEDGE_STORE_DIR);
+  }
+
+  // 2. Local project directory mode
+  if (config.USE_LOCAL_KNOWLEDGE_STORE) {
+    return path.resolve(process.cwd(), 'knowledge_db');
+  }
+
+  // 3. Default global directory
   const dbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
   // Ensure it's absolute
   return path.isAbsolute(dbDir) ? dbDir : path.resolve(process.cwd(), dbDir);
@@ -155,6 +176,8 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
+    PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR ?? '',
+    PI_RESEARCH_USE_LOCAL_KNOWLEDGE_STORE: String(config.USE_LOCAL_KNOWLEDGE_STORE),
   };
 
   try {
@@ -329,6 +352,8 @@ export function createConfig(
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
+    KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
+    USE_LOCAL_KNOWLEDGE_STORE: parseEnvBool(e, 'PI_RESEARCH_USE_LOCAL_KNOWLEDGE_STORE', DEFAULTS.USE_LOCAL_KNOWLEDGE_STORE),
   };
 }
 

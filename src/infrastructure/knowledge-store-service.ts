@@ -5,10 +5,9 @@
  * Provides clean interface for embedding and storage operations.
  */
 
-import type { IService } from '../core/service-registry.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import type { IEmbedder, IKnowledgeStore, IWriterQueue } from '../core/service-interfaces.ts';
+import type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue } from '../core/service-interfaces.ts';
 
 // Static imports from knowledge module
 import {
@@ -24,7 +23,7 @@ import { getConfig } from '../config.ts';
 /**
  * Knowledge Store Service Implementation
  */
-export class KnowledgeStoreService implements IService {
+export class KnowledgeStoreService implements IKnowledgeStoreService {
   readonly name = 'knowledge-store';
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
@@ -206,6 +205,14 @@ export class KnowledgeStoreService implements IService {
     
     // Reset state
     this.lifecycle = ServiceLifecycle.UNINITIALIZED;
+  }
+
+  /**
+   * Export the knowledge store for web use.
+   */
+  async exportForWeb(outputPath: string): Promise<void> {
+    const store = await this.getStore();
+    await store.exportForWeb(outputPath);
   }
 
   /**

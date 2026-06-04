@@ -48,6 +48,11 @@ export interface IKnowledgeStore extends IService {
   findRelevantUrls(query: string, options?: { limit?: number }): Promise<StoreUrlEntry[]>;
   rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null>;
   findDocumentsByUrl(url: string): Promise<any[]>;
+  /**
+   * Export the knowledge store entries (summaries and vectors) for use in a web application.
+   * @param outputPath - Path to save the exported JSON file
+   */
+  exportForWeb(outputPath: string): Promise<void>;
 }
 
 /**
@@ -62,6 +67,11 @@ export interface IKnowledgeStoreService extends IService {
   getStore(): Promise<IKnowledgeStore>;
   getEmbedder(): Promise<IEmbedder>;
   clear(): Promise<void>;
+  /**
+   * Export the knowledge store for web use.
+   * @param outputPath - Path to save the exported JSON file
+   */
+  exportForWeb(outputPath: string): Promise<void>;
 }
 
 /**

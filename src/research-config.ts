@@ -138,6 +138,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       values: ['true', 'false'],
     },
     {
+      id: 'USE_LOCAL_KNOWLEDGE_STORE',
+      label: 'Local project store',
+      description: 'Use a knowledge_db directory within the current project instead of the global one',
+      currentValue: config.USE_LOCAL_KNOWLEDGE_STORE ? 'true' : 'false',
+      values: ['true', 'false'],
+    },
+    {
       id: 'KNOWLEDGE_ENTRIES',
       label: 'Store entries',
       description: 'Total documents currently in the knowledge store',
@@ -253,6 +260,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
             } else if (id === 'KNOWLEDGE_STORE_ENABLED') {
               config.KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+            } else if (id === 'USE_LOCAL_KNOWLEDGE_STORE') {
+              config.USE_LOCAL_KNOWLEDGE_STORE = newValue === 'true';
             } else if (id === 'EMBEDDING_MODEL') {
               config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             } else if (id === 'EMBEDDING_DEVICE') {
@@ -334,14 +343,15 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         } catch (e: any) {
           logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
         }
-      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
-        logger.info(`[research-config] Embedding device changed from ${initialConfig.EMBEDDING_DEVICE} to ${config.EMBEDDING_DEVICE}. Resetting service.`);
+      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE || config.USE_LOCAL_KNOWLEDGE_STORE !== initialConfig.USE_LOCAL_KNOWLEDGE_STORE) {
+        const changed = config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE ? 'Device' : 'Store location';
+        logger.info(`[research-config] ${changed} changed. Resetting service.`);
         try {
           await clearService(ServiceNames.KNOWLEDGE_STORE);
           clearEmbeddingInstance();
-          ctx.ui.notify('Device changed: Service refreshed', 'info');
+          ctx.ui.notify(`${changed} changed: Service refreshed`, 'info');
         } catch (e: any) {
-          logger.warn('[research-config] Failed to refresh service on device change:', e);
+          logger.warn(`[research-config] Failed to refresh service on ${changed.toLowerCase()} change:`, e);
         }
       }
 

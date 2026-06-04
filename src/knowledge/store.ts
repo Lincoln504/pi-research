@@ -352,6 +352,56 @@ export class KnowledgeStore implements IKnowledgeStore {
     return findDocumentsByUrl(this.table, url);
   }
 
+  async exportForWeb(outputPath: string): Promise<void> {
+    if (!this.table) throw new Error('Store not open');
+
+    logger.info(`[store] Exporting knowledge store for web to: ${outputPath}`);
+    
+    // 1. Fetch all synthesis-description entries
+    // We only want the high-quality summaries and their vectors for semantic search in the UI.
+    const results = await this.table
+      .query()
+      .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
+      .toArray();
+
+    // 2. Format for web
+    // We use a compact format to keep the JSON size manageable
+    const exportData = results.map(r => {
+      let metadata: Record<string, any> = {};
+      try {
+        metadata = JSON.parse(r.metadata as string);
+      } catch {
+        // Fallback for corrupted metadata
+      }
+      
+      return {
+        url: r.url as string,
+        // The text is the summary/description
+        text: r.text as string,
+        // The vector is the 384-dim embedding
+        v: Array.from(r.vector as Float32Array),
+        // Minimal metadata needed for the UI
+        m: {
+          d: metadata['description'] || '',
+          t: Number(r.timestamp),
+        }
+      };
+    });
+
+    // 3. Save to file
+    try {
+      const dir = path.dirname(outputPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(outputPath, JSON.stringify(exportData), 'utf-8');
+      logger.info(`[store] Successfully exported ${exportData.length} entries to ${outputPath}`);
+    } catch (err) {
+      logger.error(`[store] Failed to export knowledge store for web:`, err);
+      throw err;
+    }
+  }
+
   async findByUrl(url: string): Promise<StoreDocument[]> {
     if (!this.table) throw new Error('Store not open');
     return findDocumentsByUrl(this.table, url);

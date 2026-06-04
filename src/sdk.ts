@@ -22,8 +22,10 @@ import type { Model } from '@earendil-works/pi-ai';
 import { ModelRegistry, AuthStorage } from '@earendil-works/pi-coding-agent';
 import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { resetServiceContainer } from './core/service-registry.ts';
+import { resetServiceContainer, getService } from './core/service-registry.ts';
 import type { ResearchDepth } from './types/index.ts';
+import { ServiceNames } from './core/service-interfaces.ts';
+import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
 
 /**
  * SDK Initialization Options
@@ -227,6 +229,18 @@ export async function disposeResearchSDK(): Promise<void> {
     globalRegistry = null;
   }
   logger.log('[SDK] Research SDK disposed');
+}
+
+/**
+ * Export the Knowledge Store for web use.
+ * This exports high-quality summaries and their vectors to a JSON file
+ * that can be consumed by a frontend application for semantic search.
+ * @param outputPath - Path to save the exported JSON file
+ */
+export async function exportKnowledge(outputPath: string): Promise<void> {
+  ensureInitialized();
+  const ks = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+  await ks.exportForWeb(outputPath);
 }
 
 /**
