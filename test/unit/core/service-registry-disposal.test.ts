@@ -144,11 +144,10 @@ describe('Service Registry Disposal Behavior', () => {
     
     // Try to get the service while disposal is in progress
     // This should either throw or wait for disposal to complete
-    let error: Error | null = null;
     try {
       await getService<MockService>('test-service-4');
-    } catch (err) {
-      error = err as Error;
+    } catch {
+      // Expected — may throw during disposal
     }
     
     // Wait for disposal to complete

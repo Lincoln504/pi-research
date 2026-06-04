@@ -280,13 +280,12 @@ describe('Error Recovery and Resilience', () => {
         fs.chmodSync(dbPath, 0o444);
 
         // Attempt to write should fail gracefully
-        let caughtError = false;
         try {
           await knowledgeStore.addDocuments([
             { text: 'Should fail', url: 'https://test.com/fail', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
           ]);
-        } catch (error) {
-          caughtError = true;
+        } catch {
+          // Expected — read-only db should reject or fail gracefully
         }
 
         // Either succeeded or failed gracefully (not crashed)
