@@ -172,7 +172,7 @@ describe('healthcheck', () => {
       expect(result.success).toBe(true);
       const browserCap = result.components?.find(c => c.component === 'BrowserCapability');
       expect(browserCap?.healthy).toBe(true);
-      expect(browserCap?.diagnostic?.status).toBe('mocked');
+      expect(browserCap?.diagnostic?.['status']).toBe('mocked');
     } finally {
       delete process.env['PI_RESEARCH_MOCK_SEARCH'];
       delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
