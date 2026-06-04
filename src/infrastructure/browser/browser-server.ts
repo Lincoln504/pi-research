@@ -1,7 +1,6 @@
 import * as http from 'node:http';
 import { logger } from '../../logger.ts';
 import type { SearchResult } from '../../web-research/types.ts';
-import { toSafeErrorResponse } from '../../utils/research-error.ts';
 
 export interface BrowserServerOptions {
     onSearch: (query: string) => Promise<SearchResult[]>;
@@ -62,10 +61,19 @@ export class BrowserServer {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify(result));
                     } catch (error) {
+                        // Log full error internally for debugging
                         logger.error('[BrowserServer] Error handling request:', error);
-                        res.writeHead(500);
-                        // codeql[js/stack-trace-exposure] localhost-only IPC server; clients are trusted local processes
-                        res.end(JSON.stringify(toSafeErrorResponse(error)));
+
+                        // Extract safe error message - first line only to prevent stack trace exposure
+                        let errorMessage = 'Unknown error';
+                        if (error instanceof Error && error.message) {
+                            errorMessage = (error.message.split('\n')[0] || '').trim();
+                        } else if (typeof error === 'string') {
+                            errorMessage = (error.split('\n')[0] || '').trim();
+                        }
+
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: errorMessage }));
                     }
                 });
             });
