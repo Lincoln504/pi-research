@@ -6,7 +6,8 @@
  * pool lifecycle collisions and service registry conflicts.
  *
  * Files: browser-pool-failover, concurrent-operations, error-recovery,
- *        research-workflow, tool-execution, tools-connectivity, tools-extended
+ *        research-workflow, sdk-lifecycle, tool-execution, tools-connectivity,
+ *        tools-extended
  */
 import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
@@ -21,6 +22,7 @@ export default defineConfig({
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
       'test/integration/research-workflow.test.ts',
+      'test/integration/sdk-lifecycle.test.ts',
       'test/integration/shutdown-perf.test.ts',
       'test/integration/tool-execution.test.ts',
       'test/integration/tools-connectivity.test.ts',

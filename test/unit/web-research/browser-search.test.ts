@@ -117,9 +117,9 @@ describe('browser-search', () => {
       await performSearch(queries);
 
       expect(runWorkerSearch).toHaveBeenCalledTimes(3);
-      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, undefined);
-      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, undefined);
-      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, undefined);
+      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, expect.any(AbortSignal));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, expect.any(AbortSignal));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, expect.any(AbortSignal));
     });
 
     it('should pass config to workers when provided', async () => {
@@ -130,7 +130,7 @@ describe('browser-search', () => {
 
       await performSearch(['test'], mockConfig);
 
-      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, undefined);
+      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal));
     });
 
     it('should use max workers from browser-manager', async () => {

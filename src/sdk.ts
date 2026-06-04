@@ -14,19 +14,29 @@ import { registerInfrastructureServices } from './infrastructure/service-initial
 import { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator } from './orchestration/quick-research-orchestrator.ts';
 import { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
-import { createResearchRunId, logger } from './logger.ts';
+import { createResearchRunId, logger, createLogger, setLogger } from './logger.ts';
+import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import type { Model } from '@earendil-works/pi-ai';
+import { ModelRegistry, AuthStorage } from '@earendil-works/pi-coding-agent';
 import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
+import { resetServiceContainer } from './core/service-registry.ts';
 import type { ResearchDepth } from './types/index.ts';
 
 /**
  * SDK Initialization Options
  */
 export interface SDKOptions {
-  /** The model to use for research coordination and synthesis */
-  model: Model<any>;
-  /** Optional API key for the model (if not provided via environment) */
+  /**
+   * The model to use for research coordination and synthesis.
+   * Accepts either a Model object (from getModel or ModelRegistry.find) or a
+   * "provider/id" string (e.g. "openrouter/deepseek/deepseek-v4-flash") which
+   * is resolved from pi's configured model registry (~/.pi/agent/models.json).
+   */
+  model: Model<any> | string;
+  /** Optional API key. When provided, takes precedence over pi's configured auth storage. */
   apiKey?: string;
   /** Current working directory for report exports (default: process.cwd()) */
   cwd?: string;
@@ -54,6 +64,8 @@ let isInitialized = false;
 let globalModel: Model<any> | null = null;
 let globalApiKey: string | undefined;
 let globalCwd: string = process.cwd();
+// Cached ModelRegistry — built once at init, shared across all orchestrator calls.
+let globalRegistry: ModelRegistry | null = null;
 
 /**
  * Initialize the Research SDK
@@ -64,18 +76,55 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     return;
   }
 
-  // Apply config overrides and validate BEFORE touching any global state.
-  // Validation errors must not leave the SDK in a partially-mutated state.
-  if (options.config) {
-    const currentConfig = getConfig();
-    setConfig({ ...currentConfig, ...options.config });
+  // Apply verbose before anything else so all subsequent log calls see it.
+  if (options.verbose) {
+    setLogger(createLogger({ verbose: true }));
   }
-  validateConfig();
 
-  // Set globals only after validation has passed
-  globalModel = options.model;
+  // Apply config overrides and validate BEFORE touching any global state.
+  // Save the original config so we can roll it back if validation fails.
+  const originalConfig = options.config ? getConfig() : null;
+  if (options.config) {
+    setConfig({ ...originalConfig!, ...options.config });
+  }
+  try {
+    validateConfig();
+  } catch (err) {
+    // Roll back config mutation so a corrected re-call can succeed.
+    if (originalConfig) setConfig(originalConfig);
+    throw err;
+  }
+
+  // Set globals only after validation has passed.
   globalApiKey = options.apiKey;
   globalCwd = options.cwd || process.cwd();
+
+  // Parse the provider from model (string or object) before building the registry,
+  // so buildModelRegistry can correctly key the explicit apiKey by provider.
+  let parsedProvider: string | undefined;
+  if (typeof options.model === 'string') {
+    parsedProvider = options.model.split('/')[0];
+  } else {
+    globalModel = options.model;
+    parsedProvider = options.model.provider;
+  }
+
+  // Build and cache the registry (one instance for the lifetime of this init cycle).
+  globalRegistry = buildModelRegistry(parsedProvider);
+
+  // Resolve a string "provider/id" model from the registry.
+  if (typeof options.model === 'string') {
+    const [provider, ...rest] = options.model.split('/');
+    const modelId = rest.join('/');
+    if (!provider || !modelId) {
+      throw new Error(`Invalid model string "${options.model}". Expected "provider/id" e.g. "openrouter/deepseek/deepseek-v4-flash".`);
+    }
+    const found = globalRegistry.find(provider, modelId);
+    if (!found) {
+      throw new Error(`Model "${options.model}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
+    }
+    globalModel = found;
+  }
 
   try {
     // Register and initialize services
@@ -88,13 +137,14 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     isInitialized = true;
     logger.log('[SDK] Research SDK initialized successfully');
   } catch (err) {
-    // Roll back global state and attempt to clean up any partially-registered
-    // services so that re-calling initResearchSDK() can succeed.
+    // Roll back global state and fully reset the service container so that
+    // re-calling initResearchSDK() can re-register services successfully.
     globalModel = null;
     globalApiKey = undefined;
     globalCwd = process.cwd();
+    globalRegistry = null;
     try {
-      await disposeCoreServices();
+      await resetServiceContainer();
     } catch {
       // Best-effort cleanup; ignore secondary errors
     }
@@ -113,7 +163,7 @@ export async function runDeepResearch(query: string, options: RunOptions = {}): 
   // depth is ResearchDepth (0|1|2|3); depth 0 is quick-only so clamp to 1 if not explicit
   const complexity = options.complexity ?? (depth >= 1 ? (depth as 1 | 2 | 3) : 1);
   const researchId = createResearchRunId();
-  const sessionId = `sdk-${Date.now()}`;
+  const sessionId = `sdk-${randomUUID()}`;
   const observer = new HeadlessObserver(options.observer);
 
   const orchestrator = new DeepResearchOrchestrator({
@@ -138,7 +188,7 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
   ensureInitialized();
 
   const researchId = createResearchRunId();
-  const sessionId = `sdk-${Date.now()}`;
+  const sessionId = `sdk-${randomUUID()}`;
   const observer = new HeadlessObserver(options.observer);
 
   const orchestrator = new QuickResearchOrchestrator({
@@ -166,10 +216,15 @@ export async function disposeResearchSDK(): Promise<void> {
   try {
     await shutdownManager.runCleanup('sdk_dispose');
     await disposeCoreServices();
+    // Full container reset clears service registrations so that a subsequent
+    // initResearchSDK() call can re-register without "already registered" errors.
+    await resetServiceContainer();
   } finally {
     isInitialized = false;
     globalModel = null;
     globalApiKey = undefined;
+    globalCwd = process.cwd();
+    globalRegistry = null;
   }
   logger.log('[SDK] Research SDK disposed');
 }
@@ -184,21 +239,40 @@ function ensureInitialized() {
 }
 
 /**
- * Create a mock ExtensionContext for internal services
+ * Build the ModelRegistry. Called once during initResearchSDK and cached in globalRegistry.
+ *
+ * Priority:
+ *   1. Explicit apiKey → InMemoryAuthStorage seeded with that key; caller doesn't need pi
+ *   2. No explicit key → reads ~/.pi/agent/models.json so all user-configured providers work
+ *
+ * @param provider - The model's provider string, used to key the explicit apiKey correctly.
+ */
+function buildModelRegistry(provider?: string): ModelRegistry {
+  const agentDir = path.join(os.homedir(), '.pi', 'agent');
+  const modelsJsonPath = path.join(agentDir, 'models.json');
+
+  if (globalApiKey) {
+    // Explicit key: seed InMemory storage under the correct provider name.
+    const authStorage = AuthStorage.inMemory({
+      [provider ?? 'unknown']: { type: 'api_key', key: globalApiKey },
+    });
+    return ModelRegistry.create(authStorage, modelsJsonPath);
+  }
+
+  // No explicit key: use the user's pi auth storage and model list
+  const authStorage = AuthStorage.create(path.join(agentDir, 'auth.json'));
+  return ModelRegistry.create(authStorage, modelsJsonPath);
+}
+
+/**
+ * Create an ExtensionContext for internal services.
+ * Uses the cached globalRegistry (built once at init time).
  */
 function createMockContext() {
   return {
     cwd: globalCwd,
     model: globalModel,
-    modelRegistry: {
-      getApiKeyAndHeaders: async () => ({ 
-        ok: true, 
-        apiKey: globalApiKey || process.env['PI_AI_API_KEY'] || '', 
-        headers: {} 
-      }),
-      hasConfiguredAuth: () => true,
-      getAll: () => [globalModel],
-    },
+    modelRegistry: globalRegistry!,
     ui: {
       notify: () => {},
       setWidget: () => {},

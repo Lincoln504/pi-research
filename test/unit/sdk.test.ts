@@ -11,9 +11,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ─── Hoisted stubs (available inside vi.mock factories) ───────────────────────
 
-const { mockDeepRun, mockQuickRun } = vi.hoisted(() => ({
+const { mockDeepRun, mockQuickRun, mockSetLogger, mockCreateLogger } = vi.hoisted(() => ({
   mockDeepRun: vi.fn().mockResolvedValue('deep result'),
   mockQuickRun: vi.fn().mockResolvedValue('quick result'),
+  mockSetLogger: vi.fn(),
+  mockCreateLogger: vi.fn().mockReturnValue({ verbose: true }),
 }));
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
@@ -31,6 +33,33 @@ vi.mock('../../src/infrastructure/service-initialization.ts', () => ({
 vi.mock('../../src/utils/shutdown-manager.ts', () => ({
   shutdownManager: {
     runCleanup: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+vi.mock('../../src/core/service-registry.ts', () => ({
+  resetServiceContainer: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock pi-coding-agent so ModelRegistry/AuthStorage don't read real disk files in unit tests
+const { mockModelRegistryInstance } = vi.hoisted(() => {
+  const instance = {
+    getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: 'mock-key' }),
+    hasConfiguredAuth: vi.fn().mockReturnValue(true),
+    getAll: vi.fn().mockReturnValue([]),
+    getAvailable: vi.fn().mockReturnValue([]),
+    refresh: vi.fn(),
+  };
+  return { mockModelRegistryInstance: instance };
+});
+
+vi.mock('@earendil-works/pi-coding-agent', () => ({
+  ModelRegistry: {
+    create: vi.fn().mockReturnValue(mockModelRegistryInstance),
+    inMemory: vi.fn().mockReturnValue(mockModelRegistryInstance),
+  },
+  AuthStorage: {
+    create: vi.fn().mockReturnValue({}),
+    inMemory: vi.fn().mockReturnValue({}),
   },
 }));
 
@@ -59,6 +88,8 @@ vi.mock('../../src/logger.ts', () => ({
     debug: vi.fn(),
   },
   createResearchRunId: () => 'test-run-id',
+  createLogger: mockCreateLogger,
+  setLogger: mockSetLogger,
 }));
 
 vi.mock('../../src/config.ts', () => ({
@@ -90,10 +121,11 @@ import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-
 import { QuickResearchOrchestrator } from '../../src/orchestration/quick-research-orchestrator.ts';
 import { logger } from '../../src/logger.ts';
 import { setConfig, validateConfig } from '../../src/config.ts';
+import { resetServiceContainer } from '../../src/core/service-registry.ts';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const STUB_MODEL = { id: 'test-model' } as any;
+const STUB_MODEL = { id: 'test-model', provider: 'test-provider' } as any;
 
 async function initSDK(opts: object = {}) {
   await initResearchSDK({ model: STUB_MODEL, ...opts });
@@ -108,10 +140,13 @@ describe('SDK Lifecycle', () => {
     // it only resets call tracking, leaving the prototype binding intact.
     mockDeepRun.mockClear().mockResolvedValue('deep result');
     mockQuickRun.mockClear().mockResolvedValue('quick result');
+    mockSetLogger.mockClear();
+    mockCreateLogger.mockClear().mockReturnValue({ verbose: true });
     vi.mocked(registerCoreServices).mockClear();
     vi.mocked(registerInfrastructureServices).mockClear();
     vi.mocked(initializeCoreServices).mockClear().mockResolvedValue({ initialized: [], failed: [] });
     vi.mocked(disposeCoreServices).mockClear().mockResolvedValue(undefined);
+    vi.mocked(resetServiceContainer).mockClear().mockResolvedValue(undefined);
     vi.mocked(setConfig).mockClear();
     vi.mocked(validateConfig).mockClear();
     vi.mocked(DeepResearchOrchestrator).mockClear();
@@ -176,6 +211,38 @@ describe('SDK Lifecycle', () => {
       const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
       expect(ctx.cwd).toBe('/custom/path');
     });
+
+    it('sets verbose logger when verbose:true is passed', async () => {
+      await initSDK({ verbose: true });
+      expect(mockCreateLogger).toHaveBeenCalledWith({ verbose: true });
+      expect(mockSetLogger).toHaveBeenCalledOnce();
+    });
+
+    it('does not set logger when verbose is not passed', async () => {
+      await initSDK();
+      expect(mockSetLogger).not.toHaveBeenCalled();
+    });
+
+    it('rolls back config mutation when validateConfig throws', async () => {
+      const originalCfg = { DEFAULT_RESEARCH_DEPTH: 1 } as any;
+      vi.mocked(validateConfig).mockImplementationOnce(() => { throw new Error('bad config'); });
+      vi.mocked(setConfig).mockClear();
+      // Track calls: first setConfig (mutation), then rollback setConfig
+      await expect(initSDK({ config: { MAX_CONCURRENT_RESEARCHERS: 99 } as any })).rejects.toThrow('bad config');
+      // setConfig called twice: once to apply override, once to roll back
+      expect(vi.mocked(setConfig)).toHaveBeenCalledTimes(2);
+    });
+
+    it('resets service container on init failure so re-init can succeed', async () => {
+      vi.mocked(initializeCoreServices).mockRejectedValueOnce(new Error('init failed'));
+      await expect(initSDK()).rejects.toThrow('init failed');
+      expect(resetServiceContainer).toHaveBeenCalledOnce();
+      // Clear call counts before re-init to isolate this assertion
+      vi.mocked(registerCoreServices).mockClear();
+      // Re-init should succeed now (would throw "already registered" before the fix)
+      await initSDK();
+      expect(registerCoreServices).toHaveBeenCalledOnce();
+    });
   });
 
   // ── disposeResearchSDK ──────────────────────────────────────────────────────
@@ -206,6 +273,12 @@ describe('SDK Lifecycle', () => {
       vi.mocked(disposeCoreServices).mockClear();
       await disposeResearchSDK();
       expect(disposeCoreServices).not.toHaveBeenCalled();
+    });
+
+    it('calls resetServiceContainer to clear registrations for re-init', async () => {
+      await initSDK();
+      await disposeResearchSDK();
+      expect(resetServiceContainer).toHaveBeenCalledOnce();
     });
   });
 
@@ -303,6 +376,15 @@ describe('SDK Lifecycle', () => {
       expect(id1).toBeTruthy();
       expect(id2).toBeTruthy();
     });
+
+    it('each call gets a unique sessionId (UUID-based)', async () => {
+      await runDeepResearch('q1');
+      await runDeepResearch('q2');
+      const s1 = (vi.mocked(DeepResearchOrchestrator).mock.calls[0]![0] as any).sessionId;
+      const s2 = (vi.mocked(DeepResearchOrchestrator).mock.calls[1]![0] as any).sessionId;
+      expect(s1).not.toBe(s2);
+      expect(s1).toMatch(/^sdk-[0-9a-f-]{36}$/);
+    });
   });
 
   // ── runQuickResearch ────────────────────────────────────────────────────────
@@ -355,40 +437,35 @@ describe('SDK Lifecycle', () => {
     });
   });
 
-  // ── mock context shape ──────────────────────────────────────────────────────
+  // ── context shape and ModelRegistry wiring ──────────────────────────────────
 
-  describe('mock context passed to initializeCoreServices', () => {
-    it('modelRegistry.getApiKeyAndHeaders returns ok:true', async () => {
+  describe('context passed to initializeCoreServices', () => {
+    it('uses a real ModelRegistry instance (reads pi config by default)', async () => {
+      const { ModelRegistry } = await import('@earendil-works/pi-coding-agent');
       await initSDK();
+      expect(ModelRegistry.create).toHaveBeenCalled();
       const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
-      const result = await ctx.modelRegistry.getApiKeyAndHeaders();
-      expect(result.ok).toBe(true);
-      expect(typeof result.apiKey).toBe('string');
+      expect(ctx.modelRegistry).toBe(mockModelRegistryInstance);
     });
 
-    it('modelRegistry.hasConfiguredAuth returns true', async () => {
-      await initSDK();
+    it('passes cwd to the context', async () => {
+      await initSDK({ cwd: '/custom/path' });
       const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
-      expect(ctx.modelRegistry.hasConfiguredAuth()).toBe(true);
+      expect(ctx.cwd).toBe('/custom/path');
     });
 
-    it('modelRegistry.getAll includes the configured model', async () => {
-      await initSDK();
-      const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
-      expect(ctx.modelRegistry.getAll()).toContain(STUB_MODEL);
+    it('seeds InMemory auth when apiKey is provided', async () => {
+      const { AuthStorage } = await import('@earendil-works/pi-coding-agent');
+      await initSDK({ apiKey: 'my-secret-key' });
+      expect(AuthStorage.inMemory).toHaveBeenCalledWith(
+        expect.objectContaining({ [STUB_MODEL.provider]: expect.objectContaining({ type: 'api_key', key: 'my-secret-key' }) })
+      );
     });
 
     it('ui.notify does not throw', async () => {
       await initSDK();
       const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
       expect(() => ctx.ui.notify('test')).not.toThrow();
-    });
-
-    it('uses the provided apiKey in the modelRegistry', async () => {
-      await initSDK({ apiKey: 'my-secret-key' });
-      const ctx = vi.mocked(initializeCoreServices).mock.calls[0]![0] as any;
-      const result = await ctx.modelRegistry.getApiKeyAndHeaders();
-      expect(result.apiKey).toBe('my-secret-key');
     });
   });
 });
