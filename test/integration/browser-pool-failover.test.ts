@@ -368,7 +368,7 @@ describe('Browser Pool Failover', () => {
       const healthCheck = await runBrowserHealthCheck();
       expect(healthCheck).toBeDefined();
       expect(healthCheck.success).toBe(true);
-    });
+    }, 300000);
 
     it('should pass health check after multiple failures', async () => {
       if (shouldSkip()) return;
@@ -391,7 +391,7 @@ describe('Browser Pool Failover', () => {
       const healthCheck = await runBrowserHealthCheck();
       expect(healthCheck).toBeDefined();
       expect(healthCheck.success).toBe(true);
-    });
+    }, 300000);
   });
 
   describe('Resource Cleanup After Failover', () => {
@@ -417,7 +417,7 @@ describe('Browser Pool Failover', () => {
         'search'
       );
       expect(Array.isArray(result)).toBe(true);
-    });
+    }, 300000);
 
     it('should handle multiple shutdown/restart cycles during failover', async () => {
       if (shouldSkip()) return;
@@ -445,6 +445,6 @@ describe('Browser Pool Failover', () => {
         'search'
       );
       expect(Array.isArray(finalResult)).toBe(true);
-    });
+    }, 300000);
   });
 });

@@ -49,9 +49,9 @@ export interface SearchResult {
  * Base scheduler interface
  */
 export interface IScheduler {
-  runSearch(query: string, config?: Config): Promise<any[]>;
-  runScrape(url: string, config?: Config): Promise<any>;
-  runHealthCheck(config?: Config): Promise<{ success: boolean }>;
+  runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<any[]>;
+  runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any>;
+  runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
   resetIdleTimerOnActivity?(): void;
   schedulerId?: string;

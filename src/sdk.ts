@@ -141,13 +141,19 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     registerInfrastructureServices();
 
     const mockCtx = createMockContext();
-    await initializeCoreServices(mockCtx);
+    const result = await initializeCoreServices(mockCtx);
 
     const { getServiceContainer } = await import('./core/service-registry.ts');
-    getServiceContainer().isReady = true;
+    if (result.failed.length === 0) {
+      getServiceContainer().isReady = true;
+      logger.log('[SDK] Research SDK initialized successfully');
+    } else {
+      logger.error(`[SDK] Research SDK initialization incomplete: ${result.failed.join(', ')}`);
+      // We still mark it as initialized because services were registered,
+      // but isReady=false will prevent the tool from executing.
+    }
 
     isInitialized = true;
-    logger.log('[SDK] Research SDK initialized successfully');
   } catch (err) {
     // Roll back global state and fully reset the service container so that
     // re-calling initResearchSDK() can re-register services successfully.

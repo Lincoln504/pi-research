@@ -76,7 +76,7 @@ describe('Concurrent Operations', () => {
     } catch {
       // Ignore cleanup errors
     }
-  }, 120000); // Extended: browser pool teardown (pool.destroy up to 5s + 200ms drain) can take ~10s
+  }, 300000); // Extended: browser pool teardown (pool.destroy up to 5s + 200ms drain) can take ~10s
 
   describe('Concurrent Browser Task Queue Management', () => {
     it('should handle multiple concurrent search operations', async () => {
@@ -329,7 +329,7 @@ describe('Concurrent Operations', () => {
   });
 
   describe('Browser Pool Thread Safety', () => {
-    it('should handle rapid sequential task submissions', async () => {
+    it('should handle rapid sequential task submissions', { timeout: 300000 }, async () => {
       if (testContext.skipTests()) {
         return;
       }

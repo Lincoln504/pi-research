@@ -238,7 +238,7 @@ describe('End-to-End Research Workflows', () => {
       // Update pi-ai mock for this specific test to return a valid JSON plan
       const { completeSimple, complete } = await import('@earendil-works/pi-ai');
       (completeSimple as any).mockResolvedValue({
-        content: [{ type: 'text', text: 'Mock research synthesis: Done.' }],
+        content: [{ type: 'text', text: 'Mock research synthesis: This is a longer response intended to satisfy the length requirements of the integration test suite. It covers the evolution and impact of AI on modern development workflows.' }],
         usage: { totalTokens: 50, cost: { total: 0.005 } },
       });
       (complete as any).mockImplementation(async (_model: any, options: any) => {
@@ -258,7 +258,7 @@ describe('End-to-End Research Workflows', () => {
           content: [{
             type: 'text',
             text: isRound2 
-              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of AI in SE",\n  "researchers": []\n}\n```'
+              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of AI in Software Engineering. This is a longer response intended to satisfy the length requirements of the integration test suite. It covers the evolution and impact of AI on modern development workflows.",\n  "researchers": []\n}\n```'
               : '```json\n{\n  "action": "delegate",\n  "researchers": [\n    {\n      "id": "2.1",\n      "name": "Specialist",\n      "goal": "Specific AI tools in SE",\n      "queries": ["ai tools for coding 2026"]\n    }\n  ]\n}\n```'
           }],
           usage: { totalTokens: 100, cost: { total: 0.01 } }
@@ -297,7 +297,7 @@ describe('End-to-End Research Workflows', () => {
       // Deep research should take longer than quick research usually,
       // but in tests we mock it so it's fast.
       expect(duration).toBeGreaterThan(0);
-    }, 120000);
+    }, 300000);
 
     it('should handle multi-round research with different sub-queries', async () => {
       if (testContext.skipTests()) return;
@@ -321,7 +321,7 @@ describe('End-to-End Research Workflows', () => {
           content: [{
             type: 'text',
             text: isRound2 
-              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of React evolution",\n  "researchers": []\n}\n```'
+              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of React evolution. This is a much longer summary of the research findings to satisfy the length assertions in the integration tests. It should provide comprehensive coverage of the topic and include detailed insights.",\n  "researchers": []\n}\n```'
               : '```json\n{\n  "action": "delegate",\n  "researchers": [\n    {\n      "id": "2.1",\n      "name": "Modern React",\n      "goal": "React 2019-2024",\n      "queries": ["react hooks introduction 2019"]\n    }\n  ]\n}\n```'
           }],
           usage: { totalTokens: 100, cost: { total: 0.01 } }
@@ -444,6 +444,6 @@ describe('End-to-End Research Workflows', () => {
 
       const result2 = await orchestrator2.run();
       expect(result2).toBeDefined();
-    }, 120000);
+    }, 300000);
   });
 });

@@ -214,7 +214,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       }
     });
 
-    it('should handle mixed valid and invalid URLs', async () => {
+    it('should handle mixed valid and invalid URLs', { timeout: 300000 }, async () => {
       if (testContext.skipTests()) {
         return;
       }

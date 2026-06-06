@@ -179,9 +179,13 @@ export class StateManager {
 
   /**
    * Read the state from the file system
+   * @param skipLock If true, skip acquiring the file lock (caller must hold it)
    */
-  public async readState(): Promise<SingletonState> {
+  public async readState(skipLock?: boolean): Promise<SingletonState> {
     await this.ensureDirectories();
+    if (skipLock) {
+      return await this._readState();
+    }
     return await this.fileLockService.withLock(async () => {
       return await this._readState();
     });
@@ -318,11 +322,11 @@ export class StateManager {
   // ==================== Process API ====================
 
   public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean> {
-    const state = await this.readState();
+    const state = await this.readState(skipLock);
     const expectedStartTime = state.browserServer?.pid === pid ? state.browserServer.startTime : undefined;
 
     return this.processLifecycle.isPidAlive(pid, expectedSchedulerId, {
-      getState: this.readState.bind(this),
+      getState: (s?: boolean) => this.readState(s ?? skipLock),
       skipLock,
       getSchedulerIdFromState: (state: SingletonState) => state.browserServer?.schedulerId,
       expectedStartTime,

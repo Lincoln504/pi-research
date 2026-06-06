@@ -23,7 +23,7 @@ export class BrowserClient implements IScheduler {
         logger.log(`[BrowserClient] Connecting to global scheduler at http://127.0.0.1:${port}`);
     }
 
-    private async request<T>(path: string, data: any): Promise<T> {
+    private async request<T>(path: string, data: any, signal?: AbortSignal): Promise<T> {
         const start = Date.now();
         // Extract operation from path for error tracking
         const operation = path.includes('/search') ? 'search' :
@@ -36,6 +36,23 @@ export class BrowserClient implements IScheduler {
             const timeoutMs = 180000;
             let resolved = false;
             const controller = new AbortController();
+            
+            // Merge outer signal with our local controller
+            let abortCleanup: (() => void) | undefined;
+            if (signal) {
+                if (signal.aborted) {
+                    return reject(new Error('Aborted'));
+                }
+                const onAbort = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    controller.abort();
+                    reject(new Error('Aborted'));
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+                abortCleanup = () => signal.removeEventListener('abort', onAbort);
+            }
+
             const timer = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
@@ -60,6 +77,7 @@ export class BrowserClient implements IScheduler {
                 headers: { 'Content-Type': 'application/json' }
             }, (res) => {
                 clearTimeout(timer);
+                abortCleanup?.();
                 let body = '';
                 res.on('data', chunk => body += chunk);
                 res.on('end', () => {
@@ -94,6 +112,7 @@ export class BrowserClient implements IScheduler {
                     if (resolved) return;
                     resolved = true;
                     clearTimeout(timer);
+                    abortCleanup?.();
                     const error = new Error(`[BrowserClient] Response stream error on ${path}: ${err.message}`);
                     errorTracker.trackError(error, {
                         component: 'browser-manager',
@@ -108,6 +127,7 @@ export class BrowserClient implements IScheduler {
                 if (resolved) return;
                 resolved = true;
                 clearTimeout(timer);
+                abortCleanup?.();
                 
                 // If it's just a timeout abort error, the timer already rejected it.
                 if (err.name === 'AbortError') return;
@@ -142,16 +162,16 @@ export class BrowserClient implements IScheduler {
         });
     }
 
-    async runSearch(query: string, _config?: Config): Promise<SearchResult[]> {
-        return this.request('/search', { query });
+    async runSearch(query: string, _config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+        return this.request('/search', { query }, signal);
     }
 
-    async runScrape(url: string, _config?: Config): Promise<any> {
-        return this.request('/scrape', { url });
+    async runScrape(url: string, _config?: Config, signal?: AbortSignal): Promise<any> {
+        return this.request('/scrape', { url }, signal);
     }
 
-    async runHealthCheck(_config?: Config): Promise<{ success: boolean }> {
-        return this.request('/healthcheck', {});
+    async runHealthCheck(_config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+        return this.request('/healthcheck', {}, signal);
     }
 
     async shutdown() {

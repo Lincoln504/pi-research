@@ -45,7 +45,7 @@ healthRegistry.register('BrowserRuntime', async (options) => {
   } catch (e) {
     return { healthy: false, error: `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
   }
-}, { timeoutMs: 105000, critical: true });
+}, { timeoutMs: 150000, critical: true });
 
 // Register Knowledge Store Check
 healthRegistry.register('KnowledgeStore', async (options) => {

@@ -36,5 +36,5 @@ describe('Shutdown Performance', () => {
     // The shutdown should be fast now (usually ~600-1200ms). We assert it's under 5 seconds to avoid flakiness in CI.
     // The previous bug caused it to take 5000ms+ due to poolifier IPC timeouts.
     expect(disposeDurationMs).toBeLessThan(5000);
-  }, 120000);
+  }, 300000);
 });

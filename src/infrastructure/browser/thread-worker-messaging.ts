@@ -28,7 +28,7 @@ async function createPageSafe(context: any): Promise<any> {
     const result = await Promise.race([
       pagePromise,
       new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 30000ms')), 30000);
+        timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 60000ms')), 60000);
       })
     ]);
     if (timeoutId) clearTimeout(timeoutId);
@@ -180,7 +180,7 @@ export async function executeSearchTask(
   query: string
 ): Promise<{ results: any[]; jitter: number }> {
   const page = await createPageSafe(_context);
-  const SEARCH_TIMEOUT = 25000;
+  const SEARCH_TIMEOUT = parseInt(process.env['PI_RESEARCH_SEARCH_TIMEOUT_MS'] || '45000', 10);
   page.setDefaultTimeout(SEARCH_TIMEOUT);
   page.setDefaultNavigationTimeout(SEARCH_TIMEOUT);
 

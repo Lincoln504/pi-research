@@ -41,12 +41,12 @@ export async function runBrowserTask<T>(
             if (type === 'search') {
                 const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).query;
                 if (!query) throw new Error('Search task requires a query');
-                return (await scheduler.runSearch(query, config)) as T;
+                return (await scheduler.runSearch(query, config, signal)) as T;
             }
 
             const url = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).url;
             if (url) {
-                return (await scheduler.runScrape(url, config)) as T;
+                return (await scheduler.runScrape(url, config, signal)) as T;
             }
 
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
@@ -93,11 +93,11 @@ export async function runBrowserTask<T>(
 /**
  * Run a browser health check with retry logic.
  */
-export async function runBrowserHealthCheck(config?: Config, retries = 1): Promise<{ success: boolean }> {
+export async function runBrowserHealthCheck(config?: Config, retries = 1, signal?: AbortSignal): Promise<{ success: boolean }> {
     try {
         return await browserCircuitBreaker.execute(async () => {
             const scheduler = await getScheduler(config);
-            return await scheduler.runHealthCheck(config);
+            return await scheduler.runHealthCheck(config, signal);
         });
     } catch (error: any) {
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
@@ -124,7 +124,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
 
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runBrowserHealthCheck(config, retries - 1);
+            return runBrowserHealthCheck(config, retries - 1, signal);
         }
         throw error;
     }
@@ -142,7 +142,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
         return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config);
-            return await scheduler.runSearch(query, config);
+            return await scheduler.runSearch(query, config, signal);
         });
     } catch (error: any) {
         if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted', { cause: error });

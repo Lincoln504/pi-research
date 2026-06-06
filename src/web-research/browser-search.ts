@@ -33,41 +33,44 @@ export async function performSearch(
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 
+    // Call onProgress(0) immediately to clear any 'searching' placeholder in the UI
+    if (onProgress) onProgress(0);
+
     // Hard cap per query so a single Cloudflare block or hung browser worker
-    // cannot stall the entire Promise.all burst. 35 s is generous for a real
-    // search but short enough to release the burst within ~40 s worst-case.
-    const QUERY_TIMEOUT_MS = 35_000;
+    // cannot stall the entire Promise.all burst. 120 s is generous for a real
+    // search but short enough to release the burst within a reasonable window.
+    // Increased from 60s to 120s to accommodate slow cold-starts and retries.
+    const QUERY_TIMEOUT_MS = 120_000;
 
     const filteredQueries = queries.filter(q => q.trim());
-    const searchTasks = filteredQueries.map(async (query) => {
-        if (signal?.aborted) {
-            resultMap.set(query, []);
-            return;
-        }
-        const queryStartTime = Date.now();
+    let timeoutCount = 0;
+    let errorCount = 0;
 
-        // Merge the outer abort signal with a per-query deadline.
+    const searchTasks = filteredQueries.map(async (query) => {
+        const queryStartTime = Date.now();
         const timeoutController = new AbortController();
         const timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
         if ((timeoutId as any).unref) (timeoutId as any).unref();
 
-        const querySignal = signal
-          ? AbortSignal.any([signal, timeoutController.signal])
-          : timeoutController.signal;
-
         try {
+            if (signal?.aborted) {
+                resultMap.set(query, []);
+                return;
+            }
+
+            const querySignal = signal
+              ? AbortSignal.any([signal, timeoutController.signal])
+              : timeoutController.signal;
+
             const results = await runWorkerSearch(query, config, querySignal);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
-            metrics.increment('browser_search_queries_total', 1, { status: 'success' });
 
             if (results?.length > 0) {
+                metrics.increment('browser_search_queries_total', 1, { status: 'success' });
                 metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
 
-                // Return all results for this query. The scrape tool and distributor
-                // handle cross-researcher deduplication. We only ensure results
-                // for this specific query are unique to avoid obvious waste.
                 const uniqueResults = [];
                 const localSeen = new Set<string>();
                 for (const r of results) {
@@ -86,13 +89,20 @@ export async function performSearch(
             const queryDuration = Date.now() - queryStartTime;
             const isTimeout = timeoutController.signal.aborted && !signal?.aborted;
             const status = isTimeout ? 'timeout' : 'error';
+            
+            if (isTimeout) timeoutCount++;
+            else errorCount++;
+
             metrics.observe('browser_search_query_duration_ms', queryDuration, { status });
             metrics.increment('browser_search_queries_total', 1, { status });
+            
             if (isTimeout) {
-                logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms (likely blocked): "${query}"`);
+                logger.warn(`[Search] Query timed out after ${QUERY_TIMEOUT_MS}ms (likely blocked or slow startup): "${query}"`);
             } else {
                 const msg = error instanceof Error ? error.message : String(error);
-                logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+                if (msg !== 'Aborted') {
+                    logger.error(`[Search] Worker failed for "${query}": ${msg}`);
+                }
             }
             resultMap.set(query, []);
         } finally {
@@ -107,9 +117,19 @@ export async function performSearch(
     const totalResults = Array.from(resultMap.values()).reduce((sum, r) => sum + r.length, 0);
     if (totalResults === 0 && filteredQueries.length > 0) {
         metrics.increment('browser_search_total_failures_total', 1);
+        
+        let reason = `all ${filteredQueries.length} queries returned no results`;
+        if (timeoutCount === filteredQueries.length) {
+            reason = `all ${filteredQueries.length} queries timed out after ${QUERY_TIMEOUT_MS}ms`;
+        } else if (errorCount === filteredQueries.length) {
+            reason = `all ${filteredQueries.length} queries encountered worker errors`;
+        } else if (timeoutCount + errorCount === filteredQueries.length) {
+            reason = `${timeoutCount} queries timed out and ${errorCount} queries failed`;
+        }
+
         throw new Error(
-            `Search completely failed: all ${filteredQueries.length} queries returned no results. ` +
-            `Browser workers may be unavailable or DuckDuckGo is unreachable.`
+            `Search completely failed: ${reason}. ` +
+            `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.`
         );
     }
 

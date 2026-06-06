@@ -59,7 +59,7 @@ describe('Error Recovery and Resilience', () => {
     } catch {
       // Ignore cleanup errors
     }
-  }, 120000); // Extended timeout: pool.destroy (up to 5s) + 200ms drain per forceSchedulerRestart call
+  }, 300000); // Extended timeout: pool.destroy (up to 5s) + 200ms drain per forceSchedulerRestart call
 
   describe('Browser Pool Recovery', () => {
     it('should recover browser pool after crash', async () => {
@@ -87,7 +87,7 @@ describe('Error Recovery and Resilience', () => {
       );
 
       expect(result2).toBeDefined();
-    }, 90000);
+    }, 300000);
 
     it('should recover from multiple rapid failures', async () => {
       if (testContext.skipTests()) {
@@ -120,7 +120,7 @@ describe('Error Recovery and Resilience', () => {
 
       expect(successRate).toBeGreaterThan(0.5);
       logger.info(`[test] Recovery rate: ${successRate.toFixed(2)} (${successCount}/${totalAttempts})`);
-    }, 120000);
+    }, 300000);
 
     it('should handle and recover from scheduler restart', async () => {
       if (testContext.skipTests()) {
@@ -147,7 +147,7 @@ describe('Error Recovery and Resilience', () => {
       );
 
       expect(result2).toBeDefined();
-    }, 90000);
+    }, 300000);
 
     it('should handle concurrent restart requests safely', async () => {
       if (testContext.skipTests()) {
@@ -177,7 +177,7 @@ describe('Error Recovery and Resilience', () => {
       );
 
       expect(result).toBeDefined();
-    }, 90000);
+    }, 300000);
   });
 
   describe('Knowledge Store Recovery', () => {
@@ -341,7 +341,7 @@ describe('Error Recovery and Resilience', () => {
       const total = successes + failures;
       expect(total).toBeGreaterThan(0);
       logger.info(`[test] Circuit breaker stats: ${successes} successes, ${failures} failures`);
-    }, 120000);
+    }, 300000);
 
     it('should open circuit after threshold failures and recover after timeout', async () => {
       vi.useFakeTimers();

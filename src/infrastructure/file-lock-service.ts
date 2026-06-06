@@ -51,6 +51,7 @@ export class FileLockService implements IService {
   private readonly lockUuid: string = crypto.randomUUID();
   private queue: Promise<void> = Promise.resolve();
   private resolveTurn: (() => void) | null = null;
+  private lockCount: number = 0;
 
   constructor(options: FileLockOptions) {
     this.lockFilePath = options.lockFilePath;
@@ -116,9 +117,16 @@ export class FileLockService implements IService {
 
   /**
    * Acquire a filesystem lock for exclusive access.
+   * Supports re-entrancy (recursive locking) within the same instance.
    * @throws Error if unable to acquire lock within timeout
    */
   async acquireLock(): Promise<void> {
+    // 0. Support re-entrancy: if this instance already holds the lock, just increment count.
+    if (this.lockHandle !== null) {
+        this.lockCount++;
+        return;
+    }
+
     // 1. Join the local FIFO queue for this instance.
     // This ensures that multiple concurrent calls to acquireLock() on the same
     // instance (e.g. from different queries in the same process) are handled
@@ -135,6 +143,15 @@ export class FileLockService implements IService {
         await previous;
     } catch (_err) {
         // Continue even if previous turn failed
+    }
+
+    // Secondary re-entrancy check: if a previous turn in the queue already
+    // acquired the lock for us (e.g. nested call that bypassed the queue).
+    if (this.lockHandle !== null) {
+        this.lockCount++;
+        // Release our turn immediately so the next caller can proceed.
+        if (myResolve) myResolve();
+        return;
     }
 
     // Capture resolve function so we can trigger it in releaseLock() or on failure
@@ -158,6 +175,7 @@ export class FileLockService implements IService {
 
           // Fully acquired — commit to instance state
           this.lockHandle = handle;
+          this.lockCount = 1;
 
           const duration = Date.now() - startTime;
           metrics.observe('state_lock_acquire_duration_ms', duration);
@@ -174,6 +192,14 @@ export class FileLockService implements IService {
               await handle.close();
             } catch {
               // Ignore close error
+            }
+            // If we successfully opened the file but failed to write/sync,
+            // we should try to unlink it so other processes aren't blocked
+            // by a partial/empty lock file.
+            try {
+              await fs.unlink(this.lockFilePath);
+            } catch {
+              // Ignore unlink error
             }
           }
 
@@ -192,6 +218,7 @@ export class FileLockService implements IService {
                 if (lockAge > this.lockStaleThreshold) {
                   if (lockUuid === this.lockUuid) {
                     // This is our own lock (shouldn't happen, but handle gracefully)
+                    this.lockCount = 1;
                     return;
                   }
 
@@ -252,9 +279,16 @@ export class FileLockService implements IService {
 
   /**
    * Release the filesystem lock.
+   * Supports recursive release.
    * @throws Error if unable to release lock
    */
   async releaseLock(): Promise<void> {
+    // Support recursive release
+    if (this.lockCount > 1) {
+        this.lockCount--;
+        return;
+    }
+
     try {
       if (this.lockHandle !== null) {
         try {
@@ -264,6 +298,7 @@ export class FileLockService implements IService {
             if (lockUuid !== this.lockUuid) {
               logger.warn('[FileLockService] Lock UUID mismatch during release, skipping deletion');
               this.lockHandle = null;
+              this.lockCount = 0;
               metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
               return;
             }
@@ -296,6 +331,7 @@ export class FileLockService implements IService {
         }
       }
     } finally {
+      this.lockCount = 0;
       // Always release our turn in the local queue
       if (this.resolveTurn) {
         this.resolveTurn();

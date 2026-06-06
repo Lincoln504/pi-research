@@ -42,15 +42,29 @@ export class PriorityTaskQueue {
                 return reject(new Error(`Task ${type} aborted before enqueuing`));
             }
 
+            let onAbort: (() => void) | undefined;
             if (signal) {
-                const onAbort = () => {
+                onAbort = () => {
                     if (this.removeFromQueue(task)) {
-                        reject(new Error(`Task ${type} aborted while in queue`));
+                        task.reject(new Error(`Task ${type} aborted while in queue`));
                     }
                 };
                 signal.addEventListener('abort', onAbort, { once: true });
             }
             
+            // Wrap resolve/reject to ensure listener cleanup
+            const wrappedResolve = (val: T) => {
+                if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+                resolve(val);
+            };
+            const wrappedReject = (err: any) => {
+                if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+                reject(err);
+            };
+
+            task.resolve = wrappedResolve;
+            task.reject = wrappedReject;
+
             if (type === 'healthcheck') {
                 this.healthcheckQueue.push(task);
             } else if (type === 'search') {
@@ -93,16 +107,26 @@ export class PriorityTaskQueue {
                 break;
             }
 
+            // If task was aborted while in queue, reject it and continue to the next one
+            // without incrementing activeCount or calling runTask.
+            if (task.signal?.aborted) {
+                task.reject(new Error(`Task ${task.type} aborted before starting`));
+                continue;
+            }
+
             this.runTask(task);
         }
     }
 
     private async runTask(task: QueuedTask<any>) {
+        // Double check abortion right before incrementing activeCount (redundant but safe)
         if (task.signal?.aborted) {
+            task.reject(new Error(`Task ${task.type} aborted before starting`));
             return;
         }
         
         this.activeCount++;
+        logger.debug(`[PriorityQueue] Starting task: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
         try {
             const result = await task.fn();
             task.resolve(result);
@@ -110,6 +134,7 @@ export class PriorityTaskQueue {
             task.reject(err);
         } finally {
             this.activeCount--;
+            logger.debug(`[PriorityQueue] Task finished: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
             // Check for more tasks on next tick
             process.nextTick(() => this.process());
         }
