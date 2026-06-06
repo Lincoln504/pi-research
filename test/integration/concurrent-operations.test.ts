@@ -361,7 +361,7 @@ describe('Concurrent Operations', () => {
       logger.info(
         `[test] Rapid sequential: ${successful}/${taskCount} successful`
       );
-    }, 90000);
+    });
 
     it('should handle task submission during pool restart', async () => {
       if (testContext.skipTests()) {
