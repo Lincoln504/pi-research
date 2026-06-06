@@ -28,6 +28,8 @@ export interface StoreOptions {
   migrationStrategy?: MigrationStrategy;
   /** Called when embedder connection fails — should return a fresh IEmbedder. */
   reconnectFactory?: () => Promise<IEmbedder>;
+  /** Optional lock wrapper for multi-process safety during initialization and migration */
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 function isConnectionRefused(err: unknown): boolean {
@@ -81,15 +83,31 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private async saveManifest(): Promise<void> {
+    const tempPath = `${this.manifestPath}.tmp`;
     try {
       const content = JSON.stringify({ activeTableName: this.tableName }, null, 2);
-      await fsPromises.writeFile(this.manifestPath, content, 'utf-8');
+      await fsPromises.writeFile(tempPath, content, 'utf-8');
+      await fsPromises.rename(tempPath, this.manifestPath);
     } catch (err) {
       logger.warn('[store] Failed to save manifest:', err);
+      if (fs.existsSync(tempPath)) {
+        try { await fsPromises.unlink(tempPath); } catch { /* ignore */ }
+      }
     }
   }
 
   async open(): Promise<void> {
+    if (this.db) return;
+
+    if (this.options.withLock) {
+      await this.options.withLock(() => this.openInternal());
+    } else {
+      await this.openInternal();
+    }
+  }
+
+  private async openInternal(): Promise<void> {
+    // Re-check after acquiring lock
     if (this.db) return;
 
     try {
@@ -197,13 +215,15 @@ export class KnowledgeStore implements IKnowledgeStore {
     const totalDocs = await this.table.countRows();
     logger.info(`[store] Processing ${totalDocs} documents for re-embedding...`);
 
-    let processed = 0;
     let embedded = 0;
     const batchSize = 50;
-    const allDocs: StoreDocument[] = [];
     const tempTableName = `${this.tableName}_migration_${Date.now()}`;
 
     try {
+      // Create new table BEFORE dropping the old one to prevent data loss on failure
+      logger.info(`[store] Creating new table ${tempTableName} for migration...`);
+      const newTable = await this.createTable(tempTableName);
+
       for (let i = 0; i < totalDocs; i += batchSize) {
         const batchRows = await this.table.query().limit(batchSize).offset(i).toArray();
 
@@ -215,24 +235,10 @@ export class KnowledgeStore implements IKnowledgeStore {
           timestamp: Number(row.timestamp),
         }));
 
-        allDocs.push(...batchDocs);
-        processed += batchDocs.length;
-
-        if (processed % 500 === 0 || processed === totalDocs) {
-          logger.info(`[store] Read ${processed}/${totalDocs} documents from old table`);
-        }
-      }
-
-      // Create new table BEFORE dropping the old one to prevent data loss on failure
-      logger.info(`[store] Creating new table ${tempTableName} for migration...`);
-      const newTable = await this.createTable(tempTableName);
-
-      for (let i = 0; i < allDocs.length; i += batchSize) {
-        const batch = allDocs.slice(i, i + batchSize);
-        const texts = batch.map(d => d.text);
+        const texts = batchDocs.map(d => d.text);
         const vectors = await this.options.embedder.embedMany(texts);
 
-        const records = batch.map((doc, idx) => ({
+        const records = batchDocs.map((doc, idx) => ({
           vector: Array.from(vectors[idx]!),
           url: doc.url,
           text: doc.text,
@@ -242,10 +248,10 @@ export class KnowledgeStore implements IKnowledgeStore {
         }));
 
         await newTable.add(records);
-        embedded += batch.length;
+        embedded += batchDocs.length;
 
-        if (embedded % 100 === 0 || embedded === allDocs.length) {
-          logger.info(`[store] Re-embedded ${embedded}/${allDocs.length} documents`);
+        if (embedded % 100 === 0 || embedded === totalDocs) {
+          logger.info(`[store] Re-embedded ${embedded}/${totalDocs} documents`);
         }
       }
 
@@ -381,6 +387,10 @@ export class KnowledgeStore implements IKnowledgeStore {
     const table = await this.getFreshTable();
     const startTime = Date.now();
     try {
+      // FIX (Issue 11): Escape single quotes to prevent injection.
+      // NOTE: The ingestionType is always a controlled string ("synthesis-description")
+      // so LIKE wildcard chars (%) are not a practical concern. We keep the LIKE
+      // pattern as-is since LanceDB/DataFusion LIKE escape syntax is undocumented.
       const escapedUrl = url.replace(/'/g, "''");
       const escapedType = ingestionType.replace(/'/g, "''");
       await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
@@ -427,7 +437,7 @@ export class KnowledgeStore implements IKnowledgeStore {
         url: r.url as string,
         // The text is the summary/description
         text: r.text as string,
-        // The vector is the 384-dim embedding
+        // The vector is the model-dimension embedding
         v: Array.from(r.vector as Float32Array),
         // Minimal metadata needed for the UI
         m: {
@@ -490,7 +500,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
   }
 
-  async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string }[]> {
+  async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string; provenance?: string }[]> {
     const table = await this.getFreshTable();
     return this.circuitBreaker.execute(() =>
       this.withEmbedderReconnect(embedder =>

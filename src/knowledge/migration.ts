@@ -14,5 +14,3 @@ export interface MigrationResult {
   documentsProcessed: number;
   error?: string;
 }
-
-export const VALID_MIGRATION_STRATEGIES: MigrationStrategy[] = ['drop', 're-embed'];

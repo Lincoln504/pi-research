@@ -26,8 +26,7 @@ export class WriterQueue implements IWriterQueue {
   private queue: IngestionItem[] = [];
   private processing = false;
   private options: WriterQueueOptions;
-  private drainPromise: Promise<void> | null = null;
-  private drainResolver: (() => void) | null = null;
+  private drainResolvers: (() => void)[] = [];
 
   constructor(options: WriterQueueOptions) {
     this.options = options;
@@ -73,10 +72,44 @@ export class WriterQueue implements IWriterQueue {
     }
 
     this.processing = false;
-    if (this.drainResolver) {
-      this.drainResolver();
-      this.drainResolver = null;
-      this.drainPromise = null;
+    
+    // Notify all drain callers
+    const resolvers = [...this.drainResolvers];
+    this.drainResolvers = [];
+    for (const resolve of resolvers) {
+      resolve();
+    }
+  }
+
+  /**
+   * Validate URL format — rejects obviously malformed URLs from AI hallucinations.
+   * Also provides basic SSRF defense-in-depth by rejecting internal network addresses.
+   * FIX (Issues 3/4/8): This is the knowledge store's security boundary.
+   */
+  private validateUrl(url: string): boolean {
+    if (!url || typeof url !== 'string') return false;
+    try {
+      const parsed = new URL(url);
+      // Only allow HTTP/HTTPS protocols
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+      const hostname = parsed.hostname.toLowerCase();
+      // Must have a hostname
+      if (!hostname) return false;
+      // Reject localhost and loopback
+      if (hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
+      // Reject IPv6 loopback, link-local, unique local, and IPv4-mapped
+      if (hostname === '::1' || hostname === '[::1]') return false;
+      if (hostname.startsWith('fe80:') || hostname.startsWith('[fe80:')) return false;
+      if (hostname.startsWith('fc') || hostname.startsWith('[fc')) return false; // fc00::/7 unique local
+      if (hostname.startsWith('fd') || hostname.startsWith('[fd')) return false; // fd00::/8 unique local
+      if (hostname.startsWith('::ffff:') || hostname.startsWith('[::ffff:')) return false; // IPv4-mapped
+      // Reject private/internal network ranges (SSRF defense-in-depth)
+      if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/.test(hostname)) return false;
+      // Reject hostnames without a public TLD
+      if (hostname.endsWith('.local') || hostname.endsWith('.internal')) return false;
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -88,12 +121,27 @@ export class WriterQueue implements IWriterQueue {
       return;
     }
 
+    // FIX (Issue 3/4): Validate URL format to prevent storing hallucinated/malformed URLs
+    if (!this.validateUrl(item.url)) {
+      logger.warn(`[writer-queue] Skipping ingest — URL failed validation: ${item.url}`);
+      return;
+    }
+
     const hash = createHash('sha256').update(item.markdown).update(item.content ?? '').digest('hex');
 
     if (this.options.store.isStoreClosed()) {
       logger.warn(`[writer-queue] Skipping ingest for ${item.url} — store is closing`);
       return;
     }
+
+    // FIX (Issue 5): Add provenance metadata to distinguish verified vs unverified entries
+    const hasContent = !!item.content;
+    const provenanceCategory = hasContent ? 'scraped-verified' : 'description-unverified';
+    const provenanceMeta = {
+      provenance: provenanceCategory,
+      hasContent,
+      validatedAt: Date.now(),
+    };
 
     const existing = await this.options.store.findByUrl(item.url);
     const sameType = existing.filter(c => c.metadata['ingestionType'] === incomingType);
@@ -120,6 +168,7 @@ export class WriterQueue implements IWriterQueue {
         ...(item.metadata || {}),
         contentHash: hash,
         ingestionType: incomingType,
+        ...provenanceMeta,
         chunkIndex: i,
         totalChunks: rawChunks.length,
       },
@@ -131,19 +180,9 @@ export class WriterQueue implements IWriterQueue {
 
   async drain(): Promise<void> {
     if (!this.processing && this.queue.length === 0) return;
-    if (this.drainPromise) return this.drainPromise;
 
-    this.drainPromise = new Promise<void>((resolve) => {
-      this.drainResolver = resolve;
+    return new Promise<void>((resolve) => {
+      this.drainResolvers.push(resolve);
     });
-
-    if (!this.processing && this.queue.length === 0) {
-      this.drainResolver!();
-      this.drainResolver = null;
-      this.drainPromise = null;
-      return;
-    }
-
-    return this.drainPromise;
   }
 }

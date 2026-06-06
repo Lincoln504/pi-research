@@ -25,6 +25,8 @@ import type { Config } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
+import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from '../utils/session-state.ts';
+import { getResearchSessionService } from './research-session-manager.ts';
 
 /**
  * Research Orchestration Service
@@ -143,7 +145,6 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
 
           // Record failure for stopping logic
-          const { recordResearcherFailure } = await import('../utils/session-state.ts');
           recordResearcherFailure(sessionId, researchId, id);
 
           // Notify observer
@@ -161,10 +162,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
       }
 
-      const { shouldStopResearch, getResearchStopMessage } = await import('../utils/session-state.ts');
-
       if (shouldStopResearch(sessionId, researchId)) {
-        const { getResearchSessionService } = await import('./research-session-manager.ts');
         const sessionService = await getResearchSessionService();
         // Abort sessions specifically for this researchId, not the whole piSessionId
         await sessionService.abortAllSessions(researchId);
@@ -244,16 +242,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
         for (const link of links) {
           if (link.url && link.description) {
+            const cachedContent = getCachedScrapedContent(researchId, link.url) ?? undefined;
             writer.enqueue({
               url: normalizeUrl(link.url),
               markdown: link.description,
-              content: getCachedScrapedContent(researchId, link.url) ?? undefined,
+              content: cachedContent,
               metadata: {
                 researchId,
                 round,
                 researcherId: key,
                 description: link.description,
                 sourceOrigin: link.url,
+                source: link.source || 'unknown',
               }
             });
             enqueued++;

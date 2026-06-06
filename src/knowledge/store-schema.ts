@@ -49,5 +49,10 @@ export async function createStoreTable(
   // Initial FTS index creation
   await table.createIndex('text', { config: lancedb.Index.fts() });
 
+  // Create scalar indices for performance (B-Tree)
+  // These improve deleteByUrl and evictOldRecords performance significantly as the store grows.
+  await table.createIndex('url', { config: lancedb.Index.btree() });
+  await table.createIndex('timestamp', { config: lancedb.Index.btree() });
+
   return table;
 }

@@ -11,6 +11,38 @@ import { randomUUID } from 'node:crypto';
 const sessionLinks = new Map<string, Set<string>>();
 const sessionScrapedContent = new Map<string, Map<string, string>>();
 
+// FIX (Issue 12): Track creation timestamps for orphaned-entry cleanup.
+const sessionTimestamps = new Map<string, number>();
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// Periodic cleanup of orphaned sessions (every 15 minutes)
+let cleanupInterval: NodeJS.Timeout | null = null;
+
+function startCleanupTimer(): void {
+  if (cleanupInterval) return;
+  cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [researchId, createdAt] of sessionTimestamps.entries()) {
+      if (now - createdAt > SESSION_MAX_AGE_MS) {
+        sessionLinks.delete(researchId);
+        sessionScrapedContent.delete(researchId);
+        sessionTimestamps.delete(researchId);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.debug(`[Shared Links] Cleaned up ${cleaned} orphaned session(s) older than ${SESSION_MAX_AGE_MS / 60000} minutes`);
+    }
+  }, 15 * 60 * 1000);
+  if (cleanupInterval && (cleanupInterval as any).unref) {
+    (cleanupInterval as any).unref();
+  }
+}
+
+// Start on module load
+startCleanupTimer();
+
 /**
  * Cache the raw markdown of a scraped URL during a research session.
  * This is used later to embed the raw text alongside the agent's summary.
@@ -18,6 +50,7 @@ const sessionScrapedContent = new Map<string, Map<string, string>>();
 export function cacheScrapedContent(researchId: string, url: string, content: string) {
     if (!sessionScrapedContent.has(researchId)) {
         sessionScrapedContent.set(researchId, new Map());
+        sessionTimestamps.set(researchId, Date.now());
     }
     sessionScrapedContent.get(researchId)!.set(normalizeUrl(url), content);
 }
@@ -93,6 +126,7 @@ export function normalizeUrl(url: string): string {
 export function registerScrapedLinks(researchId: string, links: string[]) {
     if (!sessionLinks.has(researchId)) {
         sessionLinks.set(researchId, new Set());
+        sessionTimestamps.set(researchId, Date.now());
     }
     const pool = sessionLinks.get(researchId)!;
     links.forEach(l => pool.add(normalizeUrl(l)));
@@ -127,49 +161,13 @@ export function deduplicateUrls(urls: string[], researchId: string): { kept: str
 
 
 /**
- * Format shared links from researcher states for context injection.
- */
-export function formatSharedLinksFromState(aspects: Record<string, any>): string {
-    const sections: string[] = [];
-    
-    for (const id in aspects) {
-        const sibling = aspects[id];
-        if (!sibling || !sibling.report) continue;
-
-        const links: string[] = [];
-        const report = sibling.report;
-        
-        // Extract from CITED LINKS
-        const citedMatch = report.match(/### CITED LINKS[\s\S]*?(?:###|$)/);
-        if (citedMatch) {
-            const urls = citedMatch[0].match(/https?:\/\/[^\s)]+/g) || [];
-            links.push(...urls);
-        }
-
-        // Extract from SCRAPE CANDIDATES
-        const candidatesMatch = report.match(/### SCRAPE CANDIDATES[\s\S]*?(?:###|$)/);
-        if (candidatesMatch) {
-            const urls = candidatesMatch[0].match(/https?:\/\/[^\s)]+/g) || [];
-            links.push(...urls);
-        }
-
-        if (links.length > 0) {
-            const unique = Array.from(new Set(links));
-            sections.push(`#### Aspect: ${sibling.query} (ID: ${sibling.id})\n` + unique.map(u => `- ${u}`).join('\n'));
-        }
-    }
-
-    if (sections.length === 0) return '';
-
-    return `\n---\n\n### Shared Links from Sibling Researchers\nThese URLs have already been scraped or identified by other researchers. Use them as starting points but prioritize discovering NEW high-quality sources.\n\n${sections.join('\n\n')}\n`;
-}
-
-/**
  * Reset the scrape-dedup pool for a session (call between rounds so new researchers
  * can access URLs that were scraped in the previous round).
  */
 export function resetScrapedLinks(researchId: string) {
     sessionLinks.set(researchId, new Set());
+    // Refresh the timestamp so this session isn't prematurely evicted by the orphan cleanup timer
+    sessionTimestamps.set(researchId, Date.now());
     logger.debug(`[Shared Links] Reset scrape pool for: ${researchId}`);
 }
 
@@ -179,5 +177,6 @@ export function resetScrapedLinks(researchId: string) {
 export function cleanupSharedLinks(researchId: string) {
     sessionLinks.delete(researchId);
     sessionScrapedContent.delete(researchId);
+    sessionTimestamps.delete(researchId);
     logger.debug(`[Shared Links] Cleaned up session: ${researchId}`);
 }

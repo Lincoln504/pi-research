@@ -14,7 +14,7 @@ All variables are optional — defaults apply if unset. Set them in `src/.env` (
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | 0–99 | Scrape batches per researcher (0 = unlimited) |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs per batch |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–16 | Browser worker processes |
-| `PI_RESEARCH_WORKER_CONCURRENCY` | `1` | 1–10 | Tasks per worker process |
+| `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process |
 | `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
 | `PI_RESEARCH_MAX_RETRIES` | `3` | 0–10 | Retries per researcher request |
@@ -152,4 +152,4 @@ const wq = await getService(ServiceNames.WRITER_QUEUE);
 await wq.enqueue({ url, text, metadata });
 ```
 
-Vector dimension is 384 (all-MiniLM-L6-v2). Stored fields: `text`, `vector`, `url`, `metadata`, `createdAt`.
+Vector dimension is model-dependent (auto-detected at runtime). Stored fields: `text`, `vector`, `url`, `metadata`, `createdAt`.

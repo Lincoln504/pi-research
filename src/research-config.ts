@@ -19,8 +19,11 @@ import {
   SettingsList,
   type SettingItem
 } from '@earendil-works/pi-tui';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
-import { getConfig, saveConfig, resetConfig } from './config.ts';
+import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
@@ -138,12 +141,19 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       values: ['true', 'false'],
     },
     {
-      id: 'USE_LOCAL_KNOWLEDGE_STORE',
-      label: 'Local project store',
-      description: 'Use a knowledge_db directory within the current project instead of the global one',
-      currentValue: config.USE_LOCAL_KNOWLEDGE_STORE ? 'true' : 'false',
-      values: ['true', 'false'],
+      id: 'KNOWLEDGE_STORE_PATH',
+      label: 'Store location',
+      description: `Active path: ${getDbDir()}\nAuto-uses ./knowledge_db if present in project root.`,
+      currentValue: getDbDir().startsWith(process.cwd()) ? 'Local project' : 'Global (shared)',
+      values: [], // Read-only
     },
+    ...(fs.existsSync(path.resolve(process.cwd(), 'knowledge_db')) ? [] : [{
+      id: 'ACTION_KNOWLEDGE_LOCAL_INIT',
+      label: 'Initialize local store',
+      description: 'Create a knowledge_db directory in this project to isolate its data from the global store.',
+      currentValue: 'run',
+      values: ['run'],
+    }]),
     {
       id: 'KNOWLEDGE_ENTRIES',
       label: 'Store entries',
@@ -189,12 +199,19 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       values: ['run'],
     },
     {
-      id: 'ACTION_KNOWLEDGE_CLEAR',
-      label: 'Clear knowledge store',
-      description: 'Permanently delete all knowledge store data',
+      id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
+      label: 'Clear global store',
+      description: 'Permanently delete all data in the global shared knowledge store.',
       currentValue: 'run',
       values: ['run'],
     },
+    ...(fs.existsSync(path.resolve(process.cwd(), 'knowledge_db')) ? [{
+      id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
+      label: 'Clear local store',
+      description: 'Permanently delete all data in the local project knowledge_db directory.',
+      currentValue: 'run',
+      values: ['run'],
+    }] : []),
     {
       id: 'ACTION_METRICS_VIEW',
       label: 'View metrics',
@@ -260,8 +277,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
             } else if (id === 'KNOWLEDGE_STORE_ENABLED') {
               config.KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-            } else if (id === 'USE_LOCAL_KNOWLEDGE_STORE') {
-              config.USE_LOCAL_KNOWLEDGE_STORE = newValue === 'true';
             } else if (id === 'EMBEDDING_MODEL') {
               config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             } else if (id === 'EMBEDDING_DEVICE') {
@@ -286,8 +301,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               wrappedDone({ type: 'action', action: 'health' });
             } else if (id === 'ACTION_KNOWLEDGE_STATUS') {
               wrappedDone({ type: 'action', action: 'knowledge_status' });
-            } else if (id === 'ACTION_KNOWLEDGE_CLEAR') {
-              wrappedDone({ type: 'action', action: 'knowledge_clear' });
+            } else if (id === 'ACTION_KNOWLEDGE_LOCAL_INIT') {
+              wrappedDone({ type: 'action', action: 'knowledge_local_init' });
+            } else if (id === 'ACTION_KNOWLEDGE_CLEAR_GLOBAL') {
+              wrappedDone({ type: 'action', action: 'knowledge_clear_global' });
+            } else if (id === 'ACTION_KNOWLEDGE_CLEAR_LOCAL') {
+              wrappedDone({ type: 'action', action: 'knowledge_clear_local' });
             } else if (id === 'ACTION_METRICS_VIEW') {
               wrappedDone({ type: 'action', action: 'metrics_view' });
             } else if (id === 'ACTION_METRICS_CLEAR') {
@@ -343,15 +362,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         } catch (e: any) {
           logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
         }
-      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE || config.USE_LOCAL_KNOWLEDGE_STORE !== initialConfig.USE_LOCAL_KNOWLEDGE_STORE) {
-        const changed = config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE ? 'Device' : 'Store location';
-        logger.info(`[research-config] ${changed} changed. Resetting service.`);
+      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
+        logger.info('[research-config] Device changed. Resetting service.');
         try {
           await clearService(ServiceNames.KNOWLEDGE_STORE);
           clearEmbeddingInstance();
-          ctx.ui.notify(`${changed} changed: Service refreshed`, 'info');
+          ctx.ui.notify('Device changed: Service refreshed', 'info');
         } catch (e: any) {
-          logger.warn(`[research-config] Failed to refresh service on ${changed.toLowerCase()} change:`, e);
+          logger.warn('[research-config] Failed to refresh service on device change:', e);
         }
       }
 
@@ -364,13 +382,54 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           case 'knowledge_status':
             await showKnowledgeStatusAction(ctx, pi);
             break;
-          case 'knowledge_clear': {
-            const confirmed = await ctx.ui.confirm('Clear Store', 'Are you sure you want to delete all knowledge store data?');
-            if (confirmed) {
-              const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-              await service.clear();
+          case 'knowledge_local_init': {
+            const localDir = path.resolve(process.cwd(), 'knowledge_db');
+            try {
+              fs.mkdirSync(localDir, { recursive: true });
+              await clearService(ServiceNames.KNOWLEDGE_STORE);
               clearEmbeddingInstance();
-              ctx.ui.notify('Knowledge store cleared', 'info');
+              ctx.ui.notify('Local store initialized', 'info');
+            } catch (e: any) {
+              ctx.ui.notify(`Failed to init local store: ${e.message}`, 'error');
+            }
+            break;
+          }
+          case 'knowledge_clear_global': {
+            const confirmed = await ctx.ui.confirm('Clear Global Store', 'Are you sure you want to delete all global shared knowledge store data?');
+            if (confirmed) {
+              try {
+                // To clear global, we need to temporarily ignore any local store
+                // The easiest way is to call the internal clear logic with the global path
+                const EXTENSION_DIR = path.dirname(fileURLToPath(import.meta.url));
+                const globalDbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
+                
+                if (fs.existsSync(globalDbDir)) {
+                  fs.rmSync(globalDbDir, { recursive: true, force: true });
+                }
+                
+                await clearService(ServiceNames.KNOWLEDGE_STORE);
+                clearEmbeddingInstance();
+                ctx.ui.notify('Global store cleared', 'info');
+              } catch (e: any) {
+                ctx.ui.notify(`Failed to clear global store: ${e.message}`, 'error');
+              }
+            }
+            break;
+          }
+          case 'knowledge_clear_local': {
+            const confirmed = await ctx.ui.confirm('Clear Local Store', 'Are you sure you want to delete all data in the local project knowledge_db?');
+            if (confirmed) {
+              const localDbDir = path.resolve(process.cwd(), 'knowledge_db');
+              try {
+                if (fs.existsSync(localDbDir)) {
+                  fs.rmSync(localDbDir, { recursive: true, force: true });
+                }
+                await clearService(ServiceNames.KNOWLEDGE_STORE);
+                clearEmbeddingInstance();
+                ctx.ui.notify('Local store cleared', 'info');
+              } catch (e: any) {
+                ctx.ui.notify(`Failed to clear local store: ${e.message}`, 'error');
+              }
             }
             break;
           }
@@ -443,10 +502,12 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
     const count = await store.count();
+    const dbDir = getDbDir();
+    const isLocal = dbDir.startsWith(process.cwd());
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}`,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Location:** ${isLocal ? 'Local Project' : 'Global (Shared)'}\n- **Path:** \`${dbDir}\``,
       display: true,
     });
   } catch (error: any) {

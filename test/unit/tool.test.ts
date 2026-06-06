@@ -77,16 +77,6 @@ vi.mock('../../src/orchestration/research-manager.ts', () => ({
 import { runResearch } from '../../src/orchestration/research-manager.ts';
 
 vi.mock('../../src/orchestration/researcher.ts', () => ({
-  createResearcherSession: vi.fn(),
-}));
-
-vi.mock('../../src/healthcheck/index.ts', () => ({
-  runHealthCheck: vi.fn(async () => ({ success: true, details: {} })),
-  isHealthCheckSuccessful: vi.fn(async () => true),
-  healthRegistry: {
-    runAll: vi.fn(async () => ({ status: 'healthy', components: [] })),
-    isCritical: vi.fn(() => false),
-  },
 }));
 
 // Mock the panel module
@@ -136,7 +126,6 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
   registerScrapedLinks: vi.fn(),
   getScrapedLinks: vi.fn(),
   deduplicateUrls: vi.fn(),
-  formatSharedLinksFromState: vi.fn(),
   resetScrapedLinks: vi.fn(),
   formatLightweightLinkUpdate: vi.fn(),
   normalizeUrl: vi.fn((u) => u),
@@ -224,17 +213,6 @@ vi.mock('../../src/observers/research-observer-impl.ts', () => ({
   stopObserverWaveAnimation: vi.fn(),
 }));
 
-vi.mock('../../src/utils/research-health.ts', async () => {
-  const actual = await vi.importActual('../../src/utils/research-health.ts') as any;
-  return {
-    ...actual,
-    createHealthMonitor: vi.fn(() => ({
-      start: vi.fn(),
-      stop: vi.fn(),
-    })),
-  };
-});
-
 vi.mock('../../src/utils/error-tracker.ts', () => ({
   runWithTracker: vi.fn(async (_tracker, fn) => await fn()),
   ErrorTracker: class {
@@ -262,18 +240,9 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
   createReadTool: vi.fn(),
 }));
 
-vi.mock('@earendil-works/pi-ai', () => ({
-  complete: vi.fn(async () => ({
-    content: [{ type: 'text', text: '2' }],
-    usage: { totalTokens: 10 },
-  })),
-}));
-
 // Import mocked modules
 import * as panel from '../../src/tui/research-panel.ts';
-import { createResearcherSession } from '../../src/orchestration/researcher.ts';
-import { complete } from '@earendil-works/pi-ai';
-import { createResearchTuiManager, hideWorkingIndicator, showWorkingIndicator } from '../../src/tui/research-tui-manager.ts';
+import { createResearchTuiManager } from '../../src/tui/research-tui-manager.ts';
 
 // ============================================================================
 // HELPERS

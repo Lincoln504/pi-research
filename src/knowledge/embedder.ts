@@ -46,6 +46,7 @@ export class Embedder {
   private pipeline: FeatureExtractionPipeline | null = null;
   private initializingPromise: Promise<void> | null = null;
   private disposePromise: Promise<void> | null = null;
+  private recoveryPromise: Promise<void> | null = null;
 
   private model: string;
   private poolingMode: 'mean' | 'cls' | 'last_token';
@@ -318,7 +319,7 @@ export class Embedder {
       throw err;
     } finally {
       if (lockAcquired && this.stateManager) {
-        await this.stateManager.releaseGpuLock().catch((err) => logger.debug('Swallowed release GPU lock error:', err));
+        await this.stateManager.releaseGpuLock().catch((err) => logger.warn('[embedder] Failed to release per-call GPU lock:', err));
       }
       this.activeEmbeddings--;
       this.resetIdleTimer();
@@ -391,44 +392,57 @@ export class Embedder {
   }
 
   private async recoverToCpu(): Promise<void> {
+    if (this.recoveryPromise) return this.recoveryPromise;
+
     // Guard: if disposal has already started, skip recovery — the embedder is going away.
     if (this.state === 'disposing' || this.state === 'idle') {
       logger.debug('[embedder] recoverToCpu called during disposal/idle — skipping');
       return;
     }
-    logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
-    
-    markWebGpuFallback();
-    
-    await releaseGpuLock(this.stateManager, this.gpuLockHeld);
-    this.gpuLockHeld = false;
-    
-    this.state = 'initializing';
-    
-    // Wait for other concurrent embeddings to finish before disposing the pipeline
-    const maxWaitMs = 15000;
-    const startTime = Date.now();
-    while (this.activeEmbeddings > 1 && (Date.now() - startTime) < maxWaitMs) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
 
-    if (this.pipeline) {
-      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
-      this.pipeline = null;
-    }
-    this.device = 'cpu';
-    
-    this.initializingPromise = this._initializeInternal();
+    this.recoveryPromise = (async () => {
+      logger.warn('[embedder] WebGPU device error detected during operation — falling back to CPU for the remainder of this session');
+      
+      markWebGpuFallback();
+      
+      await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+      this.gpuLockHeld = false;
+      
+      this.state = 'initializing';
+      
+      // Wait for other concurrent embeddings to finish before disposing the pipeline
+      const maxWaitMs = 15000;
+      const startTime = Date.now();
+      // We expect activeEmbeddings to be at least 1 (the current caller).
+      // If multiple callers are in recoverToCpu, they all wait for recoveryPromise.
+      while (this.activeEmbeddings > 1 && (Date.now() - startTime) < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      if (this.pipeline) {
+        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
+        this.pipeline = null;
+      }
+      this.device = 'cpu';
+      
+      this.initializingPromise = this._initializeInternal();
+      try {
+          await this.initializingPromise;
+          this.state = 'ready';
+      } catch (e) {
+          this.state = 'failed';
+          throw e;
+      } finally {
+          this.initializingPromise = null;
+      }
+      logger.warn('[embedder] CPU fallback recovery complete.');
+    })();
+
     try {
-        await this.initializingPromise;
-        this.state = 'ready';
-    } catch (e) {
-        this.state = 'failed';
-        throw e;
+      await this.recoveryPromise;
     } finally {
-        this.initializingPromise = null;
+      this.recoveryPromise = null;
     }
-    logger.warn('[embedder] CPU fallback recovery complete.');
   }
 
   async dispose(): Promise<void> {

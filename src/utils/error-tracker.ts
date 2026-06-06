@@ -217,8 +217,8 @@ export class ErrorTracker {
 }
 
 /**
- * Global singleton instance that proxies to the context-bound instance if available.
- * This preserves backward compatibility while enabling isolation.
+ * Global singleton instance that proxies to the context-bound instance if available,
+ * enabling session-scoped error isolation while falling back to a shared global tracker.
  */
 const globalInstance = new ErrorTracker();
 export const errorTracker: ErrorTracker = new Proxy(globalInstance, {

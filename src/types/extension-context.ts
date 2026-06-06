@@ -53,8 +53,4 @@ export interface ModelWithId {
   };
 }
 
-/**
- * Re-export AgentSessionEvent as ExtendedAgentSessionEvent for backwards compat.
- * The real SDK type has the correct shape for all event fields.
- */
-export type { AgentSessionEvent as ExtendedAgentSessionEvent } from '@earendil-works/pi-coding-agent';
+

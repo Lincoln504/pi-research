@@ -119,8 +119,7 @@ export function clearSteeringMessages(piSessionId: string | undefined): void {
 
 /**
  * Maximum allowed unique failed researchers before stopping research.
- * Increased from 2 to 4 to allow larger research teams (complexity 3) to continue
- * even if some infrastructure nodes fail, provided at least one survives.
+ * Set to 2 to balance thoroughness with resource conservation.
  */
 export const MAX_FAILED_RESEARCHERS = 2;
 

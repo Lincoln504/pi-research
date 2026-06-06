@@ -1,8 +1,7 @@
 /**
  * Service Interfaces for pi-research
  *
- * This module re-exports all service interfaces for backward compatibility.
- * Individual interfaces are now in their own modules for better organization.
+ * Central re-export barrel for all service interfaces.
  */
 
 // Scheduler interfaces

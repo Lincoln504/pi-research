@@ -69,8 +69,6 @@ export const ConfigSchema = Type.Object({
   RESEARCH_MODEL: Type.Optional(Type.String({ default: '' })),
   /** Optional directory for the knowledge store */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String({ default: '' })),
-  /** Whether to use a local knowledge store directory within the current project (default: false) */
-  USE_LOCAL_KNOWLEDGE_STORE: Type.Boolean({ default: false }),
 });
 
 export type Config = Static<typeof ConfigSchema>;
@@ -95,12 +93,14 @@ export function getDbDir(): string {
       : path.resolve(process.cwd(), config.KNOWLEDGE_STORE_DIR);
   }
 
-  // 2. Local project directory mode
-  if (config.USE_LOCAL_KNOWLEDGE_STORE) {
-    return path.resolve(process.cwd(), 'knowledge_db');
+  // 2. Local project directory detection
+  // If knowledge_db exists in the current project root, use it.
+  const localDb = path.resolve(process.cwd(), 'knowledge_db');
+  if (fs.existsSync(localDb) && fs.statSync(localDb).isDirectory()) {
+    return localDb;
   }
 
-  // 3. Default global directory
+  // 3. Default global directory (in the extension installation folder)
   const dbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
   // Ensure it's absolute
   return path.isAbsolute(dbDir) ? dbDir : path.resolve(process.cwd(), dbDir);
@@ -160,7 +160,6 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
     PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR ?? '',
-    PI_RESEARCH_USE_LOCAL_KNOWLEDGE_STORE: String(config.USE_LOCAL_KNOWLEDGE_STORE),
   };
 
   try {
@@ -336,7 +335,6 @@ export function createConfig(
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
-    USE_LOCAL_KNOWLEDGE_STORE: parseEnvBool(e, 'PI_RESEARCH_USE_LOCAL_KNOWLEDGE_STORE', DEFAULTS.USE_LOCAL_KNOWLEDGE_STORE),
   };
 }
 

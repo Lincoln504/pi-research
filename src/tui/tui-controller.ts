@@ -9,7 +9,7 @@
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { matchesKey } from '@earendil-works/pi-tui';
-import { getActiveSessionCount } from '../utils/session-state.ts';
+import { getActiveSessionCount, abortAllSessions } from '../utils/session-state.ts';
 import { shouldConsumeForCleanup, createSafeInputHandler } from '../utils/terminal-state.ts';
 import { logger } from '../logger.ts';
 
@@ -21,19 +21,23 @@ interface GlobalTuiState {
   unsubInput: (() => void) | null;
   /** Whether an interactive custom TUI is currently active */
   isInteractiveTuiActive: boolean;
+  /** The Pi session ID this controller belongs to */
+  piSessionId: string | undefined;
 }
 
 const state: GlobalTuiState = {
   unsubInput: null,
   isInteractiveTuiActive: false,
+  piSessionId: undefined,
 };
 
 /**
  * Initialize the global TUI controller
  * 
  * @param ui - The UI context from Pi
+ * @param piSessionId - The current Pi session ID for scoped cancellation
  */
-export function initGlobalTuiController(ui: ExtensionUIContext): void {
+export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: string): void {
   if (state.unsubInput) return;
 
   // Double check if ui and onTerminalInput exist (it should in interactive mode)
@@ -41,6 +45,9 @@ export function initGlobalTuiController(ui: ExtensionUIContext): void {
     logger.debug('[TUI] Global TUI controller skipped: UI context or onTerminalInput not available');
     return;
   }
+
+  // Store the Pi session ID for scoped cancellation
+  state.piSessionId = piSessionId;
 
   /**
    * Handle terminal input for cancellation and protocol cleanup
@@ -58,13 +65,16 @@ export function initGlobalTuiController(ui: ExtensionUIContext): void {
     if (matchesKey(data, 'escape') || matchesKey(data, 'ctrl+c')) {
       const activeCount = getActiveSessionCount();
       if (activeCount > 0) {
-        // Trigger abort for all sessions in this Pi session.
+        // FIX (New Issues B & E): Use abortAllSessions scoped to the current Pi session
+        // instead of clearAllSessionState() which nukes ALL sessions across ALL Pi instances.
         logger.info(`[TUI] Global cancel requested (${data === '\x03' ? 'Ctrl+C' : 'Esc'}). Aborting active sessions...`);
         
-        // We use dynamic import to avoid circular dependency
-        import('../utils/session-state.ts').then(({ clearAllSessionState }) => {
-           clearAllSessionState();
-        });
+        try {
+          // Scope to this Pi session to avoid cross-session interference
+          abortAllSessions(state.piSessionId);
+        } catch (err) {
+          logger.error('[TUI] Failed to abort sessions on cancel:', err);
+        }
       }
       
       // Let the key fall through so Pi can handle its own cancellation
@@ -103,4 +113,6 @@ export function disposeGlobalTuiController(): void {
     state.unsubInput();
     state.unsubInput = null;
   }
+  state.piSessionId = undefined;
+  state.isInteractiveTuiActive = false;
 }

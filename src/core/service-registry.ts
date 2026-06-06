@@ -269,7 +269,11 @@ class ServiceContainer {
    */
   isInitialized(name: string): boolean {
     const registration = this.services.get(name);
-    return registration?.instance !== null || false;
+    // Must check registration exists FIRST — undefined?.instance gives undefined,
+    // and undefined !== null is true, which would incorrectly report unregistered
+    // services as initialized.
+    if (!registration) return false;
+    return registration.instance !== null;
   }
 
   /**

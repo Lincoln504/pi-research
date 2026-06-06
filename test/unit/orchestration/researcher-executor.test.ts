@@ -147,26 +147,26 @@ describe('runResearcher', () => {
       expect(mockPrompt).not.toHaveBeenCalled();
     });
 
-    it('fires onResearcherComplete with empty string when skipping', async () => {
-      const onResearcherComplete = vi.fn();
+    it('fires onResearcherFailure when skipping (no initial links)', async () => {
+      const onResearcherFailure = vi.fn();
       await runResearcher(makeOptions({
         initialLinks: [],
         historicalUrls: [], sessionId: 'test-session',
-        observer: { onResearcherComplete } as any,
+        observer: { onResearcherFailure } as any,
       }));
-      expect(onResearcherComplete).toHaveBeenCalledWith(expect.any(String), '');
+      expect(onResearcherFailure).toHaveBeenCalledWith(expect.any(String), expect.any(String));
     });
 
-    it('fires onResearcherComplete with the researcher id when skipping', async () => {
-      const onResearcherComplete = vi.fn();
+    it('fires onResearcherFailure with the researcher id when skipping', async () => {
+      const onResearcherFailure = vi.fn();
       const config = { id: 'r42', name: 'R42', goal: 'g', queries: [] };
       await runResearcher(makeOptions({
         initialLinks: [],
         historicalUrls: [], sessionId: 'test-session',
         config,
-        observer: { onResearcherComplete } as any,
+        observer: { onResearcherFailure } as any,
       }));
-      expect(onResearcherComplete).toHaveBeenCalledWith('r42', '');
+      expect(onResearcherFailure).toHaveBeenCalledWith('r42', expect.any(String));
     });
 
     it('proceeds when only initialLinks is non-empty', async () => {

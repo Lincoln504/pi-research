@@ -58,7 +58,7 @@ export class QuickResearchOrchestrator {
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
-    metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0' });
+    // Note: research_sessions_total is incremented at completion (success/error) below.
 
     try {
         // Pre-flight health check to ensure browser pool is operational

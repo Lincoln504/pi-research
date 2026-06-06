@@ -25,10 +25,21 @@ export class ResearchSynthesisService implements IService {
 
   // Map of sessionId -> Map<reportId, reportContent>
   private sessions = new Map<string, Map<string, string>>();
+  // FIX (New Issue D): Maximum number of sessions to prevent unbounded growth
+  // from orphaned sessions during long-lived Pi sessions.
+  private static readonly MAX_SESSIONS = 50;
 
   private getSessionReports(sessionId: string): Map<string, string> {
     let reports = this.sessions.get(sessionId);
     if (!reports) {
+      // FIX (New Issue D): Evict the oldest session when at capacity
+      if (this.sessions.size >= ResearchSynthesisService.MAX_SESSIONS) {
+        const oldestKey = this.sessions.keys().next().value;
+        if (oldestKey !== undefined) {
+          logger.warn(`[ResearchSynthesisService] Session limit (${ResearchSynthesisService.MAX_SESSIONS}) reached, evicting oldest: ${oldestKey}`);
+          this.sessions.delete(oldestKey);
+        }
+      }
       reports = new Map<string, string>();
       this.sessions.set(sessionId, reports);
     }

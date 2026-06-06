@@ -27,21 +27,18 @@ export const USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0',
 ];
 
-// Keep the old constant name for backward compatibility
-const REALISTIC_USER_AGENTS = USER_AGENTS;
-
 /**
  * Get a random realistic User-Agent string
  */
 export function getRandomRealisticUA(): string {
-    return REALISTIC_USER_AGENTS[Math.floor(Math.random() * REALISTIC_USER_AGENTS.length)]!;
+    return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]!;
 }
 
 /**
  * Get a realistic User-Agent for a specific platform
  */
 export function getRealisticUA(platform: 'windows' | 'mac' | 'linux' | string): string {
-    const filtered = REALISTIC_USER_AGENTS.filter(ua => {
+    const filtered = USER_AGENTS.filter(ua => {
         if (platform === 'windows') return ua.includes('Windows');
         if (platform === 'mac') return ua.includes('Macintosh');
         if (platform === 'linux') return ua.includes('Linux');

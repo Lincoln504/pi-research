@@ -5,9 +5,13 @@
  * Provides clean interface for embedding and storage operations.
  */
 
-import { ServiceLifecycle } from '../core/service-registry.ts';
+import { ServiceLifecycle, getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 import { logger } from '../logger.ts';
 import type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue } from '../core/service-interfaces.ts';
+import { FileLockService } from './file-lock-service.ts';
+import { StatePathConfiguration } from './state/state-path-configuration.ts';
+import * as path from 'node:path';
 
 // Static imports from knowledge module
 import {
@@ -57,7 +61,16 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           clearEmbeddingInstance();
           return getEmbedder(config);
         };
-        const components = await createKnowledgeStoreComponents(embedderFactory, reconnectFactory);
+
+        // Acquire lock for initialization/migration
+        const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+        const lockPath = path.join(pathConfig.getLockDirPath(), 'knowledge-store-init.lock');
+        const initLock = new FileLockService({ lockFilePath: lockPath });
+        await initLock.initialize();
+
+        const components = await initLock.withLock(async () => {
+          return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
+        });
 
         this._embedder = components.embedder;
         this._store = components.store;

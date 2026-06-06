@@ -6,7 +6,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeepResearchOrchestrator } from '../../../src/orchestration/deep-research-orchestrator.ts';
 import { resetServiceContainer, registerService, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
-import type { TextContent } from '@earendil-works/pi-ai';
 
 // Mock the service registry
 vi.mock('../../../src/core/service-registry.ts', async (importOriginal) => {

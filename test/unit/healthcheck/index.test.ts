@@ -29,10 +29,6 @@ vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => (
   runBrowserHealthCheck: vi.fn(),
 }));
 
-vi.mock('../../../src/core/internal-state.ts', () => ({
-  getSchedulerInstance: vi.fn(),
-}));
-
 vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
   KnowledgeStoreService: vi.fn().mockImplementation(() => ({
     name: 'knowledge-store',

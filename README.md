@@ -106,7 +106,7 @@ Full variable reference: [docs/SDK.md](docs/SDK.md). Copy `.env.example` to `src
 ## Development
 
 ```bash
-npm run test:unit         # 1126 unit tests, no browser required
+npm run test:unit         # 1151 unit tests, no browser required
 npm run test:integration  # requires camoufox + Xvfb on Linux
 npm run type-check        # TypeScript strict mode
 npm run lint              # ESLint

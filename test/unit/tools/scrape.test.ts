@@ -42,14 +42,6 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
   }),
 }));
 
-// Mock knowledge module
-vi.mock('../../../src/knowledge/index.ts', () => {
-  return {
-    isKnowledgeStoreReady: vi.fn().mockReturnValue(false), // Default to not ready
-    initKnowledgeStore: vi.fn().mockResolvedValue(undefined),
-  };
-});
-
 describe('tools/scrape', () => {
   const mockOptions = {
     ctx: {} as any,

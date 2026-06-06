@@ -158,7 +158,7 @@ export async function findRelevantUrls(
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
   limit: number
-): Promise<{ url: string; description: string }[]> {
+): Promise<{ url: string; description: string; provenance?: string }[]> {
   const startTime = Date.now();
   const rowCount = await table.countRows();
   if (rowCount === 0) {
@@ -177,7 +177,7 @@ export async function findRelevantUrls(
     .limit(limit)
     .toArray();
 
-  const entries: { url: string; description: string }[] = [];
+  const entries: { url: string; description: string; provenance?: string }[] = [];
   const seen = new Set<string>();
   for (const r of results) {
     const url = r.url as string;
@@ -185,13 +185,17 @@ export async function findRelevantUrls(
     seen.add(url);
 
     let description = '';
+    let provenance = 'description-unverified';
     try {
       const meta = JSON.parse(r.metadata as string);
       description = meta.description as string ?? '';
+      // FIX (Issue 5): Surface provenance metadata so consumers can prefer verified entries
+      if (meta.provenance) provenance = meta.provenance;
+      else if (meta.hasContent === true) provenance = 'scraped-verified';
     } catch { /* ignore */ }
     
     if (!description) description = (r.text as string ?? '').substring(0, 300);
-    entries.push({ url, description });
+    entries.push({ url, description, provenance });
   }
 
   const duration = Date.now() - startTime;

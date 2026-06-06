@@ -21,6 +21,7 @@ export default defineConfig({
       'test/integration/browser-pool-failover.test.ts',
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
+      'test/integration/knowledge-embedding-models-real.test.ts',
       'test/integration/research-workflow.test.ts',
       'test/integration/sdk-lifecycle.test.ts',
       'test/integration/shutdown-perf.test.ts',

@@ -195,7 +195,7 @@ export function getLogger(sessionId?: string): Logger {
     }
     return lg;
   }
-  // Fall back to global logger for backward compatibility
+  // Fall back to creating a global logger if no context-bound logger is available
   if (!_globalLogger) {
     _globalLogger = new Logger({ verbose: isVerboseFromEnv() });
   }

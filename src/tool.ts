@@ -15,22 +15,8 @@
  * - utils/pi-session.ts - PI session metadata helpers
  */
 
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { createResearchTool } from './tools/research-tool-definition.ts';
-import { createHealthTool } from './tools/health-tool-definition.ts';
-
 /**
- * Get all tool definitions provided by pi-research
- */
-export function getToolDefinitions(): ToolDefinition[] {
-  return [
-    createResearchTool(),
-    createHealthTool(),
-  ];
-}
-
-/**
- * Export individual tool creation functions for direct use
+ * Export individual tool creation functions for direct use.
  */
 export { createResearchTool } from './tools/research-tool-definition.ts';
 export { createHealthTool } from './tools/health-tool-definition.ts';

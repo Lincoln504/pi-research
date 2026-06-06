@@ -10,7 +10,7 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId } from './utils/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId, getActiveSessionCount } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -64,6 +64,14 @@ export default async function (pi: ExtensionAPI) {
     const eCtx = ctx as ExtendedExtensionContext;
     try {
       if (event.streamingBehavior === 'steer') {
+        // FIX (Issue 1): Only consume steering input when research is actually active.
+        // Without this check, normal coding input is silently swallowed.
+        const activeCount = getActiveSessionCount();
+        if (activeCount === 0) {
+          logger.debug('[pi-research] Steering input received but no active research — letting pi handle it');
+          return undefined;
+        }
+
         if (event.text) {
           logger.debug(`[pi-research] Captured steering input. behavior=steer, sessionId=${eCtx.sessionId}, text=${event.text}`);
           const trimmed = event.text.trim();
@@ -238,18 +246,28 @@ export default async function (pi: ExtensionAPI) {
 
     // Only initialize TUI features and inject rules in TUI mode
     if (ctx.mode === 'tui' && ctx.hasUI) {
-      initGlobalTuiController(ctx.ui);
+      initGlobalTuiController(ctx.ui, (ctx as ExtendedExtensionContext).sessionId);
     }
 
     // Framing steering as "Additional considerations"
     const eCtx = ctx as ExtendedExtensionContext;
-    const steeringMessages = getSteeringMessages(normalizeSessionId(eCtx.sessionId));
+    const normalizedSid = normalizeSessionId(eCtx.sessionId);
+    const steeringMessages = getSteeringMessages(normalizedSid);
     let injectedSystemPrompt = event.systemPrompt;
-    if (steeringMessages.length > 0) {
+
+    // FIX (Issue 2): Only inject steering messages when research is actually active.
+    // Without this check, steering messages leak into normal coding agent turns.
+    const activeCount = getActiveSessionCount();
+    const hasSteeringMessages = steeringMessages.length > 0;
+    const shouldInjectSteering = hasSteeringMessages && activeCount > 0;
+
+    if (shouldInjectSteering) {
       injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' + 
         'The user has provided the following additional considerations for this task:\n' + 
         steeringMessages.map(m => `- ${m}`).join('\n');
       logger.debug(`[pi-research] Injected ${steeringMessages.length} steering message(s) into prompt`);
+    } else if (hasSteeringMessages && activeCount === 0) {
+      logger.debug(`[pi-research] ${steeringMessages.length} steering message(s) queued but no active research — skipping injection`);
     }
 
     // Log streaming behavior if available
@@ -258,7 +276,9 @@ export default async function (pi: ExtensionAPI) {
     }
 
     // Do not inject rules into the sub-researchers
-    const isResearcher = event.systemPrompt?.toLowerCase().includes('researcher');
+    // FIX (Issue 10): Use explicit marker instead of fragile 'includes("researcher")' string match.
+    // The marker is embedded in the researcher prompt template as an HTML comment.
+    const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
     if (isResearcher) {
       return { systemPrompt: event.systemPrompt };
     }

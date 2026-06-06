@@ -131,8 +131,7 @@ export function clearSessionCircuitBreaker(sessionId: string): void {
 }
 
 /**
- * Global fallback circuit breaker for backward compatibility
- * @deprecated Use getBrowserCircuitBreaker(sessionId) instead
+ * Global fallback circuit breaker — used when no sessionId is available.
  */
 export const browserCircuitBreaker = new CircuitBreaker(DEFAULT_BREAKER_CONFIG);
 

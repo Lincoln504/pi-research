@@ -18,7 +18,7 @@ export default defineConfig({
     ...baseConfig.test,
     name: 'integration-parallel',
     include: [
-      'test/integration/knowledge-embedding-models.test.ts',
+      'test/integration/knowledge-embedding-models-synthetic.test.ts',
       'test/integration/knowledge-migrations.test.ts',
       'test/integration/knowledge-stack.test.ts',
       'test/integration/setup.test.ts',

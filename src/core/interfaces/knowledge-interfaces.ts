@@ -20,6 +20,7 @@ export interface IngestionItem {
 export interface StoreUrlEntry {
   url: string;
   description: string;
+  provenance?: string;
 }
 
 /**
