@@ -7,12 +7,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
-import { resetServiceContainer } from '../../../src/core/service-registry.ts';
-import { getService } from '../../../src/core/service-registry.ts';
-import { ServiceNames } from '../../../src/core/service-interfaces.ts';
-import { cleanupResearchServices, resetResearchServices } from '../../../src/orchestration/research-session-manager.ts';
+import { resetServiceContainer, getService } from '../../../src/core/service-registry.ts';
+import { ServiceNames, type IResearchOrchestration } from '../../../src/core/service-interfaces.ts';
 
 describe('Planning Service State Reset', () => {
+  let orchestrationService: IResearchOrchestration;
+
   beforeEach(async () => {
     await resetServiceContainer();
     registerCoreServices();
@@ -26,6 +26,7 @@ describe('Planning Service State Reset', () => {
       },
     };
     await initializeCoreServices(mockCtx);
+    orchestrationService = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
   });
 
   afterEach(async () => {
@@ -51,7 +52,7 @@ describe('Planning Service State Reset', () => {
       expect(planBefore?.action).toBeDefined();
       
       // Clean up research services
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       // Plan should be cleared
       const planAfter = planningService.getCurrentPlan('test-session');
@@ -70,7 +71,7 @@ describe('Planning Service State Reset', () => {
       expect(historyBefore.length).toBeGreaterThan(0);
       
       // Clean up research services
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       // Query history should be cleared
       const historyAfter = planningService.getQueryHistory('test-session');
@@ -90,7 +91,7 @@ describe('Planning Service State Reset', () => {
       expect(countBefore).toBeGreaterThan(0);
       
       // Clean up research services
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       // Counter should be reset to 0
       const countAfter = planningService.getTotalResearchersPlanned('test-session');
@@ -113,7 +114,7 @@ describe('Planning Service State Reset', () => {
       expect(history1.length).toBeGreaterThan(0);
       
       // Cleanup (simulating end of first research run)
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       // Second research run
       planningService.clearPlanningState();
@@ -151,7 +152,7 @@ describe('Planning Service State Reset', () => {
       expect(planningService.getTotalResearchersPlanned('test-session')).toBeGreaterThan(0);
       
       // Use resetResearchServices (alias for cleanup)
-      await resetResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       expect(planningService.getCurrentPlan('test-session')).toBeNull();
       expect(planningService.getTotalResearchersPlanned('test-session')).toBe(0);
@@ -173,9 +174,9 @@ describe('Planning Service State Reset', () => {
       expect(planningService.getCurrentPlan('test-session')).not.toBeNull();
       
       // Multiple cleanup calls should be safe
-      await cleanupResearchServices('test-session');
-      await cleanupResearchServices('test-session');
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       expect(planningService.getCurrentPlan('test-session')).toBeNull();
     });
@@ -199,7 +200,7 @@ describe('Planning Service State Reset', () => {
       expect(count2).toBeGreaterThan(count1); // Should increment
       
       // Cleanup between runs
-      await cleanupResearchServices('test-session');
+      await orchestrationService.cleanupResearchServices('test-session');
       
       // New run should start fresh
       planningService.clearPlanningState();

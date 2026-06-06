@@ -17,7 +17,9 @@ import type { ModelWithId } from '../types/extension-context.ts';
 import type { ResearchDepth } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
-import { runResearch } from '../orchestration/research-manager.ts';
+import { getService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IResearchOrchestration } from '../core/service-interfaces.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
@@ -329,8 +331,9 @@ export function createResearchTool(): ToolDefinition {
           const sessionTracker = new ErrorTracker();
           const researchRunResult = await runWithTracker(sessionTracker, () => runWithLogger(researchLogger, async () => {
             try {
-              // Run research
-              const result = await runResearch({
+              // Run research via orchestration service
+              const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+              const result = await orch.runResearch({
                 ctx,
                 query: sanitizedQuery,
                 depth: (depth ?? 0) as ResearchDepth,

@@ -40,37 +40,6 @@ vi.mock('../../../src/config.ts', () => ({
   DEFAULTS: { KNOWLEDGE_STORE_ENABLED: false },
 }));
 
-vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
-  getResearchSynthesisService: vi.fn(() => Promise.resolve({
-    synthesize: vi.fn(),
-    storeReport: vi.fn(),
-    getReports: vi.fn(() => []),
-    hasReports: vi.fn(() => false),
-    buildFallbackSynthesis: vi.fn(() => '# Fallback Synthesis'),
-    clearReports: vi.fn(),
-    getAllReports: vi.fn(() => new Map()),
-    getReport: vi.fn(),
-    getReportsForRound: vi.fn(() => new Map()),
-    getReportCount: vi.fn(() => 0),
-    ensureCitedLinks: vi.fn((_id: string, text: string) => text),
-    appendSteeringGuidance: vi.fn((text: string) => text),
-  })),
-  getResearchSessionService: vi.fn(() => Promise.resolve({
-    registerSession: vi.fn(),
-    getSession: vi.fn(),
-    hasSession: vi.fn(),
-    unregisterSession: vi.fn(),
-    abortSession: vi.fn(),
-    abortAllSessions: vi.fn(),
-    cleanup: vi.fn(),
-    reset: vi.fn(),
-    getActiveSessionCount: vi.fn(() => 0),
-    getActiveSessionIds: vi.fn(() => []),
-  })),
-  resetResearchServices: vi.fn(() => Promise.resolve()),
-  cleanupResearchServices: vi.fn(() => Promise.resolve()),
-}));
-
 describe('DeepResearchOrchestrator', () => {
   const mockCtx = {
     cwd: '/tmp',
@@ -94,6 +63,7 @@ describe('DeepResearchOrchestrator', () => {
 
   let mockPlanningService: any;
   let mockOrchestrationService: any;
+  let mockSynthesisService: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -128,12 +98,34 @@ describe('DeepResearchOrchestrator', () => {
       runResearchers: vi.fn().mockResolvedValue(undefined),
       runSearchBurst: vi.fn().mockResolvedValue([]),
       storeLinkDescriptions: vi.fn().mockResolvedValue(undefined),
+      cleanupResearchServices: vi.fn().mockResolvedValue(undefined),
+    };
+
+    // Create mock synthesis service
+    mockSynthesisService = {
+      name: 'research-synthesis',
+      lifecycle: 'initialized',
+      async initialize() {},
+      async dispose() {},
+      synthesize: vi.fn(),
+      storeReport: vi.fn(),
+      getReports: vi.fn(() => []),
+      hasReports: vi.fn(() => false),
+      buildFallbackSynthesis: vi.fn(() => '# Fallback Synthesis'),
+      clearReports: vi.fn(),
+      getAllReports: vi.fn(() => new Map()),
+      getReport: vi.fn(),
+      getReportsForRound: vi.fn(() => new Map()),
+      getReportCount: vi.fn(() => 0),
+      ensureCitedLinks: vi.fn((_id: string, text: string) => text),
+      appendSteeringGuidance: vi.fn((text: string) => text),
     };
 
     // Default getService implementation
     vi.mocked(getService).mockImplementation(async (name) => {
       if (name === ServiceNames.PLANNING) return mockPlanningService;
       if (name === ServiceNames.RESEARCH_ORCHESTRATION) return mockOrchestrationService;
+      if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService;
       return null;
     });
 
@@ -147,6 +139,12 @@ describe('DeepResearchOrchestrator', () => {
     registerService(
       ServiceNames.RESEARCH_ORCHESTRATION,
       () => mockOrchestrationService,
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+
+    registerService(
+      ServiceNames.RESEARCH_SYNTHESIS_SERVICE,
+      () => mockSynthesisService,
       { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
     );
   });

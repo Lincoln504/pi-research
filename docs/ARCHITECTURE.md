@@ -34,7 +34,7 @@ Two orchestrators handle research sessions:
 - Depths 1–3 map to 2/3/5 researchers and 2/3/5 rounds
 - Coordinator plans research tracks; evaluator decides whether to go deeper
 
-`runResearch` in `src/orchestration/research-manager.ts` selects the orchestrator based on depth and is the single internal entry point.
+`runResearch` in `IResearchOrchestration` is the single internal entry point, implemented in `src/orchestration/research-orchestration-service.ts`.
 
 ---
 
@@ -163,7 +163,6 @@ src/
 │   ├── metrics-service.ts
 │   └── ...
 ├── orchestration/
-│   ├── research-manager.ts
 │   ├── deep-research-orchestrator.ts
 │   ├── quick-research-orchestrator.ts
 │   ├── research-orchestration-service.ts

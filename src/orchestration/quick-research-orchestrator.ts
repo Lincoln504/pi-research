@@ -22,17 +22,13 @@ import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getService } from '../core/service-registry.ts';
 import { getSteeringMessages } from '../utils/session-state.ts';
-import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService } from '../core/service-interfaces.ts';
+import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
-import {
-  getResearchSynthesisService,
-  cleanupResearchServices,
-} from './research-session-manager.ts';
 
 export interface QuickResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -240,7 +236,7 @@ export class QuickResearchOrchestrator {
           let result = ensureAssistantResponse(session, 'Quick');
           
           // Store report in synthesis service so citations can be verified/processed
-          const synthesisService = await getResearchSynthesisService();
+          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
           synthesisService.storeReport(this.options.researchId, 'quick', result);
           
           // Ensure CITED LINKS section is accurate and consistent
@@ -317,7 +313,12 @@ export class QuickResearchOrchestrator {
           }
         }
     } finally {
-        await cleanupResearchServices(researchId);
+        try {
+          const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+          await orch.cleanupResearchServices(undefined, researchId);
+        } catch (err) {
+          logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);
+        }
     }
-  }
-}
+    }
+    }

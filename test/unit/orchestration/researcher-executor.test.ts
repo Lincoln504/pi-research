@@ -11,8 +11,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runResearcher } from '../../../src/orchestration/researcher-executor.ts';
 import type { RunResearcherOptions } from '../../../src/orchestration/orchestration-types.ts';
+import { getService } from '../../../src/core/service-registry.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
+
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getService: vi.fn(),
+  registerService: vi.fn(),
+  resetServiceContainer: vi.fn(),
+}));
 
 vi.mock('../../../src/logger.ts', () => ({
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), info: vi.fn() },
@@ -59,18 +67,6 @@ vi.mock('../../../src/orchestration/researcher.ts', () => ({
     abort: mockAbort,
     subscribe: mockSubscribe,
   })),
-}));
-
-vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
-  getResearchSessionService: vi.fn().mockResolvedValue({
-    registerSession: mockRegister,
-    unregisterSession: mockUnregister,
-  }),
-  getResearchSynthesisService: vi.fn().mockResolvedValue({
-    storeReport: mockStoreReport,
-    appendSteeringGuidance: vi.fn((text) => text),
-    ensureCitedLinks: vi.fn((_id, text) => text),
-  }),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -134,6 +130,25 @@ describe('runResearcher', () => {
     mockUnregister.mockClear();
     mockStoreReport.mockClear();
     STUB_PLANNING_SERVICE.getCurrentPlan.mockReturnValue(null);
+
+    // Default getService implementation
+    vi.mocked(getService).mockImplementation(async (name) => {
+      if (name === ServiceNames.RESEARCH_SESSION_SERVICE) {
+        return {
+          registerSession: mockRegister,
+          unregisterSession: mockUnregister,
+        } as any;
+      }
+      if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) {
+        return {
+          storeReport: mockStoreReport,
+          appendSteeringGuidance: vi.fn((text) => text),
+          ensureCitedLinks: vi.fn((_id, text) => text),
+        } as any;
+      }
+      return null;
+    });
+
     // Clear the createResearcherSession call history so per-test call[0] is always fresh
     const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
     vi.mocked(createResearcherSession).mockClear();

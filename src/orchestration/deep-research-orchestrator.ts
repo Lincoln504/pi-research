@@ -16,18 +16,16 @@ import type {
   ResearchObserver,
 } from './research-observer.ts';
 import {
-  getResearchSynthesisService,
-  cleanupResearchServices,
-  resetResearchServices,
-} from './research-session-manager.ts';
-import {
   ServiceNames,
+  type IResearchOrchestration,
+  type ResearchPlan,
+  type IKnowledgeStoreService,
+  type IResearchSynthesisService,
 } from '../core/service-interfaces.ts';
 import { getService } from '../core/service-registry.ts';
 import { getConfig } from '../config.ts';
 import type { Config } from '../config.ts';
 import type { PlanningService } from '../core/planning-service.ts';
-import type { IResearchOrchestration, ResearchPlan, IKnowledgeStoreService } from '../core/service-interfaces.ts';
 
 export interface DeepResearchOrchestratorOptions {
   ctx: ExtensionContext;
@@ -88,12 +86,12 @@ export class DeepResearchOrchestrator {
   async run(signal?: AbortSignal): Promise<string> {
     const { model, query, complexity, researchId, observer } = this.options;
     
-    // Reset services for this specific research run ID to ensure fresh state
-    await resetResearchServices(researchId);
-    
     const orchestrationService = await this.getOrchestrationService();
     const planningService = await this.getPlanningService();
 
+    // Reset services for this specific research run ID to ensure fresh state
+    await orchestrationService.cleanupResearchServices(undefined, researchId);
+    
     logger.log(`[DeepOrchestrator] Starting multi-round research (complexity ${complexity}) for: "${query}" (Run: ${researchId})`);
     metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(complexity) });
 
@@ -141,7 +139,7 @@ export class DeepResearchOrchestrator {
                 steeringMessages,
             });
         } else {
-            const synthesisService = await getResearchSynthesisService();
+            const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
             observer?.onEvaluationStart?.(this.currentRound);
             observer?.onEvaluationProgress?.('evaluating');
             plan = await planningService.updatePlanForRound({
@@ -307,7 +305,7 @@ export class DeepResearchOrchestrator {
       if (loopSynthesisPlan !== null) {
           finalReport = loopSynthesisPlan;
       } else {
-          const synthesisServiceFinal = await getResearchSynthesisService();
+          const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
           finalReport = await planningService.updatePlanForRound({
               sessionId: researchId,
               query: query,
@@ -339,7 +337,7 @@ export class DeepResearchOrchestrator {
       } catch { /* result is not JSON — use as-is */ }
 
       // Final post-processing: Ensure CITED LINKS section is accurate and consistent
-      const synthesisService = await getResearchSynthesisService();
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
       result = synthesisService.ensureCitedLinks(researchId, result);
 
       // Append steering guidance if any was provided
@@ -361,7 +359,8 @@ export class DeepResearchOrchestrator {
       observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     } finally {
-      await cleanupResearchServices(researchId);
+      const orch = await this.getOrchestrationService();
+      await orch.cleanupResearchServices(undefined, researchId);
     }
   }
 }

@@ -8,6 +8,26 @@ import type { ResearchPlan, ResearcherConfig } from './planning-interfaces.ts';
 import type { QueryResultWithError } from '../../web-research/types.ts';
 import type { StoreUrlEntry } from './knowledge-interfaces.ts';
 
+import type { Model } from '@earendil-works/pi-ai';
+import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
+import type { ResearchObserver } from './observer-interfaces.ts';
+
+/**
+ * Options for running a research task
+ */
+export interface ResearchOptions {
+  ctx: ExtensionContext;
+  query: string;
+  depth?: 0 | 1 | 2 | 3;
+  model?: Model<any>;
+  observer?: ResearchObserver;
+  onUpdate?: (update: AgentToolResult<any>) => void;
+  sessionId: string;
+  researchId: string;
+  config?: Config;
+  excludeTools?: string[];
+}
+
 /**
  * Options for running researchers in parallel
  */
@@ -19,9 +39,22 @@ export interface RunResearchersOptions {
 }
 
 /**
+ * Research Synthesis Service Interface
+ */
+export interface IResearchSynthesisService extends IService {
+  storeReport(researchId: string, researcherId: string, report: string): void;
+  getAllReports(researchId: string): Map<string, string>;
+  clearReports(researchId?: string): void;
+  ensureCitedLinks(researchId: string, result: string): string;
+  appendSteeringGuidance(result: string, steeringMessages: any[]): string;
+}
+
+/**
  * Research Orchestration Service Interface
  */
 export interface IResearchOrchestration extends IService {
+  runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string>;
+  cleanupResearchServices(sessionId?: string, researchId?: string): Promise<void>;
   distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[]): Promise<Map<string, string[]>>;
   runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>, storeLinks?: Map<string, StoreUrlEntry[]>): Promise<void>;
   runSearchBurst(queries: string[], config: Config, signal?: AbortSignal, onProgress?: (links: number) => void): Promise<QueryResultWithError[]>;

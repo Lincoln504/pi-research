@@ -50,11 +50,6 @@ vi.mock('../../../src/orchestration/researcher-executor.ts', () => ({
   runResearcher: vi.fn(),
 }));
 
-vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
-  getResearchSynthesisService: vi.fn(),
-  getResearchSessionService: vi.fn(),
-}));
-
 vi.mock('../../../src/utils/session-state.ts', () => ({
   recordResearcherFailure: vi.fn(),
   shouldStopResearch: vi.fn(() => false),
@@ -65,9 +60,9 @@ vi.mock('../../../src/utils/session-state.ts', () => ({
 
 import { search } from '../../../src/web-research/search.ts';
 import { healthRegistry } from '../../../src/healthcheck/index.ts';
-import { getResearchSynthesisService } from '../../../src/orchestration/research-session-manager.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 import { parseCitations } from '../../../src/utils/text-utils.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 const mockSearch = search as ReturnType<typeof vi.fn>;
 const mockRunAll = healthRegistry.runAll as ReturnType<typeof vi.fn>;
@@ -301,8 +296,11 @@ describe('ResearchOrchestrationService', () => {
     };
 
     beforeEach(() => {
-      vi.mocked(getResearchSynthesisService).mockResolvedValue(mockSynthesisService as any);
-      vi.mocked(getService).mockResolvedValue(mockWriter as any);
+      vi.mocked(getService).mockImplementation(async (name) => {
+        if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService as any;
+        if (name === ServiceNames.WRITER_QUEUE) return mockWriter as any;
+        return null;
+      });
     });
 
     it('returns early if KNOWLEDGE_STORE_ENABLED is false', async () => {

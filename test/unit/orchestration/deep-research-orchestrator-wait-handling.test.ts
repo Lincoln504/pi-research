@@ -29,22 +29,6 @@ vi.mock('../../../src/logger.ts', () => ({
   runWithLogContext: (_ctx: any, fn: any) => fn(),
 }));
 
-vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
-  getResearchSynthesisService: vi.fn(() => Promise.resolve({
-    synthesize: vi.fn(),
-    storeReport: vi.fn(),
-    getReports: vi.fn(() => []),
-    hasReports: vi.fn(() => false),
-    buildFallbackSynthesis: vi.fn(() => '# Fallback'),
-    clearReports: vi.fn(),
-    getAllReports: vi.fn(() => new Map()),
-    ensureCitedLinks: vi.fn((_id: string, text: string) => text),
-    appendSteeringGuidance: vi.fn((text: string) => text),
-  })),
-  resetResearchServices: vi.fn(() => Promise.resolve()),
-  cleanupResearchServices: vi.fn(() => Promise.resolve()),
-}));
-
 describe('Deep Research Orchestrator - Wait Handling', () => {
   const mockCtx = {
     cwd: '/tmp',
@@ -66,6 +50,7 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
 
   let mockPlanningService: any;
   let mockOrchestrationService: any;
+  let mockSynthesisService: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -94,16 +79,35 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       runResearchers: vi.fn().mockResolvedValue(undefined),
       runSearchBurst: vi.fn().mockResolvedValue([]),
       storeLinkDescriptions: vi.fn().mockResolvedValue(undefined),
+      cleanupResearchServices: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockSynthesisService = {
+      name: 'research-synthesis',
+      lifecycle: 'initialized',
+      async initialize() {},
+      async dispose() {},
+      synthesize: vi.fn(),
+      storeReport: vi.fn(),
+      getReports: vi.fn(() => []),
+      hasReports: vi.fn(() => false),
+      buildFallbackSynthesis: vi.fn(() => '# Fallback'),
+      clearReports: vi.fn(),
+      getAllReports: vi.fn(() => new Map()),
+      ensureCitedLinks: vi.fn((_id: string, text: string) => text),
+      appendSteeringGuidance: vi.fn((text: string) => text),
     };
 
     vi.mocked(getService).mockImplementation(async (name) => {
       if (name === ServiceNames.PLANNING) return mockPlanningService;
       if (name === ServiceNames.RESEARCH_ORCHESTRATION) return mockOrchestrationService;
+      if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService;
       return null;
     });
 
     registerService(ServiceNames.PLANNING, () => mockPlanningService, { allowOverwrite: true });
     registerService(ServiceNames.RESEARCH_ORCHESTRATION, () => mockOrchestrationService, { allowOverwrite: true });
+    registerService(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, () => mockSynthesisService, { allowOverwrite: true });
   });
 
   afterEach(() => {

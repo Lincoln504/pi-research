@@ -10,7 +10,6 @@
  * - Knowledge store integration for link descriptions
  */
 
-import type { ResearchPlan, IPlanningService } from '../core/service-interfaces.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
 import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
@@ -18,15 +17,26 @@ import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
 import { logger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, ServiceLifecycle, tryGetService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IWriterQueue, IKnowledgeStoreService, IResearchOrchestration } from '../core/service-interfaces.ts';
+import type {
+  IWriterQueue,
+  IKnowledgeStoreService,
+  IResearchOrchestration,
+  ResearchOptions,
+  ResearchPlan,
+  IPlanningService,
+  IResearchSynthesisService,
+} from '../core/service-interfaces.ts';
 import type { Config } from '../config.ts';
-import { getCachedScrapedContent, normalizeUrl } from '../utils/shared-links.ts';
+import { getConfig } from '../config.ts';
+import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
-import { ServiceLifecycle } from '../core/service-registry.ts';
 import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from '../utils/session-state.ts';
-import { getResearchSessionService } from './research-session-manager.ts';
+import type { ResearchSessionService } from './research-session-service.ts';
+import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
+import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
+import { metrics } from '../utils/metrics.ts';
 
 /**
  * Research Orchestration Service
@@ -42,6 +52,103 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
   }
   async dispose(): Promise<void> {
     this.lifecycle = ServiceLifecycle.DISPOSED;
+  }
+
+  /**
+   * Run a research task (Quick or Deep)
+   */
+  async runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string> {
+    const { ctx, query, depth = 0, model, observer, onUpdate, sessionId, researchId, config, excludeTools } = options;
+    const selectedModel = model || ctx.model;
+
+    if (!selectedModel) {
+      throw new Error('No model provided for research.');
+    }
+
+    const researchStart = Date.now();
+    metrics.increment('research_manager_requests_total', 1, { depth: String(depth) });
+
+    const researchConfig = config || getConfig();
+
+    let result: string;
+    try {
+      if (depth === 0) {
+        const orchestrator = new QuickResearchOrchestrator({
+          ctx,
+          model: selectedModel,
+          query,
+          sessionId,
+          researchId,
+          observer,
+          onUpdate,
+          config: researchConfig,
+          excludeTools,
+        });
+        result = await orchestrator.run(signal);
+      } else {
+        const orchestrator = new DeepResearchOrchestrator({
+          ctx,
+          model: selectedModel,
+          query,
+          complexity: depth as 1 | 2 | 3,
+          sessionId,
+          researchId,
+          observer,
+          onUpdate,
+          config: researchConfig,
+          excludeTools,
+          orchestrationService: this,
+        });
+        result = await orchestrator.run(signal);
+      }
+      const researchDuration = Date.now() - researchStart;
+      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'success' });
+      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'success' });
+      return result;
+    } catch (error) {
+      const researchDuration = Date.now() - researchStart;
+      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error' });
+      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error' });
+      throw error;
+    }
+  }
+
+  /**
+   * Cleanup and reset services for the current research run
+   */
+  async cleanupResearchServices(sessionId?: string, researchId?: string): Promise<void> {
+    // Cleanup session service
+    try {
+      const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+      if (sessionService) {
+        await sessionService.cleanup(sessionId);
+      }
+    } catch (_err) {
+      logger.debug('[ResearchOrchestrationService] ResearchSessionService not available for cleanup');
+    }
+    
+    // Clear synthesis reports
+    try {
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+      if (synthesisService) {
+        synthesisService.clearReports(researchId || sessionId);
+      }
+    } catch (_err) {
+      logger.debug('[ResearchOrchestrationService] ResearchSynthesisService not available for cleanup');
+    }
+    
+    // Clear planning state
+    const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING);
+    if (planningService) {
+      planningService.clearPlanningState(researchId || sessionId);
+      logger.debug('[ResearchOrchestrationService] Cleared planning state');
+    }
+    
+    if (researchId || sessionId) {
+      cleanupSharedLinks(researchId || sessionId || '');
+    }
+
+    logger.debug('[ResearchOrchestrationService] Cleaned up research services');
   }
 
   /**
@@ -163,7 +270,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       if (shouldStopResearch(sessionId, researchId)) {
-        const sessionService = await getResearchSessionService();
+        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
         // Abort sessions specifically for this researchId, not the whole piSessionId
         await sessionService.abortAllSessions(researchId);
 
@@ -210,8 +317,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     }
 
     try {
-      const { getResearchSynthesisService } = await import('./research-session-manager.ts');
-      const synthesisService = await getResearchSynthesisService();
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
       const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
       
       if (!writer) {

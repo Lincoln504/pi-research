@@ -69,14 +69,28 @@ vi.mock('../../src/utils/metrics.ts', () => ({
   runWithRunRegistry: vi.fn(async (_registry, fn) => await fn()),
 }));
 
-// Mock runResearch
-vi.mock('../../src/orchestration/research-manager.ts', () => ({
-  runResearch: vi.fn(async () => 'research result'),
+import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
+
+// Mock IResearchOrchestration
+const mockRunResearch = vi.fn(async () => 'research result');
+
+vi.mock('../../src/core/service-registry.ts', () => ({
+  getServiceContainer: vi.fn(() => ({
+    isReady: true,
+  })),
+  getService: vi.fn(async (name) => {
+    if (name === ServiceNames.RESEARCH_ORCHESTRATION) {
+      return {
+        runResearch: mockRunResearch,
+        cleanupResearchServices: vi.fn(),
+      };
+    }
+    return {};
+  }),
 }));
 
-import { runResearch } from '../../src/orchestration/research-manager.ts';
-
-vi.mock('../../src/orchestration/researcher.ts', () => ({
+vi.mock('../../src/utils/text-utils.ts', () => ({
+  ensureAssistantResponse: vi.fn(() => 'Mocked assistant response'),
 }));
 
 // Mock the panel module
@@ -129,16 +143,6 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
   resetScrapedLinks: vi.fn(),
   formatLightweightLinkUpdate: vi.fn(),
   normalizeUrl: vi.fn((u) => u),
-}));
-
-vi.mock('../../src/core/service-registry.ts', () => ({
-  getServiceContainer: vi.fn(() => ({
-    isReady: true,
-  })),
-}));
-
-vi.mock('../../src/utils/text-utils.ts', () => ({
-  ensureAssistantResponse: vi.fn(() => 'Mocked assistant response'),
 }));
 
 vi.mock('../../src/utils/input-validation.ts', () => ({
@@ -312,7 +316,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'test', depth: 1 }),
         expect.any(AbortSignal),
       );
@@ -350,7 +354,7 @@ describe('createResearchTool', () => {
         context.model.id,           // model name from context
       );
       // runResearch receives the same query
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'panel test query' }),
         expect.any(AbortSignal),
       );
@@ -362,7 +366,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', depth }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ depth }),
         expect.any(AbortSignal),
       );
@@ -372,7 +376,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalled();
+      expect(mockRunResearch).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'research result' }));
     });
 
@@ -380,7 +384,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 2 }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalled();
+      expect(mockRunResearch).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'research result' }));
     });
 
@@ -388,7 +392,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 3 }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalled();
+      expect(mockRunResearch).toHaveBeenCalled();
       expect(result.content[0]).toEqual(expect.objectContaining({ text: 'research result' }));
     });
   });
@@ -418,7 +422,7 @@ describe('createResearchTool', () => {
       // validateAndSanitizeQuery is mocked to return input unchanged; whitespace is a non-empty string
       // so the tool does not short-circuit and reaches runResearch
       await tool.execute('id', { query: '   ' }, undefined, undefined, createMockContext());
-      expect(runResearch).toHaveBeenCalled();
+      expect(mockRunResearch).toHaveBeenCalled();
     });
 
     it('returns error when no model available', async () => {
@@ -432,7 +436,7 @@ describe('createResearchTool', () => {
     });
 
     it('handles research errors gracefully', async () => {
-      vi.mocked(runResearch).mockRejectedValue(new Error('Research failed'));
+      mockRunResearch.mockRejectedValueOnce(new Error('Research failed'));
       
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
@@ -445,7 +449,7 @@ describe('createResearchTool', () => {
       const signal = controller.signal;
       controller.abort();
       
-      vi.mocked(runResearch).mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+      mockRunResearch.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
       
       const tool = createResearchTool();
       const result = await tool.execute('id', { query: 'test', depth: 1 }, signal, undefined, createMockContext());
@@ -531,7 +535,7 @@ describe('createResearchTool', () => {
       
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ model: context.model }),
         expect.any(AbortSignal)
       );
@@ -549,7 +553,7 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'test', depth: 1, model: 'custom-model' }, undefined, undefined, context);
 
       // The tool should have looked up and passed the explicit model object to runResearch
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ model: customModel }),
         expect.any(AbortSignal),
       );
@@ -566,7 +570,7 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'test', depth: 1, model: 'nonexistent' }, undefined, undefined, context);
 
       // Registry lookup fails; tool falls back to ctx.model
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ model: context.model }),
         expect.any(AbortSignal),
       );
@@ -583,7 +587,7 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'test', depth: 1 }, controller.signal, undefined, createMockContext());
 
       // Should complete without throwing even when signal is already aborted
-      expect(runResearch).toHaveBeenCalled();
+      expect(mockRunResearch).toHaveBeenCalled();
     });
   });
 
@@ -668,7 +672,7 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'raw<script>', depth: 1 }, undefined, undefined, createMockContext());
 
       // runResearch should receive the sanitised value, not the raw one
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'sanitized query' }),
         expect.any(AbortSignal),
       );
@@ -685,7 +689,7 @@ describe('createResearchTool', () => {
       // The mocked ensureFunctionalHealth returns undefined.
       // The tool should proceed to runResearch without blocking.
       expect(ensureFunctionalHealth).toHaveBeenCalled();
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'test' }),
         expect.any(AbortSignal),
       );
@@ -698,7 +702,7 @@ describe('createResearchTool', () => {
       
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
-      expect(runResearch).toHaveBeenCalledWith(
+      expect(mockRunResearch).toHaveBeenCalledWith(
         expect.objectContaining({ observer: expect.any(Object) }),
         expect.any(AbortSignal)
       );

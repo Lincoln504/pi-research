@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createResearchTool } from '../../../src/tools/research-tool-definition.ts';
+import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import { getService } from '../../../src/core/service-registry.ts';
 
 // Mock dependencies
-vi.mock('../../../src/orchestration/research-manager.ts', () => ({
-  runResearch: vi.fn().mockResolvedValue('Research result'),
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getServiceContainer: vi.fn(() => ({ isReady: true })),
+  getService: vi.fn(),
 }));
 
 vi.mock('../../../src/logger.ts', () => {
@@ -62,10 +65,6 @@ vi.mock('../../../src/tui/research-health.ts', () => ({
   createHealthMonitor: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
 }));
 
-vi.mock('../../../src/core/service-registry.ts', () => ({
-  getServiceContainer: vi.fn(() => ({ isReady: true })),
-}));
-
 vi.mock('../../../src/utils/input-validation.ts', () => ({
   validateAndSanitizeQuery: vi.fn((q) => q),
 }));
@@ -95,6 +94,18 @@ vi.mock('../../../src/utils/error-tracker.ts', () => ({
 }));
 
 describe('Research Tool - Report Summaries', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getService).mockImplementation(async (name) => {
+      if (name === ServiceNames.RESEARCH_ORCHESTRATION) {
+        return {
+          runResearch: vi.fn().mockResolvedValue('Research result'),
+        } as any;
+      }
+      return null;
+    });
+  });
+
   it('includes scrape performance summary when scrapes were performed', async () => {
     const tool = createResearchTool();
     const ctx = {

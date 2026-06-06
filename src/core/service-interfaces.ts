@@ -23,7 +23,7 @@ export type { IProcessLifecycle } from './interfaces/process-interfaces.ts';
 export type { ResearchObserver } from './interfaces/observer-interfaces.ts';
 
 // Orchestration interfaces
-export type { IResearchOrchestration, RunResearchersOptions } from './interfaces/orchestration-interfaces.ts';
+export type { IResearchOrchestration, RunResearchersOptions, IResearchSynthesisService, ResearchOptions } from './interfaces/orchestration-interfaces.ts';
 
 // Planning interfaces
 export type { ResearchPlan, ResearcherConfig, SessionContext, GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions, IPlanningService } from './interfaces/planning-interfaces.ts';

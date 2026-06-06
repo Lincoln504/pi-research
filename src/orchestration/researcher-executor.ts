@@ -14,7 +14,10 @@ import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
 import { calculateCost } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getResearchSessionService, getResearchSynthesisService } from './research-session-manager.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
+import type { IResearchSynthesisService } from '../core/service-interfaces.ts';
+import { getService } from '../core/service-registry.ts';
+import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { recordResearcherFailure } from '../utils/session-state.ts';
@@ -125,7 +128,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       },
     });
 
-    const sessionService = await getResearchSessionService();
+    const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
     sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
 
     const subscription = session.subscribe((event: any) => {
@@ -219,7 +222,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round) });
       logger.debug(`[ResearcherExecutor] Researcher ${id} Final Response:\n${responseText}`);
 
-      const synthesisService = await getResearchSynthesisService();
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
       synthesisService.storeReport(researchId, `${round}.${id}`, responseText);
 
       observer?.onResearcherComplete?.(id, responseText);

@@ -17,7 +17,8 @@ import { getServiceContainer } from './core/service-registry.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 
 // Modular Orchestration Exports
-export { runResearch, type ResearchOptions } from './orchestration/research-manager.ts';
+export { ServiceNames } from './core/interfaces/service-names.ts';
+export type { IResearchOrchestration, ResearchOptions } from './core/interfaces/orchestration-interfaces.ts';
 export { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 export { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 export { shutdownManager } from './utils/shutdown-manager.ts';
