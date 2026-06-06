@@ -104,6 +104,10 @@ describe('End-to-End Research Workflows', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
+    
+    const { getServiceContainer } = await import('../../src/core/service-registry.ts');
+    getServiceContainer().isReady = true;
+    
     testDbDir = path.join(os.tmpdir(), `pi-research-workflow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   }, 30000);
 
@@ -231,6 +235,36 @@ describe('End-to-End Research Workflows', () => {
     it('should complete full deep research workflow: coordinator → researchers → aggregation', async () => {
       if (testContext.skipTests()) return;
 
+      // Update pi-ai mock for this specific test to return a valid JSON plan
+      const { completeSimple, complete } = await import('@earendil-works/pi-ai');
+      (completeSimple as any).mockResolvedValue({
+        content: [{ type: 'text', text: 'Mock research synthesis: Done.' }],
+        usage: { totalTokens: 50, cost: { total: 0.005 } },
+      });
+      (complete as any).mockImplementation(async (_model: any, options: any) => {
+        if (options.systemPrompt.includes('Coordinator')) {
+          return {
+            content: [{
+              type: 'text',
+              text: '```json\n{\n  "title": "AI in SE",\n  "researchers": [\n    {\n      "id": "1.1",\n      "name": "Generalist",\n      "goal": "Overview of AI in software engineering",\n      "queries": ["future of ai in software engineering"]\n    }\n  ],\n  "allQueries": ["future of ai in software engineering"]\n}\n```'
+            }],
+            usage: { totalTokens: 100, cost: { total: 0.01 } }
+          };
+        }
+        
+        // Lead Evaluator mock - decide to synthesize in round 2
+        const isRound2 = options.systemPrompt.includes('Round 2');
+        return {
+          content: [{
+            type: 'text',
+            text: isRound2 
+              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of AI in SE",\n  "researchers": []\n}\n```'
+              : '```json\n{\n  "action": "delegate",\n  "researchers": [\n    {\n      "id": "2.1",\n      "name": "Specialist",\n      "goal": "Specific AI tools in SE",\n      "queries": ["ai tools for coding 2026"]\n    }\n  ]\n}\n```'
+          }],
+          usage: { totalTokens: 100, cost: { total: 0.01 } }
+        };
+      });
+
       const query = 'Future of AI in software engineering';
       const sessionId = `session-${randomUUID()}`;
       const researchId = `research-${randomUUID()}`;
@@ -267,6 +301,32 @@ describe('End-to-End Research Workflows', () => {
 
     it('should handle multi-round research with different sub-queries', async () => {
       if (testContext.skipTests()) return;
+
+      // Update pi-ai mock for this specific test
+      const { complete } = await import('@earendil-works/pi-ai');
+      (complete as any).mockImplementation(async (_model: any, options: any) => {
+        if (options.systemPrompt.includes('Coordinator')) {
+          return {
+            content: [{
+              type: 'text',
+              text: '```json\n{\n  "title": "React Evolution",\n  "researchers": [\n    {\n      "id": "1.1",\n      "name": "Early React",\n      "goal": "React 2013-2018",\n      "queries": ["react version history 2013"]\n    }\n  ],\n  "allQueries": ["react version history 2013"]\n}\n```'
+            }],
+            usage: { totalTokens: 100, cost: { total: 0.01 } }
+          };
+        }
+        
+        // Lead Evaluator mock - decide to synthesize in round 2
+        const isRound2 = options.systemPrompt.includes('Round 2');
+        return {
+          content: [{
+            type: 'text',
+            text: isRound2 
+              ? '```json\n{\n  "action": "synthesize",\n  "content": "Final synthesis of React evolution",\n  "researchers": []\n}\n```'
+              : '```json\n{\n  "action": "delegate",\n  "researchers": [\n    {\n      "id": "2.1",\n      "name": "Modern React",\n      "goal": "React 2019-2024",\n      "queries": ["react hooks introduction 2019"]\n    }\n  ]\n}\n```'
+          }],
+          usage: { totalTokens: 100, cost: { total: 0.01 } }
+        };
+      });
 
       const query = 'Evolution of React.js from 2013 to 2024';
       const sessionId = `session-${randomUUID()}`;

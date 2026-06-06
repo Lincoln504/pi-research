@@ -68,6 +68,8 @@ function createPiMock() {
 function makeCtx(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     signal: undefined,
+    mode: 'tui',
+    hasUI: true,
     ui: { notify: vi.fn() },
     ...overrides,
   };

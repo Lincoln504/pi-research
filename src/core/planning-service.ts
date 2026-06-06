@@ -22,23 +22,16 @@ import type { LLMResponseMetadata } from '../types/index.ts';
 import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
 import { MAX_TOTAL_RESEARCHERS } from '../constants.ts';
-import {
-  getTeamSize,
-  getQueryBudget,
-  getMaxRounds,
-  getComplexityGuidance,
-  getEvaluatorComplexityGuidance,
-  getRoundPhaseGuidance,
-  parseJsonPlan,
-  buildFallbackCoordinatorPlan,
-  capResearcherQueries,
-  generateResearchers,
-} from './planning-utils.ts';
+import * as PlanningUtils from './planning-utils.ts';
+import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts';
+
+import { MAX_QUERY_HISTORY_SIZE } from './planning-constants.ts';
 
 interface PlanningState {
   currentPlan: ResearchPlan | null;
   queryHistory: string[];
   totalResearchersPlanned: number;
+  initialAgenda: string[];
 }
 
 export class PlanningService implements IPlanningService {
@@ -58,8 +51,11 @@ export class PlanningService implements IPlanningService {
   private getState(sessionId: string): PlanningState {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { currentPlan: null, queryHistory: [], totalResearchersPlanned: 0 };
+      state = { currentPlan: null, queryHistory: [], totalResearchersPlanned: 0, initialAgenda: [] };
       this.sessions.set(sessionId, state);
+    }
+    if (!state.initialAgenda) {
+      state.initialAgenda = [];
     }
     return state;
   }
@@ -103,10 +99,17 @@ export class PlanningService implements IPlanningService {
     logger.log(`[${this.name}] Generating plan for complexity ${complexity} (Session: ${sessionId})`);
     metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity) });
 
-    const maxTeamSize = getTeamSize(complexity);
-    const queryBudget = getQueryBudget(complexity);
+    const maxTeamSize = PlanningUtils.getTeamSize(complexity);
+    const queryBudget = PlanningUtils.getQueryBudget(complexity);
     const complexityLabel = complexity === 1 ? 'Normal' : complexity === 2 ? 'Deep' : 'Ultra';
-    const complexityGuidance = getComplexityGuidance(complexity, maxTeamSize, queryBudget);
+    const complexityGuidance = PlanningUtils.getComplexityGuidance(complexity, maxTeamSize, queryBudget);
+    
+    let steeringSection = '';
+    if (options.steeringMessages && options.steeringMessages.length > 0) {
+      steeringSection = '\n### ADDITIONAL CONSIDERATIONS\n' + 
+        'The user has provided the following additional considerations for this task:\n' + 
+        options.steeringMessages.map(m => `- ${m}`).join('\n') + '\n';
+    }
 
     const basePlanningPrompt = injectCurrentDate(loadPrompt('system-coordinator', '..'), 'coordinator')
       .replace(/\{ROOT_QUERY\}/g, query)
@@ -116,7 +119,8 @@ export class PlanningService implements IPlanningService {
       .replace('{COMPLEXITY_GUIDANCE}', complexityGuidance)
       .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
           ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
-          : '');
+          : '')
+      .replace('{{additional_considerations}}', steeringSection);
 
     if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before generating plans`);
     const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -174,7 +178,7 @@ export class PlanningService implements IPlanningService {
         logger.debug(`[${this.name}] Coordinator Response:\n${rawPlanText}`);
 
         try {
-          plan = parseJsonPlan(rawPlanText);
+          plan = PlanningUtils.parseJsonPlan(rawPlanText);
 
           if (planResponse.usage) {
             const coordUsage = parseTokenUsage(planResponse.usage);
@@ -214,7 +218,7 @@ export class PlanningService implements IPlanningService {
           if (attempt >= 3) {
             logger.warn(`[${this.name}] Coordinator failed JSON parsing after 3 attempts; building fallback plan`);
             metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'fallback' });
-            plan = buildFallbackCoordinatorPlan(this.name, lastRawPlanText, query);
+            plan = PlanningUtils.buildFallbackCoordinatorPlan(this.name, lastRawPlanText, query);
             break;
           }
           metrics.increment('coordinator_plans_total', 1, { complexity: String(complexity), status: 'error' });
@@ -235,7 +239,7 @@ export class PlanningService implements IPlanningService {
       plan.allQueries = plan.researchers.flatMap(r => r.queries);
     }
 
-    plan = capResearcherQueries(plan, complexity, this.name);
+    plan = PlanningUtils.capResearcherQueries(plan, complexity, this.name);
 
     // Ensure IDs are round-prefixed (Round 1)
     if (plan.researchers) {
@@ -248,6 +252,11 @@ export class PlanningService implements IPlanningService {
     const state = this.getState(sessionId);
     state.currentPlan = plan;
 
+    // Capture initial agenda for evaluation coverage
+    if (plan.researchers) {
+      state.initialAgenda = plan.researchers.map(r => `${r.name}: ${r.goal}`);
+    }
+
     logger.log(`[${this.name}] Generated plan with ${plan.researchers?.length || 0} researcher(s)`);
     metrics.observe('coordinator_researchers_planned', plan.researchers?.length || 0, { complexity: String(complexity) });
 
@@ -255,7 +264,7 @@ export class PlanningService implements IPlanningService {
   }
 
   generateResearchers(plan: ResearchPlan, query: string, complexity: 1 | 2 | 3): ResearcherConfig[] {
-    return generateResearchers(plan, query, complexity);
+    return PlanningUtils.generateResearchers(plan, query, complexity);
   }
 
   async generateQueries(options: GenerateQueriesOptions): Promise<string[]> {
@@ -275,6 +284,7 @@ export class PlanningService implements IPlanningService {
       totalResearchersPlanned,
       mustSynthesize = false,
       observer,
+      steeringMessages,
     } = options;
 
     logger.log(`[${this.name}] Evaluating for round ${round} (Session: ${sessionId})`);
@@ -288,29 +298,50 @@ export class PlanningService implements IPlanningService {
       ? `\n### All Queries Used in Previous Rounds\n${allPreviousQueries.map(q => `- ${q}`).join('\n')}\n`
       : '';
 
-    const maxTeamSize = getTeamSize(complexity);
-    const maxRounds = getMaxRounds(complexity);
+    const maxTeamSize = PlanningUtils.getTeamSize(complexity);
+    const maxRounds = PlanningUtils.getMaxRounds(complexity);
+    const initialAgenda = this.getState(sessionId).initialAgenda;
+    const initialAgendaSection = initialAgenda.length > 0
+      ? `\n### Original Research Agenda (The Pillars)\nYour goal is to ensure 100% coverage of these topics:\n${initialAgenda.map(a => `- ${a}`).join('\n')}\n`
+      : '';
+    
+    let steeringSection = '';
+    if (steeringMessages && steeringMessages.length > 0) {
+      steeringSection = '\n### ADDITIONAL CONSIDERATIONS\n' + 
+        'The user has provided the following additional considerations for this task:\n' + 
+        steeringMessages.map(m => `- ${m}`).join('\n') + '\n';
+    }
 
     const evalPrompt = injectCurrentDate(loadPrompt('system-lead-evaluator', '..'), 'evaluator')
       .replace(/\{ROOT_QUERY\}/g, query)
       .replace('{ROUND_NUMBER}', round.toString())
       .replace('{MAX_ROUNDS}', maxRounds.toString())
       .replace('{MAX_TEAM_SIZE}', maxTeamSize.toString())
-      .replace('{QUERY_BUDGET}', getQueryBudget(complexity).toString())
+      .replace('{QUERY_BUDGET}', PlanningUtils.getQueryBudget(complexity).toString())
       .replace('{COMPLEXITY_LABEL}', complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)')
-      .replace('{COMPLEXITY_GUIDANCE}', getEvaluatorComplexityGuidance(complexity))
-      .replace('{ROUND_PHASE_GUIDANCE}', getRoundPhaseGuidance(round, maxRounds, complexity))
+      .replace('{COMPLEXITY_GUIDANCE}', PlanningUtils.getEvaluatorComplexityGuidance(complexity))
+      .replace('{ROUND_PHASE_GUIDANCE}', PlanningUtils.getRoundPhaseGuidance(round, maxRounds, complexity))
       .replace('{{previous_queries_section}}', previousQueriesSection)
+      .replace('{{initial_agenda_section}}', initialAgendaSection)
+      .replace('{{additional_considerations}}', steeringSection)
       .replace('{{disabled_tools_section}}', options.excludeTools && options.excludeTools.length > 0
           ? `\n### DISABLED TOOLS\nThe following internal research tools are currently DISABLED and MUST NOT be used in your plan: ${options.excludeTools.join(', ')}\n`
           : '');
 
-    const reportsText = Array.from(reports.entries())
+    // Normalize citations across all reports for consistent numbering
+    const { normalizedReports, globalCitations } = normalizeCitations(reports);
+    const globalSourceList = formatCitedLinks(globalCitations);
+
+    const reportsText = Array.from(normalizedReports.entries())
       .map(([id, report]) => {
         const displayId = id.includes('.') ? id.split('.').slice(1).join('.') : id;
         return `### Researcher ${displayId} Report\n\n${report}`;
       })
       .join('\n\n---\n\n');
+
+    const globalSourceSection = globalCitations.length > 0
+      ? `\n### Global Source List (Master Citations)\nUse these global numbers [N] for all inline citations in your synthesis. These numbers are already mapped across the researcher reports provided below.\n\n${globalSourceList}\n`
+      : '';
 
     if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before updating plans`);
     const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -319,7 +350,7 @@ export class PlanningService implements IPlanningService {
     const synthOverride = mustSynthesize
       ? '\n\n**MANDATORY — ABSOLUTE MAXIMUM REACHED**: No further research rounds are permitted. You MUST return `"action": "synthesize"` with a comprehensive synthesis in the `content` field. Do NOT return delegate.'
       : '';
-    const evalUserMessage = `${evalPrompt}${synthOverride}\n\n---\n\nFindings so far:\n\n${reportsText}`;
+    const evalUserMessage = `${evalPrompt}${synthOverride}${globalSourceSection}\n\n---\n\nFindings so far (Citations normalized to Global Source List):\n\n${reportsText}`;
 
     let text = '';
     let lastEvalError: any = null;
@@ -483,6 +514,13 @@ export class PlanningService implements IPlanningService {
   addToQueryHistory(sessionId: string, queries: string[]): void {
     const state = this.getState(sessionId);
     state.queryHistory.push(...queries);
+
+    // Maintain size limit
+    if (state.queryHistory.length > MAX_QUERY_HISTORY_SIZE) {
+      state.queryHistory = state.queryHistory.slice(-MAX_QUERY_HISTORY_SIZE);
+      logger.debug(`[${this.name}] Capped query history to ${MAX_QUERY_HISTORY_SIZE} for session ${sessionId}`);
+    }
+
     logger.debug(`[${this.name}] Added ${queries.length} queries to history (total: ${state.queryHistory.length}) for session ${sessionId}`);
   }
 
@@ -505,35 +543,35 @@ export class PlanningService implements IPlanningService {
   }
 
   getTeamSize(complexity: 1 | 2 | 3): number {
-    return getTeamSize(complexity);
+    return PlanningUtils.getTeamSize(complexity);
   }
 
   getQueryBudget(complexity: 1 | 2 | 3): number {
-    return getQueryBudget(complexity);
+    return PlanningUtils.getQueryBudget(complexity);
   }
 
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string {
-    return getComplexityGuidance(complexity, maxTeamSize, queryBudget);
+    return PlanningUtils.getComplexityGuidance(complexity, maxTeamSize, queryBudget);
   }
 
   getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
-    return getEvaluatorComplexityGuidance(complexity);
+    return PlanningUtils.getEvaluatorComplexityGuidance(complexity);
   }
 
   getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3): string {
-    return getRoundPhaseGuidance(currentRound, maxRounds, complexity);
+    return PlanningUtils.getRoundPhaseGuidance(currentRound, maxRounds, complexity);
   }
 
   capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan {
-    return capResearcherQueries(plan, complexity, this.name);
+    return PlanningUtils.capResearcherQueries(plan, complexity, this.name);
   }
 
   parseJsonPlan(text: string): ResearchPlan {
-    return parseJsonPlan(text);
+    return PlanningUtils.parseJsonPlan(text);
   }
 
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan {
-    return buildFallbackCoordinatorPlan(this.name, rawText, query);
+    return PlanningUtils.buildFallbackCoordinatorPlan(this.name, rawText, query);
   }
 
   clearPlanningState(sessionId?: string): void {

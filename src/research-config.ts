@@ -57,7 +57,7 @@ export async function handleResearchConfigCommand(
   ctx: ExtensionContext,
   pi: ExtensionAPI
 ): Promise<void> {
-  if (!(ctx as any).hasUI) {
+  if (!ctx.hasUI) {
     ctx.ui.notify('Interactive menu requires UI mode', 'error');
     return;
   }
@@ -265,7 +265,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             } else if (id === 'EMBEDDING_MODEL') {
               config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             } else if (id === 'EMBEDDING_DEVICE') {
-              config.EMBEDDING_DEVICE = newValue;
+              config.EMBEDDING_DEVICE = newValue as 'webgpu' | 'cpu';
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
               config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);
             } else {
@@ -395,8 +395,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 // Action Handlers (Internal)
 // ============================================================================
 
-async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
-  ctx.ui.notify('Running health checks...', 'info');
+async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
+  if (ctx.hasUI) {
+    ctx.ui.notify('Running health checks...', 'info');
+  }
   try {
     const systemHealth = await healthRegistry.runAll({ force: true });
     const outputLines: string[] = [];
@@ -422,13 +424,17 @@ async function runHealthCheckAction(ctx: any, pi: ExtensionAPI): Promise<void> {
       display: true,
       details: { health: systemHealth },
     });
-    ctx.ui.notify(`Health check complete: ${systemHealth.status}`, 'info');
+    if (ctx.hasUI) {
+      ctx.ui.notify(`Health check complete: ${systemHealth.status}`, 'info');
+    }
   } catch (error: any) {
-    ctx.ui.notify(`Health check failed: ${error.message}`, 'error');
+    if (ctx.hasUI) {
+      ctx.ui.notify(`Health check failed: ${error.message}`, 'error');
+    }
   }
 }
 
-async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<void> {
+async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   try {
     // Reset config to ensure we read the latest from file (in case TUI changed it)
     resetConfig();
@@ -444,11 +450,13 @@ async function showKnowledgeStatusAction(ctx: any, pi: ExtensionAPI): Promise<vo
       display: true,
     });
   } catch (error: any) {
-    ctx.ui.notify(`Failed to get knowledge status: ${error.message}`, 'error');
+    if (ctx.hasUI) {
+      ctx.ui.notify(`Failed to get knowledge status: ${error.message}`, 'error');
+    }
   }
 }
 
-async function showMetricsAction(_ctx: any, pi: ExtensionAPI): Promise<void> {
+async function showMetricsAction(_ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   const sessionSnapshot = metrics.getSessionSnapshot();
   const runHistory     = metrics.getRunHistory();
   const sessionStart   = metrics.getSessionStartedAt();

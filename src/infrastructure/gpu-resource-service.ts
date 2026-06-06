@@ -67,7 +67,7 @@ export class GPUResourceService implements IService {
             return state;
           }
 
-          const isAlive = this.processLifecycle.isProcessAlive(currentOwner.pid);
+          const isAlive = await this.processLifecycle.isProcessAlive(currentOwner.pid, currentOwner.startTime);
           const lockAge = now - currentOwner.startedAt;
 
           if (isAlive && lockAge < this.gpuLockStaleThresholdMs) {
@@ -78,7 +78,7 @@ export class GPUResourceService implements IService {
           // Either owner is dead OR lock is stale - reclaim
           if (!isAlive) {
             logger.warn(
-              `[GPUResourceService] GPU owner PID ${currentOwner.pid} is dead. Reclaiming GPU lock.`
+              `[GPUResourceService] GPU owner PID ${currentOwner.pid} is dead or recycled. Reclaiming GPU lock.`
             );
           } else {
             logger.warn(
@@ -90,6 +90,7 @@ export class GPUResourceService implements IService {
         // Acquire lock
         state.gpuOwner = {
           pid: this.processLifecycle.getCurrentPid(),
+          startTime: (await this.processLifecycle.getCurrentProcessStartTime()) ?? undefined,
           startedAt: now,
           sessionId,
         };

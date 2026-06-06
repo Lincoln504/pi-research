@@ -12,6 +12,8 @@ import type { HFEnv } from './embedder-types.ts';
 import { logger } from '../logger.ts';
 import { withTimeout as retryWithTimeout } from '../web-research/retry-utils.ts';
 
+import { shutdownManager } from '../utils/shutdown-manager.ts';
+
 /**
  * Timeout wrapper for promises (re-exports from retry-utils.ts)
  */
@@ -77,6 +79,15 @@ let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
  */
 export function registerGlobalEmbedder(e: { dispose: () => Promise<void> }): void {
   globalEmbedderRef = e;
+  
+  // Register with shutdown manager for graceful extension shutdown
+  shutdownManager.register(async () => {
+    if (globalEmbedderRef === e) {
+      const ref = globalEmbedderRef;
+      globalEmbedderRef = null;
+      try { await ref.dispose(); } catch { /* ignore */ }
+    }
+  });
 }
 
 /**
@@ -88,29 +99,25 @@ export function unregisterGlobalEmbedder(): void {
 }
 
 // Belt-and-suspenders fallback for graceful (no-signal) exits.
-// Node re-fires 'beforeExit' as long as async work keeps the event loop alive,
-// so awaiting dispose() inside this handler works correctly for clean exits.
-//
-// For SIGTERM / SIGINT / process.exit() paths the primary disposal route is the
-// service container (KnowledgeStoreService.dispose → Embedder.dispose), which is
-// already properly awaited by the shutdown manager in those flows.
-//
-// NOTE: Do NOT add SIGINT/SIGTERM handlers that call process.exit() here.
-// In the pi-research multi-process architecture, subprocesses (browser pool
-// workers, embedding servers) receive signals during normal operation. Adding
-// process.exit() calls in signal handlers would kill the parent process.
-process.on('beforeExit', async () => {
+// Node re-fires 'beforeExit' as long as async work keeps the event loop alive.
+// We use a listener that can be cleaned up.
+const exitHandler = async () => {
   if (globalEmbedderRef) {
     const ref = globalEmbedderRef;
     globalEmbedderRef = null; // Clear first to prevent re-entry
     try { await ref.dispose(); } catch { /* ignore */ }
   }
-});
+};
+process.on('beforeExit', exitHandler);
+shutdownManager.registerEventListener(process, 'beforeExit', exitHandler);
 
 /**
  * Initialize the ONNX environment
  */
+let onnxInitialized = false;
 export function initializeONNXEnv(): void {
+  if (onnxInitialized) return;
+  
   hfEnv.cacheDir = getModelCacheDir();
 
   try {
@@ -122,12 +129,15 @@ export function initializeONNXEnv(): void {
   } catch (e) {
     logger.debug('[embedder] Failed to set ONNX logLevel:', e);
   }
+  
+  onnxInitialized = true;
 }
 
-// Initialize ONNX environment on module load
-initializeONNXEnv();
+// REMOVED: initializeONNXEnv() is now called lazily inside Embedder.initialize()
+// to prevent issues during module load / extension reload.
 
 let dawnInitialized = false;
+
 
 /**
  * Verify WebGPU availability for the current Node.js environment.

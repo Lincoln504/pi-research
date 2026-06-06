@@ -122,7 +122,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     });
 
     // Customize thinking label for researchers to distinguish them in the TUI
-    if (extensionCtx.ui?.setHiddenThinkingLabel && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
+    if (extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
       const internalId = systemPrompt.match(/ID: ([^)]+)/)?.[1] || 'Unknown';
       extensionCtx.ui.setHiddenThinkingLabel(`Researcher ${internalId}`);
     }

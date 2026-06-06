@@ -106,44 +106,44 @@ describe('config (refactored)', () => {
 
     it('should throw for RESEARCHER_TIMEOUT_MS below minimum (180000)', () => {
       const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '60000' }, {});
-      expect(() => validateConfig(config)).toThrow('180000–1800000ms');
+      expect(() => validateConfig(config)).toThrow('must be >= 180000');
     });
 
     it('should throw for RESEARCHER_TIMEOUT_MS above maximum (1800000)', () => {
       const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '9999999' }, {});
-      expect(() => validateConfig(config)).toThrow('180000–1800000ms');
+      expect(() => validateConfig(config)).toThrow('must be <= 1800000');
     });
 
     it('should throw for MAX_CONCURRENT_RESEARCHERS below 1', () => {
       const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '0' }, {});
-      expect(() => validateConfig(config)).toThrow('1–5');
+      expect(() => validateConfig(config)).toThrow('must be >= 1');
     });
 
     it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
       const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '6' }, {});
-      expect(() => validateConfig(config)).toThrow('1–5');
+      expect(() => validateConfig(config)).toThrow('must be <= 5');
     });
 
     it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–3', () => {
       const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
-      expect(() => validateConfig(low)).toThrow('1–3');
+      expect(() => validateConfig(low)).toThrow('must be >= 1');
       const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
-      expect(() => validateConfig(high)).toThrow('1–3');
+      expect(() => validateConfig(high)).toThrow('must be <= 3');
     });
 
     it('should throw for WORKER_CONCURRENCY outside 1–10', () => {
       const low = createConfig({ PI_RESEARCH_WORKER_CONCURRENCY: '0' }, {});
-      expect(() => validateConfig(low)).toThrow('1–10');
+      expect(() => validateConfig(low)).toThrow('must be >= 1');
     });
 
     it('should throw for EMBEDDING_DEVICE with an unsupported value', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'invalid' }, {});
-      expect(() => validateConfig(config)).toThrow('webgpu, cpu');
+      expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
     });
 
     it('should reject EMBEDDING_DEVICE of "cuda"', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cuda' }, {});
-      expect(() => validateConfig(config)).toThrow('webgpu, cpu');
+      expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
     });
 
     it('should accept EMBEDDING_DEVICE of "webgpu"', () => {
@@ -158,17 +158,17 @@ describe('config (refactored)', () => {
 
     it('should throw for SCRAPE_TIMEOUT_MS below minimum', () => {
       const config = createConfig({ PI_RESEARCH_SCRAPE_TIMEOUT_MS: '1000' }, {});
-      expect(() => validateConfig(config)).toThrow('5000–120000');
+      expect(() => validateConfig(config)).toThrow('must be >= 5000');
     });
 
     it('should throw for HEALTH_CHECK_TIMEOUT_MS below 20000', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '5000' }, {});
-      expect(() => validateConfig(config)).toThrow('20000–120000ms');
+      expect(() => validateConfig(config)).toThrow('must be >= 20000');
     });
 
     it('should throw for HEALTH_CHECK_TIMEOUT_MS above 120000', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '200000' }, {});
-      expect(() => validateConfig(config)).toThrow('20000–120000ms');
+      expect(() => validateConfig(config)).toThrow('must be <= 120000');
     });
   });
 

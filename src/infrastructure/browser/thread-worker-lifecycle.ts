@@ -85,10 +85,16 @@ export function setupOrphanProtection(): void {
     return;
   }
 
-  orphanCheckTimer = setInterval(async () => {
+  const checkOrphan = async () => {
     try {
       // signal 0 checks if the process is alive
       process.kill(process.ppid, 0);
+      
+      // Schedule next check
+      orphanCheckTimer = setTimeout(checkOrphan, 10000);
+      if (orphanCheckTimer) {
+        orphanCheckTimer.unref();
+      }
     } catch (_e) {
       // If error is thrown, the parent process is likely dead or unreachable
       logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
@@ -98,15 +104,14 @@ export function setupOrphanProtection(): void {
           logToDebugFile('WARN', `[Worker-${workerId}] Browser cleanup failed during orphan exit:`, err);
         });
       }
-      // Clear the orphan check timer to prevent it from keeping the event loop alive
-      if (orphanCheckTimer) {
-        clearInterval(orphanCheckTimer);
-        orphanCheckTimer = null;
-      }
+      // Clear the orphan check timer
+      cleanupOrphanProtection();
       process.exit(1);
     }
-  }, 10000);
+  };
 
+  // Initial schedule
+  orphanCheckTimer = setTimeout(checkOrphan, 10000);
   if (orphanCheckTimer) {
     orphanCheckTimer.unref();
   }
@@ -117,7 +122,7 @@ export function setupOrphanProtection(): void {
  */
 export function cleanupOrphanProtection(): void {
   if (orphanCheckTimer) {
-    clearInterval(orphanCheckTimer);
+    clearTimeout(orphanCheckTimer);
     orphanCheckTimer = null;
   }
 }

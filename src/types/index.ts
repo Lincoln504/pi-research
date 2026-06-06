@@ -41,6 +41,7 @@ export interface ResearchResultDetails {
 export interface BrowserTask {
   query?: string;
   url?: string;
+  sessionId?: string;
   [key: string]: unknown;
 }
 

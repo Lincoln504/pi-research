@@ -78,7 +78,7 @@ describe('Error Recovery and Resilience', () => {
       await stopBrowserManager();
 
       // Small delay to ensure cleanup
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Pool should recover and run new task
       const result2 = await runBrowserTask<any>(

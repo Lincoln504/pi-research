@@ -16,20 +16,22 @@ import { logger } from '../logger.ts';
 export function createStoredSearchTool(_options: {
   ctx: ExtensionContext;
 }): ToolDefinition {
-  const StoredSearchParams = Type.Object({
+  const StoredSearchParamsSchema = Type.Object({
     query: Type.String({ description: 'The search query' }),
     limit: Type.Optional(Type.Number({ default: 5, minimum: 1, maximum: 20 })),
   });
+
+  type StoredSearchParams = Static<typeof StoredSearchParamsSchema>;
 
   return {
     name: 'stored_search',
     label: 'Stored Search',
     description: 'Query the local knowledge store for summaries of findings from previous research sessions. Use this for discovery and to find URLs that were relevant in the past.',
     promptSnippet: 'Search historical knowledge store for summaries',
-    parameters: StoredSearchParams,
+    parameters: StoredSearchParamsSchema,
     executionMode: 'parallel',
     async execute(_callId: string, params: unknown, _signal: AbortSignal): Promise<AgentToolResult<unknown>> {
-      if (!Value.Check(StoredSearchParams, params)) {
+      if (!Value.Check(StoredSearchParamsSchema, params)) {
         return {
           content: [{ type: 'text', text: 'Invalid parameters for stored_search.' }],
           details: { error: 'invalid_params' },
@@ -60,7 +62,7 @@ export function createStoredSearchTool(_options: {
         }
       }
 
-      const p = params as Static<typeof StoredSearchParams>;
+      const p = params as StoredSearchParams;
       
       try {
         const store = await service.getStore();

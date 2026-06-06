@@ -18,8 +18,10 @@ import { errorTracker } from '../utils/error-tracker.ts';
 import {
   MAX_HTML_SIZE,
   MAX_PDF_SIZE,
-  PRIMARY_SCRAPER_TIMEOUT,
 } from './scraper-types.ts';
+import {
+  FETCH_LAYER_TIMEOUT,
+} from './types.ts';
 import {
   getRandomUserAgent,
   extractDomain,
@@ -111,7 +113,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   validateUrlForSSRF(url);
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PRIMARY_SCRAPER_TIMEOUT);
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_LAYER_TIMEOUT);
   if (timeoutId.unref) {
     timeoutId.unref();
   }
@@ -217,10 +219,10 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   }
 }
 
-async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
-    const result = await runBrowserTask<any>(_url, 'scrape', config, signal);
+    const result = await runBrowserTask<any>({ url: _url, sessionId }, 'scrape', config, signal);
     const browserDuration = Date.now() - browserStart;
 
     if (result.buffer) {
@@ -252,7 +254,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
   }
 }
 
-export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config): Promise<any> {
+export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<any> {
   if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
@@ -263,6 +265,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     const res = await scrapeWithFetch(url, signal);
     const duration = Date.now() - start;
     logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
+    metrics.increment('scrape_results_total', 1, { outcome: 'fetch_success' });
     return { ...res, url, success: true };
   } catch (e1) {
     const fetchDuration = Date.now() - start;
@@ -278,16 +281,18 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     if (playwrightAvailable) {
       try {
         const browserStart = Date.now();
-        const res = await scrapeWithStealthBrowser(url, config, signal);
+        const res = await scrapeWithStealthBrowser(url, config, signal, sessionId);
         const browserDuration = Date.now() - browserStart;
         const totalDuration = Date.now() - start;
         logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${totalDuration}ms)`);
         metrics.increment('scrape_layer_fallbacks_total', 1, { from_layer: 'fetch', to_layer: 'playwright' });
+        metrics.increment('scrape_results_total', 1, { outcome: 'browser_success' });
         return { ...res, url, success: true };
       } catch (e2) {
         const totalDuration = Date.now() - start;
         logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
         metrics.increment('scrape_errors_total', 1, { error_type: 'fallback_failed', layer: 'playwright' });
+        metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
         errorTracker.trackError(e2, {
           component: 'scrapers',
           operation: 'scrape',
@@ -300,11 +305,12 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
       }
     }
     metrics.increment('scrape_errors_total', 1, { error_type: 'no_fallback_available', layer: 'fetch' });
+    metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
     return { url, success: false, error: String(e1), markdown: '' };
   }
 }
 
-export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config): Promise<any[]> {
+export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<any[]> {
   metrics.increment('scrape_batches_total', 1);
   metrics.observe('scrape_urls_per_batch', urls.length);
   const batchStart = Date.now();
@@ -312,7 +318,7 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
   const results: any[] = [];
   for (let i = 0; i < urls.length; i += maxConcurrency) {
     const batch = urls.slice(i, i + maxConcurrency);
-    const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config)));
+    const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config, sessionId)));
     results.push(...batchRes);
   }
   

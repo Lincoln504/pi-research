@@ -163,7 +163,9 @@ export async function loadModelOnCPU(
  */
 export async function releaseGpuLock(stateManager: IStateManager | null, gpuLockHeld: boolean): Promise<void> {
   if (gpuLockHeld && stateManager) {
-    await stateManager.releaseGpuLock().catch(() => {});
+    await stateManager.releaseGpuLock().catch(err => {
+      logger.warn('[embedder] Failed to release GPU lock:', err);
+    });
   }
 }
 
@@ -213,7 +215,7 @@ export async function handleWebGPULoadError(
   
   // Clean up
   if (pipeline) {
-    try { await (pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
+    try { await (pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
   }
   await releaseGpuLock(stateManager, gpuLockHeld);
 
@@ -254,7 +256,7 @@ export async function handleWebGPUWarmupError(
   
   // Clean up
   if (pipeline) {
-    try { await (pipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
+    try { await (pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
   }
   await releaseGpuLock(stateManager, gpuLockHeld);
 
@@ -268,7 +270,7 @@ export async function handleWebGPUWarmupError(
     if (!success || cpuWarmupErr) {
       logger.error('[embedder] CPU fallback pipeline warmup failed:', cpuWarmupErr);
       if (cpuPipeline) {
-        try { await (cpuPipeline as DisposablePipeline).dispose(); } catch { /* ignore */ }
+        try { await (cpuPipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing fallback CPU pipeline:', err); }
       }
       const error = new Error(`WebGPU initialization failed and CPU fallback warmup also failed: ${cpuWarmupErr?.message || 'Unknown error'}`, { cause: cpuWarmupErr });
       return { success: false, error };

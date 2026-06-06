@@ -8,6 +8,7 @@ import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-codin
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
+import { getSteeringMessages } from '../utils/session-state.ts';
 import {
   getMaxRounds,
 } from '../core/planning-utils.ts';
@@ -99,6 +100,8 @@ export class DeepResearchOrchestrator {
     // Fire onStart observer event
     observer?.onStart?.(query, complexity);
 
+    let steeringMessages = getSteeringMessages(this.options.sessionId);
+
     const maxRounds = getMaxRounds(complexity);
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
@@ -109,6 +112,9 @@ export class DeepResearchOrchestrator {
         if (signal?.aborted) throw new Error('Research aborted');
         this.currentRound++;
         this.startTime = Date.now();
+
+        // Refresh steering messages from session state at the start of every round
+        steeringMessages = getSteeringMessages(this.options.sessionId);
 
         logger.log(`[DeepOrchestrator] Round ${this.currentRound}/${maxRounds} ${this.elapsed()}`);
         observer?.onRoundStart?.(this.currentRound);
@@ -132,6 +138,7 @@ export class DeepResearchOrchestrator {
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
+                steeringMessages,
             });
         } else {
             const synthesisService = await getResearchSynthesisService();
@@ -149,6 +156,7 @@ export class DeepResearchOrchestrator {
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
+                steeringMessages,
             });
         }
         
@@ -313,9 +321,11 @@ export class DeepResearchOrchestrator {
               signal,
               observer,
               excludeTools: this.options.excludeTools,
+              steeringMessages,
           });
-          observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
       }
+
+      observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
 
       let result = finalReport.content || 'Research completed but no summary was generated.';
       // Guard: if the LLM returned the full JSON envelope as its response text and JSON
@@ -327,6 +337,15 @@ export class DeepResearchOrchestrator {
           result = (parsed as Record<string, unknown>)['content'] as string;
         }
       } catch { /* result is not JSON — use as-is */ }
+
+      // Final post-processing: Ensure CITED LINKS section is accurate and consistent
+      const synthesisService = await getResearchSynthesisService();
+      result = synthesisService.ensureCitedLinks(researchId, result);
+
+      // Append steering guidance if any was provided
+      const finalSteeringMessages = getSteeringMessages(this.options.sessionId);
+      result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
+
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
       

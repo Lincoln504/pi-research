@@ -96,10 +96,10 @@ export function clearCompletedResearchers(state: ResearchPanelState): void {
 /**
  * Create initial panel state for research session
  */
-export function createInitialPanelState(sessionId: string, query: string, modelName: string): ResearchPanelState {
+export function createInitialPanelState(sessionId: string, researchId: string, query: string, modelName: string): ResearchPanelState {
   return {
     sessionId,
-    researchId: sessionId,
+    researchId,
     query,
     totalTokens: 0,
     totalCost: 0,

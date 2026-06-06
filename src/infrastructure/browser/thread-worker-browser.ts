@@ -104,22 +104,31 @@ export async function initBrowser(): Promise<void> {
           },
         });
 
+        // Guard with a hard timeout. We catch the launchPromise so it doesn't cause
+        // an UnhandledPromiseRejection if it resolves or rejects AFTER the timeout.
+        launchPromise.catch((err: Error) => console.debug(`[ThreadWorker] Background browser launch rejection: ${err.message}`));
+        let launchTimeoutId: NodeJS.Timeout | undefined;
         const launchedBrowser = await Promise.race([
           launchPromise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs)
-          )
+          new Promise<never>((_, reject) => {
+            launchTimeoutId = setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs);
+          })
         ]);
+        if (launchTimeoutId) clearTimeout(launchTimeoutId);
 
         browser = launchedBrowser;
         // newContext() can hang if the browser process becomes unresponsive immediately
         // after launch (e.g. OOM, GPU crash). Guard with a hard timeout.
+        const contextPromise = browser.newContext();
+        contextPromise.catch((err: Error) => console.debug(`[ThreadWorker] Background browser context rejection: ${err.message}`));
+        let contextTimeoutId: NodeJS.Timeout | undefined;
         context = await Promise.race([
-          browser.newContext(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Browser context creation timed out after 30000ms')), 30000)
-          )
+          contextPromise,
+          new Promise<never>((_, reject) => {
+            contextTimeoutId = setTimeout(() => reject(new Error('Browser context creation timed out after 30000ms')), 30000);
+          })
         ]);
+        if (contextTimeoutId) clearTimeout(contextTimeoutId);
         
         // Setup mocking for CI if enabled
         await setupMocking(context);
@@ -129,7 +138,7 @@ export async function initBrowser(): Promise<void> {
     } catch (e: any) {
       // Close any partially-launched browser to avoid orphaning the process.
       if (browser && typeof browser.close === 'function') {
-        browser.close().catch(() => {});
+        browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
       }
       browser = null;
       context = null;
@@ -166,8 +175,8 @@ export function getContext(): any {
  * Reset browser and context (used after crashes)
  */
 export function resetBrowser(): void {
-  if (context) context.close().catch(() => {});
-  if (browser) browser.close().catch(() => {});
+  if (context) context.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
+  if (browser) browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
   context = null;
   browser = null;
 }
@@ -179,8 +188,8 @@ export async function cleanupBrowser(): Promise<void> {
   const timeoutMs = 2000;
   
   const cleanup = async () => {
-    if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    if (context) await context.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
+    if (browser) await browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
   };
 
   try {

@@ -19,21 +19,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * Sanitize the current process.argv before pool initialization to prevent
- * research queries from leaking into worker process command lines.
- * This is a temporary measure for the duration of pool creation.
- *
- * Note: Poolifier's FixedClusterPool uses cluster.fork() which inherits the
- * parent's argv. We temporarily sanitize it during pool creation to minimize
- * query exposure in worker process command lines visible via ps aux.
- */
-function sanitizeArgvForPoolCreation(): () => void {
-    const originalArgv = [...process.argv];
-    process.argv = originalArgv.slice(0, 2);
-    return () => { process.argv = originalArgv; };
-}
-
-/**
  * Worker pool manager for browser operations.
  */
 export class WorkerPoolManager implements IService {
@@ -93,9 +78,6 @@ export class WorkerPoolManager implements IService {
                 ensureBrowserCacheDir();
                 const browserEnv = getBrowserEnv();
 
-                // Sanitize argv to prevent research query exposure in worker processes
-                const restoreArgv = sanitizeArgvForPoolCreation();
-
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
@@ -103,6 +85,8 @@ export class WorkerPoolManager implements IService {
                 // concern in cluster child processes — no execArgv loader flags needed.
                 this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.mjs'), {
                     env: browserEnv,
+                    // Prevent query leakage via process.argv in forked workers
+                    workerOptions: { execArgv: [] },
                     errorHandler: (e: Error) => {
                         this.consecutiveErrors++;
                         metrics.increment('browser_pool_errors_total', 1);
@@ -137,14 +121,11 @@ export class WorkerPoolManager implements IService {
                     }
                 });
 
-                // Restore original argv after pool is created
-                restoreArgv();
-
                 // Secondary race check: if shutdown() was called concurrent with the
                 // async pool construction above (between the early check and here).
                 if (this.isShuttingDown) {
                     logger.warn('[WorkerPoolManager] Pool initialized but is already shutting down. Destroying...');
-                    await this.pool.destroy().catch(() => {});
+                    await this.pool.destroy().catch((err: any) => logger.debug('Swallowed pool destroy error:', err));
                     this.pool = null;
                     throw new Error('Worker pool is shutting down');
                 }
@@ -152,12 +133,17 @@ export class WorkerPoolManager implements IService {
                 metrics.setGauge('browser_pool_workers', maxWorkers);
                 metrics.increment('browser_pool_initializations_total', 1, { success: 'true' });
 
+                if (this.lifecycle === ServiceLifecycle.UNINITIALIZED) {
+                    this.lifecycle = ServiceLifecycle.INITIALIZED;
+                }
+
                 return this.pool;
             } catch (error) {
                 metrics.increment('browser_pool_initializations_total', 1, { success: 'false' });
-                throw error;
-            } finally {
+                // Clean up the promise ONLY on failure, so next caller can retry.
+                // On success, we keep it so concurrent callers get the same resolution.
                 this.poolInitializationPromise = null;
+                throw error;
             }
         })();
 
@@ -222,8 +208,10 @@ export class WorkerPoolManager implements IService {
                 // Use a timeout for pool destruction. Workers run async browser teardown
                 // in their killHandler (context.close / browser.close via Playwright), so
                 // allow enough time for those to complete before the IPC channel closes.
+                const destroyPromise = this.pool.destroy();
+                destroyPromise.catch((err: Error) => logger.debug(`[WorkerPoolManager] Background pool destroy rejection: ${err.message}`));
                 await Promise.race([
-                    this.pool.destroy(),
+                    destroyPromise,
                     new Promise(resolve => setTimeout(resolve, 5000))
                 ]);
             } catch (e) {

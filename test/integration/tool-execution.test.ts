@@ -27,6 +27,9 @@ describe('Tool Execution After Service Registry Refactor', () => {
       },
     };
     await initializeCoreServices(mockCtx);
+    
+    const { getServiceContainer } = await import('../../src/core/service-registry.ts');
+    getServiceContainer().isReady = true;
   });
 
   afterAll(async () => {

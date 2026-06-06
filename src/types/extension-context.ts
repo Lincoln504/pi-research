@@ -21,6 +21,8 @@ export interface SessionManager {
  * Provides type safety for properties accessed at runtime.
  */
 export interface ExtendedExtensionContext extends ExtensionContext {
+   /** Session ID (provided by extension host) */
+   sessionId?: string;
    /** Model registry for API key resolution */
    modelRegistry: any;
    /** Settings manager (provided in some contexts) */

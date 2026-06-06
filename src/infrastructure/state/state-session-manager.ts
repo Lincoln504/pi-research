@@ -21,11 +21,13 @@ export class StateSessionManager implements IService {
    * @param state The current state
    * @param sessionId The session ID to add
    * @param pid The process ID
+   * @param startTime Optional process start time (Linux)
    * @returns Updated state with new session
    */
-  addSession(state: SingletonState, sessionId: string, pid: number): SingletonState {
+  addSession(state: SingletonState, sessionId: string, pid: number, startTime?: number | null): SingletonState {
     state.sessions[sessionId] = {
       pid,
+      startTime: startTime ?? undefined,
       lastSeen: Date.now(),
       connectedAt: Date.now(),
     };
@@ -66,7 +68,7 @@ export class StateSessionManager implements IService {
    * @param timeoutMs Timeout in milliseconds for session staleness
    * @returns Number of sessions to remove and their lastSeen timestamps
    */
-  classifyStaleSessions(state: SingletonState, timeoutMs: number): Map<string, number> {
+  async classifyStaleSessions(state: SingletonState, timeoutMs: number): Promise<Map<string, number>> {
     const now = Date.now();
     const sessionsToRemove = new Map<string, number>();
 
@@ -80,7 +82,8 @@ export class StateSessionManager implements IService {
       }
 
       // Secondary check: is process still alive?
-      const isAlive = this.processLifecycle.isProcessAlive(sessionInfo.pid);
+      // Passing startTime prevents PID reuse races on Linux.
+      const isAlive = await this.processLifecycle.isProcessAlive(sessionInfo.pid, sessionInfo.startTime);
 
       if (!isAlive) {
         sessionsToRemove.set(sessionId, sessionInfo.lastSeen);

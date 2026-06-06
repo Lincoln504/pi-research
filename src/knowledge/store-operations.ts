@@ -31,7 +31,7 @@ export async function addDocumentsToStore(
     const vectors = await embedder.embedMany(docs.map(d => d.text));
 
     const data = docs.map((doc, i) => ({
-      vector: Array.from(vectors[i]!),
+      vector: vectors[i]!,
       url: doc.url,
       text: doc.text,
       content: doc.content ?? null,
@@ -76,7 +76,7 @@ export async function searchStore(
 
   const results = await table
     .query()
-    .nearestTo(Array.from(vector))
+    .nearestTo(vector)
     .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
     .fullTextSearch(query)
     .rerank(await getReranker())
@@ -170,7 +170,7 @@ export async function findRelevantUrls(
 
   const results = await table
     .query()
-    .nearestTo(Array.from(vector))
+    .nearestTo(vector)
     .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
     .fullTextSearch(query)
     .rerank(await getReranker())

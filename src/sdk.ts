@@ -143,6 +143,9 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     const mockCtx = createMockContext();
     await initializeCoreServices(mockCtx);
 
+    const { getServiceContainer } = await import('./core/service-registry.ts');
+    getServiceContainer().isReady = true;
+
     isInitialized = true;
     logger.log('[SDK] Research SDK initialized successfully');
   } catch (err) {
@@ -319,8 +322,19 @@ function buildModelRegistry(provider?: string): ModelRegistry {
 function createMockContext() {
   return {
     cwd: globalCwd,
+    mode: 'print' as const, // SDK defaults to print mode
+    hasUI: false,           // SDK is headless
     model: globalModel,
     modelRegistry: globalRegistry!,
+    getContextUsage: () => undefined,
+    getSystemPrompt: () => '',
+    getSignal: () => undefined,
+    compact: () => {},
+    abort: () => {},
+    shutdown: () => {},
+    getSystemPromptOptions: () => ({ 
+      selectedTools: ['research', 'health-check'] // Default tools for SDK
+    }),
     ui: {
       notify: () => {},
       setWidget: () => {},

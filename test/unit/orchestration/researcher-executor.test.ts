@@ -68,6 +68,8 @@ vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
   }),
   getResearchSynthesisService: vi.fn().mockResolvedValue({
     storeReport: mockStoreReport,
+    appendSteeringGuidance: vi.fn((text) => text),
+    ensureCitedLinks: vi.fn((_id, text) => text),
   }),
 }));
 

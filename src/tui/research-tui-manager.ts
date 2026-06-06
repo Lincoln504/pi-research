@@ -10,6 +10,7 @@
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { TUI } from '@earendil-works/pi-tui';
+import { logger } from '../logger.ts';
 import type { Theme } from '../types/research-panel-types.ts';
 import {
   createMasterResearchPanel,
@@ -21,6 +22,7 @@ import {
   refreshAllSessions,
   onSessionOrderChange,
   getPiActivePanels,
+  normalizeSessionId,
 } from '../utils/session-state.ts';
 import { initGlobalTuiController } from './tui-controller.ts';
 import type { ResearchPanelState } from './research-panel.ts';
@@ -53,19 +55,24 @@ export function createResearchTuiManager(
   deps: TuiDependencies
 ): TuiManager {
   const {
-    piSessionId,
+    piSessionId: rawPiSessionId,
     researchId,
     query,
     modelId,
   } = tuiCtx;
   
+  const piSessionId = normalizeSessionId(rawPiSessionId);
   const { ctx } = deps;
   
   const masterWidgetId = `pi-research-master-${piSessionId}`;
-  const panelState = createInitialPanelState(researchId, query, modelId);
+  const panelState = createInitialPanelState(piSessionId, researchId, query, modelId);
+  logger.debug(`[tui-manager] Creating manager for session ${piSessionId}, research ${researchId}`);
   
   // Ensure the global TUI controller is initialized (handles cancellation and protocol leaks)
-  initGlobalTuiController(ctx.ui);
+  // Only in TUI mode with UI available
+  if (ctx.mode === 'tui' && ctx.hasUI) {
+    initGlobalTuiController(ctx.ui);
+  }
 
   let unsubOrder: (() => void) | null = null;
   let refreshTimeout: NodeJS.Timeout | null = null;
@@ -78,6 +85,9 @@ export function createResearchTuiManager(
    * Debounced refresh to avoid excessive UI updates
    */
   const debouncedRefresh = () => {
+    // Only refresh if in TUI mode
+    if (ctx.mode !== 'tui') return;
+
     if (refreshScheduled) return;
     refreshScheduled = true;
     
@@ -91,6 +101,9 @@ export function createResearchTuiManager(
    * Initialize the master widget
    */
   const initializePanel = () => {
+    // Only initialize if in TUI mode and UI is available
+    if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+
     const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
       // Get active panels lazily to avoid circular dependencies
       return getActivePanelsForSession(piSessionId);
@@ -104,6 +117,9 @@ export function createResearchTuiManager(
   // Calling refreshAllSessions() here would cause an infinite loop:
   //   debouncedRefresh → refreshAllSessions → masterUpdate → refreshAllSessions → …
   registerMasterUpdate(piSessionId, () => {
+    // Only update if in TUI mode and UI is available
+    if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+
     const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
       return getActivePanelsForSession(piSessionId);
     });

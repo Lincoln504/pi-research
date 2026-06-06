@@ -4,6 +4,7 @@
 
 // Global test configuration
 process.env['NODE_ENV'] = 'test';
+process.env['PI_RESEARCH_FORCE_READY'] = 'true';
 
 // Increase EventEmitter max listeners to avoid warnings during tests.
 // The pi-research extension registers signal handlers (SIGINT, SIGTERM, SIGHUP)

@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtendedExtensionContext } from './types/extension-context.ts';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
-import type { NodeError, ResearchResultDetails } from './types/index.ts';
+import type { ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
@@ -9,10 +10,10 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState } from './utils/session-state.ts';
-import { resetTerminalState } from './utils/terminal-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
+import { getServiceContainer } from './core/service-registry.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 
 // Modular Orchestration Exports
@@ -52,168 +53,89 @@ export default async function (pi: ExtensionAPI) {
   const minor = versionParts[1] ?? 0;
   if (major === 0 && minor < 77) {
     logger.error(`[pi-research] pi-coding-agent v${PI_VERSION} is too old. Please update to v0.77.0 or newer.`);
-    // We still load to avoid breaking the process, but tools will fail gracefully
   }
 
+  // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
+  // This ensures we capture steering even if initialization takes time.
+  // The SDK uses 'streamingBehavior === "steer"' to identify mid-run guidance.
+  // We capture these messages specifically for the active research run and 
+  // suppress the SDK's built-in steering UI to maintain TUI consistency.
+  pi.on('input', async (event: any, ctx: ExtensionContext) => {
+    const eCtx = ctx as ExtendedExtensionContext;
+    try {
+      if (event.streamingBehavior === 'steer') {
+        if (event.text) {
+          logger.debug(`[pi-research] Captured steering input. behavior=steer, sessionId=${eCtx.sessionId}, text=${event.text}`);
+          const trimmed = event.text.trim();
+          if (trimmed && trimmed.length <= 1000) {
+            let sessionIds: string[] = [];
+            if (eCtx.sessionId) {
+              sessionIds = [eCtx.sessionId];
+            } else {
+              // Fallback: Broadcast to all active sessions if SDK context is missing ID
+              sessionIds = getAllTrackedSessions().filter(id => id && id !== '');
+              if (sessionIds.length > 0) {
+                logger.info(`[pi-research] ctx.sessionId missing. Broadcasting steering to: [${sessionIds.join(', ')}]`);
+              }
+            }
+
+            for (const sid of sessionIds) {
+              addSteeringMessage(sid, trimmed);
+            }
+          }
+        }
+        // Suppress built-in UI and consume the input so it doesn't trigger a new turn
+        return { action: "handled" as const };
+      }
+      return undefined;
+    } catch (err) {
+      logger.error('[pi-research] Error in input handler:', err);
+      return undefined;
+    }
+  });
+
+  // 2. REGISTER SHUTDOWN TASKS
+  shutdownManager.register(async () => {
+    try {
+      clearAllSessionState();
+      logger.info('[pi-research] All session state cleared');
+      disposeGlobalTuiController();
+      await disposeCoreServices();
+      logger.log('[pi-research] All services disposed');
+    } catch (err) {
+      logger.error('[pi-research] Shutdown task failed:', err);
+    }
+  });
+
+  // 3. SERVICE INITIALIZATION
   logger.log(`[pi-research] Activating extension (pi v${PI_VERSION})...`);
 
-  // ============================================================
-  // SERVICE REGISTRY INITIALIZATION
-  // ============================================
-  // Register all core services with the service registry
-  // This must happen early so services are available for the rest of the extension
+  // Register and initialize services
   try {
     registerCoreServices();
-    logger.log('[pi-research] Core services registered');
-  } catch (err) {
-    logger.error('[pi-research] Failed to register core services:', err);
-    throw new Error(`Failed to register core services: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
-
-  // Register infrastructure services (must be after core services are registered)
-  try {
     registerInfrastructureServices();
-    logger.log('[pi-research] Infrastructure services registered');
-  } catch (err) {
-    logger.error('[pi-research] Failed to register infrastructure services:', err);
-    throw new Error(`Failed to register infrastructure services: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
-
-  // Initialize core services BEFORE the extension becomes usable
-  // This ensures all critical services are ready when tools/commands are invoked
-  // Prevents race conditions where services are used before initialization
-  let initializationResult: { initialized: string[]; failed: string[] };
-  try {
-    logger.log('[pi-research] Waiting for core services to initialize...');
-    initializationResult = await initializeCoreServices(pi);
+    logger.log('[pi-research] Services registered');
     
-    // Verify critical services are ready
-    if (initializationResult.failed.length > 0) {
-      logger.error('[pi-research] ⚠ Some services failed to initialize, extension may not work correctly');
-      for (const failure of initializationResult.failed) {
-        logger.error(`[pi-research]   - ${failure}`);
-      }
+    const container = getServiceContainer();
+    const result = await initializeCoreServices(pi);
+    if (result.failed.length > 0) {
+      logger.error(`[pi-research] ⚠ Service initialization incomplete: ${result.failed.join(', ')}`);
     } else {
       logger.log('[pi-research] All critical services initialized and ready');
+      container.isReady = true;
     }
   } catch (err) {
-    logger.error('[pi-research] Critical error during service initialization:', err);
-    // Don't throw - allow extension to load with degraded functionality
-    // Tools will handle missing services gracefully
+    logger.error('[pi-research] Critical failure during service setup:', err);
   }
 
-  // Validate config at startup for early misconfiguration feedback
+
+  // Validate config at startup
   try {
     validateConfig();
     logger.debug('[pi-research] Config validated');
   } catch (err) {
     logger.error(`[pi-research] ⚠ Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
-    // Don't throw — allow extension to load; tool execution will also validate and surface the error
   }
-
-  // Global uncaught exception handler to catch synchronous errors that escape all promise handlers.
-  // This is a last-resort guard for things like undici's EventEmitter-based socket close errors.
-  let uncaughtExceptionCount = 0;
-  const MAX_UNCAUGHT_EXCEPTIONS = 3;
-
-  shutdownManager.registerEventListener(process, 'uncaughtException', (err: Error, origin: string) => {
-    // EPIPE = pi closed its stdout/stderr pipe before we finished writing (normal at shutdown).
-    // Check before incrementing so it never contributes to the crash threshold.
-    const nodeErr = err as NodeError;
-    if (err.message.includes('EPIPE') || nodeErr.code === 'EPIPE') {
-      logger.warn('[pi-research] EPIPE — pipe closed (normal at shutdown), ignoring.');
-      return;
-    }
-
-    uncaughtExceptionCount++;
-    const errorMsg = `[pi-research] Uncaught exception #${uncaughtExceptionCount}/${MAX_UNCAUGHT_EXCEPTIONS}: ${err.message}`;
-    const errorOrigin = `[origin: ${origin}]`;
-
-    logger.error(`${errorMsg} ${errorOrigin}`, err);
-
-    // Log stack trace for debugging
-    if (err.stack) {
-      logger.error(`[pi-research] Stack trace:\n${err.stack}`);
-    }
-
-    // If we've hit too many uncaught exceptions, let the process exit to prevent infinite loops
-    if (uncaughtExceptionCount >= MAX_UNCAUGHT_EXCEPTIONS) {
-      logger.error('[pi-research] Too many uncaught exceptions. Exiting process to prevent infinite loop.');
-      process.exit(1);
-    }
-
-    // For common recoverable errors (like undici socket timeouts), don't crash the process.
-    // These can happen during network operations and are handled at a higher level via retries.
-    const isNetworkError =
-      err.message.includes('ETIMEDOUT') ||
-      err.message.includes('ECONNRESET') ||
-      err.message.includes('ECONNREFUSED') ||
-      err.message.includes('ENOTFOUND') ||
-      err.message.includes('terminated') ||
-      err.message.includes('socket');
-
-    if (isNetworkError) {
-      logger.warn('[pi-research] Network error caught by uncaught exception handler. Continuing...');
-      return; // Don't crash on network errors
-    }
-
-    // For unknown error types, log a warning but continue
-    logger.warn('[pi-research] Continuing after uncaught exception. Application state may be corrupted.');
-  });
-
-  // Also handle unhandled promise rejections
-  shutdownManager.registerEventListener(process, 'unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
-    const error = reason instanceof Error ? reason : new Error(String(reason));
-    logger.error('[pi-research] Unhandled promise rejection:', error.message, error);
-    
-    // Log stack trace if available
-    if (error.stack) {
-      logger.error(`[pi-research] Rejection stack trace:\n${error.stack}`);
-    }
-  });
-
-  // Ensure background resources like browser pools and knowledge store are cleaned up
-  const handleShutdown = (signal: string) => {
-    logger.log(`[pi-research] Received ${signal}, initiating cleanup...`);
-    shutdownManager.runCleanup(signal).then(() => {
-      logger.log(`[pi-research] Cleanup complete, exiting...`);
-      // Clean exit after successful cleanup
-      process.exit(0);
-    }).catch(err => {
-      logger.error(`[pi-research] ${signal} cleanup failed:`, err);
-      // Force exit after 10 seconds if cleanup hangs (browser pool can take up to 10s)
-      shutdownManager.forceExitAfter(10000, 1);
-    });
-  };
-
-  // Register cleanup tasks in the order they should run in reverse:
-  // Tasks run in REVERSE order of registration (last registered runs first)
-
-  // 1. Reset terminal state on shutdown to prevent ghost character leaks
-  shutdownManager.register(async () => {
-    try {
-      await resetTerminalState();
-      logger.debug('[pi-research] Terminal state reset on shutdown');
-    } catch (_error) {
-      // Ignore terminal reset errors
-    }
-  });
-
-  // 2. Clear all session state on shutdown
-  shutdownManager.register(() => {
-    clearAllSessionState();
-  });
-
-  // 3. Dispose all core services (runs FIRST in execution order because it is registered last)
-  shutdownManager.register(async () => {
-    try {
-      disposeGlobalTuiController();
-      await disposeCoreServices();
-      logger.log('[pi-research] All services disposed');
-    } catch (err) {
-      logger.error('[pi-research] Failed to dispose core services:', err);
-    }
-  });
 
   // Primary cleanup path for pi -p (print mode) and normal session end.
   // Pi fires session_shutdown from disposeRuntime() before process.exit() so this
@@ -224,18 +146,7 @@ export default async function (pi: ExtensionAPI) {
     } catch (_err) {
       logger.error('[pi-research] session_shutdown cleanup failed:', _err);
     }
-    // Force exit after 5 seconds if cleanup hangs (shouldn't happen normally)
-    shutdownManager.forceExitAfter(5000);
   });
-
-  // Signal handlers as a secondary path (interactive mode, external kill, SIGHUP).
-  const handleSIGINT = () => handleShutdown('SIGINT');
-  const handleSIGTERM = () => handleShutdown('SIGTERM');
-  const handleSIGHUP = () => handleShutdown('SIGHUP');
-
-  shutdownManager.registerEventListener(process, 'SIGINT', handleSIGINT);
-  shutdownManager.registerEventListener(process, 'SIGTERM', handleSIGTERM);
-  shutdownManager.registerEventListener(process, 'SIGHUP', handleSIGHUP);
 
   // Global extension state for smart dual-sided prompt injection
   let currentTurn = 0;
@@ -286,7 +197,9 @@ export default async function (pi: ExtensionAPI) {
           },
         });
 
-        ctx.ui.notify('Research complete', 'info');
+        if (ctx.hasUI) {
+          ctx.ui.notify('Research complete', 'info');
+        }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error('[pi-research] /research command failed:', error);
@@ -298,7 +211,9 @@ export default async function (pi: ExtensionAPI) {
           details: { error: message },
         });
 
-        ctx.ui.notify(`Research failed: ${message}`, 'error');
+        if (ctx.hasUI) {
+          ctx.ui.notify(`Research failed: ${message}`, 'error');
+        }
       }
     },
   });
@@ -315,17 +230,45 @@ export default async function (pi: ExtensionAPI) {
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
     currentTurn++;
     
-    // Ensure the global TUI controller is initialized
-    initGlobalTuiController(ctx.ui);
+    // Skip expensive research initialization and prompt injection during mid-stream steering
+    if (event.streamingBehavior === 'steer') {
+      logger.debug('[pi-research] Skipping JIT scan during steering');
+      return { systemPrompt: event.systemPrompt };
+    }
 
-    // Log streaming behavior if available (new in 0.77.0)
+    // Only initialize TUI features and inject rules in TUI mode
+    if (ctx.mode === 'tui' && ctx.hasUI) {
+      initGlobalTuiController(ctx.ui);
+    }
+
+    // Framing steering as "Additional considerations"
+    const eCtx = ctx as ExtendedExtensionContext;
+    const steeringMessages = getSteeringMessages(normalizeSessionId(eCtx.sessionId));
+    let injectedSystemPrompt = event.systemPrompt;
+    if (steeringMessages.length > 0) {
+      injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' + 
+        'The user has provided the following additional considerations for this task:\n' + 
+        steeringMessages.map(m => `- ${m}`).join('\n');
+      logger.debug(`[pi-research] Injected ${steeringMessages.length} steering message(s) into prompt`);
+    }
+
+    // Log streaming behavior if available
     if (event.streamingBehavior) {
-      logger.debug(`[pi-research] Agent starting with streaming behavior: ${event.streamingBehavior}`);
+      logger.debug(`[pi-research] Agent starting with behavior: ${event.streamingBehavior}`);
     }
 
     // Do not inject rules into the sub-researchers
     const isResearcher = event.systemPrompt?.toLowerCase().includes('researcher');
     if (isResearcher) {
+      return { systemPrompt: event.systemPrompt };
+    }
+
+    // Use systemPromptOptions to check if the research tool is actually selected/available
+    // This prevents instruction pollution when the tool is disabled.
+    const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);
+
+    if (!isResearchToolAvailable) {
+      logger.debug('[pi-research] Research tool not available in current context, skipping prompt injection');
       return { systemPrompt: event.systemPrompt };
     }
 
@@ -353,11 +296,11 @@ export default async function (pi: ExtensionAPI) {
         .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
       
       return {
-        systemPrompt: event.systemPrompt + '\n\n' + researchPrompt
+        systemPrompt: injectedSystemPrompt + '\n\n' + researchPrompt
       };
     }
 
-    return { systemPrompt: event.systemPrompt };
+    return { systemPrompt: injectedSystemPrompt };
   });
 
   // Monitor provider responses for diagnostics
@@ -370,8 +313,8 @@ export default async function (pi: ExtensionAPI) {
     } else if (status === 429) {
       const retryAfter = headers?.['retry-after'];
       logger.warn(`[pi-research] Rate limited by provider`, { retryAfter });
-      if (retryAfter) {
-        ctx.ui?.notify?.(`Rate limited. Retry after ${retryAfter}s`, 'warning');
+      if (retryAfter && ctx.hasUI) {
+        ctx.ui.notify(`Rate limited. Retry after ${retryAfter}s`, 'warning');
       }
     } else if (status >= 400) {
       logger.warn(`[pi-research] Provider error: ${status}`, { headers });

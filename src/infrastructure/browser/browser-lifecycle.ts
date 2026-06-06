@@ -87,13 +87,17 @@ export async function waitForBrowserPoolIdle(maxWaitMs = 15000): Promise<void> {
   if (pendingShutdown) {
     const remainingMs = maxWaitMs - (Date.now() - start);
     if (remainingMs > 0) {
-      const timeoutPromise = new Promise<'timeout'>(resolve =>
-        setTimeout(() => resolve('timeout'), remainingMs)
-      );
+      let timeoutId: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<'timeout'>(resolve => {
+        timeoutId = setTimeout(() => resolve('timeout'), remainingMs);
+      });
+      const pendingPromise = pendingShutdown.then(() => 'done' as const);
+      pendingPromise.catch((err: any) => logger.debug(`[BrowserLifecycle] Background pending shutdown rejection: ${err instanceof Error ? err.message : String(err)}`));
       const winner = await Promise.race([
-        pendingShutdown.then(() => 'done' as const),
+        pendingPromise,
         timeoutPromise,
       ]);
+      if (timeoutId) clearTimeout(timeoutId);
       if (winner === 'timeout') {
         logger.warn('[BrowserLifecycle] waitForBrowserPoolIdle: timed out awaiting pendingShutdown after', maxWaitMs, 'ms');
         return;

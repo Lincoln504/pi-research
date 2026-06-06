@@ -53,7 +53,8 @@ vi.mock('../../../src/orchestration/research-session-manager.ts', () => ({
     getReport: vi.fn(),
     getReportsForRound: vi.fn(() => new Map()),
     getReportCount: vi.fn(() => 0),
-    ensureCitedLinks: vi.fn((text: string) => text),
+    ensureCitedLinks: vi.fn((_id: string, text: string) => text),
+    appendSteeringGuidance: vi.fn((text: string) => text),
   })),
   getResearchSessionService: vi.fn(() => Promise.resolve({
     registerSession: vi.fn(),

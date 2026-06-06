@@ -69,7 +69,7 @@ describe('Browser Pool Failover', () => {
       // Simulate worker crash (in real scenario, this would be a process crash)
       // For now, we'll force a scheduler restart which simulates recovery
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Pool should still work after crash recovery
       const result2 = await runBrowserTask<SearchResult[]>(
@@ -143,7 +143,7 @@ describe('Browser Pool Failover', () => {
 
       // Force restart (simulates browser crash recovery)
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Pool should work after browser crash recovery
       const result2 = await runBrowserTask<SearchResult[]>(
@@ -187,7 +187,7 @@ describe('Browser Pool Failover', () => {
       // In a real test, we'd simulate network issues
       // For now, we'll verify the pool can recover from restart
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Pool should work after simulated network partition
       const result = await runBrowserTask<SearchResult[]>(
@@ -208,7 +208,7 @@ describe('Browser Pool Failover', () => {
 
       // Simulate network partition (force restart)
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Retry after recovery
       const result2 = await runBrowserTask<SearchResult[]>(
@@ -299,7 +299,7 @@ describe('Browser Pool Failover', () => {
 
       // Force restart (simulates worker replacement)
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Run another task - pool should still be functional
       const result2 = await runBrowserTask<SearchResult[]>(
@@ -362,7 +362,7 @@ describe('Browser Pool Failover', () => {
 
       // Force restart (simulates failure/recovery)
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Health check should pass
       const healthCheck = await runBrowserHealthCheck();
@@ -406,7 +406,7 @@ describe('Browser Pool Failover', () => {
 
       // Force restart (simulates crash)
       await forceSchedulerRestart();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForBrowserPoolIdle(15000).catch(() => {});
 
       // Shutdown should complete without errors
       await expect(stopBrowserManager()).resolves.not.toThrow();

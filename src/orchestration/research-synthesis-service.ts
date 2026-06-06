@@ -10,6 +10,7 @@
  */
 
 import { parseCitations } from '../utils/text-utils.ts';
+import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 
@@ -122,42 +123,53 @@ export class ResearchSynthesisService implements IService {
   }
 
   /**
-   * Ensure the synthesis has a ### CITED LINKS section.
-   * If missing, extract all URLs from researcher reports and append them.
+   * Ensure the synthesis has an accurate and consistent ### CITED LINKS section.
+   * Rebuilds the section from all researcher reports to guarantee sequential numbering [1], [2], [3]...
+   * and unique URLs, regardless of what the LLM produced.
+   * 
    * @param sessionId - Session identifier
    * @param synthesis - The synthesis text to check and potentially augment
-   * @returns Synthesis with guaranteed CITED LINKS section
+   * @returns Synthesis with guaranteed and verified CITED LINKS section
    */
   ensureCitedLinks(sessionId: string, synthesis: string): string {
-    if (/###\s*CITED LINKS/i.test(synthesis)) return synthesis;
-
-    logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - rebuilding from researcher reports');
-
-    // Parse each researcher report's CITED LINKS section and collect unique URLs
-    const seen = new Set<string>();
-    const links: { url: string; desc: string; source?: string }[] = [];
     const reports = this.getSessionReports(sessionId);
+    if (reports.size === 0) return synthesis;
 
-    for (const report of reports.values()) {
-      const citations = parseCitations(report);
-      for (const cit of citations) {
-        if (!seen.has(cit.url)) {
-          seen.add(cit.url);
-          links.push({ url: cit.url, desc: cit.description, source: cit.source });
-        }
-      }
+    // Use the same normalization logic as the planning service
+    const { globalCitations } = normalizeCitations(reports);
+    if (globalCitations.length === 0) return synthesis;
+
+    const verifiedLinksSection = formatCitedLinks(globalCitations);
+
+    // If the synthesis already has a CITED LINKS section, replace it
+    if (/###\s*CITED LINKS/i.test(synthesis)) {
+      logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
+      return synthesis.replace(/###\s*CITED LINKS[\s\S]*$/i, verifiedLinksSection);
     }
 
-    if (links.length === 0) return synthesis;
+    logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
+    return `${synthesis.trim()}\n\n${verifiedLinksSection}`;
+  }
 
-    const linksSection = links
-      .map(({ url, desc, source }, i) => {
-        const sourcePart = source ? ` [Source: ${source}]` : '';
-        return `[${i + 1}] ${url}${sourcePart}${desc ? ` - ${desc}` : ''}`;
-      })
-      .join('\n');
+  /**
+   * Append steering guidance to the end of the synthesis
+   * 
+   * @param synthesis - The synthesis text
+   * @param steeringMessages - Array of steering messages given during the run
+   * @returns Synthesis with steering guidance appended
+   */
+  appendSteeringGuidance(synthesis: string, steeringMessages: string[]): string {
+    if (!steeringMessages || steeringMessages.length === 0) {
+      return synthesis;
+    }
 
-    return `${synthesis}\n\n### CITED LINKS\n${linksSection}`;
+    const guidanceSection = [
+      '---',
+      'Given steering guidance:',
+      ...steeringMessages.map(m => `- ${m}`),
+    ].join('\n');
+
+    return `${synthesis.trim()}\n\n${guidanceSection}`;
   }
 
   /**

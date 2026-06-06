@@ -7,7 +7,9 @@
  */
 
 import { type Component, visibleWidth, truncateToWidth, type TUI } from '@earendil-works/pi-tui';
+import { logger } from '../logger.ts';
 import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
+import { getSteeringMessages, getAllTrackedSessions } from '../utils/session-state.ts';
 import {
   formatTokens,
   renderProgressPct,
@@ -319,6 +321,17 @@ export function createMasterResearchPanel(
         if (width < 4) return [];
 
         const panels: ResearchPanelState[] = getPanels ? getPanels(piSessionId) : [];
+        const steeringMessages = getSteeringMessages(piSessionId);
+        const trackedSessions = getAllTrackedSessions();
+        
+        if (panels.length > 0) {
+          logger.debug(`[research-panel] Rendering master panel for ${piSessionId}. Panels: ${panels.length}, Steering: ${steeringMessages.length}, All tracked: [${trackedSessions.join(', ')}]`);
+          const panelSessionId = panels[0]?.sessionId;
+          if (piSessionId !== panelSessionId) {
+             logger.warn(`[research-panel] Session ID mismatch! Master ID: ${piSessionId}, Panel ID: ${panelSessionId}`);
+          }
+        }
+
         if (panels.length === 0) return [];
 
         const allLines: string[] = [];
@@ -384,6 +397,13 @@ export function createMasterResearchPanel(
 
           const blockLines = renderPanelBlock(panel, theme, width);
           allLines.push(...blockLines);
+
+          // Render steering messages under this panel
+          const steeringMessages = getSteeringMessages(piSessionId);
+          for (const message of steeringMessages) {
+            const display = truncateToWidth(` Research Steering: ${message}`, width);
+            allLines.push(theme.fg('muted', display));
+          }
         }
 
         if (panels.length > 0) {

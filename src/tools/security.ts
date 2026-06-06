@@ -46,6 +46,8 @@ export function createSecuritySearchTool(options: {
     })),
   });
 
+  type SecuritySearchParamsType = Static<typeof SecuritySearchParamsSchema>;
+
   return {
     name: 'security_search',
     label: 'Security Search',
@@ -87,7 +89,7 @@ export function createSecuritySearchTool(options: {
           };
       }
 
-      const p = params as Static<typeof SecuritySearchParamsSchema>;
+      const p = params as SecuritySearchParamsType;
 
       const terms = p.terms;
       if (terms.length === 0) {

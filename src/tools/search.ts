@@ -20,13 +20,15 @@ export function createSearchTool(options: {
   config?: Config;
 }): ToolDefinition {
 
-  const SearchParams = Type.Object({
+  const SearchParamsSchema = Type.Object({
     queries: Type.Array(Type.String(), {
         minItems: 1,
         maxItems: 50,
         description: 'A list of 5-30 search queries to execute (minimum 1).'
     }),
   });
+
+  type SearchParams = Static<typeof SearchParamsSchema>;
 
   return {
     name: 'search',
@@ -40,12 +42,12 @@ export function createSearchTool(options: {
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
-    parameters: SearchParams,
+    parameters: SearchParamsSchema,
     async execute(_callId, params, signal, _onUpdate): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
       metrics.increment('tool_search_calls_total', 1);
 
-      if (!Value.Check(SearchParams, params)) {
+      if (!Value.Check(SearchParamsSchema, params)) {
           metrics.increment('tool_search_calls_total', 1, { status: 'invalid_params' });
           return {
             content: [{ type: 'text', text: 'Invalid parameters for search tool. Expected an array of 5-30 queries (minimum 1).' }],
@@ -53,7 +55,7 @@ export function createSearchTool(options: {
           };
       }
 
-      const p = params as Static<typeof SearchParams>;
+      const p = params as SearchParams;
       let queries = p.queries;
       metrics.increment('tool_search_queries_total', queries.length);
 

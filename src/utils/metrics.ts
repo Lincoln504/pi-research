@@ -60,7 +60,13 @@ export interface RunSummary {
 export class MetricsRegistry {
   private counters = new Map<string, number>();
   private gauges = new Map<string, number>();
-  private histograms = new Map<string, { values: number[]; pointer: number; limit: number }>();
+  private histograms = new Map<string, { 
+    values: number[]; 
+    pointer: number; 
+    limit: number; 
+    dirty: boolean;
+    cached: IMetricHistogram | null;
+  }>();
 
   private serializeLabels(labels?: Labels): string {
     if (!labels) return '';
@@ -86,9 +92,10 @@ export class MetricsRegistry {
     const key = this.getKey(name, labels);
     let entry = this.histograms.get(key);
     if (!entry) {
-      entry = { values: [], pointer: 0, limit: 10_000 };
+      entry = { values: [], pointer: 0, limit: 10_000, dirty: true, cached: null };
       this.histograms.set(key, entry);
     }
+    entry.dirty = true;
     if (entry.values.length < entry.limit) {
       entry.values.push(value);
     } else {
@@ -130,11 +137,18 @@ export class MetricsRegistry {
     for (const [k, v] of this.gauges)   snap.gauges[k]   = v;
 
     for (const [k, entry] of this.histograms) {
+      if (entry.values.length === 0) continue;
+      
+      if (!entry.dirty && entry.cached) {
+        snap.histograms[k] = entry.cached;
+        continue;
+      }
+
       const vals = entry.values;
-      if (vals.length === 0) continue;
       const sorted = vals.slice().sort((a, b) => a - b);
       const sum = sorted.reduce((a, b) => a + b, 0);
-      snap.histograms[k] = {
+      
+      const histogram = {
         count: sorted.length,
         min:   sorted[0] ?? 0,
         max:   sorted[sorted.length - 1] ?? 0,
@@ -144,6 +158,10 @@ export class MetricsRegistry {
         p95:   this.percentile(sorted, 95),
         p99:   this.percentile(sorted, 99),
       };
+
+      entry.cached = histogram;
+      entry.dirty = false;
+      snap.histograms[k] = histogram;
     }
     return snap;
   }

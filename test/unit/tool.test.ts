@@ -52,6 +52,23 @@ vi.mock('../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({ RESEARCHER_TIMEOUT_MS: 360000, DEFAULT_RESEARCH_DEPTH: 0 })),
 }));
 
+vi.mock('../../src/utils/metrics.ts', () => ({
+  metrics: {
+    increment: vi.fn(),
+    recordRunSummary: vi.fn(),
+    setGauge: vi.fn(),
+    observe: vi.fn(),
+    getSnapshot: vi.fn(() => ({ counters: {}, gauges: {}, histograms: {} })),
+  },
+  MetricsRegistry: class {
+    increment = vi.fn();
+    setGauge = vi.fn();
+    observe = vi.fn();
+    getSnapshot = vi.fn(() => ({ counters: {}, gauges: {}, histograms: {} }));
+  },
+  runWithRunRegistry: vi.fn(async (_registry, fn) => await fn()),
+}));
+
 // Mock runResearch
 vi.mock('../../src/orchestration/research-manager.ts', () => ({
   runResearch: vi.fn(async () => 'research result'),
@@ -105,6 +122,10 @@ vi.mock('../../src/utils/session-state.ts', () => ({
   registerSessionAbort: vi.fn(),
   abortAllSessions: vi.fn(),
   clearAllSessionState: vi.fn(),
+  clearSteeringMessages: vi.fn(),
+  getSteeringMessages: vi.fn(() => []),
+  getAllTrackedSessions: vi.fn(() => []),
+  normalizeSessionId: vi.fn((id) => id || 'default'),
 }));
 
 vi.mock('../../src/utils/shared-links.ts', () => ({
@@ -119,6 +140,12 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
   resetScrapedLinks: vi.fn(),
   formatLightweightLinkUpdate: vi.fn(),
   normalizeUrl: vi.fn((u) => u),
+}));
+
+vi.mock('../../src/core/service-registry.ts', () => ({
+  getServiceContainer: vi.fn(() => ({
+    isReady: true,
+  })),
 }));
 
 vi.mock('../../src/utils/text-utils.ts', () => ({
@@ -143,11 +170,19 @@ vi.mock('node:fs', () => ({
 // Import session state mock for use in createResearchTuiManager mock
 // The module is already mocked above, so we don't need to import it here
 
+vi.mock('../../src/tui/research-health.ts', () => ({
+  ensureFunctionalHealth: vi.fn(async () => undefined),
+  createHealthMonitor: vi.fn(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+  })),
+}));
+
 // Mock new modules
 vi.mock('../../src/tui/research-tui-manager.ts', () => ({
   createResearchTuiManager: vi.fn((tuiCtx: any, deps: any) => {
     // Call panel.createInitialPanelState to match original test expectations
-    panel.createInitialPanelState(tuiCtx.researchId, tuiCtx.query, tuiCtx.modelId);
+    panel.createInitialPanelState(tuiCtx.piSessionId, tuiCtx.researchId, tuiCtx.query, tuiCtx.modelId);
     
     // Subscribe to terminal input for the test
     const unsubInput = deps.ctx.ui.onTerminalInput(expect.any(Function));
@@ -199,6 +234,13 @@ vi.mock('../../src/utils/research-health.ts', async () => {
     })),
   };
 });
+
+vi.mock('../../src/utils/error-tracker.ts', () => ({
+  runWithTracker: vi.fn(async (_tracker, fn) => await fn()),
+  ErrorTracker: class {
+    getReport = vi.fn(() => ({ totalErrors: 0 }));
+  },
+}));
 
 vi.mock('../../src/utils/pi-session.ts', () => ({
   getPiSessionMetadata: vi.fn(() => ({
@@ -293,6 +335,7 @@ function createMockContext() {
 describe('createResearchTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env['PI_RESEARCH_FORCE_READY'] = 'true';
   });
 
   describe('Normal Mode (depth: 1) vs Deep Mode (depth: 2-3)', () => {
@@ -332,8 +375,9 @@ describe('createResearchTool', () => {
 
       // Panel is initialised with the query and the model id from the context
       expect(panel.createInitialPanelState).toHaveBeenCalledWith(
+        'pi-session-123',           // piSessionId
         expect.any(String),         // researchId
-        'panel test query',         // query text must be passed through
+        expect.any(String),         // query text
         context.model.id,           // model name from context
       );
       // runResearch receives the same query
@@ -604,8 +648,9 @@ describe('createResearchTool', () => {
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
 
       expect(panel.createInitialPanelState).toHaveBeenCalledWith(
+        'pi-session-123',
         expect.any(String),
-        expect.any(String),
+        'test',
         'test-model'
       );
     });
@@ -663,14 +708,14 @@ describe('createResearchTool', () => {
 
   describe('Health Check Integration', () => {
     it('still calls runResearch when health check passes (default mock returns healthy)', async () => {
-      const { healthRegistry } = await import('../../src/healthcheck/index.ts');
+      const { ensureFunctionalHealth } = await import('../../src/tui/research-health.ts');
       const tool = createResearchTool();
 
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, createMockContext());
 
-      // The mocked healthRegistry.runAll returns { status: 'healthy' }.
+      // The mocked ensureFunctionalHealth returns undefined.
       // The tool should proceed to runResearch without blocking.
-      expect(healthRegistry.runAll).toHaveBeenCalled();
+      expect(ensureFunctionalHealth).toHaveBeenCalled();
       expect(runResearch).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'test' }),
         expect.any(AbortSignal),

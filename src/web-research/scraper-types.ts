@@ -52,8 +52,6 @@ export const BOT_PATTERNS: ReadonlyArray<[string, string]> = [
 export const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png|jpe?g|gif|webp|bmp|ico)(?:\?[^)]*)?)\)/gi;
 export const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((?:data:image\/[^)]+|[^)\s]+)\)/gi;
 
-export const PRIMARY_SCRAPER_TIMEOUT = 30000;
-
 export type { ScrapeLayerResult } from './types.ts';
 
 export interface NativeHtmlToMarkdownModule {

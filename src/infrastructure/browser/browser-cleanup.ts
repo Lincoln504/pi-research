@@ -51,7 +51,7 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
     );
     
     const lines = stdout.trim().split('\n');
-    let cleanedCount = 0;
+    const cleanupTasks: Promise<void>[] = [];
     
     for (const line of lines) {
       const match = line.trim().match(/^\s*(\d+)\s+(\d+)\s+(\S+)/);
@@ -68,35 +68,37 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
         continue;
       } catch {
         // Parent is dead - this is an orphan
-        logger.log(`[BrowserCleanup] Found orphaned ${comm} process: PID ${pid}, dead parent PID ${ppid}`);
-        
-        try {
-          // Kill the orphaned process gracefully
-          process.kill(pid, 'SIGTERM');
-          cleanedCount++;
+        cleanupTasks.push((async () => {
+          logger.log(`[BrowserCleanup] Found orphaned ${comm} process: PID ${pid}, dead parent PID ${ppid}`);
           
-          // Give it a moment to exit gracefully
-          await new Promise(resolve => setTimeout(resolve, 200));
-          
-          // Check if it's still running and force kill if needed
           try {
-            process.kill(pid, 0);
-            // Still running, force kill
-            process.kill(pid, 'SIGKILL');
-            logger.warn(`[BrowserCleanup] Force killed orphaned process: PID ${pid}`);
-          } catch {
-            // Process exited
-            logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${pid}`);
+            // Kill the orphaned process gracefully
+            process.kill(pid, 'SIGTERM');
+            
+            // Give it a moment to exit gracefully (wait in parallel)
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Check if it's still running and force kill if needed
+            try {
+              process.kill(pid, 0);
+              // Still running, force kill
+              process.kill(pid, 'SIGKILL');
+              logger.warn(`[BrowserCleanup] Force killed orphaned process: PID ${pid}`);
+            } catch {
+              // Process exited
+              logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${pid}`);
+            }
+          } catch (killError) {
+            const msg = killError instanceof Error ? killError.message : String(killError);
+            logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${pid}: ${msg}`);
           }
-        } catch (killError) {
-          const msg = killError instanceof Error ? killError.message : String(killError);
-          logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${pid}: ${msg}`);
-        }
+        })());
       }
     }
     
-    if (cleanedCount > 0) {
-      logger.log(`[BrowserCleanup] Cleaned up ${cleanedCount} orphaned browser process(es)`);
+    if (cleanupTasks.length > 0) {
+      await Promise.all(cleanupTasks);
+      logger.log(`[BrowserCleanup] Cleaned up ${cleanupTasks.length} orphaned browser process(es)`);
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -115,7 +117,7 @@ async function cleanupOrphanedProcessesWindows(): Promise<void> {
     );
     
     const lines = stdout.trim().split('\n');
-    let cleanedCount = 0;
+    const cleanupTasks: Promise<void>[] = [];
     
     for (const line of lines) {
       if (!line.includes('firefox.exe')) continue;
@@ -125,44 +127,46 @@ async function cleanupOrphanedProcessesWindows(): Promise<void> {
       
       const pid = parseInt(match[1], 10);
       
-      // Check if parent process is still alive
-      try {
-        // On Windows, we need to use wmic to get parent PID
-        const { stdout: parentInfo } = await execAsync(
-          `wmic process where ProcessId=${pid} get ParentProcessId /VALUE`,
-        );
-        const parentMatch = parentInfo.match(/ParentProcessId=(\d+)/);
-        if (!parentMatch || !parentMatch[1]) continue;
-        
-        const ppid = parseInt(parentMatch[1], 10);
-        
-        // Check if parent is alive by checking if process exists
+      cleanupTasks.push((async () => {
+        // Check if parent process is still alive
         try {
-          await execAsync(`tasklist /FI "PID eq ${ppid}" /NH`);
-          // Parent is alive, not an orphan
-          continue;
+          // On Windows, we need to use wmic to get parent PID
+          const { stdout: parentInfo } = await execAsync(
+            `wmic process where ProcessId=${pid} get ParentProcessId /VALUE`,
+          );
+          const parentMatch = parentInfo.match(/ParentProcessId=(\d+)/);
+          if (!parentMatch || !parentMatch[1]) return;
+          
+          const ppid = parseInt(parentMatch[1], 10);
+          
+          // Check if parent is alive by checking if process exists
+          try {
+            await execAsync(`tasklist /FI "PID eq ${ppid}" /NH`);
+            // Parent is alive, not an orphan
+            return;
+          } catch {
+            // Parent is dead - orphan
+            logger.log(`[BrowserCleanup] Found orphaned firefox.exe process: PID ${pid}, dead parent PID ${ppid}`);
+          }
         } catch {
-          // Parent is dead - orphan
-          logger.log(`[BrowserCleanup] Found orphaned firefox.exe process: PID ${pid}, dead parent PID ${ppid}`);
+          // Couldn't determine parent, assume it might be orphaned
+          logger.log(`[BrowserCleanup] Potentially orphaned firefox.exe process: PID ${pid}`);
         }
-      } catch {
-        // Couldn't determine parent, assume it might be orphaned
-        logger.log(`[BrowserCleanup] Potentially orphaned firefox.exe process: PID ${pid}`);
-      }
-      
-      try {
-        // Kill the process
-        await execAsync(`taskkill /PID ${pid} /F`);
-        cleanedCount++;
-        logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${pid}`);
-      } catch (killError) {
-        const msg = killError instanceof Error ? killError.message : String(killError);
-        logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${pid}: ${msg}`);
-      }
+        
+        try {
+          // Kill the process
+          await execAsync(`taskkill /PID ${pid} /F`);
+          logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${pid}`);
+        } catch (killError) {
+          const msg = killError instanceof Error ? killError.message : String(killError);
+          logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${pid}: ${msg}`);
+        }
+      })());
     }
     
-    if (cleanedCount > 0) {
-      logger.log(`[BrowserCleanup] Cleaned up ${cleanedCount} orphaned browser process(es)`);
+    if (cleanupTasks.length > 0) {
+      await Promise.all(cleanupTasks);
+      logger.log(`[BrowserCleanup] Cleaned up ${cleanupTasks.length} orphaned browser process(es)`);
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

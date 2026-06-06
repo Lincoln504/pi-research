@@ -14,6 +14,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * Service lifecycle stages
@@ -90,11 +91,19 @@ interface ServiceRegistration<T extends IService> {
 }
 
 /**
+ * AsyncLocalStorage to track which service is currently being initialized.
+ * Used to build a dependency graph for safe teardown.
+ */
+const initializationContext = new AsyncLocalStorage<string>();
+
+/**
  * Centralized service container for dependency injection
  */
 class ServiceContainer {
   private services: Map<string, ServiceRegistration<any>> = new Map();
+  private dependencies: Map<string, Set<string>> = new Map();
   public isDisposing: boolean = false;
+  public isReady: boolean = false;
   private readonly defaultOptions: Required<ServiceContainerOptions>;
 
   constructor(options: ServiceContainerOptions = {}) {
@@ -138,6 +147,9 @@ class ServiceContainer {
       initializationPromise: null,
       options: mergedOptions,
     });
+    
+    // Reset dependencies for this service
+    this.dependencies.set(name, new Set());
   }
 
   /**
@@ -166,11 +178,29 @@ class ServiceContainer {
   }
 
   /**
+   * Record a dependency between two services
+   */
+  private addDependency(dependent: string, dependency: string): void {
+    let deps = this.dependencies.get(dependent);
+    if (!deps) {
+      deps = new Set();
+      this.dependencies.set(dependent, deps);
+    }
+    deps.add(dependency);
+  }
+
+  /**
    * Get a service instance, initializing it if necessary
    */
   async get<T extends IService>(name: string, ctx?: any): Promise<T> {
     if (this.isDisposing) {
       throw new Error(`Cannot get service '${name}' during container disposal`);
+    }
+
+    // Track dependency if we are currently inside an initialization or use-case of another service
+    const caller = initializationContext.getStore();
+    if (caller && caller !== name) {
+      this.addDependency(caller, name);
     }
 
     const registration = this.services.get(name);
@@ -182,7 +212,11 @@ class ServiceContainer {
     if (registration.instance) {
       // Re-initialize if ctx is provided and service supports it
       if (ctx && registration.instance.initialize) {
-        await registration.instance.initialize(ctx);
+        // Wrap in initializationContext so nested get() calls are tracked
+        return initializationContext.run(name, async () => {
+          await registration.instance!.initialize!(ctx);
+          return registration.instance as T;
+        });
       }
       return registration.instance as T;
     }
@@ -192,8 +226,10 @@ class ServiceContainer {
       return registration.initializationPromise as Promise<T>;
     }
 
-    // Initialize the service
-    registration.initializationPromise = this._initializeService(registration, ctx);
+    // Initialize the service within the tracking context
+    registration.initializationPromise = initializationContext.run(name, () => 
+      this._initializeService(registration, ctx)
+    );
 
     try {
       const instance = await registration.initializationPromise;
@@ -284,11 +320,9 @@ class ServiceContainer {
   }
 
   /**
-   * Dispose all services
-   * 
-   * NOTE: This method disposes service instances but KEEPS them registered.
-   * This allows services to be re-initialized on next access if needed.
-   * Use reset() to completely clear the service registry.
+   * Dispose all services using a true Directed Acyclic Graph (DAG) teardown.
+   * This guarantees that services are only disposed after all their dependents
+   * have been successfully torn down.
    */
   async disposeAll(): Promise<void> {
     if (this.isDisposing) {
@@ -297,22 +331,63 @@ class ServiceContainer {
 
     this.isDisposing = true;
     if (this.defaultOptions.enableLogging) {
-      logger.log('[ServiceContainer] Disposing all services (optimized parallel shutdown)...');
+      logger.log('[ServiceContainer] Disposing all services (DAG-ordered teardown)...');
     }
 
     try {
-      // Get service registrations in reverse order to respect dependencies
-      const registrations = Array.from(this.services.entries()).reverse();
-
-      // We parallelize disposal but group them to maintain SOME order.
-      // Infrastructure services (registered early, disposed last) often depend on each other.
-      // Orchestration services (registered late, disposed first) are usually more independent.
+      const activeServices = Array.from(this.services.keys()).filter(name => 
+        this.services.get(name)?.instance !== null
+      );
       
-      // Group services into chunks of 3 for parallel disposal to balance speed and safety.
-      const CHUNK_SIZE = 3;
-      for (let i = 0; i < registrations.length; i += CHUNK_SIZE) {
-        const chunk = registrations.slice(i, i + CHUNK_SIZE);
-        await Promise.all(chunk.map(async ([name, registration]) => {
+      const disposed = new Set<string>();
+      
+      // Perform iterative disposal of services that have no active dependents
+      while (disposed.size < activeServices.length) {
+        const toDispose: string[] = [];
+        
+        for (const name of activeServices) {
+          if (disposed.has(name)) continue;
+          
+          // A service can be disposed if no OTHER active service depends on it
+          // that hasn't been disposed yet.
+          const hasUndisposedDependents = activeServices.some(other => 
+            !disposed.has(other) && 
+            other !== name && 
+            this.dependencies.get(other)?.has(name)
+          );
+          
+          if (!hasUndisposedDependents) {
+            toDispose.push(name);
+          }
+        }
+        
+        if (toDispose.length === 0) {
+          // Circular dependency detected or logic error
+          const remaining = activeServices.filter(n => !disposed.has(n));
+          logger.warn(`[ServiceContainer] Circular dependency or stuck disposal detected for: ${remaining.join(', ')}. Falling back to reverse-registration order.`);
+          
+          const reverseRegistrations = Array.from(this.services.entries()).reverse();
+          for (const [name, registration] of reverseRegistrations) {
+            if (!disposed.has(name) && registration.instance && registration.instance.dispose) {
+              try { await registration.instance.dispose(); } catch (err) { logger.warn(`[ServiceContainer] Error disposing '${name}':`, err); }
+              registration.instance = null;
+              registration.initializationPromise = null;
+            }
+          }
+          break;
+        }
+        
+        // IMPORTANT: Sort toDispose in reverse-registration order. 
+        // This ensures that if multiple services are independent, we still dispose
+        // the one registered latest first, maintaining strict LIFO behavior by default.
+        const serviceNamesInOrder = Array.from(this.services.keys());
+        toDispose.sort((a, b) => serviceNamesInOrder.indexOf(b) - serviceNamesInOrder.indexOf(a));
+        
+        // Dispose independent services in parallel (but sequentially within this batch 
+        // if we want to be 100% sure about order, though Promise.all is fine if they are truly independent)
+        // Actually, to satisfy the test expectations of strict order, we should do them sequentially.
+        for (const name of toDispose) {
+          const registration = this.services.get(name)!;
           if (registration.instance && registration.instance.dispose) {
             try {
               await registration.instance.dispose();
@@ -320,14 +395,12 @@ class ServiceContainer {
               logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
             }
           }
-          // Clear instance but keep registration
           registration.instance = null;
           registration.initializationPromise = null;
-        }));
+          disposed.add(name);
+        }
       }
     } finally {
-      // Always reset disposal flag even if disposal throws
-      // This prevents permanent lock if a service's dispose() method fails
       this.isDisposing = false;
       if (this.defaultOptions.enableLogging) {
         logger.log('[ServiceContainer] All services disposed (registrations preserved)');
@@ -382,21 +455,14 @@ class ServiceContainer {
       logger.debug('[ServiceContainer] Resetting container...');
     }
 
-    // Dispose all instances in reverse order
-    const registrations = Array.from(this.services.entries()).reverse();
-    for (const [name, registration] of registrations) {
-      if (registration.instance && registration.instance.dispose) {
-        try {
-          await registration.instance.dispose();
-        } catch (err) {
-          logger.warn(`[ServiceContainer] Error disposing service '${name}' during reset:`, err);
-        }
-      }
-    }
+    // Use the safe DAG disposal logic
+    await this.disposeAll();
 
-    // Clear all registrations (complete reset, unlike disposeAll)
+    // Clear all registrations
     this.services.clear();
+    this.dependencies.clear();
     this.isDisposing = false;
+    this.isReady = false;
 
     if (this.defaultOptions.enableLogging) {
       logger.debug('[ServiceContainer] Container reset complete');

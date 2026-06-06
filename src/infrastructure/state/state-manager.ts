@@ -146,10 +146,9 @@ export class StateManager {
   // ==================== Core State Operations ====================
 
   /**
-   * Read the state from the file system
+   * Internal read without lock acquisition (caller must hold lock)
    */
-  public async readState(): Promise<SingletonState> {
-    await this.ensureDirectories();
+  private async _readState(): Promise<SingletonState> {
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;
@@ -176,6 +175,16 @@ export class StateManager {
 
       throw new Error(`Failed to read state: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
+  }
+
+  /**
+   * Read the state from the file system
+   */
+  public async readState(): Promise<SingletonState> {
+    await this.ensureDirectories();
+    return await this.fileLockService.withLock(async () => {
+      return await this._readState();
+    });
   }
 
   /**
@@ -233,7 +242,7 @@ export class StateManager {
     const startTime = Date.now();
     try {
       await this.fileLockService.withLock(async () => {
-        const currentState = await this.readState();
+        const currentState = await this._readState();
         const newState = await updater(currentState);
         await this._writeState(newState);
       });
@@ -251,7 +260,13 @@ export class StateManager {
   // ==================== Session API ====================
 
   public async addSession(sessionId: string, param: number | string): Promise<void> {
-    await this.sessionApi.addSession(sessionId, param, this.updateState.bind(this), process.pid);
+    await this.sessionApi.addSession(
+      sessionId,
+      param,
+      this.updateState.bind(this),
+      process.pid,
+      this.processLifecycle.getProcessStartTime.bind(this.processLifecycle)
+    );
   }
 
   public async removeSession(sessionId: string): Promise<void> {
@@ -268,12 +283,18 @@ export class StateManager {
 
   // ==================== Browser API ====================
 
-  public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
+  public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; startTime?: number | null } | null> {
     return this.browserApi.getBrowserServer(this.readState.bind(this));
   }
 
   public async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
-    await this.browserApi.setBrowserServer(port, pid, schedulerId, this.updateState.bind(this));
+    await this.browserApi.setBrowserServer(
+      port,
+      pid,
+      schedulerId,
+      this.updateState.bind(this),
+      this.processLifecycle.getProcessStartTime.bind(this.processLifecycle)
+    );
   }
 
   public async clearBrowserServer(): Promise<void> {
@@ -297,10 +318,14 @@ export class StateManager {
   // ==================== Process API ====================
 
   public async isPidAlive(pid: number, expectedSchedulerId?: string, skipLock?: boolean): Promise<boolean> {
+    const state = await this.readState();
+    const expectedStartTime = state.browserServer?.pid === pid ? state.browserServer.startTime : undefined;
+
     return this.processLifecycle.isPidAlive(pid, expectedSchedulerId, {
       getState: this.readState.bind(this),
       skipLock,
       getSchedulerIdFromState: (state: SingletonState) => state.browserServer?.schedulerId,
+      expectedStartTime,
     });
   }
 

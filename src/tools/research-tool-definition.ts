@@ -15,18 +15,19 @@ import type {
 import type { Model } from '@earendil-works/pi-ai';
 import type { ModelWithId } from '../types/extension-context.ts';
 import type { ResearchDepth } from '../types/index.ts';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
 import { runResearch } from '../orchestration/research-manager.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
-import { startResearchSession, registerSessionAbort } from '../utils/session-state.ts';
+import { startResearchSession, registerSessionAbort, clearSteeringMessages } from '../utils/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 
+import { getServiceContainer } from '../core/service-registry.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
 
@@ -97,37 +98,76 @@ function appendErrorSummary(result: string, errorReport: ErrorReport): string {
 }
 
 /**
+ * Append scrape summary to research result
+ */
+function appendScrapeSummary(result: string, metricsSnapshot: any): string {
+  const counters = metricsSnapshot.counters || {};
+  const fetchSuccess = counters['scrape_results_total{outcome="fetch_success"}'] || 0;
+  const browserSuccess = counters['scrape_results_total{outcome="browser_success"}'] || 0;
+  const totalFailure = counters['scrape_results_total{outcome="total_failure"}'] || 0;
+  const totalAttempts = fetchSuccess + browserSuccess + totalFailure;
+
+  if (totalAttempts === 0) {
+    return result;
+  }
+
+  const fetchPct = Math.round((fetchSuccess / totalAttempts) * 100);
+  const browserPct = Math.round((browserSuccess / totalAttempts) * 100);
+  const failPct = Math.round((totalFailure / totalAttempts) * 100);
+
+  let summary = `\n\n## Scrape Performance Summary\n\n`;
+  summary += `Total URLs attempted: **${totalAttempts}**\n\n`;
+  summary += `| Layer | Success Count | Percentage |\n`;
+  summary += `| :--- | :--- | :--- |\n`;
+  summary += `| **Fetch (Lightweight)** | ${fetchSuccess} | ${fetchPct}% |\n`;
+  summary += `| **Browser (Stealth)** | ${browserSuccess} | ${browserPct}% |\n`;
+  summary += `| **Failed (Both)** | ${totalFailure} | ${failPct}% |\n\n`;
+  
+  if (totalFailure > 0) {
+    summary += `*Note: ${totalFailure} URL(s) could not be scraped even with browser fallback.*\n`;
+  }
+  
+  summary += `---`;
+  
+  return result + summary;
+}
+
+/**
  * Create the research tool definition
  */
 export function createResearchTool(): ToolDefinition {
+  const parameters = Type.Object({
+    query: Type.String({
+      description: 'Research query or topic to investigate',
+    }),
+    depth: Type.Optional(Type.Integer({
+      minimum: 1,
+      maximum: 3,
+      description: [
+        'Research complexity 1-3.',
+        '1: Normal (coordinated, thorough)',
+        '2: Deep (multi-round, exhaustive)',
+        '3: Ultra (maximum depth, extreme rigor)',
+      ].join('\n'),
+      default: 1,
+    })),
+    model: Type.Optional(Type.String({
+      description: 'Model ID to use for coordination (optional)',
+    })),
+    excludeTools: Type.Optional(Type.Array(Type.String(), {
+      description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange)',
+    })),
+  });
+
+  type ResearchParams = Static<typeof parameters>;
+
   return {
     name: 'research',
     label: 'Research',
     description:
       'Perform web/internet research using an internal multi-source system. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
     promptSnippet: 'Conduct comprehensive web/internet research',
-    parameters: Type.Object({
-      query: Type.String({
-        description: 'Research query or topic to investigate',
-      }),
-      depth: Type.Optional(Type.Integer({
-        minimum: 1,
-        maximum: 3,
-        description: [
-          'Research complexity 1-3.',
-          '1: Normal (coordinated, thorough)',
-          '2: Deep (multi-round, exhaustive)',
-          '3: Ultra (maximum depth, extreme rigor)',
-        ].join('\n'),
-        default: 1,
-      })),
-      model: Type.Optional(Type.String({
-        description: 'Model ID to use for coordination (optional)',
-      })),
-      excludeTools: Type.Optional(Type.Array(Type.String(), {
-        description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange)',
-      })),
-    }),
+    parameters,
     renderShell: 'self',
     executionMode: 'parallel',
     prepareArguments: (args: unknown) => {
@@ -163,19 +203,29 @@ export function createResearchTool(): ToolDefinition {
       onUpdate: AgentToolUpdateCallback<any>,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { query, depth, model: modelId, excludeTools: paramExcludeTools } = params as {
-        query: string;
-        depth?: number;
-        model?: string;
-        excludeTools?: string[];
-      };
+      // 1. System Readiness Check
+      const container = getServiceContainer();
+      if (!container.isReady && process.env['PI_RESEARCH_FORCE_READY'] !== 'true') {
+        return {
+          content: [{
+            type: 'text',
+            text: '❌ **Research system is not ready.**\n\nOne or more critical services failed to initialize during startup. Please check the logs for error details or try restarting the extension.\n\nYou can also run `/research-config health` to diagnose the issue.'
+          }],
+          details: { error: 'system_not_ready' }
+        };
+      }
+
+      const { query, depth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
 
       // Inherit exclusions from parent context if possible (new in v0.77.0)
       const parentExcludeTools = (ctx as any).excludeTools || [];
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
 
       const researchId = createResearchRunId();
-      const piSessionId = (ctx as any).sessionManager?.getSessionId() || 'default';
+      const eCtx = ctx as any;
+      const piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId() || 'default';
+      logger.debug(`[research] Initializing session IDs: piSessionId=${piSessionId}, researchId=${researchId}`);
+      
       const internalAbort = new AbortController();
       let tuiManager: ReturnType<typeof createResearchTuiManager> | null = null;
       let healthMonitorInstance: ReturnType<typeof createHealthMonitor> | null = null;
@@ -213,6 +263,9 @@ export function createResearchTool(): ToolDefinition {
 
           const sanitizedQuery = validateAndSanitizeQuery(query);
           
+          // Clear any stale steering messages from previous runs in this session
+          clearSteeringMessages(piSessionId);
+
           // Setup TUI
           tuiManager = createResearchTuiManager({
             piSessionId,
@@ -292,30 +345,36 @@ export function createResearchTool(): ToolDefinition {
               // Stop wave animation
               stopObserverWaveAnimation(observerState, panelState);
 
-              const exportPath = await exportResearchReport(sanitizedQuery, result, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
-              const finalResult = exportPath ? appendExportMessage(result, exportPath, panelState.totalCost) : result;
-
               // Append error summary if errors occurred during research
               const errorReport = sessionTracker.getReport();
-              let resultWithErrorSummary = finalResult;
+              let resultWithSummaries = result;
               if (errorReport.totalErrors > 0) {
-                resultWithErrorSummary = appendErrorSummary(finalResult, errorReport);
+                resultWithSummaries = appendErrorSummary(result, errorReport);
               }
 
-              return { result: resultWithErrorSummary, tokens: panelState.totalTokens, researchId };
+              // Append scrape summary
+              resultWithSummaries = appendScrapeSummary(resultWithSummaries, runRegistry.getSnapshot());
+
+              const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
+              const finalResult = exportPath ? appendExportMessage(resultWithSummaries, exportPath, panelState.totalCost) : resultWithSummaries;
+
+              return { result: finalResult, tokens: panelState.totalTokens, researchId };
             } catch (error) {
               if (aborted?.aborted || internalAbort.signal.aborted) {
                 return { result: 'Research cancelled.', tokens: 0, researchId };
               }
               throw error;
             } finally {
-              // Stop health monitor unconditionally
               if (healthMonitorInstance) {
                 healthMonitorInstance.stop();
               }
 
               // Stop wave animation unconditionally
               stopObserverWaveAnimation(observerState, panelState);
+
+              // Always clear steering messages when the research run ends
+              // to prevent them from leaking into follow-up agent turns.
+              clearSteeringMessages(piSessionId);
 
               // Run cleanup (wrap in try-catch to allow other cleanup to run)
               try {
@@ -378,7 +437,7 @@ export function createResearchTool(): ToolDefinition {
         // Handle rate limits gracefully
         if (errMsg.includes('429') || errMsg.includes('rate limit') || errMsg.includes('too many requests') || errMsg.includes('quota')) {
             logger.warn('[research] Run halted gracefully due to rate limit:', error);
-            if (ctx.ui?.notify) {
+            if (ctx.hasUI) {
                 ctx.ui.notify('Research halted: API rate limit reached', 'warning');
             }
             return {

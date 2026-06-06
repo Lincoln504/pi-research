@@ -19,6 +19,7 @@ import { BrowserServer } from './browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
+import { PriorityTaskQueue } from './priority-task-queue.ts';
 
 /**
  * Browser task scheduler - manages the worker pool and executes tasks.
@@ -27,10 +28,12 @@ import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowser
 export class BrowserTaskScheduler implements IScheduler {
     private workerPoolManager: WorkerPoolManager | null = null;
     private server: BrowserServer | null = null;
+    private priorityQueue: PriorityTaskQueue | null = null;
     private leadershipTimer: any = null;
     private idleTimer: any = null;
     private consecutiveLeadershipMisses: number = 0;
-    private readonly LEADERSHIP_MISS_THRESHOLD: number = 5;
+    private readonly LEADERSHIP_CHECK_INTERVAL_MS: number = 5000;
+    private readonly LEADERSHIP_MISS_THRESHOLD: number = 3;
     private isShuttingDown: boolean = false;
     private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — must outlast the embedding phase for large documents (can take 20+ min on CPU)
 
@@ -48,6 +51,17 @@ export class BrowserTaskScheduler implements IScheduler {
             await this.workerPoolManager.initialize();
         }
         return this.workerPoolManager;
+    }
+
+    private async getPriorityQueue(config?: Config): Promise<PriorityTaskQueue> {
+        const c = config || getConfig();
+        const maxTotalConcurrency = c.WORKER_THREADS * c.WORKER_CONCURRENCY;
+        if (!this.priorityQueue) {
+            this.priorityQueue = new PriorityTaskQueue(maxTotalConcurrency);
+        } else {
+            this.priorityQueue.updateConcurrency(maxTotalConcurrency);
+        }
+        return this.priorityQueue;
     }
 
     private startLeadershipCheck() {
@@ -85,13 +99,13 @@ export class BrowserTaskScheduler implements IScheduler {
                 logger.warn('[Scheduler] Leadership check error:', err);
             } finally {
                 if (!this.isShuttingDown) {
-                    this.leadershipTimer = setTimeout(check, 30000);
+                    this.leadershipTimer = setTimeout(check, this.LEADERSHIP_CHECK_INTERVAL_MS);
                     if (this.leadershipTimer.unref) this.leadershipTimer.unref();
                 }
             }
         };
 
-        this.leadershipTimer = setTimeout(check, 30000);
+        this.leadershipTimer = setTimeout(check, this.LEADERSHIP_CHECK_INTERVAL_MS);
         if (this.leadershipTimer.unref) this.leadershipTimer.unref();
     }
 
@@ -145,10 +159,13 @@ export class BrowserTaskScheduler implements IScheduler {
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
         let result: any;
         try {
-            result = await Promise.race([
-                pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                timeoutPromise
-            ]);
+            const queue = await this.getPriorityQueue(config);
+            result = await queue.enqueue('search', async () => {
+                return await Promise.race([
+                    pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                    timeoutPromise
+                ]);
+            });
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
@@ -206,10 +223,13 @@ export class BrowserTaskScheduler implements IScheduler {
 
         let result: any;
         try {
-            result = await Promise.race([
-                pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                timeoutPromise
-            ]);
+            const queue = await this.getPriorityQueue(config);
+            result = await queue.enqueue('scrape', async () => {
+                return await Promise.race([
+                    pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                    timeoutPromise
+                ]);
+            });
         } catch (error) {
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
@@ -253,10 +273,15 @@ export class BrowserTaskScheduler implements IScheduler {
 
         let result: { success: boolean; error?: string };
         try {
-            result = await Promise.race([
-                pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                timeoutPromise
-            ]) as { success: boolean; error?: string };
+            const queue = await this.getPriorityQueue(config);
+            result = await queue.enqueue('healthcheck', async () => {
+                const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
+                execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
+                return await Promise.race([
+                    execPromise,
+                    timeoutPromise
+                ]);
+            }) as { success: boolean; error?: string };
         } catch (error) {
             metrics.increment('browser_healthcheck_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
@@ -367,12 +392,14 @@ export class BrowserTaskScheduler implements IScheduler {
         // This handles edge cases where workers were force-killed or hung during teardown
         // Add timeout to prevent hanging - orphan cleanup can find many processes on CI
         try {
+            const orphanPromise = cleanupOrphanedCamoufoxProcesses();
+            orphanPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background orphan cleanup rejection: ${err.message}`));
             await Promise.race([
-                cleanupOrphanedCamoufoxProcesses(),
+                orphanPromise,
                 new Promise(resolve => setTimeout(resolve, 15000))
             ]);
-        } catch (cleanupError) {
-            const msg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
             logger.warn('[Scheduler] Failed to cleanup orphaned browsers:', msg);
         }
     }

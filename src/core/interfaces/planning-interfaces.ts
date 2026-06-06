@@ -29,6 +29,7 @@ export interface GeneratePlanOptions {
   signal?: AbortSignal;
   observer?: ResearchObserver;
   excludeTools?: string[];
+  steeringMessages?: string[];
 }
 
 /**
@@ -58,6 +59,7 @@ export interface UpdatePlanOptions {
   mustSynthesize?: boolean;
   observer?: ResearchObserver;
   excludeTools?: string[];
+  steeringMessages?: string[];
 }
 
 /**

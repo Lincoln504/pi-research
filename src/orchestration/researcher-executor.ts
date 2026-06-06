@@ -120,7 +120,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     });
 
     const sessionService = await getResearchSessionService();
-    sessionService.registerSession(researchId, id, session, () => session.abort().catch(() => {}));
+    sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
 
     const subscription = session.subscribe((event: any) => {
       if (event.type === 'message_update') {
@@ -183,8 +183,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
       let abortCleanup: (() => void) | undefined;
       try {
+        const promptPromise = session.prompt(`Topic: ${researcherConfig.name}\nGoal: ${researcherConfig.goal}\n\nPerform your research and submit your full report now.`);
+        promptPromise.catch((err: Error) => logger.debug(`[ResearcherExecutor] Background session prompt rejection: ${err.message}`));
         await Promise.race([
-          session.prompt(`Topic: ${researcherConfig.name}\nGoal: ${researcherConfig.goal}\n\nPerform your research and submit your full report now.`),
+          promptPromise,
           timeoutPromise,
           ...(signal ? [
             new Promise<never>((_, reject) => {

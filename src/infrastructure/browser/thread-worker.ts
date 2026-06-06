@@ -138,8 +138,11 @@ const worker = new ClusterWorker(runTask, {
 
 export default worker;
 
-// Eagerly warm the browser when the worker starts. Skipped in full mock mode
-// so Firefox is never launched on constrained CI runners where startup takes 60-90s.
+// DEFERRED: Eagerly warming the browser when the worker starts is disabled
+// to prevent "thundering herd" resource spikes. Instead, the browser is
+// initialized lazily upon receipt of the first task in runTask().
+/*
 if (!FULL_MOCK_MODE) {
   initBrowser().catch(() => {});
 }
+*/

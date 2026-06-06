@@ -22,7 +22,17 @@ async function createPageSafe(context: any): Promise<any> {
 
   await currentLock;
   try {
-    return await context.newPage();
+    const pagePromise = context.newPage();
+    pagePromise.catch((err: Error) => console.debug(`[ThreadWorker] Background page creation rejection: ${err.message}`));
+    let timeoutId: NodeJS.Timeout | undefined;
+    const result = await Promise.race([
+      pagePromise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 30000ms')), 30000);
+      })
+    ]);
+    if (timeoutId) clearTimeout(timeoutId);
+    return result;
   } finally {
     release();
   }
@@ -203,7 +213,7 @@ export async function executeSearchTask(
 
     return { results, jitter };
   } catch (error) {
-    await page.close().catch(() => {});
+    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
     throw error;
   }
 }
@@ -278,7 +288,7 @@ export async function executeScrapeTask(
                       html.includes('<noscript>');
 
     if (needsWait) {
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch((err: any) => console.debug('Swallowed page close/wait error:', err));
       html = await page.content();
     }
 
@@ -291,7 +301,7 @@ export async function executeScrapeTask(
     await page.close();
     return { contentType, html, jitter };
   } catch (error) {
-    await page.close().catch(() => {});
+    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
     throw error;
   }
 }
@@ -320,7 +330,7 @@ async function executeHealthCheckAttempt(
     await page.close();
     return { success: !!title, navMs };
   } catch (error) {
-    await page.close().catch(() => {});
+    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
     throw error;
   }
 }

@@ -10,28 +10,32 @@ import type {
   AgentToolResult,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
+import { Type, type Static } from 'typebox';
 import { healthRegistry } from '../healthcheck/index.ts';
 
 /**
  * Create the health check tool definition
  */
 export function createHealthTool(): ToolDefinition {
+  const parameters = Type.Object({
+    verbose: Type.Optional(Type.Boolean({
+      description: 'Show detailed diagnostic information for each component',
+      default: true,
+    })),
+    probe: Type.Optional(Type.Boolean({
+      description: 'Force liveness checks (spawns browser, loads GPU models)',
+      default: false,
+    })),
+  });
+
+  type HealthParams = Static<typeof parameters>;
+
   return {
     name: 'health',
     label: 'Health Check',
     description: 'Check system health status across all components (browser pool, knowledge store, GPU lock)',
     promptSnippet: 'Run health checks on the research system',
-    parameters: Type.Object({
-      verbose: Type.Optional(Type.Boolean({
-        description: 'Show detailed diagnostic information for each component',
-        default: true,
-      })),
-      probe: Type.Optional(Type.Boolean({
-        description: 'Force liveness checks (spawns browser, loads GPU models)',
-        default: false,
-      })),
-    }),
+    parameters,
     renderShell: 'self',
     executionMode: 'parallel',
     async execute(
@@ -41,7 +45,7 @@ export function createHealthTool(): ToolDefinition {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const { verbose = true, probe = false } = params as { verbose?: boolean; probe?: boolean };
+      const { verbose = true, probe = false } = params as HealthParams;
 
       const outputLines: string[] = [];
 

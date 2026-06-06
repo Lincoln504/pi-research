@@ -49,11 +49,15 @@ class HealthCheckRegistry {
       };
 
       try {
+        let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<{ healthy: boolean; error?: string; diagnostic?: Record<string, any> }>((_, reject) => {
-          setTimeout(() => reject(new Error(`Health check timed out after ${registeredCheck.timeoutMs}ms`)), registeredCheck.timeoutMs);
+          timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${registeredCheck.timeoutMs}ms`)), registeredCheck.timeoutMs);
         });
 
-        const result = await Promise.race([registeredCheck.check(options), timeoutPromise]);
+        const checkPromise = registeredCheck.check(options);
+        checkPromise.catch((err: any) => console.debug(`[HealthCheck] Background check rejection: ${err instanceof Error ? err.message : String(err)}`));
+        const result = await Promise.race([checkPromise, timeoutPromise]);
+        if (timeoutId) clearTimeout(timeoutId);
         
         status.healthy = result.healthy;
         status.error = result.error;

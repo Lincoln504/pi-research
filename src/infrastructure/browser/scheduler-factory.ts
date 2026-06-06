@@ -251,7 +251,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                                 schedulerService.setSchedulerVersion(currentVersion);
                             } else {
                                 logger.warn('[Scheduler] Initialization finished but was superseded by a restart. Disposing...');
-                                await client.shutdown().catch(() => {});
+                                await client.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                                 throw new Error('Initialization superseded');
                             }
                             return client;
@@ -271,7 +271,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                     schedulerService.setSchedulerInstance(scheduler);
                     schedulerService.setSchedulerVersion(currentVersion);
                 } else {
-                    await scheduler.shutdown().catch(() => {});
+                    await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                     throw new Error('Initialization superseded', { cause: error });
                 }
                 return scheduler;
@@ -300,7 +300,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                     schedulerService.setSchedulerInstance(scheduler);
                     schedulerService.setSchedulerVersion(currentVersion);
                 } else {
-                    await scheduler.shutdown().catch(() => {});
+                    await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                     throw new Error('Initialization superseded', { cause: error });
                 }
                 return scheduler;
@@ -314,7 +314,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                     schedulerService.setSchedulerInstance(client);
                     schedulerService.setSchedulerVersion(schedulerVersion);
                 } else {
-                    await client.shutdown().catch(() => {});
+                    await client.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                     throw new Error('Initialization superseded');
                 }
                 return client;
@@ -328,7 +328,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                 schedulerService.setSchedulerVersion(schedulerVersion);
             } else {
                 logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
-                await scheduler.shutdown().catch(() => {});
+                await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));
                 throw new Error('Initialization superseded');
             }
             return scheduler;

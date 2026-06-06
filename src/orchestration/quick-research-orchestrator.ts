@@ -21,14 +21,16 @@ import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts'
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IWriterQueue, IKnowledgeStoreService } from '../core/service-interfaces.ts';
+import { getSteeringMessages } from '../utils/session-state.ts';
+import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService } from '../core/service-interfaces.ts';
+import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 import {
+  getResearchSynthesisService,
   cleanupResearchServices,
 } from './research-session-manager.ts';
 
@@ -145,8 +147,8 @@ export class QuickResearchOrchestrator {
           },
         });
 
-        const sessionService = await getService<any>(ServiceNames.RESEARCH_SESSION_SERVICE);
-        sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch(() => {}));
+        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+        sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
 
         const subscription = session.subscribe((event: AgentSessionEvent) => {
             if (event.type === 'message_end') {
@@ -210,8 +212,10 @@ export class QuickResearchOrchestrator {
           // whether the race resolves via session.prompt, timeout, or abort.
           let abortCleanup: (() => void) | undefined;
           try {
+            const promptPromise = session.prompt(query);
+            promptPromise.catch((err: Error) => logger.debug(`[QuickOrchestrator] Background session prompt rejection: ${err.message}`));
             await Promise.race([
-              session.prompt(query),
+              promptPromise,
               timeoutPromise,
               ...(signal ? [
                 new Promise<never>((_, reject) => {
@@ -233,7 +237,19 @@ export class QuickResearchOrchestrator {
             if (abortCleanup) (abortCleanup as () => void)();
           }
           
-          const result = ensureAssistantResponse(session, 'Quick');
+          let result = ensureAssistantResponse(session, 'Quick');
+          
+          // Store report in synthesis service so citations can be verified/processed
+          const synthesisService = await getResearchSynthesisService();
+          synthesisService.storeReport(this.options.researchId, 'quick', result);
+          
+          // Ensure CITED LINKS section is accurate and consistent
+          result = synthesisService.ensureCitedLinks(this.options.researchId, result);
+
+          // Append steering guidance if any was provided
+          const finalSteeringMessages = getSteeringMessages(this.options.sessionId);
+          result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
+
           const sessionDuration = Date.now() - sessionStart;
           metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'success' });
           logger.debug(`[QuickOrchestrator] Researcher Final Response:\n${result}`);

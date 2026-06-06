@@ -10,9 +10,13 @@ import type { SearchResult } from '../../web-research/types.ts';
 import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
-import { browserCircuitBreaker, isTransientSocketError, isPoolShutdownError, isTaskTimeoutError, isCloudflareBlockError } from './browser-error-utils.ts';
+import { getBrowserCircuitBreaker, browserCircuitBreaker, isTransientSocketError, isPoolShutdownError, isTaskTimeoutError, isCloudflareBlockError } from './browser-error-utils.ts';
 import { getScheduler, forceSchedulerRestart } from './scheduler-factory.ts';
 import { waitForBrowserPoolIdle } from './browser-lifecycle.ts';
+
+// Cooldown to prevent cascading scheduler restarts (thundering herd)
+let lastRestartTime = 0;
+const RESTART_COOLDOWN_MS = 10000;
 
 /**
  * Dispatches a browser task to the unified worker pool.
@@ -26,8 +30,12 @@ export async function runBrowserTask<T>(
 ): Promise<T> {
     if (signal?.aborted) throw new Error('Aborted');
 
+    // Extract sessionId for circuit breaker scoping
+    const sessionId = typeof taskOrUrl === 'object' ? taskOrUrl.sessionId : undefined;
+    const breaker = sessionId ? getBrowserCircuitBreaker(sessionId) : browserCircuitBreaker;
+
     try {
-        return await browserCircuitBreaker.execute(async () => {
+        return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config);
             if (type === 'search') {
@@ -54,20 +62,28 @@ export async function runBrowserTask<T>(
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            
             if (isPoolShutdownError(error)) {
                 // Pool is temporarily draining — wait for the drain to finish.
-                // Do NOT call forceSchedulerRestart here: it would shut down the new scheduler
-                // instance and restart the drain cycle, compounding the problem.
                 logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
-                // True socket/connection error — restart the scheduler and wait for idle.
-                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                await forceSchedulerRestart(true);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                // True socket/connection error — restart the scheduler with thundering herd guard.
+                const now = Date.now();
+                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
+                    lastRestartTime = now;
+                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                    await forceSchedulerRestart(true);
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                } else {
+                    logger.warn(`[BrowserManager] Scheduler restart recently triggered, waiting for pool idle...`);
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                }
             }
-            // Small buffer after pool is confirmed idle to allow port reclamation.
-            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Retry with jitter (100-500ms) to prevent thundering herd
+            const jitter = 100 + Math.floor(Math.random() * 400);
+            await new Promise(resolve => setTimeout(resolve, jitter));
             return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1);
         }
         throw error;
@@ -91,15 +107,23 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            
             if (isPoolShutdownError(error)) {
-                logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
-                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                await forceSchedulerRestart(true);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                const now = Date.now();
+                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
+                    lastRestartTime = now;
+                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                    await forceSchedulerRestart(true);
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                } else {
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                }
             }
-            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const jitter = 100 + Math.floor(Math.random() * 400);
+            await new Promise(resolve => setTimeout(resolve, jitter));
             return runBrowserHealthCheck(config, retries - 1);
         }
         throw error;
@@ -109,11 +133,13 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1): Promi
 /**
  * Run a worker search query with retry logic.
  */
-export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1): Promise<SearchResult[]> {
+export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string): Promise<SearchResult[]> {
     if (signal?.aborted) throw new Error('Aborted');
     
+    const breaker = sessionId ? getBrowserCircuitBreaker(sessionId) : browserCircuitBreaker;
+
     try {
-        return await browserCircuitBreaker.execute(async () => {
+        return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
             const scheduler = await getScheduler(config);
             return await scheduler.runSearch(query, config);
@@ -129,16 +155,24 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 errorType: 'transient_socket_error',
             });
             logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            
             if (isPoolShutdownError(error)) {
-                logger.warn(`[BrowserManager] Pool is draining — waiting for pool idle before retry...`);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
             } else {
-                logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                await forceSchedulerRestart(true);
-                await waitForBrowserPoolIdle(15000).catch(() => {});
+                const now = Date.now();
+                if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
+                    lastRestartTime = now;
+                    logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
+                    await forceSchedulerRestart(true);
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                } else {
+                    await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
+                }
             }
-            await new Promise(resolve => setTimeout(resolve, 500));
-            return runWorkerSearch(query, config, signal, retries - 1);
+
+            const jitter = 100 + Math.floor(Math.random() * 400);
+            await new Promise(resolve => setTimeout(resolve, jitter));
+            return runWorkerSearch(query, config, signal, retries - 1, sessionId);
         }
         throw error;
     }

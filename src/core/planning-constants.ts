@@ -43,3 +43,8 @@ export const QUERY_BUDGET_BY_COMPLEXITY = {
   3: MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
 } as const;
 
+/**
+ * Maximum number of queries to keep in history per session
+ */
+export const MAX_QUERY_HISTORY_SIZE = 1000;
+

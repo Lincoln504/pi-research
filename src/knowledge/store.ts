@@ -43,8 +43,9 @@ export class KnowledgeStore implements IKnowledgeStore {
   private table: lancedb.Table | null = null;
   private options: StoreOptions;
   private tableName = 'knowledge';
+  private manifestPath: string;
   private isClosing = false;
-  private pendingOperations = 0;
+  private activeWrites = new Set<Promise<any>>();
   private rrfReranker: lancedb.rerankers.RRFReranker | null = null;
   private circuitBreaker = new CircuitBreaker({
     failureThreshold: 3,
@@ -54,12 +55,38 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   constructor(options: StoreOptions) {
     this.options = options;
+    this.manifestPath = path.join(this.options.dbDir, 'store-manifest.json');
   }
 
   async initialize(): Promise<void> {
     this.lifecycle = ServiceLifecycle.INITIALIZING;
+    await this.loadManifest();
     await this.open();
     this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  private async loadManifest(): Promise<void> {
+    try {
+      if (fs.existsSync(this.manifestPath)) {
+        const content = await fsPromises.readFile(this.manifestPath, 'utf-8');
+        const manifest = JSON.parse(content);
+        if (manifest.activeTableName) {
+          this.tableName = manifest.activeTableName;
+          logger.debug(`[store] Loaded active table name from manifest: ${this.tableName}`);
+        }
+      }
+    } catch (err) {
+      logger.warn('[store] Failed to load manifest, using default table name:', err);
+    }
+  }
+
+  private async saveManifest(): Promise<void> {
+    try {
+      const content = JSON.stringify({ activeTableName: this.tableName }, null, 2);
+      await fsPromises.writeFile(this.manifestPath, content, 'utf-8');
+    } catch (err) {
+      logger.warn('[store] Failed to save manifest:', err);
+    }
   }
 
   async open(): Promise<void> {
@@ -224,8 +251,9 @@ export class KnowledgeStore implements IKnowledgeStore {
 
       // Only drop old table after successful completion
       logger.info(`[store] Migration successful, dropping old table ${this.tableName}...`);
-      const canonicalName = this.tableName;
-      await this.db.dropTable(canonicalName);
+      const canonicalName = 'knowledge'; // We try to return to the canonical name if possible
+      const oldTableName = this.tableName;
+      await this.db.dropTable(oldTableName);
 
       // LanceDB has no rename API, but its tables are plain directories on disk.
       // Rename the temp directory to the canonical table name so that the next
@@ -234,22 +262,26 @@ export class KnowledgeStore implements IKnowledgeStore {
       try {
         const tempDir = path.join(this.options.dbDir, `${tempTableName}.lance`);
         const canonicalDir = path.join(this.options.dbDir, `${canonicalName}.lance`);
-        await fsPromises.rename(tempDir, canonicalDir);
-        // Reopen the canonical table so this.table reflects the renamed path
-        this.table = await this.db.openTable(canonicalName);
-      } catch (renameErr) {
-        // If rename fails (cross-device, permissions, etc.) fall back to keeping
-        // the temp name. We MUST update this.tableName so that findRelevantUrls/search
-        // continue to work, and future sessions MIGHT need manual intervention or
-        // we could implement a discovery mechanism. For now, we at least don't lose
-        // the in-memory connection to the new data.
-        logger.warn(`[store] Directory rename failed, keeping temp table name: ${renameErr}`);
-        this.tableName = tempTableName;
-        this.table = newTable;
         
-        // Persist the new table name if possible, or at least log it loudly.
-        // Since we don't have a metadata file for the store itself yet, we log it.
-        logger.error(`[store] CRITICAL: Migrated data is in ${tempTableName}. Next start will NOT find it automatically.`);
+        // If canonical name was already something else and it still exists, 
+        // we might need to handle it. But we just dropped it above.
+        await fsPromises.rename(tempDir, canonicalDir);
+        
+        this.tableName = canonicalName;
+        await this.saveManifest();
+        
+        // Reopen the canonical table so this.table reflects the renamed path
+        this.table = await this.db.openTable(this.tableName);
+      } catch (renameErr) {
+        // If rename fails (cross-device, permissions, etc.) we keep the temp name
+        // but CRITICALLY we now persist it in the manifest so future sessions
+        // will find it automatically.
+        logger.warn(`[store] Directory rename failed, persisting temp table name in manifest: ${renameErr}`);
+        this.tableName = tempTableName;
+        await this.saveManifest();
+        
+        this.table = newTable;
+        logger.info(`[store] Migrated data is safe in ${tempTableName} and tracked via manifest.`);
       }
 
       logger.info(`[store] Migration complete: ${embedded} documents re-embedded with model ${newModel}`);
@@ -282,15 +314,32 @@ export class KnowledgeStore implements IKnowledgeStore {
     }
   }
 
-  async addDocuments(docs: StoreDocument[]): Promise<void> {
-    if (!this.table) throw new Error('Store not open');
-    this.pendingOperations++;
+  /**
+   * Internal helper to get a fresh table handle, ensuring we see the latest
+   * documents added by other processes. Re-opening a table in LanceDB is 
+   * a cheap manifest re-read.
+   */
+  private async getFreshTable(): Promise<lancedb.Table> {
+    if (!this.db) throw new Error('Store not open');
     try {
-      await this.withEmbedderReconnect(embedder =>
-        addDocumentsToStore(this.table!, docs, embedder, () => this.isClosing)
-      );
+      this.table = await this.db.openTable(this.tableName);
+    } catch (err) {
+      if (!this.table) throw err;
+      logger.debug(`[store] Failed to refresh table handle, using existing: ${err}`);
+    }
+    return this.table!;
+  }
+
+  async addDocuments(docs: StoreDocument[]): Promise<void> {
+    const table = await this.getFreshTable();
+    const writePromise = this.withEmbedderReconnect(embedder =>
+      addDocumentsToStore(table, docs, embedder, () => this.isClosing)
+    );
+    this.activeWrites.add(writePromise);
+    try {
+      await writePromise;
     } finally {
-      this.pendingOperations--;
+      this.activeWrites.delete(writePromise);
     }
   }
 
@@ -302,20 +351,20 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
     return this.circuitBreaker.execute(() =>
       this.withEmbedderReconnect(embedder =>
-        searchStore(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 5)
+        searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5)
       )
     );
   }
 
   async deleteByUrl(url: string): Promise<void> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
     const startTime = Date.now();
     try {
       const escapedUrl = url.replace(/'/g, "''");
-      await this.table.delete(`url = '${escapedUrl}'`);
+      await table.delete(`url = '${escapedUrl}'`);
       const duration = Date.now() - startTime;
       metrics.observe('knowledge_store_delete_duration_ms', duration);
       metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'success' });
@@ -329,12 +378,12 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async deleteByUrlAndType(url: string, ingestionType: string): Promise<void> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
     const startTime = Date.now();
     try {
       const escapedUrl = url.replace(/'/g, "''");
       const escapedType = ingestionType.replace(/'/g, "''");
-      await this.table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
+      await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
       const duration = Date.now() - startTime;
       metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
       metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
@@ -348,18 +397,18 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async findDocumentsByUrl(url: string): Promise<StoreDocument[]> {
-    if (!this.table) throw new Error('Store not open');
-    return findDocumentsByUrl(this.table, url);
+    const table = await this.getFreshTable();
+    return findDocumentsByUrl(table, url);
   }
 
   async exportForWeb(outputPath: string): Promise<void> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
 
     logger.info(`[store] Exporting knowledge store for web to: ${outputPath}`);
     
     // 1. Fetch all synthesis-description entries
     // We only want the high-quality summaries and their vectors for semantic search in the UI.
-    const results = await this.table
+    const results = await table
       .query()
       .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
       .toArray();
@@ -403,17 +452,17 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async findByUrl(url: string): Promise<StoreDocument[]> {
-    if (!this.table) throw new Error('Store not open');
-    return findDocumentsByUrl(this.table, url);
+    const table = await this.getFreshTable();
+    return findDocumentsByUrl(table, url);
   }
 
   async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
 
     const startTime = Date.now();
     const escapedUrl = url.replace(/'/g, "''");
 
-    const results = await this.table
+    const results = await table
       .query()
       .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND content IS NOT NULL`)
       .limit(1)
@@ -442,24 +491,24 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string }[]> {
-    if (!this.table) throw new Error('Store not open');
+    const table = await this.getFreshTable();
     return this.circuitBreaker.execute(() =>
       this.withEmbedderReconnect(embedder =>
-        findRelevantUrls(this.table!, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
+        findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
       )
     );
   }
 
   async rebuildFtsIndex(): Promise<void> {
-    if (!this.table) return;
+    const table = await this.getFreshTable();
     try {
-      const count = await this.table.countRows();
+      const count = await table.countRows();
       if (count === 0) {
         logger.debug('[store] Skipping FTS index rebuild (table is empty)');
         return;
       }
       logger.info('[store] Rebuilding FTS index...');
-      await this.table.createIndex('text', {
+      await table.createIndex('text', {
         config: lancedb.Index.fts(),
         replace: true,
       });
@@ -470,7 +519,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private async evictOldRecords(): Promise<void> {
-    if (!this.table) return;
+    const table = await this.getFreshTable();
 
     try {
       const config = getConfig();
@@ -478,7 +527,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       if (ttlDays <= 0) return;
 
       const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
-      await this.table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
+      await table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
       logger.log(`[store] Ran eviction for records older than ${ttlDays} days`);
     } catch (err) {
       logger.warn('[store] Failed to evict old records:', err);
@@ -486,17 +535,9 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async count(): Promise<number> {
-    if (!this.table || !this.db) return 0;
-    // Reopen the table handle to pick up the latest manifest version.
-    // LanceDB table handles pin to the dataset snapshot at open time; rows
-    // appended via add() since then won't appear in countRows() until the
-    // handle is refreshed. This is a cheap manifest re-read, not a full scan.
-    try {
-      this.table = await this.db.openTable(this.tableName);
-    } catch (err) {
-      logger.debug('[store] count(): failed to refresh table handle, proceeding with existing:', err);
-    }
-    const count = await this.table.countRows();
+    if (!this.db) return 0;
+    const table = await this.getFreshTable();
+    const count = await table.countRows();
     metrics.setGauge('knowledge_store_total_documents', count);
     return count;
   }
@@ -530,18 +571,32 @@ export class KnowledgeStore implements IKnowledgeStore {
   async close(): Promise<void> {
     this.isClosing = true;
 
-    const maxWaitMs = 10000;
-    const startTime = Date.now();
-    while (this.pendingOperations > 0 && (Date.now() - startTime) < maxWaitMs) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-
-    if (this.pendingOperations > 0) {
-      logger.warn(`[store] Closing with ${this.pendingOperations} pending operations`);
+    if (this.activeWrites.size > 0) {
+      const maxWaitMs = 10000;
+      const writesCount = this.activeWrites.size;
+      let timeoutId: NodeJS.Timeout | undefined;
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Close timeout')), maxWaitMs);
+        });
+        // We don't need a .catch() on Promise.allSettled because it never rejects,
+        // but we DO need to ensure the timeoutPromise rejection is caught if it fires AFTER the race.
+        timeoutPromise.catch((err: Error) => logger.debug(`[store] Background timeout rejection: ${err.message}`));
+        
+        await Promise.race([
+          Promise.allSettled(Array.from(this.activeWrites)),
+          timeoutPromise
+        ]);
+      } catch (_err) {
+        logger.warn(`[store] Closing with ${this.activeWrites.size} pending operations after timeout (started with ${writesCount})`);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     }
 
     try {
       this.table = null;
+      this.rrfReranker = null;
       if (this.db) {
         this.db.close();
         this.db = null;

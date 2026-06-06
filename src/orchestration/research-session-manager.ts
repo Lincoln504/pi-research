@@ -6,7 +6,7 @@
  */
 
 import { getService, tryGetService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/service-interfaces.ts';
+import { ServiceNames, type IPlanningService } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import type { ResearchSynthesisService } from './research-synthesis-service.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
@@ -44,8 +44,8 @@ export async function cleanupResearchServices(sessionId?: string): Promise<void>
   }
   
   // Clear planning state to prevent accumulation across research runs
-  const planningService = tryGetService<any>(ServiceNames.PLANNING);
-  if (planningService && typeof planningService.clearPlanningState === 'function') {
+  const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING);
+  if (planningService) {
     planningService.clearPlanningState(sessionId);
     logger.debug('[ResearchSessionManager] Cleared planning state');
   }

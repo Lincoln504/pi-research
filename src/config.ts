@@ -11,88 +11,71 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.ts';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 
 // Get the directory where this extension is installed
 const __filename = fileURLToPath(import.meta.url);
 const EXTENSION_DIR = path.dirname(__filename);
 
-export interface Config {
-  /** Per-researcher timeout in milliseconds (default: 600000) */
-  RESEARCHER_TIMEOUT_MS: number;
-  /** Maximum researchers to run simultaneously (default: 3, max: 5) */
-  MAX_CONCURRENT_RESEARCHERS: number;
-  /** Maximum retries per researcher request (default: 3) */
-  RESEARCHER_MAX_RETRIES: number;
-  /** Maximum delay between retries in milliseconds (default: 5000) */
-  RESEARCHER_MAX_RETRY_DELAY_MS: number;
-  /** Health check timeout in milliseconds (default: 30000) */
-  HEALTH_CHECK_TIMEOUT_MS?: number;
-  /** Global TUI refresh debounce in milliseconds (default: 10) */
-  TUI_REFRESH_DEBOUNCE_MS: number;
-  /** Console restore delay after research in milliseconds (default: 15000) */
-  CONSOLE_RESTORE_DELAY_MS: number;
-  /** Default depth for /research command (1-3, default: 1) */
-  DEFAULT_RESEARCH_DEPTH: number;
-  /** Maximum scrape batches per researcher (0-99, 0=unlimited, default: 2) */
-  MAX_SCRAPE_BATCHES: number;
-  /** Number of parallel browser workers for search and scraping (default: 4) */
-  WORKER_THREADS: number;
-  /** Number of concurrent tasks per pool worker process (default: 3, range: 1–10) */
-  WORKER_CONCURRENCY: number;
-  /** Whether the local knowledge store is enabled (default: true) */
-  KNOWLEDGE_STORE_ENABLED: boolean;
-  /** Embedding model to use for the knowledge store */
-  EMBEDDING_MODEL: string;
-  /** Inference backend for embeddings: 'webgpu' (Dawn/Vulkan/Metal/D3D12 via Vulkan — works on virtually all GPUs) or 'cpu' (fallback) */
-  EMBEDDING_DEVICE: string;
-  /** Timeout for scraping operations in milliseconds (default: 15000) */
-  SCRAPE_TIMEOUT_MS: number;
-  /** How long to keep cached scrapes in the knowledge store (default: 30 days) */
-  KNOWLEDGE_STORE_CACHE_TTL_DAYS: number;
-  /** Timeout for embedding model initialization in milliseconds (default: 300000) */
-  EMBEDDING_MODEL_INIT_TIMEOUT_MS: number;
-  /** Context fraction at which further scraping is blocked (0–1, default: 0.45) */
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: number;
-  /** Estimated tokens consumed by a single scrape batch URL (default: 10000) */
-  AVG_TOKENS_PER_SCRAPE: number;
-  /** Maximum concurrent URLs fetched in a single scrape batch (default: 3) */
-  MAX_CONCURRENT_SCRAPES: number;
-  /** Timeout for a single browser task (search/scrape) in milliseconds (default: 30000) */
-  BROWSER_TASK_TIMEOUT_MS: number;
-  /** Optional model override for researcher sub-agents (e.g. "openrouter/anthropic/claude-3-5-sonnet"). Empty string = use session model. */
-  RESEARCH_MODEL?: string;
-  /** Optional directory for the knowledge store (default: ../knowledge_db relative to extension) */
-  KNOWLEDGE_STORE_DIR?: string;
-  /** Whether to use a local knowledge store directory within the current project (default: false) */
-  USE_LOCAL_KNOWLEDGE_STORE: boolean;
-}
+// ============================================================================
+// Configuration Schema
+// ============================================================================
 
-export const DEFAULTS: Config = {
-  RESEARCHER_TIMEOUT_MS: 600000,
-  MAX_CONCURRENT_RESEARCHERS: 3,
-  RESEARCHER_MAX_RETRIES: 3,
-  RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
-  HEALTH_CHECK_TIMEOUT_MS: 30000,
-  TUI_REFRESH_DEBOUNCE_MS: 10,
-  CONSOLE_RESTORE_DELAY_MS: 15000,
-  DEFAULT_RESEARCH_DEPTH: 1,
-  MAX_SCRAPE_BATCHES: 2,
-  WORKER_THREADS: 4,
-  WORKER_CONCURRENCY: 1,
-  KNOWLEDGE_STORE_ENABLED: true,
-  EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
-  EMBEDDING_DEVICE: 'webgpu',
-  SCRAPE_TIMEOUT_MS: 15000,
-  KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
-  EMBEDDING_MODEL_INIT_TIMEOUT_MS: 300_000, // 5 minutes
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 0.45,
-  AVG_TOKENS_PER_SCRAPE: 10000,
-  MAX_CONCURRENT_SCRAPES: 3,
-  BROWSER_TASK_TIMEOUT_MS: 45000,
-  RESEARCH_MODEL: '',
-  KNOWLEDGE_STORE_DIR: '',
-  USE_LOCAL_KNOWLEDGE_STORE: false,
-};
+export const ConfigSchema = Type.Object({
+  /** Per-researcher timeout in milliseconds (default: 600000, range: 3-30 minutes) */
+  RESEARCHER_TIMEOUT_MS: Type.Number({ minimum: 180000, maximum: 1800000, default: 600000 }),
+  /** Maximum researchers to run simultaneously (default: 3, range: 1-5) */
+  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
+  /** Maximum retries per researcher request (default: 3, range: 0-10) */
+  RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 10, default: 3 }),
+  /** Maximum delay between retries in milliseconds (default: 5000, range: 1-60 seconds) */
+  RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 1000, maximum: 60000, default: 5000 }),
+  /** Health check timeout in milliseconds (default: 30000, range: 20-120 seconds) */
+  HEALTH_CHECK_TIMEOUT_MS: Type.Optional(Type.Number({ minimum: 20000, maximum: 120000, default: 30000 })),
+  /** Global TUI refresh debounce in milliseconds (default: 10) */
+  TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 1, default: 10 }),
+  /** Console restore delay after research in milliseconds (default: 15000) */
+  CONSOLE_RESTORE_DELAY_MS: Type.Number({ minimum: 0, default: 15000 }),
+  /** Default depth for /research command (1-3, default: 1) */
+  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
+  /** Maximum scrape batches per researcher (0-99, 0=unlimited, default: 2) */
+  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
+  /** Number of parallel browser workers for search and scraping (default: 4, range: 1-16) */
+  WORKER_THREADS: Type.Number({ minimum: 1, maximum: 16, default: 4 }),
+  /** Number of concurrent tasks per pool worker process (default: 3, range: 1-10) */
+  WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
+  /** Whether the local knowledge store is enabled (default: true) */
+  KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: true }),
+  /** Embedding model to use for the knowledge store */
+  EMBEDDING_MODEL: Type.String({ default: 'Xenova/all-MiniLM-L6-v2' }),
+  /** Inference backend for embeddings: 'webgpu' or 'cpu' */
+  EMBEDDING_DEVICE: Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' }),
+  /** Timeout for scraping operations in milliseconds (default: 15000, range: 5-120 seconds) */
+  SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 15000 }),
+  /** How long to keep cached scrapes in the knowledge store (default: 30 days, range: 1-365) */
+  KNOWLEDGE_STORE_CACHE_TTL_DAYS: Type.Number({ minimum: 1, maximum: 365, default: 30 }),
+  /** Timeout for embedding model initialization in milliseconds (default: 300000, range: 30s-30min) */
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 30000, maximum: 1800000, default: 300000 }),
+  /** Context fraction at which further scraping is blocked (0-1, default: 0.45) */
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.0001, maximum: 1, default: 0.45 }),
+  /** Estimated tokens consumed by a single scrape batch URL (default: 10000, range: 100-100,000) */
+  AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 100, maximum: 100000, default: 10000 }),
+  /** Maximum concurrent URLs fetched in a single scrape batch (default: 3, range: 1-20) */
+  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
+  /** Timeout for a single browser task (search/scrape) in milliseconds (default: 45000) */
+  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 5000, default: 45000 }),
+  /** Optional model override for researcher sub-agents. Empty string = use session model. */
+  RESEARCH_MODEL: Type.Optional(Type.String({ default: '' })),
+  /** Optional directory for the knowledge store */
+  KNOWLEDGE_STORE_DIR: Type.Optional(Type.String({ default: '' })),
+  /** Whether to use a local knowledge store directory within the current project (default: false) */
+  USE_LOCAL_KNOWLEDGE_STORE: Type.Boolean({ default: false }),
+});
+
+export type Config = Static<typeof ConfigSchema>;
+
+export const DEFAULTS: Config = Value.Create(ConfigSchema);
 
 // ============================================================================
 // Env-file persistence
@@ -343,7 +326,7 @@ export function createConfig(
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
     KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
-    EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE)!,
+    EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
@@ -382,87 +365,9 @@ export function resetConfig(): void {
 // ============================================================================
 
 export function validateConfig(config: Config = getConfig()): void {
-  if (config.RESEARCHER_TIMEOUT_MS < 180000 || config.RESEARCHER_TIMEOUT_MS > 1800000) {
-    throw new Error(
-      `PI_RESEARCH_TIMEOUT_MS must be 180000–1800000ms (3–30 minutes), got ${config.RESEARCHER_TIMEOUT_MS}`,
-    );
-  }
-  if (config.MAX_CONCURRENT_RESEARCHERS < 1 || config.MAX_CONCURRENT_RESEARCHERS > 5) {
-    throw new Error(
-      `PI_RESEARCH_MAX_RESEARCHERS must be 1–5, got ${config.MAX_CONCURRENT_RESEARCHERS}`,
-    );
-  }
-  if (config.RESEARCHER_MAX_RETRIES < 0 || config.RESEARCHER_MAX_RETRIES > 10) {
-    throw new Error(
-      `PI_RESEARCH_MAX_RETRIES must be 0–10, got ${config.RESEARCHER_MAX_RETRIES}`,
-    );
-  }
-  if (config.RESEARCHER_MAX_RETRY_DELAY_MS < 1000 || config.RESEARCHER_MAX_RETRY_DELAY_MS > 60000) {
-    throw new Error(
-      `PI_RESEARCH_RETRY_DELAY_MS must be 1000–60000ms, got ${config.RESEARCHER_MAX_RETRY_DELAY_MS}`,
-    );
-  }
-  if (config.DEFAULT_RESEARCH_DEPTH < 1 || config.DEFAULT_RESEARCH_DEPTH > 3) {
-    throw new Error(
-      `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH must be 1–3, got ${config.DEFAULT_RESEARCH_DEPTH}`,
-    );
-  }
-  if (config.MAX_SCRAPE_BATCHES < 0 || config.MAX_SCRAPE_BATCHES > 99) {
-    throw new Error(
-      `PI_RESEARCH_MAX_SCRAPE_BATCHES must be 0–99, got ${config.MAX_SCRAPE_BATCHES}`,
-    );
-  }
-  if (config.WORKER_THREADS < 1 || config.WORKER_THREADS > 16) {
-    throw new Error(
-      `PI_RESEARCH_WORKER_THREADS must be 1–16, got ${config.WORKER_THREADS}`,
-    );
-  }
-  if (config.WORKER_CONCURRENCY < 1 || config.WORKER_CONCURRENCY > 10) {
-    throw new Error(
-      `PI_RESEARCH_WORKER_CONCURRENCY must be 1–10, got ${config.WORKER_CONCURRENCY}`,
-    );
-  }
-  if (config.KNOWLEDGE_STORE_CACHE_TTL_DAYS < 1 || config.KNOWLEDGE_STORE_CACHE_TTL_DAYS > 365) {
-    throw new Error(
-      `PI_RESEARCH_CACHE_TTL_DAYS must be 1–365, got ${config.KNOWLEDGE_STORE_CACHE_TTL_DAYS}`,
-    );
-  }
-  if (config.SCRAPE_TIMEOUT_MS < 5000 || config.SCRAPE_TIMEOUT_MS > 120000) {
-    throw new Error(
-      `PI_RESEARCH_SCRAPE_TIMEOUT_MS must be 5000–120000ms, got ${config.SCRAPE_TIMEOUT_MS}`,
-    );
-  }
-  if (['webgpu', 'cpu'].indexOf(config.EMBEDDING_DEVICE) === -1) {
-    throw new Error(
-      `PI_RESEARCH_EMBEDDING_DEVICE must be one of: webgpu, cpu. Got: ${config.EMBEDDING_DEVICE}`,
-    );
-  }
-  if (
-    config.HEALTH_CHECK_TIMEOUT_MS !== undefined &&
-    (config.HEALTH_CHECK_TIMEOUT_MS < 20000 || config.HEALTH_CHECK_TIMEOUT_MS > 120000)
-  ) {
-    throw new Error(
-      `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS must be 20000–120000ms, got ${config.HEALTH_CHECK_TIMEOUT_MS}`,
-    );
-  }
-  if (config.EMBEDDING_MODEL_INIT_TIMEOUT_MS < 30000 || config.EMBEDDING_MODEL_INIT_TIMEOUT_MS > 1_800_000) {
-    throw new Error(
-      `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS must be 30000–1800000ms (30s–30min), got ${config.EMBEDDING_MODEL_INIT_TIMEOUT_MS}`,
-    );
-  }
-  if (config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING <= 0 || config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING > 1) {
-    throw new Error(
-      `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING must be > 0 and ≤ 1, got ${config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING}`,
-    );
-  }
-  if (config.AVG_TOKENS_PER_SCRAPE < 100 || config.AVG_TOKENS_PER_SCRAPE > 100000) {
-    throw new Error(
-      `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE must be 100–100000, got ${config.AVG_TOKENS_PER_SCRAPE}`,
-    );
-  }
-  if (config.MAX_CONCURRENT_SCRAPES < 1 || config.MAX_CONCURRENT_SCRAPES > 20) {
-    throw new Error(
-      `PI_RESEARCH_MAX_CONCURRENT_SCRAPES must be 1–20, got ${config.MAX_CONCURRENT_SCRAPES}`,
-    );
+  const errors = [...Value.Errors(ConfigSchema, config)];
+  if (errors.length > 0) {
+    const errorMessages = errors.map(err => `${(err as any).path}: ${err.message}`).join(', ');
+    throw new Error(`Invalid configuration: ${errorMessages}`);
   }
 }

@@ -56,13 +56,18 @@ vi.mock('@kreuzberg/html-to-markdown-node', () => ({
 }));
 
 import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';
+import { MetricsRegistry, runWithRunRegistry } from '../../../src/utils/metrics.ts';
 
 describe('scrapers', () => {
+  let runRegistry: MetricsRegistry;
+
   beforeEach(() => {
+    runRegistry = new MetricsRegistry();
     initScraperDependencies();
     mockRunBrowserTask.mockReset();
     mockRunBrowserHealthCheck.mockReset();
     mockRunWorkerSearch.mockReset();
+    // ... rest of beforeEach
 
     // Register mock scheduler service for browser fallback tests
     registerService(
@@ -201,6 +206,47 @@ describe('scrapers', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Browser failed');
+    });
+  });
+
+  describe('scrapeSingle — metrics', () => {
+    it('records fetch_success metric', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'text/html' },
+        text: async () => 'Word '.repeat(60),
+      }));
+
+      await runWithRunRegistry(runRegistry, async () => {
+        await scrapeSingle('https://example.com/m1');
+      });
+
+      const snapshot = runRegistry.getSnapshot();
+      expect(snapshot.counters['scrape_results_total{outcome="fetch_success"}']).toBe(1);
+    });
+
+    it('records browser_success metric', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Fail')));
+      mockRunBrowserTask.mockResolvedValue({ html: 'Word '.repeat(60) });
+
+      await runWithRunRegistry(runRegistry, async () => {
+        await scrapeSingle('https://example.com/m2');
+      });
+
+      const snapshot = runRegistry.getSnapshot();
+      expect(snapshot.counters['scrape_results_total{outcome="browser_success"}']).toBe(1);
+    });
+
+    it('records total_failure metric', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Fail')));
+      mockRunBrowserTask.mockRejectedValue(new Error('Fail'));
+
+      await runWithRunRegistry(runRegistry, async () => {
+        await scrapeSingle('https://example.com/m3');
+      });
+
+      const snapshot = runRegistry.getSnapshot();
+      expect(snapshot.counters['scrape_results_total{outcome="total_failure"}']).toBe(1);
     });
   });
 });

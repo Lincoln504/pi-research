@@ -63,18 +63,21 @@ export function createCleanupFunction(
 
     // Drain terminal input to consume any pending protocol responses
     // This prevents Kitty protocol responses (like \x1b[?4;1;3u) from leaking to the shell
-    try {
-      const tuiUI = ctx.ui as { tui?: { terminal?: { drainInput?: (timeoutMs: number, maxAttempts: number) => Promise<void> } } };
-      const tuiTerminal = tuiUI?.tui?.terminal;
-      if (tuiTerminal && typeof tuiTerminal.drainInput === 'function') {
-        // Use pi-tui's built-in drainInput if available
-        await tuiTerminal.drainInput(100, 20);
-      } else if (process.stdin.isTTY) {
-        // Fallback: ensure terminal is in a safe state and drain input
-        await resetTerminalState();
+    // Only perform this in TUI mode to avoid disturbing other modes (print/json/rpc)
+    if (ctx.mode === 'tui') {
+      try {
+        const tuiUI = ctx.ui as { tui?: { terminal?: { drainInput?: (timeoutMs: number, maxAttempts: number) => Promise<void> } } };
+        const tuiTerminal = tuiUI?.tui?.terminal;
+        if (tuiTerminal && typeof tuiTerminal.drainInput === 'function') {
+          // Use pi-tui's built-in drainInput if available
+          await tuiTerminal.drainInput(100, 20);
+        } else if (process.stdin.isTTY) {
+          // Fallback: ensure terminal is in a safe state and drain input
+          await resetTerminalState();
+        }
+      } catch (error) {
+        logger.warn('[research] Failed to drain terminal input:', error);
       }
-    } catch (error) {
-      logger.warn('[research] Failed to drain terminal input:', error);
     }
 
     // Clear wave animation timer
@@ -95,10 +98,12 @@ export function createCleanupFunction(
     
     const activePanels = getPiActivePanels(piSessionId);
     if (activePanels.length === 0) {
-      ctx.ui.setWidget(masterWidgetId, undefined);
-      const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
-      if (typeof tuiUI?.setWorkingVisible === 'function') {
-        tuiUI.setWorkingVisible(true);
+      if (ctx.hasUI) {
+        ctx.ui.setWidget(masterWidgetId, undefined);
+        const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
+        if (typeof tuiUI?.setWorkingVisible === 'function') {
+          tuiUI.setWorkingVisible(true);
+        }
       }
     } else {
       refreshAllSessions(piSessionId);

@@ -9,17 +9,35 @@ import { ToolUsageTracker } from '../../../src/utils/tool-usage-tracker.ts';
 export function createMockExtensionContext(overrides: Partial<ExtensionContext> = {}): ExtensionContext {
   return {
     cwd: '/tmp',
+    mode: 'tui',
+    hasUI: true,
     model: createMockModel(),
     modelRegistry: {
       getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: 'test-key', headers: {} })),
+      find: vi.fn(),
     } as any,
     ui: {
       setWidget: vi.fn(),
+      notify: vi.fn(),
+      custom: vi.fn(async () => ({ type: 'cancel' })),
+      confirm: vi.fn(async () => false),
+      onTerminalInput: vi.fn(() => vi.fn()),
+    } as any,
+    sessionManager: {
+      getSessionId: vi.fn(() => 'test-session'),
+      getBranch: vi.fn(() => []),
     } as any,
     settingsManager: {
         get: vi.fn(),
         set: vi.fn(),
     } as any,
+    getContextUsage: vi.fn(() => undefined),
+    getSystemPrompt: vi.fn(() => ''),
+    getSignal: vi.fn(() => undefined),
+    compact: vi.fn(),
+    abort: vi.fn(),
+    shutdown: vi.fn(),
+    getSystemPromptOptions: vi.fn(() => ({})),
     ...overrides,
   } as ExtensionContext;
 }

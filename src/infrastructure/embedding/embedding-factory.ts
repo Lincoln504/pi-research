@@ -130,7 +130,7 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
         }
         if (!isPidAliveStatic(info.pid)) {
           // Candidate process died without cleaning up
-          await stateManager.clearEmbeddingServer().catch(() => {});
+          await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
           break;
         }
         if (info.port > 0) {
@@ -149,7 +149,7 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
           const secondCheck = await isPortListening(info.port);
           if (!secondCheck) {
             logger.warn(`[EmbeddingFactory] Registered port ${info.port} is unreachable after two checks — clearing stale state`);
-            await stateManager.clearEmbeddingServer().catch(() => {});
+            await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
             break;
           }
         }
@@ -183,7 +183,7 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
       port = await server.startServer();
     } catch (err) {
       // Init failed — clear our placeholder so others can try
-      await stateManager.clearEmbeddingServer().catch(() => {});
+      await stateManager.clearEmbeddingServer().catch((err) => logger.debug('Swallowed clear embedding server error:', err));
       throw err;
     }
 

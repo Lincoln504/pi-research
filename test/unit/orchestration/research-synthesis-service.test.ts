@@ -176,6 +176,39 @@ describe('ResearchSynthesisService', () => {
     });
   });
 
+  // ─── appendSteeringGuidance ──────────────────────────────────────────────────
+
+  describe('appendSteeringGuidance', () => {
+    it('returns the synthesis unchanged when steeringMessages is empty', () => {
+      const input = 'Final report content';
+      expect(service.appendSteeringGuidance(input, [])).toBe(input);
+    });
+
+    it('returns the synthesis unchanged when steeringMessages is undefined', () => {
+      const input = 'Final report content';
+      expect(service.appendSteeringGuidance(input, undefined as any)).toBe(input);
+    });
+
+    it('appends a formatted steering guidance section when messages are provided', () => {
+      const input = 'Final report content';
+      const messages = ['focus on modern times', 'ignore historical data'];
+      const result = service.appendSteeringGuidance(input, messages);
+      
+      expect(result).toContain('Final report content');
+      expect(result).toContain('---');
+      expect(result).toContain('Given steering guidance:');
+      expect(result).toContain('- focus on modern times');
+      expect(result).toContain('- ignore historical data');
+    });
+
+    it('trims the synthesis before appending', () => {
+      const input = '  Final report content  ';
+      const messages = ['steer'];
+      const result = service.appendSteeringGuidance(input, messages);
+      expect(result.startsWith('Final report content')).toBe(true);
+    });
+  });
+
   // ─── extractAllCitations ─────────────────────────────────────────────────────
 
   describe('extractAllCitations', () => {

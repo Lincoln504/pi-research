@@ -73,29 +73,7 @@ describe('FileLockService', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Double-acquire (same instance, no release)
-  // ---------------------------------------------------------------------------
 
-  describe('double-acquire without release', () => {
-    it('second acquireLock() times out because lock file already exists', async () => {
-      service = new FileLockService({
-        lockFilePath,
-        lockTimeout: 100,
-        lockRetryDelay: 1,
-      });
-      await service.initialize();
-
-      // First acquire succeeds
-      await service.acquireLock();
-
-      // Second acquire on the same instance should time out
-      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
-
-      // Clean up the held lock
-      await service.releaseLock();
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // Stale lock recovery

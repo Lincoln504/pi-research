@@ -62,10 +62,12 @@ export function createScrapeTool(options: {
     fallbackState.allScrapedLinks = [...new Set([...fallbackState.allScrapedLinks, ...links])];
   });
 
-  const ScrapeParams = Type.Object({
+  const ScrapeParamsSchema = Type.Object({
     urls: Type.Array(Type.String({ description: 'The URLs to scrape' }), { minItems: 1, maxItems: 20 }),
     maxConcurrency: Type.Optional(Type.Number({ default: config.MAX_CONCURRENT_SCRAPES, minimum: 1, maximum: 20 })),
   });
+
+  type ScrapeParams = Static<typeof ScrapeParamsSchema>;
 
   // Determine the effective batch limit for the protocol display text
   const trackerLimit = options.tracker?.getToolLimit('scrape');
@@ -90,7 +92,7 @@ export function createScrapeTool(options: {
       'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
     ],
-    parameters: ScrapeParams,
+    parameters: ScrapeParamsSchema,
     async execute(_callId: string, params: unknown, signal: AbortSignal, _onUpdate: AgentToolUpdateCallback<any>): Promise<AgentToolResult<unknown>> {
       const callStartTime = Date.now();
 
@@ -107,7 +109,7 @@ export function createScrapeTool(options: {
         }
       }
 
-      if (!Value.Check(ScrapeParams, params)) {
+      if (!Value.Check(ScrapeParamsSchema, params)) {
         metrics.increment('tool_scrape_calls_total', 1, { status: 'invalid_params' });
         return {
           content: [{ type: 'text', text: 'Invalid parameters for scrape tool. Expected an array of URLs.' }],
@@ -115,7 +117,7 @@ export function createScrapeTool(options: {
         };
       }
 
-      const p = params as Static<typeof ScrapeParams>;
+      const p = params as ScrapeParams;
       const rawUrls = p.urls.map(u => u.trim()).filter(u => u.length > 0);
 
       if (rawUrls.length === 0) {

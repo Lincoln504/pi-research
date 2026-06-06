@@ -25,6 +25,7 @@ import {
   registerGlobalEmbedder,
   unregisterGlobalEmbedder,
   initializeDawnWebGPU,
+  initializeONNXEnv,
 } from './embedder-utils.ts';
 import {
   isWebGpuDeviceError,
@@ -120,6 +121,9 @@ export class Embedder {
     if (this.state === 'disposing') {
       throw new Error('Cannot initialize while disposing');
     }
+
+    // Lazy initialization of ONNX environment
+    initializeONNXEnv();
     
     if (this.initializingPromise) {
       return this.initializingPromise;
@@ -242,7 +246,7 @@ export class Embedder {
       await releaseGpuLock(this.stateManager, this.gpuLockHeld);
       this.gpuLockHeld = false;
       if (this.pipeline) {
-        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
+        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
         this.pipeline = null;
       }
       logger.error(`[embedder] Failed to initialize:`, err);
@@ -300,7 +304,9 @@ export class Embedder {
     } catch (err) {
       if (isWebGpuDeviceError(err)) {
         if (lockAcquired && this.stateManager) {
-          await this.stateManager.releaseGpuLock().catch(() => {});
+          await this.stateManager.releaseGpuLock().catch(err => {
+            logger.warn('[embedder] Failed to release GPU lock:', err);
+          });
           lockAcquired = false;
         }
         await this.recoverToCpu();
@@ -312,7 +318,7 @@ export class Embedder {
       throw err;
     } finally {
       if (lockAcquired && this.stateManager) {
-        await this.stateManager.releaseGpuLock().catch(() => {});
+        await this.stateManager.releaseGpuLock().catch((err) => logger.debug('Swallowed release GPU lock error:', err));
       }
       this.activeEmbeddings--;
       this.resetIdleTimer();
@@ -352,7 +358,9 @@ export class Embedder {
           } catch (err) {
             if (isWebGpuDeviceError(err)) {
               if (lockAcquired && this.stateManager) {
-                await this.stateManager.releaseGpuLock().catch(() => {});
+                await this.stateManager.releaseGpuLock().catch(err => {
+            logger.warn('[embedder] Failed to release GPU lock:', err);
+          });
                 lockAcquired = false;
               }
               await this.recoverToCpu();
@@ -370,7 +378,9 @@ export class Embedder {
         }
       } finally {
         if (lockAcquired && this.stateManager) {
-          await this.stateManager.releaseGpuLock().catch(() => {});
+          await this.stateManager.releaseGpuLock().catch(err => {
+            logger.warn('[embedder] Failed to release GPU lock:', err);
+          });
         }
         this.activeEmbeddings--;
         this.resetIdleTimer();
@@ -403,7 +413,7 @@ export class Embedder {
     }
 
     if (this.pipeline) {
-      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (_e) { /* ignore */ }
+      try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
       this.pipeline = null;
     }
     this.device = 'cpu';
@@ -463,7 +473,9 @@ export class Embedder {
       await releaseGpuLock(this.stateManager, this.gpuLockHeld);
       // Always try to release on dispose for safety (test expects this)
       if (this.stateManager) {
-        await this.stateManager.releaseGpuLock().catch(() => {});
+        await this.stateManager.releaseGpuLock().catch(err => {
+          logger.warn('[embedder] Failed to release GPU lock during dispose:', err);
+        });
       }
       this.gpuLockHeld = false;
 

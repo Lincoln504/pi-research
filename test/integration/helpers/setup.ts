@@ -60,6 +60,8 @@ export async function setupLifecycle(): Promise<TestContext> {
       },
     };
     await initializeCoreServices(mockCtx);
+    const { getServiceContainer } = await import('../../../src/core/service-registry.ts');
+    getServiceContainer().isReady = true;
     logger.log('[test] Service Registry initialized for integration tests');
   } catch (err) {
     logger.error('[test] Failed to initialize Service Registry:', err);

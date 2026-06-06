@@ -5,10 +5,9 @@ You orchestrate the next phase of research.
 ## Your Context
 - **ROOT QUERY**: {ROOT_QUERY}
 - **Current round**: {ROUND_NUMBER} / {MAX_ROUNDS}
-- **Complexity**: {COMPLEXITY_LABEL}
-- **Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on remaining research gaps and topic scope.
-- **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Prioritize queries that uncover authoritative sources and citable evidence.
+{{initial_agenda_section}}
 {{previous_queries_section}}
+{{additional_considerations}}
 
 {{disabled_tools_section}}
 
@@ -50,7 +49,10 @@ Use unique, targeted queries for any new researchers.
 
 **If synthesizing**:
 ```json
-{ "action": "synthesize", "content": "..." }
+{ 
+  "action": "synthesize", 
+  "content": "<Full Markdown Report body with [N] citations, followed by the mandatory ### CITED LINKS section>" 
+}
 ```
 
 **If delegating**:
@@ -60,12 +62,12 @@ Use unique, targeted queries for any new researchers.
   "researchers": [
     { 
       "id": "{ROUND_NUMBER}.1", 
-      "name": "Specialty", 
-      "goal": "Goal", 
-      "queries": ["query 1", "query 2", "query 3", ... (up to QUERY_BUDGET queries)] 
+      "name": "<Researcher Specialty>", 
+      "goal": "<Focused gap or new angle to investigate>", 
+      "queries": ["<query_1>", "<query_2>", "<query_3>", "..."] 
     }
   ],
-  "allQueries": ["query 1", "query 2", "query 3", ... (all queries across all researchers)]
+  "allQueries": ["<flat_list_of_all_queries_from_all_new_researchers>"]
 }
 ```
 
@@ -93,13 +95,13 @@ When delegating, ensure:
 
 1. **Organization**: Organize the report logically **BY TOPIC**. Do NOT structure it by researcher or round.
 2. **Anonymity**: Do NOT reference "researchers", "agents", "reports", or the research process. Present the findings as a direct, unified knowledge base.
-3. **Master Links List**: Deduplicate ALL URLs from ALL researcher "CITED LINKS" sections. Create a single master list with sequential numbers [1], [2], [3], etc. **Preserve the `Source:` information for each entry.**
+3. **Master Links List**: A **Global Source List** has been provided to you. Use these sequential numbers [1], [2], [3], etc., for all inline citations. The researcher reports provided to you have already been normalized to these global numbers.
 4. **Exhaustive Synthesis**: Use ALL findings from ALL reports. Include every fact, date, name, and statistic verbatim. Longer is better.
 5. **Strict Grounding**: Every sentence must come from a report. Use [N] inline citations. No prior knowledge.
 6. **CRITICAL — Links at Bottom Only**: 
-   - Write all topic sections first with inline citations [1], [2], etc.
+   - Write all topic sections first with inline citations [1], [2], etc., using the numbers from the **Global Source List**.
    - Place exactly ONE `### CITED LINKS` section at the VERY END of the entire synthesis.
-   - This section must contain the complete master list of all unique URLs.
+   - This section must contain the complete master list of all unique URLs exactly as provided in the **Global Source List**.
    - Do NOT include any links within topic sections or subsections.
    - Format: `[1] https://url.com [Source: ...] — brief description` on each line.
 

@@ -10,7 +10,7 @@
  * - Knowledge store integration for link descriptions
  */
 
-import type { ResearchPlan } from '../core/service-interfaces.ts';
+import type { ResearchPlan, IPlanningService } from '../core/service-interfaces.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
 import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
@@ -78,9 +78,9 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const { sessionId, researchId, observer } = orchestratorOptions;
 
     // Obtain the planning service once for all researchers in this round
-    let planningService: any;
+    let planningService: IPlanningService;
     try {
-      planningService = await getService<any>(ServiceNames.PLANNING);
+      planningService = await getService<IPlanningService>(ServiceNames.PLANNING);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // If the service container is already disposing (SIGTERM during active research),
@@ -205,7 +205,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param researchId - Research ID
    * @param config - Research configuration
    */
-  async storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: Config): Promise<void> {
+  async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, config: Config): Promise<void> {
     if (config.KNOWLEDGE_STORE_ENABLED !== true) {
       logger.debug('[ResearchOrchestrationService] Knowledge store disabled, skipping link descriptions');
       return;
@@ -225,9 +225,9 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       let enqueued = 0;
       let researcherCount = 0;
 
-      const allReports = synthesisService.getAllReports(sessionId);
+      const allReports = synthesisService.getAllReports(researchId);
       if (allReports.size === 0) {
-        logger.warn(`[ResearchOrchestrationService] No reports found in synthesis service for session ${sessionId} round ${round}`);
+        logger.warn(`[ResearchOrchestrationService] No reports found in synthesis service for researchId ${researchId} round ${round}`);
       }
 
       for (const [key, report] of allReports.entries()) {

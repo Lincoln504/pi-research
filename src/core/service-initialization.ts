@@ -5,7 +5,7 @@
  * This is the central place for service configuration and initialization.
  */
 
-import { registerService, getService, disposeAllServices } from './service-registry.ts';
+import { registerService, getService, disposeAllServices, type IService } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
@@ -115,7 +115,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
         // getService will call initialize(ctx) if not already initialized
-        await getService<any>(service.name, ctx);
+        await getService<IService>(service.name, ctx);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {
@@ -131,7 +131,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
     for (const service of eagerServices) {
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
-        await getService<any>(service.name, ctx);
+        await getService<IService>(service.name, ctx);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {

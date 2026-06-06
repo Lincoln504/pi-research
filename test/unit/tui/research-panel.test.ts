@@ -26,7 +26,7 @@ describe('TUI Research Panel', () => {
 
   describe('createInitialPanelState', () => {
     it('should create initial state with correct properties', () => {
-      const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
       expect(state.query).toBe('test-query');
       expect(state.modelName).toBe('test-model');
     });
@@ -34,7 +34,7 @@ describe('TUI Research Panel', () => {
 
   describe('progress tracking', () => {
     it('should render progress percentage when progress is set', () => {
-      const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
       state.progress = { expected: 10, made: 5 };
 
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
@@ -47,7 +47,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should render status message in header if present', () => {
-      const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
       state.statusMessage = 'planning';
       
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
@@ -62,7 +62,7 @@ describe('TUI Research Panel', () => {
 
   describe('wave animation', () => {
     it('should render wave when isSearching is true', () => {
-      const state = createInitialPanelState('test-session-id', 'test-query', 'test-model');
+      const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
       state.isSearching = true;
       state.waveFrame = 0;
 
@@ -81,7 +81,7 @@ describe('TUI Research Panel', () => {
     let state: any;
 
     beforeEach(() => {
-      state = createInitialPanelState('s', 'q', 'm');
+      state = createInitialPanelState('s', 'r', 'q', 'm');
     });
 
     it('should add slices correctly', () => {
@@ -99,7 +99,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should update tokens with non-decreasing guard and accumulate cost', () => {
-      const state = createInitialPanelState('s', 'q', 'm');
+      const state = createInitialPanelState('s', 'r', 'q', 'm');
       addSlice(state, 'r1', '1');
       
       updateSliceTokens(state, 'r1', 100, 0.05);
@@ -113,7 +113,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should complete and clear slices', () => {
-      const state = createInitialPanelState('s', 'q', 'm');
+      const state = createInitialPanelState('s', 'r', 'q', 'm');
       addSlice(state, 'r1', '1');
       addSlice(state, 'r2', '2');
       

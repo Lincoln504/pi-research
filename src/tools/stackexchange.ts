@@ -17,7 +17,7 @@ export function createStackexchangeTool(options: {
 }): ToolDefinition {
   const { tracker } = options;
 
-  const StackExchangeParams = Type.Object({
+  const StackExchangeParamsSchema = Type.Object({
     command: Type.String({
       description: 'Command: search, get, user, or site',
     }),
@@ -49,6 +49,8 @@ export function createStackexchangeTool(options: {
     })),
   });
 
+  type StackExchangeParams = Static<typeof StackExchangeParamsSchema>;
+
   return {
     name: 'stackexchange',
     label: 'Stack Exchange Search',
@@ -63,7 +65,7 @@ export function createStackexchangeTool(options: {
       'Use maxPages parameter to control pagination for search results (default: 5 pages).',
       `CRITICAL: You are allowed a maximum of ${MAX_GATHERING_CALLS} gathering calls total across ALL tools. Use them for breadth.`,
     ],
-    parameters: StackExchangeParams,
+    parameters: StackExchangeParamsSchema,
     executionMode: 'parallel',
     async execute(
       _toolCallId,
@@ -81,14 +83,14 @@ export function createStackexchangeTool(options: {
           };
       }
 
-      if (!Value.Check(StackExchangeParams, params)) {
+      if (!Value.Check(StackExchangeParamsSchema, params)) {
           return {
             content: [{ type: 'text', text: 'Invalid parameters for stackexchange tool.' }],
             details: { error: 'invalid_parameters' },
           };
       }
 
-      const p = params as Static<typeof StackExchangeParams>;
+      const p = params as StackExchangeParams;
       const command = p.command;
 
       if (!command || typeof command !== 'string') {

@@ -19,18 +19,21 @@ export class StateSessionApi {
    * @param sessionId The session ID to add
    * @param param PID (number) or container name (string)
    * @param updateState Function to update state atomically
-   * @param getCurrentProcess Function to get current process pid
+   * @param processPid PID of the current process
+   * @param getStartTime Function to get process start time
    * @throws Error if unable to update state
    */
   async addSession(
     sessionId: string,
     param: number | string,
     updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>,
-    processPid: number
+    processPid: number,
+    getStartTime: (pid: number) => Promise<number | null>
   ): Promise<void> {
     const pid = typeof param === 'number' ? param : processPid;
+    const startTime = await getStartTime(pid);
     await updateState(async (state): Promise<SingletonState> => {
-      return this.sessionManager.addSession(state, sessionId, pid);
+      return this.sessionManager.addSession(state, sessionId, pid, startTime);
     });
   }
 
@@ -75,7 +78,7 @@ export class StateSessionApi {
     updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>
   ): Promise<number> {
     const state = await readState();
-    const sessionsToRemove = this.sessionManager.classifyStaleSessions(state, timeoutMs);
+    const sessionsToRemove = await this.sessionManager.classifyStaleSessions(state, timeoutMs);
 
     // Remove stale sessions under a fresh lock. Re-validate lastSeen so a
     // session that received a heartbeat between the two lock acquisitions is

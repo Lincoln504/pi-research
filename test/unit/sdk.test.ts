@@ -38,6 +38,7 @@ vi.mock('../../src/utils/shutdown-manager.ts', () => ({
 
 vi.mock('../../src/core/service-registry.ts', () => ({
   resetServiceContainer: vi.fn().mockResolvedValue(undefined),
+  getServiceContainer: vi.fn().mockReturnValue({ isReady: false }),
 }));
 
 // Mock pi-coding-agent so ModelRegistry/AuthStorage don't read real disk files in unit tests
