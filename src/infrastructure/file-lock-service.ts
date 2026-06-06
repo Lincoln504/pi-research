@@ -19,13 +19,13 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 export interface FileLockOptions {
   /** Lock file path */
   lockFilePath: string;
-  /** Maximum time to wait for lock acquisition (default: 10 seconds) */
+  /** Maximum time to wait for lock acquisition (default: 20 seconds) */
   lockTimeout?: number;
-  /** Number of retries for lock acquisition (default: 100) */
+  /** Number of retries for lock acquisition (default: 200) */
   lockRetries?: number;
   /** Delay between retries in milliseconds (default: 100ms) */
   lockRetryDelay?: number;
-  /** Stale lock threshold in milliseconds (default: 30 seconds) */
+  /** Stale lock threshold in milliseconds (default: 15 seconds) */
   lockStaleThreshold?: number;
 }
 
@@ -49,15 +49,15 @@ export class FileLockService implements IService {
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
   private readonly lockUuid: string = crypto.randomUUID();
-  private lockPromise: Promise<void> | null = null;
-  private resolveLock: ((value?: any) => void) | null = null;
+  private queue: Promise<void> = Promise.resolve();
+  private resolveTurn: (() => void) | null = null;
 
   constructor(options: FileLockOptions) {
     this.lockFilePath = options.lockFilePath;
-    this.lockTimeout = options.lockTimeout ?? 10000;
-    this.lockRetries = options.lockRetries ?? 100;
+    this.lockTimeout = options.lockTimeout ?? 20000;
+    this.lockRetries = options.lockRetries ?? 200;
     this.lockRetryDelay = options.lockRetryDelay ?? 100;
-    this.lockStaleThreshold = options.lockStaleThreshold ?? 30000;
+    this.lockStaleThreshold = options.lockStaleThreshold ?? 15000;
   }
 
   async initialize(): Promise<void> {
@@ -95,7 +95,7 @@ export class FileLockService implements IService {
       const stats = await fs.stat(this.lockFilePath);
       const lockAge = Date.now() - stats.mtimeMs;
 
-      // Clean up locks older than stale threshold (30 seconds)
+      // Clean up locks older than stale threshold (15 seconds)
       if (lockAge > this.lockStaleThreshold) {
         logger.log(
           `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old)`
@@ -119,153 +119,134 @@ export class FileLockService implements IService {
    * @throws Error if unable to acquire lock within timeout
    */
   async acquireLock(): Promise<void> {
-    // Wait in line for any other async context on this same instance
-    while (this.lockPromise) {
-      await this.lockPromise;
+    // 1. Join the local FIFO queue for this instance.
+    // This ensures that multiple concurrent calls to acquireLock() on the same
+    // instance (e.g. from different queries in the same process) are handled
+    // one by one, preventing internal state corruption and redundant disk I/O.
+    let myResolve!: () => void;
+    const myTurn = new Promise<void>((resolve) => {
+        myResolve = resolve;
+    });
+
+    const previous = this.queue;
+    this.queue = myTurn;
+
+    try {
+        await previous;
+    } catch (_err) {
+        // Continue even if previous turn failed
     }
 
-    let resolver!: () => void;
-    this.lockPromise = new Promise(resolve => {
-      resolver = resolve;
-    });
-    this.resolveLock = resolver;
+    // Capture resolve function so we can trigger it in releaseLock() or on failure
+    this.resolveTurn = myResolve;
 
     const startTime = Date.now();
     let contentionCount = 0;
 
-    for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
-      // Use a LOCAL handle variable so that concurrent acquireLock() calls on
-      // the same instance cannot close each other's file handle through the
-      // shared this.lockHandle field. We only promote to this.lockHandle after
-      // the lock is fully and successfully acquired.
-      let handle: import('node:fs/promises').FileHandle | null = null;
-      try {
-        // Open lock file and write UUID immediately (atomic)
-        handle = await fs.open(this.lockFilePath, 'wx');
-        await handle.write(this.lockUuid);
-        await handle.sync(); // Ensure UUID is written to disk
+    try {
+      for (let _attempt = 0; _attempt < this.lockRetries; _attempt++) {
+        // Use a LOCAL handle variable so that concurrent acquireLock() calls on
+        // the same instance cannot close each other's file handle through the
+        // shared this.lockHandle field. We only promote to this.lockHandle after
+        // the lock is fully and successfully acquired.
+        let handle: import('node:fs/promises').FileHandle | null = null;
+        try {
+          // Open lock file and write UUID immediately (atomic)
+          handle = await fs.open(this.lockFilePath, 'wx');
+          await handle.write(this.lockUuid);
+          await handle.sync(); // Ensure UUID is written to disk
 
-        // Fully acquired — commit to instance state
-        this.lockHandle = handle;
+          // Fully acquired — commit to instance state
+          this.lockHandle = handle;
 
-        const duration = Date.now() - startTime;
-        metrics.observe('state_lock_acquire_duration_ms', duration);
-        metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
-        if (contentionCount > 0) {
-          metrics.increment('state_lock_contention_total', 1);
-          metrics.observe('state_lock_contention_retries', contentionCount);
-        }
-        return;
-      } catch (error: unknown) {
-        // Close the locally-opened handle only (never touch this.lockHandle here)
-        if (handle) {
-          try {
-            await handle.close();
-          } catch {
-            // Ignore close error
+          const duration = Date.now() - startTime;
+          metrics.observe('state_lock_acquire_duration_ms', duration);
+          metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
+          if (contentionCount > 0) {
+            metrics.increment('state_lock_contention_total', 1);
+            metrics.observe('state_lock_contention_retries', contentionCount);
           }
-          // handle goes out of scope at end of iteration; no need to null it
-        }
-
-        if (error instanceof Error && 'code' in error) {
-          const errnoError = error as NodeJS.ErrnoException;
-          if (errnoError.code === 'EEXIST') {
-            contentionCount++;
-            // Read lock UUID to verify ownership before considering stale
+          return;
+        } catch (error: unknown) {
+          // Close the locally-opened handle only (never touch this.lockHandle here)
+          if (handle) {
             try {
-              const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
-              const lockUuid = lockContent.trim();
-              const stats = await fs.stat(this.lockFilePath);
-              const lockAge = Date.now() - stats.mtimeMs;
+              await handle.close();
+            } catch {
+              // Ignore close error
+            }
+          }
 
-              // Only delete if lock is stale AND we can verify it's not owned by a live process
-              if (lockAge > this.lockStaleThreshold) {
-                // Check if lock owner is still alive using the UUID
-                // This prevents TOCTOU race where a new process might have acquired the lock
-                if (lockUuid === this.lockUuid) {
-                  // This is our own lock (shouldn't happen, but handle gracefully)
-                  return;
+          if (error instanceof Error && 'code' in error) {
+            const errnoError = error as NodeJS.ErrnoException;
+            if (errnoError.code === 'EEXIST') {
+              contentionCount++;
+              // Read lock UUID to verify ownership before considering stale
+              try {
+                const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
+                const lockUuid = lockContent.trim();
+                const stats = await fs.stat(this.lockFilePath);
+                const lockAge = Date.now() - stats.mtimeMs;
+
+                // Only delete if lock is stale AND we can verify it's not owned by a live process
+                if (lockAge > this.lockStaleThreshold) {
+                  if (lockUuid === this.lockUuid) {
+                    // This is our own lock (shouldn't happen, but handle gracefully)
+                    return;
+                  }
+
+                  const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+                  try {
+                    await fs.rename(this.lockFilePath, trashPath);
+                    const trashContent = await fs.readFile(trashPath, 'utf-8');
+                    if (trashContent.trim() !== lockUuid) {
+                      try {
+                        await fs.link(trashPath, this.lockFilePath);
+                      } catch { /* ignore */ }
+                      await fs.unlink(trashPath);
+                      continue;
+                    }
+                    await fs.unlink(trashPath);
+                  } catch { /* ignore */ }
+                  continue;
                 }
-
-                // Stale lock with different UUID - safe to remove
-                // Use atomic rename to "claim" the stale lock file before deleting it
-                // This prevents deleting a lock that was JUST acquired by another process
+              } catch (_statError) {
                 const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
                 try {
                   await fs.rename(this.lockFilePath, trashPath);
-                  
-                  // TOCTOU verification: check if the lock we just renamed is still
-                  // the one we thought was stale. If the UUID changed between
-                  // the readFile above and the rename, we accidentally hijacked
-                  // a fresh lock from another process.
-                  const trashContent = await fs.readFile(trashPath, 'utf-8');
-                  if (trashContent.trim() !== lockUuid) {
-                    logger.warn('[FileLockService] Stale lock cleanup race detected, restoring fresh lock');
-                    try {
-                      // Attempt to restore it. fs.link fails if destination exists,
-                      // ensuring we don't overwrite yet another even newer lock.
-                      await fs.link(trashPath, this.lockFilePath);
-                    } catch {
-                      // If restoration fails, someone else already created a new lock.
-                      // That's fine; the hijacked process will fail its own liveness check.
-                    }
-                    await fs.unlink(trashPath);
-                    continue;
-                  }
-                  
                   await fs.unlink(trashPath);
-                } catch {
-                  // Someone else already cleaned it up or acquired it - that's fine
-                }
-                continue;
+                  continue;
+                } catch { /* ignore */ }
               }
-            } catch (_statError) {
-              // Can't stat or read lock file - try to remove it atomically
-              const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-              try {
-                await fs.rename(this.lockFilePath, trashPath);
-                await fs.unlink(trashPath);
-                continue;
-              } catch {
-                // Lock file might be removed by another process, continue waiting
+
+              if (Date.now() - startTime >= this.lockTimeout) {
+                const duration = Date.now() - startTime;
+                metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
+                metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
+                throw new Error(
+                  `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms`,
+                  { cause: error },
+                );
               }
-            }
 
-            // Check timeout before sleeping
-            if (Date.now() - startTime >= this.lockTimeout) {
-              const duration = Date.now() - startTime;
-              metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
-              metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
-              const err = new Error(
-                `Failed to acquire lock at ${this.lockFilePath}: timeout after ${this.lockTimeout}ms`,
-                { cause: error },
-              );
-              this._resolveQueue();
-              throw err;
+              await this.sleep(this.lockRetryDelay);
+              continue;
             }
-
-            await this.sleep(this.lockRetryDelay);
-            continue;
           }
+          throw error;
         }
-        const duration = Date.now() - startTime;
-        metrics.observe('state_lock_acquire_duration_ms', duration, { status: 'timeout' });
-        metrics.increment('state_lock_acquire_total', 1, { status: 'timeout' });
-        this._resolveQueue();
-        throw error;
       }
-    }
 
-    metrics.increment('state_lock_acquire_total', 1, { status: 'failed' });
-    this._resolveQueue();
-    throw new Error(`Failed to acquire lock after ${this.lockRetries} retries`);
-  }
-
-  private _resolveQueue(): void {
-    if (this.resolveLock) {
-      this.resolveLock();
-      this.resolveLock = null;
-      this.lockPromise = null;
+      metrics.increment('state_lock_acquire_total', 1, { status: 'failed' });
+      throw new Error(`Failed to acquire lock after ${this.lockRetries} retries`);
+    } catch (err) {
+      // If acquisition failed (timeout/error), we MUST release our turn in the 
+      // queue so the next caller can try.
+      if (this.resolveTurn) {
+        this.resolveTurn();
+        this.resolveTurn = null;
+      }
+      throw err;
     }
   }
 
@@ -277,22 +258,17 @@ export class FileLockService implements IService {
     try {
       if (this.lockHandle !== null) {
         try {
-          // Verify we still own the lock before releasing
           try {
             const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
             const lockUuid = lockContent.trim();
             if (lockUuid !== this.lockUuid) {
-              // Lock was stolen by another process, don't delete
               logger.warn('[FileLockService] Lock UUID mismatch during release, skipping deletion');
               this.lockHandle = null;
               metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
               return;
             }
-          } catch (_readError) {
-            // Lock file might already be gone, that's fine
-          }
+          } catch (_readError) { /* ignore */ }
 
-          // Only close if handle exists (might have been set to null above)
           if (this.lockHandle !== null) {
             await this.lockHandle.close();
             this.lockHandle = null;
@@ -320,7 +296,11 @@ export class FileLockService implements IService {
         }
       }
     } finally {
-      this._resolveQueue();
+      // Always release our turn in the local queue
+      if (this.resolveTurn) {
+        this.resolveTurn();
+        this.resolveTurn = null;
+      }
     }
   }
 

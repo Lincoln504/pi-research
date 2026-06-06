@@ -35,7 +35,7 @@ export class BrowserTaskScheduler implements IScheduler {
     private readonly LEADERSHIP_CHECK_INTERVAL_MS: number = 5000;
     private readonly LEADERSHIP_MISS_THRESHOLD: number = 3;
     private isShuttingDown: boolean = false;
-    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — must outlast the embedding phase for large documents (can take 20+ min on CPU)
+    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
     constructor(
         public readonly schedulerId: string,
@@ -53,7 +53,12 @@ export class BrowserTaskScheduler implements IScheduler {
         return this.workerPoolManager;
     }
 
-    private async getPriorityQueue(config?: Config): Promise<PriorityTaskQueue> {
+    /**
+     * Get or create the priority task queue.
+     * This is synchronous to prevent races where multiple concurrent requests
+     * might create redundant queue instances before the reference is set.
+     */
+    private getPriorityQueue(config?: Config): PriorityTaskQueue {
         const c = config || getConfig();
         const maxTotalConcurrency = c.WORKER_THREADS * c.WORKER_CONCURRENCY;
         if (!this.priorityQueue) {
@@ -70,7 +75,6 @@ export class BrowserTaskScheduler implements IScheduler {
             
             try {
                 const serverInfo = await this.stateManager.getBrowserServer();
-                // If the state file now points to a different schedulerId, we have lost leadership
                 if (serverInfo?.schedulerId !== this.schedulerId) {
                     this.consecutiveLeadershipMisses++;
                     metrics.increment('browser_leadership_misses_total', 1);
@@ -81,10 +85,9 @@ export class BrowserTaskScheduler implements IScheduler {
                         metrics.increment('browser_leadership_lost_total', 1);
                         logger.error(`[Scheduler] Leadership threshold exceeded (${this.consecutiveLeadershipMisses} misses), shutting down pool...`);
                         await this.shutdown();
-                        return; // Stop checking after shutdown
+                        return;
                     }
                 } else {
-                    // Reset counter on successful leadership check
                     if (this.consecutiveLeadershipMisses > 0) {
                         logger.log(`[Scheduler] Leadership confirmed, resetting miss counter from ${this.consecutiveLeadershipMisses}`);
                         this.consecutiveLeadershipMisses = 0;
@@ -92,7 +95,6 @@ export class BrowserTaskScheduler implements IScheduler {
                     metrics.setGauge('browser_is_leader', 1);
                 }
                 
-                // Decay the consecutive error counter
                 const poolManager = await this.getWorkerPoolManager();
                 poolManager.resetConsecutiveErrors();
             } catch (err) {
@@ -131,20 +133,11 @@ export class BrowserTaskScheduler implements IScheduler {
         return this.server.start();
     }
 
-    async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
-        // Activity on the server should keep the idle timer alive. This matters when
-        // this process is the leader and another process (BrowserClient) is calling
-        // us via HTTP — getScheduler() only resets the timer on the caller side,
-        // so we must also reset it here on every inbound operation.
+    async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
 
-        // Worker does at most 2 page loads at 12s each; 30s gives a buffer without
-        // blocking Promise.all for 2 minutes when DuckDuckGo is slow or Cloudflare blocks.
-        // The 180s safety buffer accounts for tasks sitting in the poolifier queue on
-        // constrained CI runners (2 vCPU) where browser init can take 30–50s per worker
-        // and multiple tasks may be backlogged before a slot opens.
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
         const timeoutMs = baseTimeoutMs + 180000;
 
@@ -159,13 +152,18 @@ export class BrowserTaskScheduler implements IScheduler {
         logger.debug(`[BrowserTaskScheduler] Executing search: "${query}" (Timeout: ${timeoutMs}ms)`);
         let result: any;
         try {
-            const queue = await this.getPriorityQueue(config);
-            result = await queue.enqueue('search', async () => {
-                return await Promise.race([
-                    pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                    timeoutPromise
-                ]);
-            });
+            const queue = this.getPriorityQueue(config);
+            // Race the enqueue call against the timeoutPromise.
+            // This ensures that even if the queue is saturated, we won't hang forever.
+            result = await Promise.race([
+                queue.enqueue('search', async () => {
+                    return await Promise.race([
+                        pool.execute({ type: 'search', query, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                        timeoutPromise
+                    ]);
+                }, signal),
+                timeoutPromise
+            ]);
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
@@ -184,7 +182,6 @@ export class BrowserTaskScheduler implements IScheduler {
         const duration = Date.now() - startTime;
         metrics.observe('browser_search_duration_ms', duration, { status: 'success' });
         metrics.increment('browser_search_requests_total', 1, { status: 'success' });
-        logger.debug(`[Scheduler] Search task completed in ${duration}ms: ${query}`);
         if (result.error) {
             metrics.increment('browser_search_requests_total', 1, { status: 'error' });
             errorTracker.trackError(new Error(result.error), {
@@ -199,17 +196,11 @@ export class BrowserTaskScheduler implements IScheduler {
         return result.results;
     }
 
-    async runScrape(url: string, config?: Config): Promise<any> {
-        this.resetIdleTimer(); // Keep server alive while clients are actively scraping
+    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any> {
+        this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        // The 180s safety buffer accounts for tasks sitting in the poolifier queue on
-        // constrained CI runners. The worker itself enforces SCRAPE_TIMEOUT_MS on the
-        // actual browser operations.
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
-        // In mock mode the scrape worker returns immediately; a tight 15s queue buffer
-        // is sufficient. In real mode the full 180s buffer accounts for browser init
-        // on constrained runners where multiple tasks may backlog before a slot opens.
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
 
@@ -223,13 +214,16 @@ export class BrowserTaskScheduler implements IScheduler {
 
         let result: any;
         try {
-            const queue = await this.getPriorityQueue(config);
-            result = await queue.enqueue('scrape', async () => {
-                return await Promise.race([
-                    pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
-                    timeoutPromise
-                ]);
-            });
+            const queue = this.getPriorityQueue(config);
+            result = await Promise.race([
+                queue.enqueue('scrape', async () => {
+                    return await Promise.race([
+                        pool.execute({ type: 'scrape', url, queuedAt: startTime, taskTimeoutMs: timeoutMs }),
+                        timeoutPromise
+                    ]);
+                }, signal),
+                timeoutPromise
+            ]);
         } catch (error) {
             metrics.increment('browser_scrape_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
@@ -258,11 +252,10 @@ export class BrowserTaskScheduler implements IScheduler {
         return result;
     }
 
-    async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
-        this.resetIdleTimer(); // Keep server alive during active health-checks from clients
+    async runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+        this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        // Add a generous safety buffer to account for worker queueing.
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = (45000 + 60000) / (isMocking ? 4 : 1);
         let timeoutId: NodeJS.Timeout;
@@ -273,15 +266,18 @@ export class BrowserTaskScheduler implements IScheduler {
 
         let result: { success: boolean; error?: string };
         try {
-            const queue = await this.getPriorityQueue(config);
-            result = await queue.enqueue('healthcheck', async () => {
-                const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
-                execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
-                return await Promise.race([
-                    execPromise,
-                    timeoutPromise
-                ]);
-            }) as { success: boolean; error?: string };
+            const queue = this.getPriorityQueue(config);
+            result = await Promise.race([
+                queue.enqueue('healthcheck', async () => {
+                    const execPromise = pool.execute({ type: 'healthcheck', queuedAt: startTime, taskTimeoutMs: timeoutMs });
+                    execPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background healthcheck task rejection: ${err.message}`));
+                    return await Promise.race([
+                        execPromise,
+                        timeoutPromise
+                    ]);
+                }, signal),
+                timeoutPromise
+            ]) as { success: boolean; error?: string };
         } catch (error) {
             metrics.increment('browser_healthcheck_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
@@ -297,11 +293,11 @@ export class BrowserTaskScheduler implements IScheduler {
         const duration = Date.now() - startTime;
         metrics.observe('browser_healthcheck_duration_ms', duration, { status: 'success' });
         metrics.increment('browser_healthcheck_requests_total', 1, { status: 'success' });
-        metrics.setGauge('browser_pool_health', 1); // Health check passed
+        metrics.setGauge('browser_pool_health', 1);
         logger.debug(`[Scheduler] Healthcheck completed in ${duration}ms`);
         if (result.error) {
             metrics.increment('browser_healthcheck_requests_total', 1, { status: 'error' });
-            metrics.setGauge('browser_pool_health', 0); // Health check failed
+            metrics.setGauge('browser_pool_health', 0);
             errorTracker.trackError(new Error(result.error), {
                 component: 'browser-manager',
                 operation: 'healthcheck',
@@ -327,7 +323,6 @@ export class BrowserTaskScheduler implements IScheduler {
             this.leadershipTimer = null;
         }
 
-        // Clear reference immediately to prevent new tasks from using this scheduler
         const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER);
         const currentScheduler = schedulerService.getSchedulerInstance();
         if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
@@ -340,11 +335,8 @@ export class BrowserTaskScheduler implements IScheduler {
         try {
             serverInfo = await this.stateManager.getBrowserServer();
         } catch (err) {
-            logger.warn('[Scheduler] Could not read browser server state during shutdown (state manager may be disposed):', err);
+            logger.warn('[Scheduler] Could not read browser server state during shutdown:', err);
         }
-        // Only clear state if this scheduler still owns it — same pid AND same schedulerId.
-        // Checking pid alone is wrong when a new scheduler wins election in the same process:
-        // the old scheduler's shutdown would wipe the new leader's registration.
         if (serverInfo?.pid === process.pid && serverInfo?.schedulerId === this.schedulerId) {
             await this.stateManager.clearBrowserServer().catch((err) => {
                 logger.warn('[Scheduler] Failed to clear browser server state during shutdown:', err);
@@ -353,7 +345,6 @@ export class BrowserTaskScheduler implements IScheduler {
 
         if (this.server) {
             try {
-                // Use a timeout for server shutdown
                 await Promise.race([
                     this.server.stop(),
                     new Promise(resolve => setTimeout(resolve, 2000))
@@ -375,22 +366,17 @@ export class BrowserTaskScheduler implements IScheduler {
             }
         }
 
-        // Shutdown the worker pool
         if (this.workerPoolManager) {
             await this.workerPoolManager.shutdown();
         }
 
         if (targetBrowserPids.length > 0) {
-            // Add timeout to prevent hanging during process cleanup
             await Promise.race([
                 killBrowserProcesses(targetBrowserPids),
                 new Promise(resolve => setTimeout(resolve, 10000))
             ]);
         }
 
-        // Clean up any orphaned Camoufox browser processes that may have been left behind
-        // This handles edge cases where workers were force-killed or hung during teardown
-        // Add timeout to prevent hanging - orphan cleanup can find many processes on CI
         try {
             const orphanPromise = cleanupOrphanedCamoufoxProcesses();
             orphanPromise.catch((err: Error) => logger.debug(`[BrowserTaskScheduler] Background orphan cleanup rejection: ${err.message}`));

@@ -7,6 +7,7 @@ export interface QueuedTask<T> {
     fn: () => Promise<T>;
     resolve: (val: T) => void;
     reject: (err: any) => void;
+    signal?: AbortSignal;
 }
 
 /**
@@ -33,9 +34,22 @@ export class PriorityTaskQueue {
      * Enqueue a task with priority.
      * Searches and healthchecks have high priority.
      */
-    enqueue<T>(type: TaskType, fn: () => Promise<T>): Promise<T> {
+    enqueue<T>(type: TaskType, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
         return new Promise<T>((resolve, reject) => {
-            const task: QueuedTask<T> = { type, fn, resolve, reject };
+            const task: QueuedTask<T> = { type, fn, resolve, reject, signal };
+
+            if (signal?.aborted) {
+                return reject(new Error(`Task ${type} aborted before enqueuing`));
+            }
+
+            if (signal) {
+                const onAbort = () => {
+                    if (this.removeFromQueue(task)) {
+                        reject(new Error(`Task ${type} aborted while in queue`));
+                    }
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
             
             if (type === 'healthcheck') {
                 this.healthcheckQueue.push(task);
@@ -48,6 +62,18 @@ export class PriorityTaskQueue {
             logger.debug(`[PriorityQueue] Task enqueued: ${type}. Active: ${this.activeCount}, Capacity: ${this.maxTotalConcurrency}. Queues: H:${this.healthcheckQueue.length} S:${this.searchQueue.length} SC:${this.scrapeQueue.length}`);
             this.process();
         });
+    }
+
+    private removeFromQueue(task: QueuedTask<any>): boolean {
+        const queues = [this.healthcheckQueue, this.searchQueue, this.scrapeQueue];
+        for (const q of queues) {
+            const idx = q.indexOf(task);
+            if (idx !== -1) {
+                q.splice(idx, 1);
+                return true;
+            }
+        }
+        return false;
     }
 
     private process() {
@@ -72,6 +98,10 @@ export class PriorityTaskQueue {
     }
 
     private async runTask(task: QueuedTask<any>) {
+        if (task.signal?.aborted) {
+            return;
+        }
+        
         this.activeCount++;
         try {
             const result = await task.fn();

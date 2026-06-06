@@ -87,9 +87,9 @@ describe('utils/session-state', () => {
       const s3 = startResearchSession(psid);
       
       // Sessions are only added to the order when they register a panel
-      const p1 = createInitialPanelState(s1, 'query', 'm');
-      const p2 = createInitialPanelState(s2, 'query', 'm');
-      const p3 = createInitialPanelState(s3, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
+      const p2 = createInitialPanelState(s2, 'r2', 'query', 'm');
+      const p3 = createInitialPanelState(s3, 'r3', 'query', 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -104,8 +104,8 @@ describe('utils/session-state', () => {
       const s1 = startResearchSession(psid);
       const s2 = startResearchSession(psid);
       
-      const p1 = createInitialPanelState(s1, 'query', 'm');
-      const p2 = createInitialPanelState(s2, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
+      const p2 = createInitialPanelState(s2, 'r2', 'query', 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -119,8 +119,8 @@ describe('utils/session-state', () => {
       const s1 = startResearchSession(psid);
       const s2 = startResearchSession(psid);
       
-      const p1 = createInitialPanelState(s1, 'query', 'm');
-      const p2 = createInitialPanelState(s2, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
+      const p2 = createInitialPanelState(s2, 'r2', 'query', 'm');
       
       registerSessionPanel(psid, s1, p1);
       registerSessionPanel(psid, s2, p2);
@@ -140,8 +140,8 @@ describe('utils/session-state', () => {
       
       onSessionOrderChange(psid, callback);
       
-      const p1 = createInitialPanelState(s1, 'query', 'm');
-      const p2 = createInitialPanelState(s2, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
+      const p2 = createInitialPanelState(s2, 'r2', 'query', 'm');
       
       registerSessionPanel(psid, s1, p1);
       expect(callback).toHaveBeenCalledTimes(1);
@@ -160,7 +160,7 @@ describe('utils/session-state', () => {
       const masterUpdate = vi.fn();
       registerMasterUpdate(psid, masterUpdate);
       
-      const p1 = createInitialPanelState(s1, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
       registerSessionPanel(psid, s1, p1);
       
       refreshAllSessions(psid);
@@ -189,8 +189,8 @@ describe('utils/session-state', () => {
       registerMasterUpdate(ps1, masterUpdate1);
       registerMasterUpdate(ps2, masterUpdate2);
       
-      const p1 = createInitialPanelState(s1, 'query', 'm');
-      const p2 = createInitialPanelState(s2, 'query', 'm');
+      const p1 = createInitialPanelState(s1, 'r1', 'query', 'm');
+      const p2 = createInitialPanelState(s2, 'r2', 'query', 'm');
       
       registerSessionPanel(ps1, s1, p1);
       registerSessionPanel(ps2, s2, p2);
