@@ -274,22 +274,36 @@ describe('Error Recovery and Resilience', () => {
       const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
-      // Simulate write failures by making the directory read-only
+      // Sanity check: store is queryable before the failure-inducing write.
+      const beforeResults = await knowledgeStore.findByUrl('https://test.com/never-existed');
+      expect(Array.isArray(beforeResults)).toBe(true);
+
+      // Simulate write failures by making the directory read-only.
       const fs = await import('node:fs');
+      let writeThrew = false;
+      let storeStillUsable = false;
       try {
         fs.chmodSync(dbPath, 0o444);
 
-        // Attempt to write should fail gracefully
+        // Attempt to write should fail (or be rejected) gracefully.
         try {
           await knowledgeStore.addDocuments([
             { text: 'Should fail', url: 'https://test.com/fail', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() },
           ]);
         } catch {
-          // Expected — read-only db should reject or fail gracefully
+          writeThrew = true;
         }
 
-        // Either succeeded or failed gracefully (not crashed)
-        expect(true).toBe(true);
+        // Critical: the store must NOT be left in a corrupted state. After the
+        // failed write, a subsequent read operation should still succeed.
+        try {
+          const afterResults = await knowledgeStore.findByUrl('https://test.com/never-existed');
+          expect(Array.isArray(afterResults)).toBe(true);
+          expect(afterResults.length).toBe(0);
+          storeStillUsable = true;
+        } catch {
+          storeStillUsable = false;
+        }
       } finally {
         // Restore permissions
         try {
@@ -299,6 +313,12 @@ describe('Error Recovery and Resilience', () => {
         }
         await knowledgeStore.close();
       }
+
+      // The contract: a write failure does not corrupt the store. The store
+      // either rejects the write cleanly OR silently drops it, and it remains
+      // queryable afterwards. The store must not have accepted the write and
+      // then crashed (storeStillUsable === false).
+      expect(storeStillUsable).toBe(true);
     }, 60000);
   });
 

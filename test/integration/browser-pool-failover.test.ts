@@ -339,6 +339,13 @@ describe('Browser Pool Failover', () => {
 
       // Tasks already in-flight when forceSchedulerRestart runs may fail with a
       // transient pool error. Use allSettled to capture both outcomes.
+      //
+      // NOTE: the worst-case wait can be up to ~225s per task (the BrowserTaskScheduler
+      // runSearch timeout: BROWSER_TASK_TIMEOUT_MS (45s) + 180s). poolifier does NOT
+      // abort active workers when the pool is destroyed, so in-flight tasks must run
+      // to completion (or the task-level timeout fires) before the test observes
+      // the failure. This is the contract: the queue is maintained and tasks do
+      // eventually settle — they do not hang indefinitely.
       const settled = await Promise.allSettled(taskPromises);
       // All tasks must settle (no hangs / unresolved promises).
       expect(settled.length).toBe(taskPromises.length);
