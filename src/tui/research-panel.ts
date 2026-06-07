@@ -335,6 +335,9 @@ export function createMasterResearchPanel(
         if (panels.length === 0) return [];
 
         const allLines: string[] = [];
+        // Render steering messages ONCE at the bottom of the master panel,
+        // not duplicated under each research panel.
+        const allSteering = getSteeringMessages(piSessionId);
         for (let i = 0; i < panels.length; i++) {
           const panel = panels[i]!;
 
@@ -397,17 +400,22 @@ export function createMasterResearchPanel(
 
           const blockLines = renderPanelBlock(panel, theme, width);
           allLines.push(...blockLines);
+        }
 
-          // Render steering messages under this panel
-          const steeringMessages = getSteeringMessages(piSessionId);
-          for (const message of steeringMessages) {
-            const display = truncateToWidth(` Research Steering: ${message}`, width);
-            allLines.push(theme.fg('muted', display));
-          }
+        // Render steering messages once at the bottom (not duplicated under each panel)
+        for (const msg of allSteering) {
+          const prefix = msg.status === 'queued' ? ' QUEUED RESEARCHER STEERING: ' : ' RESEARCHER STEERING: ';
+          const display = truncateToWidth(`${prefix}${msg.text}`, width);
+          // Use 'warning' style for queued (amber/yellow), 'muted' for active
+          const color = msg.status === 'queued' ? 'warning' : 'muted';
+          allLines.push(theme.fg(color as any, display));
         }
 
         if (panels.length > 0) {
-          allLines.push(theme.fg('muted', ' esc to cancel'));
+          // Dynamic hint line based on whether there are queued (poppable) messages
+          const hasQueued = allSteering.some(m => m.status === 'queued');
+          const hint = hasQueued ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
+          allLines.push(theme.fg('muted', hint));
         }
 
         return allLines.map(line => {

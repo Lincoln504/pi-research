@@ -9,6 +9,34 @@ import { generateSessionId as generateUniqueSessionId } from './shared-links.ts'
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';
+import { randomUUID } from 'node:crypto';
+
+/**
+ * Steering message status lifecycle:
+ * queued → active (consumed by orchestrator) or queued → popped (removed by user via Alt+P)
+ */
+export type SteeringMessageStatus = 'queued' | 'active' | 'popped';
+
+/**
+ * A steering message captured during active research.
+ */
+export interface SteeringMessage {
+  /** Unique identifier */
+  id: string;
+  /** The message text */
+  text: string;
+  /** Current lifecycle status */
+  status: SteeringMessageStatus;
+  /** Timestamp when the message was added */
+  addedAt: number;
+  /** Timestamp when the message was consumed (marked active) by the orchestrator */
+  consumedAt: number | null;
+  /** Timestamp when the message was popped by the user */
+  poppedAt: number | null;
+}
+
+/** Maximum number of steering messages per Pi session */
+const MAX_STEERING_MESSAGES = 20;
 
 /**
  * State container for a single Pi session
@@ -29,7 +57,7 @@ interface PiSessionState {
   /** Single update function for the Master Widget of this Pi session */
   masterUpdate: (() => void) | null;
   /** Steering messages captured for this Pi session */
-  steeringMessages: string[];
+  steeringMessages: SteeringMessage[];
 }
 
 /**
@@ -75,28 +103,40 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
 export function addSteeringMessage(piSessionId: string | undefined, message: string): void {
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
+  
   // Normalize whitespace to prevent functional duplicates
   const normalizedMsg = message.trim().replace(/\s+/g, ' ');
-  const exists = state.steeringMessages.some(m => m.trim().replace(/\s+/g, ' ') === normalizedMsg);
+  const exists = state.steeringMessages.some(
+    m => m.status !== 'popped' && m.text.trim().replace(/\s+/g, ' ') === normalizedMsg
+  );
   
   if (!exists) {
-    logger.debug(`[session-state] Adding steering message to session ${sid}: ${message}`);
-    state.steeringMessages.push(message);
-    // CRITICAL: Trigger a TUI refresh when a steering message is added
+    // Enforce cap: remove oldest queued message if at limit
+    if (state.steeringMessages.filter(m => m.status !== 'popped').length >= MAX_STEERING_MESSAGES) {
+      const oldestQueuedIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
+      if (oldestQueuedIdx !== -1) {
+        logger.debug(`[session-state] Steering message cap reached, removing oldest queued in session ${sid}`);
+        state.steeringMessages.splice(oldestQueuedIdx, 1);
+      }
+    }
+    
+    const steeringMsg: SteeringMessage = {
+      id: randomUUID(),
+      text: message,
+      status: 'queued',
+      addedAt: Date.now(),
+      consumedAt: null,
+      poppedAt: null,
+    };
+    
+    logger.debug(`[session-state] Adding steering message to session ${sid}: ${message} (id: ${steeringMsg.id})`);
+    state.steeringMessages.push(steeringMsg);
+    
+    // Trigger a TUI refresh when a steering message is added
     refreshAllSessions(sid);
   } else {
     logger.debug(`[session-state] Steering message already exists in session ${sid}: ${message}`);
   }
-}
-
-/**
- * Get all steering messages for a Pi session
- */
-export function getSteeringMessages(piSessionId: string | undefined): string[] {
-  const sid = normalizeSessionId(piSessionId);
-  const messages = getPiState(sid).steeringMessages;
-  logger.debug(`[session-state] Getting ${messages.length} steering messages for session ${sid}`);
-  return [...messages];
 }
 
 /**
@@ -107,21 +147,118 @@ export function getAllTrackedSessions(): string[] {
 }
 
 /**
- * Clear steering messages for a Pi session
+ * Get all non-popped steering messages for a Pi session.
+ * Returns SteeringMessage objects (full metadata).
+ */
+export function getSteeringMessages(piSessionId: string | undefined): SteeringMessage[] {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return [];
+  return [...state.steeringMessages.filter(m => m.status !== 'popped')];
+}
+
+/**
+ * Get only queued steering messages for a Pi session.
+ * Used by the Alt+P pop handler to identify poppable messages.
+ */
+export function getQueuedSteeringMessages(piSessionId: string | undefined): SteeringMessage[] {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return [];
+  return state.steeringMessages.filter(m => m.status === 'queued');
+}
+
+/**
+ * Get only active (consumed) steering messages for a Pi session.
+ * Used for the final report — only messages the LLM actually saw.
+ */
+export function getActiveSteeringMessages(piSessionId: string | undefined): SteeringMessage[] {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return [];
+  return state.steeringMessages.filter(m => m.status === 'active');
+}
+
+/**
+ * Consume all queued steering messages — atomically mark them as active.
+ * Called by orchestrators at round start before passing messages to planning.
+ * Returns the messages that were transitioned from queued to active.
+ */
+export function consumeQueuedMessages(piSessionId: string | undefined): SteeringMessage[] {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return [];
+  
+  const now = Date.now();
+  const consumed: SteeringMessage[] = [];
+  
+  for (const msg of state.steeringMessages) {
+    if (msg.status === 'queued') {
+      msg.status = 'active';
+      msg.consumedAt = now;
+      consumed.push(msg);
+    }
+  }
+  
+  if (consumed.length > 0) {
+    logger.debug(`[session-state] Consumed ${consumed.length} queued steering messages for session ${sid}`);
+    refreshAllSessions(sid);
+  }
+  
+  return consumed;
+}
+
+/**
+ * Pop all queued steering messages — mark them as popped and return them.
+ * Called by the Alt+P shortcut handler.
+ * Returns the messages that were popped (for forwarding to pi's follow-up queue).
+ */
+export function popQueuedMessages(piSessionId: string | undefined): SteeringMessage[] {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return [];
+  
+  const now = Date.now();
+  const popped: SteeringMessage[] = [];
+  
+  for (const msg of state.steeringMessages) {
+    if (msg.status === 'queued') {
+      msg.status = 'popped';
+      msg.poppedAt = now;
+      popped.push(msg);
+    }
+  }
+  
+  if (popped.length > 0) {
+    logger.info(`[session-state] Popped ${popped.length} queued steering messages for session ${sid}`);
+    refreshAllSessions(sid);
+  }
+  
+  return popped;
+}
+
+/**
+ * Clear all steering messages for a Pi session regardless of status.
  */
 export function clearSteeringMessages(piSessionId: string | undefined): void {
   const sid = normalizeSessionId(piSessionId);
-  const state = getPiState(sid);
+  const state = piSessions.get(sid);
+  if (!state) return;
+  
   logger.debug(`[session-state] Clearing steering messages for session ${sid} (current count: ${state.steeringMessages.length})`);
   state.steeringMessages = [];
   refreshAllSessions(sid);
 }
 
 /**
- * Maximum allowed unique failed researchers before stopping research.
- * Set to 2 to balance thoroughness with resource conservation.
+ * Check if there are any queued (poppable) steering messages for a Pi session.
  */
-export const MAX_FAILED_RESEARCHERS = 2;
+export function hasQueuedSteeringMessages(piSessionId: string | undefined): boolean {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return false;
+  return state.steeringMessages.some(m => m.status === 'queued');
+}
 
 /**
  * Subscribe to session order changes for a specific Pi session
@@ -131,8 +268,6 @@ export function onSessionOrderChange(piSessionId: string | undefined, callback: 
   const state = getPiState(sid);
   state.subscribers.push(callback);
   return () => {
-    // Avoid splice during iteration by making a copy before mutating if iterating.
-    // Instead of raw splice, we create a new array or null out the entry.
     const index = state.subscribers.indexOf(callback);
     if (index !== -1) {
       state.subscribers.splice(index, 1);
@@ -146,7 +281,6 @@ export function onSessionOrderChange(piSessionId: string | undefined, callback: 
 function notifyOrderChange(piSessionId: string | undefined): void {
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
-  // Make a shallow copy of subscribers to safely iterate if one unsubscribes
   const currentSubscribers = [...state.subscribers];
   for (const subscriber of currentSubscribers) {
     try {
@@ -196,7 +330,6 @@ export function refreshAllSessions(piSessionId: string | undefined): void {
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
 
-  // Clear existing timeout for this specific Pi session
   if (state.refreshTimeout) {
     clearTimeout(state.refreshTimeout);
   }
@@ -204,7 +337,6 @@ export function refreshAllSessions(piSessionId: string | undefined): void {
   const debounceMs = getConfig().TUI_REFRESH_DEBOUNCE_MS;
   state.refreshTimeout = setTimeout(() => {
     try {
-      // Validate order integrity
       const validIds = state.order.filter(id => state.panels.has(id));
 
       if (validIds.length !== state.order.length) {
@@ -218,7 +350,6 @@ export function refreshAllSessions(piSessionId: string | undefined): void {
         state.order.push(...validIds);
       }
 
-      // Trigger the single Master Update for this Pi session
       if (state.masterUpdate) {
         try {
           state.masterUpdate();
@@ -256,7 +387,7 @@ export function clearPendingRefresh(piSessionId: string | undefined): void {
 }
 
 /**
- * Register an abort controller for a research run so Esc can cancel all active runs at once.
+ * Register an abort controller for a research run
  */
 export function registerSessionAbort(piSessionId: string | undefined, researchId: string, controller: AbortController): void {
   const sid = normalizeSessionId(piSessionId);
@@ -265,18 +396,11 @@ export function registerSessionAbort(piSessionId: string | undefined, researchId
 
 /**
  * Abort every active research run in a Pi session.
- * Called when the user presses Esc — cancels all concurrent sessions with a single keypress.
  */
 export function abortAllSessions(piSessionId: string | undefined): void {
   const sid = normalizeSessionId(piSessionId);
   const state = piSessions.get(sid);
-  if (!state) {
-    logger.warn(`[session-state] No active session state found for abort request on ${sid}`);
-    return;
-  }
-  
-  const count = state.aborts.size;
-  logger.info(`[session-state] Aborting ${count} research session(s) for ${sid}`);
+  if (!state) return;
   
   for (const controller of state.aborts.values()) {
     controller.abort();
@@ -302,15 +426,22 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
   }
 
   // If this was the last research run in the Pi session, clean up the state
-  // Clear subscribers to prevent memory leak if they weren't properly unsubscribed
+  // but preserve steering messages if any remain (they might arrive between
+  // the last research end and the next research start)
   if (state.order.length === 0 && state.panels.size === 0) {
-    // Clear any remaining subscribers to allow cleanup
-    if (state.subscribers.length > 0) {
-      logger.warn(`[session-state] Clearing ${state.subscribers.length} remaining subscribers for ${sid} during session end`);
-      state.subscribers = [];
+    // Only fully delete if there are no remaining steering messages
+    const hasRemainingSteering = state.steeringMessages.length > 0;
+    if (!hasRemainingSteering) {
+      if (state.subscribers.length > 0) {
+        state.subscribers = [];
+      }
+      clearPendingRefresh(sid);
+      piSessions.delete(sid);
+    } else {
+      // Clear research-specific state but preserve the session and steering
+      state.failures.clear();
+      state.aborts.clear();
     }
-    clearPendingRefresh(sid);
-    piSessions.delete(sid);
   }
 }
 
@@ -319,21 +450,16 @@ export function endResearchSession(piSessionId: string | undefined, researchId: 
  */
 export function clearAllSessionState(): void {
   for (const [, state] of piSessions.entries()) {
-    // Clear all pending refreshes
     if (state.refreshTimeout) {
       clearTimeout(state.refreshTimeout);
       state.refreshTimeout = null;
     }
-    // Clear all abort controllers
     for (const abort of state.aborts.values()) {
       try {
         abort.abort();
-      } catch (e) {
-        logger.error(`[session-state] Error aborting session:`, e);
-      }
+      } catch { /* ignore */ }
     }
   }
-  // Clear all sessions
   piSessions.clear();
   logger.log('[session-state] All session state cleared');
 }
@@ -370,6 +496,11 @@ export function getFailedResearchers(piSessionId: string | undefined, researchId
 }
 
 /**
+ * Maximum allowed unique failed researchers
+ */
+export const MAX_FAILED_RESEARCHERS = 2;
+
+/**
  * Check if research should stop due to too many unique failures
  */
 export function shouldStopResearch(piSessionId: string | undefined, researchId: string): boolean {
@@ -397,7 +528,6 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
     'Troubleshooting:',
     '• Verify network connection is active',
     '• Check browser logs for automation detection signals',
-
     '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 6 minutes)',
     '',
     'Partial results may be available below.',
@@ -411,17 +541,18 @@ export function getPiActivePanels(piSessionId: string | undefined): ResearchPane
   const sid = normalizeSessionId(piSessionId);
   const state = piSessions.get(sid);
   if (!state) return [];
-  // Return in reverse order (newest first) for top-to-bottom stacking in a single widget
   return [...state.order].reverse().map(id => state.panels.get(id)!).filter(Boolean);
 }
 
 /**
- * Get ordered list of active research runs in a Pi session
+ * Get the ordered list of active research run IDs in a Pi session.
+ * Returns IDs in chronological order (oldest first, newest last).
  */
 export function getPiActiveSessionOrder(piSessionId: string | undefined): string[] {
   const sid = normalizeSessionId(piSessionId);
   const state = piSessions.get(sid);
-  return state ? [...state.order] : [];
+  if (!state) return [];
+  return [...state.order];
 }
 
 /**

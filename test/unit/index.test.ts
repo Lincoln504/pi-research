@@ -59,6 +59,7 @@ function createPiMock() {
       registerCommand: vi.fn((name: string, opts: { description?: string; handler: CommandHandler }) => {
         commands.set(name, opts);
       }),
+      registerShortcut: vi.fn(),
       sendUserMessage: vi.fn(),
       sendMessage: vi.fn(),
     },

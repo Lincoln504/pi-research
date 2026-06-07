@@ -14,6 +14,7 @@ import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { ensureBrowserCacheDir, getBrowserEnv, getMaxWorkers } from './config.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,7 +23,7 @@ const __dirname = dirname(__filename);
  * Worker pool manager for browser operations.
  */
 export class WorkerPoolManager implements IService {
-    readonly name = 'worker-pool-manager';
+    readonly name = ServiceNames.WORKER_POOL_MANAGER;
     lifecycle = ServiceLifecycle.UNINITIALIZED;
 
     private pool: any | null = null;

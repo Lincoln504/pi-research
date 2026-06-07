@@ -10,9 +10,9 @@ import type { Config } from '../config.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import type { IService } from '../core/service-registry.ts';
 import type { ISchedulerFactory, IScheduler } from '../core/scheduler-factory.ts';
-import { getScheduler as _getScheduler } from './browser/scheduler-factory.ts';
+import { getScheduler as _getScheduler, forceSchedulerRestart as _forceSchedulerRestart } from './browser/scheduler-factory.ts';
 import { getSchedulerVersion as _getSchedulerVersion } from './browser/config.ts';
-import { forceSchedulerRestart as _forceSchedulerRestart } from './browser/scheduler-factory.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
  * Scheduler Factory Service Implementation
@@ -21,7 +21,7 @@ import { forceSchedulerRestart as _forceSchedulerRestart } from './browser/sched
  * Directly uses the browser/scheduler-factory module functions.
  */
 export class SchedulerFactoryService implements ISchedulerFactory, IService {
-  readonly name = 'scheduler-factory';
+  readonly name = ServiceNames.SCHEDULER_FACTORY;
   lifecycle = ServiceLifecycle.INITIALIZED;
 
   /**

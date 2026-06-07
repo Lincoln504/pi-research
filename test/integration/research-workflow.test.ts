@@ -104,11 +104,14 @@ describe('End-to-End Research Workflows', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
-    
+
+    // Use the state dir set by setupLifecycle (PI_RESEARCH_STATE_DIR) as
+    // the per-test cwd. Isolation is now handled at the test-file level
+    // by setup.ts, so all tests in this file share a single state dir.
+    testDbDir = process.env['PI_RESEARCH_STATE_DIR'] || os.tmpdir();
+
     const { getServiceContainer } = await import('../../src/core/service-registry.ts');
     getServiceContainer().isReady = true;
-    
-    testDbDir = path.join(os.tmpdir(), `pi-research-workflow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
   }, 30000);
 
   beforeEach(async () => {

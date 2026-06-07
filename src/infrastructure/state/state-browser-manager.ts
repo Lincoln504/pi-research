@@ -6,12 +6,13 @@
 
 import type { SingletonState } from '../types/state-types.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 /**
  * Manages browser server information in state
  */
 export class StateBrowserManager implements IService {
-  readonly name = 'state-browser-manager';
+  readonly name = ServiceNames.STATE_BROWSER_MANAGER;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   /**
    * Get the current browser server information

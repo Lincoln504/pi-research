@@ -10,12 +10,13 @@ import * as path from 'node:path';
 import { logger } from '../../logger.ts';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 /**
  * Manages backup and recovery for state files
  */
 export class StateBackupManager implements IService {
-  readonly name = 'state-backup-manager';
+  readonly name = ServiceNames.STATE_BACKUP_MANAGER;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   private _initialized = false;
 

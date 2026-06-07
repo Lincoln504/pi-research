@@ -11,6 +11,7 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
  * Session entry with abort capability
@@ -26,7 +27,7 @@ export interface SessionEntry {
  * Manages the lifecycle of researcher agent sessions.
  */
 export class ResearchSessionService implements IService {
-  readonly name = 'research-session-service';
+  readonly name = ServiceNames.RESEARCH_SESSION_SERVICE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // Map of sessionId -> Map<id, SessionEntry>

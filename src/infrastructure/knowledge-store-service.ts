@@ -28,13 +28,14 @@ import { getConfig } from '../config.ts';
  * Knowledge Store Service Implementation
  */
 export class KnowledgeStoreService implements IKnowledgeStoreService {
-  readonly name = 'knowledge-store';
+  readonly name = ServiceNames.KNOWLEDGE_STORE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // Knowledge store components
   private _embedder: IEmbedder | null = null;
   private _store: IKnowledgeStore | null = null;
   private _writerQueue: IWriterQueue | null = null;
+  private _initLock: FileLockService | null = null;
 
   // Initialization promise to prevent concurrent initialization
   private _initializationPromise: Promise<void> | null = null;
@@ -65,12 +66,42 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         // Acquire lock for initialization/migration
         const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
         const lockPath = path.join(pathConfig.getLockDirPath(), 'knowledge-store-init.lock');
-        const initLock = new FileLockService({ lockFilePath: lockPath });
-        await initLock.initialize();
+        
+        // Re-use or create the init lock
+        if (!this._initLock) {
+          // Increase threshold to 60s because createKnowledgeStoreComponents retries for ~15-20s total
+          // and we want to avoid lock theft during this critical initialization phase.
+          this._initLock = new FileLockService({ 
+            lockFilePath: lockPath,
+            lockStaleThreshold: 60000
+          });
+          await this._initLock.initialize();
+        }
 
-        const components = await initLock.withLock(async () => {
-          return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
-        });
+        const initLock = this._initLock;
+        let components;
+        try {
+          components = await initLock.withLock(async () => {
+            return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
+          });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          // Detect LanceDB corruption (often due to 0-byte manifest/txn files after a crash)
+          if (errorMsg.includes('Generic memory error') && errorMsg.includes('Invalid range 0..0')) {
+            logger.warn('[KnowledgeStoreService] Detected corrupted Knowledge Store. Clearing and retrying initialization...');
+            try {
+              await clearKnowledgeStoreInternal();
+              components = await initLock.withLock(async () => {
+                return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
+              });
+            } catch (retryErr) {
+              logger.error('[KnowledgeStoreService] Retry after clearing store failed:', retryErr);
+              throw retryErr;
+            }
+          } else {
+            throw err;
+          }
+        }
 
         this._embedder = components.embedder;
         this._store = components.store;
@@ -115,9 +146,14 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         await this._embedder.dispose?.();
       }
 
+      if (this._initLock) {
+        await this._initLock.dispose();
+      }
+
       this._embedder = null;
       this._store = null;
       this._writerQueue = null;
+      this._initLock = null;
 
       logger.debug('[KnowledgeStoreService] Disposed');
     } catch (err) {

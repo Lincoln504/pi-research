@@ -8,7 +8,8 @@ import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-codin
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages } from '../utils/session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from '../utils/session-state.ts';
+import { MAX_EXTRA_ROUNDS_WITH_STEERING } from '../constants.ts';
 import {
   getMaxRounds,
 } from '../core/planning-utils.ts';
@@ -98,9 +99,31 @@ export class DeepResearchOrchestrator {
     // Fire onStart observer event
     observer?.onStart?.(query, complexity);
 
-    let steeringMessages = getSteeringMessages(this.options.sessionId);
+    // Consume all queued messages at the start of the research run so
+    // that getQueuedSteeringMessages() below returns an accurate count
+    // of NEW messages that arrived after prior research (not stale ones).
+    consumeQueuedMessages(this.options.sessionId);
 
-    const maxRounds = getMaxRounds(complexity);
+    // The base round budget for this complexity level, plus extra room
+    // for any queued steering messages that arrived before this run
+    // started (and were just consumed above). Each consumed steering
+    // message unlocks one extra round, capped by
+    // MAX_EXTRA_ROUNDS_WITH_STEERING. This keeps the round budget
+    // concept simple (one number drives the loop) while letting the
+    // user push research deeper via Alt+Enter when they have queued
+    // guidance waiting to be applied.
+    const baseMaxRounds = getMaxRounds(complexity);
+    const queuedAtStart = getSteeringMessages(this.options.sessionId).length;
+    const steeringBonusRounds = Math.min(queuedAtStart, MAX_EXTRA_ROUNDS_WITH_STEERING);
+    const maxRounds = baseMaxRounds + steeringBonusRounds;
+    if (steeringBonusRounds > 0) {
+      logger.log(
+        `[DeepOrchestrator] Extending round budget from ${baseMaxRounds} to ${maxRounds} ` +
+        `(${steeringBonusRounds} extra round(s) for ${queuedAtStart} queued steering message(s), ` +
+        `cap ${MAX_EXTRA_ROUNDS_WITH_STEERING})`
+      );
+    }
+
     const MAX_WAIT_RETRIES = 5;
     let waitRetryCount = 0;
     let loopSynthesisPlan: ResearchPlan | null = null;
@@ -111,10 +134,15 @@ export class DeepResearchOrchestrator {
         this.currentRound++;
         this.startTime = Date.now();
 
-        // Refresh steering messages from session state at the start of every round
-        steeringMessages = getSteeringMessages(this.options.sessionId);
+        // Refresh steering messages and consume any new queued ones at round start
+        consumeQueuedMessages(this.options.sessionId);
+        const steeringMessages = getSteeringMessages(this.options.sessionId);
+        const steeringTexts = steeringMessages.map(m => m.text);
 
-        logger.log(`[DeepOrchestrator] Round ${this.currentRound}/${maxRounds} ${this.elapsed()}`);
+        const roundLabel = this.currentRound > baseMaxRounds
+          ? `Round ${this.currentRound}/${maxRounds} (extra, steering-driven, base=${baseMaxRounds})`
+          : `Round ${this.currentRound}/${maxRounds}`;
+        logger.log(`[DeepOrchestrator] ${roundLabel} ${this.elapsed()}`);
         observer?.onRoundStart?.(this.currentRound);
 
         // Check infrastructure health (only if round > 1 or complexity > 1)
@@ -136,7 +164,7 @@ export class DeepResearchOrchestrator {
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
-                steeringMessages,
+                steeringMessages: steeringTexts,
             });
         } else {
             const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
@@ -154,7 +182,7 @@ export class DeepResearchOrchestrator {
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
-                steeringMessages,
+                steeringMessages: steeringTexts,
             });
         }
         
@@ -305,6 +333,10 @@ export class DeepResearchOrchestrator {
       if (loopSynthesisPlan !== null) {
           finalReport = loopSynthesisPlan;
       } else {
+          // One final check for new steering messages before synthesis
+          consumeQueuedMessages(this.options.sessionId);
+          const finalSteeringTexts = getSteeringMessages(this.options.sessionId).map(m => m.text);
+
           const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
           finalReport = await planningService.updatePlanForRound({
               sessionId: researchId,
@@ -319,7 +351,7 @@ export class DeepResearchOrchestrator {
               signal,
               observer,
               excludeTools: this.options.excludeTools,
-              steeringMessages,
+              steeringMessages: finalSteeringTexts,
           });
       }
 
@@ -340,8 +372,8 @@ export class DeepResearchOrchestrator {
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
       result = synthesisService.ensureCitedLinks(researchId, result);
 
-      // Append steering guidance if any was provided
-      const finalSteeringMessages = getSteeringMessages(this.options.sessionId);
+      // Append steering guidance — only active (consumed by orchestrator) messages
+      const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
       result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
       const sessionDuration = Date.now() - this.sessionStart;

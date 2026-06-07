@@ -7,12 +7,14 @@
 import type { ProcessLifecycleService } from '../process-lifecycle-service.ts';
 import type { SingletonState } from '../types/state-types.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 /**
- * Manages session operations for state
+ * Manages research sessions within the state
  */
 export class StateSessionManager implements IService {
-  readonly name = 'state-session-manager';
+  readonly name = ServiceNames.STATE_SESSION_MANAGER;
+
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   constructor(private readonly processLifecycle: ProcessLifecycleService) {}
 

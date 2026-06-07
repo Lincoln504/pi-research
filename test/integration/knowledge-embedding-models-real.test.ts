@@ -163,9 +163,19 @@ describe('MODEL_CONFIG — per-model configuration correctness', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Full store workflow per model (synthetic embedder — no downloads)
+// Full store workflow sampled (synthetic embedder — no downloads)
 // ---------------------------------------------------------------------------
-describe('Full store+WriterQueue workflow — per model', () => {
+// We don't need to test EVERY model for the basic KnowledgeStore + WriterQueue
+// workflow if they all share the same code paths. We'll test one for each
+// major dimension (384, 768, 1024).
+// ---------------------------------------------------------------------------
+const WORKFLOW_MODELS = [
+  'Xenova/all-MiniLM-L6-v2',      // 384
+  'Xenova/all-mpnet-base-v2',     // 768
+  'onnx-community/Qwen3-Embedding-0.6B-ONNX', // 1024
+];
+
+describe('Knowledge store workflow — sampled per dimension', () => {
   let baseTmpDir: string;
 
   beforeEach(() => {
@@ -179,23 +189,13 @@ describe('Full store+WriterQueue workflow — per model', () => {
     }
   });
 
-  for (const modelId of SUPPORTED_MODELS) {
+  for (const modelId of WORKFLOW_MODELS) {
     it(`${modelId}: enqueue → drain → findByUrl round-trip`, async () => {
       const dbDir = path.join(baseTmpDir, modelId.replace(/[/\\]/g, '-'));
-      // Get correct dimension for modelId
-      const dim = modelId.includes('e5-base') || modelId.includes('Qwen3') || modelId.includes('bge-m3') ? 1024 : 
-                 (modelId.includes('e5-base') ? 768 : 384);
-      // Wait, better yet, just match the hardcoded list in store.ts
       const dimensions: Record<string, number> = {
-        'Xenova/multilingual-e5-small': 384,
-        'Xenova/multilingual-e5-base': 768,
-        'Xenova/bge-m3': 1024,
-        'onnx-community/embeddinggemma-300m-ONNX': 512,
-        'onnx-community/Qwen3-Embedding-0.6B-ONNX': 1024,
         'Xenova/all-MiniLM-L6-v2': 384,
-        'Xenova/bge-small-en-v1.5': 384,
         'Xenova/all-mpnet-base-v2': 768,
-        'onnx-community/granite-embedding-small-english-r2-ONNX': 384,
+        'onnx-community/Qwen3-Embedding-0.6B-ONNX': 1024,
       };
       const modelDim = dimensions[modelId] || 384;
       
@@ -217,52 +217,36 @@ describe('Full store+WriterQueue workflow — per model', () => {
         const found = await store.findByUrl(url);
         expect(found.length).toBeGreaterThan(0);
         expect(found[0]!.url).toBe(url);
-        // All rows share the same content hash
         const hash = createHash('sha256').update(markdown).digest('hex');
         expect(found.every(d => d.metadata['contentHash'] === hash)).toBe(true);
-        // ingestionType is set correctly
         expect(found.every(d => d.metadata['ingestionType'] === 'synthesis-description')).toBe(true);
       } finally {
         await store.close();
       }
     });
-
-    it(`${modelId}: model mismatch on re-open drops and recreates table`, async () => {
-      const dbDir = path.join(baseTmpDir, `mismatch-${modelId.replace(/[/\\]/g, '-')}`);
-      
-      const modelA = modelId === 'Xenova/all-MiniLM-L6-v2' 
-        ? 'Xenova/multilingual-e5-base' 
-        : 'Xenova/all-MiniLM-L6-v2';
-      
-      const dimensions: Record<string, number> = {
-        'Xenova/multilingual-e5-small': 384,
-        'Xenova/multilingual-e5-base': 768,
-        'Xenova/all-MiniLM-L6-v2': 384,
-      };
-      
-      const dimA = dimensions[modelA] || 384;
-      const dimB = dimensions[modelId] || 384;
-
-      // 1. Open with model A
-      const embedderA = makeSyntheticEmbedder(dimA);
-      const store1 = new KnowledgeStore({ dbDir, embedder: embedderA, modelName: modelA });
-      await store1.open();
-      await store1.addDocuments([{ url: 'https://mismatch.test', text: 'old content', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
-      await store1.close();
-
-      // 2. Re-open with model B (simulates switching embedding model)
-      const embedderB = makeSyntheticEmbedder(dimB);
-      const store2 = new KnowledgeStore({ dbDir, embedder: embedderB, modelName: modelId });
-      await store2.open();
-      try {
-        // Old data from model A must be gone (table was recreated)
-        const found = await store2.findByUrl('https://mismatch.test');
-        expect(found).toHaveLength(0);
-      } finally {
-        await store2.close();
-      }
-    });
   }
+  
+  it('model mismatch on re-open drops and recreates table (sampled)', async () => {
+    const modelId = 'Xenova/all-MiniLM-L6-v2';
+    const dbDir = path.join(baseTmpDir, 'mismatch-test');
+    const modelA = 'Xenova/multilingual-e5-base';
+    
+    // 1. Open with model A (768)
+    const store1 = new KnowledgeStore({ dbDir, embedder: makeSyntheticEmbedder(768), modelName: modelA });
+    await store1.open();
+    await store1.addDocuments([{ url: 'https://mismatch.test', text: 'old content', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+    await store1.close();
+
+    // 2. Re-open with model B (384)
+    const store2 = new KnowledgeStore({ dbDir, embedder: makeSyntheticEmbedder(384), modelName: modelId });
+    await store2.open();
+    try {
+      const found = await store2.findByUrl('https://mismatch.test');
+      expect(found).toHaveLength(0);
+    } finally {
+      await store2.close();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

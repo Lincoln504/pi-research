@@ -10,11 +10,12 @@
 import type { IService } from '../core/service-registry.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import type { Labels, IMetricHistogram, IMetricsSnapshot } from '../utils/metrics.ts';
 import { metrics } from '../utils/metrics.ts';
+import type { Labels, IMetricHistogram, IMetricsSnapshot } from '../utils/metrics.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 export class MetricsService implements IService {
-  readonly name = 'metrics';
+  readonly name = ServiceNames.METRICS;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   async initialize(): Promise<void> {

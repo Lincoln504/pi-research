@@ -5,9 +5,10 @@
  * Stateless service for checking if processes are alive.
  */
 
+import * as fs from 'node:fs/promises';
 import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
-import * as fs from 'node:fs/promises';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
  * Process Lifecycle Service
@@ -15,7 +16,7 @@ import * as fs from 'node:fs/promises';
  * Provides utilities for checking process liveness and monitoring.
  */
 export class ProcessLifecycleService implements IProcessLifecycle {
-  readonly name = 'process-lifecycle';
+  readonly name = ServiceNames.PROCESS_LIFECYCLE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   private cachedStartTime: number | null = null;

@@ -8,12 +8,13 @@ import type { SingletonState } from '../types/state-types.ts';
 import { SingletonStateSchema } from '../types/state-types.ts';
 import { Value } from 'typebox/value';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 /**
  * Validates state objects using TypeBox schemas
  */
 export class StateValidator implements IService {
-  readonly name = 'state-validator';
+  readonly name = ServiceNames.STATE_VALIDATOR;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   /**

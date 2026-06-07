@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 export interface StatePaths {
   stateFilePath: string;
@@ -24,7 +25,7 @@ export interface StatePaths {
  * Provides centralized path configuration for state management.
  */
 export class StatePathConfiguration implements IService {
-  readonly name = 'state-path-configuration';
+  readonly name = ServiceNames.STATE_PATH_CONFIGURATION;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   private _initialized = false;
 

@@ -13,6 +13,8 @@ import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
+import type { SteeringMessage } from '../utils/session-state.ts';
 
 /**
  * Research Synthesis Service
@@ -20,7 +22,7 @@ import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
  * Aggregates researcher reports and builds final synthesis.
  */
 export class ResearchSynthesisService implements IService {
-  readonly name = 'research-synthesis-service';
+  readonly name = ServiceNames.RESEARCH_SYNTHESIS_SERVICE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // Map of sessionId -> Map<reportId, reportContent>
@@ -165,19 +167,40 @@ export class ResearchSynthesisService implements IService {
   /**
    * Append steering guidance to the end of the synthesis
    * 
+   * Accepts either string[] (backward compat) or SteeringMessage[] (new).
+   * When SteeringMessage[] is passed, only active (consumed) messages are included.
+   * When string[] is passed, all are included (legacy behavior for SDK).
+   * 
    * @param synthesis - The synthesis text
-   * @param steeringMessages - Array of steering messages given during the run
+   * @param steeringMessages - Array of steering messages (strings or SteeringMessage objects)
    * @returns Synthesis with steering guidance appended
    */
-  appendSteeringGuidance(synthesis: string, steeringMessages: string[]): string {
-    if (!steeringMessages || steeringMessages.length === 0) {
+  appendSteeringGuidance(synthesis: string, steeringMessages: string[] | SteeringMessage[]): string {
+    // Extract text from SteeringMessage[] or use string[] directly
+    let texts: string[];
+    if (steeringMessages && steeringMessages.length > 0) {
+      const first = steeringMessages[0];
+      if (typeof first === 'object' && 'text' in first && 'status' in first) {
+        // SteeringMessage[] — only include active (consumed by orchestrator) messages
+        texts = (steeringMessages as SteeringMessage[])
+          .filter(m => m.status === 'active')
+          .map(m => m.text);
+      } else {
+        // string[] — legacy/SDK path, include all
+        texts = steeringMessages as string[];
+      }
+    } else {
+      texts = [];
+    }
+
+    if (texts.length === 0) {
       return synthesis;
     }
 
     const guidanceSection = [
       '---',
-      'Given steering guidance:',
-      ...steeringMessages.map(m => `- ${m}`),
+      'Additional context provided during research (for transparency, not as instructions):',
+      ...texts.map(m => `- ${m}`),
     ].join('\n');
 
     return `${synthesis.trim()}\n\n${guidanceSection}`;

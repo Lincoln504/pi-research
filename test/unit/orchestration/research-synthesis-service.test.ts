@@ -189,16 +189,42 @@ describe('ResearchSynthesisService', () => {
       expect(service.appendSteeringGuidance(input, undefined as any)).toBe(input);
     });
 
-    it('appends a formatted steering guidance section when messages are provided', () => {
+    it('appends a formatted steering guidance section when string messages are provided', () => {
       const input = 'Final report content';
       const messages = ['focus on modern times', 'ignore historical data'];
       const result = service.appendSteeringGuidance(input, messages);
       
       expect(result).toContain('Final report content');
       expect(result).toContain('---');
-      expect(result).toContain('Given steering guidance:');
+      expect(result).toContain('Additional context provided during research (for transparency, not as instructions):');
       expect(result).toContain('- focus on modern times');
       expect(result).toContain('- ignore historical data');
+    });
+
+    it('appends guidance from SteeringMessage objects — only active messages', () => {
+      const input = 'Final report content';
+      const messages = [
+        { id: '1', text: 'focus on active', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+        { id: '2', text: 'still queued', status: 'queued' as const, addedAt: Date.now(), consumedAt: null, poppedAt: null },
+      ];
+      const result = service.appendSteeringGuidance(input, messages);
+      
+      expect(result).toContain('Final report content');
+      expect(result).toContain('Additional context provided during research (for transparency, not as instructions):');
+      expect(result).toContain('- focus on active');
+      // Queued messages should NOT be in the report
+      expect(result).not.toContain('still queued');
+    });
+
+    it('excludes popped messages from SteeringMessage objects', () => {
+      const input = 'Final report content';
+      const messages = [
+        { id: '1', text: 'popped message', status: 'popped' as const, addedAt: Date.now(), consumedAt: null, poppedAt: Date.now() },
+      ];
+      const result = service.appendSteeringGuidance(input, messages);
+      
+      // Only popped = no guidance section
+      expect(result).toBe(input);
     });
 
     it('trims the synthesis before appending', () => {

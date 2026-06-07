@@ -7,6 +7,7 @@
  */
 
 import type { IHealthCheckService, HealthCheckResult } from './service-interfaces.ts';
+import { ServiceNames } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
 
@@ -21,7 +22,7 @@ const DEFAULT_BACKOFF_MULTIPLIER = 2;
  * Health Check Service Implementation
  */
 export class HealthCheckService implements IHealthCheckService {
-  readonly name = 'health-check-cache';
+  readonly name = ServiceNames.HEALTH_CHECK_CACHE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // Thread-safe state management using atomic operations

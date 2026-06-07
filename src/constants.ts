@@ -59,6 +59,16 @@ export const MAX_ROUNDS_LEVEL_1 = 2;
 export const MAX_ROUNDS_LEVEL_2 = 3;
 export const MAX_ROUNDS_LEVEL_3 = 5;
 
+/**
+ * Additional research rounds allowed past MAX_ROUNDS_LEVEL_n when queued
+ * steering messages exist at the end of the last planned round. Each
+ * consumed steering message unlocks one more round, up to this cap per
+ * session. This lets the user push research deeper via Alt+Enter even
+ * after the normal round budget is exhausted, without letting steering
+ * spin research forever.
+ */
+export const MAX_EXTRA_ROUNDS_WITH_STEERING = 2;
+
 /** Hard cap on cumulative researchers across all rounds to prevent runaway costs */
 export const MAX_TOTAL_RESEARCHERS = 25;
 

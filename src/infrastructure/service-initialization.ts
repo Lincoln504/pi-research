@@ -47,7 +47,7 @@ export function registerInfrastructureServices(): void {
   // Must be initialized before FileLockService and StateBackupManager
   registerService(
     ServiceNames.STATE_PATH_CONFIGURATION,
-    () => new StatePathConfiguration(),
+    () => new StatePathConfiguration(process.env['PI_RESEARCH_STATE_DIR']),
     {
       lazyInitialization: false, // Core infrastructure
       allowOverwrite: false,

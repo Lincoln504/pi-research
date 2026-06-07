@@ -12,6 +12,7 @@ import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { IService } from '../core/service-registry.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
  * Lock configuration options
@@ -36,7 +37,7 @@ export interface FileLockOptions {
  * Handles stale lock detection and cleanup.
  */
 export class FileLockService implements IService {
-  readonly name = 'file-lock-service';
+  readonly name = ServiceNames.FILE_LOCK_SERVICE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   private _initialized = false;
 
@@ -218,8 +219,12 @@ export class FileLockService implements IService {
                 if (lockAge > this.lockStaleThreshold) {
                   if (lockUuid === this.lockUuid) {
                     // This is our own lock (shouldn't happen, but handle gracefully)
-                    this.lockCount = 1;
-                    return;
+                    // We found our UUID but we don't have a handle, so a previous 
+                    // attempt must have been interrupted. Unlink and try again properly.
+                    try {
+                      await fs.unlink(this.lockFilePath);
+                    } catch { /* ignore */ }
+                    continue;
                   }
 
                   const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
@@ -297,6 +302,15 @@ export class FileLockService implements IService {
             const lockUuid = lockContent.trim();
             if (lockUuid !== this.lockUuid) {
               logger.warn('[FileLockService] Lock UUID mismatch during release, skipping deletion');
+              
+              // CRITICAL: We MUST close our handle even if we no longer own the lock file
+              // on disk, otherwise Node.js will throw ERR_INVALID_STATE on GC.
+              try {
+                await this.lockHandle.close();
+              } catch (closeError) {
+                logger.debug(`[FileLockService] Error closing handle after UUID mismatch: ${closeError}`);
+              }
+              
               this.lockHandle = null;
               this.lockCount = 0;
               metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
@@ -305,8 +319,13 @@ export class FileLockService implements IService {
           } catch (_readError) { /* ignore */ }
 
           if (this.lockHandle !== null) {
-            await this.lockHandle.close();
-            this.lockHandle = null;
+            try {
+              await this.lockHandle.close();
+            } finally {
+              // Ensure we null out the handle even if close() fails, to prevent
+              // leaks and repeated close attempts.
+              this.lockHandle = null;
+            }
           }
         } catch (error: unknown) {
           metrics.increment('state_lock_release_total', 1, { status: 'error' });

@@ -338,9 +338,36 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async addDocuments(docs: StoreDocument[]): Promise<void> {
     const table = await this.getFreshTable();
-    const writePromise = this.withEmbedderReconnect(embedder =>
-      addDocumentsToStore(table, docs, embedder, () => this.isClosing)
-    );
+    const writePromise = this.withEmbedderReconnect(async (embedder) => {
+      let retryCount = 0;
+      const MAX_RETRIES = 5;
+      const BASE_DELAY = 100;
+
+      while (retryCount <= MAX_RETRIES) {
+        try {
+          await addDocumentsToStore(table, docs, embedder, () => this.isClosing);
+          return;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Detect version mismatch or lock errors typical of cross-process contention
+          if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+            retryCount++;
+            if (retryCount > MAX_RETRIES) throw err;
+
+            // Exponential backoff with jitter
+            const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+            logger.debug(`[store] Write contention detected, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            
+            // Refresh table handle for the next attempt
+            await this.getFreshTable();
+            continue;
+          }
+          throw err;
+        }
+      }
+    });
+
     this.activeWrites.add(writePromise);
     try {
       await writePromise;
@@ -366,43 +393,77 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async deleteByUrl(url: string): Promise<void> {
-    const table = await this.getFreshTable();
-    const startTime = Date.now();
-    try {
-      const escapedUrl = url.replace(/'/g, "''");
-      await table.delete(`url = '${escapedUrl}'`);
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_delete_duration_ms', duration);
-      metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'success' });
-      logger.log(`[store] Deleted chunks for ${url}`);
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_delete_duration_ms', duration, { status: 'error' });
-      metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'error' });
-      throw err;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 100;
+
+    while (retryCount <= MAX_RETRIES) {
+      const table = await this.getFreshTable();
+      const startTime = Date.now();
+      try {
+        const escapedUrl = url.replace(/'/g, "''");
+        await table.delete(`url = '${escapedUrl}'`);
+        const duration = Date.now() - startTime;
+        metrics.observe('knowledge_store_delete_duration_ms', duration);
+        metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'success' });
+        logger.log(`[store] Deleted chunks for ${url}`);
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+          retryCount++;
+          if (retryCount > MAX_RETRIES) throw err;
+          const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+          logger.debug(`[store] Delete contention detected for ${url}, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        
+        const duration = Date.now() - startTime;
+        metrics.observe('knowledge_store_delete_duration_ms', duration, { status: 'error' });
+        metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'error' });
+        throw err;
+      }
     }
   }
 
   async deleteByUrlAndType(url: string, ingestionType: string): Promise<void> {
-    const table = await this.getFreshTable();
-    const startTime = Date.now();
-    try {
-      // FIX (Issue 11): Escape single quotes to prevent injection.
-      // NOTE: The ingestionType is always a controlled string ("synthesis-description")
-      // so LIKE wildcard chars (%) are not a practical concern. We keep the LIKE
-      // pattern as-is since LanceDB/DataFusion LIKE escape syntax is undocumented.
-      const escapedUrl = url.replace(/'/g, "''");
-      const escapedType = ingestionType.replace(/'/g, "''");
-      await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
-      metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
-      logger.log(`[store] Deleted ${ingestionType} chunks for ${url}`);
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type', status: 'error' });
-      metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'error' });
-      throw err;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 100;
+
+    while (retryCount <= MAX_RETRIES) {
+      const table = await this.getFreshTable();
+      const startTime = Date.now();
+      try {
+        // FIX (Issue 11): Escape single quotes to prevent injection.
+        // NOTE: The ingestionType is always a controlled string ("synthesis-description")
+        // so LIKE wildcard chars (%) are not a practical concern. We keep the LIKE
+        // pattern as-is since LanceDB/DataFusion LIKE escape syntax is undocumented.
+        const escapedUrl = url.replace(/'/g, "''");
+        const escapedType = ingestionType.replace(/'/g, "''");
+        await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
+        const duration = Date.now() - startTime;
+        metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
+        metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
+        logger.log(`[store] Deleted ${ingestionType} chunks for ${url}`);
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+          retryCount++;
+          if (retryCount > MAX_RETRIES) throw err;
+          const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+          logger.debug(`[store] Delete-by-type contention detected for ${url}, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        const duration = Date.now() - startTime;
+        metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type', status: 'error' });
+        metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'error' });
+        throw err;
+      }
     }
   }
 

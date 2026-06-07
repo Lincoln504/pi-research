@@ -28,7 +28,7 @@ import { StateManager } from './state-manager.ts';
  * State Manager Service Implementation
  */
 export class StateManagerService implements IStateManager {
-  readonly name = 'state-manager';
+  readonly name = ServiceNames.STATE_MANAGER;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // The underlying state manager instance

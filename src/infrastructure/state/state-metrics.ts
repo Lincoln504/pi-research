@@ -7,12 +7,13 @@
 import type { StateMetrics, SingletonState } from '../types/state-types.ts';
 import { metrics } from '../../utils/metrics.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
 /**
  * Collects metrics from state
  */
 export class StateMetricsCollector implements IService {
-  readonly name = 'state-metrics-collector';
+  readonly name = ServiceNames.STATE_METRICS_COLLECTOR;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   /**
    * Get metrics about the current state

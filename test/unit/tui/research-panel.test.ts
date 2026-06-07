@@ -19,6 +19,12 @@ vi.mock('@earendil-works/pi-tui', () => ({
   truncateToWidth: vi.fn().mockImplementation((s, w) => s.slice(0, w)),
 }));
 
+// Mock session-state to return SteeringMessage objects
+vi.mock('../../../src/utils/session-state.ts', () => ({
+  getSteeringMessages: vi.fn().mockReturnValue([]),
+  getAllTrackedSessions: vi.fn().mockReturnValue([]),
+}));
+
 describe('TUI Research Panel', () => {
   const mockTheme = {
     fg: (_color: string, text: string) => text,
@@ -143,6 +149,84 @@ describe('TUI Research Panel', () => {
       expect(_renderProgressPct({ expected: 10, made: 5 })).toBe('50%');
       expect(_renderProgressPct({ expected: 0, made: 5 })).toBe('');
       expect(_renderProgressPct(undefined)).toBe('');
+    });
+  });
+
+  describe('steering message rendering', () => {
+    it('should render queued steering messages with QUEUED prefix', async () => {
+      const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+      vi.mocked(getSteeringMessages).mockReturnValue([
+        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
+      ]);
+
+      const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+      const component = componentCreator({} as any, mockTheme as Theme);
+      const lines = component.render(80);
+
+      const steeringLine = lines.find(l => l.includes('QUEUED RESEARCHER STEERING'));
+      expect(steeringLine).toBeDefined();
+      expect(steeringLine).toContain('Focus on X');
+      
+      // Hint should include alt+p
+      const hintLine = lines.find(l => l.includes('alt+p'));
+      expect(hintLine).toBeDefined();
+    });
+
+    it('should render active steering messages with RESEARCHER STEERING prefix', async () => {
+      const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+      vi.mocked(getSteeringMessages).mockReturnValue([
+        { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+      ]);
+
+      const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+      const component = componentCreator({} as any, mockTheme as Theme);
+      const lines = component.render(80);
+
+      const steeringLine = lines.find(l => l.includes('RESEARCHER STEERING'));
+      expect(steeringLine).toBeDefined();
+      expect(steeringLine).toContain('Focus on Y');
+      // Should NOT show QUEUED prefix
+      expect(steeringLine).not.toContain('QUEUED');
+      
+      // Hint should NOT include alt+p when no queued messages
+      const hintLine = lines.find(l => l.includes('alt+p'));
+      expect(hintLine).toBeUndefined();
+    });
+
+    it('should show basic esc hint when no steering messages', async () => {
+      const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+      vi.mocked(getSteeringMessages).mockReturnValue([]);
+
+      const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
+      const getActivePanelsMock = vi.fn().mockReturnValue([state]);
+      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+      const component = componentCreator({} as any, mockTheme as Theme);
+      const lines = component.render(80);
+
+      const hintLine = lines.find(l => l.includes('esc to cancel'));
+      expect(hintLine).toBeDefined();
+    });
+
+    it('should not duplicate steering messages across multiple panels', async () => {
+      const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+      vi.mocked(getSteeringMessages).mockReturnValue([
+        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
+      ]);
+
+      const state1 = createInitialPanelState('pi-session', 'research-1', 'query1', 'model');
+      const state2 = createInitialPanelState('pi-session', 'research-2', 'query2', 'model');
+      const getActivePanelsMock = vi.fn().mockReturnValue([state1, state2]);
+      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
+      const component = componentCreator({} as any, mockTheme as Theme);
+      const lines = component.render(80);
+
+      // Steering message should appear only once, not twice
+      const steeringLines = lines.filter(l => l.includes('Focus on X'));
+      expect(steeringLines).toHaveLength(1);
     });
   });
 });

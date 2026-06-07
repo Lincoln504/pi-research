@@ -42,7 +42,7 @@ async function getBrowserInitLock(): Promise<FileLockService> {
         lockTimeout: 60000, // 60s timeout for browser startup
         lockRetries: 600,
         lockRetryDelay: 100,
-        lockStaleThreshold: 20000, // 20s stale threshold (must be < lockTimeout)
+        lockStaleThreshold: 60000, // 60s stale threshold (must be <= lockTimeout)
     });
 
     await browserInitLock.initialize();

@@ -265,9 +265,6 @@ export function createResearchTool(): ToolDefinition {
 
           const sanitizedQuery = validateAndSanitizeQuery(query);
           
-          // Clear any stale steering messages from previous runs in this session
-          clearSteeringMessages(piSessionId);
-
           // Setup TUI
           tuiManager = createResearchTuiManager({
             piSessionId,
@@ -375,7 +372,7 @@ export function createResearchTool(): ToolDefinition {
               // Stop wave animation unconditionally
               stopObserverWaveAnimation(observerState, panelState);
 
-              // Always clear steering messages when the research run ends
+              // Clear steering messages when the research run ends
               // to prevent them from leaking into follow-up agent turns.
               clearSteeringMessages(piSessionId);
 

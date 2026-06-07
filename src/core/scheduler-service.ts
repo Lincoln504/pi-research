@@ -10,8 +10,8 @@
 
 import type { SearchResult, IScheduler } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
-import { getService } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
+import { getService } from './service-registry.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
 import type { ISchedulerFactory } from './scheduler-factory.ts';
@@ -41,7 +41,7 @@ interface ISchedulerInternal {
  * All state is managed within the instance - no module-level state
  */
 export class SchedulerService implements IScheduler, ISchedulerInternals {
-  readonly name = 'scheduler';
+  readonly name = ServiceNames.SCHEDULER;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
   // ==========================================================================

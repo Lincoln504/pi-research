@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ExtendedExtensionContext } from './types/extension-context.ts';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
+import { Key } from '@earendil-works/pi-tui';
 import type { ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
 import { logger } from './logger.ts';
@@ -10,7 +11,7 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId, getActiveSessionCount } from './utils/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId, getActiveSessionCount, popQueuedMessages } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -173,6 +174,42 @@ export default async function (pi: ExtensionAPI) {
   const healthTool: ToolDefinition = createHealthTool();
   pi.registerTool(healthTool);
 
+  // Alt+P — Pop queued steering messages back to pi's follow-up queue.
+  // The shortcut handler receives an ExtensionContext (not ExtensionAPI),
+  // but `pi` is captured in the closure and remains valid for the
+  // extension's lifetime. This is safe because extension reloads recreate
+  // the module and thus refresh the closure.
+  pi.registerShortcut(Key.alt('p'), {
+    description: 'Pop queued researcher steering messages back to chat',
+    handler: (ctx: ExtensionContext) => {
+      const eCtx = ctx as ExtendedExtensionContext;
+      const piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId() || 'default';
+      
+      // Only pop if there are queued messages and research is active
+      const activeCount = getActiveSessionCount();
+      if (activeCount === 0) {
+        logger.debug('[pi-research] Alt+P pressed but no active research — ignoring');
+        return;
+      }
+      
+      const popped = popQueuedMessages(piSessionId);
+      if (popped.length === 0) {
+        logger.debug('[pi-research] Alt+P pressed but no queued steering messages');
+        return;
+      }
+      
+      // Forward each popped message to pi's follow-up queue
+      for (const msg of popped) {
+        logger.info(`[pi-research] Popping steering message: ${msg.text}`);
+        pi.sendUserMessage(msg.text, { deliverAs: 'followUp' });
+      }
+      
+      if (ctx.hasUI) {
+        ctx.ui.notify(`Popped ${popped.length} steering message(s) to chat`, 'info');
+      }
+    },
+  });
+
   // /research <query> — direct quick research, no LLM turn.
   pi.registerCommand('research', {
     description: 'Web research a query',
@@ -265,7 +302,7 @@ export default async function (pi: ExtensionAPI) {
     if (shouldInjectSteering) {
       injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' + 
         'The user has provided the following additional considerations for this task:\n' + 
-        steeringMessages.map(m => `- ${m}`).join('\n');
+        steeringMessages.map(m => `- ${m.text}`).join('\n');
       logger.debug(`[pi-research] Injected ${steeringMessages.length} steering message(s) into prompt`);
     } else if (hasSteeringMessages && activeCount === 0) {
       logger.debug(`[pi-research] ${steeringMessages.length} steering message(s) queued but no active research — skipping injection`);

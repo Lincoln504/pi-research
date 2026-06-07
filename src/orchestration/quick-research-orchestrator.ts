@@ -21,7 +21,6 @@ import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts'
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
 import { getService } from '../core/service-registry.ts';
-import { getSteeringMessages } from '../utils/session-state.ts';
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
@@ -241,10 +240,6 @@ export class QuickResearchOrchestrator {
           
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);
-
-          // Append steering guidance if any was provided
-          const finalSteeringMessages = getSteeringMessages(this.options.sessionId);
-          result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
           const sessionDuration = Date.now() - sessionStart;
           metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'success' });

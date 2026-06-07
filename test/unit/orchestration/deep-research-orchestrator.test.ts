@@ -40,6 +40,15 @@ vi.mock('../../../src/config.ts', () => ({
   DEFAULTS: { KNOWLEDGE_STORE_ENABLED: false },
 }));
 
+// Mock session-state for steering functions
+vi.mock('../../../src/utils/session-state.ts', () => ({
+  getSteeringMessages: vi.fn(() => []),
+  getQueuedSteeringMessages: vi.fn(() => []),
+  consumeQueuedMessages: vi.fn(() => []),
+  getActiveSteeringMessages: vi.fn(() => []),
+  getActiveSessionCount: vi.fn(() => 1),
+}));
+
 describe('DeepResearchOrchestrator', () => {
   const mockCtx = {
     cwd: '/tmp',
@@ -241,6 +250,100 @@ describe('DeepResearchOrchestrator', () => {
     const result = await orchestrator.run();
 
     expect(result).toContain('Forced synthesis result');
+  });
+
+  it('should extend round budget when queued steering messages exist at run start', async () => {
+    // Pretend the user has 2 queued steering messages waiting when this
+    // research run begins. For complexity 1, the base budget is 2 rounds;
+    // with 2 queued messages we should get up to 2 extra rounds (capped
+    // at MAX_EXTRA_ROUNDS_WITH_STEERING = 2).
+    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    vi.mocked(getSteeringMessages).mockReturnValue([
+      { id: '1', text: 'focus on X', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
+      { id: '2', text: 'and Y', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
+    ]);
+
+    // Evaluator keeps delegating until the loop exits, then forced synthesis.
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.mustSynthesize) {
+        return { action: 'synthesize', content: 'Final synthesis' };
+      }
+      return {
+        action: 'delegate',
+        researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+        allQueries: ['q'],
+      };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
+    const result = await orchestrator.run();
+
+    expect(result).toContain('Final synthesis');
+
+    // With 2 queued messages and cap=2, the budget extends from 2 → 4 rounds.
+    // updatePlanForRound is called once per round 2..N and once more for the
+    // forced final synthesis: so 3 in-loop evaluator calls + 1 forced = 4.
+    const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(updateCalls.length).toBe(4);
+  });
+
+  it('should NOT extend round budget when no queued steering messages exist', async () => {
+    // Explicitly reset steering mock in case a previous test set it.
+    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    vi.mocked(getSteeringMessages).mockReturnValue([]);
+
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.mustSynthesize) {
+        return { action: 'synthesize', content: 'Base synthesis' };
+      }
+      return {
+        action: 'delegate',
+        researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+        allQueries: ['q'],
+      };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
+    const result = await orchestrator.run();
+
+    expect(result).toContain('Base synthesis');
+    // Base budget 2 rounds → 1 in-loop evaluator call (round 2) + 1 forced = 2.
+    const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(updateCalls.length).toBe(2);
+  });
+
+  it('should cap extra rounds at MAX_EXTRA_ROUNDS_WITH_STEERING even with many queued messages', async () => {
+    // 5 queued messages — but cap is 2, so we should only get 2 extra rounds.
+    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    vi.mocked(getSteeringMessages).mockReturnValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        id: String(i),
+        text: `steer ${i}`,
+        status: 'queued' as const,
+        addedAt: 0,
+        consumedAt: null,
+        poppedAt: null,
+      })),
+    );
+
+    mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
+      if (opts.mustSynthesize) {
+        return { action: 'synthesize', content: 'Capped synthesis' };
+      }
+      return {
+        action: 'delegate',
+        researchers: [{ id: 'r', name: 'R', goal: 'G', queries: ['q'] }],
+        allQueries: ['q'],
+      };
+    });
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, complexity: 1 });
+    const result = await orchestrator.run();
+
+    expect(result).toContain('Capped synthesis');
+    // Cap=2 + base=2 = 4 rounds → 3 in-loop calls + 1 forced = 4.
+    const updateCalls = vi.mocked(mockPlanningService.updatePlanForRound).mock.calls;
+    expect(updateCalls.length).toBe(4);
   });
 
   it('should report round progress to observer', async () => {

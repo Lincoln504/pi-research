@@ -10,6 +10,7 @@ import { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
 
 /**
  * GPU Resource Service
@@ -18,7 +19,7 @@ import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
  * Ensures only one process can use GPU resources at a time.
  */
 export class GPUResourceService implements IService {
-  readonly name = 'gpu-resource-service';
+  readonly name = ServiceNames.GPU_RESOURCE_SERVICE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
   private readonly processLifecycle: ProcessLifecycleService;
   private readonly gpuLockStaleThresholdMs: number;

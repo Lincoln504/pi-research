@@ -27,6 +27,8 @@ import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts
 
 import { MAX_QUERY_HISTORY_SIZE } from './planning-constants.ts';
 
+import { ServiceNames } from './interfaces/service-names.ts';
+
 interface PlanningState {
   currentPlan: ResearchPlan | null;
   queryHistory: string[];
@@ -35,7 +37,7 @@ interface PlanningState {
 }
 
 export class PlanningService implements IPlanningService {
-  readonly name = 'PlanningService';
+  readonly name = ServiceNames.PLANNING;
   lifecycle = ServiceLifecycle.UNINITIALIZED as ServiceLifecycle;
 
   // Planning state mapped by sessionId

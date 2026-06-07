@@ -12,6 +12,9 @@ import { createHash } from 'node:crypto';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
 import { resetServiceContainer } from '../../../src/core/service-registry.ts';
+import * as pathmod from 'node:path';
+import * as os from 'node:os';
+import * as fsmod from 'node:fs';
 
 async function importLogger() {
   try {
@@ -45,7 +48,15 @@ export async function setupLifecycle(): Promise<TestContext> {
     return createUninitializedContext(logger);
   }
 
-  logger.log('[test] Browser available, initializing integration test lifecycle...');
+  // ISOLATION: Create unique directories for this test file
+  const testId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const testStateDir = pathmod.join(os.tmpdir(), `pi-test-state-${testId}`);
+  const testKnowledgeDir = pathmod.join(os.tmpdir(), `pi-test-knowledge-${testId}`);
+
+  process.env['PI_RESEARCH_STATE_DIR'] = testStateDir;
+  process.env['PI_RESEARCH_KNOWLEDGE_DIR'] = testKnowledgeDir;
+
+  logger.log(`[test] Browser available. Isolating test in: ${testStateDir} / ${testKnowledgeDir}`);
   
   // Initialize Service Registry
   try {
@@ -74,23 +85,25 @@ export async function setupLifecycle(): Promise<TestContext> {
     init: async () => {},
     beforeEach: async () => {
       // Service Registry reset is handled in shutdown() per-file.
-      // Individual tests can still call stopBrowserManager() if they need a fresh pool.
     },
     afterEach: async () => {
       // Pool teardown happens once in shutdown() / afterAll — not per-test.
-      // Per-test stopBrowserManager() caused the f6621858 regression (8+ pool
-      // recreations per file, each requiring a 90s Firefox startup on CI).
     },
     shutdown: async () => {
       logger.log('[test] Shutting down browser manager and disposing services...');
       await stopBrowserManager();
       await disposeCoreServices();
       // Reset the service container entirely so the next test file that calls
-      // setupLifecycle() can re-register all services cleanly.  Without this,
-      // registrations survive across test files in sequential (non-forked) mode
-      // and registerCoreServices() throws "already registered", causing the
-      // catch-block in setupLifecycle() to silently skip re-initialization.
+      // setupLifecycle() can re-register all services cleanly.
       await resetServiceContainer();
+
+      // CLEANUP: Remove temporary isolation directories
+      try {
+        if (fsmod.existsSync(testStateDir)) fsmod.rmSync(testStateDir, { recursive: true, force: true });
+        if (fsmod.existsSync(testKnowledgeDir)) fsmod.rmSync(testKnowledgeDir, { recursive: true, force: true });
+      } catch (err) {
+        logger.warn(`[test] Cleanup failed: ${err}`);
+      }
     },
   };
 }
@@ -147,5 +160,8 @@ export function makeSyntheticEmbedder(dim = 384): Embedder {
     initialize: async () => {},
     embed: async (text: string) => textToVector(text),
     embedMany: async (texts: string[]) => texts.map(t => textToVector(t)),
+    dispose: async () => {},
+    getDevice: () => 'cpu',
+    getOriginalDevice: () => 'cpu',
   } as unknown as Embedder;
 }
