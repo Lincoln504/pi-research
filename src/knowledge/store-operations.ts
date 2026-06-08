@@ -99,6 +99,7 @@ export async function searchStore(
       try {
         metadata = JSON.parse(r.metadata as string) as Record<string, unknown>;
       } catch {
+        logger.debug('[store-operations] Corrupted metadata in searchStore, skipping row');
         return null;
       }
       return {
@@ -154,7 +155,7 @@ export async function findDocumentsByUrl(
 
   return results.map(r => {
     let metadata: Record<string, unknown> = {};
-    try { metadata = JSON.parse(r.metadata as string); } catch { /* corrupted row */ }
+    try { metadata = JSON.parse(r.metadata as string); } catch { logger.debug('[store-operations] Corrupted metadata in findDocumentsByUrl, skipping row'); }
     return {
     url: r.url as string,
     text: r.text as string,
@@ -214,7 +215,7 @@ export async function findRelevantUrls(
       // Surface provenance metadata so consumers can prefer verified entries
       if (meta.provenance) provenance = meta.provenance;
       else if (meta.hasContent === true) provenance = 'scraped-verified';
-    } catch { /* ignore */ }
+    } catch { logger.debug('[store-operations] Corrupted metadata in findRelevantUrls, skipping row'); }
     
     if (!description) description = (r.text as string ?? '').substring(0, 300);
     entries.push({ url, description, provenance });

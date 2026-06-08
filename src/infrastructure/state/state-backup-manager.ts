@@ -162,7 +162,17 @@ export class StateBackupManager implements IService {
     const tempFile = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
     const tempPath = path.join(stateDir, tempFile);
     await fs.writeFile(tempPath, JSON.stringify(defaultState, null, 2), 'utf-8');
-    await fs.rename(tempPath, this.stateFilePath);
+    try {
+      await fs.rename(tempPath, this.stateFilePath);
+    } catch (renameErr) {
+      // fs.rename fails on Windows if target exists (NTFS). Fall back to copy+delete.
+      if (process.platform === 'win32') {
+        await fs.copyFile(tempPath, this.stateFilePath);
+        await fs.unlink(tempPath);
+      } else {
+        throw renameErr;
+      }
+    }
   }
 
   /**

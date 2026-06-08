@@ -39,7 +39,17 @@ export class LogRotation {
       const archivePath = `${logFile}.${timestamp}`;
       
       // Rename current log file to archive
-      fs.renameSync(logFile, archivePath);
+      try {
+        fs.renameSync(logFile, archivePath);
+      } catch (renameErr) {
+        // fs.renameSync fails on Windows if target exists (NTFS). Fall back to copy+delete.
+        if (process.platform === 'win32') {
+          fs.copyFileSync(logFile, archivePath);
+          fs.unlinkSync(logFile);
+        } else {
+          throw renameErr;
+        }
+      }
       
       // Clean up old archives
       try {

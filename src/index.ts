@@ -49,12 +49,26 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check (requires 0.77.0+ for excludeTools and other new features)
+  // Runtime version check — must match peerDependencies minimum (>=0.78.1)
   const versionParts = PI_VERSION.split('.').map(Number);
   const major = versionParts[0] ?? 0;
   const minor = versionParts[1] ?? 0;
-  if (major === 0 && minor < 77) {
-    logger.error(`[pi-research] pi-coding-agent v${PI_VERSION} is too old. Please update to v0.77.0 or newer.`);
+  const patch = versionParts[2] ?? 0;
+  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+    throw new Error(
+      `[pi-research] Cannot parse pi-coding-agent version "${PI_VERSION}". ` +
+      `Please ensure pi-coding-agent is installed correctly.`,
+    );
+  }
+  const minMajor = 0, minMinor = 78, minPatch = 1;
+  const tooOld = major < minMajor
+    || (major === minMajor && minor < minMinor)
+    || (major === minMajor && minor === minMinor && patch < minPatch);
+  if (tooOld) {
+    throw new Error(
+      `[pi-research] pi-coding-agent v${PI_VERSION} is too old. ` +
+      `Requires v${minMajor}.${minMinor}.${minPatch}+. Please update pi-coding-agent.`,
+    );
   }
 
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY

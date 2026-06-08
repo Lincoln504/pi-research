@@ -226,7 +226,21 @@ export function saveConfig(config: Config): void {
       }
     }
 
-    fs.writeFileSync(p, outLines.join('\n'), 'utf-8');
+    // Atomic write: write to temp file then rename (crash-safe)
+    const tmpPath = `${p}.tmp.${Date.now()}`;
+    fs.writeFileSync(tmpPath, outLines.join('\n'), 'utf-8');
+    try {
+      fs.renameSync(tmpPath, p);
+    } catch (renameErr) {
+      // fs.renameSync fails on Windows if target exists (NTFS). Fall back to copy+delete.
+      if (process.platform === 'win32') {
+        fs.copyFileSync(tmpPath, p);
+        try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+      } else {
+        try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+        throw renameErr;
+      }
+    }
   } catch (err) {
     logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;

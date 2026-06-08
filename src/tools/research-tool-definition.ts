@@ -13,8 +13,8 @@ import type {
   AgentToolUpdateCallback,
 } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
-import type { ModelWithId } from '../types/extension-context.ts';
-import type { ResearchDepth } from '../types/index.ts';
+import type { ModelWithId, ExtendedExtensionContext } from '../types/extension-context.ts';
+import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
 import { getService } from '../core/service-registry.ts';
@@ -220,12 +220,12 @@ export function createResearchTool(): ToolDefinition {
       const { query, depth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
 
       // Inherit exclusions from parent context if possible (new in v0.77.0)
-      const parentExcludeTools = (ctx as any).excludeTools || [];
+      const eCtx = ctx as ExtendedExtensionContext;
+      const parentExcludeTools = eCtx.excludeTools || [];
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
 
       const researchId = createResearchRunId();
-      const eCtx = ctx as any;
-      const piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId() || 'default';
+      const piSessionId = eCtx.sessionId || (eCtx as any).sessionManager?.getSessionId() || 'default';
       logger.debug(`[research] Initializing session IDs: piSessionId=${piSessionId}, researchId=${researchId}`);
       
       const internalAbort = new AbortController();
@@ -244,14 +244,14 @@ export function createResearchTool(): ToolDefinition {
 
       try {
         const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
-          (logger as any).runCapturingStderr(async () => {
+          logger.runCapturingStderr(async () => {
           const config = getConfig();
           validateConfig(config);
 
           // When no explicit model parameter is given, use ctx.model directly.
           let selectedModel: ModelWithId | undefined;
           if (modelId) {
-            selectedModel = (ctx.modelRegistry as any).getAll().find((m: any) => m.id === modelId);
+            selectedModel = (eCtx.modelRegistry as any).getAll().find((m: any) => m.id === modelId);
             if (!selectedModel) {
               logger.warn(`[research] Model ${modelId} not found, falling back to context model.`);
               selectedModel = ctx.model as ModelWithId;
@@ -299,18 +299,19 @@ export function createResearchTool(): ToolDefinition {
           );
 
           // Setup cleanup (will be updated with actual unsubscribe functions after TUI initialization)
-          const cleanup = createCleanupFunction({
+          const cleanupCtx: CleanupContext = {
             researchId: sessionResearchId,
             piSessionId,
             masterWidgetId: tuiManager.masterWidgetId,
             panelState,
             waveTimer: null,
             unsubOrder: null,
-          }, { ctx });
+          };
+          const cleanup = createCleanupFunction(cleanupCtx, { ctx });
           
           // Update cleanup with actual unsubscribe functions from TUI manager
           const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
-          updateUnsubOrder(cleanup as any, tuiManager.unsubOrder);
+          updateUnsubOrder(cleanupCtx, tuiManager.unsubOrder);
           // Note: wave timer will be set by the observer when searching starts
 
           // Handle abort signal — use { once: true } so the listener is auto-removed after the first fire

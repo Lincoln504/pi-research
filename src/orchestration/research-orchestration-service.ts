@@ -66,7 +66,6 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     }
 
     const researchStart = Date.now();
-    metrics.increment('research_manager_requests_total', 1, { depth: String(depth) });
 
     const researchConfig = config || getConfig();
 
@@ -102,13 +101,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         result = await orchestrator.run(signal);
       }
       const researchDuration = Date.now() - researchStart;
-      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'success' });
-      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'success' });
+      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'success', source: 'extension' });
+      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'success', source: 'extension' });
       return result;
     } catch (error) {
       const researchDuration = Date.now() - researchStart;
-      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error' });
-      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error' });
+      metrics.observe('research_manager_latency_ms', researchDuration, { depth: String(depth), status: 'error', source: 'extension' });
+      metrics.increment('research_manager_requests_total', 1, { depth: String(depth), status: 'error', source: 'extension' });
       throw error;
     }
   }

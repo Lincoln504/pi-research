@@ -148,8 +148,9 @@ export class KnowledgeStore implements IKnowledgeStore {
 
         try {
           const schema = await this.table.schema();
+
+          // Extract vector dimension for embedder initialization
           const vectorField = schema.fields.find(f => f.name === 'vector');
-          // Fix for FixedSizeList: check type name or use any if lancedb doesn't export it
           if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
             const dim = (vectorField.type as any).listSize;
             if (this.options.embedder.getDimension() === null) {
@@ -157,43 +158,43 @@ export class KnowledgeStore implements IKnowledgeStore {
               logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
             }
           }
-        } catch (schemaErr) {
-          logger.warn('[store] Failed to extract dimension from schema:', schemaErr);
-        }
 
-        const schema = await this.table.schema();
-        let storedModel = schema.metadata.get('embedding_model');
-        let storedVersion = schema.metadata.get('schema_version');
+          // Check model and schema version metadata
+          let storedModel = schema.metadata.get('embedding_model');
+          let storedVersion = schema.metadata.get('schema_version');
 
-        if (typeof storedModel === 'object' && storedModel !== null && 'byteLength' in (storedModel as any)) {
-          storedModel = new TextDecoder().decode(storedModel as unknown as Uint8Array);
-        }
-        if (typeof storedVersion === 'object' && storedVersion !== null && 'byteLength' in (storedVersion as any)) {
-          storedVersion = new TextDecoder().decode(storedVersion as unknown as Uint8Array);
-        }
+          if (typeof storedModel === 'object' && storedModel !== null && 'byteLength' in (storedModel as any)) {
+            storedModel = new TextDecoder().decode(storedModel as unknown as Uint8Array);
+          }
+          if (typeof storedVersion === 'object' && storedVersion !== null && 'byteLength' in (storedVersion as any)) {
+            storedVersion = new TextDecoder().decode(storedVersion as unknown as Uint8Array);
+          }
 
-        const isModelMismatch = storedModel !== this.options.modelName;
-        const isVersionMismatch = storedVersion !== CURRENT_SCHEMA_VERSION;
+          const isModelMismatch = storedModel !== this.options.modelName;
+          const isVersionMismatch = storedVersion !== CURRENT_SCHEMA_VERSION;
 
-        if (isModelMismatch || isVersionMismatch) {
-          const reason = isModelMismatch ? 'Model change' : 'Schema version change';
-          logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
-          const strategy = this.options.migrationStrategy || 'drop';
+          if (isModelMismatch || isVersionMismatch) {
+            const reason = isModelMismatch ? 'Model change' : 'Schema version change';
+            logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
+            const strategy = this.options.migrationStrategy || 'drop';
 
-          try {
-            await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
-          } catch (err) {
-            const errorMsg = `Model migration failed using strategy '${strategy}': ${err instanceof Error ? err.message : String(err)}`;
-            logger.error(`[store] ${errorMsg}`);
+            try {
+              await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
+            } catch (err) {
+              const errorMsg = `Model migration failed using strategy '${strategy}': ${err instanceof Error ? err.message : String(err)}`;
+              logger.error(`[store] ${errorMsg}`);
 
-            if (strategy !== 'drop') {
-              logger.warn('[store] Falling back to drop strategy after migration failure');
-              await this.db.dropTable(this.tableName);
-              this.table = await this.createTable();
-            } else {
-              throw new Error(errorMsg, { cause: err });
+              if (strategy !== 'drop') {
+                logger.warn('[store] Falling back to drop strategy after migration failure');
+                await this.db.dropTable(this.tableName);
+                this.table = await this.createTable();
+              } else {
+                throw new Error(errorMsg, { cause: err });
+              }
             }
           }
+        } catch (schemaErr) {
+          logger.warn('[store] Failed to read table schema:', schemaErr);
         }
       } else {
         this.table = await this.createTable();
@@ -544,6 +545,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       try {
         metadata = JSON.parse(r.metadata as string);
       } catch {
+        logger.debug('[store] Corrupted metadata for row in rebuildDocument');
         // Fallback for corrupted metadata
       }
       
@@ -576,9 +578,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async findByUrl(url: string): Promise<StoreDocument[]> {
-    const table = await this.getFreshTable();
-    const scopeFilter = this.getScopeFilter();
-    return findDocumentsByUrl(table, url, scopeFilter);
+    return this.findDocumentsByUrl(url);
   }
 
   async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
@@ -611,6 +611,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
       return { text: r.content as string, description, metadata };
     } catch {
+      logger.debug(`[store] Parse error reading cached content for ${url}`);
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'parse_error' });
       return null;
     }

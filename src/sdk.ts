@@ -29,6 +29,7 @@ import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
 import type { SchedulerService } from './core/scheduler-service.ts';
 import { repairJsonWithLlm } from './utils/agentic-repair.ts';
 import { completeSimple } from '@earendil-works/pi-ai';
+import { metrics } from './utils/metrics.ts';
 
 export { repairJsonWithLlm };
 export { getService, resetServiceContainer } from './core/service-registry.ts';
@@ -179,11 +180,12 @@ export async function runDeepResearch(query: string, options: RunOptions = {}): 
   ensureInitialized();
 
   const depth = options.depth ?? 1;
-  // depth is ResearchDepth (0|1|2|3); depth 0 is quick-only so clamp to 1 if not explicit
   const complexity = options.complexity ?? (depth >= 1 ? (depth as 1 | 2 | 3) : 1);
   const researchId = createResearchRunId();
   const sessionId = `sdk-${randomUUID()}`;
   const observer = new HeadlessObserver(options.observer);
+  const depthLabel = String(depth);
+  const researchStart = Date.now();
 
   const orchestrator = new DeepResearchOrchestrator({
     ctx: createMockContext() as any,
@@ -196,7 +198,16 @@ export async function runDeepResearch(query: string, options: RunOptions = {}): 
     config: getConfig(),
   });
 
-  return await orchestrator.run(options.signal);
+  try {
+    const result = await orchestrator.run(options.signal);
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'success', source: 'sdk' });
+    return result;
+  } catch (error) {
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
+    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'error', source: 'sdk' });
+    throw error;
+  }
 }
 
 /**
@@ -209,6 +220,8 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
   const researchId = createResearchRunId();
   const sessionId = `sdk-${randomUUID()}`;
   const observer = new HeadlessObserver(options.observer);
+  const depthLabel = '0';
+  const researchStart = Date.now();
 
   const orchestrator = new QuickResearchOrchestrator({
     ctx: createMockContext() as any,
@@ -220,7 +233,16 @@ export async function runQuickResearch(query: string, options: RunOptions = {}):
     config: getConfig(),
   });
 
-  return await orchestrator.run(options.signal);
+  try {
+    const result = await orchestrator.run(options.signal);
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'success', source: 'sdk' });
+    return result;
+  } catch (error) {
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
+    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'error', source: 'sdk' });
+    throw error;
+  }
 }
 
 /**

@@ -238,9 +238,9 @@ export function createScrapeTool(options: {
       const successfulFresh = freshResults.filter(r => r.success);
       const failedFresh = freshResults.filter(r => !r.success);
 
-      const allSuccessful = [
-        ...duplicateResults.map(r => ({ ...r, error: undefined, source: 'session-cache' })),
-        ...cachedResults.map(r => ({ ...r, success: true as const, error: undefined, source: 'knowledge-store' })),
+      const allSuccessful: Array<typeof successfulFresh[number] & { source?: string }> = [
+        ...duplicateResults.map(r => ({ ...r, error: undefined, source: 'session-cache' as const })),
+        ...cachedResults.map(r => ({ ...r, success: true as const, error: undefined, source: 'knowledge-store' as const })),
         ...successfulFresh,
       ];
 
@@ -263,9 +263,9 @@ export function createScrapeTool(options: {
 
       for (const res of allSuccessful) {
         let sourceLabel: string;
-        if ((res as any).source === 'session-cache') {
+        if (res.source === 'session-cache') {
           sourceLabel = 'Source: Session Memory (Already scraped by sibling/previous round)';
-        } else if ((res as any).source === 'knowledge-store') {
+        } else if (res.source === 'knowledge-store') {
           sourceLabel = 'Source: Knowledge Store (Local Cache)';
         } else {
           sourceLabel = 'Source: Scrape';

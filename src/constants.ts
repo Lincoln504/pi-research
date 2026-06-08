@@ -76,7 +76,6 @@ export const MAX_TOTAL_RESEARCHERS = 25;
 // ==================== Timeout Constants ====================
 
 export const OSV_TIMEOUT_MS = 30000;
-export const NVD_TIMEOUT_MS = 30000;
 
 // ==================== Export Constants ====================
 
@@ -113,7 +112,6 @@ export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 // ==================== UI Constants ====================
 
 export const MAX_REPORT_LENGTH = 200000;
-export const PROGRESS_BAR_WIDTH = 18;
 
 // ==================== Orchestrator Constants ====================
 

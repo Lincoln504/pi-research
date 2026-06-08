@@ -306,8 +306,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               try {
                 saveConfig(config);
                 resetConfig();
-              } catch (e: any) {
-                ctx.ui.notify(`Failed to save: ${e.message}`, 'error');
+              } catch (e: unknown) {
+                ctx.ui.notify(`Failed to save: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
 
@@ -374,7 +374,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           await clearService(ServiceNames.KNOWLEDGE_STORE);
           clearEmbeddingInstance();
           ctx.ui.notify('Model changed: Knowledge store cleared', 'info');
-        } catch (e: any) {
+        } catch (e: unknown) {
           logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
         }
       } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
@@ -383,7 +383,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           await clearService(ServiceNames.KNOWLEDGE_STORE);
           clearEmbeddingInstance();
           ctx.ui.notify('Device changed: Service refreshed', 'info');
-        } catch (e: any) {
+        } catch (e: unknown) {
           logger.warn('[research-config] Failed to refresh service on device change:', e);
         }
       }
@@ -404,8 +404,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
                 await service.clearGlobal();
                 ctx.ui.notify('Global shared data cleared', 'info');
-              } catch (e: any) {
-                ctx.ui.notify(`Failed to clear global store: ${e.message}`, 'error');
+              } catch (e: unknown) {
+                ctx.ui.notify(`Failed to clear global store: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
             break;
@@ -417,8 +417,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
                 await service.clearLocal();
                 ctx.ui.notify('Project-specific data cleared', 'info');
-              } catch (e: any) {
-                ctx.ui.notify(`Failed to clear local project data: ${e.message}`, 'error');
+              } catch (e: unknown) {
+                ctx.ui.notify(`Failed to clear local project data: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
             break;
@@ -433,8 +433,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         }
       }
     });
-  } catch (error: any) {
-    logger.error(`[Config] Menu error: ${error.message}`);
+  } catch (error: unknown) {
+    logger.error(`[Config] Menu error: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     setInteractiveTuiActive(false);
   }
@@ -476,9 +476,9 @@ async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Pr
     if (ctx.hasUI) {
       ctx.ui.notify(`Health check complete: ${systemHealth.status}`, 'info');
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (ctx.hasUI) {
-      ctx.ui.notify(`Health check failed: ${error.message}`, 'error');
+      ctx.ui.notify(`Health check failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 }
@@ -499,9 +499,9 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
       content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
       display: true,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (ctx.hasUI) {
-      ctx.ui.notify(`Failed to get knowledge status: ${error.message}`, 'error');
+      ctx.ui.notify(`Failed to get knowledge status: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 }

@@ -70,8 +70,8 @@ export async function initBrowser(): Promise<void> {
         let CamoufoxModule: any;
         try {
           CamoufoxModule = await import('camoufox-js');
-        } catch (e: any) {
-          throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e.message}`, { cause: e });
+        } catch (e: unknown) {
+          throw new Error(`[Worker] camoufox-js not found in node_modules. Please run 'npm install'. Original error: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
         }
 
         const { Camoufox } = CamoufoxModule;
@@ -135,7 +135,7 @@ export async function initBrowser(): Promise<void> {
         
         logToDebugFile('INFO', `[Worker-${workerId}] Browser initialized.`);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Close any partially-launched browser to avoid orphaning the process.
       if (browser && typeof browser.close === 'function') {
         browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));

@@ -181,6 +181,7 @@ export class FileLockService implements IService {
           const duration = Date.now() - startTime;
           metrics.observe('state_lock_acquire_duration_ms', duration);
           metrics.increment('state_lock_acquire_total', 1, { status: 'success' });
+          metrics.setGauge('state_lock_held', 1);
           if (contentionCount > 0) {
             metrics.increment('state_lock_contention_total', 1);
             metrics.observe('state_lock_contention_retries', contentionCount);

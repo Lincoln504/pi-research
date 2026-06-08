@@ -224,7 +224,17 @@ export class StateManager {
       tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
       const content = JSON.stringify(state, null, 2);
       await fs.writeFile(tempFilePath, content, 'utf-8');
-      await fs.rename(tempFilePath, this.stateFilePath);
+      try {
+        await fs.rename(tempFilePath, this.stateFilePath);
+      } catch (renameErr) {
+        // fs.rename fails on Windows if target exists (NTFS). Fall back to copy+delete.
+        if (process.platform === 'win32') {
+          await fs.copyFile(tempFilePath, this.stateFilePath);
+          await fs.unlink(tempFilePath);
+        } else {
+          throw renameErr;
+        }
+      }
       tempFilePath = null;
       await this.backupManager.cleanupOldBackups();
     } catch (error: unknown) {

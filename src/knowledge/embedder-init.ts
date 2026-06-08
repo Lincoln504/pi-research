@@ -83,8 +83,8 @@ export function isWebGpuDeviceError(err: unknown): boolean {
     msg = err.message ?? '';
     stack = err.stack ?? '';
   } else if (typeof err === 'object') {
-    msg = String((err as any).message ?? '');
-    stack = String((err as any).stack ?? '');
+    msg = String((err as Record<string, unknown>)['message'] ?? '');
+    stack = String((err as Record<string, unknown>)['stack'] ?? '');
     if (!msg && !stack) {
       try { msg = JSON.stringify(err); } catch { msg = String(err); }
     }

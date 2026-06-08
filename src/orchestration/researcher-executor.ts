@@ -207,7 +207,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
                 onAbort();
               } else {
                 signal.addEventListener('abort', onAbort, { once: true });
-                (abortCleanup as any) = () => signal.removeEventListener('abort', onAbort);
+                abortCleanup = () => signal.removeEventListener('abort', onAbort);
               }
             })
           ] : []),

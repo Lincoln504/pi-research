@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import type { IProcessLifecycle } from '../core/interfaces/process-interfaces.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
@@ -35,27 +36,40 @@ export class ProcessLifecycleService implements IProcessLifecycle {
    * even if PIDs are recycled by the OS.
    * 
    * @param pid Process ID
-   * @returns Start time in jiffies (Linux) or null if not supported/available
+   * @returns Start time identifier (Linux: jiffies; cross-platform: epoch seconds) or null
    */
   async getProcessStartTime(pid: number): Promise<number | null> {
-    if (process.platform !== 'linux') {
-      return null;
+    // Linux: read from /proc/{pid}/stat (field 22 = starttime in jiffies)
+    if (process.platform === 'linux') {
+      try {
+        const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
+        const lastParenIndex = stat.lastIndexOf(')');
+        if (lastParenIndex === -1) return null;
+        const partsAfterName = stat.substring(lastParenIndex + 2).trim().split(/\s+/);
+        const startTimeStr = partsAfterName[19];
+        return startTimeStr ? parseInt(startTimeStr, 10) : null;
+      } catch (_err) {
+        // ENOENT is common if process just died
+        return null;
+      }
     }
 
+    // Cross-platform fallback: `ps -o etimes=` returns elapsed seconds.
+    // Returns epoch-second floor of process start for stable PID-reuse detection.
     try {
-      const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
-      // Field 22 is starttime. Note: executable name in field 2 can contain spaces/parens.
-      // e.g. "123 (my app) S 1 ..."
-      const lastParenIndex = stat.lastIndexOf(')');
-      if (lastParenIndex === -1) return null;
-      
-      const partsAfterName = stat.substring(lastParenIndex + 2).trim().split(/\s+/);
-      // partsAfterName[0] is state (field 3)
-      // starttime is field 22. 22 - 3 = 19.
-      const startTimeStr = partsAfterName[19];
-      return startTimeStr ? parseInt(startTimeStr, 10) : null;
-    } catch (_err) {
-      // ENOENT is common if process just died
+      const output = await new Promise<string>((resolve, reject) => {
+        const child = execFile(
+          'ps', ['-o', 'etimes=', '-p', String(pid)],
+          { encoding: 'utf8', timeout: 3000 },
+          (err, stdout) => err ? reject(err) : resolve(stdout),
+        );
+        child.unref?.();
+      });
+      if (!output || !output.trim()) return null;
+      const elapsedSec = parseInt(output.trim(), 10);
+      if (isNaN(elapsedSec)) return null;
+      return Math.floor(Date.now() / 1000) - elapsedSec;
+    } catch {
       return null;
     }
   }

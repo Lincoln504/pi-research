@@ -117,7 +117,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     }
 
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
 
     // If the browser crashed or disconnected, clear the instance to force re-initialization on next task

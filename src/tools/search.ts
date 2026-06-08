@@ -45,7 +45,6 @@ export function createSearchTool(options: {
     parameters: SearchParamsSchema,
     async execute(_callId, params, signal, _onUpdate): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
-      metrics.increment('tool_search_calls_total', 1);
 
       if (!Value.Check(SearchParamsSchema, params)) {
           metrics.increment('tool_search_calls_total', 1, { status: 'invalid_params' });

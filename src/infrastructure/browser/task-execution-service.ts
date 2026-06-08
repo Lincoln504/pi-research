@@ -51,8 +51,8 @@ export async function runBrowserTask<T>(
 
             throw new Error('Unified browser manager requires data-driven tasks (URLs/Queries)');
         });
-    } catch (error: any) {
-        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted', { cause: error });
+    } catch (error: unknown) {
+        if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw new Error('Aborted', { cause: error });
 
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
@@ -61,7 +61,7 @@ export async function runBrowserTask<T>(
                 taskType: type,
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during ${type} task (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
             
             if (isPoolShutdownError(error)) {
                 // Pool is temporarily draining — wait for the drain to finish.
@@ -99,14 +99,14 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
             const scheduler = await getScheduler(config);
             return await scheduler.runHealthCheck(config, signal);
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
                 component: 'browser-manager',
                 operation: 'healthcheck',
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during healthcheck (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
             
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
@@ -144,8 +144,8 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
             const scheduler = await getScheduler(config);
             return await scheduler.runSearch(query, config, signal);
         });
-    } catch (error: any) {
-        if (signal?.aborted || error.message === 'Aborted') throw new Error('Aborted', { cause: error });
+    } catch (error: unknown) {
+        if (signal?.aborted || (error instanceof Error && error.message === 'Aborted')) throw new Error('Aborted', { cause: error });
 
         if (retries > 0 && isTransientSocketError(error) && !isTaskTimeoutError(error) && !isCloudflareBlockError(error)) {
             errorTracker.trackError(error, {
@@ -154,7 +154,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 query,
                 errorType: 'transient_socket_error',
             });
-            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${error.message.substring(0, 100)}...`);
+            logger.warn(`[BrowserManager] Transient socket error during search (retries left: ${retries}): ${(error instanceof Error ? error.message : String(error)).substring(0, 100)}...`);
             
             if (isPoolShutdownError(error)) {
                 await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));

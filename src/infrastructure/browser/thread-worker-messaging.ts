@@ -273,7 +273,7 @@ export async function executeScrapeTask(
         // Challenge resolved, get updated content
         html = await page.content();
         logToDebugFile('INFO', `[Worker-${workerId}] Cloudflare challenge resolved for: ${url}`);
-      } catch (_waitError: any) {
+      } catch (_waitError: unknown) {
         logToDebugFile('ERROR', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
         const error = new Error('Fetch blocked: Cloudflare challenge');
         error.cause = _waitError;
@@ -353,15 +353,15 @@ export async function executeHealthCheck(
 
   try {
     return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT);
-  } catch (firstError: any) {
+  } catch (firstError: unknown) {
     // One retry: if the first attempt fails, the page may have been in a bad state
     // (challenge redirect, partial load, transient network blip). A second attempt
     // on a fresh page helps distinguish a real outage from a one-off failure.
-    logToDebugFile('WARN', `[Worker-${workerId}] Health check attempt 1 failed: ${firstError.message}. Retrying once...`);
+    logToDebugFile('WARN', `[Worker-${workerId}] Health check attempt 1 failed: ${firstError instanceof Error ? firstError.message : String(firstError)}. Retrying once...`);
     try {
       return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT);
-    } catch (retryError: any) {
-      logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryError.message}`);
+    } catch (retryError: unknown) {
+      logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryError instanceof Error ? retryError.message : String(retryError)}`);
       throw retryError;
     }
   }

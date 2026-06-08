@@ -27,6 +27,7 @@ import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { ResearchMessage } from '../types/index.ts';
+import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 
 export interface QuickResearchOrchestratorOptions {
@@ -119,7 +120,7 @@ export class QuickResearchOrchestrator {
           cwd: ctx.cwd,
           ctxModel: model,
           modelRegistry: ctx.modelRegistry,
-          settingsManager: (ctx as any).settingsManager,
+          settingsManager: (ctx as ExtendedExtensionContext).settingsManager,
           systemPrompt: prompt,
           extensionCtx: ctx,
           excludeTools: this.options.excludeTools || ['grep'],

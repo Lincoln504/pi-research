@@ -54,7 +54,7 @@ export function createCleanupFunction(
   
   // Store reference objects in cleanup context for later updates
   if (!cleanupCtx.unsubOrderRef) {
-    (cleanupCtx as any).unsubOrderRef = unsubOrderContainer;
+    cleanupCtx.unsubOrderRef = unsubOrderContainer;
   }
 
   return async () => {
