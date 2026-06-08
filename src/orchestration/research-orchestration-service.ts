@@ -311,7 +311,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param config - Research configuration
    */
   async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, config: Config): Promise<void> {
-    if (config.KNOWLEDGE_STORE_ENABLED !== true) {
+    if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
       logger.debug('[ResearchOrchestrationService] Knowledge store disabled, skipping link descriptions');
       return;
     }

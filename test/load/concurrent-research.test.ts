@@ -240,7 +240,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
               },
             } as any,
             observer: {},
-            config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: false },
+            config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: false, GLOBAL_KNOWLEDGE_STORE_ENABLED: false },
           });
 
           // Mock run to avoid real LLM calls
@@ -264,7 +264,7 @@ describe('Load Tests: Concurrent Research Sessions', () => {
               },
             } as any,
             observer: {},
-            config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: false },
+            config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: false, GLOBAL_KNOWLEDGE_STORE_ENABLED: false },
           });
 
           // Mock run

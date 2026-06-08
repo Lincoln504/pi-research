@@ -39,7 +39,8 @@ vi.mock('../../../src/knowledge/chunker.ts', () => ({
 
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn().mockReturnValue({
-    KNOWLEDGE_STORE_ENABLED: true,
+    LOCAL_KNOWLEDGE_STORE_ENABLED: true,
+GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
     EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   }),

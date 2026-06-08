@@ -1,11 +1,14 @@
 import { logger } from '../logger.ts';
-import type { KnowledgeStore } from './store.ts';
-import type { StoreDocument } from './store-types.ts';
 import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
 import { ServiceLifecycle } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/interfaces/service-names.ts';
-import type { IWriterQueue, IngestionItem } from '../core/interfaces/knowledge-interfaces.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { 
+  IWriterQueue, 
+  IngestionItem, 
+  IKnowledgeStore, 
+  StoreDocument 
+} from '../core/interfaces/knowledge-interfaces.ts';
 
 function isConnectionRefused(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -15,7 +18,7 @@ function isConnectionRefused(err: unknown): boolean {
 export type { IngestionItem };
 
 export interface WriterQueueOptions {
-  store: KnowledgeStore;
+  store: IKnowledgeStore;
   chunker?: Chunker;
 }
 
@@ -129,7 +132,7 @@ export class WriterQueue implements IWriterQueue {
 
     const hash = createHash('sha256').update(item.markdown).update(item.content ?? '').digest('hex');
 
-    if (this.options.store.isStoreClosed()) {
+    if (this.options.store.isStoreClosed?.()) {
       logger.warn(`[writer-queue] Skipping ingest for ${item.url} — store is closing`);
       return;
     }

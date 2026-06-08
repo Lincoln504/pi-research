@@ -8,7 +8,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.ts';
 import { Type, type Static } from 'typebox';
@@ -18,91 +17,89 @@ import { Value } from 'typebox/value';
 const __filename = fileURLToPath(import.meta.url);
 const EXTENSION_DIR = path.dirname(__filename);
 
-// ============================================================================
-// Configuration Schema
-// ============================================================================
-
+/**
+ * Validates configuration schema using TypeBox.
+ * This provides runtime validation and TypeScript types from the same source.
+ */
 export const ConfigSchema = Type.Object({
-  /** Per-researcher timeout in milliseconds (default: 600000, range: 3-30 minutes) */
-  RESEARCHER_TIMEOUT_MS: Type.Number({ minimum: 180000, maximum: 1800000, default: 600000 }),
-  /** Maximum researchers to run simultaneously (default: 3, range: 1-5) */
-  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
-  /** Maximum retries per researcher request (default: 3, range: 0-10) */
-  RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 10, default: 3 }),
-  /** Maximum delay between retries in milliseconds (default: 5000, range: 1-60 seconds) */
-  RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 1000, maximum: 60000, default: 5000 }),
-  /** Health check timeout in milliseconds (default: 30000, range: 20-120 seconds) */
-  HEALTH_CHECK_TIMEOUT_MS: Type.Optional(Type.Number({ minimum: 20000, maximum: 120000, default: 30000 })),
-  /** Global TUI refresh debounce in milliseconds (default: 10) */
-  TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 1, default: 10 }),
-  /** Console restore delay after research in milliseconds (default: 15000) */
-  CONSOLE_RESTORE_DELAY_MS: Type.Number({ minimum: 0, default: 15000 }),
-  /** Default depth for /research command (1-3, default: 1) */
-  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
-  /** Maximum scrape batches per researcher (0-99, 0=unlimited, default: 2) */
+  /** Per-researcher timeout in milliseconds (default: 300000, range: 3-30 min) */
+  RESEARCHER_TIMEOUT_MS: Type.Number({ minimum: 180000, maximum: 1800000, default: 300000 }),
+  /** Maximum number of concurrent researcher processes (default: 10, range: 1-20) */
+  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 20, default: 10 }),
+  /** Maximum number of retries for a failed researcher (default: 2, range: 0-5) */
+  RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 5, default: 2 }),
+  /** Base delay between retries in milliseconds (default: 2000, range: 100-10000) */
+  RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 100, maximum: 10000, default: 2000 }),
+  /** Target depth for recursive research (default: 3, range: 1-10) */
+  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 10, default: 3 }),
+  /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
   MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
-  /** Number of parallel browser workers for search and scraping (default: 4, range: 1-16) */
-  WORKER_THREADS: Type.Number({ minimum: 1, maximum: 16, default: 4 }),
-  /** Number of concurrent tasks per pool worker process (default: 3, range: 1-10) */
+  /** Number of parallel browser pool workers (default: 3, range: 1-10) */
+  WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
+  /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
   WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
-  /** Whether the local knowledge store is enabled (default: true) */
-  KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: true }),
+  /** Whether the local knowledge store is enabled (default: false) */
+  LOCAL_KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: false }),
+  /** Whether the global knowledge store is enabled (default: true) */
+  GLOBAL_KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: true }),
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: Type.String({ default: 'Xenova/all-MiniLM-L6-v2' }),
-  /** Inference backend for embeddings: 'webgpu' or 'cpu' */
+  /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
   EMBEDDING_DEVICE: Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' }),
   /** Timeout for scraping operations in milliseconds (default: 15000, range: 5-120 seconds) */
   SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 15000 }),
-  /** How long to keep cached scrapes in the knowledge store (default: 30 days, range: 1-365) */
+  /** How long to keep documents in the knowledge store before eviction (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: Type.Number({ minimum: 1, maximum: 365, default: 30 }),
-  /** Timeout for embedding model initialization in milliseconds (default: 300000, range: 30s-30min) */
-  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 30000, maximum: 1800000, default: 300000 }),
-  /** Context fraction at which further scraping is blocked (0-1, default: 0.45) */
-  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.0001, maximum: 1, default: 0.45 }),
-  /** Estimated tokens consumed by a single scrape batch URL (default: 10000, range: 100-100,000) */
-  AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 100, maximum: 100000, default: 10000 }),
-  /** Maximum concurrent URLs fetched in a single scrape batch (default: 3, range: 1-20) */
-  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
-  /** Timeout for a single browser task (search/scrape) in milliseconds (default: 45000) */
-  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 5000, default: 45000 }),
-  /** Optional model override for researcher sub-agents. Empty string = use session model. */
-  RESEARCH_MODEL: Type.Optional(Type.String({ default: '' })),
-  /** Optional directory for the knowledge store */
-  KNOWLEDGE_STORE_DIR: Type.Optional(Type.String({ default: '' })),
+  /** Timeout for embedding model initialization (default: 60000ms) */
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 10000, maximum: 300000, default: 60000 }),
+  /** Max fraction of context window to use for initial scrape context (default: 0.15) */
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.05, maximum: 1.0, default: 0.15 }),
+  /** Estimated tokens per scrape result for planning (default: 2500) */
+  AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 500, maximum: 10000, default: 2500 }),
+  /** Maximum number of concurrent scrapes (default: 10) */
+  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 50, default: 10 }),
+  /** Health check timeout in milliseconds (default: 30000ms) */
+  HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 30000 }),
+  /** TUI refresh debounce in milliseconds (default: 100ms) */
+  TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
+  /** Delay to wait before restoring console log after TUI close (default: 200ms) */
+  CONSOLE_RESTORE_DELAY_MS: Type.Number({ minimum: 0, maximum: 30000, default: 200 }),
+  /** Timeout for individual browser tasks (default: 30000ms) */
+  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 30000 }),
+  /** LLM Model to use for research (e.g. google/gemini-2.0-flash-001) */
+  RESEARCH_MODEL: Type.Optional(Type.String()),
+  /** Explicit directory for the knowledge store database (overrides default) */
+  KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
 });
 
 export type Config = Static<typeof ConfigSchema>;
 
+/** Default configuration values extracted from schema */
 export const DEFAULTS: Config = Value.Create(ConfigSchema);
 
 // ============================================================================
 // Env-file persistence
 // ============================================================================
 
-export function getEnvFilePath(): string {
+export function getGlobalEnvFilePath(): string {
   return path.join(EXTENSION_DIR, '.env');
 }
 
+export function getLocalEnvFilePath(): string {
+  return path.resolve(process.cwd(), '.pi-research.env');
+}
+
+/**
+ * Returns the active database directory.
+ */
 export function getDbDir(): string {
   const config = getConfig();
-
-  // 1. Explicit directory override
   if (config.KNOWLEDGE_STORE_DIR) {
     return path.isAbsolute(config.KNOWLEDGE_STORE_DIR) 
       ? config.KNOWLEDGE_STORE_DIR 
       : path.resolve(process.cwd(), config.KNOWLEDGE_STORE_DIR);
   }
-
-  // 2. Local project directory detection
-  // If knowledge_db exists in the current project root, use it.
-  const localDb = path.resolve(process.cwd(), 'knowledge_db');
-  if (fs.existsSync(localDb) && fs.statSync(localDb).isDirectory()) {
-    return localDb;
-  }
-
-  // 3. Default global directory (in the extension installation folder)
   const dbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
-  // Ensure it's absolute
   return path.isAbsolute(dbDir) ? dbDir : path.resolve(process.cwd(), dbDir);
 }
 
@@ -114,28 +111,48 @@ function parseDotEnv(content: string): Record<string, string> {
     const eq = line.indexOf('=');
     if (eq < 1) continue;
     const key = line.slice(0, eq).trim();
-    const val = line.slice(eq + 1).replace(/\r$/, ''); // strip Windows \r, preserve leading spaces
+    const val = line.slice(eq + 1).replace(/\r$/, '');
     if (key) out[key] = val;
   }
   return out;
 }
 
 function loadEnvFile(): Record<string, string> {
+  const merged: Record<string, string> = {};
+  
+  // 1. Global defaults
   try {
-    const p = getEnvFilePath();
-    if (fs.existsSync(p)) return parseDotEnv(fs.readFileSync(p, 'utf-8'));
+    const globalPath = getGlobalEnvFilePath();
+    if (fs.existsSync(globalPath)) {
+      Object.assign(merged, parseDotEnv(fs.readFileSync(globalPath, 'utf-8')));
+    }
   } catch (err) {
-    logger.warn('[config] Failed to read env file:', err);
+    logger.warn('[config] Failed to read global env file:', err);
   }
-  return {};
+
+  // 2. Local overrides
+  try {
+    const localPath = getLocalEnvFilePath();
+    if (fs.existsSync(localPath)) {
+      Object.assign(merged, parseDotEnv(fs.readFileSync(localPath, 'utf-8')));
+    }
+  } catch (err) {
+    logger.warn('[config] Failed to read local env file:', err);
+  }
+
+  return merged;
 }
 
 /**
- * Write config back to .env in the current directory.
- * Robustly updates existing keys while preserving comments and other variables.
+ * Write config back to env file.
+ * Automatically selects between local and global based on project presence.
  */
 export function saveConfig(config: Config): void {
-  const p = getEnvFilePath();
+  const isProject = fs.existsSync(path.resolve(process.cwd(), '.git')) || 
+                    fs.existsSync(path.resolve(process.cwd(), 'package.json'));
+  
+  const p = isProject ? getLocalEnvFilePath() : getGlobalEnvFilePath();
+  
   const newValues: Record<string, string> = {
     PI_RESEARCH_TIMEOUT_MS: String(config.RESEARCHER_TIMEOUT_MS),
     PI_RESEARCH_MAX_RESEARCHERS: String(config.MAX_CONCURRENT_RESEARCHERS),
@@ -148,7 +165,8 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
-    PI_RESEARCH_KNOWLEDGE_ENABLED: String(config.KNOWLEDGE_STORE_ENABLED),
+    PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: String(config.LOCAL_KNOWLEDGE_STORE_ENABLED),
+    PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: String(config.GLOBAL_KNOWLEDGE_STORE_ENABLED),
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
@@ -168,8 +186,7 @@ export function saveConfig(config: Config): void {
       lines = fs.readFileSync(p, 'utf-8').split('\n');
     } else {
       lines = [
-        '# pi-research configuration — edit this file or use /research-config in pi',
-        '# This file is located in the pi-research extension directory',
+        '# pi-research configuration',
         '',
       ];
     }
@@ -192,180 +209,127 @@ export function saveConfig(config: Config): void {
 
       const key = line.slice(0, eq).trim();
       if (newValues[key] !== undefined) {
-        // If new value is empty string, omit the line entirely (clears the value)
-        if (newValues[key] !== '') {
-          outLines.push(`${key}=${newValues[key]}`);
-        }
+        outLines.push(`${key}=${newValues[key]}`);
         updatedKeys.add(key);
       } else {
         outLines.push(line);
       }
     }
 
-    // Add missing keys (skip keys with empty values - they were intentionally cleared)
-    let addedAny = false;
     for (const [key, val] of Object.entries(newValues)) {
       if (!updatedKeys.has(key) && val !== '') {
-        if (!addedAny && outLines.length > 0 && outLines[outLines.length - 1]?.trim() !== '') {
+        if (outLines.length > 0 && outLines[outLines.length - 1]?.trim() !== '') {
           outLines.push('');
         }
         outLines.push(`${key}=${val}`);
-        addedAny = true;
+        updatedKeys.add(key);
       }
     }
 
-    const tempPath = `${p}.tmp.${crypto.randomUUID()}`;
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(tempPath, outLines.join('\n'), 'utf-8');
-    fs.renameSync(tempPath, p);
-    logger.info('[config] Saved to', p);
+    fs.writeFileSync(p, outLines.join('\n'), 'utf-8');
   } catch (err) {
-    logger.error('[config] Failed to save config:', err);
+    logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;
   }
 }
 
 // ============================================================================
-// Parsing helpers
+// Internal State
 // ============================================================================
 
-function parseEnvNumber(
-  env: Record<string, string | undefined>,
-  key: string,
-  defaultValue: number,
-): number {
-  const value = env[key];
-  if (value === undefined || value === '') return defaultValue;
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed)) {
-    logger.warn(`[config] Invalid value for ${key}: "${value}", using default ${defaultValue}`);
-    return defaultValue;
-  }
-  return parsed;
-}
+let currentConfig: Config | null = null;
 
 /**
- * Parse an environment variable as a floating-point number.
- * Used for fraction/ratio config values (e.g. 0.45) where parseInt would
- * truncate valid values like "0.7" to 0, causing validation to fail.
+ * Internal factory for creating a configuration object from env.
+ * Primarily used for testing.
  */
-function parseEnvFloat(
-  env: Record<string, string | undefined>,
-  key: string,
-  defaultValue: number,
-): number {
-  const value = env[key];
-  if (value === undefined || value === '') return defaultValue;
-  const parsed = parseFloat(value);
-  if (isNaN(parsed)) {
-    logger.warn(`[config] Invalid float for ${key}: "${value}", using default ${defaultValue}`);
-    return defaultValue;
-  }
-  return parsed;
-}
+export function createConfig(env: Record<string, string | undefined>, processEnv: Record<string, string | undefined>): Config {
+  const e = { ...env, ...processEnv };
 
-function parseEnvString(
-  env: Record<string, string | undefined>,
-  key: string,
-  defaultValue?: string,
-): string | undefined {
-  const value = env[key];
-  return value === undefined || value === '' ? defaultValue : value;
-}
-
-function parseEnvBool(
-  env: Record<string, string | undefined>,
-  key: string,
-  defaultValue: boolean,
-): boolean {
-  const value = env[key];
-  if (value === undefined || value === '') return defaultValue;
-  const normalized = value.toLowerCase().trim();
-  if (normalized === 'true') return true;
-  if (normalized === 'false') return false;
-  logger.warn(`[config] Invalid boolean for ${key}: "${value}", using default ${defaultValue}`);
-  return defaultValue;
-}
-
-// ============================================================================
-// createConfig
-// ============================================================================
-
-/**
- * Build a Config from the env file and environment variables.
- *
- * Priority (highest first):
- *   1. Values in `env` (defaults to process.env) — allows shell / CI overrides
- *   2. Values in <extension-dir>/.env
- *   3. Compiled-in DEFAULTS
- *
- * @param env          Override the env source (pass `{}` in tests).
- * @param fileEnvOverride  Override the file source (pass `{}` in tests to skip file loading).
- */
-export function createConfig(
-  env: Record<string, string | undefined> = process.env,
-  fileEnvOverride?: Record<string, string>,
-): Config {
-  const fileEnv: Record<string, string | undefined> =
-    fileEnvOverride !== undefined ? fileEnvOverride : loadEnvFile();
-  // Spread order: file first so that explicit env vars win.
-  const e: Record<string, string | undefined> = { ...fileEnv, ...env };
-
-  return {
+  const raw = {
     RESEARCHER_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_TIMEOUT_MS', DEFAULTS.RESEARCHER_TIMEOUT_MS),
     MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_RESEARCHERS', DEFAULTS.MAX_CONCURRENT_RESEARCHERS),
     RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES),
     RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS),
-    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS as number),
-    TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
-    CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
     DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH),
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
-    KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_KNOWLEDGE_ENABLED', DEFAULTS.KNOWLEDGE_STORE_ENABLED),
+    LOCAL_KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED', DEFAULTS.LOCAL_KNOWLEDGE_STORE_ENABLED),
+    GLOBAL_KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED', DEFAULTS.GLOBAL_KNOWLEDGE_STORE_ENABLED),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
-    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvFloat(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
+    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
+    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS ?? 30000),
+    TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
+    CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
   };
+
+  const config = { ...DEFAULTS };
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== undefined) {
+      (config as any)[key] = value;
+    }
+  }
+  return config;
 }
 
-// ============================================================================
-// Global singleton
-// ============================================================================
-
-let globalConfig: Config | null = null;
-
+/**
+ * Robustly load current configuration.
+ * Preference: process.env > local env file > global env file > defaults.
+ */
 export function getConfig(): Config {
-  if (!globalConfig) globalConfig = createConfig();
-  return globalConfig;
+  if (currentConfig) return currentConfig;
+
+  const e = loadEnvFile();
+  currentConfig = createConfig(e, process.env);
+  return currentConfig;
 }
 
-export function setConfig(config: Config): void {
-  globalConfig = config;
+/**
+ * Manually override configuration (primarily for SDK/tests)
+ */
+export function setConfig(config: Partial<Config>): void {
+  const current = getConfig();
+  currentConfig = { ...current, ...config };
 }
 
-/** Clear the singleton so the next getConfig() re-reads from file. */
 export function resetConfig(): void {
-  globalConfig = null;
+  currentConfig = null;
 }
 
-// ============================================================================
-// Validation
-// ============================================================================
-
-export function validateConfig(config: Config = getConfig()): void {
+/**
+ * Validate configuration object against schema
+ */
+export function validateConfig(config: Config): void {
   const errors = [...Value.Errors(ConfigSchema, config)];
   if (errors.length > 0) {
-    const errorMessages = errors.map(err => `${(err as any).path}: ${err.message}`).join(', ');
-    throw new Error(`Invalid configuration: ${errorMessages}`);
+    throw new Error(`Invalid configuration: ${errors.map(e => `${(e as any).path || ''} ${e.message}`).join(', ')}`);
   }
+}
+
+// Helpers
+function parseEnvNumber(env: Record<string, string | undefined>, key: string, def: number): number {
+  const v = env[key];
+  if (v === undefined || v === '') return def;
+  const n = parseFloat(v);
+  return isNaN(n) ? def : n;
+}
+
+function parseEnvBool(env: Record<string, string | undefined>, key: string, def: boolean): boolean {
+  const v = env[key];
+  if (v === undefined || v === '') return def;
+  return v.toLowerCase() === 'true';
+}
+
+function parseEnvString(env: Record<string, string | undefined>, key: string, def?: string): string | undefined {
+  return env[key] || def;
 }

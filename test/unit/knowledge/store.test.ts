@@ -62,6 +62,11 @@ describe('KnowledgeStore', () => {
     expect(results[0].content).toBe('full page content here');
     expect(results[0].metadata['title']).toBe('Test');
     expect(results[0].timestamp).toBe(timestamp);
+
+    // Internal check: verify it was tagged with current workspace and not global
+    const rawDocs = await (store as any).table.query().toArray();
+    expect(rawDocs[0].workspace).toBe(process.cwd());
+    expect(rawDocs[0].is_global).toBe(false);
   });
 
   it('should throw when addDocuments is called before open()', async () => {
@@ -102,6 +107,28 @@ describe('KnowledgeStore', () => {
     const results = await store.findByUrl('https://example.com/a');
     expect(results.length).toBeGreaterThan(0);
     expect(results.every(r => r.url === 'https://example.com/a')).toBe(true);
+  });
+
+  it('should tag documents as global when globalEnabled is true', async () => {
+    const globalStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      globalEnabled: true,
+      workspace: 'ANY'
+    });
+    await globalStore.open();
+    await globalStore.addDocuments([{
+      url: 'https://global.com',
+      text: 'Global content',
+      metadata: {},
+      timestamp: Date.now()
+    }]);
+
+    const rawDocs = await (globalStore as any).table.query().toArray();
+    const doc = rawDocs.find((r: any) => r.url === 'https://global.com');
+    expect(doc.is_global).toBe(true);
+    await globalStore.close();
   });
 
   it('findByUrl returns empty array for URL with no documents', async () => {

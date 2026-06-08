@@ -16,7 +16,7 @@ import * as path from 'node:path';
 // Static imports from knowledge module
 import {
   createKnowledgeStoreComponents,
-  clearKnowledgeStore as clearKnowledgeStoreInternal,
+  forceDeleteKnowledgeStore,
   SUPPORTED_MODELS,
   getModelEmbedderConfig as getKnowledgeModelEmbedderConfig,
   getModelChunkConfig as getKnowledgeModelChunkConfig,
@@ -90,7 +90,7 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           if (errorMsg.includes('Generic memory error') && errorMsg.includes('Invalid range 0..0')) {
             logger.warn('[KnowledgeStoreService] Detected corrupted Knowledge Store. Clearing and retrying initialization...');
             try {
-              await clearKnowledgeStoreInternal();
+              await forceDeleteKnowledgeStore();
               components = await initLock.withLock(async () => {
                 return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
               });
@@ -243,17 +243,29 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   }
 
   /**
-   * Clear the knowledge store
+   * Clear the knowledge store (all entries)
    */
   async clear(): Promise<void> {
-    // Shutdown first to release locks
-    await this.dispose();
-    
-    // Clear the storage
-    await clearKnowledgeStoreInternal();
-    
-    // Reset state
-    this.lifecycle = ServiceLifecycle.UNINITIALIZED;
+    const store = await this.getStore();
+    // Clear everything by using a filter that matches everything
+    await store.clear('1 = 1');
+  }
+
+  /**
+   * Clear only local project entries
+   */
+  async clearLocal(): Promise<void> {
+    const store = await this.getStore();
+    const workspace = process.cwd().replace(/'/g, "''");
+    await store.clear(`workspace = '${workspace}'`);
+  }
+
+  /**
+   * Clear only global entries
+   */
+  async clearGlobal(): Promise<void> {
+    const store = await this.getStore();
+    await store.clear('is_global = true');
   }
 
   /**

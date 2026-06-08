@@ -97,7 +97,8 @@ export async function initResearchSDK(options: SDKOptions): Promise<void> {
     setConfig({ ...originalConfig!, ...options.config });
   }
   try {
-    validateConfig();
+    const config = getConfig();
+    validateConfig(config);
   } catch (err) {
     // Roll back config mutation so a corrected re-call can succeed.
     if (originalConfig) setConfig(originalConfig);

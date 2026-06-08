@@ -7,19 +7,21 @@
 import * as lancedb from '@lancedb/lancedb';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
-import type { IEmbedder } from '../core/interfaces/knowledge-interfaces.ts';
+import { 
+  IKnowledgeStore, 
+  StoreDocument, 
+  IEmbedder 
+} from '../core/interfaces/knowledge-interfaces.ts';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
 import { getConfig } from '../config.ts';
 import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
-import { createStoreTable } from './store-schema.ts';
+import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
 import { addDocumentsToStore, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
-import type { StoreDocument } from './store-types.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/interfaces/service-names.ts';
-import type { IKnowledgeStore } from '../core/interfaces/knowledge-interfaces.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
 
 export interface StoreOptions {
   dbDir: string;
@@ -30,6 +32,11 @@ export interface StoreOptions {
   reconnectFactory?: () => Promise<IEmbedder>;
   /** Optional lock wrapper for multi-process safety during initialization and migration */
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  
+  // Scoping options for unified database
+  workspace?: string;
+  localEnabled?: boolean;
+  globalEnabled?: boolean;
 }
 
 function isConnectionRefused(err: unknown): boolean {
@@ -58,6 +65,25 @@ export class KnowledgeStore implements IKnowledgeStore {
   constructor(options: StoreOptions) {
     this.options = options;
     this.manifestPath = path.join(this.options.dbDir, 'store-manifest.json');
+  }
+
+  private getScopeFilter(): string {
+    const local = this.options.localEnabled !== false; // Default to true if not specified
+    const global = this.options.globalEnabled !== false;
+    const ws = (this.options.workspace || process.cwd()).replace(/'/g, "''");
+
+    if (local && global) {
+      return `workspace = '${ws}' OR is_global = true`;
+    } else if (local) {
+      return `workspace = '${ws}'`;
+    } else if (global) {
+      return `is_global = true`;
+    }
+    return '1 = 0';
+  }
+
+  private getWorkspace(): string {
+    return this.options.workspace || process.cwd();
   }
 
   async initialize(): Promise<void> {
@@ -137,17 +163,25 @@ export class KnowledgeStore implements IKnowledgeStore {
 
         const schema = await this.table.schema();
         let storedModel = schema.metadata.get('embedding_model');
+        let storedVersion = schema.metadata.get('schema_version');
 
-        if (typeof storedModel === 'object' && storedModel !== null && 'byteLength' in storedModel && 'byteOffset' in storedModel) {
+        if (typeof storedModel === 'object' && storedModel !== null && 'byteLength' in (storedModel as any)) {
           storedModel = new TextDecoder().decode(storedModel as unknown as Uint8Array);
         }
+        if (typeof storedVersion === 'object' && storedVersion !== null && 'byteLength' in (storedVersion as any)) {
+          storedVersion = new TextDecoder().decode(storedVersion as unknown as Uint8Array);
+        }
 
-        if (storedModel !== this.options.modelName) {
-          logger.warn(`[store] Model change detected: ${storedModel} → ${this.options.modelName}`);
+        const isModelMismatch = storedModel !== this.options.modelName;
+        const isVersionMismatch = storedVersion !== CURRENT_SCHEMA_VERSION;
+
+        if (isModelMismatch || isVersionMismatch) {
+          const reason = isModelMismatch ? 'Model change' : 'Schema version change';
+          logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
           const strategy = this.options.migrationStrategy || 'drop';
 
           try {
-            await this.handleModelChange(storedModel!, this.options.modelName, strategy);
+            await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
           } catch (err) {
             const errorMsg = `Model migration failed using strategy '${strategy}': ${err instanceof Error ? err.message : String(err)}`;
             logger.error(`[store] ${errorMsg}`);
@@ -232,6 +266,8 @@ export class KnowledgeStore implements IKnowledgeStore {
           text: row.text as string,
           content: row.content as string | undefined,
           metadata: JSON.parse(row.metadata as string),
+          workspace: (row.workspace as string) || 'global',
+          is_global: !!row.is_global,
           timestamp: Number(row.timestamp),
         }));
 
@@ -244,6 +280,8 @@ export class KnowledgeStore implements IKnowledgeStore {
           text: doc.text,
           content: doc.content || null,
           metadata: JSON.stringify(doc.metadata),
+          workspace: doc.workspace,
+          is_global: doc.is_global,
           timestamp: BigInt(doc.timestamp),
         }));
 
@@ -338,6 +376,9 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async addDocuments(docs: StoreDocument[]): Promise<void> {
     const table = await this.getFreshTable();
+    const workspace = this.getWorkspace();
+    const isGlobal = !!this.options.globalEnabled;
+
     const writePromise = this.withEmbedderReconnect(async (embedder) => {
       let retryCount = 0;
       const MAX_RETRIES = 5;
@@ -345,7 +386,14 @@ export class KnowledgeStore implements IKnowledgeStore {
 
       while (retryCount <= MAX_RETRIES) {
         try {
-          await addDocumentsToStore(table, docs, embedder, () => this.isClosing);
+          await addDocumentsToStore(
+            table, 
+            docs, 
+            embedder, 
+            () => this.isClosing,
+            workspace,
+            isGlobal
+          );
           return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -385,9 +433,10 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async search(query: string, options: { limit?: number } = {}): Promise<StoreDocument[]> {
     const table = await this.getFreshTable();
+    const scopeFilter = this.getScopeFilter();
     return this.circuitBreaker.execute(() =>
       this.withEmbedderReconnect(embedder =>
-        searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5)
+        searchStore(table, embedder, query, this.getReranker.bind(this), options.limit ?? 5, scopeFilter)
       )
     );
   }
@@ -396,17 +445,18 @@ export class KnowledgeStore implements IKnowledgeStore {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;
+    const scopeFilter = this.getScopeFilter();
 
     while (retryCount <= MAX_RETRIES) {
       const table = await this.getFreshTable();
       const startTime = Date.now();
       try {
         const escapedUrl = url.replace(/'/g, "''");
-        await table.delete(`url = '${escapedUrl}'`);
+        await table.delete(`url = '${escapedUrl}' AND (${scopeFilter})`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration);
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url', status: 'success' });
-        logger.log(`[store] Deleted chunks for ${url}`);
+        logger.log(`[store] Deleted chunks for ${url} (scoped)`);
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -431,6 +481,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     let retryCount = 0;
     const MAX_RETRIES = 5;
     const BASE_DELAY = 100;
+    const scopeFilter = this.getScopeFilter();
 
     while (retryCount <= MAX_RETRIES) {
       const table = await this.getFreshTable();
@@ -442,11 +493,11 @@ export class KnowledgeStore implements IKnowledgeStore {
         // pattern as-is since LanceDB/DataFusion LIKE escape syntax is undocumented.
         const escapedUrl = url.replace(/'/g, "''");
         const escapedType = ingestionType.replace(/'/g, "''");
-        await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%'`);
+        await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%' AND (${scopeFilter})`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
-        logger.log(`[store] Deleted ${ingestionType} chunks for ${url}`);
+        logger.log(`[store] Deleted ${ingestionType} chunks for ${url} (scoped)`);
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -469,19 +520,21 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async findDocumentsByUrl(url: string): Promise<StoreDocument[]> {
     const table = await this.getFreshTable();
-    return findDocumentsByUrl(table, url);
+    const scopeFilter = this.getScopeFilter();
+    return findDocumentsByUrl(table, url, scopeFilter);
   }
 
   async exportForWeb(outputPath: string): Promise<void> {
     const table = await this.getFreshTable();
+    const scopeFilter = this.getScopeFilter();
 
-    logger.info(`[store] Exporting knowledge store for web to: ${outputPath}`);
+    logger.info(`[store] Exporting knowledge store for web to: ${outputPath} (scope=${scopeFilter})`);
     
     // 1. Fetch all synthesis-description entries
     // We only want the high-quality summaries and their vectors for semantic search in the UI.
     const results = await table
       .query()
-      .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
+      .where(`metadata LIKE '%"ingestionType":"synthesis-description"%' AND (${scopeFilter})`)
       .toArray();
 
     // 2. Format for web
@@ -524,18 +577,20 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async findByUrl(url: string): Promise<StoreDocument[]> {
     const table = await this.getFreshTable();
-    return findDocumentsByUrl(table, url);
+    const scopeFilter = this.getScopeFilter();
+    return findDocumentsByUrl(table, url, scopeFilter);
   }
 
   async rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null> {
     const table = await this.getFreshTable();
+    const scopeFilter = this.getScopeFilter();
 
     const startTime = Date.now();
     const escapedUrl = url.replace(/'/g, "''");
 
     const results = await table
       .query()
-      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND content IS NOT NULL`)
+      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND content IS NOT NULL AND (${scopeFilter})`)
       .limit(1)
       .toArray();
 
@@ -563,9 +618,10 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   async findRelevantUrls(query: string, options: { limit?: number } = {}): Promise<{ url: string; description: string; provenance?: string }[]> {
     const table = await this.getFreshTable();
+    const scopeFilter = this.getScopeFilter();
     return this.circuitBreaker.execute(() =>
       this.withEmbedderReconnect(embedder =>
-        findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20)
+        findRelevantUrls(table, embedder, query, this.getReranker.bind(this), options.limit ?? 20, scopeFilter)
       )
     );
   }
@@ -608,24 +664,27 @@ export class KnowledgeStore implements IKnowledgeStore {
   async count(): Promise<number> {
     if (!this.db) return 0;
     const table = await this.getFreshTable();
-    const count = await table.countRows();
+    const scopeFilter = this.getScopeFilter();
+    const count = await table.countRows(scopeFilter);
     metrics.setGauge('knowledge_store_total_documents', count);
     return count;
   }
 
-  async clear(): Promise<void> {
+  async clear(filter?: string): Promise<void> {
     if (!this.db) throw new Error('Store not open');
+    const table = await this.getFreshTable();
+    const scopeFilter = filter || this.getScopeFilter();
 
     const startTime = Date.now();
     try {
-      this.table = null;
-      await this.db.dropTable(this.tableName);
-      this.table = await this.createTable();
+      // Scoped clear instead of dropping table to preserve other workspace data
+      await table.delete(scopeFilter);
+      
       const duration = Date.now() - startTime;
       metrics.observe('knowledge_store_clear_duration_ms', duration);
       metrics.increment('knowledge_store_clear_total', 1, { status: 'success' });
       metrics.setGauge('knowledge_store_total_documents', 0);
-      logger.info('[store] Knowledge store cleared.');
+      logger.info(`[store] Knowledge store cleared for scope: ${scopeFilter}`);
     } catch (err) {
       const duration = Date.now() - startTime;
       metrics.observe('knowledge_store_clear_duration_ms', duration, { status: 'error' });

@@ -67,7 +67,7 @@ export class QuickResearchOrchestrator {
 
         // Knowledge Store Context Injection
         let storeSection = '';
-        if (this.config.KNOWLEDGE_STORE_ENABLED) {
+        if (this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
           try {
             const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
             if (!ksService.isReady()) {
@@ -247,7 +247,7 @@ export class QuickResearchOrchestrator {
           
           // Extract citations and store agent-synthesized descriptions for vector/semantic search
           // Quick research is single-pass, so this is the final synthesis point
-          if (this.config.KNOWLEDGE_STORE_ENABLED) {
+          if (this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
             try {
               const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
               if (!writer) {

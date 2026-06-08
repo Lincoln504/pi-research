@@ -71,23 +71,25 @@ describe('config (refactored)', () => {
 
       it('should parse knowledge store configuration from env', () => {
         const env = {
-          PI_RESEARCH_KNOWLEDGE_ENABLED: 'false',
+          PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false',
+          PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'false',
           PI_RESEARCH_EMBEDDING_MODEL: 'custom-model',
           PI_RESEARCH_CACHE_TTL_DAYS: '15',
         };
         const config = createConfig(env, {});
 
-        expect(config.KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(config.LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(config.GLOBAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
         expect(config.EMBEDDING_MODEL).toBe('custom-model');
         expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(15);
       });
 
-      it('should handle boolean variations in env for KNOWLEDGE_STORE_ENABLED', () => {
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'TRUE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: 'FALSE' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_KNOWLEDGE_ENABLED: '' }, {}).KNOWLEDGE_STORE_ENABLED).toBe(true); // default
+      it('should handle boolean variations in env for LOCAL_KNOWLEDGE_STORE_ENABLED', () => {
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'true' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'TRUE' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(true);
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'FALSE' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: '' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false); // default is false for local
       });
     });
   });
@@ -101,7 +103,7 @@ describe('config (refactored)', () => {
 
   describe('validateConfig', () => {
     it('should validate default config without throwing', () => {
-      expect(() => validateConfig()).not.toThrow();
+      expect(() => validateConfig(DEFAULTS)).not.toThrow();
     });
 
     it('should throw for RESEARCHER_TIMEOUT_MS below minimum (180000)', () => {
@@ -119,16 +121,16 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).toThrow('must be >= 1');
     });
 
-    it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
-      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '6' }, {});
-      expect(() => validateConfig(config)).toThrow('must be <= 5');
+    it('should throw for MAX_CONCURRENT_RESEARCHERS above 20', () => {
+      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '21' }, {});
+      expect(() => validateConfig(config)).toThrow('must be <= 20');
     });
 
-    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–3', () => {
+    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–10', () => {
       const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
       expect(() => validateConfig(low)).toThrow('must be >= 1');
-      const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
-      expect(() => validateConfig(high)).toThrow('must be <= 3');
+      const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '11' }, {});
+      expect(() => validateConfig(high)).toThrow('must be <= 10');
     });
 
     it('should throw for WORKER_CONCURRENCY outside 1–10', () => {
@@ -161,9 +163,9 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).toThrow('must be >= 5000');
     });
 
-    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 20000', () => {
-      const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '5000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 20000');
+    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 5000', () => {
+      const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '1000' }, {});
+      expect(() => validateConfig(config)).toThrow('must be >= 5000');
     });
 
     it('should throw for HEALTH_CHECK_TIMEOUT_MS above 120000', () => {

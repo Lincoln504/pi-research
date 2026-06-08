@@ -46,10 +46,12 @@ out/
 .env
 .env.local
 .env.*.local
+.pi-research.env
 
 # Logs
 logs/
 *.log
+config-debug.log
 
 # Temporary and patch files
 *.tmp

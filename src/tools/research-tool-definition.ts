@@ -245,7 +245,8 @@ export function createResearchTool(): ToolDefinition {
       try {
         const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
           (logger as any).runCapturingStderr(async () => {
-          validateConfig();
+          const config = getConfig();
+          validateConfig(config);
 
           // When no explicit model parameter is given, use ctx.model directly.
           let selectedModel: ModelWithId | undefined;

@@ -8,7 +8,7 @@ import { env as hfEnv } from '@huggingface/transformers';
 import path from 'node:path';
 import * as os from 'node:os';
 
-import type { HFEnv } from './embedder-types.ts';
+import { HFEnv } from '../core/interfaces/knowledge-interfaces.ts';
 import { logger } from '../logger.ts';
 import { withTimeout as retryWithTimeout } from '../web-research/retry-utils.ts';
 

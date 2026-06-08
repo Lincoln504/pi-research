@@ -7,7 +7,7 @@
 import * as lancedb from '@lancedb/lancedb';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import type { StoreDocument } from './store-types.ts';
+import { StoreDocument } from '../core/interfaces/knowledge-interfaces.ts';
 
 /**
  * Add documents to the store
@@ -16,7 +16,9 @@ export async function addDocumentsToStore(
   table: lancedb.Table,
   docs: StoreDocument[],
   embedder: { embedMany(texts: string[]): Promise<(Float32Array | number[])[]> },
-  isClosing: () => boolean
+  isClosing: () => boolean,
+  workspace: string,
+  isGlobal: boolean
 ): Promise<void> {
   if (docs.length === 0) return;
   if (isClosing()) {
@@ -36,6 +38,8 @@ export async function addDocumentsToStore(
       text: doc.text,
       content: doc.content ?? null,
       metadata: JSON.stringify(doc.metadata),
+      workspace,
+      is_global: isGlobal,
       timestamp: BigInt(doc.timestamp),
     }));
 
@@ -44,7 +48,7 @@ export async function addDocumentsToStore(
     metrics.observe('knowledge_store_add_documents_duration_ms', duration);
     metrics.increment('knowledge_store_add_documents_total', 1, { status: 'success' });
     metrics.increment('knowledge_store_chunks_added_total', docs.length);
-    logger.log(`[store] Added ${docs.length} chunk(s) for ${docs[0]?.url}`);
+    logger.log(`[store] Added ${docs.length} chunk(s) for ${docs[0]?.url} [workspace=${workspace}, global=${isGlobal}]`);
   } catch (err) {
     const duration = Date.now() - startTime;
     metrics.observe('knowledge_store_add_documents_duration_ms', duration, { status: 'error' });
@@ -62,7 +66,8 @@ export async function searchStore(
   embedder: { embed(query: string): Promise<Float32Array | number[]> },
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
-  limit: number
+  limit: number,
+  scopeFilter?: string
 ): Promise<StoreDocument[]> {
   const startTime = Date.now();
 
@@ -74,10 +79,15 @@ export async function searchStore(
 
   const vector = await embedder.embed(query);
 
+  let filter = "metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'";
+  if (scopeFilter) {
+    filter = `(${filter}) AND (${scopeFilter})`;
+  }
+
   const results = await table
     .query()
     .nearestTo(vector)
-    .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
+    .where(filter)
     .fullTextSearch(query)
     .rerank(await getReranker())
     .limit(limit)
@@ -114,16 +124,22 @@ export async function searchStore(
  */
 export async function findDocumentsByUrl(
   table: lancedb.Table,
-  url: string
+  url: string,
+  scopeFilter?: string
 ): Promise<StoreDocument[]> {
   const startTime = Date.now();
 
   // Escape single quotes in URL to prevent SQL injection
   const escapedUrl = url.replace(/'/g, "''");
 
+  let filter = `url = '${escapedUrl}'`;
+  if (scopeFilter) {
+    filter = `(${filter}) AND (${scopeFilter})`;
+  }
+
   const results = await table
     .query()
-    .where(`url = '${escapedUrl}'`)
+    .where(filter)
     .limit(1000)
     .toArray();
 
@@ -157,7 +173,8 @@ export async function findRelevantUrls(
   embedder: { embed(query: string): Promise<Float32Array | number[]> },
   query: string,
   getReranker: () => Promise<lancedb.rerankers.RRFReranker>,
-  limit: number
+  limit: number,
+  scopeFilter?: string
 ): Promise<{ url: string; description: string; provenance?: string }[]> {
   const startTime = Date.now();
   const rowCount = await table.countRows();
@@ -168,10 +185,15 @@ export async function findRelevantUrls(
 
   const vector = await embedder.embed(query);
 
+  let filter = "metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'";
+  if (scopeFilter) {
+    filter = `(${filter}) AND (${scopeFilter})`;
+  }
+
   const results = await table
     .query()
     .nearestTo(vector)
-    .where("metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'")
+    .where(filter)
     .fullTextSearch(query)
     .rerank(await getReranker())
     .limit(limit)
@@ -189,7 +211,7 @@ export async function findRelevantUrls(
     try {
       const meta = JSON.parse(r.metadata as string);
       description = meta.description as string ?? '';
-      // FIX (Issue 5): Surface provenance metadata so consumers can prefer verified entries
+      // Surface provenance metadata so consumers can prefer verified entries
       if (meta.provenance) provenance = meta.provenance;
       else if (meta.hasContent === true) provenance = 'scraped-verified';
     } catch { /* ignore */ }

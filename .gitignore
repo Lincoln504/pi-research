@@ -5,12 +5,14 @@ node_modules/
 .env
 .env.local
 .env.*.local
+.pi-research.env
 
 # Generated files
 config/tor-settings-generated.yml
 config/proxy-settings-generated.yml
 config/runtime-settings-*.yml
 /tmp/
+config-debug.log
 
 # Research output files
 pi-research-*.md

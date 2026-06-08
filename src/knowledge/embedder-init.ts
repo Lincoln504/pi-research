@@ -7,7 +7,7 @@
 import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { logger } from '../logger.ts';
 import type { IStateManager } from '../core/service-interfaces.ts';
-import type { DisposablePipeline } from './embedder-types.ts';
+import { DisposablePipeline } from '../core/interfaces/knowledge-interfaces.ts';
 import { withTimeout, getHFEnv, markWebGpuFallback } from './embedder-utils.ts';
 
 /**

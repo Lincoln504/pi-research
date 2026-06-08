@@ -5,6 +5,64 @@
 import type { IService } from '../service-registry.ts';
 
 /**
+ * Single document record in the knowledge store
+ */
+export interface StoreDocument {
+  url: string;
+  text: string;
+  content?: string;
+  metadata: Record<string, any>;
+  timestamp: number;
+  workspace?: string;
+  is_global?: boolean;
+}
+
+/**
+ * ONNX runtime environment
+ */
+export interface ONNXRuntimeEnv {
+  logLevel?: string;
+  debug?: boolean;
+}
+
+/**
+ * HuggingFace environment with ONNX support
+ */
+export interface HFEnv {
+  cacheDir: string;
+  onnx?: ONNXRuntimeEnv;
+}
+
+/**
+ * Disposable pipeline interface
+ */
+export interface DisposablePipeline {
+  dispose(): Promise<void>;
+}
+
+/**
+ * Embedder configuration options
+ */
+export interface EmbedderOptions {
+  model: string;
+  pooling?: 'mean' | 'cls' | 'last_token';
+  queryPrefix?: string;
+  initializationTimeoutMs?: number;
+  device?: string;
+  maxTokens?: number;
+  batchSize?: number;
+  charsPerToken?: number;
+  documentPrefix?: string;
+  stateManager?: any; // To avoid circular dependency with IStateManager
+  useCache?: boolean;
+}
+
+/**
+ * Embedder state
+ */
+export type EmbedderState = 'idle' | 'initializing' | 'ready' | 'failed' | 'disposing';
+
+/**
  * Item to be ingested into the knowledge store
  */
 export interface IngestionItem {
@@ -37,18 +95,26 @@ export interface IEmbedder {
 }
 
 /**
- * Knowledge store interface for raw storage operations (the inner LanceDB store).
+ * Core Knowledge Store interface for raw storage operations.
  */
 export interface IKnowledgeStore extends IService {
   open(): Promise<void>;
   close(): Promise<void>;
-  clear(): Promise<void>;
+  clear(filter?: string): Promise<void>;
   rebuildFtsIndex(): Promise<void>;
   count(): Promise<number>;
-  search(query: string, options?: { limit?: number }): Promise<any[]>;
+  search(query: string, options?: { limit?: number }): Promise<StoreDocument[]>;
   findRelevantUrls(query: string, options?: { limit?: number }): Promise<StoreUrlEntry[]>;
   rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null>;
-  findDocumentsByUrl(url: string): Promise<any[]>;
+  findDocumentsByUrl(url: string): Promise<StoreDocument[]>;
+  findByUrl(url: string): Promise<StoreDocument[]>;
+  
+  /** Extended operations */
+  addDocuments(docs: StoreDocument[]): Promise<void>;
+  deleteByUrl(url: string): Promise<void>;
+  deleteByUrlAndType(url: string, ingestionType: string): Promise<void>;
+  isStoreClosed?(): boolean;
+
   /**
    * Export the knowledge store entries (summaries and vectors) for use in a web application.
    * @param outputPath - Path to save the exported JSON file
@@ -57,10 +123,7 @@ export interface IKnowledgeStore extends IService {
 }
 
 /**
- * Service-level interface for the knowledge store service wrapper.
- * This is the type for the object registered in the service registry under
- * ServiceNames.KNOWLEDGE_STORE. It manages the embedder, store, and writer
- * queue lifecycle, and provides access to the inner IKnowledgeStore.
+ * Higher-level service interface for Knowledge Store management.
  */
 export interface IKnowledgeStoreService extends IService {
   isReady(): boolean;
@@ -68,6 +131,9 @@ export interface IKnowledgeStoreService extends IService {
   getStore(): Promise<IKnowledgeStore>;
   getEmbedder(): Promise<IEmbedder>;
   clear(): Promise<void>;
+  clearLocal(): Promise<void>;
+  clearGlobal(): Promise<void>;
+  
   /**
    * Export the knowledge store for web use.
    * @param outputPath - Path to save the exported JSON file

@@ -25,7 +25,7 @@ export { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from
 export { shutdownManager } from './utils/shutdown-manager.ts';
 export type { ResearchObserver } from './orchestration/research-observer.ts';
 export { normalizeUrl } from './utils/shared-links.ts';
-export { resetConfig, getConfig, setConfig } from './config.ts';
+export { resetConfig, getConfig, setConfig, validateConfig } from './config.ts';
 
 // Programmatic SDK Exports
 export * from './sdk.ts';
@@ -141,7 +141,8 @@ export default async function (pi: ExtensionAPI) {
 
   // Validate config at startup
   try {
-    validateConfig();
+    const config = getConfig();
+    validateConfig(config);
     logger.debug('[pi-research] Config validated');
   } catch (err) {
     logger.error(`[pi-research] ⚠ Config validation failed: ${err instanceof Error ? err.message : String(err)}`);

@@ -49,7 +49,8 @@ healthRegistry.register('BrowserRuntime', async (options) => {
 
 // Register Knowledge Store Check
 healthRegistry.register('KnowledgeStore', async (options) => {
-  if (!getConfig().KNOWLEDGE_STORE_ENABLED) {
+  const config = getConfig();
+  if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
     return { healthy: true, diagnostic: { status: 'disabled in config' } };
   }
   try {

@@ -304,12 +304,12 @@ describe('ResearchOrchestrationService', () => {
     });
 
     it('returns early if KNOWLEDGE_STORE_ENABLED is false', async () => {
-      await service.storeLinkDescriptions('s1', 1, 'r1', { KNOWLEDGE_STORE_ENABLED: false } as any);
+      await service.storeLinkDescriptions('s1', 1, 'r1', { LOCAL_KNOWLEDGE_STORE_ENABLED: false, GLOBAL_KNOWLEDGE_STORE_ENABLED: false } as any);
       expect(mockSynthesisService.getAllReports).not.toHaveBeenCalled();
     });
 
     it('enqueues citations from reports matching the round prefix', async () => {
-      const config = { KNOWLEDGE_STORE_ENABLED: true };
+      const config = { LOCAL_KNOWLEDGE_STORE_ENABLED: true };
       const reportContent = '### CITED LINKS\n[1] https://foo.com\nSource: X\nDescription: D';
       const reports = new Map([
         ['1.res1', reportContent],
@@ -334,7 +334,7 @@ describe('ResearchOrchestrationService', () => {
     });
 
     it('skips reports with no parseable citations', async () => {
-      const config = { KNOWLEDGE_STORE_ENABLED: true };
+      const config = { LOCAL_KNOWLEDGE_STORE_ENABLED: true };
       const reports = new Map([['1.res1', 'no citations']]);
       
       mockSynthesisService.getAllReports.mockReturnValue(reports);
@@ -347,7 +347,7 @@ describe('ResearchOrchestrationService', () => {
     });
 
     it('handles synthesis service with no reports', async () => {
-        const config = { KNOWLEDGE_STORE_ENABLED: true };
+        const config = { LOCAL_KNOWLEDGE_STORE_ENABLED: true };
         mockSynthesisService.getAllReports.mockReturnValue(new Map());
 
         await service.storeLinkDescriptions('s1', 1, 'r1', config as any);

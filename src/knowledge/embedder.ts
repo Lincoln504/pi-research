@@ -15,7 +15,7 @@ import type {
   EmbedderOptions,
   EmbedderState,
   DisposablePipeline,
-} from './embedder-types.ts';
+} from '../core/interfaces/knowledge-interfaces.ts';
 import {
   resetWebGpuFallbackFlag,
   hasWebGpuFallback,

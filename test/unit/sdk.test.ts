@@ -96,7 +96,8 @@ vi.mock('../../src/logger.ts', () => ({
 vi.mock('../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({
     DEFAULT_RESEARCH_DEPTH: 1,
-    KNOWLEDGE_STORE_ENABLED: false,
+    LOCAL_KNOWLEDGE_STORE_ENABLED: false,
+GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
     MAX_CONCURRENT_RESEARCHERS: 3,
     RESEARCHER_TIMEOUT_MS: 120000,
   })),
@@ -178,7 +179,7 @@ describe('SDK Lifecycle', () => {
     });
 
     it('applies config overrides before registering services', async () => {
-      await initSDK({ config: { KNOWLEDGE_STORE_ENABLED: true } });
+      await initSDK({ config: { LOCAL_KNOWLEDGE_STORE_ENABLED: true } });
       expect(setConfig).toHaveBeenCalled();
       expect(validateConfig).toHaveBeenCalled();
       const setOrder = vi.mocked(setConfig).mock.invocationCallOrder[0]!;

@@ -10,9 +10,12 @@ import {
   Float32,
   FixedSizeList,
   Utf8,
-  Int64
+  Int64,
+  Bool
 } from 'apache-arrow';
 import * as lancedb from '@lancedb/lancedb';
+
+export const CURRENT_SCHEMA_VERSION = '2';
 
 /**
  * Create the knowledge store table schema
@@ -24,8 +27,13 @@ export function createStoreSchema(dim: number, modelName: string): Schema {
     new Field('text', new Utf8(), false),
     new Field('content', new Utf8(), true), // full page markdown, nullable
     new Field('metadata', new Utf8(), false), // JSON stringified
+    new Field('workspace', new Utf8(), false), // local workspace path or 'global'
+    new Field('is_global', new Bool(), false), // boolean indicating if it's shared globally
     new Field('timestamp', new Int64(), false),
-  ], new Map([['embedding_model', modelName]]));
+  ], new Map([
+    ['embedding_model', modelName],
+    ['schema_version', CURRENT_SCHEMA_VERSION]
+  ]));
 }
 
 /**

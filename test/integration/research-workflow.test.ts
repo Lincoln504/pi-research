@@ -151,7 +151,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const startTime = Date.now();
@@ -185,7 +185,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const result = await orchestrator.run();
@@ -225,7 +225,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const result = await orchestrator.run();
@@ -286,7 +286,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const startTime = Date.now();
@@ -349,7 +349,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const result = await orchestrator.run();
@@ -383,7 +383,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       await orchestrator.run();
@@ -423,7 +423,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       await orchestrator1.run();
@@ -442,7 +442,7 @@ describe('End-to-End Research Workflows', () => {
           },
         } as any,
         observer: {},
-        config: { ...getConfig(), KNOWLEDGE_STORE_ENABLED: true },
+        config: { ...getConfig(), LOCAL_KNOWLEDGE_STORE_ENABLED: true, GLOBAL_KNOWLEDGE_STORE_ENABLED: true },
       });
 
       const result2 = await orchestrator2.run();

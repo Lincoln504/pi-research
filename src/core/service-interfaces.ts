@@ -11,7 +11,22 @@ export type { SearchResult, IScheduler, SchedulerMetadata, ISchedulerInstance, I
 export type { HealthCheckResult, HealthCheckCache, IHealthCheckService } from './interfaces/health-check-interfaces.ts';
 
 // Knowledge store interfaces
-export type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue, IMetricsSnapshot, IMetricHistogram, IngestionItem, StoreUrlEntry } from './interfaces/knowledge-interfaces.ts';
+export type { 
+  IEmbedder, 
+  IKnowledgeStore, 
+  IKnowledgeStoreService, 
+  IWriterQueue, 
+  IMetricsSnapshot, 
+  IMetricHistogram, 
+  IngestionItem, 
+  StoreUrlEntry, 
+  StoreDocument,
+  EmbedderOptions,
+  EmbedderState,
+  HFEnv,
+  ONNXRuntimeEnv,
+  DisposablePipeline
+} from './interfaces/knowledge-interfaces.ts';
 
 // State manager interfaces
 export type { IStateManager } from './interfaces/state-manager-interfaces.ts';

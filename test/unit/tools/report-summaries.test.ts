@@ -3,6 +3,19 @@ import { createResearchTool } from '../../../src/tools/research-tool-definition.
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import { getService } from '../../../src/core/service-registry.ts';
 
+// Mock config
+vi.mock('../../../src/config.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/config.ts')>();
+  return {
+    ...actual,
+    getConfig: vi.fn(() => ({
+      ...actual.DEFAULTS,
+      RESEARCH_MODEL: 'test-model',
+    })),
+    validateConfig: vi.fn(),
+  };
+});
+
 // Mock dependencies
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getServiceContainer: vi.fn(() => ({ isReady: true })),
