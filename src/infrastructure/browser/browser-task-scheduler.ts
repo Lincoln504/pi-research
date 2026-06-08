@@ -139,7 +139,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
 
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 180000;
+        const timeoutMs = baseTimeoutMs + 30000;
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -202,7 +202,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 180000);
+        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 30000);
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
