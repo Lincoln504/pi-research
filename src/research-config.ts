@@ -81,14 +81,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const config = { ...getConfig() };
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
-  // Fetch knowledge store count for display
-  let knowledgeCount = 0;
+  // Fetch knowledge store counts for display
+  let knowledgeCounts = { local: 0, global: 0 };
   try {
     const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
-    knowledgeCount = await store.count();
+    knowledgeCounts = await store.countScoped();
   } catch (err) {
-    logger.debug('[research-config] Failed to fetch knowledge count for menu:', err);
+    logger.debug('[research-config] Failed to fetch knowledge counts for menu:', err);
   }
 
   const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
@@ -119,9 +119,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'WORKER_THREADS',
       label: 'Worker threads',
-      description: 'Number of parallel browser workers for search and scraping (1-12)',
+      description: 'Number of parallel browser workers for search and scraping (1-10)',
       currentValue: String(config.WORKER_THREADS),
-      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
+      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
     {
       id: 'RESEARCHER_TIMEOUT_MS',
@@ -134,64 +134,50 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Knowledge Store ---
     {
       id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Local store',
-      description: 'Enable/disable project-specific knowledge. Stored project-locally.',
+      label: 'Project scope',
+      description: 'Enable project-specific knowledge for this directory.',
       currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
-    ...(config.LOCAL_KNOWLEDGE_STORE_ENABLED ? [{
-      id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-      label: 'Clear project data',
-      description: 'Delete project-specific entries from the unified store.',
-      currentValue: 'run',
-      values: ['run'],
-    }] : []),
     {
       id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Global store',
-      description: 'Enable/disable shared knowledge (cross-project).',
+      label: 'Shared scope',
+      description: 'Enable shared knowledge (cross-project, different directories).',
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
-    ...(config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? [{
-      id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-      label: 'Clear shared data',
-      description: 'Permanently delete all global shared entries.',
-      currentValue: 'run',
-      values: ['run'],
-    }] : []),
     {
-      id: 'KNOWLEDGE_STORE_PATH',
-      label: 'Unified store',
-      description: `Active database:\n${getDbDir()}\nStores both shared and local data via scoped tagging.`,
-      currentValue: 'Operational',
+      id: 'KNOWLEDGE_ENTRIES_LOCAL',
+      label: 'Project entries',
+      description: 'Documents scoped to the current project directory',
+      currentValue: String(knowledgeCounts.local),
       values: [], // Read-only
     },
     {
-      id: 'KNOWLEDGE_ENTRIES',
-      label: 'Store entries',
-      description: 'Total documents currently in the knowledge store',
-      currentValue: String(knowledgeCount),
+      id: 'KNOWLEDGE_ENTRIES_GLOBAL',
+      label: 'Shared entries',
+      description: 'Documents shared across all project directories',
+      currentValue: String(knowledgeCounts.global),
       values: [], // Read-only
     },
     {
       id: 'EMBEDDING_MODEL',
       label: 'Embed model',
-      description: 'Embedding model for the knowledge store.\nChanging model clears the knowledge store.\nDownloaded to: ~/.cache/pi-research/models/',
+      description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.\nLocation: ~/.cache/pi-research/models/',
       currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
       values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
     },
     {
       id: 'EMBEDDING_DEVICE',
       label: 'Embed device',
-      description: 'Hardware device for embeddings (webgpu is significantly faster)',
+      description: 'Hardware backend (webgpu is significantly faster)',
       currentValue: config.EMBEDDING_DEVICE,
       values: ['webgpu', 'cpu'],
     },
     {
       id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
       label: 'Cache TTL (days)',
-      description: 'How long to keep cached research findings in the knowledge store (1-365 days)',
+      description: 'Retention period for research findings (1-365 days)',
       currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
       values: ['7', '14', '30', '60', '90', '180', '365'],
     },
@@ -199,43 +185,43 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Actions & Diagnostics ---
     {
       id: 'ACTION_HEALTH',
-      label: 'System health',
-      description: 'Run comprehensive health checks and display results',
+      label: 'Check system health',
+      description: 'Run comprehensive diagnostics and display results',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_KNOWLEDGE_STATUS',
-      label: 'Knowledge status',
-      description: 'Run a report of current knowledge store statistics',
+      label: 'Show knowledge status',
+      description: 'Display detailed knowledge store statistics',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
+      label: 'Clear project data',
+      description: 'Permanently delete all project-scoped entries',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-      label: 'Clear global store',
-      description: 'Permanently delete all data in the global shared knowledge store.',
+      label: 'Clear shared data',
+      description: 'Permanently delete all shared entries',
       currentValue: 'run',
       values: ['run'],
     },
-    ...(fs.existsSync(path.resolve(process.cwd(), 'knowledge_db')) ? [{
-      id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-      label: 'Clear local store',
-      description: 'Permanently delete all data in the local project knowledge_db directory.',
-      currentValue: 'run',
-      values: ['run'],
-    }] : []),
     {
       id: 'ACTION_METRICS_VIEW',
-      label: 'View metrics',
-      description: 'Run a report of session-wide performance metrics',
+      label: 'View session metrics',
+      description: 'Display session performance and latency report',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
-      label: 'Reset metrics',
-      description: 'Reset all session performance counters',
+      label: 'Reset session metrics',
+      description: 'Zero out all performance counters',
       currentValue: 'run',
       values: ['run'],
     },
@@ -251,7 +237,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           description: (text: string) => {
             // SettingsList calls this once per word-wrapped line (already has "  " prefix).
             // Check for the warning keyword to highlight destructive-action lines.
-            if (text.includes('clears')) {
+            if (text.includes('delete') || text.includes('clear')) {
               return theme.fg('warning', text);
             }
             return theme.fg('dim', text);
@@ -333,18 +319,23 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           { enableSearch: true }
         );
 
-        // Poll the knowledge store count every 5 s and update the display in-place.
-        // store.count() reopens the LanceDB table handle on each call so it always
-        // returns the true live count even for rows added since the menu opened.
+        // Poll the knowledge store counts every 5 s and update the display in-place.
         const refreshCount = async () => {
           if (menuClosed) return;
           try {
             const svc = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
             const store = await svc.getStore();
-            const fresh = await store.count();
-            const item = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES');
-            if (item && item.currentValue !== String(fresh)) {
-              item.currentValue = String(fresh);
+            const fresh = await store.countScoped();
+            
+            const localItem = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES_LOCAL');
+            if (localItem && localItem.currentValue !== String(fresh.local)) {
+              localItem.currentValue = String(fresh.local);
+              settingsList?.invalidate();
+            }
+            
+            const globalItem = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES_GLOBAL');
+            if (globalItem && globalItem.currentValue !== String(fresh.global)) {
+              globalItem.currentValue = String(fresh.global);
               settingsList?.invalidate();
             }
           } catch { /* non-fatal — leave current value */ }
@@ -491,12 +482,12 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     
     const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
-    const count = await store.count();
+    const counts = await store.countScoped();
     const dbDir = getDbDir();
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Entries:** ${count}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **Shared Entries:** ${counts.global}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {

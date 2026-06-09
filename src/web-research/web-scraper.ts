@@ -110,7 +110,7 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
 }
 
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
-  validateUrlForSSRF(url);
+  await validateUrlForSSRF(url);
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_LAYER_TIMEOUT);
@@ -263,7 +263,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   // FIX (New Issue A): Validate SSRF BEFORE any fetch attempt, so the blocked URL
   // cannot bypass validation through the stealth browser fallback path.
   try {
-    validateUrlForSSRF(url);
+    await validateUrlForSSRF(url);
   } catch (ssrfError) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'ssrf_blocked' });
     errorTracker.trackError(ssrfError, {

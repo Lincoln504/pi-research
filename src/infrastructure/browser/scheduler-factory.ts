@@ -29,6 +29,20 @@ import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 let browserInitLock: FileLockService | null = null;
 
 /**
+ * Dispose the global browser initialization lock (for testing / cleanup).
+ */
+export async function disposeBrowserInitLock(): Promise<void> {
+  if (browserInitLock) {
+    try {
+      await browserInitLock.dispose();
+    } catch (err) {
+      logger.debug('[SchedulerFactory] Error disposing browserInitLock:', err);
+    }
+    browserInitLock = null;
+  }
+}
+
+/**
  * Get the global browser initialization lock.
  */
 async function getBrowserInitLock(): Promise<FileLockService> {
@@ -158,6 +172,8 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
         logger.log('[Scheduler] Restart complete. Next call will create fresh scheduler.');
     } finally {
         schedulerService.setSchedulerRestartInProgress(false);
+        // FIX (#11): Dispose the browser init lock so it doesn't leak across restarts.
+        await disposeBrowserInitLock().catch(() => {});
     }
 }
 

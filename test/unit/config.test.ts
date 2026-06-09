@@ -121,16 +121,16 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).toThrow('must be >= 1');
     });
 
-    it('should throw for MAX_CONCURRENT_RESEARCHERS above 20', () => {
-      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '21' }, {});
-      expect(() => validateConfig(config)).toThrow('must be <= 20');
+    it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
+      const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '6' }, {});
+      expect(() => validateConfig(config)).toThrow('must be <= 5');
     });
 
-    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–10', () => {
+    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–3', () => {
       const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
       expect(() => validateConfig(low)).toThrow('must be >= 1');
-      const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '11' }, {});
-      expect(() => validateConfig(high)).toThrow('must be <= 10');
+      const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
+      expect(() => validateConfig(high)).toThrow('must be <= 3');
     });
 
     it('should throw for WORKER_CONCURRENCY outside 1–10', () => {
@@ -163,9 +163,9 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).toThrow('must be >= 5000');
     });
 
-    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 5000', () => {
+    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 2000', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '1000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 5000');
+      expect(() => validateConfig(config)).toThrow('must be >= 2000');
     });
 
     it('should throw for HEALTH_CHECK_TIMEOUT_MS above 120000', () => {

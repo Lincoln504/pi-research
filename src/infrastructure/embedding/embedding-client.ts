@@ -75,6 +75,8 @@ export class EmbeddingClient implements IEmbedder {
           reject(new Error(`[EmbeddingClient] GET ${path} timed out after ${timeoutMs}ms`));
         }
       }, timeoutMs);
+      // FIX (#34): Don't keep the event loop alive for timeout timers
+      if (timer.unref) timer.unref();
 
       const req = http.request(
         {
@@ -131,6 +133,8 @@ export class EmbeddingClient implements IEmbedder {
           reject(new Error(`[EmbeddingClient] POST ${path} timed out after ${timeoutMs}ms`));
         }
       }, timeoutMs);
+      // FIX (#34): Don't keep the event loop alive for timeout timers
+      if (timer.unref) timer.unref();
 
       const body = JSON.stringify(data);
 

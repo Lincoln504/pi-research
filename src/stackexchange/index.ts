@@ -40,7 +40,7 @@ function loadConfig(): StackExchangeConfig {
   return {
     defaultSite: 'stackoverflow.com',
     apiKey: process.env['STACKEXCHANGE_API_KEY'] ?? null,
-    requestTimeout: 30000, // 30 seconds
+    requestTimeout: 10000, // 10 seconds
   };
 }
 
@@ -223,7 +223,7 @@ async function executeGet(
   });
 
   const response = await client.request<Question>(
-    { method: 'GET', endpoint: `/questions/${id}`, params: questionParams },
+    { method: 'GET', endpoint: `/questions/${encodeURIComponent(id)}`, params: questionParams },
     signal,
   );
 
@@ -244,7 +244,7 @@ async function executeGet(
   });
 
   const answersResponse = await client.request<Answer>(
-    { method: 'GET', endpoint: `/questions/${id}/answers`, params: answersParams },
+    { method: 'GET', endpoint: `/questions/${encodeURIComponent(id)}/answers`, params: answersParams },
     signal,
   );
 

@@ -7,7 +7,6 @@
 
 import process from 'node:process';
 import cluster from 'node:cluster';
-import { appendFileSync } from 'node:fs';
 
 let workerId: string = '';
 
@@ -146,7 +145,9 @@ function logToDebugFile(level: string, ...args: any[]): void {
         return String(arg);
       }).join(' ')
     };
-    appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
+    // FIX (#32): Use async fs.appendFile to avoid blocking the event loop.
+    // Fire-and-forget is acceptable for debug logging in error handlers.
+    import('node:fs/promises').then(fs => fs.appendFile(logFile, `${JSON.stringify(entry)}\n`)).catch(() => {});
   } catch {
     // ignore
   }

@@ -4,10 +4,20 @@
  * Captures stderr/stdout during task execution to redirect native logs.
  */
 
-import * as fs from 'node:fs';
+// Use createRequire to get a mutable reference to 'fs'.
+// ESM namespace imports (import * as fs from 'node:fs') create bindings that are
+// writable at Node.js runtime but flagged as immutable by esbuild's static analysis.
+// Since this module needs to monkey-patch fs.writeSync to capture native addon output
+// on FD 1/2, we use createRequire — the official Node.js CJS↔ESM interop mechanism
+// — to obtain a fully mutable module object.
+import { createRequire } from 'node:module';
+import type * as FsType from 'node:fs';
+import type { Stats } from 'node:fs';
 import { TextDecoder } from 'node:util';
 import type { LogContext } from './log-utils.ts';
 import { getLogContext, formatArg, safeJsonStringify } from './log-utils.ts';
+
+const fs: typeof FsType = createRequire(import.meta.url)('node:fs');
 
 /**
  * Session-scoped capture flags to support concurrent research runs.
@@ -127,7 +137,7 @@ function isBoxDrawing(message: string): boolean {
 /**
  * Check if stderr should be redirected
  */
-function shouldRedirectStderr(stat: fs.Stats): boolean {
+function shouldRedirectStderr(stat: Stats): boolean {
   // Only redirect when FD 2 is a tty or regular file, not a pipe/socket (MCP mode)
   return !stat.isFIFO() && !stat.isSocket();
 }
@@ -314,7 +324,7 @@ export async function captureStdio<T>(
   try {
     const descriptor = Object.getOwnPropertyDescriptor(fs, 'writeSync');
     if (!descriptor || (descriptor.writable || descriptor.set)) {
-      (fs as any).writeSync = (fd: number, chunk: any, ...args: any[]) => {
+      fs.writeSync = (fd: number, chunk: any, ...args: any[]) => {
         if (fd === 1 || fd === 2) {
           const message = typeof chunk === 'string' ? chunk : decoder.decode(chunk);
           
@@ -357,7 +367,7 @@ export async function captureStdio<T>(
     process.stderr.write = originalStderrWrite;
     process.stdout.write = originalStdoutWrite;
     try {
-      (fs as any).writeSync = originalFsWriteSync;
+      fs.writeSync = originalFsWriteSync;
     } catch { /* ignore */ }
     console.log = originalConsole.log;
     console.info = originalConsole.info;

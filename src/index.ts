@@ -4,6 +4,7 @@ import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import { Key } from '@earendil-works/pi-tui';
 import type { ResearchResultDetails } from './types/index.ts';
 import { createResearchTool, createHealthTool } from './tool.ts';
+import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
@@ -188,6 +189,12 @@ export default async function (pi: ExtensionAPI) {
   // Create and register the health check tool
   const healthTool: ToolDefinition = createHealthTool();
   pi.registerTool(healthTool);
+
+  // Create and register the Research Knowledge Search tool (local research knowledge database search).
+  // This is a top-level satellite tool for the main pi agent — NOT for researcher sub-agents.
+  // The ExtensionContext is provided by pi at execution time inside the execute() closure.
+  const researchKnowledgeSearchTool: ToolDefinition = createResearchKnowledgeSearchTool();
+  pi.registerTool(researchKnowledgeSearchTool);
 
   // Alt+P — Pop queued steering messages back to pi's follow-up queue.
   // The shortcut handler receives an ExtensionContext (not ExtensionAPI),

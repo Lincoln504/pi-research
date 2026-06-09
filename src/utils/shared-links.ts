@@ -14,6 +14,8 @@ const sessionScrapedContent = new Map<string, Map<string, string>>();
 // FIX (Issue 12): Track creation timestamps for orphaned-entry cleanup.
 const sessionTimestamps = new Map<string, number>();
 const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+// FIX (#20): Cap per-session cached content to prevent unbounded memory growth
+const MAX_CACHED_CONTENT_PER_SESSION = 500;
 
 // Periodic cleanup of orphaned sessions (every 15 minutes)
 let cleanupInterval: NodeJS.Timeout | null = null;
@@ -52,7 +54,13 @@ export function cacheScrapedContent(researchId: string, url: string, content: st
         sessionScrapedContent.set(researchId, new Map());
         sessionTimestamps.set(researchId, Date.now());
     }
-    sessionScrapedContent.get(researchId)!.set(normalizeUrl(url), content);
+    const cache = sessionScrapedContent.get(researchId)!;
+    // FIX (#20): Evict oldest entry if at capacity
+    if (cache.size >= MAX_CACHED_CONTENT_PER_SESSION) {
+        const firstKey = cache.keys().next().value;
+        if (firstKey !== undefined) cache.delete(firstKey);
+    }
+    cache.set(normalizeUrl(url), content);
 }
 
 /**

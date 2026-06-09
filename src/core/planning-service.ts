@@ -6,6 +6,9 @@
  *
  * This service extracts the planning logic from the orchestrator,
  * making it reusable and testable.
+ *
+ * TODO (#30): Split into focused modules: PlanGenerator, QueryGenerator,
+ * PlanEvaluator. Current size (~500 lines / 17 methods) exceeds SRP.
  */
 
 import type { IPlanningService, ResearchPlan, ResearcherConfig } from './service-interfaces.ts';

@@ -37,11 +37,23 @@ class SerialQueue {
   }
 
   private async pump(): Promise<void> {
+    // FIX (#19): Guard against empty array (edge case from concurrent enqueue + pump)
+    if (this.running) return;
     this.running = true;
-    while (this.tasks.length > 0) {
-      await this.tasks.shift()!();
+    try {
+      while (this.tasks.length > 0) {
+        const task = this.tasks.shift();
+        if (task) {
+          await task();
+        }
+      }
+    } finally {
+      this.running = false;
+      // If tasks were enqueued while we were finishing, pump again
+      if (this.tasks.length > 0) {
+        void this.pump();
+      }
     }
-    this.running = false;
   }
 }
 

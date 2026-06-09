@@ -15,7 +15,7 @@ import { getService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
-import { BrowserServer } from './browser-server.ts';
+import { BrowserServer, getBrowserServerAuthSecret } from './browser-server.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
@@ -130,6 +130,8 @@ export class BrowserTaskScheduler implements IScheduler {
             onScrape: (u) => this.runScrape(u),
             onHealthCheck: () => this.runHealthCheck(),
         });
+        // FIX (#21): Expose auth secret to child processes via env
+        process.env['PI_BROWSER_AUTH_SECRET'] = getBrowserServerAuthSecret();
         return this.server.start();
     }
 
@@ -139,7 +141,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
 
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 30000;
+        const timeoutMs = baseTimeoutMs + 10000;
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -202,7 +204,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
         const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        const timeoutMs = baseTimeoutMs + (isMocking ? 15000 : 30000);
+        const timeoutMs = baseTimeoutMs + (isMocking ? 5000 : 10000);
 
         let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -364,6 +366,11 @@ export class BrowserTaskScheduler implements IScheduler {
                     targetBrowserPids = await getBrowserPidsForWorkers(workerPids);
                 }
             }
+        }
+
+        if (this.priorityQueue) {
+            this.priorityQueue.shutdown();
+            this.priorityQueue = null;
         }
 
         if (this.workerPoolManager) {

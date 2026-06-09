@@ -21,7 +21,7 @@ Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a h
 ## What It Does
 
 - **Web Search** — Multi-threaded, parallel search bursts using DuckDuckGo Lite.
-- **URL Scraping** — Configurable batch scraping protocol (1-16 batches or unlimited) with PDF support and global deduplication.
+- **URL Scraping** — Configurable batch scraping protocol with PDF support and global deduplication.
 - **Security Databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
 - **Stack Exchange** — Full network search and filtering.
 - **Real-time TUI** — Live progress tracking with token and cost monitoring.
@@ -90,9 +90,9 @@ Configurable via environment variables or the `/research-config` TUI dashboard. 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_TIMEOUT_MS` | `600000` | Per-researcher timeout (3–30 min) |
+| `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (3–30 min) |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5) |
-| `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–16) |
+| `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–10) |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
 | `PI_RESEARCH_MODEL` | _(session model)_ | Model override for researcher sub-agents |
 | `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs |

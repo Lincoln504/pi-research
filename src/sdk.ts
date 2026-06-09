@@ -71,6 +71,8 @@ export interface RunOptions {
 }
 
 let isInitialized = false;
+// FIX (#13): Module-level promise to prevent concurrent initialization
+let _initPromise: Promise<void> | null = null;
 let globalModel: Model<any> | null = null;
 let globalApiKey: string | undefined;
 let globalCwd: string = process.cwd();
@@ -81,11 +83,31 @@ let globalRegistry: ModelRegistry | null = null;
  * Initialize the Research SDK
  */
 export async function initResearchSDK(options: SDKOptions): Promise<void> {
+  // FIX (#13): Guard against concurrent initialization with a module-level promise.
   if (isInitialized) {
     logger.warn('[SDK] SDK is already initialized');
     return;
   }
+  if (_initPromise) {
+    // Concurrent call — wait for the existing init to settle.
+    try { await _initPromise; } catch { /* previous init failed, allow retry */ }
+    if (isInitialized) return;
+    // Previous init failed — fall through to retry
+  }
 
+  // Create the init promise and store it before starting async work
+  _initPromise = _doInit(options);
+  try {
+    await _initPromise;
+  } finally {
+    _initPromise = null;
+  }
+}
+
+/**
+ * Internal init implementation (separated for concurrency guard)
+ */
+async function _doInit(options: SDKOptions): Promise<void> {
   // Apply verbose before anything else so all subsequent log calls see it.
   if (options.verbose) {
     setLogger(createLogger({ verbose: true }));
@@ -326,6 +348,10 @@ function ensureInitialized() {
  *   2. No explicit key → reads ~/.pi/agent/models.json so all user-configured providers work
  *
  * @param provider - The model's provider string, used to key the explicit apiKey correctly.
+ */
+/**
+ * NOTE (#29): This function duplicates logic in openclaw-entry.ts buildModelRegistry().
+ * Future refactor: extract to shared module (e.g., src/utils/model-registry-factory.ts).
  */
 function buildModelRegistry(provider?: string): ModelRegistry {
   const agentDir = path.join(os.homedir(), '.pi', 'agent');

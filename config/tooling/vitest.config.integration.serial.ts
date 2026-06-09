@@ -5,7 +5,7 @@
  * the global service registry. They MUST run one file at a time to prevent
  * pool lifecycle collisions and service registry conflicts.
  *
- * Files: browser-pool-failover, concurrent-operations, error-recovery,
+ * Files: concurrent-operations, error-recovery,
  *        research-workflow, sdk-lifecycle, tool-execution, tools-connectivity,
  *        tools-extended
  */
@@ -18,7 +18,6 @@ export default defineConfig({
     ...baseConfig.test,
     name: 'integration-serial',
     include: [
-      'test/integration/browser-pool-failover.test.ts',
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
       'test/integration/knowledge-embedding-models-real.test.ts',

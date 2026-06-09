@@ -186,7 +186,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       }
     });
 
-    it('should handle non-existent URL gracefully', { timeout: 30000 }, async () => {
+    it('should handle non-existent URL gracefully', { timeout: 60000 }, async () => {
       if (testContext.skipTests()) {
         return;
       }

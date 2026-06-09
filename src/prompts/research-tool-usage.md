@@ -14,6 +14,13 @@ argument-hint: <query> [depth:0|1|2|3] [model:<id>]
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
+**⚡ LOCAL KNOWLEDGE SEARCH**
+- The `research_knowledge_search` tool searches the research knowledge database for previously researched information.
+- It is **instant and free** — always try it FIRST before using the `research` tool.
+- If it finds an answer, it returns a clean, cited report.
+- If it doesn't find an answer, it explicitly tells you to use live web research.
+- You do NOT need both — if `research_knowledge_search` succeeds, skip live research for that query.
+
 ---
 
 #### What counts as web research?

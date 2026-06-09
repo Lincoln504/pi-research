@@ -26,7 +26,7 @@ export function getMaxScrapeBatches(config?: Config): number {
     const batches = (config || getConfig()).MAX_SCRAPE_BATCHES;
     return batches === 0 || batches > 99 ? 999999 : batches;
   } catch {
-    return 3; // Fallback to default
+    return 2; // Fallback to default
   }
 }
 
@@ -75,7 +75,7 @@ export const MAX_TOTAL_RESEARCHERS = 25;
 
 // ==================== Timeout Constants ====================
 
-export const OSV_TIMEOUT_MS = 30000;
+export const OSV_TIMEOUT_MS = 10000;
 
 // ==================== Export Constants ====================
 

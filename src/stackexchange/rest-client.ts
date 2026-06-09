@@ -33,7 +33,7 @@ export class StackExchangeClient {
     this._timeout = timeout;
     this.circuitBreaker = new CircuitBreaker({
       failureThreshold: 5,
-      resetTimeoutMs: 30000,
+      resetTimeoutMs: 10000,
       name: 'StackExchange API',
       isTransientError: (err) => {
         if (err instanceof Error) {

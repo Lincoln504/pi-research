@@ -63,7 +63,8 @@ export function isTaskTimeoutError(error: unknown): boolean {
         err.message.includes('timed out after') ||
         err.message.includes('Search task timed out') ||
         err.message.includes('Scrape task timed out') ||
-        err.message.includes('Health check timed out')
+        err.message.includes('Health check timed out') ||
+        err.message.includes('[BrowserClient] Request to')
     );
 }
 

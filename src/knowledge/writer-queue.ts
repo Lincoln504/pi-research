@@ -30,6 +30,9 @@ export class WriterQueue implements IWriterQueue {
   private processing = false;
   private options: WriterQueueOptions;
   private drainResolvers: (() => void)[] = [];
+  // FIX (#2): Per-URL lock map to prevent TOCTOU races when concurrent writers
+  // ingest the same URL. Key is the normalized URL; value is the in-flight promise.
+  private inflightByUrl = new Map<string, Promise<void>>();
 
   constructor(options: WriterQueueOptions) {
     this.options = options;
@@ -58,7 +61,20 @@ export class WriterQueue implements IWriterQueue {
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
       try {
-        await this.ingest(item);
+        // FIX (#2): Chain per-URL to serialize concurrent ingests of the same URL.
+        // process() already runs sequentially, so we chain only for the race case
+        // where two enqueue() calls trigger concurrent process() calls.
+        const urlKey = item.url;
+        const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
+        const inflight = prev.then(() => this._ingestInner(item));
+        this.inflightByUrl.set(urlKey, inflight);
+        try {
+          await inflight;
+        } finally {
+          if (this.inflightByUrl.get(urlKey) === inflight) {
+            this.inflightByUrl.delete(urlKey);
+          }
+        }
       } catch (err) {
         if (isConnectionRefused(err)) {
           logger.warn(`[writer-queue] Embedder unreachable for ${item.url}, retrying once after 2s...`);
@@ -81,6 +97,20 @@ export class WriterQueue implements IWriterQueue {
     this.drainResolvers = [];
     for (const resolve of resolvers) {
       resolve();
+    }
+  }
+
+  private async ingest(item: IngestionItem): Promise<void> {
+    const urlKey = item.url;
+    const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
+    const inflight = prev.then(() => this._ingestInner(item));
+    this.inflightByUrl.set(urlKey, inflight);
+    try {
+      await inflight;
+    } finally {
+      if (this.inflightByUrl.get(urlKey) === inflight) {
+        this.inflightByUrl.delete(urlKey);
+      }
     }
   }
 
@@ -116,7 +146,7 @@ export class WriterQueue implements IWriterQueue {
     }
   }
 
-  private async ingest(item: IngestionItem): Promise<void> {
+  private async _ingestInner(item: IngestionItem): Promise<void> {
     const incomingType = (item.metadata?.['ingestionType'] as string | undefined) ?? 'synthesis-description';
 
     if (!item.markdown) {
@@ -182,9 +212,14 @@ export class WriterQueue implements IWriterQueue {
   }
 
   async drain(): Promise<void> {
-    if (!this.processing && this.queue.length === 0) return;
-
+    // FIX (#7): Atomically check state AND register the resolver inside the
+    // Promise constructor to prevent the race where process() finishes between
+    // the check and new Promise().
     return new Promise<void>((resolve) => {
+      if (!this.processing && this.queue.length === 0) {
+        resolve();
+        return;
+      }
       this.drainResolvers.push(resolve);
     });
   }

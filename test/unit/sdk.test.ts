@@ -150,7 +150,7 @@ describe('SDK Lifecycle', () => {
     vi.mocked(disposeCoreServices).mockClear().mockResolvedValue(undefined);
     vi.mocked(resetServiceContainer).mockClear().mockResolvedValue(undefined);
     vi.mocked(setConfig).mockClear();
-    vi.mocked(validateConfig).mockClear();
+    vi.mocked(validateConfig).mockReset();
     vi.mocked(DeepResearchOrchestrator).mockClear();
     vi.mocked(QuickResearchOrchestrator).mockClear();
     vi.mocked(logger.warn).mockClear();

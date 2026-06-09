@@ -3,6 +3,10 @@
  *
  * Creates all research tools with properly configured browser manager.
  * These tools are used by both direct tool calls and researcher agents.
+ *
+ * NOTE: `research_knowledge_search` is NOT included here. It is a top-level tool
+ * registered via pi.registerTool() in src/index.ts. Researcher sub-agents
+ * already receive knowledge store data via the store_section prompt injection.
  */
 
 import type { ToolDefinition, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -31,7 +35,7 @@ interface CreateToolsOptions {
 }
 
 /**
- * Create all research tools
+ * Create all research tools for researcher sub-agents.
  */
 export function createResearchTools(options: CreateToolsOptions): ToolDefinition[] {
   // Create a fresh fallback state per tool instance to avoid state leakage between research runs

@@ -150,6 +150,28 @@ export class PriorityTaskQueue {
     }
 
     /**
+     * FIX (#18): Shut down the queue, rejecting all pending tasks.
+     * In-progress tasks are allowed to complete. This prevents the queue from
+     * holding unsettled promises that would hang the calling orchestrator.
+     */
+    shutdown(): void {
+        const error = new Error('PriorityTaskQueue is shutting down');
+        for (const task of this.healthcheckQueue) {
+            task.reject(error);
+        }
+        for (const task of this.searchQueue) {
+            task.reject(error);
+        }
+        for (const task of this.scrapeQueue) {
+            task.reject(error);
+        }
+        this.healthcheckQueue.length = 0;
+        this.searchQueue.length = 0;
+        this.scrapeQueue.length = 0;
+        logger.debug(`[PriorityQueue] Shutdown complete. Active tasks: ${this.activeCount}`);
+    }
+
+    /**
      * Get current status for metrics or logging.
      */
     getStats() {

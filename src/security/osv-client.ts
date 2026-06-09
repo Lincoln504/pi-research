@@ -21,7 +21,7 @@ import {
 
 const osvCircuitBreaker = new CircuitBreaker({
   failureThreshold: 5,
-  resetTimeoutMs: 30000,
+  resetTimeoutMs: 10000,
   name: 'OSV API',
   isTransientError: isTransientError
 });
@@ -198,7 +198,7 @@ export async function searchOSV(
 export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
   const startTime = Date.now();
   try {
-    const url: string = `${OSV_BASE_URL}/vulns/${osvId}`;
+    const url: string = `${OSV_BASE_URL}/vulns/${encodeURIComponent(osvId)}`;
     const response: Response = await fetchWithRetry(url, {
       headers: {
         'User-Agent': 'pi-research/2.0',

@@ -32,8 +32,8 @@ export class BrowserClient implements IScheduler {
 
         return new Promise((resolve, reject) => {
             const agent = getClientAgent();
-            // Increased timeout to 180s to allow for shared pool queuing delays
-            const timeoutMs = 180000;
+            // 60s timeout for client requests (1/3 of original 180s)
+            const timeoutMs = 60000;
             let resolved = false;
             const controller = new AbortController();
             
@@ -66,6 +66,8 @@ export class BrowserClient implements IScheduler {
                     reject(error);
                 }
             }, timeoutMs);
+            // FIX (#34): Don't keep the event loop alive for timeout timers
+            if (timer.unref) timer.unref();
 
             const req = http.request({
                 hostname: '127.0.0.1',
@@ -74,7 +76,11 @@ export class BrowserClient implements IScheduler {
                 method: 'POST',
                 agent,
                 signal: controller.signal,
-                headers: { 'Content-Type': 'application/json' }
+                headers: {
+                    'Content-Type': 'application/json',
+                    // FIX (#21): Send auth token to authenticate with browser server
+                    'X-Browser-Auth': process.env['PI_BROWSER_AUTH_SECRET'] ?? '',
+                }
             }, (res) => {
                 clearTimeout(timer);
                 abortCleanup?.();
@@ -99,7 +105,9 @@ export class BrowserClient implements IScheduler {
                             resolve(parsed);
                         }
                     } catch (_e) {
-                        const error = new Error(`Failed to parse response: ${body}`);
+                        // FIX (#23): Truncate response body in error to prevent data leakage
+                        const preview = body.length > 200 ? body.slice(0, 200) + '...' : body;
+                        const error = new Error(`Failed to parse response (status ${res.statusCode}): ${preview}`);
                         errorTracker.trackError(error, {
                             component: 'browser-manager',
                             operation,

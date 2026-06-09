@@ -9,13 +9,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./sdk": "./src/sdk.ts",
+    "./openclaw": "./src/openclaw-entry.ts",
     "./package.json": "./package.json"
   },
   "files": [
     "src/",
+    "dist/",
     "!src/.env",
     "!src/.env.local",
     "!src/.env.*.local",
+    "openclaw.plugin.json",
     "docs/OVERVIEW.md",
     "docs/SDK.md",
     "docs/ARCHITECTURE.md",
@@ -36,6 +39,8 @@
     "pi",
     "pi-package",
     "pi-extension",
+    "openclaw",
+    "openclaw-plugin",
     "research",
     "agent",
     "web-search",
@@ -68,7 +73,8 @@
     "test:full": "npm run test:unit && npm run test:integration && npm run test:load",
     "test:watch": "vitest --config config/tooling/vitest.config.unit.ts",
     "test:coverage": "vitest run --config config/tooling/vitest.config.unit.ts --coverage",
-    "prepublishOnly": "npm run build:worker",
+    "build:openclaw": "esbuild src/openclaw-entry.ts --bundle --platform=node --format=esm --packages=external --external:node:* --outfile=dist/openclaw-entry.js",
+    "prepublishOnly": "npm run build:worker && npm run build:openclaw",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
@@ -86,6 +92,14 @@
     "extensions": [
       "./src/index.ts"
     ]
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/openclaw-entry.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.17"
+    }
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.78.1",

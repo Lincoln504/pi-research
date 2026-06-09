@@ -65,6 +65,12 @@ export class KnowledgeStore implements IKnowledgeStore {
   constructor(options: StoreOptions) {
     this.options = options;
     this.manifestPath = path.join(this.options.dbDir, 'store-manifest.json');
+
+    // Defense-in-depth: warn if scope options are not explicitly set.
+    // Production code should always pass explicit localEnabled/globalEnabled.
+    if (options.localEnabled === undefined && options.globalEnabled === undefined) {
+      logger.log('[KnowledgeStore] Warning: localEnabled and globalEnabled not explicitly set. Defaulting to both enabled.');
+    }
   }
 
   private getScopeFilter(): string {
@@ -376,52 +382,62 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   async addDocuments(docs: StoreDocument[]): Promise<void> {
-    const table = await this.getFreshTable();
-    const workspace = this.getWorkspace();
-    const isGlobal = !!this.options.globalEnabled;
-
-    const writePromise = this.withEmbedderReconnect(async (embedder) => {
-      let retryCount = 0;
-      const MAX_RETRIES = 5;
-      const BASE_DELAY = 100;
-
-      while (retryCount <= MAX_RETRIES) {
-        try {
-          await addDocumentsToStore(
-            table, 
-            docs, 
-            embedder, 
-            () => this.isClosing,
-            workspace,
-            isGlobal
-          );
-          return;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          // Detect version mismatch or lock errors typical of cross-process contention
-          if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
-            retryCount++;
-            if (retryCount > MAX_RETRIES) throw err;
-
-            // Exponential backoff with jitter
-            const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
-            logger.debug(`[store] Write contention detected, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
-            await new Promise(r => setTimeout(r, delay));
-            
-            // Refresh table handle for the next attempt
-            await this.getFreshTable();
-            continue;
-          }
-          throw err;
-        }
-      }
-    });
-
+    // FIX (#3): Register the write promise BEFORE checking isClosing to prevent
+    // close() from reading an empty activeWrites set and closing the DB.
+    let writeResolve: () => void;
+    const writePromise = new Promise<void>((resolve) => { writeResolve = resolve; });
     this.activeWrites.add(writePromise);
+
     try {
-      await writePromise;
+      // Now check isClosing after registering
+      if (this.isClosing) {
+        logger.warn(`[store] Skipping addDocuments — store is closing`);
+        return;
+      }
+
+      const table = await this.getFreshTable();
+      const workspace = this.getWorkspace();
+      const isGlobal = !!this.options.globalEnabled;
+
+      await this.withEmbedderReconnect(async (embedder) => {
+        let retryCount = 0;
+        const MAX_RETRIES = 5;
+        const BASE_DELAY = 100;
+
+        while (retryCount <= MAX_RETRIES) {
+          try {
+            await addDocumentsToStore(
+              table, 
+              docs, 
+              embedder, 
+              () => this.isClosing,
+              workspace,
+              isGlobal
+            );
+            return;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            // Detect version mismatch or lock errors typical of cross-process contention
+            if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+              retryCount++;
+              if (retryCount > MAX_RETRIES) throw err;
+
+              // Exponential backoff with jitter
+              const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+              logger.debug(`[store] Write contention detected, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+              await new Promise(r => setTimeout(r, delay));
+              
+              // Refresh table handle for the next attempt
+              await this.getFreshTable();
+              continue;
+            }
+            throw err;
+          }
+        }
+      });
     } finally {
       this.activeWrites.delete(writePromise);
+      writeResolve!();
     }
   }
 
@@ -488,12 +504,9 @@ export class KnowledgeStore implements IKnowledgeStore {
       const table = await this.getFreshTable();
       const startTime = Date.now();
       try {
-        // FIX (Issue 11): Escape single quotes to prevent injection.
-        // NOTE: The ingestionType is always a controlled string ("synthesis-description")
-        // so LIKE wildcard chars (%) are not a practical concern. We keep the LIKE
-        // pattern as-is since LanceDB/DataFusion LIKE escape syntax is undocumented.
         const escapedUrl = url.replace(/'/g, "''");
-        const escapedType = ingestionType.replace(/'/g, "''");
+        // FIX (#9): Escape LIKE wildcards to prevent pattern injection.
+        const escapedType = ingestionType.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
         await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%' AND (${scopeFilter})`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
@@ -669,6 +682,22 @@ export class KnowledgeStore implements IKnowledgeStore {
     const count = await table.countRows(scopeFilter);
     metrics.setGauge('knowledge_store_total_documents', count);
     return count;
+  }
+
+  /**
+   * Get granular counts for local vs global entries.
+   */
+  async countScoped(): Promise<{ local: number; global: number }> {
+    if (!this.db) return { local: 0, global: 0 };
+    const table = await this.getFreshTable();
+    const ws = this.getWorkspace().replace(/'/g, "''");
+    
+    const [local, global] = await Promise.all([
+      table.countRows(`workspace = '${ws}'`),
+      table.countRows(`is_global = true`)
+    ]);
+    
+    return { local, global };
   }
 
   async clear(filter?: string): Promise<void> {

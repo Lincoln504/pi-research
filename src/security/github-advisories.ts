@@ -28,7 +28,7 @@ import {
 
 const githubCircuitBreaker = new CircuitBreaker({
   failureThreshold: 5,
-  resetTimeoutMs: 30000,
+  resetTimeoutMs: 10000,
   name: 'GitHub API',
   isTransientError: isTransientError
 });
@@ -77,7 +77,7 @@ export async function searchGitHubAdvisories(
       }
 
       const [owner, name] = repoParts;
-      const url = `${GITHUB_API_BASE}/repos/${owner}/${name}/security-advisories?per_page=${maxResults}`;
+      const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}/security-advisories?per_page=${maxResults}`;
 
       const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
         const resp = await fetch(url, {
@@ -85,7 +85,7 @@ export async function searchGitHubAdvisories(
             'User-Agent': 'pi-research/2.0',
             'Accept': 'application/vnd.github.v3+json',
           },
-          signal: createTimeoutSignal(30000),
+          signal: createTimeoutSignal(10000),
         });
 
         if (!resp.ok) {
@@ -158,7 +158,7 @@ export async function searchGitHubAdvisories(
               'User-Agent': 'pi-research/2.0',
               'Accept': 'application/vnd.github.v3+json',
             },
-            signal: createTimeoutSignal(30000),
+            signal: createTimeoutSignal(10000),
           });
 
           if (!resp.ok) {
@@ -292,7 +292,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
           'User-Agent': 'pi-research/2.0',
           'Accept': 'application/vnd.github.v3+json',
         },
-        signal: createTimeoutSignal(30000),
+        signal: createTimeoutSignal(10000),
       });
 
       if (!resp.ok) {

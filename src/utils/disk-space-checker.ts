@@ -41,8 +41,18 @@ export class DiskSpaceChecker {
           this.hasDiskSpace = true;
         }
       } else {
-        // Non-POSIX: assume OK (Windows has different disk management)
-        this.hasDiskSpace = true;
+        // Non-POSIX (Windows): Use synchronous drive space check
+        // FIX (#38): Attempt Windows disk space check via execSync
+        try {
+          const { execSync } = require('node:child_process');
+          const output = execSync('wmic logicaldisk get freespace /value', { encoding: 'utf-8', timeout: 5000 });
+          const match = output.match(/FreeSpace=(\d+)/);
+          const availableBytes = match ? parseInt(match[1]!, 10) : Infinity;
+          this.hasDiskSpace = availableBytes >= this.MIN_DISK_SPACE_BYTES;
+        } catch {
+          // wmic not available (e.g., newer Windows 11) — assume OK
+          this.hasDiskSpace = true;
+        }
       }
     } catch (_error) {
       // On error, assume OK to avoid blocking logging

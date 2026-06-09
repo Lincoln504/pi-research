@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import * as crypto from 'node:crypto';
 import { logger } from '../../logger.ts';
 import type { SearchResult } from '../../web-research/types.ts';
 
@@ -6,6 +7,25 @@ export interface BrowserServerOptions {
     onSearch: (query: string) => Promise<SearchResult[]>;
     onScrape: (url: string) => Promise<any>;
     onHealthCheck: () => Promise<{ success: boolean }>;
+}
+
+/**
+ * FIX (#21): Shared secret for authenticating local HTTP requests.
+ * Generated once per server instance; clients must present it in the
+ * `X-Browser-Auth` header. This prevents unauthorized local processes
+ * from issuing search/scrape requests through the browser pool.
+ */
+let _authSecret: string | null = null;
+
+function getOrCreateAuthSecret(): string {
+  if (!_authSecret) {
+    _authSecret = crypto.randomBytes(32).toString('hex');
+  }
+  return _authSecret;
+}
+
+export function getBrowserServerAuthSecret(): string {
+  return getOrCreateAuthSecret();
 }
 
 export class BrowserServer {
@@ -17,6 +37,16 @@ export class BrowserServer {
     async start(): Promise<number> {
         return new Promise((resolve, reject) => {
             this.server = http.createServer(async (req, res) => {
+                // FIX (#21): Validate auth token on every request
+                const authHeader = req.headers['x-browser-auth'];
+                const expected = Buffer.from(getOrCreateAuthSecret(), 'utf8');
+                const actual = Buffer.from(authHeader, 'utf8');
+                if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+                    res.writeHead(403, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Unauthorized' }));
+                    return;
+                }
+
                 if (req.method !== 'POST') {
                     res.writeHead(405);
                     res.end('Method Not Allowed');

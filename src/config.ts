@@ -24,17 +24,17 @@ const EXTENSION_DIR = path.dirname(__filename);
 export const ConfigSchema = Type.Object({
   /** Per-researcher timeout in milliseconds (default: 300000, range: 3-30 min) */
   RESEARCHER_TIMEOUT_MS: Type.Number({ minimum: 180000, maximum: 1800000, default: 300000 }),
-  /** Maximum number of concurrent researcher processes (default: 10, range: 1-20) */
-  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 20, default: 10 }),
+  /** Maximum number of concurrent researcher processes (default: 3, range: 1-5) */
+  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
   /** Maximum number of retries for a failed researcher (default: 2, range: 0-5) */
   RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 5, default: 2 }),
   /** Base delay between retries in milliseconds (default: 2000, range: 100-10000) */
   RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 100, maximum: 10000, default: 2000 }),
-  /** Target depth for recursive research (default: 3, range: 1-10) */
-  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 10, default: 3 }),
+  /** Target depth for recursive research (default: 1, range: 1-3) */
+  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
   MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
-  /** Number of parallel browser pool workers (default: 3, range: 1-10) */
+  /** Number of parallel browser pool workers (default: 4, range: 1-10) */
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
   WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
@@ -50,24 +50,26 @@ export const ConfigSchema = Type.Object({
   SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 15000 }),
   /** How long to keep documents in the knowledge store before eviction (default: 30 days) */
   KNOWLEDGE_STORE_CACHE_TTL_DAYS: Type.Number({ minimum: 1, maximum: 365, default: 30 }),
-  /** Timeout for embedding model initialization (default: 60000ms) */
-  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 10000, maximum: 300000, default: 60000 }),
+  /** Timeout for embedding model initialization (default: 300000ms) */
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 10000, maximum: 600000, default: 300000 }),
   /** Max fraction of context window to use for initial scrape context (default: 0.15) */
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.05, maximum: 1.0, default: 0.15 }),
   /** Estimated tokens per scrape result for planning (default: 2500) */
   AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 500, maximum: 10000, default: 2500 }),
-  /** Maximum number of concurrent scrapes (default: 10) */
-  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 50, default: 10 }),
-  /** Health check timeout in milliseconds (default: 30000ms) */
-  HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 30000 }),
+  /** Maximum number of concurrent scrapes (default: 3) */
+  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
+  /** Health check timeout in milliseconds (default: 10000ms) */
+  HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** TUI refresh debounce in milliseconds (default: 100ms) */
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
   /** Delay to wait before restoring console log after TUI close (default: 200ms) */
   CONSOLE_RESTORE_DELAY_MS: Type.Number({ minimum: 0, maximum: 30000, default: 200 }),
-  /** Timeout for individual browser tasks (default: 30000ms) */
-  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 30000 }),
+  /** Timeout for individual browser tasks (default: 10000ms) */
+  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** LLM Model to use for research (e.g. google/gemini-2.0-flash-001) */
   RESEARCH_MODEL: Type.Optional(Type.String()),
+  /** LLM Model to use for knowledge synthesis (e.g. gemini-2.5-flash) */
+  KNOWLEDGE_SYNTHESIS_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
 });
@@ -177,6 +179,7 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
+    PI_RESEARCH_KNOWLEDGE_MODEL: config.KNOWLEDGE_SYNTHESIS_MODEL ?? '',
     PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR ?? '',
   };
 
@@ -217,6 +220,8 @@ export function saveConfig(config: Config): void {
     }
 
     for (const [key, val] of Object.entries(newValues)) {
+      // FIX (#33): Skip prototype pollution keys
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
       if (!updatedKeys.has(key) && val !== '') {
         if (outLines.length > 0 && outLines[outLines.length - 1]?.trim() !== '') {
           outLines.push('');
@@ -279,7 +284,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
-    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS ?? 30000),
+    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
     CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
@@ -335,7 +340,12 @@ function parseEnvNumber(env: Record<string, string | undefined>, key: string, de
   const v = env[key];
   if (v === undefined || v === '') return def;
   const n = parseFloat(v);
-  return isNaN(n) ? def : n;
+  if (isNaN(n)) {
+    // FIX (#16): Warn when env value is malformed instead of silently falling back
+    logger.warn(`[config] Environment variable ${key}="${v}" is not a valid number, using default: ${def}`);
+    return def;
+  }
+  return n;
 }
 
 function parseEnvBool(env: Record<string, string | undefined>, key: string, def: boolean): boolean {

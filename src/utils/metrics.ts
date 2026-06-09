@@ -89,6 +89,8 @@ export class MetricsRegistry {
   }
 
   public observe(name: string, value: number, labels?: Labels): void {
+    // FIX (#15): Guard against NaN/Infinity which would corrupt histogram calculations
+    if (!Number.isFinite(value)) return;
     const key = this.getKey(name, labels);
     let entry = this.histograms.get(key);
     if (!entry) {

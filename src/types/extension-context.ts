@@ -24,7 +24,7 @@ export interface ExtendedExtensionContext extends ExtensionContext {
    /** Session ID (provided by extension host) */
    sessionId?: string;
    /** Model registry for API key resolution */
-   modelRegistry: any;
+   modelRegistry: import('@earendil-works/pi-coding-agent').ModelRegistry;
    /** Settings manager (provided in some contexts) */
    settingsManager?: any;
    /** Current tool exclusion list */

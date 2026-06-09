@@ -70,7 +70,7 @@ export class Embedder {
     this.model = options.model;
     this.poolingMode = options.pooling ?? 'mean';
     this.queryPrefix = options.queryPrefix ?? '';
-    this.initializationTimeoutMs = options.initializationTimeoutMs ?? 120000;
+    this.initializationTimeoutMs = options.initializationTimeoutMs ?? 300000;
     this.originalDevice = options.device ?? 'webgpu';
     
     // Check for fallbacks
@@ -100,6 +100,12 @@ export class Embedder {
       clearTimeout(this.idleTimer);
     }
     this.idleTimer = setTimeout(() => {
+      // FIX (#17): Only dispose if no embeddings are active, otherwise re-schedule
+      if (this.activeEmbeddings > 0) {
+        logger.debug(`[embedder] Idle timeout but ${this.activeEmbeddings} embeddings active, rescheduling...`);
+        this.resetIdleTimer();
+        return;
+      }
       if (this.state === 'ready') {
         logger.info(`[embedder] Idle timeout reached (${this.IDLE_TIMEOUT_MS}ms), releasing GPU memory...`);
         this.dispose().catch(err => logger.warn('[embedder] Failed to dispose on idle:', err));

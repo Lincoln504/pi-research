@@ -79,16 +79,16 @@ export interface SecuritySearcherConfig {
   readonly requestDelay?: number; // Override for testing
 }
 
-const DEFAULT_CONFIG: Required<SecuritySearcherConfig> = {
-  nvdClient: null as unknown as INVDClient,
-  cisaKevClient: null as unknown as ICisaKevClient,
-  githubAdvisoriesClient: null as unknown as IGitHubAdvisoriesClient,
-  osvClient: null as unknown as IOSVClient,
+const DEFAULT_CONFIG: SecuritySearcherConfig = {
+  nvdClient: undefined,
+  cisaKevClient: undefined,
+  githubAdvisoriesClient: undefined,
+  osvClient: undefined,
   requestDelay: -1, // Use database-specific logic by default
 };
 
 export class SecuritySearcher {
-  private readonly config: Required<SecuritySearcherConfig>;
+  private readonly config: SecuritySearcherConfig;
 
   constructor(config: Partial<SecuritySearcherConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };

@@ -33,7 +33,15 @@ export interface ResearchOptions {
  */
 export interface RunResearchersOptions {
   plan: { researchers?: ResearcherConfig[] };
-  options: { sessionId: string; researchId: string; excludeTools?: string[] } & any;
+  options: {
+    sessionId: string;
+    researchId: string;
+    excludeTools?: string[];
+    ctx?: ExtensionContext;
+    model?: Model<any>;
+    config?: Config;
+    observer?: ResearchObserver;
+  };
   currentRound: number;
   signal?: AbortSignal;
 }

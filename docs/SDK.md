@@ -8,22 +8,23 @@ All variables are optional — defaults apply if unset. Set them in `src/.env` (
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_TIMEOUT_MS` | `600000` | 180000–1800000 | Per-researcher timeout (3–30 min) |
+| `PI_RESEARCH_TIMEOUT_MS` | `300000` | 180000–1800000 | Per-researcher timeout (3–30 min) |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | 1–5 | Parallel researchers |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | 1–3 | Default depth for `/research` command |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | 0–99 | Scrape batches per researcher (0 = unlimited) |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs per batch |
-| `PI_RESEARCH_WORKER_THREADS` | `4` | 1–16 | Browser worker processes |
+| `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process |
 | `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
-| `PI_RESEARCH_MAX_RETRIES` | `3` | 0–10 | Retries per researcher request |
+| `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request |
 
 ### Knowledge Store
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_ENABLED` | `true` | — | Enable local vector knowledge store |
+| `PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED` | `false` | — | Enable project-scoped knowledge store |
+| `PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED` | `true` | — | Enable shared (cross-project) knowledge store |
 | `PI_RESEARCH_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |

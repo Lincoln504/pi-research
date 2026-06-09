@@ -123,6 +123,9 @@ describe('WriterQueue', () => {
     const p2 = queue.drain();
 
     await Promise.resolve();
+    await Promise.resolve();
+    // FIX: Extra microtick to allow the .then() chain in process() to reach addDocuments
+    await Promise.resolve();
     unblock!();
 
     await Promise.all([p1, p2]);

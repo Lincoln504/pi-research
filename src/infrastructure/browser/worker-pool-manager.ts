@@ -31,6 +31,8 @@ export class WorkerPoolManager implements IService {
     private currentWorkerCount: number | null = null;
     private consecutiveErrors: number = 0;
     private isShuttingDown: boolean = false;
+    // FIX (#12): Flag to indicate a pool reset is in progress
+    private _resetInProgress: boolean = false;
 
     constructor(
         private readonly onPoolError?: (error: Error, consecutiveErrors: number) => void
@@ -51,6 +53,22 @@ export class WorkerPoolManager implements IService {
         // "Cannot execute a task on destroying pool".
         if (this.isShuttingDown) {
             throw new Error('Worker pool is shutting down');
+        }
+
+        // FIX (#12): If a pool reset is in progress, wait briefly and retry
+        // instead of creating a duplicate pool.
+        if (this._resetInProgress) {
+            const maxWait = 3000;
+            const interval = 100;
+            const deadline = Date.now() + maxWait;
+            while (this._resetInProgress && Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, interval));
+            }
+            if (this._resetInProgress) {
+                throw new Error('Worker pool is being reset, please retry');
+            }
+            // Reset complete — recurse once to get the fresh pool
+            return this.ensurePool(config);
         }
 
         // If pool exists, worker count matches, and we are not shutting down,
@@ -173,11 +191,14 @@ export class WorkerPoolManager implements IService {
     private schedulePoolReset(): void {
         if (this.isShuttingDown) return;
         const deadPool = this.pool;
-        this.pool = null;
+        // FIX (#12): Don't nullify pool immediately — mark it as dead but keep the
+        // reference so ensurePool() doesn't create a duplicate while the old one
+        // is still being destroyed. Instead, use a flag to signal reset is in progress.
+        this._resetInProgress = true;
         this.currentWorkerCount = null;
         this.consecutiveErrors = 0;
         metrics.increment('browser_pool_auto_recoveries_total', 1);
-        logger.info('[WorkerPoolManager] Pool reference dropped for auto-recovery; next ensurePool() will create a fresh pool.');
+        logger.info('[WorkerPoolManager] Pool scheduled for auto-recovery; next ensurePool() will wait for old pool destruction.');
         // Destroy the old pool asynchronously after the event handler returns.
         const t = setTimeout(async () => {
             try {
@@ -185,6 +206,10 @@ export class WorkerPoolManager implements IService {
                 logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
             } catch (err) {
                 logger.warn('[WorkerPoolManager] Auto-recovery: error destroying old pool:', err);
+            } finally {
+                // Now nullify the dead pool and clear the flag
+                if (this.pool === deadPool) this.pool = null;
+                this._resetInProgress = false;
             }
         }, 1000);
         if (t.unref) t.unref();

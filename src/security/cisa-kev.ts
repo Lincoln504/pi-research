@@ -16,7 +16,7 @@ const CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_explo
 // Circuit breaker to prevent cascading failures
 const cisaCircuitBreaker = new CircuitBreaker({
   failureThreshold: 5,
-  resetTimeoutMs: 30000,
+  resetTimeoutMs: 10000,
   name: 'CISA KEV API',
   isTransientError: isTransientError
 });
@@ -215,6 +215,7 @@ export async function searchCisaKev(
     }
 
     // Sort by due date (most urgent first)
+    // FIX (#24): Guard against NaN from invalid dates to ensure stable sort
     vulnerabilities.sort((a: Vulnerability, b: Vulnerability): number => {
       if (a.dueDate === undefined) {
         return 1;
@@ -222,7 +223,12 @@ export async function searchCisaKev(
       if (b.dueDate === undefined) {
         return -1;
       }
-      return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      const aTime = new Date(a.dueDate).getTime();
+      const bTime = new Date(b.dueDate).getTime();
+      // Treat invalid dates as Infinity (sorted to the end)
+      const aSafe = Number.isFinite(aTime) ? aTime : Infinity;
+      const bSafe = Number.isFinite(bTime) ? bTime : Infinity;
+      return aSafe - bSafe;
     });
 
   } catch (err: unknown) {

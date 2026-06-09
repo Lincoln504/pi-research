@@ -49,7 +49,7 @@ vi.mock('../../src/logger.ts', () => ({
 
 vi.mock('../../src/config.ts', () => ({
   validateConfig: vi.fn(),
-  getConfig: vi.fn(() => ({ RESEARCHER_TIMEOUT_MS: 360000, DEFAULT_RESEARCH_DEPTH: 0 })),
+  getConfig: vi.fn(() => ({ RESEARCHER_TIMEOUT_MS: 360000, DEFAULT_RESEARCH_DEPTH: 1 })),
 }));
 
 vi.mock('../../src/utils/metrics.ts', () => ({

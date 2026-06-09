@@ -2,6 +2,7 @@
  * Scraper Utilities
  */
 
+import * as dns from 'node:dns/promises';
 import crypto from 'node:crypto';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { errorTracker } from '../utils/error-tracker.ts';
@@ -42,35 +43,74 @@ export function extractDomain(url: string): string {
 
 /**
  * Validate URL to prevent SSRF attacks
+ *
+ * FIX (#8): In addition to hostname pattern checks, resolves the hostname
+ * via DNS and rejects any address that resolves to a private/reserved IP.
+ * This defends against DNS rebinding and decimal/octal IP representations.
  */
-export function validateUrlForSSRF(url: string): void {
+export async function validateUrlForSSRF(url: string): Promise<void> {
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    const hostname = parsed.hostname.toLowerCase();
-    
-    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
-      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'localhost' });
-      throw new Error('Access to localhost is not allowed');
-    }
-    
-    for (const pattern of INTERNAL_NETWORK_PATTERNS) {
-      if (pattern.test(hostname)) {
-        metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'internal_network' });
-        throw new Error('Access to internal networks is not allowed');
-      }
-    }
-    
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'invalid_protocol' });
-      throw new Error('Only HTTP/HTTPS protocols are allowed');
-    }
+    parsed = new URL(url);
   } catch (e) {
-    if (e instanceof Error && e.message.includes('not allowed')) {
-      throw e;
-    }
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url' });
     throw new Error(`Invalid URL: ${url}`, { cause: e });
   }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'invalid_protocol' });
+    throw new Error('Only HTTP/HTTPS protocols are allowed');
+  }
+
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'localhost' });
+    throw new Error('Access to localhost is not allowed');
+  }
+
+  for (const pattern of INTERNAL_NETWORK_PATTERNS) {
+    if (pattern.test(hostname)) {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'internal_network' });
+      throw new Error('Access to internal networks is not allowed');
+    }
+  }
+
+  // FIX (#8): Resolve hostname via DNS and check the resulting IP addresses.
+  // This catches DNS rebinding, decimal IP representations (2130706433),
+  // and other hostname-based bypasses that pass the regex checks above.
+  try {
+    const result = await dns.resolve4(hostname);
+    for (const ip of result) {
+      if (isPrivateIp(ip)) {
+        metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'dns_rebinding' });
+        throw new Error('Hostname resolves to a private/reserved IP address');
+      }
+    }
+  } catch (err) {
+    // Re-throw our own security errors
+    if (err instanceof Error && err.message.includes('private/reserved')) throw err;
+    // DNS resolution failure (NXDOMAIN, etc.) — allow through, the HTTP request
+    // will fail on its own. Only block resolved-internal addresses.
+  }
+}
+
+/**
+ * Check if an IPv4 address is private/reserved/loopback.
+ */
+function isPrivateIp(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(p => isNaN(p))) return false;
+  const [a, b] = parts;
+  // 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16,
+  // 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 (multicast), 240.0.0.0/4 (reserved)
+  return (
+    a === 0 || a === 10 || a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a >= 224
+  );
 }
 
 /**

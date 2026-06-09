@@ -220,7 +220,14 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
 // clearEmbeddingInstance — for testing / restart scenarios
 // ---------------------------------------------------------------------------
 
-export function clearEmbeddingInstance(): void {
+export async function clearEmbeddingInstance(): Promise<void> {
+  if (_embeddingInstance) {
+    try {
+      await _embeddingInstance.dispose?.();
+    } catch (err) {
+      logger.warn('[EmbeddingFactory] Error disposing old embedding instance:', err);
+    }
+  }
   _embeddingInstance = null;
   _embeddingInitPromise = null;
   _cachedModel = null;

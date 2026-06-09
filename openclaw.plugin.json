@@ -1,0 +1,155 @@
+{
+  "id": "pi-research",
+  "name": "Pi Research",
+  "description": "Multi-agent web research with stealth browser, security databases, and Stack Exchange integration.",
+  "version": "0.1.14",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "description": "LLM API key for research coordination and researcher sub-agents. Required when no pi config files exist (~/.pi/agent/auth.json)."
+      },
+      "provider": {
+        "type": "string",
+        "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'openrouter'). Required when no pi config files exist."
+      },
+      "model": {
+        "type": "string",
+        "description": "Model ID override for researcher sub-agents (e.g., 'openai/gpt-4o'). Defaults to the active model."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Per-researcher timeout in milliseconds.",
+        "default": 300000,
+        "minimum": 180000,
+        "maximum": 1800000
+      },
+      "maxResearchers": {
+        "type": "number",
+        "description": "Maximum number of concurrent researchers.",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 5
+      },
+      "defaultDepth": {
+        "type": "number",
+        "description": "Default research depth (0-3). 0=quick, 1=normal, 2=deep, 3=ultra.",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 3
+      },
+      "maxScrapeBatches": {
+        "type": "number",
+        "description": "Scrape batches per researcher (0=unlimited).",
+        "default": 2,
+        "minimum": 0,
+        "maximum": 99
+      },
+      "maxConcurrentScrapes": {
+        "type": "number",
+        "description": "Concurrent URLs fetched per scrape batch.",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 20
+      },
+      "workerThreads": {
+        "type": "number",
+        "description": "Browser worker processes for search and scraping.",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 10
+      },
+      "workerConcurrency": {
+        "type": "number",
+        "description": "Concurrent tasks per worker process.",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 10
+      },
+      "knowledgeEnabled": {
+        "type": "boolean",
+        "description": "Enable vector knowledge store for cross-session research memory (both project-scoped and shared).",
+        "default": true
+      },
+      "embeddingModel": {
+        "type": "string",
+        "description": "Embedding model for the knowledge store.",
+        "default": "Xenova/all-MiniLM-L6-v2"
+      },
+      "embeddingDevice": {
+        "type": "string",
+        "enum": ["webgpu", "cpu"],
+        "description": "Inference backend for embeddings.",
+        "default": "webgpu"
+      },
+      "cacheTtlDays": {
+        "type": "number",
+        "description": "Days to keep cached scrapes.",
+        "default": 30,
+        "minimum": 1,
+        "maximum": 365
+      },
+      "scrapeTimeoutMs": {
+        "type": "number",
+        "description": "Scrape page load timeout in milliseconds.",
+        "default": 15000,
+        "minimum": 5000,
+        "maximum": 120000
+      },
+      "searxngUrl": {
+        "type": "string",
+        "description": "External SearXNG instance URL. When set, skips Docker management."
+      }
+    },
+    "additionalProperties": false
+  },
+  "contracts": {
+    "tools": ["research", "health"]
+  },
+  "toolMetadata": {
+    "research": {
+      "description": "Multi-agent web research with search, scraping, security databases, and Stack Exchange."
+    },
+    "health": {
+      "description": "System health checks across browser pool, knowledge store, and GPU lock."
+    },
+    "research_knowledge_search": {
+      "description": "Satellite tool for the main pi agent. Search the research knowledge database for previously researched information before live research."
+    }
+  },
+  "activation": {
+    "onStartup": true,
+    "onCapabilities": ["tool"]
+  },
+  "setup": {
+    "providers": [
+      {
+        "id": "pi-research",
+        "envVars": [
+          "SEARXNG_URL",
+          "STACKEXCHANGE_API_KEY",
+          "PI_RESEARCH_MODEL"
+        ]
+      }
+    ]
+  },
+  "uiHints": {
+    "apiKey": { "label": "LLM API Key", "sensitive": true },
+    "provider": { "label": "LLM Provider" },
+    "model": { "label": "Research Model Override", "advanced": true },
+    "timeoutMs": { "label": "Research Timeout (ms)", "advanced": true },
+    "maxResearchers": { "label": "Max Concurrent Researchers" },
+    "defaultDepth": { "label": "Default Research Depth", "help": "0=quick, 1=normal, 2=deep, 3=ultra" },
+    "maxScrapeBatches": { "label": "Max Scrape Batches", "advanced": true },
+    "maxConcurrentScrapes": { "label": "Max Concurrent Scrapes", "advanced": true },
+    "workerThreads": { "label": "Browser Workers", "advanced": true },
+    "workerConcurrency": { "label": "Worker Concurrency", "advanced": true },
+    "knowledgeEnabled": { "label": "Knowledge Store", "advanced": true },
+    "embeddingModel": { "label": "Embedding Model", "advanced": true },
+    "embeddingDevice": { "label": "Embedding Device", "advanced": true },
+    "cacheTtlDays": { "label": "Cache TTL (days)", "advanced": true },
+    "scrapeTimeoutMs": { "label": "Scrape Timeout (ms)", "advanced": true },
+    "searxngUrl": { "label": "SearXNG URL", "advanced": true }
+  }
+}

@@ -96,6 +96,12 @@ export function createCleanupFunction(
     endResearchSession(piSessionId, researchId);
     cleanupSharedLinks(researchId);
     
+    // FIX (#10): Clear session circuit breaker to prevent unbounded map growth.
+    const { clearSessionCircuitBreaker } = await import('../infrastructure/browser/browser-error-utils.ts');
+    if (piSessionId) {
+      clearSessionCircuitBreaker(piSessionId);
+    }
+    
     const activePanels = getPiActivePanels(piSessionId);
     if (activePanels.length === 0) {
       if (ctx.hasUI) {

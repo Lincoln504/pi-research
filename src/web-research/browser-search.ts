@@ -37,10 +37,9 @@ export async function performSearch(
     if (onProgress) onProgress(0);
 
     // Hard cap per query so a single Cloudflare block or hung browser worker
-    // cannot stall the entire Promise.all burst. 120 s is generous for a real
-    // search but short enough to release the burst within a reasonable window.
-    // Increased from 60s to 120s to accommodate slow cold-starts and retries.
-    const QUERY_TIMEOUT_MS = 120_000;
+    // cannot stall the entire Promise.all burst. 40s is sufficient for most
+    // searches and ensures system responsiveness.
+    const QUERY_TIMEOUT_MS = 40_000;
 
     const filteredQueries = queries.filter(q => q.trim());
     let timeoutCount = 0;

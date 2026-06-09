@@ -2,9 +2,12 @@
  * Thread Worker Browser Management
  *
  * Handles browser initialization, context management, and cleanup.
+ *
+ * NOTE (#31): This file uses console.debug() instead of the logger because
+ * worker threads run in separate processes without access to the full
+ * logging infrastructure. This is intentional.
  */
 
-import * as fs from 'node:fs';
 import { setupMocking } from './thread-worker-messaging.ts';
 
 let browser: any = null;
@@ -26,6 +29,8 @@ const isBrowserConnected = () => {
   try {
     return browser && typeof browser.isConnected === 'function' && browser.isConnected();
   } catch {
+    // FIX (#22): Log unexpected errors instead of fully swallowing
+    console.debug('[ThreadWorker] browser.isConnected check threw, treating as disconnected');
     return false;
   }
 };
@@ -49,7 +54,8 @@ function logToDebugFile(level: string, ...args: any[]): void {
         return String(arg);
       }).join(' ')
     };
-    fs.appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
+    // FIX (#32): Use async fs.appendFile to avoid blocking the event loop.
+    import('node:fs/promises').then(fsp => fsp.appendFile(logFile, `${JSON.stringify(entry)}\n`)).catch(() => {});
   } catch {
     // ignore
   }

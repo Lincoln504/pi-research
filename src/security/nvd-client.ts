@@ -38,7 +38,7 @@ import {
 
 const nvdCircuitBreaker = new CircuitBreaker({
   failureThreshold: 3,
-  resetTimeoutMs: 30000,
+  resetTimeoutMs: 10000,
   name: 'NVD API',
   isTransientError: isTransientError
 });
