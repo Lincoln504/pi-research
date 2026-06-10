@@ -4,10 +4,6 @@
  * Files in this group share the global BrowserPoolManager singleton and/or
  * the global service registry. They MUST run one file at a time to prevent
  * pool lifecycle collisions and service registry conflicts.
- *
- * Files: concurrent-operations, error-recovery,
- *        research-workflow, sdk-lifecycle, tool-execution, tools-connectivity,
- *        tools-extended
  */
 import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
@@ -20,7 +16,6 @@ export default defineConfig({
     include: [
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
-      'test/integration/knowledge-embedding-models-real.test.ts',
       'test/integration/research-workflow.test.ts',
       'test/integration/sdk-lifecycle.test.ts',
       'test/integration/shutdown-perf.test.ts',
@@ -28,6 +23,7 @@ export default defineConfig({
       'test/integration/tools-connectivity.test.ts',
       'test/integration/tools-extended.test.ts',
     ],
+    exclude: ['node_modules', 'dist', '.tmp'],
     setupFiles: [],
     testTimeout: 300000,
     // Sequential file execution required: all files share the global
