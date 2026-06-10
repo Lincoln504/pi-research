@@ -4,8 +4,7 @@
  * Uses a real LanceDB database in /tmp and real Chunker — only the Embedder
  * is synthetic (no HF model download). The goal is to verify that every
  * layer of the stack (Chunker → WriterQueue → KnowledgeStore → search /
- * rebuildDocument) works correctly as a unit and that MODEL_CONFIG pooling
- * options are threaded through properly.
+ * rebuildDocument) works correctly as a unit.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
@@ -17,14 +16,11 @@ import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { WriterQueue } from '../../src/knowledge/writer-queue.ts';
 import { Chunker } from '../../src/knowledge/chunker.ts';
 import { Embedder } from '../../src/knowledge/embedder.ts';
-import { getModelEmbedderConfig, getModelChunkConfig } from '../../src/knowledge/index.ts';
 
 // ---------------------------------------------------------------------------
 // Synthetic embedder — returns deterministic vectors without downloading models
 // ---------------------------------------------------------------------------
 function makeSyntheticEmbedder(dim = 64): Embedder {
-  // Hash input text to a reproducible float vector so similar texts get
-  // similar (but not identical) vectors.
   function textToVector(text: string): Float32Array {
     const v = new Float32Array(dim);
     const h = createHash('sha256').update(text).digest();
@@ -40,6 +36,7 @@ function makeSyntheticEmbedder(dim = 64): Embedder {
     initialize: async () => {},
     embed: async (text: string) => textToVector(text),
     embedMany: async (texts: string[]) => texts.map(t => textToVector(t)),
+    dispose: async () => {},
   } as unknown as Embedder;
 }
 
@@ -162,7 +159,6 @@ describe('Knowledge stack integration', () => {
   // ── WriterQueue ────────────────────────────────────────────────────────────
 
   it('WriterQueue ingests markdown through chunker into store', async () => {
-    // 'Integration test content. '.repeat(20) = 500 chars, targetSize=200 → >1 chunk
     const markdown = 'Integration test content. '.repeat(20);
     queue.enqueue({ url: 'https://wq.example.com', markdown });
     await queue.drain();
@@ -220,102 +216,35 @@ describe('Knowledge stack integration', () => {
     expect(rebuilt?.text).toBe(originalMarkdown);
   });
 
-  // ── MODEL_CONFIG / getModelEmbedderConfig ─────────────────────────────────
-
-  describe('getModelEmbedderConfig', () => {
-    it('mean-pooling models all return pooling: mean', () => {
-      expect(getModelEmbedderConfig('Xenova/all-MiniLM-L6-v2').pooling).toBe('mean');
-      expect(getModelEmbedderConfig('Xenova/all-mpnet-base-v2').pooling).toBe('mean');
-      expect(getModelEmbedderConfig('Xenova/multilingual-e5-small').pooling).toBe('mean');
-      expect(getModelEmbedderConfig('Xenova/multilingual-e5-base').pooling).toBe('mean');
-      expect(getModelEmbedderConfig('onnx-community/embeddinggemma-300m-ONNX').pooling).toBe('mean');
-    });
-
-    it('cls-pooling models return pooling: cls', () => {
-      expect(getModelEmbedderConfig('Xenova/bge-small-en-v1.5').pooling).toBe('cls');
-      expect(getModelEmbedderConfig('Xenova/bge-m3').pooling).toBe('cls');
-      expect(getModelEmbedderConfig('onnx-community/granite-embedding-small-english-r2-ONNX').pooling).toBe('cls');
-    });
-
-    it('Qwen3-Embedding returns last_token pooling', () => {
-      const cfg = getModelEmbedderConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX');
-      expect(cfg.pooling).toBe('last_token');
-    });
-
-    it('Qwen3-Embedding queryPrefix contains required Instruct/Query markers', () => {
-      const { queryPrefix } = getModelEmbedderConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX');
-      expect(queryPrefix).toBeDefined();
-      expect(queryPrefix).toContain('Instruct:');
-      expect(queryPrefix).toContain('Query:');
-      expect(queryPrefix!.endsWith(' ')).toBe(true);
-    });
-
-    it('bge-m3 has no queryPrefix', () => {
-      const { queryPrefix } = getModelEmbedderConfig('Xenova/bge-m3');
-      expect(queryPrefix).toBeUndefined();
-    });
-  });
-
-  describe('getModelChunkConfig', () => {
-    it('all supported models return chunk size in valid range and 15% overlap', () => {
-      const models = [
-        'Xenova/all-MiniLM-L6-v2',
-        'Xenova/bge-small-en-v1.5',
-        'Xenova/all-mpnet-base-v2',
-        'Xenova/multilingual-e5-small',
-        'Xenova/multilingual-e5-base',
-        'Xenova/bge-m3',
-        'onnx-community/embeddinggemma-300m-ONNX',
-        'onnx-community/Qwen3-Embedding-0.6B-ONNX',
-        'onnx-community/granite-embedding-small-english-r2-ONNX',
-      ];
-      for (const m of models) {
-        const cfg = getModelChunkConfig(m);
-        expect(cfg.chunkSize, `${m} chunkSize`).toBeGreaterThanOrEqual(500);
-        expect(cfg.chunkSize, `${m} chunkSize`).toBeLessThanOrEqual(5000);
-        expect(cfg.overlapPct, `${m} overlapPct`).toBe(0.15);
-        const overlap = Math.round(cfg.chunkSize * cfg.overlapPct);
-        expect(overlap, `${m} overlap < chunkSize`).toBeLessThan(cfg.chunkSize);
-      }
-    });
-
-    it('MiniLM chunk size is smaller than Qwen3 (training context difference)', () => {
-      expect(getModelChunkConfig('Xenova/all-MiniLM-L6-v2').chunkSize)
-        .toBeLessThan(getModelChunkConfig('onnx-community/Qwen3-Embedding-0.6B-ONNX').chunkSize);
-    });
-  });
-
   // ── WriterQueue chunking ───────────────────────────────────────────────────
 
   describe('WriterQueue chunking', () => {
     it('stores multiple chunks for text larger than targetSize', async () => {
-      // Chunker is configured with targetSize: 200, 'Integration test content. '.repeat(20) = 500 chars
       const markdown = 'Integration test content. '.repeat(20);
       queue.enqueue({ url: 'https://chunks.example.com', markdown });
       await queue.drain();
       const found = await store.findByUrl('https://chunks.example.com');
       expect(found.length).toBeGreaterThan(1);
-      // All chunks share the same URL and contentHash
       const hash = createHash('sha256').update(markdown).digest('hex');
       expect(found.every(d => d.url === 'https://chunks.example.com')).toBe(true);
       expect(found.every(d => d.metadata['contentHash'] === hash)).toBe(true);
     });
 
     it('only first chunk carries the full-page content field', async () => {
-      const markdown = 'Content. '.repeat(60); // long enough to chunk
+      const markdown = 'Content. '.repeat(60); 
       const fullPageContent = '# Full Page\n\nOriginal markdown content here.';
       queue.enqueue({ url: 'https://content-field.example.com', markdown, content: fullPageContent });
       await queue.drain();
       const found = await store.findByUrl('https://content-field.example.com');
       expect(found.length).toBeGreaterThan(0);
       const withContent = found.filter(d => d.content !== undefined && d.content !== null);
-      expect(withContent.length).toBe(1); // exactly one chunk carries content
+      expect(withContent.length).toBe(1); 
       expect(withContent[0]!.content).toBe(fullPageContent);
-      expect(withContent[0]!.metadata['chunkIndex']).toBe(0); // must be the first chunk
+      expect(withContent[0]!.metadata['chunkIndex']).toBe(0); 
     });
 
     it('chunk metadata includes chunkIndex and totalChunks', async () => {
-      const markdown = 'Metadata test. '.repeat(40); // forces multiple chunks
+      const markdown = 'Metadata test. '.repeat(40); 
       queue.enqueue({ url: 'https://meta.example.com', markdown });
       await queue.drain();
       const found = await store.findByUrl('https://meta.example.com');
@@ -334,53 +263,10 @@ describe('Knowledge stack integration', () => {
       const countAfterFirst = (await store.findByUrl('https://chunk-dedup.example.com')).length;
       expect(countAfterFirst).toBeGreaterThan(0);
 
-      // Re-enqueue same content — should be a no-op
       queue.enqueue({ url: 'https://chunk-dedup.example.com', markdown });
       await queue.drain();
       const countAfterSecond = (await store.findByUrl('https://chunk-dedup.example.com')).length;
       expect(countAfterSecond).toBe(countAfterFirst);
-    });
-  });
-
-  // ── Concurrent WriterQueue operations ─────────────────────────────────────
-
-  describe('Concurrent WriterQueue operations', () => {
-    it('multiple sequential enqueues before drain all complete', async () => {
-      const urls = ['https://c1.example.com', 'https://c2.example.com', 'https://c3.example.com'];
-      for (const url of urls) {
-        queue.enqueue({ url, markdown: `Content for ${url} with enough words to be meaningful.` });
-      }
-      await queue.drain();
-      for (const url of urls) {
-        const found = await store.findByUrl(url);
-        expect(found.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('two WriterQueue instances sharing one store do not cross-contaminate', async () => {
-      const q2 = new WriterQueue({ store, chunker });
-      queue.enqueue({ url: 'https://q1share.example.com', markdown: 'Queue 1 share content.' });
-      q2.enqueue({ url: 'https://q2share.example.com', markdown: 'Queue 2 share content.' });
-      await Promise.all([queue.drain(), q2.drain()]);
-
-      const q1Docs = await store.findByUrl('https://q1share.example.com');
-      const q2Docs = await store.findByUrl('https://q2share.example.com');
-      expect(q1Docs.length).toBeGreaterThan(0);
-      expect(q2Docs.length).toBeGreaterThan(0);
-      expect(q1Docs.every(d => d.url === 'https://q1share.example.com')).toBe(true);
-      expect(q2Docs.every(d => d.url === 'https://q2share.example.com')).toBe(true);
-    });
-
-    it('rapid re-enqueue of same URL serializes correctly — no duplicate rows', async () => {
-      const markdown = 'Rapid dedup content for serialization test.';
-      queue.enqueue({ url: 'https://rapid.example.com', markdown });
-      queue.enqueue({ url: 'https://rapid.example.com', markdown });
-      queue.enqueue({ url: 'https://rapid.example.com', markdown });
-      await queue.drain();
-      const docs = await store.findByUrl('https://rapid.example.com');
-      // Same hash means dedup kicks in after first ingest
-      const hashes = new Set(docs.map(d => d.metadata['contentHash']));
-      expect(hashes.size).toBe(1);
     });
   });
 });

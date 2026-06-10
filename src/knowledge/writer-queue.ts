@@ -22,6 +22,38 @@ export interface WriterQueueOptions {
   chunker?: Chunker;
 }
 
+/**
+ * Validate URL format — rejects obviously malformed URLs from AI hallucinations.
+ * Also provides basic SSRF defense-in-depth by rejecting internal network addresses.
+ * FIX (Issues 3/4/8): This is the knowledge store's security boundary.
+ */
+export function validateUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    // Only allow HTTP/HTTPS protocols
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    // Must have a hostname
+    if (!hostname) return false;
+    // Reject localhost and loopback
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
+    // Reject IPv6 loopback, link-local, unique local, and IPv4-mapped
+    if (hostname === '::1' || hostname === '[::1]') return false;
+    if (hostname.startsWith('fe80:') || hostname.startsWith('[fe80:')) return false;
+    if (hostname.startsWith('fc') || hostname.startsWith('[fc')) return false; // fc00::/7 unique local
+    if (hostname.startsWith('fd') || hostname.startsWith('[fd')) return false; // fd00::/8 unique local
+    if (hostname.startsWith('::ffff:') || hostname.startsWith('[::ffff:')) return false; // IPv4-mapped
+    // Reject private/internal network ranges (SSRF defense-in-depth)
+    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/.test(hostname)) return false;
+    // Reject hostnames without a public TLD
+    if (hostname.endsWith('.local') || hostname.endsWith('.internal')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class WriterQueue implements IWriterQueue {
   readonly name = ServiceNames.WRITER_QUEUE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
@@ -114,38 +146,6 @@ export class WriterQueue implements IWriterQueue {
     }
   }
 
-  /**
-   * Validate URL format — rejects obviously malformed URLs from AI hallucinations.
-   * Also provides basic SSRF defense-in-depth by rejecting internal network addresses.
-   * FIX (Issues 3/4/8): This is the knowledge store's security boundary.
-   */
-  private validateUrl(url: string): boolean {
-    if (!url || typeof url !== 'string') return false;
-    try {
-      const parsed = new URL(url);
-      // Only allow HTTP/HTTPS protocols
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-      const hostname = parsed.hostname.toLowerCase();
-      // Must have a hostname
-      if (!hostname) return false;
-      // Reject localhost and loopback
-      if (hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
-      // Reject IPv6 loopback, link-local, unique local, and IPv4-mapped
-      if (hostname === '::1' || hostname === '[::1]') return false;
-      if (hostname.startsWith('fe80:') || hostname.startsWith('[fe80:')) return false;
-      if (hostname.startsWith('fc') || hostname.startsWith('[fc')) return false; // fc00::/7 unique local
-      if (hostname.startsWith('fd') || hostname.startsWith('[fd')) return false; // fd00::/8 unique local
-      if (hostname.startsWith('::ffff:') || hostname.startsWith('[::ffff:')) return false; // IPv4-mapped
-      // Reject private/internal network ranges (SSRF defense-in-depth)
-      if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/.test(hostname)) return false;
-      // Reject hostnames without a public TLD
-      if (hostname.endsWith('.local') || hostname.endsWith('.internal')) return false;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   private async _ingestInner(item: IngestionItem): Promise<void> {
     const incomingType = (item.metadata?.['ingestionType'] as string | undefined) ?? 'synthesis-description';
 
@@ -155,7 +155,7 @@ export class WriterQueue implements IWriterQueue {
     }
 
     // FIX (Issue 3/4): Validate URL format to prevent storing hallucinated/malformed URLs
-    if (!this.validateUrl(item.url)) {
+    if (!validateUrl(item.url)) {
       logger.warn(`[writer-queue] Skipping ingest — URL failed validation: ${item.url}`);
       return;
     }

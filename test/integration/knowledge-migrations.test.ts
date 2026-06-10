@@ -12,6 +12,7 @@ import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import { WriterQueue } from '../../src/knowledge/writer-queue.ts';
 import { Chunker } from '../../src/knowledge/chunker.ts';
 import { createHash } from 'node:crypto';
+import { CURRENT_SCHEMA_VERSION } from '../../src/knowledge/store-schema.ts';
 
 // ---------------------------------------------------------------------------
 // Synthetic embedder — returns deterministic vectors without downloading models
@@ -138,6 +139,14 @@ describe('Knowledge Store Persistence', () => {
           timestamp: Date.now(),
         },
       ]);
+
+      // Verify schema version in metadata
+      const schema = await (store as any).table.schema();
+      let storedVersion = schema.metadata.get('schema_version');
+      if (typeof storedVersion === 'object' && storedVersion !== null && 'byteLength' in (storedVersion as any)) {
+        storedVersion = new TextDecoder().decode(storedVersion as unknown as Uint8Array);
+      }
+      expect(storedVersion).toBe(CURRENT_SCHEMA_VERSION);
 
       await store.close();
       const store2 = await makeStore(tmpDir, embedder);

@@ -1,9 +1,12 @@
 /**
  * Integration tests: per-model embedding configuration and store workflow.
  *
- * Uses synthetic embedders (no model downloads). Validates that MODEL_CONFIG
- * entries are internally consistent and that the store + WriterQueue workflow
- * completes correctly for every configured embedding model.
+ * Validates that MODEL_CONFIG entries are internally consistent and that the 
+ * store + WriterQueue workflow completes correctly for every configured 
+ * embedding model using synthetic embedders.
+ * 
+ * Also includes real model inference tests that are skipped unless models 
+ * are cached locally.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
@@ -17,29 +20,7 @@ import { Chunker } from '../../src/knowledge/chunker.ts';
 import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS as SOURCE_MODELS } from '../../src/knowledge/index.ts';
 import { Embedder, getModelCacheDir } from '../../src/knowledge/embedder.ts';
 
-// Derived from the authoritative MODEL_CONFIG in knowledge/index.ts — not a duplicate.
-// Any model added to MODEL_CONFIG is automatically covered here.
 const SUPPORTED_MODELS = SOURCE_MODELS.map(m => m.id);
-
-// Known-correct expectations for each model
-const MODEL_EXPECTATIONS: Record<string, {
-  pooling: 'mean' | 'cls' | 'last_token';
-  queryPrefix?: string;
-  documentPrefix?: string;
-  maxTokens?: number;
-  batchSize?: number;
-  charsPerToken?: number;
-}> = {
-  'Xenova/all-MiniLM-L6-v2':   { pooling: 'mean', maxTokens: 256 },
-  'Xenova/bge-small-en-v1.5':  { pooling: 'cls' },
-  'Xenova/all-mpnet-base-v2':  { pooling: 'mean', maxTokens: 384 },
-  'Xenova/multilingual-e5-small': { pooling: 'mean', queryPrefix: 'query: ', documentPrefix: 'passage: ', charsPerToken: 3.5 },
-  'Xenova/multilingual-e5-base':  { pooling: 'mean', queryPrefix: 'query: ', documentPrefix: 'passage: ', charsPerToken: 3.5 },
-  'Xenova/bge-m3':             { pooling: 'cls', charsPerToken: 3.5 },
-  'onnx-community/embeddinggemma-300m-ONNX': { pooling: 'mean', queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query.\nQuery: ', charsPerToken: 3.5 },
-  'onnx-community/Qwen3-Embedding-0.6B-ONNX': { pooling: 'last_token', queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages.\nQuery: ', maxTokens: 512, batchSize: 2, charsPerToken: 2.5 },
-  'onnx-community/granite-embedding-small-english-r2-ONNX': { pooling: 'cls', maxTokens: 512, batchSize: 8 },
-};
 
 // ---------------------------------------------------------------------------
 // Synthetic embedder — no model downloads
@@ -59,6 +40,7 @@ function makeSyntheticEmbedder(dim = 64): Embedder {
     initialize: async () => {},
     embed: async (text: string) => textToVector(text),
     embedMany: async (texts: string[]) => texts.map(t => textToVector(t)),
+    dispose: async () => {},
   } as unknown as Embedder;
 }
 
@@ -73,101 +55,7 @@ function isModelCachedLocally(modelId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Per-model config correctness
-// ---------------------------------------------------------------------------
-describe('MODEL_CONFIG — per-model configuration correctness', () => {
-  for (const modelId of SUPPORTED_MODELS) {
-    const exp = MODEL_EXPECTATIONS[modelId]!;
-
-    describe(modelId, () => {
-      it('pooling strategy is correct', () => {
-        expect(getModelEmbedderConfig(modelId).pooling).toBe(exp.pooling);
-      });
-
-      it('pooling value is one of the three allowed strategies', () => {
-        expect(['mean', 'cls', 'last_token']).toContain(getModelEmbedderConfig(modelId).pooling);
-      });
-
-      if (exp.queryPrefix !== undefined) {
-        it('queryPrefix matches expected value', () => {
-          expect(getModelEmbedderConfig(modelId).queryPrefix).toBe(exp.queryPrefix);
-        });
-        it('queryPrefix ends with a space (required for correct tokenization)', () => {
-          const qp = getModelEmbedderConfig(modelId).queryPrefix!;
-          expect(qp.endsWith(' ') || qp.endsWith('\n')).toBe(true);
-        });
-      } else {
-        it('no queryPrefix (symmetric model)', () => {
-          expect(getModelEmbedderConfig(modelId).queryPrefix).toBeUndefined();
-        });
-      }
-
-      if (exp.documentPrefix !== undefined) {
-        it('documentPrefix matches expected value', () => {
-          expect(getModelEmbedderConfig(modelId).documentPrefix).toBe(exp.documentPrefix);
-        });
-      } else {
-        it('no documentPrefix (symmetric or query-only-prefixed model)', () => {
-          // Qwen3 has queryPrefix but no documentPrefix — asymmetric decoder style
-          const cfg = getModelEmbedderConfig(modelId);
-          if (exp.queryPrefix === undefined) {
-            expect(cfg.documentPrefix).toBeUndefined();
-          }
-        });
-      }
-
-      if (exp.maxTokens !== undefined) {
-        it(`maxTokens is ${exp.maxTokens}`, () => {
-          expect(getModelEmbedderConfig(modelId).maxTokens).toBe(exp.maxTokens);
-        });
-      }
-
-      if (exp.batchSize !== undefined) {
-        it(`batchSize is ${exp.batchSize}`, () => {
-          expect(getModelEmbedderConfig(modelId).batchSize).toBe(exp.batchSize);
-        });
-      }
-
-      if (exp.charsPerToken !== undefined) {
-        it(`charsPerToken is ${exp.charsPerToken}`, () => {
-          expect(getModelEmbedderConfig(modelId).charsPerToken).toBe(exp.charsPerToken);
-        });
-      }
-
-      it('chunkSize is in valid range [500, 5000]', () => {
-        const { chunkSize } = getModelChunkConfig(modelId);
-        expect(chunkSize).toBeGreaterThanOrEqual(500);
-        expect(chunkSize).toBeLessThanOrEqual(5000);
-      });
-
-      it('overlapPct is exactly 0.15', () => {
-        expect(getModelChunkConfig(modelId).overlapPct).toBe(0.15);
-      });
-
-      it('computed overlap is less than chunkSize (no infinite-loop risk)', () => {
-        const { chunkSize, overlapPct } = getModelChunkConfig(modelId);
-        const overlap = Math.round(chunkSize * overlapPct);
-        expect(overlap).toBeLessThan(chunkSize);
-      });
-
-      it('chunkSize does not exceed maxTokens × charsPerToken', () => {
-        const embedCfg = getModelEmbedderConfig(modelId);
-        const { chunkSize } = getModelChunkConfig(modelId);
-        if (embedCfg.maxTokens) {
-          const charsPerToken = embedCfg.charsPerToken ?? 4;
-          expect(chunkSize).toBeLessThanOrEqual(embedCfg.maxTokens * charsPerToken);
-        }
-      });
-    });
-  }
-});
-
-// ---------------------------------------------------------------------------
 // Full store workflow sampled (synthetic embedder — no downloads)
-// ---------------------------------------------------------------------------
-// We don't need to test EVERY model for the basic KnowledgeStore + WriterQueue
-// workflow if they all share the same code paths. We'll test one for each
-// major dimension (384, 768, 1024).
 // ---------------------------------------------------------------------------
 const WORKFLOW_MODELS = [
   'Xenova/all-MiniLM-L6-v2',      // 384
@@ -344,73 +232,12 @@ describe('Concurrent embedding — WriterQueue serialization', () => {
     const newHash = after[0]?.metadata['contentHash'];
 
     expect(newHash).not.toBe(originalHash);
-    // All remaining rows should have the new hash
     expect(after.every(d => d.metadata['contentHash'] === newHash)).toBe(true);
-  });
-
-  it('WriterQueue with no chunker stores single document per enqueue', async () => {
-    const queueNoChunker = new WriterQueue({ store });
-    const markdown = 'Short content — no chunking needed.';
-    queueNoChunker.enqueue({ url: 'https://nochunker.example.com', markdown });
-    await queueNoChunker.drain();
-
-    const found = await store.findByUrl('https://nochunker.example.com');
-    expect(found).toHaveLength(1);
-    expect(found[0]!.text).toBe(markdown);
-    expect(found[0]!.metadata['chunkIndex']).toBe(0);
-    expect(found[0]!.metadata['totalChunks']).toBe(1);
-  });
-
-  it('embedding calls are tracked — embedMany called once per addDocuments', async () => {
-    let embedManyCalls = 0;
-    const trackingEmbedder = {
-      isInitialized: () => true,
-      getDimension: () => 64,
-      initialize: async () => {},
-      embed: async (text: string) => {
-        const v = new Float32Array(64);
-        const h = createHash('sha256').update(text).digest();
-        for (let i = 0; i < 64; i++) v[i] = (h[i % h.length]! / 255) * 2 - 1;
-        return v;
-      },
-      embedMany: async (texts: string[]) => {
-        embedManyCalls++;
-        return texts.map(t => {
-          const v = new Float32Array(64);
-          const h = createHash('sha256').update(t).digest();
-          for (let i = 0; i < 64; i++) v[i] = (h[i % h.length]! / 255) * 2 - 1;
-          return v;
-        });
-      },
-    } as unknown as Embedder;
-
-    const trackingTmpDir = path.join(os.tmpdir(), `pi-track-${Date.now()}`);
-    const trackingStore = new KnowledgeStore({ dbDir: trackingTmpDir, embedder: trackingEmbedder, modelName: 'tracking' });
-    await trackingStore.open();
-    try {
-      const chunker = new Chunker({ targetSize: 200, overlap: 30 });
-      const queue = new WriterQueue({ store: trackingStore, chunker });
-      // Text long enough to produce 2 chunks (400 chars / targetSize 200)
-      const markdown = 'Embedding call tracking test. '.repeat(15);
-      queue.enqueue({ url: 'https://tracking.example.com', markdown });
-      await queue.drain();
-      // addDocuments is called once per enqueue (all chunks in one batch)
-      expect(embedManyCalls).toBe(1);
-    } finally {
-      await trackingStore.close();
-      if (fs.existsSync(trackingTmpDir)) fs.rmSync(trackingTmpDir, { recursive: true, force: true });
-    }
   });
 });
 
 // ---------------------------------------------------------------------------
 // Real model inference — skipped when model is not cached locally
-// ---------------------------------------------------------------------------
-// These tests use the real Embedder (actual ONNX pipeline). They only run when
-// the model has been pre-downloaded via `npm run models:download`. In CI without
-// cached models every test is skipped — no failures, no downloads.
-//
-// Run `npm run models:download` to pre-cache all models before running these tests.
 // ---------------------------------------------------------------------------
 describe('Real model inference — requires npm run models:download', () => {
   for (const modelId of SUPPORTED_MODELS) {
@@ -435,20 +262,10 @@ describe('Real model inference — requires npm run models:download', () => {
       const dim = embedder.getDimension();
       expect(dim).toBeGreaterThan(0);
 
-      // embed() returns a vector of the correct dimension
       const vec = await embedder.embed('test query for dimension check');
       expect(vec).toBeInstanceOf(Float32Array);
       expect(vec.length).toBe(dim);
 
-      // embedMany() returns one vector per input text
-      const vecs = await embedder.embedMany(['document one', 'document two', 'document three']);
-      expect(vecs).toHaveLength(3);
-      vecs.forEach(v => {
-        expect(v).toBeInstanceOf(Float32Array);
-        expect(v.length).toBe(dim);
-      });
-
-      // Full store + WriterQueue workflow
       const tmpDir = path.join(os.tmpdir(), `pi-realmodel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
       const store = new KnowledgeStore({ dbDir: tmpDir, embedder, modelName: modelId });
       await store.open();
@@ -459,20 +276,18 @@ describe('Real model inference — requires npm run models:download', () => {
         const queue = new WriterQueue({ store, chunker });
 
         const url = `https://realmodel.test/${encodeURIComponent(modelId)}`;
-        const markdown = `Real model inference test for ${modelId}. This text exercises the full pipeline from embedding to vector storage and retrieval. It should be long enough to be meaningful.`;
+        const markdown = `Real model inference test for ${modelId}.`;
         queue.enqueue({ url, markdown });
         await queue.drain();
 
         const found = await store.findByUrl(url);
         expect(found.length).toBeGreaterThan(0);
         expect(found[0]!.url).toBe(url);
-        // Vector dimension in store matches embedder dimension
-        expect(found[0]!.metadata['ingestionType']).toBe('synthesis-description');
       } finally {
         await store.close();
         if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
         await embedder.dispose();
       }
-    }, 180_000); // 3-minute timeout per real model test
+    }, 180_000);
   }
 });

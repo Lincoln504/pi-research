@@ -2,58 +2,110 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Must mock all heavy dependencies before importing the module under test
 vi.mock('../../../src/knowledge/embedder.ts', () => ({
-  Embedder: vi.fn().mockImplementation((opts: any) => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    isInitialized: vi.fn().mockReturnValue(true),
-    getDimension: vi.fn().mockReturnValue(384),
-    embed: vi.fn().mockResolvedValue(new Float32Array(384)),
-    embedMany: vi.fn().mockImplementation(async (texts: string[]) => texts.map(() => new Float32Array(384))),
-    // Expose constructor options so tests can inspect how it was built
-    _opts: opts,
-  })),
+  Embedder: vi.fn().mockImplementation(function(opts: any) {
+    return {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      isInitialized: vi.fn().mockReturnValue(true),
+      getDimension: vi.fn().mockReturnValue(384),
+      embed: vi.fn().mockResolvedValue(new Float32Array(384)),
+      embedMany: vi.fn().mockImplementation(async (texts: string[]) => texts.map(() => new Float32Array(384))),
+      getOriginalDevice: vi.fn().mockReturnValue('webgpu'),
+      getDevice: vi.fn().mockReturnValue('webgpu'),
+      _opts: opts,
+    };
+  }),
 }));
 
 vi.mock('../../../src/knowledge/store.ts', () => ({
-  KnowledgeStore: vi.fn().mockImplementation(() => ({
-    open: vi.fn().mockResolvedValue(undefined),
-    close: vi.fn().mockResolvedValue(undefined),
-    rebuildFtsIndex: vi.fn().mockResolvedValue(undefined),
-    addDocuments: vi.fn().mockResolvedValue(undefined),
-    search: vi.fn().mockResolvedValue([]),
-    findByUrl: vi.fn().mockResolvedValue([]),
-  })),
+  KnowledgeStore: vi.fn().mockImplementation(function() {
+    return {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      rebuildFtsIndex: vi.fn().mockResolvedValue(undefined),
+      addDocuments: vi.fn().mockResolvedValue(undefined),
+      search: vi.fn().mockResolvedValue([]),
+      findByUrl: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+    };
+  }),
 }));
 
 vi.mock('../../../src/knowledge/writer-queue.ts', () => ({
-  WriterQueue: vi.fn().mockImplementation(() => ({
-    enqueue: vi.fn(),
-    drain: vi.fn().mockResolvedValue(undefined),
-  })),
+  WriterQueue: vi.fn().mockImplementation(function() {
+    return {
+      enqueue: vi.fn(),
+      drain: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 vi.mock('../../../src/knowledge/chunker.ts', () => ({
-  Chunker: vi.fn().mockImplementation(() => ({
-    chunk: vi.fn().mockReturnValue([{ text: 'chunk', actual_overlap: 0 }]),
-  })),
+  Chunker: vi.fn().mockImplementation(function() {
+    return {
+      chunk: vi.fn().mockReturnValue([{ text: 'chunk', actual_overlap: 0 }]),
+    };
+  }),
 }));
 
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn().mockReturnValue({
     LOCAL_KNOWLEDGE_STORE_ENABLED: true,
-GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
     EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   }),
+  validateConfig: vi.fn(),
+  getDbDir: vi.fn().mockReturnValue('/tmp/knowledge_db'),
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
 }));
 
-import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS } from '../../../src/knowledge/index.ts';
+import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS, createKnowledgeStoreComponents, forceDeleteKnowledgeStore } from '../../../src/knowledge/index.ts';
+import { getConfig } from '../../../src/config.ts';
 
 // Derived from SUPPORTED_MODELS — never a hardcoded duplicate.
 const ALL_MODEL_IDS = SUPPORTED_MODELS.map(m => m.id);
+
+describe('createKnowledgeStoreComponents', () => {
+  it('throws error if both local and global stores are disabled', async () => {
+    vi.mocked(getConfig).mockReturnValueOnce({
+      LOCAL_KNOWLEDGE_STORE_ENABLED: false,
+      GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    } as any);
+
+    await expect(createKnowledgeStoreComponents(() => Promise.resolve({} as any)))
+      .rejects.toThrow('Knowledge store is disabled in configuration');
+  });
+
+  it('initializes and returns components successfully', async () => {
+    const mockEmbedder = { initialize: vi.fn(), getDimension: () => 384 };
+    const embedderFactory = vi.fn().mockResolvedValue(mockEmbedder);
+
+    const components = await createKnowledgeStoreComponents(embedderFactory);
+
+    expect(components.embedder).toBe(mockEmbedder);
+    expect(components.store).toBeDefined();
+    expect(components.writerQueue).toBeDefined();
+    expect(embedderFactory).toHaveBeenCalled();
+  });
+});
+
+describe('forceDeleteKnowledgeStore', () => {
+  it('should not throw if directory does not exist', async () => {
+    vi.mock('node:fs', async () => {
+      const actual = await vi.importActual('node:fs') as any;
+      return {
+        ...actual,
+        existsSync: vi.fn().mockReturnValue(false),
+      };
+    });
+
+    await expect(forceDeleteKnowledgeStore()).resolves.toBeUndefined();
+  });
+});
 
 describe('getModelEmbedderConfig', () => {
   it('returns mean pooling and no prefix for unknown models', () => {
