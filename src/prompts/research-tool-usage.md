@@ -1,5 +1,5 @@
 ---
-argument-hint: <query> [depth:0|1|2|3] [model:<id>]
+argument-hint: <query> [depth:1|2|3] [model:<id>]
 ---
 
 ### 🔍 RESEARCH TOOL USAGE
@@ -10,7 +10,7 @@ argument-hint: <query> [depth:0|1|2|3] [model:<id>]
 - Use ONLY the `research` tool for internet investigations.
 - NEVER invoke `subagent`, delegate to other agents, or use any manual delegation system.
 - The `research` tool has its own internal research system that handles all coordination.
-- Do NOT try to "parallelize" by using subagents — if you have multiple unrelated topics, call the `research` tool multiple times **simultaneously** in a single turn instead.
+- Do NOT try to "parallelize" by using subagents — the `research` tool handles its own internal parallelization. Do NOT emit multiple research calls simultaneously either — that would create concurrent orchestrators that compete for resources.
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
@@ -81,8 +81,8 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 - Do NOT use subagents to make multiple simultaneous calls.
 
 **Multiple Topics:**
-- If you need to research multiple unrelated topics, you can emit multiple `research` calls **simultaneously in a single turn**.
-- Example: You can call `research("bananas")` and `research("oranges")` in the same response.
-- Emitting multiple calls in parallel is preferred over sequential turns for distinct topics.
+- If you need to research multiple unrelated topics, call the `research` tool once for each topic, **one after another** (one call per turn).
+- Example: First call `research("bananas")`, get results, then call `research("oranges")`.
+- This lets you evaluate the first topic's findings before deciding how to approach the second.
 
 **Do NOT escalate depth just because a topic is broad** — depth 1 handles most cases well, and the higher depths have their own internal decomposition.
