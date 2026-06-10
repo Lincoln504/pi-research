@@ -8,7 +8,7 @@
  * on destroying pool" errors are handled as transient errors and retried automatically.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import {
   runBrowserTask,
   stopBrowserManager,
