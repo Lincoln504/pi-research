@@ -192,9 +192,15 @@ export default async function (pi: ExtensionAPI) {
 
   // Create and register the Research Knowledge Search tool (local research knowledge database search).
   // This is a top-level satellite tool for the main pi agent — NOT for researcher sub-agents.
+  // Only registered when knowledge store is enabled (project scope, shared scope, or both).
   // The ExtensionContext is provided by pi at execution time inside the execute() closure.
-  const researchKnowledgeSearchTool: ToolDefinition = createResearchKnowledgeSearchTool();
-  pi.registerTool(researchKnowledgeSearchTool);
+  const researchKnowledgeSearchTool: ToolDefinition | null =
+    (getConfig().LOCAL_KNOWLEDGE_STORE_ENABLED || getConfig().GLOBAL_KNOWLEDGE_STORE_ENABLED)
+      ? createResearchKnowledgeSearchTool()
+      : null;
+  if (researchKnowledgeSearchTool) {
+    pi.registerTool(researchKnowledgeSearchTool);
+  }
 
   // Alt+P — Pop queued steering messages back to pi's follow-up queue.
   // The shortcut handler receives an ExtensionContext (not ExtensionAPI),
@@ -343,12 +349,17 @@ export default async function (pi: ExtensionAPI) {
       return { systemPrompt: event.systemPrompt };
     }
 
-    // Use systemPromptOptions to check if the research tool is actually selected/available
-    // This prevents instruction pollution when the tool is disabled.
+    // Use systemPromptOptions to check if either the research tool or the knowledge
+    // search tool is actually selected/available. This prevents instruction pollution
+    // when both tools are disabled. The research-tool-usage.md prompt covers guidance
+    // for BOTH tools, so it should be injected when either is available.
     const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);
+    const isKnowledgeSearchAvailable = researchKnowledgeSearchTool
+      ? (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name))
+      : false;
 
-    if (!isResearchToolAvailable) {
-      logger.debug('[pi-research] Research tool not available in current context, skipping prompt injection');
+    if (!isResearchToolAvailable && !isKnowledgeSearchAvailable) {
+      logger.debug('[pi-research] Neither research nor knowledge search tool available in current context, skipping prompt injection');
       return { systemPrompt: event.systemPrompt };
     }
 

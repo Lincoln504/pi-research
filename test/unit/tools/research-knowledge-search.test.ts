@@ -342,7 +342,7 @@ describe('Orchestration steering — deterministic pivot strings', () => {
 // Test 5: Model Resolution Priority (Phase 4)
 // ---------------------------------------------------------------------------
 describe('Model resolution priority chain', () => {
-  // Priority: KNOWLEDGE_SYNTHESIS_MODEL → RESEARCH_MODEL → ctx.model
+  // Priority: RESEARCH_MODEL → ctx.model
 
   function createMockRegistry(models: Array<{ id: string; provider: string }>) {
     return {
@@ -351,17 +351,10 @@ describe('Model resolution priority chain', () => {
   }
 
   function resolveModel(
-    config: { KNOWLEDGE_SYNTHESIS_MODEL?: string; RESEARCH_MODEL?: string },
+    config: { RESEARCH_MODEL?: string },
     ctxModel: { id: string; provider: string },
     registry: ReturnType<typeof createMockRegistry>,
   ): string {
-    if (config.KNOWLEDGE_SYNTHESIS_MODEL) {
-      const target = config.KNOWLEDGE_SYNTHESIS_MODEL;
-      const found = registry.getAll().find(
-        (m: any) => `${m.provider}/${m.id}` === target || m.id === target,
-      );
-      if (found) return found.id;
-    }
     if (config.RESEARCH_MODEL) {
       const target = config.RESEARCH_MODEL;
       const found = registry.getAll().find(
@@ -372,44 +365,31 @@ describe('Model resolution priority chain', () => {
     return ctxModel.id;
   }
 
-  it('uses KNOWLEDGE_SYNTHESIS_MODEL when configured and available', () => {
-    const registry = createMockRegistry([
-      { id: 'synth-model', provider: 'openai' },
-      { id: 'research-model', provider: 'openai' },
-    ]);
-    const modelId = resolveModel(
-      { KNOWLEDGE_SYNTHESIS_MODEL: 'synth-model' },
-      { id: 'ctx-model', provider: 'openai' },
-      registry,
-    );
-    expect(modelId).toBe('synth-model');
-  });
-
-  it('falls back to RESEARCH_MODEL when KNOWLEDGE_SYNTHESIS_MODEL is not available', () => {
+  it('uses RESEARCH_MODEL when configured and available', () => {
     const registry = createMockRegistry([
       { id: 'research-model', provider: 'openai' },
     ]);
     const modelId = resolveModel(
-      { KNOWLEDGE_SYNTHESIS_MODEL: 'missing-model', RESEARCH_MODEL: 'research-model' },
+      { RESEARCH_MODEL: 'research-model' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
     );
     expect(modelId).toBe('research-model');
   });
 
-  it('falls back to ctx.model when neither config model is available', () => {
+  it('falls back to ctx.model when RESEARCH_MODEL is not available', () => {
     const registry = createMockRegistry([
       { id: 'unrelated', provider: 'openai' },
     ]);
     const modelId = resolveModel(
-      { KNOWLEDGE_SYNTHESIS_MODEL: 'missing', RESEARCH_MODEL: 'also-missing' },
+      { RESEARCH_MODEL: 'missing-model' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
     );
     expect(modelId).toBe('ctx-model');
   });
 
-  it('uses ctx.model when no config models are set', () => {
+  it('uses ctx.model when no RESEARCH_MODEL is set', () => {
     const registry = createMockRegistry([
       { id: 'some-model', provider: 'openai' },
     ]);
@@ -426,7 +406,7 @@ describe('Model resolution priority chain', () => {
       { id: 'gpt-4o', provider: 'openai' },
     ]);
     const modelId = resolveModel(
-      { KNOWLEDGE_SYNTHESIS_MODEL: 'openai/gpt-4o' },
+      { RESEARCH_MODEL: 'openai/gpt-4o' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
     );
@@ -440,7 +420,7 @@ describe('Model resolution priority chain', () => {
     ]);
     // provider/id matches first
     const modelId = resolveModel(
-      { KNOWLEDGE_SYNTHESIS_MODEL: 'openai/gpt-4o' },
+      { RESEARCH_MODEL: 'openai/gpt-4o' },
       { id: 'ctx-model', provider: 'unused' },
       registry,
     );

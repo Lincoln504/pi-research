@@ -185,25 +185,13 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
  * Resolve the model to use for the background synthesis LLM.
  *
  * Priority:
- *   1. KNOWLEDGE_SYNTHESIS_MODEL — dedicated lightweight synthesis model
- *   2. RESEARCH_MODEL — the shared research coordination model
- *   3. ctx.model — the main agent's current model
+ *   1. RESEARCH_MODEL — the shared research model override
+ *   2. ctx.model — the main agent's current model
  */
 function resolveSynthesisModel(ctx: ExtensionContext): { model: ModelWithId; error?: string } {
   const config: Config = getConfig();
   const modelRegistry = ctx.modelRegistry;
   const ctxModel = ctx.model as ModelWithId | undefined;
-
-  if (config.KNOWLEDGE_SYNTHESIS_MODEL) {
-    const target = config.KNOWLEDGE_SYNTHESIS_MODEL;
-    const found = modelRegistry.getAll().find(
-      (m: any) => `${m.provider}/${m.id}` === target || m.id === target,
-    );
-    if (found) {
-      return { model: found as unknown as ModelWithId };
-    }
-    logger.warn(`[research-knowledge-search] KNOWLEDGE_SYNTHESIS_MODEL '${target}' not found`);
-  }
 
   if (config.RESEARCH_MODEL) {
     const target = config.RESEARCH_MODEL;
