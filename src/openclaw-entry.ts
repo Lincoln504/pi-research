@@ -314,7 +314,7 @@ export default {
             minimum: 0,
             maximum: 3,
             default: 1,
-            description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (2 researchers, 2 rounds), 2=deep (3 researchers, 3 rounds), 3=ultra (5 researchers, 5 rounds).',
+            description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (up to 2 researchers, 2 rounds), 2=deep (up to 3 researchers, 3 rounds), 3=ultra (up to 5 researchers, 5 rounds).',
           })),
           excludeTools: Type.Optional(Type.Array(Type.String(), {
             description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange). Defaults to ["grep", "read"].',

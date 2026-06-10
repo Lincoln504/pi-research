@@ -17,11 +17,12 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import type { TUI } from '@earendil-works/pi-tui';
 import {
   SettingsList,
-  type SettingItem
+  type SettingItem,
+  truncateToWidth,
 } from '@earendil-works/pi-tui';
 import * as fs from 'node:fs';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
-import { safeUnref } from './utils/safe-unref.ts';
+// safeUnref removed — no polling timer in config menu anymore
 import { getConfig, saveConfig, resetConfig, getDbDir, getGlobalEnvFilePath, getLocalEnvFilePath } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService } from './core/service-registry.ts';
@@ -80,16 +81,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const initialConfig = { ...getConfig() };
   const config = { ...getConfig() };
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
-
-  // Fetch knowledge store counts for display
-  let knowledgeCounts = { local: 0, global: 0, projects: 0 };
-  try {
-    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-    const store = await service.getStore();
-    knowledgeCounts = await store.countScoped();
-  } catch (err) {
-    logger.debug('[research-config] Failed to fetch knowledge counts for menu:', err);
-  }
 
   const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
 
@@ -160,20 +151,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
-    {
-      id: 'KNOWLEDGE_ENTRIES_LOCAL',
-      label: 'Project entries',
-      description: 'Documents scoped to the current project directory',
-      currentValue: String(knowledgeCounts.local),
-      values: [], // Read-only
-    },
-    {
-      id: 'KNOWLEDGE_ENTRIES_GLOBAL',
-      label: 'Shared entries',
-      description: 'Documents shared across all project directories',
-      currentValue: `${knowledgeCounts.global}, across ${knowledgeCounts.projects} Projects`,
-      values: [], // Read-only
-    },
+
     {
       id: 'EMBEDDING_MODEL',
       label: 'Embed model',
@@ -261,12 +239,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         };
 
         let settingsList: SettingsList;
-        let menuClosed = false;
-        let countRefreshTimer: ReturnType<typeof setInterval> | undefined;
 
         const wrappedDone = (val: any) => {
-          menuClosed = true;
-          if (countRefreshTimer !== undefined) clearInterval(countRefreshTimer);
           done(val);
         };
 
@@ -320,8 +294,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               wrappedDone({ type: 'action', action: 'health' });
             } else if (id === 'ACTION_KNOWLEDGE_STATUS') {
               wrappedDone({ type: 'action', action: 'knowledge_status' });
-            } else if (id === 'ACTION_KNOWLEDGE_LOCAL_INIT') {
-              wrappedDone({ type: 'action', action: 'knowledge_local_init' });
             } else if (id === 'ACTION_KNOWLEDGE_CLEAR_GLOBAL') {
               wrappedDone({ type: 'action', action: 'knowledge_clear_global' });
             } else if (id === 'ACTION_KNOWLEDGE_CLEAR_LOCAL') {
@@ -337,31 +309,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           { enableSearch: true }
         );
 
-        // Poll the knowledge store counts every 5 s and update the display in-place.
-        const refreshCount = async () => {
-          if (menuClosed) return;
-          try {
-            const svc = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-            const store = await svc.getStore();
-            const fresh = await store.countScoped();
-            
-            const localItem = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES_LOCAL');
-            if (localItem && localItem.currentValue !== String(fresh.local)) {
-              localItem.currentValue = String(fresh.local);
-              settingsList?.invalidate();
-            }
-            
-            const globalItem = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES_GLOBAL');
-            const newGlobalVal = `${fresh.global}, across ${fresh.projects} Projects`;
-            if (globalItem && globalItem.currentValue !== newGlobalVal) {
-              globalItem.currentValue = newGlobalVal;
-              settingsList?.invalidate();
-            }
-          } catch { /* non-fatal — leave current value */ }
-        };
-
-        countRefreshTimer = setInterval(refreshCount, 5000);
-        safeUnref(countRefreshTimer);
+        // No polling timer needed — stats removed from menu
 
         return {
           render: (width: number) => {
@@ -372,9 +320,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             const activeEnvPath = hasLocal ? localEnvPath : globalEnvPath;
             const footerLines = [
               '',
-              theme.fg('dim', `  Config: ${activeEnvPath}`),
-              theme.fg('warning', `  "Project" refers to this distinct directory on your system.`),
-              theme.fg('dim', `  See file for all settings (PI_RESEARCH_MODEL, timeouts, paths, and more).`),
+              theme.fg('dim', truncateToWidth(`  Config: ${activeEnvPath}`, width)),
+              theme.fg('dim', truncateToWidth(`  "Project" refers to this distinct directory on your system.`, width)),
+              theme.fg('dim', truncateToWidth(`  See file for all settings (PI_RESEARCH_MODEL, timeouts, paths, and more).`, width)),
             ];
             return [border, ...settingsList.render(width), border, ...footerLines, border];
           },

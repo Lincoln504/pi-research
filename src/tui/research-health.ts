@@ -32,12 +32,6 @@ export async function ensureFunctionalHealth(
   ctx: HealthCheckContext
 ): Promise<void> {
   const { panelState, onUpdate } = ctx;
-  
-  // Check if already healthy (quick check)
-  const isHealthy = await isHealthCheckSuccessful();
-  if (isHealthy) {
-    return;
-  }
 
   const sliceLabel = 'health check ...';
   addSlice(panelState, sliceLabel, sliceLabel, false);
@@ -57,18 +51,6 @@ export async function ensureFunctionalHealth(
   }
 }
 
-/**
- * Check if a health check was successful without running a full new one if possible.
- * Since we're stateless, we run a quick check of critical components.
- */
-async function isHealthCheckSuccessful(): Promise<boolean> {
-  try {
-    const health = await healthRegistry.runAll();
-    return health.status === 'healthy' || health.status === 'degraded';
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Format health check error into user-friendly message

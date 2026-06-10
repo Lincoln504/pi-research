@@ -53,7 +53,7 @@ export function getMaxRounds(complexity: 1 | 2 | 3): number {
  */
 export function getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string {
   if (complexity === 1) {
-    return '**Complexity: Level 1 (Normal)**. Conduct a thorough, well-rounded investigation of the topic covering the primary angles with adequate citations. Plan the right number of researchers for the topic — a single focused researcher is fine for narrow topics, while broader topics benefit from 2 researchers covering distinct aspects.';
+    return '**Complexity: Level 1 (Normal)**. Conduct a thorough, well-rounded investigation of the topic covering the primary angles with adequate citations. **Default to a single researcher** for most Level 1 topics — one focused researcher can handle the majority of normal-complexity queries efficiently. Use 2 researchers only when the topic clearly spans two distinct, non-overlapping domains that benefit from parallel investigation.';
   } else if (complexity === 2) {
     return `**Complexity: Level 2 (Deep)**. Conduct a thorough investigation covering multiple angles and sources with comprehensive citations. Think in terms of a multi-phase investigation: plan Round 1 to map the landscape with specialized researchers, anticipating that subsequent rounds will cover remaining gaps. Scale your team (1-${maxTeamSize}) based on topic scope — not every round needs the full team.`;
   } else {
@@ -73,7 +73,7 @@ export function getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
 - **SYNTHESIZE when**: The primary topic is covered from multiple angles with evidence from diverse sources and no significant gaps remain that would prevent a complete answer.
 - **DELEGATE when**: Coverage is incomplete, important angles are missing, or additional sources would meaningfully strengthen the findings.
 
-Use a second round when the topic warrants it. Delegate for a second round if the initial findings are narrow, lack source diversity, or leave key angles unexplored. But if Round 1 produced comprehensive coverage, synthesize immediately — don't add a round unnecessarily. A single researcher is appropriate for focused follow-up.`;
+Use a second round when the topic warrants it. Delegate for a second round if the initial findings are narrow, lack source diversity, or leave key angles unexplored. But if Round 1 produced comprehensive coverage, synthesize immediately — don't add a round unnecessarily. **A single researcher is the default** for Level 1 follow-up rounds — only use 2 researchers if the remaining gaps clearly span two distinct domains.`;
   } else if (complexity === 2) {
     return `**Level 2 (Deep)** - Thorough, multi-phase investigation with comprehensive citations.
 

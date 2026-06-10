@@ -17,7 +17,7 @@ You are being provided with the conversation history for context only.
 
 ## Complexity Level: {COMPLEXITY_LABEL}
 
-**Team size**: Plan between **1 and {MAX_TEAM_SIZE} researchers**. Use only as many as the topic requires — a single focused researcher is fine for narrow or well-defined topics.
+**Team size**: Plan between **1 and {MAX_TEAM_SIZE} researchers**. **Default to 1 researcher** — use only as many as the topic requires. A single focused researcher is the right choice for most topics at this complexity level. Use the maximum only when the topic clearly spans multiple distinct domains.
 **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Maximize coverage of each angle with targeted, specific queries.
 
 {COMPLEXITY_GUIDANCE}
