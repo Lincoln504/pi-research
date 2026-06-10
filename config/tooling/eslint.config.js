@@ -86,6 +86,7 @@ const config = [
       // Override specific rules
       'no-console': 'off', // Allow console.log for debugging
       'no-unused-vars': 'off', // Disable in favor of TypeScript version
+      'no-redeclare': 'off', // TypeBox uses const+type with same name (standard pattern)
       '@typescript-eslint/no-unused-vars': [
         'error',
         {

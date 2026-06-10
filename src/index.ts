@@ -12,7 +12,7 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages } from './utils/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -97,9 +97,15 @@ export default async function (pi: ExtensionAPI) {
             if (eCtx.sessionId) {
               sessionIds = [eCtx.sessionId];
             } else {
-              // sessionId missing — don't broadcast to all sessions to prevent
-              // cross-session steering pollution. Log and skip.
-              logger.warn('[pi-research] ctx.sessionId missing during steer — cannot route steering message. Skipping.');
+              // If sessionId is missing from the event context, check if there's exactly one active session
+              const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
+              if (activeSessions.length === 1) {
+                sessionIds = [activeSessions[0]!];
+              } else if (activeSessions.length > 1) {
+                logger.warn('[pi-research] ctx.sessionId missing and multiple active sessions exist — cannot route steering safely.');
+              } else {
+                logger.warn('[pi-research] ctx.sessionId missing and no active sessions found — cannot route steering.');
+              }
             }
 
             for (const sid of sessionIds) {
