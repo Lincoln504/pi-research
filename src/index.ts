@@ -346,7 +346,7 @@ export default async function (pi: ExtensionAPI) {
     // Do not inject rules into the sub-researchers
     const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
     if (isResearcher) {
-      return { systemPrompt: event.systemPrompt };
+      return { systemPrompt: injectedSystemPrompt };
     }
 
     // Conservative Prompt Injection: Only inject research instructions if the tool is 

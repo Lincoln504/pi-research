@@ -10,7 +10,7 @@ argument-hint: <query> [depth:1|2|3] [model:<id>]
 - Use ONLY the `research` tool for internet investigations.
 - NEVER invoke `subagent`, delegate to other agents, or use any manual delegation system.
 - The `research` tool has its own internal research system that handles all coordination.
-- Do NOT try to "parallelize" by using subagents — the `research` tool handles its own internal parallelization. Do NOT emit multiple research calls simultaneously either — that would create concurrent orchestrators that compete for resources.
+- Do NOT try to "parallelize" by using subagents — the `research` tool handles its own internal parallelization via its own coordinator and concurrent researcher agents.
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
@@ -81,8 +81,9 @@ The coordinator will plan as many researchers as needed (up to the max). You do 
 - Do NOT use subagents to make multiple simultaneous calls.
 
 **Multiple Topics:**
-- If you need to research multiple unrelated topics, call the `research` tool once for each topic, **one after another** (one call per turn).
-- Example: First call `research("bananas")`, get results, then call `research("oranges")`.
-- This lets you evaluate the first topic's findings before deciding how to approach the second.
+- If you need to research multiple unrelated topics of **truly distinct scope**, you may emit multiple `research` calls **simultaneously in a single turn**. Each call gets its own isolated research run with its own coordinator and researchers.
+- Example: `research("bananas")` and `research("quantum computing")` in the same turn — these have zero overlap.
+- **Group related topics**: If topics share ANY scope or could inform each other, combine them into a single `research` call. The internal coordinator will decompose them into parallel researcher agents. Do NOT split related sub-topics into separate calls.
+- Example: `research("Python async performance and Rust async performance comparison")` — NOT separate calls for Python and Rust, since the comparison IS the research goal.
 
 **Do NOT escalate depth just because a topic is broad** — depth 1 handles most cases well, and the higher depths have their own internal decomposition.
