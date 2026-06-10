@@ -8,11 +8,19 @@
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import * as pathmod from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { IService } from '../core/service-registry.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
+
+/**
+ * Global storage for tracking lock ownership within the same async execution flow.
+ * This allows safe re-entrancy (nested locks) while correctly serializing 
+ * non-nested concurrent calls on the same instance.
+ */
+const lockContext = new AsyncLocalStorage<Set<string>>();
 
 /**
  * Lock configuration options
@@ -118,14 +126,17 @@ export class FileLockService implements IService {
 
   /**
    * Acquire a filesystem lock for exclusive access.
-   * Supports re-entrancy (recursive locking) within the same instance.
+   * Supports re-entrancy (recursive locking) within the same async execution context.
    * @throws Error if unable to acquire lock within timeout
    */
   async acquireLock(): Promise<void> {
-    // 0. Support re-entrancy: if this instance already holds the lock, just increment count.
-    if (this.lockHandle !== null) {
+    // 0. Support re-entrancy: check if the current async flow already holds this lock.
+    const heldLocks = lockContext.getStore();
+    if (heldLocks?.has(this.lockFilePath)) {
+      if (this.lockHandle !== null) {
         this.lockCount++;
         return;
+      }
     }
 
     // 1. Join the local FIFO queue for this instance.
@@ -134,25 +145,25 @@ export class FileLockService implements IService {
     // one by one, preventing internal state corruption and redundant disk I/O.
     let myResolve!: () => void;
     const myTurn = new Promise<void>((resolve) => {
-        myResolve = resolve;
+      myResolve = resolve;
     });
 
     const previous = this.queue;
     this.queue = myTurn;
 
     try {
-        await previous;
+      await previous;
     } catch (_err) {
-        // Continue even if previous turn failed
+      // Continue even if previous turn failed
     }
 
     // Secondary re-entrancy check: if a previous turn in the queue already
     // acquired the lock for us (e.g. nested call that bypassed the queue).
-    if (this.lockHandle !== null) {
-        this.lockCount++;
-        // Release our turn immediately so the next caller can proceed.
-        if (myResolve) myResolve();
-        return;
+    if (heldLocks?.has(this.lockFilePath) && this.lockHandle !== null) {
+      this.lockCount++;
+      // Release our turn immediately so the next caller can proceed.
+      if (myResolve) myResolve();
+      return;
     }
 
     // Capture resolve function so we can trigger it in releaseLock() or on failure
@@ -167,7 +178,7 @@ export class FileLockService implements IService {
         // the same instance cannot close each other's file handle through the
         // shared this.lockHandle field. We only promote to this.lockHandle after
         // the lock is fully and successfully acquired.
-        let handle: import('node:fs/promises').FileHandle | null = null;
+        let handle: fs.FileHandle | null = null;
         try {
           // Open lock file and write UUID immediately (atomic)
           handle = await fs.open(this.lockFilePath, 'wx');
@@ -177,6 +188,11 @@ export class FileLockService implements IService {
           // Fully acquired — commit to instance state
           this.lockHandle = handle;
           this.lockCount = 1;
+
+          // Track in ALS for nested calls
+          if (heldLocks) {
+            heldLocks.add(this.lockFilePath);
+          }
 
           const duration = Date.now() - startTime;
           metrics.observe('state_lock_acquire_duration_ms', duration);
@@ -285,141 +301,101 @@ export class FileLockService implements IService {
 
   /**
    * Release the filesystem lock.
-   * Supports recursive release.
-   * @throws Error if unable to release lock
    */
   async releaseLock(): Promise<void> {
-    // Support recursive release
-    if (this.lockCount > 1) {
-        this.lockCount--;
-        return;
+    if (this.lockHandle === null) {
+      return;
+    }
+
+    this.lockCount--;
+    if (this.lockCount > 0) {
+      return;
     }
 
     try {
-      if (this.lockHandle !== null) {
-        try {
-          try {
-            const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
-            const lockUuid = lockContent.trim();
-            if (lockUuid !== this.lockUuid) {
-              logger.warn('[FileLockService] Lock UUID mismatch during release, skipping deletion');
-              
-              // CRITICAL: We MUST close our handle even if we no longer own the lock file
-              // on disk, otherwise Node.js will throw ERR_INVALID_STATE on GC.
-              try {
-                await this.lockHandle.close();
-              } catch (closeError) {
-                logger.debug(`[FileLockService] Error closing handle after UUID mismatch: ${closeError}`);
-              }
-              
-              this.lockHandle = null;
-              this.lockCount = 0;
-              metrics.increment('state_lock_release_total', 1, { status: 'not_owner' });
-              return;
-            }
-          } catch (_readError) { /* ignore */ }
-
-          if (this.lockHandle !== null) {
-            try {
-              await this.lockHandle.close();
-            } finally {
-              // Ensure we null out the handle even if close() fails, to prevent
-              // leaks and repeated close attempts.
-              this.lockHandle = null;
-            }
-          }
-        } catch (error: unknown) {
-          metrics.increment('state_lock_release_total', 1, { status: 'error' });
-          throw new Error(
-            `Failed to close lock file handle: ${error instanceof Error ? error.message : String(error)}`,
-            { cause: error }
-          );
-        }
+      // 1. Double check ownership before unlinking
+      const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
+      if (content === this.lockUuid) {
+        await fs.unlink(this.lockFilePath).catch(() => {});
       }
-
-      try {
-        await fs.unlink(this.lockFilePath);
-        metrics.increment('state_lock_release_total', 1, { status: 'success' });
-        metrics.setGauge('state_lock_held', 0);
-      } catch (error: unknown) {
-        if (error instanceof Error && 'code' in error) {
-          const errnoError = error as NodeJS.ErrnoException;
-          if (errnoError.code !== 'ENOENT') {
-            metrics.increment('state_lock_release_total', 1, { status: 'error' });
-            throw new Error(`Failed to remove lock file: ${errnoError.message}`, { cause: error });
-          }
-        }
-      }
-    } finally {
+      
+      // 2. Clean up handle
+      await this.lockHandle.close().catch(() => {});
+      this.lockHandle = null;
       this.lockCount = 0;
-      // Always release our turn in the local queue
-      if (this.resolveTurn) {
-        this.resolveTurn();
-        this.resolveTurn = null;
+
+      // 3. Remove from ALS
+      const heldLocks = lockContext.getStore();
+      if (heldLocks) {
+        heldLocks.delete(this.lockFilePath);
+      }
+
+      metrics.setGauge('state_lock_held', 0);
+    } finally {
+      // 4. Signal the next caller in the queue that it's their turn.
+      const resolve = this.resolveTurn;
+      this.resolveTurn = null;
+      if (resolve) {
+        resolve();
       }
     }
   }
 
   /**
-   * Execute a callback function while holding the lock with timeout.
-   * @param callback Async function to execute while holding the lock
-   * @param timeout Maximum time to hold the lock (default 30 seconds, currently unused)
-   * @returns The return value of the callback
-   * @throws Error if unable to acquire lock, timeout, or callback throws
+   * Execute a function within the scope of a filesystem lock.
+   * This is the preferred way to use the lock service.
+   * Safe re-entrancy is supported within the same async flow.
    */
   async withLock<T>(callback: () => Promise<T> | T, _timeout: number = 30000): Promise<T> {
-    // 1. Acquire lock with timeout
-    await this.acquireLock();
-
-    try {
+    // If we already hold this lock in this async flow, just call the callback
+    const heldLocks = lockContext.getStore();
+    if (heldLocks?.has(this.lockFilePath)) {
       return await callback();
-    } finally {
-      try {
-        await this.releaseLock();
-      } catch (error: unknown) {
-        logger.error('[FileLockService] Failed to release lock:', error);
-      }
     }
+
+    // Otherwise, create a new context (if none exists) and acquire the lock
+    return await lockContext.run(heldLocks || new Set<string>(), async () => {
+      await this.acquireLock();
+      try {
+        return await callback();
+      } finally {
+        await this.releaseLock();
+      }
+    });
   }
 
   /**
-   * Get the lock UUID for this instance
+   * Force clean up any lock files owned by this instance.
+   */
+  async cleanup(): Promise<void> {
+    if (this.lockHandle) {
+      try {
+        await fs.unlink(this.lockFilePath);
+      } catch { /* ignore */ }
+      try {
+        await this.lockHandle.close();
+      } catch { /* ignore */ }
+      this.lockHandle = null;
+    }
+    this.lockCount = 0;
+  }
+
+  /**
+   * Check if the current instance holds the lock
+   */
+  isLocked(): boolean {
+    return this.lockHandle !== null;
+  }
+
+  /**
+   * Get the UUID for this service instance
    */
   getLockUuid(): string {
     return this.lockUuid;
   }
 
   /**
-   * Get the lock file path
-   */
-  getLockFilePath(): string {
-    return this.lockFilePath;
-  }
-
-  /**
-   * Check if the lock is currently held
-   */
-  isLockHeld(): boolean {
-    return this.lockHandle !== null;
-  }
-
-  /**
-   * Clean up resources (release lock if held)
-   * Should be called when shutting down
-   */
-  async cleanup(): Promise<void> {
-    if (this.lockHandle !== null) {
-      try {
-        await this.releaseLock();
-      } catch (error: unknown) {
-        logger.error('[FileLockService] Failed to release lock during cleanup:', error);
-      }
-    }
-  }
-
-  /**
    * Sleep for a specified number of milliseconds
-   * @param ms The number of milliseconds to sleep
    */
   private sleep(ms: number): Promise<void> {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));

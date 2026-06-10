@@ -54,8 +54,27 @@ export class ProcessLifecycleService implements IProcessLifecycle {
       }
     }
 
-    // Cross-platform fallback: `ps -o etimes=` returns elapsed seconds.
-    // Returns epoch-second floor of process start for stable PID-reuse detection.
+    // Windows: use powershell to get process creation time
+    if (process.platform === 'win32') {
+      try {
+        const output = await new Promise<string>((resolve, reject) => {
+          const child = execFile(
+            'powershell', 
+            ['-NoProfile', '-Command', `[Math]::Floor(([DateTimeOffset](Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeSeconds())`],
+            { encoding: 'utf8', timeout: 5000 },
+            (err, stdout) => err ? reject(err) : resolve(stdout),
+          );
+          child.unref?.();
+        });
+        if (!output || !output.trim()) return null;
+        const startTime = parseInt(output.trim(), 10);
+        return isNaN(startTime) ? null : startTime;
+      } catch {
+        return null;
+      }
+    }
+
+    // Cross-platform fallback (macOS/Unix): `ps -o etimes=` returns elapsed seconds.
     try {
       const output = await new Promise<string>((resolve, reject) => {
         const child = execFile(

@@ -177,6 +177,45 @@ describe('FileLockService', () => {
       // Lock file must be deleted despite the throw
       await expect(fs.access(lockFilePath)).rejects.toThrow();
     });
+
+    it('supports re-entrancy within the same async flow', async () => {
+      service = new FileLockService({ lockFilePath });
+      await service.initialize();
+
+      await service.withLock(async () => {
+        expect(service.isLocked()).toBe(true);
+        // Nested lock
+        await service.withLock(async () => {
+          expect(service.isLocked()).toBe(true);
+          const content = await fs.readFile(lockFilePath, 'utf-8');
+          expect(content.trim()).toBe(service.getLockUuid());
+        });
+        expect(service.isLocked()).toBe(true);
+      });
+      expect(service.isLocked()).toBe(false);
+    });
+
+    it('correctly serializes concurrent non-nested calls on the same instance', async () => {
+      service = new FileLockService({ lockFilePath });
+      await service.initialize();
+
+      const events: string[] = [];
+      const task1 = service.withLock(async () => {
+        events.push('1:start');
+        await new Promise(r => setTimeout(r, 50));
+        events.push('1:end');
+      });
+
+      const task2 = service.withLock(async () => {
+        events.push('2:start');
+        await new Promise(r => setTimeout(r, 50));
+        events.push('2:end');
+      });
+
+      await Promise.all([task1, task2]);
+
+      expect(events).toEqual(['1:start', '1:end', '2:start', '2:end']);
+    });
   });
 
   // ---------------------------------------------------------------------------
