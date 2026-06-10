@@ -15,7 +15,7 @@ import {
 } from 'apache-arrow';
 import * as lancedb from '@lancedb/lancedb';
 
-export const CURRENT_SCHEMA_VERSION = '2';
+export const CURRENT_SCHEMA_VERSION = '3';
 
 /**
  * Create the knowledge store table schema
@@ -54,8 +54,13 @@ export async function createStoreTable(
     schema: schema,
   });
 
-  // Initial FTS index creation
+  // Create FTS indexes for hybrid search:
+  //   'text'    — synthesis descriptions (semantic search targets these via vectors)
+  //   'content' — full article markdown (keyword/BM25 grep through full article contents)
+  // This enables true hybrid search: semantic similarity on descriptions +
+  // keyword matching across full article text, fused via RRF reranking.
   await table.createIndex('text', { config: lancedb.Index.fts() });
+  await table.createIndex('content', { config: lancedb.Index.fts() });
 
   // Create scalar indices for performance (B-Tree)
   // These improve deleteByUrl and evictOldRecords performance significantly as the store grows.

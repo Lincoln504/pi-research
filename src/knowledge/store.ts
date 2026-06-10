@@ -648,12 +648,18 @@ export class KnowledgeStore implements IKnowledgeStore {
         logger.debug('[store] Skipping FTS index rebuild (table is empty)');
         return;
       }
-      logger.info('[store] Rebuilding FTS index...');
+      logger.info('[store] Rebuilding FTS indexes...');
+      // FTS on 'text' — synthesis descriptions (for semantic/hybrid search)
       await table.createIndex('text', {
         config: lancedb.Index.fts(),
         replace: true,
       });
-      logger.info('[store] FTS index rebuilt.');
+      // FTS on 'content' — full article markdown (for keyword/BM25 grep)
+      await table.createIndex('content', {
+        config: lancedb.Index.fts(),
+        replace: true,
+      });
+      logger.info('[store] FTS indexes rebuilt (text + content).');
     } catch (err) {
       logger.warn('[store] FTS index rebuild failed:', err);
     }

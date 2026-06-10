@@ -59,7 +59,12 @@ export async function addDocumentsToStore(
 }
 
 /**
- * Search for documents in the store
+ * Search for documents in the store using hybrid search.
+ *
+ * Semantic search (vector similarity) targets the 'text' field (synthesis descriptions)
+ * since vectors are computed from description chunks. Keyword search (BM25/FTS) targets
+ * BOTH 'text' and 'content' fields — 'text' for description keywords and 'content'
+ * for full article body text. Results are fused via Reciprocal Rank Fusion (RRF).
  */
 export async function searchStore(
   table: lancedb.Table,
@@ -88,7 +93,7 @@ export async function searchStore(
     .query()
     .nearestTo(vector)
     .where(filter)
-    .fullTextSearch(query)
+    .fullTextSearch(query, { columns: ['text', 'content'] })
     .rerank(await getReranker())
     .limit(limit)
     .toArray();
@@ -167,7 +172,11 @@ export async function findDocumentsByUrl(
 }
 
 /**
- * Find URLs relevant to a query
+ * Find URLs relevant to a query using hybrid search.
+ *
+ * Semantic search (vector) targets the 'text' field (descriptions).
+ * Keyword search (BM25/FTS) targets both 'text' and 'content' fields.
+ * Results are fused via RRF reranking.
  */
 export async function findRelevantUrls(
   table: lancedb.Table,
@@ -195,7 +204,7 @@ export async function findRelevantUrls(
     .query()
     .nearestTo(vector)
     .where(filter)
-    .fullTextSearch(query)
+    .fullTextSearch(query, { columns: ['text', 'content'] })
     .rerank(await getReranker())
     .limit(limit)
     .toArray();
