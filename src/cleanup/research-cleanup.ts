@@ -95,6 +95,12 @@ export function createCleanupFunction(
 
     endResearchSession(piSessionId, researchId);
     cleanupSharedLinks(researchId);
+
+    // Clean up session-scoped logger to prevent unbounded Map growth.
+    // Each research run creates a logger via getLogger(sessionId) that is
+    // never removed otherwise.
+    const { resetLogger } = await import('../logger.ts');
+    resetLogger(researchId);
     
     // FIX (#10): Clear session circuit breaker to prevent unbounded map growth.
     const { clearSessionCircuitBreaker } = await import('../infrastructure/browser/browser-error-utils.ts');

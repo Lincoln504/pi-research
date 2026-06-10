@@ -16,10 +16,8 @@ import { QuickResearchOrchestrator } from './orchestration/quick-research-orches
 import { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 import { createResearchRunId, logger, createLogger, setLogger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import type { Model } from '@earendil-works/pi-ai';
-import { ModelRegistry, AuthStorage } from '@earendil-works/pi-coding-agent';
+import { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { resetServiceContainer, getService } from './core/service-registry.ts';
@@ -143,7 +141,7 @@ async function _doInit(options: SDKOptions): Promise<void> {
   }
 
   // Build and cache the registry (one instance for the lifetime of this init cycle).
-  globalRegistry = buildModelRegistry(parsedProvider);
+  globalRegistry = sharedBuildModelRegistry(globalApiKey, parsedProvider);
 
   try {
     // Resolve a string "provider/id" model from the registry.
@@ -349,26 +347,7 @@ function ensureInitialized() {
  *
  * @param provider - The model's provider string, used to key the explicit apiKey correctly.
  */
-/**
- * NOTE (#29): This function duplicates logic in openclaw-entry.ts buildModelRegistry().
- * Future refactor: extract to shared module (e.g., src/utils/model-registry-factory.ts).
- */
-function buildModelRegistry(provider?: string): ModelRegistry {
-  const agentDir = path.join(os.homedir(), '.pi', 'agent');
-  const modelsJsonPath = path.join(agentDir, 'models.json');
-
-  if (globalApiKey) {
-    // Explicit key: seed InMemory storage under the correct provider name.
-    const authStorage = AuthStorage.inMemory({
-      [provider ?? 'unknown']: { type: 'api_key', key: globalApiKey },
-    });
-    return ModelRegistry.create(authStorage, modelsJsonPath);
-  }
-
-  // No explicit key: use the user's pi auth storage and model list
-  const authStorage = AuthStorage.create(path.join(agentDir, 'auth.json'));
-  return ModelRegistry.create(authStorage, modelsJsonPath);
-}
+import { buildModelRegistry as sharedBuildModelRegistry } from './utils/model-registry-factory.ts';
 
 /**
  * Create an ExtensionContext for internal services.

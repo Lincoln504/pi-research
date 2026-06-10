@@ -21,12 +21,10 @@
  */
 
 import type { Model } from '@earendil-works/pi-ai';
-import { ModelRegistry, AuthStorage } from '@earendil-works/pi-coding-agent';
+import { ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { buildModelRegistry } from './utils/model-registry-factory.ts';
 import { Type } from 'typebox';
 import { randomUUID } from 'node:crypto';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import * as fs from 'node:fs';
 
 // pi-research internals (same imports used by sdk.ts)
 import { registerCoreServices, initializeCoreServices } from './core/service-initialization.ts';
@@ -148,28 +146,7 @@ function applyOpenClawConfig(pluginConfig: OpenClawPluginConfig): void {
 // Model resolution
 // ---------------------------------------------------------------------------
 
-function buildModelRegistry(apiKey: string | undefined, provider: string | undefined): ModelRegistry {
-  const agentDir = path.join(os.homedir(), '.pi', 'agent');
-  const modelsJsonPath = path.join(agentDir, 'models.json');
 
-  if (apiKey && provider) {
-    // Explicit key: seed InMemory storage under the correct provider name.
-    const authStorage = AuthStorage.inMemory({
-      [provider]: { type: 'api_key', key: apiKey },
-    });
-    return ModelRegistry.create(authStorage, fs.existsSync(modelsJsonPath) ? modelsJsonPath : undefined);
-  }
-
-  // No explicit key: use the user's pi auth storage and model list if available
-  const authPath = path.join(agentDir, 'auth.json');
-  if (fs.existsSync(authPath)) {
-    const authStorage = AuthStorage.create(authPath);
-    return ModelRegistry.create(authStorage, fs.existsSync(modelsJsonPath) ? modelsJsonPath : undefined);
-  }
-
-  // Last resort: in-memory with nothing — will fail at LLM call time with actionable error
-  return ModelRegistry.inMemory(AuthStorage.inMemory());
-}
 
 function resolveModel(registry: ModelRegistry, modelSpec?: string, provider?: string): Model<any> {
   // 1. Explicit model string: "provider/modelId"
