@@ -8,7 +8,7 @@
  * All state is managed within the singleton instance, accessed via getSchedulerService().
  */
 
-import type { SearchResult, IScheduler } from './service-interfaces.ts';
+import type { SearchResult, ScrapeResult, IScheduler } from './service-interfaces.ts';
 import { ServiceLifecycle } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import { getService } from './service-registry.ts';
@@ -28,7 +28,7 @@ interface ISchedulerInternal {
   name?: string;
   lifecycle?: ServiceLifecycle;
   runSearch?: (query: string, config?: Config) => Promise<SearchResult[]>;
-  runScrape?: (url: string, config?: Config) => Promise<unknown>;
+  runScrape?: (url: string, config?: Config, signal?: AbortSignal) => Promise<ScrapeResult>;
   runHealthCheck?: (config?: Config) => Promise<{ success: boolean }>;
   schedulerId?: string;
   shutdown?: () => Promise<void>;
@@ -285,12 +285,12 @@ export class SchedulerService implements IScheduler, ISchedulerInternals {
   /**
    * Scrape a URL
    */
-  async runScrape(url: string, config?: Config): Promise<unknown> {
+  async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
     await this.getOrCreateScheduler(config);
     if (!this._scheduler?.runScrape) {
       throw new Error('Scheduler does not support runScrape');
     }
-    return this._scheduler.runScrape(url, config);
+    return this._scheduler.runScrape(url, config, signal);
   }
 
   /**

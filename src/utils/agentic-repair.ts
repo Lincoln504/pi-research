@@ -5,6 +5,7 @@
  * using an LLM-based correction pass.
  */
 
+import type { Model, AssistantMessage } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { extractJson } from './json-utils.ts';
 import type { TSchema } from 'typebox';
@@ -15,7 +16,7 @@ import { Value } from 'typebox/value';
  */
 export interface JsonRepairOptions {
   /** The model to use for the repair pass */
-  model: any;
+  model: Model<any>;
   /** Original user prompt or context for the repair */
   context?: string;
   /** Optional schema for validation after repair */
@@ -30,10 +31,10 @@ export interface JsonRepairOptions {
  * LLM completion function signature matching pi-ai's completeSimple
  */
 export type LlmCompleter = (
-  model: any,
+  model: Model<any>,
   context: { systemPrompt?: string; messages: any[] },
   options: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal }
-) => Promise<any>;
+) => Promise<AssistantMessage>;
 
 /**
  * Repair malformed JSON using an LLM-based correction pass
@@ -86,7 +87,7 @@ Return ONLY the valid JSON object. No prose before or after.`;
         messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }]
       }, { ...auth, signal });
 
-      const responseText = response.content.find((c: any) => c.type === 'text')?.text;
+      const responseText = response.content.find((c) => c.type === 'text')?.text;
       if (!responseText) {
         logger.warn(`[${serviceName}] Salvage attempt ${attempt} failed: empty LLM response`);
         continue;

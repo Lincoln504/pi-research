@@ -19,6 +19,7 @@ export interface ResearchOptions {
   ctx: ExtensionContext;
   query: string;
   depth?: 0 | 1 | 2 | 3;
+  complexity?: 1 | 2 | 3;
   model?: Model<any>;
   observer?: ResearchObserver;
   onUpdate?: (update: AgentToolResult<any>) => void;
@@ -26,6 +27,7 @@ export interface ResearchOptions {
   researchId: string;
   config?: Config;
   excludeTools?: string[];
+  signal?: AbortSignal;
 }
 
 /**

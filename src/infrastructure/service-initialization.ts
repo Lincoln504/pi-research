@@ -6,7 +6,7 @@
  * depending on Infrastructure layer.
  */
 
-import { registerService, getService } from '../core/service-registry.ts';
+import { registerService, getService, disposeAllServices, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import { SchedulerFactoryService } from './scheduler-factory-service.ts';
 import { StateManagerService } from './state/state-manager-service.ts';
@@ -248,4 +248,49 @@ export function registerInfrastructureServices(): void {
   );
 
   logger.debug('[InfrastructureServiceInit] Infrastructure services registered');
+}
+
+/**
+ * Initialize all infrastructure services
+ * 
+ * @param ctx - Optional extension context
+ */
+export async function initializeInfrastructureServices(ctx?: any): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
+  logger.log('[InfrastructureServiceInit] Initializing infrastructure services...');
+  
+  const initialized: string[] = [];
+  const failed: string[] = [];
+  
+  // Infrastructure services that should be eagerly initialized
+  const eagerServices = [
+    { name: ServiceNames.PROCESS_LIFECYCLE, label: 'Process Lifecycle' },
+    { name: ServiceNames.STATE_PATH_CONFIGURATION, label: 'Path Configuration' },
+    { name: ServiceNames.STATE_MANAGER, label: 'State Manager' },
+    { name: ServiceNames.METRICS, label: 'Metrics' },
+  ];
+
+  for (const service of eagerServices) {
+    try {
+      await getService<IService>(service.name, ctx);
+      initialized.push(service.label);
+    } catch (err) {
+      const msg = `${service.label} init failed`;
+      logger.error(`[InfrastructureServiceInit] ${msg}:`, err);
+      failed.push(msg);
+    }
+  }
+
+  return { 
+    success: failed.length === 0, 
+    initialized, 
+    failed 
+  };
+}
+
+/**
+ * Shutdown all infrastructure services
+ */
+export async function shutdownInfrastructureServices(): Promise<void> {
+  logger.log('[InfrastructureServiceInit] Shutting down infrastructure services...');
+  await disposeAllServices();
 }

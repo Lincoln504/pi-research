@@ -27,6 +27,7 @@ import { searchNVD, getCVEById } from './nvd-client.ts';
 import { searchCisaKev } from './cisa-kev.ts';
 import { searchGitHubAdvisories, getAdvisoryById } from './github-advisories.ts';
 import { searchOSV, getOSVById } from './osv-client.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 
 // ============================================================================
 // Type Definitions
@@ -174,7 +175,7 @@ export class SecuritySearcher {
     if (delay > 0) {
       await new Promise<void>((resolve) => {
         const timeoutId = setTimeout(resolve, delay);
-        timeoutId.unref();
+        safeUnref(timeoutId);
       });
     }
 

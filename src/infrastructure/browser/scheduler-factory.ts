@@ -21,6 +21,7 @@ import { generateSchedulerVersion } from './config.ts';
 import { BrowserClient } from './browser-client.ts';
 import { BrowserTaskScheduler } from './browser-task-scheduler.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
+import { getBrowserServerAuthSecret } from './browser-server.ts';
 
 /**
  * Global lock for browser scheduler initialization to prevent "thundering herd"
@@ -151,12 +152,11 @@ export async function forceSchedulerRestart(forceClearRemoteState: boolean = fal
         // in browser-error-utils.ts and are retried automatically by task-execution-service.ts.
         if (oldScheduler && 'schedulerId' in oldScheduler && oldScheduler.schedulerId) {
             // This is a BrowserTaskScheduler
-            const scheduler = oldScheduler as any;
-            if (scheduler instanceof BrowserTaskScheduler) {
+            if (oldScheduler instanceof BrowserTaskScheduler) {
                 // Fire-and-forget: do not block forceSchedulerRestart on the old pool draining.
                 // Track the promise in SchedulerService so waitForBrowserPoolIdle() can await
                 // it rather than blindly polling a flag that is set several async steps later.
-                const shutdownPromise: Promise<void> = scheduler.shutdown().catch((err: unknown) => {
+                const shutdownPromise: Promise<void> = oldScheduler.shutdown().catch((err: unknown) => {
                     logger.warn('[Scheduler] Error during old scheduler shutdown after restart:', err);
                 });
                 schedulerService.setPendingShutdownPromise(shutdownPromise);
@@ -259,7 +259,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
                         } else {
                             // Port confirmed: use the existing scheduler
                             logger.log(`[Scheduler] Connecting to existing scheduler (version: ${currentVersion})`);
-                            const client = new BrowserClient(serverInfo.port);
+                            const client = new BrowserClient(serverInfo.port, serverInfo.authSecret);
 
                             // Race check: if initializationPromise was cleared (restart), don't set reference
                             if (schedulerService.getSchedulerInitializationPromise() === p) {
@@ -295,17 +295,20 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
 
             let wonElection = false;
             let winnerPort = port;
+            let winnerAuthSecret: string | undefined;
             try {
                 await stateManager.updateState(async (state) => {
                     if (state.browserServer) {
                         const alive = await stateManager.isPidAlive(state.browserServer.pid, state.browserServer.schedulerId, true);
                         if (alive) {
                             winnerPort = state.browserServer.port;
+                            winnerAuthSecret = state.browserServer.authSecret;
                             wonElection = false;
                             return state;
                         }
                     }
-                    state.browserServer = { port, pid: process.pid, schedulerId };
+                    const secret = getBrowserServerAuthSecret();
+                    state.browserServer = { port, pid: process.pid, schedulerId, authSecret: secret };
                     state.schedulerVersion = schedulerVersion; // Store current version in state
                     wonElection = true;
                     return state;
@@ -325,7 +328,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
             if (!wonElection) {
                 logger.log(`[Scheduler] Lost election, connecting to winner at port ${winnerPort}`);
                 await scheduler.shutdown();
-                const client = new BrowserClient(winnerPort);
+                const client = new BrowserClient(winnerPort, winnerAuthSecret);
                 if (schedulerService.getSchedulerInitializationPromise() === p) {
                     schedulerService.setSchedulerInstance(client);
                     schedulerService.setSchedulerVersion(schedulerVersion);
@@ -352,7 +355,7 @@ export async function getScheduler(config?: Config): Promise<IScheduler> {
     };
 
     p = initializationFunction();
-    schedulerService.setSchedulerInitializationPromise(p as any);
+    schedulerService.setSchedulerInitializationPromise(p);
     // Clear on rejection so the next caller retries rather than receiving the same
     // rejected promise forever.
     p.catch(() => {

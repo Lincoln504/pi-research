@@ -297,17 +297,18 @@ export class StateManager {
 
   // ==================== Browser API ====================
 
-  public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; startTime?: number | null } | null> {
+  public async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; startTime?: number | null; authSecret?: string } | null> {
     return this.browserApi.getBrowserServer(this.readState.bind(this));
   }
 
-  public async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
+  public async setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void> {
     await this.browserApi.setBrowserServer(
       port,
       pid,
       schedulerId,
       this.updateState.bind(this),
-      this.processLifecycle.getProcessStartTime.bind(this.processLifecycle)
+      this.processLifecycle.getProcessStartTime.bind(this.processLifecycle),
+      authSecret
     );
   }
 

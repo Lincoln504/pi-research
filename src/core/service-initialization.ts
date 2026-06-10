@@ -73,7 +73,7 @@ export function registerCoreServices(): void {
  *
  * @param ctx - Optional extension context to pass to services
  */
-export async function initializeCoreServices(ctx?: any): Promise<{ initialized: string[]; failed: string[] }> {
+export async function initializeCoreServices(ctx?: any): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
   logger.log('[ServiceInitialization] Initializing core services...');
 
   const initialized: string[] = [];
@@ -157,7 +157,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ initialized: 
       }
     }
 
-    return { initialized, failed };
+    return { success: failed.length === 0, initialized, failed };
   } catch (err) {
     logger.error('[ServiceInitialization] Failed to initialize core services:', err);
     throw err;

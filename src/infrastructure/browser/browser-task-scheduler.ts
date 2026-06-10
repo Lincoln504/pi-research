@@ -7,7 +7,7 @@
 
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
-import type { SearchResult } from '../../web-research/types.ts';
+import type { SearchResult, ScrapeResult } from '../../web-research/types.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
@@ -143,7 +143,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
         const timeoutMs = baseTimeoutMs + 10000;
 
-        let timeoutId: NodeJS.Timeout;
+        let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
                 reject(new Error(`Search task timed out after ${timeoutMs}ms (including queue wait). query="${query}"`));
@@ -178,7 +178,7 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw error;
         } finally {
-            clearTimeout(timeoutId!);
+            if (timeoutId) clearTimeout(timeoutId);
         }
 
         const duration = Date.now() - startTime;
@@ -198,7 +198,7 @@ export class BrowserTaskScheduler implements IScheduler {
         return result.results;
     }
 
-    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any> {
+    async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
@@ -206,7 +206,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = baseTimeoutMs + (isMocking ? 5000 : 10000);
 
-        let timeoutId: NodeJS.Timeout;
+        let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
                 reject(new Error(`Scrape task timed out after ${timeoutMs}ms (including queue wait). url="${url}"`));
@@ -235,7 +235,7 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw error;
         } finally {
-            clearTimeout(timeoutId!);
+            if (timeoutId) clearTimeout(timeoutId);
         }
 
         const duration = Date.now() - startTime;
@@ -260,7 +260,7 @@ export class BrowserTaskScheduler implements IScheduler {
         const startTime = Date.now();
         const isMocking = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' || process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
         const timeoutMs = (45000 + 60000) / (isMocking ? 4 : 1);
-        let timeoutId: NodeJS.Timeout;
+        let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error(`Health check timed out after ${timeoutMs}ms (including queue wait)`)), timeoutMs);
             if (timeoutId.unref) timeoutId.unref();
@@ -289,7 +289,7 @@ export class BrowserTaskScheduler implements IScheduler {
             });
             throw error;
         } finally {
-            clearTimeout(timeoutId!);
+            if (timeoutId) clearTimeout(timeoutId);
         }
 
         const duration = Date.now() - startTime;

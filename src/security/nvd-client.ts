@@ -23,6 +23,7 @@ import type {
 import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import {
   isWeaknessDescription,
@@ -64,7 +65,7 @@ class NVDRateLimiter {
     if (waitTime > 0) {
       await new Promise<void>(resolve => {
         const timeoutId = setTimeout(resolve, waitTime);
-        timeoutId.unref();
+        safeUnref(timeoutId);
       });
       
       metrics.increment('nvd_ratelimiter_wait_total', 1);

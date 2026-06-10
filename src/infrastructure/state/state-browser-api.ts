@@ -20,7 +20,7 @@ export class StateBrowserApi {
    */
   async getBrowserServer(
     readState: () => Promise<SingletonState>
-  ): Promise<{ port: number; pid: number; schedulerId?: string; startTime?: number | null } | null> {
+  ): Promise<{ port: number; pid: number; schedulerId?: string; startTime?: number | null; authSecret?: string } | null> {
     const state = await readState();
     return this.browserManager.getBrowserServer(state);
   }
@@ -38,11 +38,12 @@ export class StateBrowserApi {
     pid: number,
     schedulerId: string | undefined,
     updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>,
-    getStartTime: (pid: number) => Promise<number | null>
+    getStartTime: (pid: number) => Promise<number | null>,
+    authSecret?: string
   ): Promise<void> {
     const startTime = await getStartTime(pid);
     await updateState((state) => {
-      return this.browserManager.setBrowserServer(state, port, pid, schedulerId, startTime);
+      return this.browserManager.setBrowserServer(state, port, pid, schedulerId, startTime, authSecret);
     });
   }
 

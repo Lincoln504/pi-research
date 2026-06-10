@@ -8,12 +8,12 @@
 import { 
     type ExtensionContext, 
     type AgentSessionEvent,
-    type AgentToolResult
+    type AgentToolResult,
 } from '@earendil-works/pi-coding-agent';
-import { type Model, calculateCost } from '@earendil-works/pi-ai';
+import { type Model } from '@earendil-works/pi-ai';
 import { injectCurrentDate } from '../utils/inject-date.ts';
 import { loadPrompt } from '../utils/prompts.ts';
-import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
+import { extractUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
@@ -54,7 +54,8 @@ export class QuickResearchOrchestrator {
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
-    // Note: research_sessions_total is incremented at completion (success/error) below.
+
+    let subscription: (() => void) | undefined;
 
     try {
         // Pre-flight health check to ensure browser pool is operational
@@ -146,7 +147,7 @@ export class QuickResearchOrchestrator {
         const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
         sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
 
-        const subscription = session.subscribe((event: AgentSessionEvent) => {
+        subscription = session.subscribe((event: AgentSessionEvent) => {
             if (event.type === 'message_end') {
                 const msg = event.message as unknown as ResearchMessage;
                 if (msg?.['role'] !== 'assistant') return;
@@ -162,15 +163,7 @@ export class QuickResearchOrchestrator {
 
                 const rawUsage = msg['usage'] as any;
                 if (rawUsage) {
-                    const parsed = parseTokenUsage(rawUsage);
-                    const tokens = calculateTotalTokens(parsed);
-                    
-                    // Ultra-accurate cost calculation
-                    let cost = parsed.cost?.total ?? rawUsage.cost?.total ?? 0;
-                    if (cost === 0 && tokens > 0) {
-                        const calculatedCost = calculateCost(model, rawUsage);
-                        cost = calculatedCost.total;
-                    }
+                    const { tokens, cost } = extractUsage(model, rawUsage);
 
                     if (tokens > 0 || cost > 0) {
                         metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });
@@ -295,20 +288,9 @@ export class QuickResearchOrchestrator {
           metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'error' });
           observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
           throw error;
-        } finally {
-          subscription();
-          try {
-            await session.abort();
-          } catch (err) {
-            logger.warn('[QuickOrchestrator] Failed to abort session during cleanup:', err);
-          }
-          try {
-            sessionService.unregisterSession(this.options.researchId, 'quick');
-          } catch (err) {
-            logger.warn('[QuickOrchestrator] Failed to unregister session:', err);
-          }
         }
     } finally {
+        if (subscription) subscription();
         try {
           const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
           await orch.cleanupResearchServices(undefined, researchId);

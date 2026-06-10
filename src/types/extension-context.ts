@@ -9,36 +9,21 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 export type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 /**
- * Session manager interface for accessing session metadata
- */
-export interface SessionManager {
-  getSessionId(): string;
-  getSessionFile(): string;
-}
-
-/**
  * Extended ExtensionContext with additional properties.
  * Provides type safety for properties accessed at runtime.
+ *
+ * NOTE: We do NOT re-declare properties from ExtensionContext (sessionManager,
+ * modelRegistry, etc.) to avoid type conflicts when the base library evolves.
+ * Instead, consumers cast to ExtendedExtensionContext only for the properties
+ * that the base type doesn't include (sessionId, settingsManager, excludeTools).
  */
 export interface ExtendedExtensionContext extends ExtensionContext {
    /** Session ID (provided by extension host) */
    sessionId?: string;
-   /** Model registry for API key resolution */
-   modelRegistry: import('@earendil-works/pi-coding-agent').ModelRegistry;
    /** Settings manager (provided in some contexts) */
    settingsManager?: any;
    /** Current tool exclusion list */
    excludeTools?: string[];
-   /** Abort the current agent operation */
-   abort(): void;
-   /** Gracefully shutdown pi and exit. Available in all contexts. */
-   shutdown(): void;
-   /** Get current context usage for the active model. */
-   getContextUsage(): any;
-   /** Trigger compaction without awaiting completion. */
-   compact(options?: any): void;
-   /** Get the current effective system prompt. */
-   getSystemPrompt(): string;
  }
 /**
  * Model with ID property and optional cost information

@@ -10,375 +10,308 @@ import {
   initializeCoreServices, 
   disposeCoreServices 
 } from './core/service-initialization.ts';
-import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
-import { DeepResearchOrchestrator } from './orchestration/deep-research-orchestrator.ts';
-import { QuickResearchOrchestrator } from './orchestration/quick-research-orchestrator.ts';
-import { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
-import { createResearchRunId, logger, createLogger, setLogger } from './logger.ts';
-import { randomUUID } from 'node:crypto';
-import type { Model } from '@earendil-works/pi-ai';
-import { ModelRegistry } from '@earendil-works/pi-coding-agent';
-import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
-import { shutdownManager } from './utils/shutdown-manager.ts';
-import { resetServiceContainer, getService } from './core/service-registry.ts';
-import type { ResearchDepth } from './types/index.ts';
+import { 
+  registerInfrastructureServices, 
+  initializeInfrastructureServices,
+  shutdownInfrastructureServices
+} from './infrastructure/service-initialization.ts';
+import { getService, resetServiceContainer, disposeAllServices } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
-import type { IKnowledgeStoreService } from './core/service-interfaces.ts';
-import type { SchedulerService } from './core/scheduler-service.ts';
-import { repairJsonWithLlm } from './utils/agentic-repair.ts';
-import { completeSimple } from '@earendil-works/pi-ai';
+import type { 
+  IResearchOrchestration, 
+  IResearchSynthesisService,
+  ResearchOptions 
+} from './core/interfaces/orchestration-interfaces.ts';
+import type { Model } from '@earendil-works/pi-ai';
+import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { logger, createLogger, setLogger } from './logger.ts';
+import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
 import { metrics } from './utils/metrics.ts';
+import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './utils/model-registry-factory.ts';
+import { randomUUID } from 'node:crypto';
+import type { ResearchDepth } from './types/index.ts';
 
-export { repairJsonWithLlm };
-export { getService, resetServiceContainer } from './core/service-registry.ts';
-export { ServiceNames } from './core/service-interfaces.ts';
+// ---------------------------------------------------------------------------
+// Global SDK State
+// ---------------------------------------------------------------------------
+
+let isInitialized = false;
+let _initPromise: Promise<void> | null = null;
+let globalRegistry: ModelRegistry | null = null;
+let globalModel: Model<any> | null = null;
+let globalCwd: string = process.cwd();
+let globalApiKey: string | undefined = undefined;
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
 
 /**
- * SDK Initialization Options
+ * Options for initializing the Research SDK
  */
-export interface SDKOptions {
-  /**
-   * The model to use for research coordination and synthesis.
-   * Accepts either a Model object (from getModel or ModelRegistry.find) or a
-   * "provider/id" string (e.g. "openrouter/deepseek/deepseek-v4-flash") which
-   * is resolved from pi's configured model registry (~/.pi/agent/models.json).
+export interface ResearchSDKOptions {
+  /** 
+   * The LLM model to use for coordination, planning, and evaluation.
+   * If a string, it must match "provider/id" (e.g. "openai/gpt-4o").
+   * If omitted, the first available model in pi's configuration will be used.
    */
-  model: Model<any> | string;
-  /** Optional API key. When provided, takes precedence over pi's configured auth storage. */
+  model?: string | Model<any>;
+  
+  /** 
+   * Optional explicit API key for the model. 
+   * If provided, `provider` must also be set.
+   * If omitted, pi's global auth storage (~/.pi/agent/auth.json) is used.
+   */
   apiKey?: string;
-  /** Current working directory for report exports (default: process.cwd()) */
-  cwd?: string;
-  /** Optional configuration overrides */
+
+  /**
+   * The provider name for the explicit API key (e.g. "openai", "anthropic").
+   * Required if `apiKey` is provided.
+   */
+  provider?: string;
+
+  /**
+   * Override default configuration values.
+   */
   config?: Partial<Config>;
-  /** Whether to enable verbose logging to the console */
+
+  /**
+   * Working directory for research logs and database. 
+   * Defaults to current process directory.
+   */
+  cwd?: string;
+
+  /**
+   * Whether to enable verbose logging to the console.
+   */
   verbose?: boolean;
 }
 
 /**
- * Research Execution Options
+ * Internal initializer — ensures services are registered and ready.
+ * Can be called multiple times; subsequent calls are no-ops if successful.
  */
-export interface RunOptions {
-  /** Research depth (1-3 for deep research, 0 for quick research) */
-  depth?: ResearchDepth;
-  /** Optional complexity override for deep research (1-3) */
-  complexity?: 1 | 2 | 3;
-  /** Optional observer for progress tracking */
-  observer?: HeadlessObserverOptions;
-  /** Abort signal to cancel research */
-  signal?: AbortSignal;
-}
-
-let isInitialized = false;
-// FIX (#13): Module-level promise to prevent concurrent initialization
-let _initPromise: Promise<void> | null = null;
-let globalModel: Model<any> | null = null;
-let globalApiKey: string | undefined;
-let globalCwd: string = process.cwd();
-// Cached ModelRegistry — built once at init, shared across all orchestrator calls.
-let globalRegistry: ModelRegistry | null = null;
-
-/**
- * Initialize the Research SDK
- */
-export async function initResearchSDK(options: SDKOptions): Promise<void> {
-  // FIX (#13): Guard against concurrent initialization with a module-level promise.
+async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   if (isInitialized) {
     logger.warn('[SDK] SDK is already initialized');
     return;
   }
-  if (_initPromise) {
-    // Concurrent call — wait for the existing init to settle.
-    try { await _initPromise; } catch { /* previous init failed, allow retry */ }
-    if (isInitialized) return;
-    // Previous init failed — fall through to retry
+
+  if (options.cwd) {
+    globalCwd = options.cwd;
   }
 
-  // Create the init promise and store it before starting async work
-  _initPromise = _doInit(options);
-  try {
-    await _initPromise;
-  } finally {
-    _initPromise = null;
-  }
-}
-
-/**
- * Internal init implementation (separated for concurrency guard)
- */
-async function _doInit(options: SDKOptions): Promise<void> {
-  // Apply verbose before anything else so all subsequent log calls see it.
+  // Verbose logging setup
   if (options.verbose) {
     setLogger(createLogger({ verbose: true }));
   }
 
-  // Apply config overrides and validate BEFORE touching any global state.
-  // Save the original config so we can roll it back if validation fails.
-  const originalConfig = options.config ? getConfig() : null;
+  // Seed configuration
   if (options.config) {
-    setConfig({ ...originalConfig!, ...options.config });
-  }
-  try {
-    const config = getConfig();
-    validateConfig(config);
-  } catch (err) {
-    // Roll back config mutation so a corrected re-call can succeed.
-    if (originalConfig) setConfig(originalConfig);
-    throw err;
+    const oldConfig = { ...getConfig() };
+    try {
+      setConfig(options.config);
+      validateConfig(getConfig());
+    } catch (err) {
+      // Rollback on validation failure
+      setConfig(oldConfig);
+      throw err;
+    }
   }
 
-  // Set globals only after validation has passed.
-  globalApiKey = options.apiKey;
-  globalCwd = options.cwd || process.cwd();
+  globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
+  let parsedProvider = options.provider || process.env['PI_RESEARCH_PROVIDER'];
 
-  // Parse the provider from model (string or object) before building the registry,
-  // so buildModelRegistry can correctly key the explicit apiKey by provider.
-  let parsedProvider: string | undefined;
-  if (typeof options.model === 'string') {
-    parsedProvider = options.model.split('/')[0];
-  } else {
-    globalModel = options.model;
-    parsedProvider = options.model.provider;
+  // Infer provider from model if not explicitly provided
+  if (!parsedProvider && options.model) {
+    if (typeof options.model === 'string') {
+      const slashIdx = options.model.indexOf('/');
+      if (slashIdx > 0) {
+        parsedProvider = options.model.slice(0, slashIdx);
+      }
+    } else if ((options.model as any).provider) {
+      parsedProvider = (options.model as any).provider;
+    }
+  }
+
+  if (globalApiKey && !parsedProvider) {
+    throw new Error('Provider must be specified when using an explicit API key (set provider option or PI_RESEARCH_PROVIDER).');
   }
 
   // Build and cache the registry (one instance for the lifetime of this init cycle).
   globalRegistry = sharedBuildModelRegistry(globalApiKey, parsedProvider);
 
   try {
-    // Resolve a string "provider/id" model from the registry.
-    if (typeof options.model === 'string') {
-      const [provider, ...rest] = options.model.split('/');
-      const modelId = rest.join('/');
-      if (!provider || !modelId) {
-        throw new Error(`Invalid model string "${options.model}". Expected "provider/id" e.g. "openrouter/deepseek/deepseek-v4-flash".`);
-      }
-      const found = globalRegistry.find(provider, modelId);
-      if (!found) {
-        throw new Error(`Model "${options.model}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
-      }
-      globalModel = found;
-    }
+    // Resolve model using unified logic.
+    globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider);
 
     // Register and initialize services
     registerCoreServices();
     registerInfrastructureServices();
 
-    const mockCtx = createMockContext();
-    const result = await initializeCoreServices(mockCtx);
+    const initResult = await Promise.all([
+      initializeCoreServices(createMockContext('init-session')),
+      initializeInfrastructureServices(createMockContext('init-session'))
+    ]);
 
-    const { getServiceContainer } = await import('./core/service-registry.ts');
-    if (result.failed.length === 0) {
-      getServiceContainer().isReady = true;
-      logger.log('[SDK] Research SDK initialized successfully');
-    } else {
-      logger.error(`[SDK] Research SDK initialization incomplete: ${result.failed.join(', ')}`);
-      // We still mark it as initialized because services were registered,
-      // but isReady=false will prevent the tool from executing.
+    const allSucceeded = initResult.every(r => r && r.success);
+    if (!allSucceeded) {
+      const failed = initResult.flatMap(r => r?.failed || []);
+      throw new Error(`Failed to initialize SDK services: ${failed.join(', ')}`);
     }
 
     isInitialized = true;
+    logger.log('[SDK] Research SDK initialized successfully');
   } catch (err) {
-    // Roll back global state and fully reset the service container so that
-    // re-calling initResearchSDK() can re-register services successfully.
-    globalModel = null;
-    globalApiKey = undefined;
-    globalCwd = process.cwd();
-    globalRegistry = null;
-    try {
-      await resetServiceContainer();
-    } catch {
-      // Best-effort cleanup; ignore secondary errors
-    }
-    logger.error('[SDK] Initialization failed, rolling back state:', err);
+    logger.error('[SDK] Initialization failed:', err);
+    // Cleanup on failure
+    await shutdownResearchSDK();
+    throw err;
+  } finally {
+    _initPromise = null;
+  }
+}
+
+/**
+ * Public initialization. Guarantees the SDK is ready for use.
+ */
+export async function initResearchSDK(options: ResearchSDKOptions = {}): Promise<void> {
+  if (isInitialized) {
+    // Trigger the warning logic in _doInit
+    await _doInit(options);
+    return;
+  }
+  if (_initPromise) return _initPromise;
+  _initPromise = _doInit(options);
+  return _initPromise;
+}
+
+// ---------------------------------------------------------------------------
+// Research API
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a "Deep" research task (multi-round, multi-agent).
+ *
+ * @param query - The research objective
+ * @param options - Research configuration (depth, complexity, observer)
+ * @param signal - Optional abort signal
+ * @returns The final synthesized research report (Markdown)
+ */
+export async function runDeepResearch(
+  query: string, 
+  options: Omit<ResearchOptions, 'ctx' | 'query' | 'model' | 'sessionId' | 'researchId'> = {},
+  signal?: AbortSignal
+): Promise<string> {
+  if (!isInitialized) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+
+  const researchId = `sdk-${Date.now()}`;
+  const sessionId = randomUUID();
+  const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+  
+  const researchStart = Date.now();
+  const depth = options.depth ?? 1;
+  const depthLabel = depth === 0 ? 'quick' : `deep-${depth}`;
+  const complexity = Math.max(1, Math.min(3, options.complexity ?? 1));
+
+  try {
+    const result = await orchestrator.runResearch({
+      ...options,
+      ctx: createMockContext(sessionId),
+      query,
+      model: globalModel!,
+      sessionId,
+      researchId,
+      depth: depth as ResearchDepth,
+      complexity: complexity as 1 | 2 | 3,
+    }, signal ?? options.signal);
+
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    return result;
+  } catch (err) {
+    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
     throw err;
   }
 }
 
 /**
- * Run Deep Research (Multi-agent, Level 1-3)
+ * Run a "Quick" research task (single-pass, single-agent).
+ * Equivalent to calling runDeepResearch with depth: 0.
  */
-export async function runDeepResearch(query: string, options: RunOptions = {}): Promise<string> {
-  ensureInitialized();
+export async function runQuickResearch(
+  query: string,
+  options: Omit<ResearchOptions, 'ctx' | 'query' | 'model' | 'sessionId' | 'researchId' | 'depth'> = {},
+  signal?: AbortSignal
+): Promise<string> {
+  return runDeepResearch(query, { ...options, depth: 0 } as any, signal);
+}
 
-  const depth = options.depth ?? 1;
-  const complexity = options.complexity ?? (depth >= 1 ? (depth as 1 | 2 | 3) : 1);
-  const researchId = createResearchRunId();
-  const sessionId = `sdk-${randomUUID()}`;
-  const observer = new HeadlessObserver(options.observer);
-  const depthLabel = String(depth);
-  const researchStart = Date.now();
+/**
+ * Retrieve all researcher reports gathered during a specific research ID.
+ */
+export async function getResearchReports(researchId: string): Promise<Map<string, string>> {
+  const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+  return synthesis.getAllReports(researchId);
+}
 
-  const orchestrator = new DeepResearchOrchestrator({
-    ctx: createMockContext() as any,
-    model: globalModel!,
-    query,
-    complexity: Math.max(1, Math.min(3, complexity)) as 1 | 2 | 3,
-    sessionId,
-    researchId,
-    observer,
-    config: getConfig(),
-  });
-
-  try {
-    const result = await orchestrator.run(options.signal);
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
-    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'success', source: 'sdk' });
-    return result;
-  } catch (error) {
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
-    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'error', source: 'sdk' });
-    throw error;
+/**
+ * Shutdown the SDK and cleanup all background processes and resources.
+ */
+export async function shutdownResearchSDK(): Promise<void> {
+  if (!isInitialized && !_initPromise) {
+    // Basic safety reset even if not initialized, to prevent registry collisions
+    await resetServiceContainer().catch(() => {});
+    return;
   }
-}
-
-/**
- * Run Quick Research (Single-agent, Level 0)
- * Note: Level 0 is reserved for SDK use.
- */
-export async function runQuickResearch(query: string, options: RunOptions = {}): Promise<string> {
-  ensureInitialized();
-
-  const researchId = createResearchRunId();
-  const sessionId = `sdk-${randomUUID()}`;
-  const observer = new HeadlessObserver(options.observer);
-  const depthLabel = '0';
-  const researchStart = Date.now();
-
-  const orchestrator = new QuickResearchOrchestrator({
-    ctx: createMockContext() as any,
-    model: globalModel!,
-    query,
-    sessionId,
-    researchId,
-    observer,
-    config: getConfig(),
-  });
-
+  
+  logger.log('[SDK] Shutting down Research SDK...');
+  
   try {
-    const result = await orchestrator.run(options.signal);
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
-    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'success', source: 'sdk' });
-    return result;
-  } catch (error) {
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
-    metrics.increment('research_manager_requests_total', 1, { depth: depthLabel, status: 'error', source: 'sdk' });
-    throw error;
-  }
-}
-
-/**
- * Verify if a URL exists using the browser pool (high fidelity stealth check).
- */
-export async function verifyUrl(url: string): Promise<boolean> {
-  ensureInitialized();
-  try {
-    const scheduler = await getService<SchedulerService>(ServiceNames.SCHEDULER);
-    const result = await scheduler.runScrape(url);
-    // If it didn't throw and returned something, it exists.
-    return !!result;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Repair malformed JSON using the SDK's global model.
- */
-export async function repairJson(text: string, schema?: any): Promise<any | null> {
-  ensureInitialized();
-  return await repairJsonWithLlm(text, completeSimple, { apiKey: globalApiKey || '' }, {
-    model: globalModel,
-    schema,
-    serviceName: 'SDK-Repair',
-  });
-}
-
-/**
- * Dispose the Research SDK and clean up resources
- */
-export async function disposeResearchSDK(): Promise<void> {
-  if (!isInitialized) return;
-
-  // Reset flags in finally so they clear even if cleanup throws.
-  // Keeping isInitialized=true until finally ensures the SDK is not considered
-  // "uninitialized" while mid-dispose (prevents re-init races).
-  try {
-    await shutdownManager.runCleanup('sdk_dispose');
-    await disposeCoreServices();
-    // Full container reset clears service registrations so that a subsequent
-    // initResearchSDK() call can re-register without "already registered" errors.
-    await resetServiceContainer();
+    await shutdownInfrastructureServices().catch(() => {});
+    await disposeCoreServices().catch(() => {});
+    await disposeAllServices().catch(() => {});
+    await resetServiceContainer().catch(() => {});
+  } catch (err) {
+    logger.warn('[SDK] Error during shutdown:', err);
   } finally {
     isInitialized = false;
-    globalModel = null;
-    globalApiKey = undefined;
-    globalCwd = process.cwd();
+    _initPromise = null;
     globalRegistry = null;
-  }
-  logger.log('[SDK] Research SDK disposed');
-}
-
-/**
- * Export the Knowledge Store for web use.
- * This exports high-quality summaries and their vectors to a JSON file
- * that can be consumed by a frontend application for semantic search.
- * @param outputPath - Path to save the exported JSON file
- */
-export async function exportKnowledge(outputPath: string): Promise<void> {
-  ensureInitialized();
-  const ks = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-  await ks.exportForWeb(outputPath);
-}
-
-/**
- * Internal helper to ensure SDK is initialized
- */
-function ensureInitialized() {
-  if (!isInitialized) {
-    throw new Error('Research SDK not initialized. Call initResearchSDK() first.');
+    globalModel = null;
   }
 }
 
-/**
- * Build the ModelRegistry. Called once during initResearchSDK and cached in globalRegistry.
- *
- * Priority:
- *   1. Explicit apiKey → InMemoryAuthStorage seeded with that key; caller doesn't need pi
- *   2. No explicit key → reads ~/.pi/agent/models.json so all user-configured providers work
- *
- * @param provider - The model's provider string, used to key the explicit apiKey correctly.
- */
-import { buildModelRegistry as sharedBuildModelRegistry } from './utils/model-registry-factory.ts';
+/** @deprecated Use shutdownResearchSDK */
+export const disposeResearchSDK = shutdownResearchSDK;
+
+// ---------------------------------------------------------------------------
+// Mock context (mirrors pi-coding-agent ExtensionContext)
+// ---------------------------------------------------------------------------
 
 /**
  * Create an ExtensionContext for internal services.
  * Uses the cached globalRegistry (built once at init time).
  */
-function createMockContext() {
+function createMockContext(sessionId: string): ExtensionContext {
   return {
     cwd: globalCwd,
     mode: 'print' as const, // SDK defaults to print mode
     hasUI: false,           // SDK is headless
-    model: globalModel,
+    model: globalModel!,
     modelRegistry: globalRegistry!,
-    getContextUsage: () => undefined,
-    getSystemPrompt: () => '',
-    getSignal: () => undefined,
-    compact: () => {},
-    abort: () => {},
-    shutdown: () => {},
-    getSystemPromptOptions: () => ({ 
-      selectedTools: ['research', 'health-check'] // Default tools for SDK
-    }),
     ui: {
-      notify: () => {},
-      setWidget: () => {},
+      log: (msg: string) => logger.log(`[PI-UI] ${msg}`),
+      error: (msg: string) => logger.error(`[PI-UI] ${msg}`),
+      notify: (msg: string) => logger.log(`[PI-UI-NOTIFY] ${msg}`),
+      showStatus: () => () => {},
+      progress: () => () => {},
       custom: async () => ({ type: 'cancel' }),
       confirm: async () => false,
-      onTerminalInput: () => () => {},
+      onTerminalInput: () => () => { return () => {}; },
     },
     sessionManager: {
-      getSessionId: () => 'sdk-session',
+      getSessionId: () => sessionId,
       getBranch: () => [],
     },
-  };
+  } as any;
 }

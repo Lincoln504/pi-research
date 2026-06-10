@@ -19,7 +19,10 @@ import type { NodeError } from '../../types/index.ts';
  * Used when this process is not the leader.
  */
 export class BrowserClient implements IScheduler {
-    constructor(private readonly port: number) {
+    private readonly authSecret: string;
+
+    constructor(private readonly port: number, authSecret?: string) {
+        this.authSecret = authSecret ?? process.env['PI_BROWSER_AUTH_SECRET'] ?? '';
         logger.log(`[BrowserClient] Connecting to global scheduler at http://127.0.0.1:${port}`);
     }
 
@@ -79,7 +82,7 @@ export class BrowserClient implements IScheduler {
                 headers: {
                     'Content-Type': 'application/json',
                     // FIX (#21): Send auth token to authenticate with browser server
-                    'X-Browser-Auth': process.env['PI_BROWSER_AUTH_SECRET'] ?? '',
+                    'X-Browser-Auth': this.authSecret,
                 }
             }, (res) => {
                 clearTimeout(timer);

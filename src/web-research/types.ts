@@ -4,6 +4,10 @@
  * All TypeScript interfaces and types for the web research functionality
  */
 
+import type { SearchResult, ScrapeResult } from '../core/interfaces/scheduler-interfaces.ts';
+
+export type { SearchResult, ScrapeResult };
+
 // Search result with per-query error context.
 export interface QueryResultWithError {
   query: string;
@@ -24,24 +28,5 @@ export interface ScrapeLayerResult {
   error?: string;
 }
 
-// Search result type
-export interface SearchResult {
-  title: string;
-  url: string;
-  content: string;
-  engine?: string;
-  score?: number;
-}
-
-export interface ScrapeResult {
-  url: string;
-  success: boolean;
-  markdown: string;
-  error?: string;
-  source?: string;
-  layer?: string;
-  duration?: number;
-}
 /** Timeout for the lightweight fetch layer only (not the full playwright scraper path). */
 export const FETCH_LAYER_TIMEOUT = 10000;
-

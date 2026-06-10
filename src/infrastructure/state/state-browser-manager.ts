@@ -19,7 +19,7 @@ export class StateBrowserManager implements IService {
    * @param state The current state
    * @returns Browser server info or null if not set
    */
-  getBrowserServer(state: SingletonState): { port: number; pid: number; schedulerId?: string; startTime?: number | null } | null {
+  getBrowserServer(state: SingletonState): { port: number; pid: number; schedulerId?: string; startTime?: number | null; authSecret?: string } | null {
     return state.browserServer ?? null;
   }
 
@@ -37,9 +37,10 @@ export class StateBrowserManager implements IService {
     port: number,
     pid: number,
     schedulerId?: string,
-    startTime?: number | null
+    startTime?: number | null,
+    authSecret?: string
   ): SingletonState {
-    state.browserServer = { port, pid, schedulerId, startTime: startTime ?? undefined };
+    state.browserServer = { port, pid, schedulerId, startTime: startTime ?? undefined, authSecret };
     return state;
   }
 

@@ -225,7 +225,7 @@ export function createResearchTool(): ToolDefinition {
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
 
       const researchId = createResearchRunId();
-      const piSessionId = eCtx.sessionId || (eCtx as any).sessionManager?.getSessionId() || 'default';
+      const piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId() || 'default';
       logger.debug(`[research] Initializing session IDs: piSessionId=${piSessionId}, researchId=${researchId}`);
       
       const internalAbort = new AbortController();
@@ -251,7 +251,7 @@ export function createResearchTool(): ToolDefinition {
           // When no explicit model parameter is given, use ctx.model directly.
           let selectedModel: ModelWithId | undefined;
           if (modelId) {
-            selectedModel = (eCtx.modelRegistry as any).getAll().find((m: any) => m.id === modelId);
+            selectedModel = eCtx.modelRegistry.getAll().find((m) => m.id === modelId) as ModelWithId | undefined;
             if (!selectedModel) {
               logger.warn(`[research] Model ${modelId} not found, falling back to context model.`);
               selectedModel = ctx.model as ModelWithId;

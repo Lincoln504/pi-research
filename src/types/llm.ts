@@ -6,6 +6,8 @@
  * more specific typing for our use cases.
  */
 
+import { calculateCost, type Model } from '@earendil-works/pi-ai';
+
 /**
  * Token usage and cost information from LLM responses
  */
@@ -161,6 +163,35 @@ export function calculateTotalTokens(usage: Partial<TokenUsage>): number {
     (usage.cacheRead ?? 0) +
     (usage.cacheWrite ?? 0)
   );
+}
+
+/**
+ * Extract usage (tokens and cost) from a raw LLM usage object.
+ * Handles both provided cost and estimated cost via calculateCost.
+ * 
+ * @param model - The model used for the call (for cost estimation)
+ * @param rawUsage - The raw usage object from the LLM response
+ */
+export function extractUsage(model: Model<any>, rawUsage: any): { tokens: number; cost: number; parsed: Partial<TokenUsage> } {
+  if (!rawUsage) {
+    return { tokens: 0, cost: 0, parsed: {} };
+  }
+
+  const parsed = parseTokenUsage(rawUsage);
+  const tokens = calculateTotalTokens(parsed);
+
+  // Ultra-accurate cost calculation
+  let cost = parsed.cost?.total ?? rawUsage.cost?.total ?? 0;
+  if (cost === 0 && tokens > 0) {
+    try {
+      const calculatedCost = calculateCost(model, rawUsage);
+      cost = calculatedCost.total;
+    } catch {
+      // Best-effort cost calculation; if calculateCost fails (e.g. model not in registry), keep 0.
+    }
+  }
+
+  return { tokens, cost, parsed };
 }
 
 /**

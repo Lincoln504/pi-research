@@ -24,11 +24,10 @@ import type {
   AgentToolResult,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type { ModelWithId } from '../types/extension-context.ts';
 import type { Config } from '../config.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { completeSimple, type TextContent } from '@earendil-works/pi-ai';
+import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
@@ -188,18 +187,18 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
  *   1. RESEARCH_MODEL — the shared research model override
  *   2. ctx.model — the main agent's current model
  */
-function resolveSynthesisModel(ctx: ExtensionContext): { model: ModelWithId; error?: string } {
+function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; error?: string } {
   const config: Config = getConfig();
   const modelRegistry = ctx.modelRegistry;
-  const ctxModel = ctx.model as ModelWithId | undefined;
+  const ctxModel = ctx.model as Model<any> | undefined;
 
   if (config.RESEARCH_MODEL) {
     const target = config.RESEARCH_MODEL;
     const found = modelRegistry.getAll().find(
-      (m: any) => `${m.provider}/${m.id}` === target || m.id === target,
+      (m) => `${m.provider}/${m.id}` === target || m.id === target,
     );
     if (found) {
-      return { model: found as unknown as ModelWithId };
+      return { model: found };
     }
     logger.warn(`[research-knowledge-search] RESEARCH_MODEL '${target}' not found`);
   }
@@ -208,7 +207,7 @@ function resolveSynthesisModel(ctx: ExtensionContext): { model: ModelWithId; err
     return { model: ctxModel };
   }
 
-  return { model: undefined as any, error: 'No model available for knowledge synthesis' };
+  return { error: 'No model available for knowledge synthesis' };
 }
 
 /**
@@ -222,7 +221,7 @@ function resolveSynthesisModel(ctx: ExtensionContext): { model: ModelWithId; err
  * If both phases fail, returns a safe default (answer_found: false).
  */
 async function runBackgroundExtraction(
-  model: ModelWithId,
+  model: Model<any>,
   auth: { apiKey: string; headers?: Record<string, string> },
   conversationHistory: string,
   referenceDocuments: string,
@@ -241,7 +240,7 @@ async function runBackgroundExtraction(
     'Analyze the reference documents above and extract the answer using the required JSON format.';
 
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects
-  const response = await completeSimple(model as any, {
+  const response = await completeSimple(model, {
     systemPrompt,
     messages: [
       { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
@@ -283,7 +282,7 @@ async function runBackgroundExtraction(
     completeSimple,
     auth,
     {
-      model: model as any,
+      model,
       schema: ResearchKnowledgeSynthesisResponseSchemaAsTSchema,
       context: 'Knowledge search extraction — synthesizing answer from reference documents',
       serviceName: 'ResearchKnowledgeSearch',
@@ -400,7 +399,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
           };
         }
 
-        const authResult = await ctx.modelRegistry.getApiKeyAndHeaders(model as any);
+        const authResult = await ctx.modelRegistry.getApiKeyAndHeaders(model);
         if (!authResult.ok) {
           logger.warn(`[research-knowledge-search] Model auth failed: ${authResult.error}`);
           metrics.increment('research_knowledge_search_total', 1, { status: 'auth_failed' });

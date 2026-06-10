@@ -1,17 +1,19 @@
 import { logger } from '../logger.ts';
+import { safeUnref } from './safe-unref.ts';
 
 export type CleanupTask = () => Promise<void> | void;
 
-interface EventListenerCleanup {
-  target: EventEmitter | typeof process;
-  event: string;
-  listener: (...args: any[]) => void;
+// Minimal interface matching Node.js EventEmitter and process
+interface EventEmitterLike {
+  on(event: string | symbol, listener: (...args: any[]) => void): any;
+  off?(event: string | symbol, listener: (...args: any[]) => void): any;
+  removeListener?(event: string | symbol, listener: (...args: any[]) => void): any;
 }
 
-// Type for EventEmitter target
-interface EventEmitter {
-  on(event: string, listener: (...args: any[]) => void): this;
-  off(event: string, listener: (...args: any[]) => void): this;
+interface EventListenerCleanup {
+  target: EventEmitterLike;
+  event: string;
+  listener: (...args: any[]) => void;
 }
 
 export class ShutdownManager {
@@ -27,23 +29,25 @@ export class ShutdownManager {
     this.tasks.push(task);
   }
 
-  registerEventListener<T extends EventEmitter | typeof process>(
+  registerEventListener<T extends EventEmitterLike>(
     target: T,
     event: string,
     listener: (...args: any[]) => void
   ) {
-    // @ts-ignore - EventEmitter API
     target.on(event, listener);
     this.eventListeners.push({ target, event, listener });
   }
 
-  unregisterEventListener<T extends EventEmitter | typeof process>(
+  unregisterEventListener<T extends EventEmitterLike>(
     target: T,
     event: string,
     listener: (...args: any[]) => void
   ) {
-    // @ts-ignore - EventEmitter API
-    target.off(event, listener);
+    if (target.off) {
+      target.off(event, listener);
+    } else if (target.removeListener) {
+      target.removeListener(event, listener);
+    }
     this.eventListeners = this.eventListeners.filter(
       el => el.target !== target || el.event !== event || el.listener !== listener
     );
@@ -84,8 +88,11 @@ export class ShutdownManager {
       // Remove all registered event listeners to allow clean process exit
       for (const { target, event, listener } of this.eventListeners) {
         try {
-          // @ts-ignore - EventEmitter API
-          target.off(event, listener);
+          if (target.off) {
+            target.off(event, listener);
+          } else if (target.removeListener) {
+            target.removeListener(event, listener);
+          }
         } catch (error) {
           logger.error('[ShutdownManager] Error removing event listener:', error);
         }
@@ -104,7 +111,7 @@ export class ShutdownManager {
       logger.warn(`[ShutdownManager] Forcing exit after ${timeoutMs}ms timeout`);
       process.exit(code);
     }, timeoutMs);
-    timer.unref(); // unref() allows Node.js to exit if this is the only timer
+    safeUnref(timer); // unref() allows Node.js to exit if this is the only timer
   }
 }
 

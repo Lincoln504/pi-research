@@ -22,7 +22,7 @@
 
 import type { Model } from '@earendil-works/pi-ai';
 import { ModelRegistry } from '@earendil-works/pi-coding-agent';
-import { buildModelRegistry } from './utils/model-registry-factory.ts';
+import { buildModelRegistry, resolveModel } from './utils/model-registry-factory.ts';
 import { Type } from 'typebox';
 import { randomUUID } from 'node:crypto';
 
@@ -140,49 +140,6 @@ function applyOpenClawConfig(pluginConfig: OpenClawPluginConfig): void {
   if (Object.keys(overrides).length > 0) {
     setConfig(overrides);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Model resolution
-// ---------------------------------------------------------------------------
-
-
-
-function resolveModel(registry: ModelRegistry, modelSpec?: string, provider?: string): Model<any> {
-  // 1. Explicit model string: "provider/modelId"
-  if (modelSpec) {
-    const slashIdx = modelSpec.indexOf('/');
-    if (slashIdx > 0) {
-      const prov = modelSpec.slice(0, slashIdx);
-      const modelId = modelSpec.slice(slashIdx + 1);
-      const found = registry.find(prov, modelId);
-      if (found) return found;
-    }
-    // Try as bare model id
-    const allModels = registry.getAll();
-    const found = allModels.find(m => m.id === modelSpec);
-    if (found) return found;
-  }
-
-  // 2. Provider-only: pick first available model from that provider
-  if (provider) {
-    const allModels = registry.getAll();
-    const found = allModels.find(m => m.provider === provider);
-    if (found) return found;
-  }
-
-  // 3. First available model with auth
-  const available = registry.getAvailable();
-  if (available.length > 0) return available[0]!;
-
-  // 4. Any model at all
-  const all = registry.getAll();
-  if (all.length > 0) return all[0]!;
-
-  throw new Error(
-    'No LLM model available. Configure apiKey and provider in plugins.entries.pi-research.config, ' +
-    'or ensure ~/.pi/agent/auth.json has valid credentials.',
-  );
 }
 
 // ---------------------------------------------------------------------------

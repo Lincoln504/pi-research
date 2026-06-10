@@ -23,14 +23,8 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import {
-  getRandomUserAgent,
-  extractDomain,
-  validateUrlForSSRF,
-  validateContent,
-  createNativeMarkdownConverter,
-  createJsMarkdownConverter,
-} from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, } from './scraper-utils.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 
 let playwrightAvailable: boolean = false;
 let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
@@ -115,9 +109,7 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_LAYER_TIMEOUT);
-  if (timeoutId.unref) {
-    timeoutId.unref();
-  }
+  safeUnref(timeoutId);
   const onAbort = () => {
     clearTimeout(timeoutId);
     controller.abort();
@@ -333,7 +325,7 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
   metrics.observe('scrape_urls_per_batch', urls.length);
   const batchStart = Date.now();
   
-  const results: any[] = [];
+  const results: ScrapeResult[] = [];
   for (let i = 0; i < urls.length; i += maxConcurrency) {
     const batch = urls.slice(i, i + maxConcurrency);
     const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config, sessionId)));

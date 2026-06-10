@@ -20,6 +20,7 @@ import type { StateMetricsCollector } from './state-metrics.ts';
 import type { StateValidator } from './state-validator.ts';
 import type { FileLockService } from '../file-lock-service.ts';
 import type { StateBackupManager } from './state-backup-manager.ts';
+import type { StatePathConfiguration } from './state-path-configuration.ts';
 
 // Import the actual state manager implementation (static import)
 import { StateManager } from './state-manager.ts';
@@ -52,8 +53,13 @@ export class StateManagerService implements IStateManager {
     const metricsCollector = await getService<StateMetricsCollector>(ServiceNames.STATE_METRICS_COLLECTOR);
     const validator = await getService<StateValidator>(ServiceNames.STATE_VALIDATOR);
 
+    // Resolve the state directory from StatePathConfiguration
+    const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+    const stateDir = pathConfig.getStateDir();
+
     // Instantiate state manager with injected dependencies
     this._stateManager = new StateManager({
+      stateDir,
       processLifecycle,
       fileLockService,
       backupManager,
@@ -159,15 +165,15 @@ export class StateManagerService implements IStateManager {
   /**
    * Get the current browser server information
    */
-  async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string } | null> {
+  async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; authSecret?: string } | null> {
     return this.getStateManager().getBrowserServer();
   }
 
   /**
    * Set the current browser server information
    */
-  async setBrowserServer(port: number, pid: number, schedulerId?: string): Promise<void> {
-    return this.getStateManager().setBrowserServer(port, pid, schedulerId);
+  async setBrowserServer(port: number, pid: number, schedulerId?: string, authSecret?: string): Promise<void> {
+    return this.getStateManager().setBrowserServer(port, pid, schedulerId, authSecret);
   }
 
   /**

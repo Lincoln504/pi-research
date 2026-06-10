@@ -5,7 +5,7 @@
  */
 
 // Scheduler interfaces
-export type { SearchResult, IScheduler, SchedulerMetadata, ISchedulerInstance, ISchedulerInternals } from './interfaces/scheduler-interfaces.ts';
+export type { SearchResult, ScrapeResult, IScheduler, SchedulerMetadata, ISchedulerInstance, ISchedulerInternals } from './interfaces/scheduler-interfaces.ts';
 
 // Health check interfaces
 export type { HealthCheckResult, HealthCheckCache, IHealthCheckService } from './interfaces/health-check-interfaces.ts';

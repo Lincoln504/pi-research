@@ -46,6 +46,7 @@ export const SingletonStateSchema = Type.Object({
     pid: Type.Number(),
     startTime: Type.Optional(Type.Number()),
     schedulerId: Type.Optional(Type.String()),
+    authSecret: Type.Optional(Type.String()),
   })),
   schedulerVersion: Type.Optional(Type.String()),
   gpuOwner: Type.Optional(Type.Object({

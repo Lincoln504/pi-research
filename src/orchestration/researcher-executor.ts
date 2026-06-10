@@ -10,8 +10,7 @@ import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import { createResearcherSession } from './researcher.ts';
 import { registerScrapedLinks } from '../utils/shared-links.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
-import { calculateTotalTokens, parseTokenUsage } from '../types/llm.ts';
-import { calculateCost } from '@earendil-works/pi-ai';
+import { extractUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
@@ -155,15 +154,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
         const rawUsage = msg['usage'] as any;
         if (rawUsage) {
-          const parsed = parseTokenUsage(rawUsage);
-          const tokens = calculateTotalTokens(parsed);
-          
-          // Ultra-accurate cost calculation
-          let cost = parsed.cost?.total ?? rawUsage.cost?.total ?? 0;
-          if (cost === 0 && tokens > 0) {
-              const calculatedCost = calculateCost(model, rawUsage);
-              cost = calculatedCost.total;
-          }
+          const { tokens, cost } = extractUsage(model, rawUsage);
 
           if (tokens > 0 || cost > 0) {
             metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(complexity) });

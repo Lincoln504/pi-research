@@ -46,11 +46,25 @@ export interface SearchResult {
 }
 
 /**
+ * Scheduler scrape result — matches the shape returned by the browser
+ * infrastructure layer (BrowserTaskScheduler / BrowserClient).
+ */
+export interface ScrapeResult {
+  url: string;
+  success: boolean;
+  markdown: string;
+  error?: string;
+  source?: string;
+  layer?: string;
+  duration?: number;
+}
+
+/**
  * Base scheduler interface
  */
 export interface IScheduler {
-  runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<any[]>;
-  runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<any>;
+  runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]>;
+  runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult>;
   runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }>;
   shutdown(): Promise<void>;
   resetIdleTimerOnActivity?(): void;

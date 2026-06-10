@@ -15,7 +15,17 @@ import type { IPlanningService, ResearchPlan, ResearcherConfig } from './service
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
-import { complete, completeSimple, calculateCost, type TextContent, type Message, type ThinkingLevel } from '@earendil-works/pi-ai';
+import { 
+  complete, 
+  completeSimple, 
+  type TextContent, 
+  type Message, 
+  type ThinkingLevel,
+} from '@earendil-works/pi-ai';
+import { 
+  extractUsage, 
+  type ThinkingContentBlock 
+} from '../types/llm.ts';
 import { extractJson } from '../utils/json-utils.ts';
 import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
@@ -23,7 +33,6 @@ import { loadPrompt } from '../utils/prompts.ts';
 import type { GeneratePlanOptions, GenerateQueriesOptions, UpdatePlanOptions } from './interfaces/planning-interfaces.ts';
 import { ResearchPlanSchema } from './interfaces/planning-interfaces.ts';
 import type { LLMResponseMetadata } from '../types/index.ts';
-import { parseTokenUsage, calculateTotalTokens } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
 import { MAX_TOTAL_RESEARCHERS } from '../constants.ts';
 import * as PlanningUtils from './planning-utils.ts';
@@ -174,7 +183,7 @@ export class PlanningService implements IPlanningService {
         }
 
         const textContent = planResponse.content.find((c): c is TextContent => c.type === 'text');
-        const thinkingContent = (planResponse.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
+        const thinkingContent = planResponse.content.find((c): c is ThinkingContentBlock => c.type === 'thinking');
         
         if (thinkingContent?.thinking) {
           logger.debug(`[${this.name}] Coordinator Thinking:\n${thinkingContent.thinking}`);
@@ -189,15 +198,8 @@ export class PlanningService implements IPlanningService {
           plan = PlanningUtils.parseJsonPlan(rawPlanText);
 
           if (planResponse.usage) {
-            const coordUsage = parseTokenUsage(planResponse.usage);
-            const tokens = calculateTotalTokens(coordUsage);
+            const { tokens, cost } = extractUsage(model, planResponse.usage);
             
-            let cost = coordUsage.cost?.total ?? planResponse.usage.cost?.total ?? 0;
-            if (cost === 0 && tokens > 0) {
-                const calculatedCost = calculateCost(model, planResponse.usage);
-                cost = calculatedCost.total;
-            }
-
             metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
             metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
             options.observer?.onPlanningTokens?.(tokens, cost);
@@ -387,29 +389,20 @@ export class PlanningService implements IPlanningService {
         }
 
         const textContent = response.content.find((c): c is TextContent => c.type === 'text');
-        const thinkingContent = (response.content as any[]).find((c): c is { type: 'thinking', thinking: string } => c.type === 'thinking');
-        
+        const thinkingContent = response.content.find((c): c is ThinkingContentBlock => c.type === 'thinking');
+
         if (thinkingContent?.thinking) {
-          logger.debug(`[${this.name}] Evaluator Thinking:\n${thinkingContent.thinking}`);
+          logger.debug(`[${this.name}] Query Generator Thinking:\n${thinkingContent.thinking}`);
           observer?.onPlanningProgress?.('thinking');
         }
 
         text = textContent?.text || '';
 
         if (response.usage) {
-          const evalUsage = parseTokenUsage(response.usage);
-          const tokens = calculateTotalTokens(evalUsage);
-          
-          let cost = evalUsage.cost?.total ?? response.usage.cost?.total ?? 0;
-          if (cost === 0 && tokens > 0) {
-              const calculatedCost = calculateCost(model, response.usage);
-              cost = calculatedCost.total;
-          }
+          const { tokens, cost } = extractUsage(model, response.usage);
 
           metrics.increment('llm_tokens_total', tokens, { component: 'evaluator', complexity: String(complexity) });
           metrics.increment('llm_cost_total', cost, { component: 'evaluator', complexity: String(complexity) });
-          
-          observer?.onEvaluationTokens?.(tokens, cost);
           observer?.onTokensConsumed?.(tokens, cost);
         }
 

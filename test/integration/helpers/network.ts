@@ -20,6 +20,8 @@ const NETWORK_ERROR_PATTERNS: readonly RegExp[] = [
     /<\!DOCTYPE/i,
     /<html/i,
     /unexpected token/i,
+    // Browser pool / search failures
+    /search completely failed/i,
 ];
 
 /**

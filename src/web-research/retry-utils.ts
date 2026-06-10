@@ -1,3 +1,4 @@
+import { safeUnref } from '../utils/safe-unref.ts';
 /**
  * API Retry and Timeout Utilities
  *
@@ -66,7 +67,7 @@ export function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal): Ab
   
   // Unref so it doesn't keep the process alive
   if (typeof timeoutId.unref === 'function') {
-    timeoutId.unref();
+    safeUnref(timeoutId);
   }
   
   if (signal) {

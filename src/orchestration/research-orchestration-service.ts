@@ -15,8 +15,9 @@ import type { RunResearchersOptions } from './orchestration-types.ts';
 import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
 import { search } from '../web-research/search.ts';
 import { parseCitations } from '../utils/text-utils.ts';
-import { logger } from '../logger.ts';
+import { logger, resetLogger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
+import { clearSessionCircuitBreaker } from '../infrastructure/browser/browser-error-utils.ts';
 import { getService, ServiceLifecycle, tryGetService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type {
@@ -116,11 +117,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * Cleanup and reset services for the current research run
    */
   async cleanupResearchServices(sessionId?: string, researchId?: string): Promise<void> {
+    const targetId = researchId || sessionId;
+    
     // Cleanup session service
     try {
       const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
-      if (sessionService) {
-        await sessionService.cleanup(sessionId);
+      if (sessionService && targetId) {
+        await sessionService.cleanup(targetId);
       }
     } catch (_err) {
       logger.debug('[ResearchOrchestrationService] ResearchSessionService not available for cleanup');
@@ -129,8 +132,8 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     // Clear synthesis reports
     try {
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
-      if (synthesisService) {
-        synthesisService.clearReports(researchId || sessionId);
+      if (synthesisService && targetId) {
+        synthesisService.clearReports(targetId);
       }
     } catch (_err) {
       logger.debug('[ResearchOrchestrationService] ResearchSynthesisService not available for cleanup');
@@ -138,16 +141,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     
     // Clear planning state
     const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING);
-    if (planningService) {
-      planningService.clearPlanningState(researchId || sessionId);
-      logger.debug('[ResearchOrchestrationService] Cleared planning state');
+    if (planningService && targetId) {
+      planningService.clearPlanningState(targetId);
+      logger.debug(`[ResearchOrchestrationService] Cleared planning state for ${targetId}`);
     }
     
-    if (researchId || sessionId) {
-      cleanupSharedLinks(researchId || sessionId || '');
+    if (targetId) {
+      cleanupSharedLinks(targetId);
+      resetLogger(targetId);
+      clearSessionCircuitBreaker(targetId);
     }
 
-    logger.debug('[ResearchOrchestrationService] Cleaned up research services');
+    logger.debug(`[ResearchOrchestrationService] Cleaned up research services for ${targetId}`);
   }
 
   /**

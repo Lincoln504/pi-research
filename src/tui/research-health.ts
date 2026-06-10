@@ -6,6 +6,7 @@
 
 import { runHealthCheck, healthRegistry } from '../healthcheck/index.ts';
 import { logger } from '../logger.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import {
   addSlice,
   activateSlice,
@@ -109,7 +110,7 @@ export function createHealthMonitor(): HealthMonitor {
         logger.debug('[research] Periodic health check failed (non-blocking):', error);
       }
     }, 30000); // Every 30 seconds
-    if (timer.unref) timer.unref();
+    safeUnref(timer);
   };
 
   const stop = () => {
