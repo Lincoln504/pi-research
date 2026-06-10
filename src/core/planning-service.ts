@@ -12,6 +12,7 @@
  */
 
 import type { IPlanningService, ResearchPlan, ResearcherConfig } from './service-interfaces.ts';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { ServiceLifecycle } from './service-registry.ts';
 import { logger } from '../logger.ts';
 import { complete, completeSimple, calculateCost, type TextContent, type Message, type ThinkingLevel } from '@earendil-works/pi-ai';
@@ -47,7 +48,7 @@ export class PlanningService implements IPlanningService {
   private sessions = new Map<string, PlanningState>();
 
   // Dependencies
-  private ctx?: any;
+  private ctx?: ExtensionContext;
 
   constructor() {
     this.lifecycle = ServiceLifecycle.UNINITIALIZED;
@@ -65,7 +66,7 @@ export class PlanningService implements IPlanningService {
     return state;
   }
 
-  async initialize(ctx?: any): Promise<void> {
+  async initialize(ctx?: ExtensionContext): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED && !ctx) {
       logger.debug(`[${this.name}] Already initialized`);
       return;
