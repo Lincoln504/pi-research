@@ -88,7 +88,7 @@ describe('OpenClaw Plugin Integration', () => {
 
   it('should initialize and provide tools', () => {
     expect(plugin.id).toBe('pi-research');
-    expect(plugin.tools).toHaveLength(2);
+    expect(plugin.tools).toHaveLength(3);
   });
 
   it('should execute research via OpenClaw interface', async () => {

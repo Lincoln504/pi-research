@@ -81,12 +81,16 @@ export default async function (pi: ExtensionAPI) {
     // PASSIVE: We only capture steering messages. 
     // We NEVER swallow input (action: "handled") because it interferes with user experience.
     if (event.streamingBehavior === 'steer' && event.text) {
-      const eCtx = ctx as ExtendedExtensionContext;
-      const sanitized = event.text.trim();
+      try {
+        const eCtx = ctx as ExtendedExtensionContext;
+        // eslint-disable-next-line no-control-regex
+        const sanitized = event.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+        if (!sanitized) return undefined;
       
-      // Only route steering if research is actually active
-      const activeCount = getActiveSessionCount();
-      if (activeCount > 0) {
+        // Only route steering if research is actually active
+        const activeCount = getActiveSessionCount();
+      if (activeCount === 0) return undefined;
+
         logger.debug(`[pi-research] Captured steering input. sessionId=${eCtx.sessionId}`);
 
         let sessionIds: string[] = [];
@@ -104,6 +108,8 @@ export default async function (pi: ExtensionAPI) {
         for (const sid of sessionIds) {
           addSteeringMessage(sid, sanitized);
         }
+      } catch (err) {
+        logger.debug('[pi-research] Input handler error:', err);
       }
     }
     
@@ -166,8 +172,6 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // Global extension state for smart dual-sided prompt injection
-  let currentTurn = 0;
-  
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);
@@ -310,7 +314,6 @@ export default async function (pi: ExtensionAPI) {
 
   // JIT Prompt Injection (Simplified & Non-Intrusive)
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
-    currentTurn++;
     
     // Skip injection during mid-stream steering
     if (event.streamingBehavior === 'steer') {

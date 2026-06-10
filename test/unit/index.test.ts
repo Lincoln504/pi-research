@@ -96,7 +96,7 @@ describe('extension entrypoint', () => {
     );
   });
 
-  it('augments system prompt during before_agent_start when research intent detected', async () => {
+  it('augments system prompt during before_agent_start when research tool available', async () => {
     const { pi, handlers } = createPiMock();
     await activate(pi as any);
 

@@ -32,6 +32,7 @@ import { registerInfrastructureServices } from './infrastructure/service-initial
 import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
+import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { createResearchRunId, logger } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
@@ -159,7 +160,7 @@ function createMockContext(model: Model<any>, registry: ModelRegistry): any {
     compact: () => {},
     abort: () => {},
     shutdown: () => {},
-    getSystemPromptOptions: () => ({ selectedTools: ['research', 'health'] }),
+    getSystemPromptOptions: () => ({ selectedTools: ['research', 'health', 'research_knowledge_search'] }),
     ui: {
       notify: () => {},
       setWidget: () => {},
@@ -296,146 +297,197 @@ export default {
   description: 'Multi-agent web research with stealth browser, security databases, and Stack Exchange integration.',
   configSchema: OpenClawConfigSchema,
 
-  tools: [
-    {
-      name: 'research',
-      label: 'Research',
-      description:
-        'Perform web/internet research using an internal multi-source system. ' +
-        'Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
-      parameters: Type.Object({
-        query: Type.String({ description: 'Research query or topic to investigate' }),
-        depth: Type.Optional(Type.Integer({
-          minimum: 0,
-          maximum: 3,
-          default: 1,
-          description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (2 researchers, 2 rounds), 2=deep (3 researchers, 3 rounds), 3=ultra (5 researchers, 5 rounds).',
-        })),
-        excludeTools: Type.Optional(Type.Array(Type.String(), {
-          description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange). Defaults to ["grep", "read"].',
-        })),
-      }),
+  get tools() {
+    const config = getConfig();
+    const knowledgeEnabled = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
 
-      async execute(
-        params: { query: string; depth?: number; excludeTools?: string[] },
-        config: OpenClawPluginConfig,
-        context: { signal?: AbortSignal },
-      ): Promise<string> {
-        await ensureInitialized(config);
+    const allTools: any[] = [
+      {
+        name: 'research',
+        label: 'Research',
+        description:
+          'Perform web/internet research using an internal multi-source system. ' +
+          'Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
+        parameters: Type.Object({
+          query: Type.String({ description: 'Research query or topic to investigate' }),
+          depth: Type.Optional(Type.Integer({
+            minimum: 0,
+            maximum: 3,
+            default: 1,
+            description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (2 researchers, 2 rounds), 2=deep (3 researchers, 3 rounds), 3=ultra (5 researchers, 5 rounds).',
+          })),
+          excludeTools: Type.Optional(Type.Array(Type.String(), {
+            description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange). Defaults to ["grep", "read"].',
+          })),
+        }),
 
-        const query = params.query?.trim();
-        if (!query) {
-          return 'Error: Research query is required.';
-        }
+        async execute(
+          params: { query: string; depth?: number; excludeTools?: string[] },
+          config: OpenClawPluginConfig,
+          context: { signal?: AbortSignal },
+        ): Promise<string> {
+          await ensureInitialized(config);
 
-        // Depth resolution: param > plugin config default > hardcoded default of 1
-        const depth = params.depth ?? globalDefaultDepth;
-        // Default exclusion: grep and read are pi developer tools not useful for web research in OpenClaw
-        const excludeTools = params.excludeTools ?? ['grep', 'read'];
-        const signal = context.signal;
-
-        const researchId = createResearchRunId();
-        const sessionId = `openclaw-${randomUUID()}`;
-        const mockCtx = createMockContext(globalModel!, globalRegistry!);
-        const observer = new HeadlessObserver({ enableLogging: true });
-
-        const researchStart = Date.now();
-
-        try {
-          let result: string;
-
-          if (depth === 0) {
-            // Quick research — single researcher, one search burst
-            const orchestrator = new QuickResearchOrchestrator({
-              ctx: mockCtx,
-              model: globalModel!,
-              query,
-              sessionId,
-              researchId,
-              observer,
-              config: getConfig(),
-              excludeTools,
-            } satisfies QuickResearchOrchestratorOptions);
-            result = await orchestrator.run(signal);
-          } else {
-            // Deep research — multi-round, multi-researcher
-            const complexity = Math.max(1, Math.min(3, depth)) as 1 | 2 | 3;
-            const orchestrator = new DeepResearchOrchestrator({
-              ctx: mockCtx,
-              model: globalModel!,
-              query,
-              complexity,
-              sessionId,
-              researchId,
-              observer,
-              config: getConfig(),
-              excludeTools,
-            } satisfies DeepResearchOrchestratorOptions);
-            result = await orchestrator.run(signal);
+          const query = params.query?.trim();
+          if (!query) {
+            return 'Error: Research query is required.';
           }
 
-          if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
-            const exportPath = await exportResearchReport(query, result, (depth ?? 0) === 0 ? 'quick' : 'deep', globalCwd);
-            if (exportPath) {
-              result = appendExportMessage(result, exportPath);
+          // Depth resolution: param > plugin config default > hardcoded default of 1
+          const depth = params.depth ?? globalDefaultDepth;
+          // Default exclusion: grep and read are pi developer tools not useful for web research in OpenClaw
+          const excludeTools = params.excludeTools ?? ['grep', 'read'];
+          const signal = context.signal;
+
+          const researchId = createResearchRunId();
+          const sessionId = `openclaw-${randomUUID()}`;
+          const mockCtx = createMockContext(globalModel!, globalRegistry!);
+          const observer = new HeadlessObserver({ enableLogging: true });
+
+          const researchStart = Date.now();
+
+          try {
+            let result: string;
+
+            if (depth === 0) {
+              // Quick research — single researcher, one search burst
+              const orchestrator = new QuickResearchOrchestrator({
+                ctx: mockCtx,
+                model: globalModel!,
+                query,
+                sessionId,
+                researchId,
+                observer,
+                config: getConfig(),
+                excludeTools,
+              } satisfies QuickResearchOrchestratorOptions);
+              result = await orchestrator.run(signal);
+            } else {
+              // Deep research — multi-round, multi-researcher
+              const complexity = Math.max(1, Math.min(3, depth)) as 1 | 2 | 3;
+              const orchestrator = new DeepResearchOrchestrator({
+                ctx: mockCtx,
+                model: globalModel!,
+                query,
+                complexity,
+                sessionId,
+                researchId,
+                observer,
+                config: getConfig(),
+                excludeTools,
+              } satisfies DeepResearchOrchestratorOptions);
+              result = await orchestrator.run(signal);
             }
+
+            if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
+              const exportPath = await exportResearchReport(query, result, (depth ?? 0) === 0 ? 'quick' : 'deep', globalCwd);
+              if (exportPath) {
+                result = appendExportMessage(result, exportPath);
+              }
+            }
+
+            metrics.observe('research_manager_latency_ms', Date.now() - researchStart, {
+              depth: String(depth), status: 'success', source: 'openclaw',
+            });
+            metrics.increment('research_manager_requests_total', 1, {
+              depth: String(depth), status: 'success', source: 'openclaw',
+            });
+
+            return result;
+          } catch (error) {
+            metrics.observe('research_manager_latency_ms', Date.now() - researchStart, {
+              depth: String(depth), status: 'error', source: 'openclaw',
+            });
+            metrics.increment('research_manager_requests_total', 1, {
+              depth: String(depth), status: 'error', source: 'openclaw',
+            });
+
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error(`[OpenClaw] Research failed: ${message}`);
+            return `Research failed: ${message}`;
           }
-
-          metrics.observe('research_manager_latency_ms', Date.now() - researchStart, {
-            depth: String(depth), status: 'success', source: 'openclaw',
-          });
-          metrics.increment('research_manager_requests_total', 1, {
-            depth: String(depth), status: 'success', source: 'openclaw',
-          });
-
-          return result;
-        } catch (error) {
-          metrics.observe('research_manager_latency_ms', Date.now() - researchStart, {
-            depth: String(depth), status: 'error', source: 'openclaw',
-          });
-          metrics.increment('research_manager_requests_total', 1, {
-            depth: String(depth), status: 'error', source: 'openclaw',
-          });
-
-          const message = error instanceof Error ? error.message : String(error);
-          logger.error(`[OpenClaw] Research failed: ${message}`);
-          return `Research failed: ${message}`;
-        }
+        },
       },
-    },
 
-    {
-      name: 'health',
-      label: 'Health Check',
-      description: 'Check system health status across all research components (browser pool, knowledge store, GPU lock).',
-      parameters: Type.Object({
-        verbose: Type.Optional(Type.Boolean({
-          description: 'Show detailed diagnostic information for each component',
-          default: true,
-        })),
-        probe: Type.Optional(Type.Boolean({
-          description: 'Force liveness checks (spawns browser, loads GPU models)',
-          default: false,
-        })),
-      }),
+      {
+        name: 'health',
+        label: 'Health Check',
+        description: 'Check system health status across all research components (browser pool, knowledge store, GPU lock).',
+        parameters: Type.Object({
+          verbose: Type.Optional(Type.Boolean({
+            description: 'Show detailed diagnostic information for each component',
+            default: true,
+          })),
+          probe: Type.Optional(Type.Boolean({
+            description: 'Force liveness checks (spawns browser, loads GPU models)',
+            default: false,
+          })),
+        }),
 
-      async execute(
-        params: { verbose?: boolean; probe?: boolean },
-        config: OpenClawPluginConfig,
-        _context: { signal?: AbortSignal },
-      ): Promise<string> {
-        await ensureInitialized(config);
+        async execute(
+          params: { verbose?: boolean; probe?: boolean },
+          config: OpenClawPluginConfig,
+          _context: { signal?: AbortSignal },
+        ): Promise<string> {
+          await ensureInitialized(config);
 
-        const { verbose = true, probe = false } = params;
+          const { verbose = true, probe = false } = params;
 
-        try {
-          const systemHealth = await healthRegistry.runAll({ force: probe });
-          return formatHealthResult(systemHealth, verbose);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return `**Health check failed**\n\n${message}`;
-        }
+          try {
+            const systemHealth = await healthRegistry.runAll({ force: probe });
+            return formatHealthResult(systemHealth, verbose);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return `**Health check failed**\n\n${message}`;
+          }
+        },
       },
-    },
-  ],
+    ];
+
+    if (knowledgeEnabled) {
+      allTools.push({
+        name: 'research_knowledge_search',
+        label: 'Research Knowledge Search',
+        description: 'Search the research knowledge database for previously researched information.',
+        parameters: Type.Object({
+          queries: Type.Array(Type.String(), {
+            minItems: 1,
+            maxItems: 5,
+            description: 'Search queries to look up in the research knowledge database (1-5 queries).',
+          }),
+        }),
+
+        async execute(
+          params: { queries: string[] },
+          config: OpenClawPluginConfig,
+          context: { signal?: AbortSignal },
+        ): Promise<string> {
+          await ensureInitialized(config);
+          const mockCtx = createMockContext(globalModel!, globalRegistry!);
+          const tool = createResearchKnowledgeSearchTool();
+          
+          try {
+            const result = await tool.execute(
+              randomUUID(),
+              params,
+              context.signal,
+              undefined,
+              mockCtx,
+            );
+
+            const textBlock = result.content?.find(
+              (c): c is { type: 'text'; text: string } => c.type === 'text',
+            );
+            return textBlock?.text || 'No relevant data found.';
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error(`[OpenClaw] Knowledge search failed: ${message}`);
+            return `Knowledge search failed: ${message}`;
+          }
+        },
+      });
+    }
+
+    return allTools;
+  },
 };

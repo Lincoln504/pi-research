@@ -96,6 +96,7 @@ async function assembleReferenceDocuments(
   store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
 ): Promise<{ text: string; urls: string[] }> {
   const allUrls = new Map<string, number>();
+  const resultsMap = new Map<string, { url: string; description: string; provenance?: string }>();
 
   for (const query of queries) {
     try {
@@ -103,6 +104,7 @@ async function assembleReferenceDocuments(
       for (const entry of results) {
         if (!allUrls.has(entry.url)) {
           allUrls.set(entry.url, allUrls.size);
+          resultsMap.set(entry.url, entry);
         }
       }
     } catch (err) {
@@ -130,7 +132,9 @@ async function assembleReferenceDocuments(
         continue;
       }
 
-      const header = `\n---\n### Source: ${url}\n`;
+      // Find original entry for provenance
+      const provenance = resultsMap.get(url)?.provenance || 'unknown';
+      const header = `\n---\n### Source: ${url}\n#### Provenance: ${provenance}\n`;
       const docText = rebuilt.text || '';
       const entry = header + docText;
 

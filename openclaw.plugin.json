@@ -110,7 +110,7 @@
     "additionalProperties": false
   },
   "contracts": {
-    "tools": ["research", "health"]
+    "tools": ["research", "health", "research_knowledge_search"]
   },
   "toolMetadata": {
     "research": {

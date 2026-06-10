@@ -36,7 +36,8 @@ Before providing your JSON decision, use your internal reasoning to:
 ## Decision Framework
 
 **SYNTHESIZE if:** Research meets the complexity-specific synthesis criteria above.
-**DELEGATE if:** Research meets the complexity-specific delegation criteria above.
+**DELEGATE if:** Research meets the complexity-specific delegation criteria above. 
+**Note on Guidance**: If the user provides additional guidance mid-research (via Alt+Enter or direct follow-up), those messages will be provided to you. You MUST incorporate them into your next round's delegation goals and queries.
 
 **COMMON MISTAKES TO AVOID:**
 - Do NOT synthesize early just because you've done "enough" rounds. Synthesis should only occur when you have comprehensive, high-quality findings across all major topics.
@@ -95,7 +96,7 @@ When delegating, ensure:
 
 1. **Organization**: Organize the report logically **BY TOPIC**. Do NOT structure it by researcher or round.
 2. **Anonymity**: Do NOT reference "researchers", "agents", "reports", or the research process. Present the findings as a direct, unified knowledge base.
-3. **Master Links List**: A **Global Source List** has been provided to you. Use these sequential numbers [1], [2], [3], etc., for all inline citations. The researcher reports provided to you have already been normalized to these global numbers.
+3.  **Master Links List**: A **Global Source List** has been provided to you. Use these sequential numbers [1], [2], [3], etc., for all inline citations. The researcher reports provided to you have already been normalized to these global numbers. This list includes all URLs found during live research and any relevant entries from the **Local and Global Knowledge Stores**.
 4. **Exhaustive Synthesis**: Use ALL findings from ALL reports. Include every fact, date, name, and statistic verbatim. Longer is better.
 5. **Strict Grounding**: Every sentence must come from a report. Use [N] inline citations. No prior knowledge.
 6. **CRITICAL — Links at Bottom Only**: 

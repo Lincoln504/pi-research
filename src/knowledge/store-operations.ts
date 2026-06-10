@@ -227,7 +227,12 @@ export async function findRelevantUrls(
     } catch { logger.debug('[store-operations] Corrupted metadata in findRelevantUrls, skipping row'); }
     
     if (!description) description = (r.text as string ?? '').substring(0, 300);
-    entries.push({ url, description, provenance });
+    
+    // Add store scope to provenance
+    const scope = r.is_global === true ? 'Global Store' : `Local Project (${r.workspace || 'unknown'})`;
+    const finalProvenance = `${provenance} [${scope}]`;
+    
+    entries.push({ url, description, provenance: finalProvenance });
   }
 
   const duration = Date.now() - startTime;
