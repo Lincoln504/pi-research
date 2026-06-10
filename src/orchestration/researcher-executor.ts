@@ -19,7 +19,7 @@ import { getService } from '../core/service-registry.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
-import { recordResearcherFailure } from '../utils/session-state.ts';
+import { recordResearcherFailure, getSteeringMessages } from '../utils/session-state.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 
 /**
@@ -40,6 +40,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     planningService,
     observer,
     signal,
+    sessionId,
   } = options;
   
   const id = String(researcherConfig.id);
@@ -130,7 +131,24 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
     sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
 
+    const deliveredSteeringIds = new Set<string>();
+    let lastSteeringCheck = Date.now();
+
     const subscription = session.subscribe((event: any) => {
+      // Check for new steering messages periodically
+      const now = Date.now();
+      if (now - lastSteeringCheck > 500) {
+        lastSteeringCheck = now;
+        const allSteering = getSteeringMessages(sessionId);
+        for (const msg of allSteering) {
+          if (!deliveredSteeringIds.has(msg.id)) {
+            deliveredSteeringIds.add(msg.id);
+            session.steer(msg.text).catch(e => logger.warn('[ResearcherExecutor] Failed to deliver steering:', e));
+            logger.debug(`[ResearcherExecutor] Delivered mid-flight steering message to ${id}: ${msg.text}`);
+          }
+        }
+      }
+
       if (event.type === 'message_update') {
         const ame = event.assistantMessageEvent as any;
         if (ame?.type === 'start') {

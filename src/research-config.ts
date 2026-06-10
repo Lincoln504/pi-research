@@ -82,7 +82,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
   // Fetch knowledge store counts for display
-  let knowledgeCounts = { local: 0, global: 0 };
+  let knowledgeCounts = { local: 0, global: 0, projects: 0 };
   try {
     const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
     const store = await service.getStore();
@@ -171,7 +171,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       id: 'KNOWLEDGE_ENTRIES_GLOBAL',
       label: 'Shared entries',
       description: 'Documents shared across all project directories',
-      currentValue: String(knowledgeCounts.global),
+      currentValue: `${knowledgeCounts.global}, across ${knowledgeCounts.projects} Projects`,
       values: [], // Read-only
     },
     {
@@ -352,8 +352,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             }
             
             const globalItem = initialItems.find(i => i.id === 'KNOWLEDGE_ENTRIES_GLOBAL');
-            if (globalItem && globalItem.currentValue !== String(fresh.global)) {
-              globalItem.currentValue = String(fresh.global);
+            const newGlobalVal = `${fresh.global}, across ${fresh.projects} Projects`;
+            if (globalItem && globalItem.currentValue !== newGlobalVal) {
+              globalItem.currentValue = newGlobalVal;
               settingsList?.invalidate();
             }
           } catch { /* non-fatal — leave current value */ }
@@ -372,6 +373,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             const footerLines = [
               '',
               theme.fg('dim', `  Config: ${activeEnvPath}`),
+              theme.fg('warning', `  "Project" refers to this distinct directory on your system.`),
               theme.fg('dim', `  See file for all settings (PI_RESEARCH_MODEL, timeouts, paths, and more).`),
             ];
             return [border, ...settingsList.render(width), border, ...footerLines, border];
@@ -514,7 +516,7 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **Shared Entries:** ${counts.global}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **Shared Entries:** ${counts.global}, across ${counts.projects} Projects\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {

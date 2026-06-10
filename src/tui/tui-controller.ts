@@ -9,8 +9,8 @@
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { matchesKey } from '@earendil-works/pi-tui';
-import { getActiveSessionCount, abortAllSessions } from '../utils/session-state.ts';
-import { shouldConsumeForCleanup, createSafeInputHandler } from '../utils/terminal-state.ts';
+import { getActiveSessionCount, abortAllSessions, refreshAllSessions } from '../utils/session-state.ts';
+import { shouldConsumeForCleanup, createSafeInputHandler, resetTerminalState } from '../utils/terminal-state.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -49,8 +49,14 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
   // Store the Pi session ID for scoped cancellation
   state.piSessionId = piSessionId;
 
+  // Ensure terminal is in a clean, safe state for TUI interaction.
+  // This disables bracketed paste mode, mouse tracking, and other features 
+  // that might cause "ghost" input or weird keypress behavior.
+  resetTerminalState(true).catch(err => logger.debug('[TUI] Failed to reset terminal state:', err));
+
   /**
    * Handle terminal input for cancellation and protocol cleanup
+
    */
   const handleTerminalInput = (data: string) => {
     // If an interactive TUI is active (like the config menu), 
@@ -103,6 +109,19 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
 export function setInteractiveTuiActive(active: boolean): void {
   state.isInteractiveTuiActive = active;
   logger.debug(`[TUI] Interactive TUI state changed: ${active}`);
+  
+  if (!active && state.piSessionId !== undefined) {
+    // When the menu closes, immediately refresh the background research widgets
+    // because they were paused while the menu was open to prevent TUI fighting.
+    refreshAllSessions(state.piSessionId);
+  }
+}
+
+/**
+ * Check if an interactive TUI is active
+ */
+export function isInteractiveTuiActive(): boolean {
+  return state.isInteractiveTuiActive;
 }
 
 /**

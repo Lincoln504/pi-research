@@ -69,4 +69,22 @@ describe('Graceful shutdown', () => {
     await manager.runCleanup('third');
     expect(task3).toHaveBeenCalledTimes(1);
   });
+
+  it('does not invoke process exit or install process event handlers during cleanup', async () => {
+    const { ShutdownManager } = await import('../../src/utils/shutdown-manager.ts');
+    
+    const manager = new ShutdownManager();
+    const processOnSpy = vi.spyOn(process, 'on');
+    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    manager.register(() => {});
+
+    await manager.runCleanup('process-safety');
+
+    expect(processOnSpy).not.toHaveBeenCalled();
+    expect(processExitSpy).not.toHaveBeenCalled();
+
+    processOnSpy.mockRestore();
+    processExitSpy.mockRestore();
+  });
 });

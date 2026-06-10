@@ -91,26 +91,54 @@ export default async function (pi: ExtensionAPI) {
 
         if (event.text) {
           logger.debug(`[pi-research] Captured steering input. behavior=steer, sessionId=${eCtx.sessionId}, text=${event.text}`);
-          const trimmed = event.text.trim();
-          if (trimmed && trimmed.length <= 1000) {
-            let sessionIds: string[] = [];
-            if (eCtx.sessionId) {
-              sessionIds = [eCtx.sessionId];
-            } else {
-              // If sessionId is missing from the event context, check if there's exactly one active session
-              const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
-              if (activeSessions.length === 1) {
-                sessionIds = [activeSessions[0]!];
-              } else if (activeSessions.length > 1) {
-                logger.warn('[pi-research] ctx.sessionId missing and multiple active sessions exist — cannot route steering safely.');
-              } else {
-                logger.warn('[pi-research] ctx.sessionId missing and no active sessions found — cannot route steering.');
-              }
-            }
 
-            for (const sid of sessionIds) {
-              addSteeringMessage(sid, trimmed);
+          // Strip ANSI escape sequences that might leak from terminal transport.
+          // This is sanitization, not content filtering — we accept whatever the user
+          // (or their terminal) sends and route it to the active research session.
+          // eslint-disable-next-line no-control-regex
+          const sanitized = event.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+          if (!sanitized) return { action: "handled" as const };
+
+          // ARCHITECTURAL GUARD: Ignore input that looks like it leaked from terminal history
+          // or accidental scraping output. This happens if the user's shell captures tool results
+          // into history and the user recalls them via UP arrow or Ctrl+P.
+          if (sanitized.startsWith('/')) {
+            logger.debug(`[pi-research] Ignoring steering input that looks like a command: ${sanitized}`);
+            return { action: "handled" as const };
+          }
+
+          const lowerText = sanitized.toLowerCase();
+          const lines = sanitized.split('\n');
+          const isScrapeLeak = 
+            sanitized.includes('Footer navigation') || 
+            sanitized.includes('© 2026 GitHub') || 
+            (sanitized.includes('Terms') && sanitized.includes('Privacy') && sanitized.includes('Security')) ||
+            sanitized.includes('C++ 71.1%') || 
+            (lowerText.includes('contributors') && lowerText.includes('+')) ||
+            sanitized.includes('Starlark') || sanitized.includes('MLIR') ||
+            (sanitized.length > 500 && lines.length > 5 && (sanitized.includes('###') || sanitized.includes('Sources:')));
+
+          if (isScrapeLeak) {
+            logger.warn(`[pi-research] Ignoring suspicious steering input (detected as accidental history/scrape recall): ${sanitized.substring(0, 50)}...`);
+            return { action: "handled" as const };
+          }
+
+          let sessionIds: string[] = [];
+          if (eCtx.sessionId) {
+            sessionIds = [eCtx.sessionId];
+          } else {
+            const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
+            if (activeSessions.length === 1) {
+              sessionIds = [activeSessions[0]!];
+            } else if (activeSessions.length > 1) {
+              logger.warn(`[pi-research] ctx.sessionId missing and multiple active sessions exist ([${activeSessions.join(', ')}]) — cannot route steering safely.`);
+            } else {
+              logger.warn('[pi-research] ctx.sessionId missing and no active sessions found — cannot route steering.');
             }
+          }
+
+          for (const sid of sessionIds) {
+            addSteeringMessage(sid, sanitized);
           }
         }
         // Suppress built-in UI and consume the input so it doesn't trigger a new turn
@@ -215,21 +243,43 @@ export default async function (pi: ExtensionAPI) {
     description: 'Pop queued researcher steering messages back to chat',
     handler: (ctx: ExtensionContext) => {
       const eCtx = ctx as ExtendedExtensionContext;
-      const piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId() || 'default';
-      
+
+      // Improved session ID resolution: try explicit ID first, then fallback to active session
+      let piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId();
+
+      if (!piSessionId) {
+        const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
+        if (activeSessions.length === 1) {
+          piSessionId = activeSessions[0]!;
+          logger.debug(`[pi-research] Alt+P: ctx.sessionId missing, falling back to only active session: ${piSessionId}`);
+        } else if (activeSessions.length > 1) {
+          logger.warn(`[pi-research] Alt+P: ctx.sessionId missing and multiple active sessions exist — cannot pop safely.`);
+          if (ctx.hasUI) ctx.ui.notify('Multiple active sessions — cannot pop steering unambiguously', 'warning');
+          return;
+        } else {
+          piSessionId = 'default';
+        }
+      }
+
       // Only pop if there are queued messages and research is active
       const activeCount = getActiveSessionCount();
       if (activeCount === 0) {
-        logger.debug('[pi-research] Alt+P pressed but no active research — ignoring');
+        logger.debug(`[pi-research] Alt+P pressed but no active research (sessionId=${piSessionId}) — ignoring`);
         return;
       }
-      
+
+      const queuedBefore = getSteeringMessages(piSessionId).filter(m => m.status === 'queued');
       const popped = popQueuedMessages(piSessionId);
+
+      logger.debug(`[pi-research] Alt+P: sessionId=${piSessionId}, queuedCount=${queuedBefore.length}, poppedCount=${popped.length}`);
+
       if (popped.length === 0) {
-        logger.debug('[pi-research] Alt+P pressed but no queued steering messages');
+        logger.debug(`[pi-research] Alt+P: no messages popped. queuedBefore=${queuedBefore.length}`);
+        if (ctx.hasUI && queuedBefore.length === 0) {
+          ctx.ui.notify('No queued steering messages to pop', 'info');
+        }
         return;
       }
-      
       // Forward each popped message to pi's follow-up queue
       for (const msg of popped) {
         logger.info(`[pi-research] Popping steering message: ${msg.text}`);

@@ -26,6 +26,7 @@ import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from '../utils/session-state.ts';
 import type { ResearchMessage } from '../types/index.ts';
 import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
@@ -107,8 +108,17 @@ export class QuickResearchOrchestrator {
             `After searching, scrape the best sources using the \`scrape\` tool (up to ${maxScrapeBatchesDisplay} batches, up to 4 URLs each).\n` +
             'Prioritize primary sources and authoritative data.';
         
+        // Consume queued steering messages before starting
+        consumeQueuedMessages(this.options.sessionId);
+        const steeringMessages = getSteeringMessages(this.options.sessionId);
+        let steeringSection = '';
+        if (steeringMessages.length > 0) {
+            steeringSection = '\n\n### ADDITIONAL CONSIDERATIONS\n' +
+                steeringMessages.map(m => `- ${m.text}`).join('\n');
+        }
+
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-            .replace('{{goal}}', query)
+            .replace('{{goal}}', query + steeringSection)
             .replace('{{store_section}}', storeSection)
             .replace('{{evidence_section}}', quickEvidenceSection)
             .replace('{{coordination_section}}', '')
@@ -147,7 +157,19 @@ export class QuickResearchOrchestrator {
         const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
         sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
 
+        let lastSteeringCheck = Date.now();
         subscription = session.subscribe((event: AgentSessionEvent) => {
+            // Check for new steering messages periodically (at most every 500ms to avoid spam)
+            const now = Date.now();
+            if (now - lastSteeringCheck > 500) {
+                lastSteeringCheck = now;
+                const newSteering = consumeQueuedMessages(this.options.sessionId);
+                for (const msg of newSteering) {
+                    session.steer(msg.text).catch(e => logger.warn('[QuickOrchestrator] Failed to deliver steering:', e));
+                    logger.debug(`[QuickOrchestrator] Delivered mid-flight steering message: ${msg.text}`);
+                }
+            }
+
             if (event.type === 'message_end') {
                 const msg = event.message as unknown as ResearchMessage;
                 if (msg?.['role'] !== 'assistant') return;
@@ -234,6 +256,10 @@ export class QuickResearchOrchestrator {
           
           // Ensure CITED LINKS section is accurate and consistent
           result = synthesisService.ensureCitedLinks(this.options.researchId, result);
+
+          // Append steering guidance — only active (consumed by orchestrator) messages
+          const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
+          result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
           const sessionDuration = Date.now() - sessionStart;
           metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'success' });

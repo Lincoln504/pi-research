@@ -106,12 +106,18 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
   
   // Normalize whitespace to prevent functional duplicates
   const normalizedMsg = message.trim().replace(/\s+/g, ' ');
+  
+  // 1. Check for duplicates (already in queue or active)
   const exists = state.steeringMessages.some(
     m => m.status !== 'popped' && m.text.trim().replace(/\s+/g, ' ') === normalizedMsg
   );
   
-  if (!exists) {
-    // Enforce cap: remove oldest queued message if at limit
+  if (exists) {
+    logger.debug(`[session-state] Steering message already exists in session ${sid}: ${message}`);
+    return;
+  }
+  
+  // Enforce cap: remove oldest queued message if at limit
     if (state.steeringMessages.filter(m => m.status !== 'popped').length >= MAX_STEERING_MESSAGES) {
       const oldestQueuedIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
       if (oldestQueuedIdx !== -1) {
@@ -134,9 +140,6 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
     
     // Trigger a TUI refresh when a steering message is added
     refreshAllSessions(sid);
-  } else {
-    logger.debug(`[session-state] Steering message already exists in session ${sid}: ${message}`);
-  }
 }
 
 /**

@@ -24,7 +24,7 @@ import {
   getPiActivePanels,
   normalizeSessionId,
 } from '../utils/session-state.ts';
-import { initGlobalTuiController } from './tui-controller.ts';
+import { initGlobalTuiController, isInteractiveTuiActive } from './tui-controller.ts';
 import type { ResearchPanelState } from './research-panel.ts';
 
 export interface TuiContext {
@@ -103,6 +103,9 @@ export function createResearchTuiManager(
   const initializePanel = () => {
     // Only initialize if in TUI mode and UI is available
     if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+    
+    // Do not initialize background widgets if a foreground interactive menu is active
+    if (isInteractiveTuiActive()) return;
 
     const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
       // Get active panels lazily to avoid circular dependencies
@@ -119,6 +122,11 @@ export function createResearchTuiManager(
   registerMasterUpdate(piSessionId, () => {
     // Only update if in TUI mode and UI is available
     if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+    
+    // Do not update background widgets if a foreground interactive menu is active!
+    // This prevents the background research widget from fighting with the settings menu,
+    // which causes the terminal cursor to jump and "spam" duplicates down the screen.
+    if (isInteractiveTuiActive()) return;
 
     const masterPanelCreator = createMasterResearchPanel(piSessionId, () => {
       return getActivePanelsForSession(piSessionId);

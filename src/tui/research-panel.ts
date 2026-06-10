@@ -403,7 +403,14 @@ export function createMasterResearchPanel(
         }
 
         // Render steering messages once at the bottom (not duplicated under each panel)
-        for (const msg of allSteering) {
+        const maxSteeringLines = 3;
+        const visibleSteering = allSteering.slice(-maxSteeringLines);
+        if (allSteering.length > maxSteeringLines) {
+          const hiddenCount = allSteering.length - maxSteeringLines;
+          allLines.push(theme.fg('dim', ` ... and ${hiddenCount} older steering message(s) hidden`));
+        }
+
+        for (const msg of visibleSteering) {
           const prefix = msg.status === 'queued' ? ' QUEUED RESEARCHER STEERING: ' : ' RESEARCHER STEERING: ';
           const display = truncateToWidth(`${prefix}${msg.text}`, width);
           // Use 'warning' style for queued (amber/yellow), 'muted' for active

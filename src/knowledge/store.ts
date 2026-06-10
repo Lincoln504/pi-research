@@ -693,17 +693,20 @@ export class KnowledgeStore implements IKnowledgeStore {
   /**
    * Get granular counts for local vs global entries.
    */
-  async countScoped(): Promise<{ local: number; global: number }> {
-    if (!this.db) return { local: 0, global: 0 };
+  async countScoped(): Promise<{ local: number; global: number; projects: number }> {
+    if (!this.db) return { local: 0, global: 0, projects: 0 };
     const table = await this.getFreshTable();
     const ws = this.getWorkspace().replace(/'/g, "''");
     
-    const [local, global] = await Promise.all([
+    const [local, global, allRows] = await Promise.all([
       table.countRows(`workspace = '${ws}'`),
-      table.countRows(`is_global = true`)
+      table.countRows(`is_global = true`),
+      table.query().select(['workspace']).toArray()
     ]);
     
-    return { local, global };
+    const workspaces = new Set(allRows.map(r => r.workspace));
+    
+    return { local, global, projects: workspaces.size };
   }
 
   async clear(filter?: string): Promise<void> {

@@ -9,7 +9,6 @@
  * - unit: Fast, isolated unit tests (no external dependencies)
  * - integration-serial: Integration tests that share global state (run one at a time)
  * - integration-parallel: Integration tests with isolated state (can run concurrently)
- * - load: Load/stress tests that require significant resources
  *
  * USE:
  *   npx vitest run                    (runs all groups via workspace)
@@ -22,5 +21,4 @@ export default defineWorkspace([
   'config/tooling/vitest.config.unit.ts',
   'config/tooling/vitest.config.integration.serial.ts',
   'config/tooling/vitest.config.integration.parallel.ts',
-  'config/tooling/vitest.config.load.ts',
 ]);

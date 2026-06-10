@@ -76,8 +76,8 @@ export const ConfigSchema = Type.Object({
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
   /** Whether to automatically export a markdown research report to disk at the end (default: false) */
   RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
-  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: false) */
-  DEBUG: Type.Boolean({ default: false }),
+  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: true) */
+  DEBUG: Type.Boolean({ default: true }),
 });
 
 export type Config = Static<typeof ConfigSchema>;
