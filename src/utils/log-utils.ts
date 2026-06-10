@@ -35,14 +35,14 @@ export function getDefaultDebugLogPathTemplate(): string {
   return buildDefaultDebugLogPath('{researchRunId}');
 }
 
+/**
+ * Check whether debug/verbose logging is enabled.
+ *
+ * Only source of truth: PI_RESEARCH_DEBUG env var (or the config DEBUG field
+ * which reads from the same env var). Set to "true" to enable INFO+DEBUG logs.
+ */
 export function isVerboseFromEnv(): boolean {
-  return process.argv.includes('--verbose') || 
-         process.argv.includes('-v') ||
-         process.argv.includes('--debug') ||
-         process.env['PI_RESEARCH_VERBOSE'] === '1' ||
-         process.env['PI_RESEARCH_DEBUG'] === '1' ||
-         process.env['DEBUG'] === '1' ||
-         process.env['DEBUG'] === 'pi-research';
+  return process.env['PI_RESEARCH_DEBUG'] === 'true';
 }
 
 export function createResearchRunId(): string {

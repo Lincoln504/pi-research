@@ -24,15 +24,13 @@ const TEST_LOG_PATH = path.join(os.tmpdir(), 'pi-research-test.log');
 
 describe('logger', () => {
   beforeEach(() => {
-    // Clear verbose flag for each test
-    process.argv = process.argv.filter(arg => arg !== '--verbose');
-    delete process.env['PI_RESEARCH_VERBOSE'];
+    // Clear debug flag for each test
+    delete process.env['PI_RESEARCH_DEBUG'];
   });
 
   afterEach(() => {
     resetLogger();
-    process.argv = process.argv.filter(arg => arg !== '--verbose');
-    delete process.env['PI_RESEARCH_VERBOSE'];
+    delete process.env['PI_RESEARCH_DEBUG'];
 
     // Clean up test log files
     const testLogPaths = [TEST_LOG_PATH];
@@ -112,48 +110,20 @@ describe('logger', () => {
   });
 
   describe('isVerboseFromEnv', () => {
-    it('should detect --verbose in process.argv', () => {
-      process.argv.push('--verbose');
-      expect(isVerboseFromEnv()).toBe(true);
-    });
-
-    it('should detect PI_RESEARCH_VERBOSE=1', () => {
-      process.env['PI_RESEARCH_VERBOSE'] = '1';
-      expect(isVerboseFromEnv()).toBe(true);
-    });
-
-    it('should detect -v in process.argv', () => {
-      process.argv.push('-v');
-      expect(isVerboseFromEnv()).toBe(true);
-      process.argv = process.argv.filter(arg => arg !== '-v');
-    });
-
-    it('should detect --debug in process.argv', () => {
-      process.argv.push('--debug');
-      expect(isVerboseFromEnv()).toBe(true);
-      process.argv = process.argv.filter(arg => arg !== '--debug');
-    });
-
-    it('should detect PI_RESEARCH_DEBUG=1', () => {
-      process.env['PI_RESEARCH_DEBUG'] = '1';
+    it('should detect PI_RESEARCH_DEBUG=true', () => {
+      process.env['PI_RESEARCH_DEBUG'] = 'true';
       expect(isVerboseFromEnv()).toBe(true);
       delete process.env['PI_RESEARCH_DEBUG'];
     });
 
-    it('should detect DEBUG=1', () => {
-      process.env['DEBUG'] = '1';
-      expect(isVerboseFromEnv()).toBe(true);
-      delete process.env['DEBUG'];
-    });
-
-    it('should detect DEBUG=pi-research', () => {
-      process.env['DEBUG'] = 'pi-research';
-      expect(isVerboseFromEnv()).toBe(true);
-      delete process.env['DEBUG'];
-    });
-
-    it('should be false when not verbose', () => {
+    it('should be false when PI_RESEARCH_DEBUG is not set', () => {
       expect(isVerboseFromEnv()).toBe(false);
+    });
+
+    it('should be false for PI_RESEARCH_DEBUG=false', () => {
+      process.env['PI_RESEARCH_DEBUG'] = 'false';
+      expect(isVerboseFromEnv()).toBe(false);
+      delete process.env['PI_RESEARCH_DEBUG'];
     });
   });
 

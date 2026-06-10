@@ -35,6 +35,7 @@ import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from '
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import { createResearchRunId, logger } from './logger.ts';
+import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
 import { resetServiceContainer, getServiceContainer } from './core/service-registry.ts';
 import { disposeCoreServices } from './core/service-initialization.ts';
@@ -63,6 +64,7 @@ const OpenClawConfigSchema = Type.Object({
   cacheTtlDays: Type.Optional(Type.Number({ minimum: 1, maximum: 365, default: 30 })),
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),
   searxngUrl: Type.Optional(Type.String()),
+  reportExportEnabled: Type.Optional(Type.Boolean({ default: false })),
 });
 
 type OpenClawPluginConfig = {
@@ -82,6 +84,7 @@ type OpenClawPluginConfig = {
   cacheTtlDays?: number;
   scrapeTimeoutMs?: number;
   searxngUrl?: string;
+  reportExportEnabled?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +127,7 @@ function applyOpenClawConfig(pluginConfig: OpenClawPluginConfig): void {
   if (pluginConfig.cacheTtlDays !== undefined) overrides.KNOWLEDGE_STORE_CACHE_TTL_DAYS = pluginConfig.cacheTtlDays;
   if (pluginConfig.scrapeTimeoutMs !== undefined) overrides.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
   if (pluginConfig.model !== undefined) overrides.RESEARCH_MODEL = pluginConfig.model;
+  if (pluginConfig.reportExportEnabled !== undefined) overrides.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
 
   // SearXNG URL → env var (pi-research reads SEARXNG_URL from process.env)
   if (pluginConfig.searxngUrl) {
@@ -434,6 +438,13 @@ export default {
               excludeTools,
             } satisfies DeepResearchOrchestratorOptions);
             result = await orchestrator.run(signal);
+          }
+
+          if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
+            const exportPath = await exportResearchReport(query, result, (depth ?? 0) === 0 ? 'quick' : 'deep', globalCwd);
+            if (exportPath) {
+              result = appendExportMessage(result, exportPath);
+            }
           }
 
           metrics.observe('research_manager_latency_ms', Date.now() - researchStart, {

@@ -22,7 +22,7 @@ import {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
-import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
+import { getConfig, saveConfig, resetConfig, getDbDir, getGlobalEnvFilePath, getLocalEnvFilePath } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService } from './core/service-registry.ts';
 import { ServiceNames, IKnowledgeStoreService } from './core/service-interfaces.ts';
@@ -97,8 +97,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Core Research Settings ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: 'Research depth',
-      description: `Default depth for the /research command (normal/deep/ultra)`,
+      label: '/research depth',
+      description: 'Default depth for the /research command (normal/deep/ultra)',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
@@ -108,6 +108,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       description: 'Maximum researchers to run simultaneously (1-5)',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
+    },
+    {
+      id: 'RESEARCH_REPORT_EXPORT_ENABLED',
+      label: 'Export report',
+      description: 'Automatically save a markdown report to disk when research completes.\nFiles go to a "research" or "docs" folder in your project, or your temp folder if at home.',
+      currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
+      values: ['true', 'false'],
     },
     {
       id: 'MAX_SCRAPE_BATCHES',
@@ -129,6 +136,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       description: 'Per-researcher timeout in minutes (3-30)',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
+    },
+    {
+      id: 'DEBUG',
+      label: 'Debug logging',
+      description: 'Enable verbose debug logging to the log file.\nIncludes INFO and DEBUG level output for diagnosing issues.',
+      currentValue: config.DEBUG ? 'true' : 'false',
+      values: ['true', 'false'],
     },
 
     // --- Knowledge Store ---
@@ -163,7 +177,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'EMBEDDING_MODEL',
       label: 'Embed model',
-      description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.\nLocation: ~/.cache/pi-research/models/',
+      description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.',
       currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
       values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
     },
@@ -274,6 +288,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               config.WORKER_THREADS = parseInt(newValue, 10);
             } else if (id === 'RESEARCHER_TIMEOUT_MS') {
               config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+            } else if (id === 'DEBUG') {
+              config.DEBUG = newValue === 'true';
+            } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
+              config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             } else if (id === 'LOCAL_KNOWLEDGE_STORE_ENABLED') {
               config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
             } else if (id === 'GLOBAL_KNOWLEDGE_STORE_ENABLED') {
@@ -347,7 +365,16 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         return {
           render: (width: number) => {
             const border = theme.fg('muted', '─'.repeat(width));
-            return [border, ...settingsList.render(width), border];
+            const globalEnvPath = getGlobalEnvFilePath();
+            const localEnvPath = getLocalEnvFilePath();
+            const hasLocal = fs.existsSync(localEnvPath);
+            const activeEnvPath = hasLocal ? localEnvPath : globalEnvPath;
+            const footerLines = [
+              '',
+              theme.fg('dim', `  Config: ${activeEnvPath}`),
+              theme.fg('dim', `  See file for all settings (PI_RESEARCH_MODEL, timeouts, paths, and more).`),
+            ];
+            return [border, ...settingsList.render(width), border, ...footerLines, border];
           },
           handleInput: (data: string) => settingsList.handleInput(data),
           invalidate: () => settingsList.invalidate(),

@@ -60,18 +60,24 @@ export const ConfigSchema = Type.Object({
   MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
   /** Health check timeout in milliseconds (default: 10000ms) */
   HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
+  /** Default timeout for browser page operations like search (default: 45000ms) */
+  SEARCH_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 45000 }),
   /** TUI refresh debounce in milliseconds (default: 100ms) */
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
-  /** Delay to wait before restoring console log after TUI close (default: 200ms) */
-  CONSOLE_RESTORE_DELAY_MS: Type.Number({ minimum: 0, maximum: 30000, default: 200 }),
   /** Timeout for individual browser tasks (default: 10000ms) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
-  /** LLM Model to use for research (e.g. google/gemini-2.0-flash-001) */
+  /** LLM Model override for all research sub-tasks: researchers, coordinator, evaluator, and knowledge synthesis.
+   *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
+   *  When set, this overrides ctx.model for researcher sub-agents and the knowledge synthesis background LLM.
+   *  The coordinator and evaluator continue to use the caller's model unless explicitly overridden here.
+   */
   RESEARCH_MODEL: Type.Optional(Type.String()),
-  /** LLM Model to use for knowledge synthesis (e.g. gemini-2.5-flash) */
-  KNOWLEDGE_SYNTHESIS_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
+  /** Whether to automatically export a markdown research report to disk at the end (default: false) */
+  RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
+  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: false) */
+  DEBUG: Type.Boolean({ default: false }),
 });
 
 export type Config = Static<typeof ConfigSchema>;
@@ -161,8 +167,8 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_RETRIES: String(config.RESEARCHER_MAX_RETRIES),
     PI_RESEARCH_RETRY_DELAY_MS: String(config.RESEARCHER_MAX_RETRY_DELAY_MS),
     PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: String(config.HEALTH_CHECK_TIMEOUT_MS ?? DEFAULTS.HEALTH_CHECK_TIMEOUT_MS),
+    PI_RESEARCH_SEARCH_TIMEOUT_MS: String(config.SEARCH_TIMEOUT_MS),
     PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS: String(config.TUI_REFRESH_DEBOUNCE_MS),
-    PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS: String(config.CONSOLE_RESTORE_DELAY_MS),
     PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: String(config.DEFAULT_RESEARCH_DEPTH),
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
@@ -179,8 +185,9 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_MODEL: config.RESEARCH_MODEL ?? '',
-    PI_RESEARCH_KNOWLEDGE_MODEL: config.KNOWLEDGE_SYNTHESIS_MODEL ?? '',
     PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR ?? '',
+    PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
+    PI_RESEARCH_DEBUG: String(config.DEBUG),
   };
 
   try {
@@ -285,11 +292,13 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS),
+    SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
-    CONSOLE_RESTORE_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_CONSOLE_RESTORE_DELAY_MS', DEFAULTS.CONSOLE_RESTORE_DELAY_MS),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
+    RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
+    DEBUG: parseEnvBool(e, 'PI_RESEARCH_DEBUG', DEFAULTS.DEBUG),
   };
 
   const config = { ...DEFAULTS };

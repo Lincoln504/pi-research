@@ -95,7 +95,7 @@ export class WorkerPoolManager implements IService {
                 logger.log(`[WorkerPoolManager] Initializing Unified FixedClusterPool (Size: ${maxWorkers}) on PID ${process.pid}`);
 
                 ensureBrowserCacheDir();
-                const browserEnv = getBrowserEnv();
+                const browserEnv = getBrowserEnv(config);
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 

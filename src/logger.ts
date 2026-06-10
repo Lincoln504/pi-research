@@ -4,7 +4,7 @@
  * Writes timestamped lines to {tmpdir}/pi-research-{researchRunId}.log when a researchRunId is provided.
  * Falls back to {tmpdir}/pi-research.log when no researchRunId.
  * ERROR and WARN levels are always logged.
- * INFO and DEBUG levels are only logged when --verbose or PI_RESEARCH_VERBOSE=1 is set.
+ * INFO and DEBUG levels are only logged when PI_RESEARCH_DEBUG=true (or config.DEBUG=true).
  *
  * This module never patches process-global console.* methods.
  */

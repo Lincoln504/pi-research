@@ -43,8 +43,13 @@ export function getBrowserCacheDir(): string {
 /**
  * Get environment for spawning browser worker processes.
  * Does not override HOME so camoufox uses its natural install location.
+ *
+ * CRITICAL: Browser workers run as cluster child processes and inherit process.env.
+ * Since the config module loads .env file values into its internal config object
+ * but does NOT set them into process.env, we must explicitly inject config values
+ * here so workers can read them from their process.env copy.
  */
-export function getBrowserEnv(): NodeJS.ProcessEnv {
+export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
     const customPath = process.env['PLAYWRIGHT_BROWSERS_PATH'];
     if (customPath) {
@@ -58,6 +63,12 @@ export function getBrowserEnv(): NodeJS.ProcessEnv {
     if (logFilePath) {
         env['PI_RESEARCH_LOG_FILE'] = logFilePath;
     }
+    // Inject config values that browser workers read from process.env.
+    // Without this, workers only see shell-set values — .env file values would be lost.
+    const c = config || getConfig();
+    env['PI_RESEARCH_SCRAPE_TIMEOUT_MS'] = String(c.SCRAPE_TIMEOUT_MS);
+    env['PI_RESEARCH_SEARCH_TIMEOUT_MS'] = String(c.SEARCH_TIMEOUT_MS);
+    env['PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS'] = String(c.HEALTH_CHECK_TIMEOUT_MS);
     return env;
 }
 

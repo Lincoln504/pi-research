@@ -80,7 +80,7 @@ function formatHealthError(raw: string): string {
   } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {
     return 'Unable to reach the web (network error). Check your internet connection.';
   } else {
-    return `Browser readiness check failed. Run with PI_RESEARCH_VERBOSE=1 for details. (${raw || 'unknown error'})`;
+    return `Browser readiness check failed. Enable debug logging (PI_RESEARCH_DEBUG=true) for details. (${raw || 'unknown error'})`;
   }
 }
 

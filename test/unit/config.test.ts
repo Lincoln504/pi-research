@@ -5,7 +5,9 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { createConfig, getConfig, setConfig, resetConfig, validateConfig, type Config, DEFAULTS } from '../../src/config';
+import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config, DEFAULTS } from '../../src/config';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 // Mock fs to avoid reading .env during tests
 vi.mock('node:fs', async () => {
@@ -14,6 +16,9 @@ vi.mock('node:fs', async () => {
     readFileSync: vi.fn(() => ''),
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
   };
 });
 
@@ -37,6 +42,57 @@ describe('config (refactored)', () => {
     process.env = { ...originalEnv };
   });
 
+  describe('getDbDir', () => {
+    it('returns absolute KNOWLEDGE_STORE_DIR if provided', () => {
+      const customDir = '/custom/db/dir';
+      setConfig({ KNOWLEDGE_STORE_DIR: customDir });
+      expect(getDbDir()).toBe(customDir);
+    });
+
+    it('returns default knowledge_db dir if not provided', () => {
+      setConfig({ KNOWLEDGE_STORE_DIR: undefined });
+      const dir = getDbDir();
+      expect(dir).toContain('knowledge_db');
+    });
+  });
+
+  describe('saveConfig', () => {
+    it('should use atomic write via temp file', () => {
+      const config = { ...DEFAULTS };
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('OLD_KEY=old_val');
+      
+      saveConfig(config);
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), expect.any(String), 'utf-8');
+      expect(fs.renameSync).toHaveBeenCalled();
+    });
+
+    it('should protect against prototype pollution', () => {
+      const config = { ...DEFAULTS };
+      const writeSpy = vi.spyOn(fs, 'writeFileSync');
+      
+      saveConfig(config);
+
+      const writtenContent = writeSpy.mock.calls[0]![1] as string;
+      expect(writtenContent).not.toContain('__proto__');
+      expect(writtenContent).not.toContain('constructor');
+      expect(writtenContent).not.toContain('prototype');
+    });
+
+    it('should preserve comments in env file', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue('# This is a comment\nPI_RESEARCH_MODEL=old-model');
+      
+      const config = { ...DEFAULTS, RESEARCH_MODEL: 'new-model' };
+      saveConfig(config);
+
+      const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(writtenContent).toContain('# This is a comment');
+      expect(writtenContent).toContain('PI_RESEARCH_MODEL=new-model');
+    });
+  });
+
   describe('createConfig', () => {
     describe('positive cases', () => {
       it('should use defaults when no environment vars', () => {
@@ -48,7 +104,6 @@ describe('config (refactored)', () => {
         expect(config.RESEARCHER_MAX_RETRIES).toBe(DEFAULTS.RESEARCHER_MAX_RETRIES);
         expect(config.RESEARCHER_MAX_RETRY_DELAY_MS).toBe(DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS);
         expect(config.TUI_REFRESH_DEBOUNCE_MS).toBe(DEFAULTS.TUI_REFRESH_DEBOUNCE_MS);
-        expect(config.CONSOLE_RESTORE_DELAY_MS).toBe(DEFAULTS.CONSOLE_RESTORE_DELAY_MS);
         expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
         expect(config.WORKER_THREADS).toBe(DEFAULTS.WORKER_THREADS);
       });
