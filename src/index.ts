@@ -13,7 +13,6 @@ import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder } from './utils/session-state.ts';
-import { echoGuard } from './utils/input-guard.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -79,58 +78,36 @@ export default async function (pi: ExtensionAPI) {
   // We capture these messages specifically for the active research run and 
   // suppress the SDK's built-in steering UI to maintain TUI consistency.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
-    const eCtx = ctx as ExtendedExtensionContext;
-    try {
-      if (event.streamingBehavior === 'steer') {
-        // FIX (Issue 1): Only consume steering input when research is actually active.
-        // Without this check, normal coding input is silently swallowed.
-        const activeCount = getActiveSessionCount();
-        if (activeCount === 0) {
-          logger.debug('[pi-research] Steering input received but no active research — letting pi handle it');
-          return undefined;
-        }
+    // PASSIVE: We only capture steering messages. 
+    // We NEVER swallow input (action: "handled") because it interferes with user experience.
+    if (event.streamingBehavior === 'steer' && event.text) {
+      const eCtx = ctx as ExtendedExtensionContext;
+      const sanitized = event.text.trim();
+      
+      // Only route steering if research is actually active
+      const activeCount = getActiveSessionCount();
+      if (activeCount > 0) {
+        logger.debug(`[pi-research] Captured steering input. sessionId=${eCtx.sessionId}`);
 
-        if (event.text) {
-          logger.debug(`[pi-research] Captured steering input. behavior=steer, sessionId=${eCtx.sessionId}`);
-
-          // Strip ANSI escape sequences that might leak from terminal transport.
-          // eslint-disable-next-line no-control-regex
-          const sanitized = event.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-          if (!sanitized) return { action: "handled" as const };
-
-          // ARCHITECTURAL GUARD: Ignore input that looks like it leaked from terminal history
-          // or accidental scraping output using the robust EchoGuard.
-          if (echoGuard.isEcho(sanitized)) {
-            logger.warn(`[pi-research] Ignoring suspicious steering input (detected as accidental history/tool output echo): ${sanitized.substring(0, 50)}...`);
-            return { action: "handled" as const };
-          }
-
-          let sessionIds: string[] = [];
-          if (eCtx.sessionId) {
-            sessionIds = [eCtx.sessionId];
-          } else {
-            const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
-            if (activeSessions.length === 1) {
-              sessionIds = [activeSessions[0]!];
-            } else if (activeSessions.length > 1) {
-              logger.warn(`[pi-research] ctx.sessionId missing and multiple active sessions exist ([${activeSessions.join(', ')}]) — cannot route steering safely.`);
-            } else {
-              logger.warn('[pi-research] ctx.sessionId missing and no active sessions found — cannot route steering.');
-            }
-          }
-
-          for (const sid of sessionIds) {
-            addSteeringMessage(sid, sanitized);
+        let sessionIds: string[] = [];
+        if (eCtx.sessionId) {
+          sessionIds = [eCtx.sessionId];
+        } else {
+          const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
+          if (activeSessions.length === 1) {
+            sessionIds = [activeSessions[0]!];
+          } else if (activeSessions.length > 1) {
+            logger.warn(`[pi-research] ctx.sessionId missing and multiple active sessions exist — cannot route steering safely.`);
           }
         }
-        // Suppress built-in UI and consume the input so it doesn't trigger a new turn
-        return { action: "handled" as const };
+
+        for (const sid of sessionIds) {
+          addSteeringMessage(sid, sanitized);
+        }
       }
-      return undefined;
-    } catch (err) {
-      logger.error('[pi-research] Error in input handler:', err);
-      return undefined;
     }
+    
+    return undefined; // Always let the host handle the input
   });
 
   // 2. REGISTER SHUTDOWN TASKS
@@ -188,29 +165,9 @@ export default async function (pi: ExtensionAPI) {
     }
   });
 
-  // Populate EchoGuard cache with large tool results to detect future history echoes
-  pi.on('tool_result', async (event: any) => {
-    try {
-      if (event.content && Array.isArray(event.content)) {
-        for (const block of event.content) {
-          if (block?.type === 'text' && block?.text) {
-            echoGuard.trackResult(block.text);
-          }
-        }
-      }
-    } catch (err) {
-      logger.debug('[pi-research] Failed to track tool result for EchoGuard:', err);
-    }
-  });
-
   // Global extension state for smart dual-sided prompt injection
   let currentTurn = 0;
-  let lastInjectionTurn = -10;
-  // Reduced cooldown for safety constraints (NO SUBAGENTS should be reinforced frequently)
-  const COOLDOWN_TURNS = 3;
-  // Match research keywords including common typos (reserach, reseach, resarch, etc)
-  const RESEARCH_REGEX = /\b(research|reserach|reseach|resarch|search|web|analyze|investigate)\b/i;
-
+  
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);
@@ -351,17 +308,16 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  // Dual-Sided JIT Prompt Injection (User Input + LLM Output) with Cooldown
+  // JIT Prompt Injection (Simplified & Non-Intrusive)
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
     currentTurn++;
     
-    // Skip expensive research initialization and prompt injection during mid-stream steering
+    // Skip injection during mid-stream steering
     if (event.streamingBehavior === 'steer') {
-      logger.debug('[pi-research] Skipping JIT scan during steering');
       return { systemPrompt: event.systemPrompt };
     }
 
-    // Only initialize TUI features and inject rules in TUI mode
+    // Only initialize TUI features in TUI mode
     if (ctx.mode === 'tui' && ctx.hasUI) {
       initGlobalTuiController(ctx.ui, (ctx as ExtendedExtensionContext).sessionId);
     }
@@ -372,8 +328,7 @@ export default async function (pi: ExtensionAPI) {
     const steeringMessages = getSteeringMessages(normalizedSid);
     let injectedSystemPrompt = event.systemPrompt;
 
-    // FIX (Issue 2): Only inject steering messages when research is actually active.
-    // Without this check, steering messages leak into normal coding agent turns.
+    // Only inject steering messages when research is actually active.
     const activeCount = getActiveSessionCount();
     const hasSteeringMessages = steeringMessages.length > 0;
     const shouldInjectSteering = hasSteeringMessages && activeCount > 0;
@@ -383,54 +338,23 @@ export default async function (pi: ExtensionAPI) {
         'The user has provided the following additional considerations for this task:\n' + 
         steeringMessages.map(m => `- ${m.text}`).join('\n');
       logger.debug(`[pi-research] Injected ${steeringMessages.length} steering message(s) into prompt`);
-    } else if (hasSteeringMessages && activeCount === 0) {
-      logger.debug(`[pi-research] ${steeringMessages.length} steering message(s) queued but no active research — skipping injection`);
-    }
-
-    // Log streaming behavior if available
-    if (event.streamingBehavior) {
-      logger.debug(`[pi-research] Agent starting with behavior: ${event.streamingBehavior}`);
     }
 
     // Do not inject rules into the sub-researchers
-    // FIX (Issue 10): Use explicit marker instead of fragile 'includes("researcher")' string match.
-    // The marker is embedded in the researcher prompt template as an HTML comment.
     const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
     if (isResearcher) {
       return { systemPrompt: event.systemPrompt };
     }
 
-    // Use systemPromptOptions to check if either the research tool or the knowledge
-    // search tool is actually selected/available. This prevents instruction pollution
-    // when both tools are disabled. The research-tool-usage.md prompt covers guidance
-    // for BOTH tools, so it should be injected when either is available.
+    // Conservative Prompt Injection: Only inject research instructions if the tool is 
+    // actually selected/available for this turn.
     const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);
     const isKnowledgeSearchAvailable = researchKnowledgeSearchTool
       ? (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name))
       : false;
 
-    if (!isResearchToolAvailable && !isKnowledgeSearchAvailable) {
-      logger.debug('[pi-research] Neither research nor knowledge search tool available in current context, skipping prompt injection');
-      return { systemPrompt: event.systemPrompt };
-    }
-
-    // 1. Scan User Input
-    let needsResearch = RESEARCH_REGEX.test(event.prompt || '');
-
-    // 2. Scan LLM Output (if user didn't explicitly ask)
-    if (!needsResearch) {
-      const branch = ctx?.sessionManager?.getBranch?.() || [];
-      // Grab the last assistant message
-      const lastAssistant = [...branch].reverse().find((e: any) => e.type === 'message' && e.message.role === 'assistant');
-      if (lastAssistant) {
-        needsResearch = RESEARCH_REGEX.test(JSON.stringify((lastAssistant as any).message.content));
-      }
-    }
-
-    // 3. Inject ONLY if matched AND cooldown has passed
-    if (needsResearch && (currentTurn - lastInjectionTurn >= COOLDOWN_TURNS)) {
-      lastInjectionTurn = currentTurn;
-      logger.debug('[pi-research] JIT constraint rule injected (Dual-Scan matched).');
+    if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
+      logger.debug('[pi-research] Research-related tool available, injecting best-practice instructions.');
       
       const researchPrompt = loadPrompt('research-tool-usage')
         .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())

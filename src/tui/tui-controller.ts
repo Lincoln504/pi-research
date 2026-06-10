@@ -10,7 +10,7 @@
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { matchesKey } from '@earendil-works/pi-tui';
 import { getActiveSessionCount, abortAllSessions, refreshAllSessions } from '../utils/session-state.ts';
-import { shouldConsumeForCleanup, createSafeInputHandler, resetTerminalState } from '../utils/terminal-state.ts';
+import { resetTerminalState } from '../utils/terminal-state.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -49,11 +49,6 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
   // Store the Pi session ID for scoped cancellation
   state.piSessionId = piSessionId;
 
-  // Ensure terminal is in a clean, safe state for TUI interaction.
-  // This disables bracketed paste mode, mouse tracking, and other features 
-  // that might cause "ghost" input or weird keypress behavior.
-  resetTerminalState(true).catch(err => logger.debug('[TUI] Failed to reset terminal state:', err));
-
   /**
    * Handle terminal input for cancellation and protocol cleanup
 
@@ -88,17 +83,11 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
       return undefined;
     }
 
-    // Consume only legitimate terminal status responses to prevent leaks.
-    if (shouldConsumeForCleanup(data)) {
-      return { consume: true };
-    }
-
     return undefined;
   };
 
   // Register the global listener
-  // We use the safe input handler to ensure interleaved data is handled correctly.
-  state.unsubInput = ui.onTerminalInput(createSafeInputHandler(handleTerminalInput));
+  state.unsubInput = ui.onTerminalInput(handleTerminalInput);
   
   logger.debug('[TUI] Global TUI controller initialized');
 }

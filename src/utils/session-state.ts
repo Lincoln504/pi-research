@@ -58,6 +58,8 @@ interface PiSessionState {
   masterUpdate: (() => void) | null;
   /** Steering messages captured for this Pi session */
   steeringMessages: SteeringMessage[];
+  /** Timestamp of the last global abort for this Pi session */
+  lastAbortAt?: number;
 }
 
 /**
@@ -91,6 +93,7 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
       refreshTimeout: null,
       masterUpdate: null,
       steeringMessages: [],
+      lastAbortAt: 0,
     };
     piSessions.set(sid, state);
   }
@@ -118,13 +121,13 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
   }
   
   // Enforce cap: remove oldest queued message if at limit
-    if (state.steeringMessages.filter(m => m.status !== 'popped').length >= MAX_STEERING_MESSAGES) {
-      const oldestQueuedIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
-      if (oldestQueuedIdx !== -1) {
-        logger.debug(`[session-state] Steering message cap reached, removing oldest queued in session ${sid}`);
-        state.steeringMessages.splice(oldestQueuedIdx, 1);
-      }
+  if (state.steeringMessages.filter(m => m.status !== 'popped').length >= MAX_STEERING_MESSAGES) {
+    const oldestQueuedIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
+    if (oldestQueuedIdx !== -1) {
+      logger.debug(`[session-state] Steering message cap reached, removing oldest queued in session ${sid}`);
+      state.steeringMessages.splice(oldestQueuedIdx, 1);
     }
+  }
     
     const steeringMsg: SteeringMessage = {
       id: randomUUID(),
@@ -405,9 +408,19 @@ export function abortAllSessions(piSessionId: string | undefined): void {
   const state = piSessions.get(sid);
   if (!state) return;
   
+  state.lastAbortAt = Date.now();
+  
   for (const controller of state.aborts.values()) {
     controller.abort();
   }
+}
+
+/**
+ * Get the timestamp of the last global abort for a Pi session.
+ */
+export function getLastAbortAt(piSessionId: string | undefined): number {
+  const sid = normalizeSessionId(piSessionId);
+  return piSessions.get(sid)?.lastAbortAt ?? 0;
 }
 
 /**

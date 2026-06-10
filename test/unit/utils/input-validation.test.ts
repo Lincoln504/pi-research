@@ -36,10 +36,10 @@ describe('validateQuery', () => {
   });
 
   it('should reject queries that are too long', () => {
-    const longQuery = 'a'.repeat(12001);
+    const longQuery = 'a'.repeat(100001);
     const result = validateQuery(longQuery);
     expect(result.isValid).toBe(false);
-    expect(result.error).toContain('at most 12000 characters');
+    expect(result.error).toContain('at most 100000 characters');
   });
 
   it('should reject whitespace-only queries', () => {

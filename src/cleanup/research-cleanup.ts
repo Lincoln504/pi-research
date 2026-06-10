@@ -16,7 +16,6 @@ import {
   refreshAllSessions,
 } from '../utils/session-state.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
-import { resetTerminalState } from '../utils/terminal-state.ts';
 import type { CleanupContext } from '../types/index.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';
 
@@ -60,25 +59,6 @@ export function createCleanupFunction(
   return async () => {
     if (cleanupCalled) return;
     cleanupCalled = true;
-
-    // Drain terminal input to consume any pending protocol responses
-    // This prevents Kitty protocol responses (like \x1b[?4;1;3u) from leaking to the shell
-    // Only perform this in TUI mode to avoid disturbing other modes (print/json/rpc)
-    if (ctx.mode === 'tui') {
-      try {
-        const tuiUI = ctx.ui as { tui?: { terminal?: { drainInput?: (timeoutMs: number, maxAttempts: number) => Promise<void> } } };
-        const tuiTerminal = tuiUI?.tui?.terminal;
-        if (tuiTerminal && typeof tuiTerminal.drainInput === 'function') {
-          // Use pi-tui's built-in drainInput if available
-          await tuiTerminal.drainInput(100, 20);
-        } else if (process.stdin.isTTY) {
-          // Fallback: ensure terminal is in a safe state and drain input
-          await resetTerminalState();
-        }
-      } catch (error) {
-        logger.warn('[research] Failed to drain terminal input:', error);
-      }
-    }
 
     // Clear wave animation timer
     if (waveTimerRef) {

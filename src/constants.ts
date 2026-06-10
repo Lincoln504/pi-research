@@ -80,7 +80,7 @@ export const OSV_TIMEOUT_MS = 10000;
 // ==================== Export Constants ====================
 
 /** Maximum query length for validation */
-export const MAX_QUERY_LENGTH = 12000;
+export const MAX_QUERY_LENGTH = 100000;
 
 /** Maximum query length for filename sanitization */
 export const MAX_FILENAME_QUERY_LENGTH = 150;

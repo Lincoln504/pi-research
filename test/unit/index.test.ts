@@ -107,11 +107,16 @@ describe('extension entrypoint', () => {
     expect(result.systemPrompt).toContain('MOCK_USAGE_PROMPT');
   });
 
-  it('does not augment system prompt if no research intent detected', async () => {
+  it('does not augment system prompt if research tool is not available', async () => {
     const { pi, handlers } = createPiMock();
     await activate(pi as any);
 
-    const event = { systemPrompt: 'ORIGINAL', prompt: 'just fix code' };
+    // Explicitly exclude research tool from selected tools
+    const event = { 
+      systemPrompt: 'ORIGINAL', 
+      prompt: 'research something',
+      systemPromptOptions: { selectedTools: ['bash'] } 
+    };
     const result = await handlers.get('before_agent_start')?.(event, {});
 
     expect(result.systemPrompt).toBe('ORIGINAL');
