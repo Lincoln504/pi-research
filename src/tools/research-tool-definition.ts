@@ -1,9 +1,11 @@
 /**
  * Research Tool Definition
  *
- * Defines the research tool that orchestrates web/internet research:
- * - Quick research (depth 0) - Single session for simple queries
- * - Deep research (depth 1-3) - Multi-session coordinated research
+ * Defines the research tool that orchestrates web/internet research.
+ * Depth 1-3: AI-orchestrated multi-session research (coordinator → researchers → evaluator).
+ *
+ * Note: Depth 0 (quick mode) is only available via the SDK/OpenClaw programmatic API.
+ * The pi extension tool has minimum: 1.
  */
 
 import type {
@@ -294,7 +296,7 @@ export function createResearchTool(): ToolDefinition {
           // Setup observer
           const observerState = createObserverState();
           const observer = createResearchObserver(
-            { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 0 },
+            { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 1 },
             observerState
           );
 
@@ -335,7 +337,7 @@ export function createResearchTool(): ToolDefinition {
               const result = await orch.runResearch({
                 ctx,
                 query: sanitizedQuery,
-                depth: (depth ?? 0) as ResearchDepth,
+                depth: (depth ?? 1) as ResearchDepth,
                 model: selectedModel as Model<any>,
                 observer,
                 onUpdate,
@@ -359,7 +361,7 @@ export function createResearchTool(): ToolDefinition {
 
               let finalResult = resultWithSummaries;
               if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
-                const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 0) === 0 ? 'quick' : 'deep', ctx.cwd);
+                const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd);
                 if (exportPath) {
                   finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState.totalCost);
                 }

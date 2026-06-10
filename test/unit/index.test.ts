@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   createResearchTool: vi.fn(() => ({
     name: 'research',
     execute: mockExecute,
-    description: 'Perform deep research using a coordinated team of agents.',
+    description: 'Perform web/internet research using an internal multi-source system.',
   })),
   createHealthTool: vi.fn(() => ({
     name: 'health',

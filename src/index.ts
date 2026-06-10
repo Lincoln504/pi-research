@@ -86,10 +86,10 @@ export default async function (pi: ExtensionAPI) {
         // eslint-disable-next-line no-control-regex
         const sanitized = event.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
         if (!sanitized) return undefined;
-      
+
         // Only route steering if research is actually active
         const activeCount = getActiveSessionCount();
-      if (activeCount === 0) return undefined;
+        if (activeCount === 0) return undefined;
 
         logger.debug(`[pi-research] Captured steering input. sessionId=${eCtx.sessionId}`);
 
@@ -171,7 +171,6 @@ export default async function (pi: ExtensionAPI) {
     }
   });
 
-  // Global extension state for smart dual-sided prompt injection
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);
