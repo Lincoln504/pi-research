@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { repairJsonWithLlm } from '../../../src/utils/agentic-repair.ts';
 import { Type } from 'typebox';
+import type { Model } from '@earendil-works/pi-ai';
+
+const stubModel: Model<any> = { id: 'test-model' } as Model<any>;
 
 describe('repairJsonWithLlm', () => {
   const mockCompleter = vi.fn();
@@ -20,7 +23,7 @@ describe('repairJsonWithLlm', () => {
     });
 
     const result = await repairJsonWithLlm('{"foo": "broken", "bar": "nan"', mockCompleter, auth, {
-      model: 'test-model',
+      model: stubModel,
       schema,
       serviceName: 'TestService'
     });
@@ -38,7 +41,7 @@ describe('repairJsonWithLlm', () => {
     });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {
-      model: 'test-model'
+      model: stubModel
     });
 
     expect(result).toBeNull();
@@ -48,7 +51,7 @@ describe('repairJsonWithLlm', () => {
     mockCompleter.mockResolvedValue({ content: [] });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {
-      model: 'test-model'
+      model: stubModel
     });
 
     expect(result).toBeNull();
@@ -60,7 +63,7 @@ describe('repairJsonWithLlm', () => {
     });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {
-      model: 'test-model',
+      model: stubModel,
       schema
     });
 

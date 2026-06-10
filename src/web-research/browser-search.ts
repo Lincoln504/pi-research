@@ -71,7 +71,7 @@ export async function performSearch(
                 metrics.increment('browser_search_results_total', results.length);
                 logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
 
-                const uniqueResults = [];
+                const uniqueResults: SearchResult[] = [];
                 const localSeen = new Set<string>();
                 for (const r of results) {
                     if (r.url && !localSeen.has(r.url)) {

@@ -99,7 +99,7 @@ describe('StateManager Concurrency and Lock Resilience', () => {
   it('should handle high contention without losing updates', async () => {
     // Run 10 concurrent updates to a counter in state (reduced from 20 to reduce flakiness)
     const iterations = 10;
-    const promises = [];
+    const promises: Promise<void>[] = [];
 
     // Initialize state
     await manager.updateState(state => {
@@ -108,7 +108,7 @@ describe('StateManager Concurrency and Lock Resilience', () => {
     });
 
     for (let i = 0; i < iterations; i++) {
-        promises.push(manager.updateState(async (state) => {
+        promises.push(manager.updateState(async (state): Promise<any> => {
             // Add a very small random delay (reduced from 0-50ms to 0-5ms to reduce contention)
             await new Promise(r => setTimeout(r, Math.random() * 5));
             (state as any).counter = ((state as any).counter || 0) + 1;

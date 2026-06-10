@@ -23,7 +23,7 @@ describe('GPUResourceService', () => {
     state = {
       initialized: true,
       lastCleanup: Date.now(),
-    };
+    } as any;
   });
 
   async function updateState(updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) {

@@ -109,7 +109,7 @@ describe('OpenClaw Plugin Integration', () => {
     const result = await researchTool.execute(
         { query: 'test', depth: 0 }, 
         { apiKey: 'test', provider: 'mock', model: 'mock-model', reportExportEnabled: true }, 
-        { cwd: exportCwd }
+        { cwd: exportCwd } as any
     );
 
     expect(result).toContain('integrated research report');
@@ -119,7 +119,7 @@ describe('OpenClaw Plugin Integration', () => {
 
   it('should handle health check', async () => {
     const healthTool = plugin.tools.find(t => t.name === 'health')!;
-    const result = await healthTool.execute({}, {}, {});
+    const result = await healthTool.execute({} as any, {} as any, {});
     expect(result).toContain('Status');
   });
 });

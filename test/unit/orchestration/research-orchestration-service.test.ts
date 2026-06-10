@@ -204,7 +204,7 @@ describe('ResearchOrchestrationService', () => {
       ];
       mockSearch.mockResolvedValue(fakeResults);
 
-      const out = await service.runSearchBurst(['foo', 'bar'], {});
+      const out = await service.runSearchBurst(['foo', 'bar'], {} as any);
 
       expect(out).toBe(fakeResults);
       expect(mockSearch).toHaveBeenCalledOnce();
@@ -216,9 +216,9 @@ describe('ResearchOrchestrationService', () => {
       const signal = new AbortController().signal;
       const onProgress = vi.fn();
 
-      await service.runSearchBurst(['q'], { some: 'config' }, signal, onProgress);
+      await service.runSearchBurst(['q'], { some: 'config' } as any, signal, onProgress);
 
-      expect(mockSearch).toHaveBeenCalledWith(['q'], { some: 'config' }, signal, onProgress);
+      expect(mockSearch).toHaveBeenCalledWith(['q'], { some: 'config' } as any, signal, onProgress);
     });
   });
 

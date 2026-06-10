@@ -144,8 +144,8 @@ import { resetServiceContainer, disposeAllServices } from '../../src/core/servic
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function initSDK(opts: object = {}) {
-  await initResearchSDK({ model: STUB_MODEL, ...opts });
+async function initSDK(opts: Record<string, any> = {}) {
+  await initResearchSDK({ model: STUB_MODEL as any, ...opts });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

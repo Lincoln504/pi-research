@@ -26,7 +26,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
       synthesis: 'The sky is blue [1].',
       citations: ['https://example.com/sky'],
     };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
     expect(coerced.answer_found).toBe(true);
     expect(coerced.synthesis).toBe('The sky is blue [1].');
@@ -38,7 +38,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
       answer_found: false,
       citations: [],
     };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
     expect(coerced.answer_found).toBe(false);
     // synthesis is optional — should be undefined when not provided
@@ -47,7 +47,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
 
   it('rejects when answer_found is missing (required boolean)', () => {
     const input = { citations: ['https://x.com'] };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
     // TypeBox error path is 'undefined' for missing required properties
     expect([...Value.Errors(ResearchKnowledgeSynthesisResponseSchema, coerced)]).toHaveLength(1);
@@ -55,7 +55,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
 
   it('rejects when answer_found is not a boolean', () => {
     const input = { answer_found: 'yes', citations: [] };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
   });
 
@@ -64,7 +64,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     // expected lenient behavior. The real agentic repair pipeline catches
     // truly malformed responses.
     const input = { answer_found: true, synthesis: 'text', citations: 'not-an-array' as any };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     // Convert wraps the string: citations becomes ['not-an-array']
     expect(Array.isArray(coerced.citations)).toBe(true);
   });
@@ -74,14 +74,14 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     // lenient behavior. The agentic repair pipeline (repairJsonWithLlm) uses
     // a stricter re-prompt with the schema to fix truly malformed output.
     const input = { answer_found: true, synthesis: 'text', citations: [42] };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
     expect(coerced.citations[0]).toBe('42'); // number coerced to string
   });
 
   it('accepts citations as an empty array', () => {
     const input = { answer_found: true, citations: [] };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
   });
 
@@ -89,7 +89,7 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     // Type.Object by default allows additional properties in TypeBox —
     // we just verify the required fields are validated correctly
     const input = { answer_found: false, citations: [], extra_field: 'nope' };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input);
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     // TypeBox Object allows additional by default, so it should still pass Check
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
   });

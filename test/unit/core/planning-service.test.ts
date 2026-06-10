@@ -47,7 +47,7 @@ const MOCK_CTX = {
   modelRegistry: {
     getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: 'test-key', headers: {} }),
   },
-};
+} as any;
 
 /** Build a mock `complete()` response with text content. */
 function makeCompleteResponse(text: string, stopReason: StopReason = 'stop') {

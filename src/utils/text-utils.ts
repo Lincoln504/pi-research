@@ -145,7 +145,7 @@ export function parseCitations(report: string): Citation[] {
       url = candidateUrl;
     }
     
-    const descLines = [];
+    const descLines: string[] = [];
     let foundDescTag = false;
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]!.trim();

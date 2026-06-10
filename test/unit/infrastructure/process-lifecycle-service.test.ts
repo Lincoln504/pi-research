@@ -55,7 +55,7 @@ describe('ProcessLifecycleService', () => {
     it('should fallback to ps on non-Linux', async () => {
       vi.stubGlobal('process', { ...process, platform: 'darwin' });
 
-      vi.mocked(execFile).mockImplementation(((_cmd, _args, _opts, cb) => {
+      vi.mocked(execFile).mockImplementation(((_cmd: string, _args: string[], _opts: any, cb: any) => {
         const callback = typeof _opts === 'function' ? _opts : cb;
         (callback as any)(null, '500\n', '');
         return { unref: () => {} };
@@ -77,7 +77,7 @@ describe('ProcessLifecycleService', () => {
     it('should read start time on Windows using powershell', async () => {
       vi.stubGlobal('process', { ...process, platform: 'win32' });
 
-      vi.mocked(execFile).mockImplementation(((_cmd, _args, _opts, cb) => {
+      vi.mocked(execFile).mockImplementation(((_cmd: string, _args: string[], _opts: any, cb: any) => {
         const callback = typeof _opts === 'function' ? _opts : cb;
         (callback as any)(null, '1600000000\n', '');
         return { unref: () => {} };
