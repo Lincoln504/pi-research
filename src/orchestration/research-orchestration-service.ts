@@ -292,7 +292,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    */
   async runSearchBurst(
     queries: string[],
-    config: any,
+    config: Config,
     signal?: AbortSignal,
     onProgress?: (links: number) => void
   ): Promise<QueryResultWithError[]> {

@@ -194,7 +194,7 @@ export class QuickResearchOrchestrator {
         });
 
         try {
-          let timeoutId: NodeJS.Timeout;
+          let timeoutId: NodeJS.Timeout | undefined;
           const timeoutPromise = new Promise<void>((_, reject) => {
               timeoutId = setTimeout(() => {
                   const msg = `Quick research timed out after ${this.config.RESEARCHER_TIMEOUT_MS}ms`;
@@ -229,8 +229,8 @@ export class QuickResearchOrchestrator {
               ] : []),
             ]);
           } finally {
-            clearTimeout(timeoutId!);
-            if (abortCleanup) (abortCleanup as () => void)();
+            clearTimeout(timeoutId);
+            if (abortCleanup) abortCleanup();
           }
           
           let result = ensureAssistantResponse(session, 'Quick');

@@ -180,7 +180,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     });
 
     try {
-      let timeoutId: NodeJS.Timeout;
+      let timeoutId: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise<void>((_, reject) => {
         timeoutId = setTimeout(() => {
           const msg = `Researcher ${id} (${researcherConfig.name}) timed out after ${config.RESEARCHER_TIMEOUT_MS}ms`;
@@ -213,7 +213,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
           ] : []),
         ]);
       } finally {
-        clearTimeout(timeoutId!);
+        clearTimeout(timeoutId);
         abortCleanup?.();
       }
 

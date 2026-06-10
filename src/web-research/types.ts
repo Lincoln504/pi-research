@@ -33,7 +33,15 @@ export interface SearchResult {
   score?: number;
 }
 
-// Timeouts
+export interface ScrapeResult {
+  url: string;
+  success: boolean;
+  markdown: string;
+  error?: string;
+  source?: string;
+  layer?: string;
+  duration?: number;
+}
 /** Timeout for the lightweight fetch layer only (not the full playwright scraper path). */
 export const FETCH_LAYER_TIMEOUT = 10000;
 

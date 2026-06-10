@@ -2,7 +2,10 @@
  * Research Orchestration Types
  */
 
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { Model } from '@earendil-works/pi-ai';
 import type { ResearcherConfig } from '../core/service-interfaces.ts';
+import type { IPlanningService } from '../core/interfaces/planning-interfaces.ts';
 import type { StoreUrlEntry } from '../core/interfaces/knowledge-interfaces.ts';
 import type { Config } from '../config.ts';
 import type { ResearchObserver } from './research-observer.ts';
@@ -20,10 +23,10 @@ export interface RunResearcherOptions {
   round: number;
   query: string;
   complexity: 1 | 2 | 3;
-  ctx: any;
-  model: any;
+  ctx: ExtensionContext;
+  model: Model<any>;
   researchConfig: Config;
-  planningService: any;
+  planningService: IPlanningService;
   observer?: ResearchObserver;
   signal?: AbortSignal;
   excludeTools?: string[];

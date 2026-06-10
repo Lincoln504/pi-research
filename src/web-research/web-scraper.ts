@@ -9,6 +9,7 @@
  */
 
 import type { ScrapeLayerResult } from './scraper-types.ts';
+import type { ScrapeResult } from './types.ts';
 import { checkModule } from './utils.ts';
 import { logger } from '../logger.ts';
 import { runBrowserTask } from '../infrastructure/browser/task-execution-service.ts';
@@ -254,7 +255,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
   }
 }
 
-export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<any> {
+export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<ScrapeResult> {
   if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
@@ -327,7 +328,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   }
 }
 
-export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<any[]> {
+export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<ScrapeResult[]> {
   metrics.increment('scrape_batches_total', 1);
   metrics.observe('scrape_urls_per_batch', urls.length);
   const batchStart = Date.now();
