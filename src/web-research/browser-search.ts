@@ -7,6 +7,7 @@
 import { runWorkerSearch } from '../infrastructure/browser/task-execution-service.ts';
 import { getMaxWorkers } from '../infrastructure/browser/config.ts';
 import { logger } from '../logger.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import type { SearchResult } from './types.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -49,7 +50,7 @@ export async function performSearch(
         const queryStartTime = Date.now();
         const timeoutController = new AbortController();
         const timeoutId = setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
-        if ((timeoutId as any).unref) (timeoutId as any).unref();
+        safeUnref(timeoutId);
 
         try {
             if (signal?.aborted) {

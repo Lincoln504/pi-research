@@ -238,7 +238,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
             // the per-researcher plan item goes into 'config' (overriding the spread),
             // and the app Config moves to 'researchConfig'.
             config: configItem,
-            researchConfig: orchestratorOptions.config,
+            researchConfig: orchestratorOptions.config ?? getConfig(),
             round: currentRound,
             planningService,
             initialLinks,

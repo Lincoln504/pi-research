@@ -108,6 +108,7 @@ export interface IKnowledgeStore extends IService {
   rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null>;
   findDocumentsByUrl(url: string): Promise<StoreDocument[]>;
   findByUrl(url: string): Promise<StoreDocument[]>;
+  countScoped(): Promise<{ local: number; global: number }>;
   
   /** Extended operations */
   addDocuments(docs: StoreDocument[]): Promise<void>;

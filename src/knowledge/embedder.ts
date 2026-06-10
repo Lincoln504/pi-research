@@ -9,6 +9,7 @@
 import { type FeatureExtractionPipeline } from '@huggingface/transformers';
 
 import { logger } from '../logger.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import type { IStateManager } from '../core/service-interfaces.ts';
 import type {
@@ -111,9 +112,7 @@ export class Embedder {
         this.dispose().catch(err => logger.warn('[embedder] Failed to dispose on idle:', err));
       }
     }, this.IDLE_TIMEOUT_MS);
-    if (this.idleTimer && (this.idleTimer as any).unref) {
-      (this.idleTimer as any).unref();
-    }
+    if (this.idleTimer) safeUnref(this.idleTimer);
   }
 
   private stopIdleTimer(): void {

@@ -316,5 +316,5 @@ export class QuickResearchOrchestrator {
           logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);
         }
     }
-    }
-    }
+  }
+}

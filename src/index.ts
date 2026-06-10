@@ -12,7 +12,7 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, getAllTrackedSessions, normalizeSessionId, getActiveSessionCount, popQueuedMessages } from './utils/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -97,11 +97,9 @@ export default async function (pi: ExtensionAPI) {
             if (eCtx.sessionId) {
               sessionIds = [eCtx.sessionId];
             } else {
-              // Fallback: Broadcast to all active sessions if SDK context is missing ID
-              sessionIds = getAllTrackedSessions().filter(id => id && id !== '');
-              if (sessionIds.length > 0) {
-                logger.info(`[pi-research] ctx.sessionId missing. Broadcasting steering to: [${sessionIds.join(', ')}]`);
-              }
+              // sessionId missing — don't broadcast to all sessions to prevent
+              // cross-session steering pollution. Log and skip.
+              logger.warn('[pi-research] ctx.sessionId missing during steer — cannot route steering message. Skipping.');
             }
 
             for (const sid of sessionIds) {

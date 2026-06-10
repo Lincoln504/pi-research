@@ -7,6 +7,7 @@
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
+import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from '../utils/session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING } from '../constants.ts';
@@ -226,7 +227,7 @@ export class DeepResearchOrchestrator {
                     signal?.removeEventListener('abort', onAbort);
                     resolve();
                 }, 5000);
-                if ((timeout as any).unref) (timeout as any).unref();
+                safeUnref(timeout);
                 signal?.addEventListener('abort', onAbort, { once: true });
             });
             

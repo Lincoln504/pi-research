@@ -20,8 +20,8 @@ import {
   type SettingItem
 } from '@earendil-works/pi-tui';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
+import { safeUnref } from './utils/safe-unref.ts';
 import { getConfig, saveConfig, resetConfig, getDbDir, getGlobalEnvFilePath, getLocalEnvFilePath } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService } from './core/service-registry.ts';
@@ -360,7 +360,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         };
 
         countRefreshTimer = setInterval(refreshCount, 5000);
-        if ((countRefreshTimer as any).unref) (countRefreshTimer as any).unref();
+        safeUnref(countRefreshTimer);
 
         return {
           render: (width: number) => {

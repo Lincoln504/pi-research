@@ -65,7 +65,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
     // FIX (New Issue C): Record as a partial failure rather than silently skipping,
     // so the orchestration layer knows coverage was reduced.
-    recordResearcherFailure(ctx.sessionId, researchId, id);
+    recordResearcherFailure((ctx as ExtendedExtensionContext).sessionId, researchId, id);
     metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
     // Notify failure (not completion) since coverage was reduced
     observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');

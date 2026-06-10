@@ -129,10 +129,12 @@ export class PlanningService implements IPlanningService {
       .replace('{{additional_considerations}}', steeringSection);
 
     if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before generating plans`);
-    const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
+    const authResult = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!authResult.ok) throw new Error(`Model auth failed: ${authResult.error}`);
+    const apiKey = authResult.apiKey!;
+    const headers = authResult.headers ?? {};
 
-    logger.log(`[${this.name}] Coordinator auth for model ${model.id}: ok=${auth.ok}, hasApiKey=${!!auth.apiKey}`);
+    logger.log(`[${this.name}] Coordinator auth for model ${model.id}: ok=${authResult.ok}, hasApiKey=${!!authResult.apiKey}`);
 
     let plan: ResearchPlan | null = null;
     let lastRawPlanText!: string;
@@ -156,8 +158,8 @@ export class PlanningService implements IPlanningService {
           systemPrompt: basePlanningPrompt + retryHint,
           messages,
         }, { 
-          apiKey: auth.apiKey, 
-          headers: auth.headers, 
+          apiKey, 
+          headers, 
           signal,
           ...({ reasoning } as any)
         });
@@ -206,7 +208,7 @@ export class PlanningService implements IPlanningService {
           break;
         } catch (_err) {
           // Attempt agentic salvage
-          const salvaged = await repairJsonWithLlm<ResearchPlan>(rawPlanText, completeSimple, auth, {
+          const salvaged = await repairJsonWithLlm<ResearchPlan>(rawPlanText, completeSimple, { apiKey, headers }, {
             model,
             context: coordUserMessage,
             schema: ResearchPlanSchema,
@@ -350,8 +352,10 @@ export class PlanningService implements IPlanningService {
       : '';
 
     if (!this.ctx) throw new Error(`[${this.name}] Not initialized with ctx — call initialize(ctx) before updating plans`);
-    const auth = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(`Model auth failed: ${auth.error}`);
+    const auth2 = await this.ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth2.ok) throw new Error(`Model auth failed: ${auth2.error}`);
+    const evalApiKey = auth2.apiKey!;
+    const evalHeaders = auth2.headers ?? {};
 
     const synthOverride = mustSynthesize
       ? '\n\n**MANDATORY — ABSOLUTE MAXIMUM REACHED**: No further research rounds are permitted. You MUST return `"action": "synthesize"` with a comprehensive synthesis in the `content` field. Do NOT return delegate.'
@@ -365,7 +369,7 @@ export class PlanningService implements IPlanningService {
       try {
         const response = await completeSimple(model, {
           messages: [{ role: 'user', content: [{ type: 'text', text: evalUserMessage }], timestamp: Date.now() }],
-        }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+        }, { apiKey: evalApiKey, headers: evalHeaders, signal });
 
         const responseMetadata = response as LLMResponseMetadata;
         if (responseMetadata.stopReason === 'error' || responseMetadata.stopReason === 'aborted') {
@@ -428,7 +432,7 @@ export class PlanningService implements IPlanningService {
     let extracted = extractJson<ResearchPlan>(text, 'any');
     
     if (!extracted.success && text.trim()) {
-      const salvaged = await repairJsonWithLlm<ResearchPlan>(text, completeSimple, auth, {
+      const salvaged = await repairJsonWithLlm<ResearchPlan>(text, completeSimple, { apiKey: evalApiKey, headers: evalHeaders }, {
         model,
         context: evalUserMessage,
         schema: ResearchPlanSchema,

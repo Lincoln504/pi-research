@@ -6,6 +6,7 @@
  */
 
 import { logger } from '../logger.ts';
+import { safeUnref } from './safe-unref.ts';
 import { randomUUID } from 'node:crypto';
 
 const sessionLinks = new Map<string, Set<string>>();
@@ -37,9 +38,7 @@ function startCleanupTimer(): void {
       logger.debug(`[Shared Links] Cleaned up ${cleaned} orphaned session(s) older than ${SESSION_MAX_AGE_MS / 60000} minutes`);
     }
   }, 15 * 60 * 1000);
-  if (cleanupInterval && (cleanupInterval as any).unref) {
-    (cleanupInterval as any).unref();
-  }
+  if (cleanupInterval) safeUnref(cleanupInterval);
 }
 
 // Start on module load

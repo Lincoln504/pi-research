@@ -36,9 +36,11 @@ export interface RunResearchersOptions {
   options: {
     sessionId: string;
     researchId: string;
+    query: string;
+    complexity: 1 | 2 | 3;
     excludeTools?: string[];
-    ctx?: ExtensionContext;
-    model?: Model<any>;
+    ctx: ExtensionContext;
+    model: Model<any>;
     config?: Config;
     observer?: ResearchObserver;
   };
