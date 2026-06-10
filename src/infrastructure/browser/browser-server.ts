@@ -38,9 +38,10 @@ export class BrowserServer {
         return new Promise((resolve, reject) => {
             this.server = http.createServer(async (req, res) => {
                 // FIX (#21): Validate auth token on every request
-                const authHeader = req.headers['x-browser-auth'];
+                const rawAuth = req.headers['x-browser-auth'];
+                const authHeader = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
                 const expected = Buffer.from(getOrCreateAuthSecret(), 'utf8');
-                const actual = Buffer.from(authHeader, 'utf8');
+                const actual = Buffer.from(authHeader ?? '', 'utf8');
                 if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
                     res.writeHead(403, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Unauthorized' }));

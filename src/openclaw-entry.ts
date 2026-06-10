@@ -300,7 +300,7 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
  * FIX (#14): Shutdown function to clean up services when the plugin is unloaded.
  * Disposes all initialized services to prevent resource leaks.
  */
-async function shutdown(): Promise<void> {
+export async function shutdown(): Promise<void> {
   if (!initialized) return;
   try {
     await shutdownManager.runCleanup('openclaw_shutdown');

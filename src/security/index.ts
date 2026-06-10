@@ -166,7 +166,7 @@ export class SecuritySearcher {
     await Promise.all(searchPromises);
 
     // Apply delay
-    let delay = this.config.requestDelay;
+    let delay = this.config.requestDelay ?? -1;
     if (delay === -1) {
         delay = params.databases.includes('nvd') ? REQUEST_DELAY_MS_NVD : REQUEST_DELAY_MS_OTHER;
     }

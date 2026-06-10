@@ -102,6 +102,7 @@ function isPrivateIp(ip: string): boolean {
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some(p => isNaN(p))) return false;
   const [a, b] = parts;
+  if (a === undefined || b === undefined) return false;
   // 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16,
   // 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 (multicast), 240.0.0.0/4 (reserved)
   return (
