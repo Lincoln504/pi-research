@@ -74,7 +74,7 @@ Use unique, targeted queries for any new researchers.
 **DELEGATION REQUIREMENTS**:
 - **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
-- **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps and topic scope.
+- **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps — a single well-targeted researcher is often sufficient for focused gaps.
 - **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
 - **DEFAULT TO DELEGATE**: When in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.
 
@@ -113,6 +113,6 @@ When delegating, ensure:
 
 - **Researcher IDs**: Use Round.Index format (e.g. **{ROUND_NUMBER}.1**, **{ROUND_NUMBER}.2**).
 - **Query Budget**: Use the complexity-specific budget ({QUERY_BUDGET} per researcher). Fill each researcher's query budget completely.
-- **Team Size**: Use the maximum number of researchers ({MAX_TEAM_SIZE}) when delegating. Don't hold back — maximize parallel coverage.
+- **Team Size**: Scale researcher count to match the gaps. Use up to {MAX_TEAM_SIZE} researchers when delegating, but a single well-targeted researcher is often sufficient for focused gaps. Don't pad the team when fewer researchers will cover the remaining gaps efficiently.
 - **Synthesis Quality**: Logical topic-based structure, maximal detail, NO mention of researchers.
 - **Format**: ONLY return valid JSON in a code block.

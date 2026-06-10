@@ -79,7 +79,7 @@ export interface IPlanningService extends IService {
   getQueryBudget(complexity: 1 | 2 | 3): number;
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string;
   getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string;
-  getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3): string;
+  getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3, maxTeamSize: number): string;
   capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan;
   parseJsonPlan(text: string): ResearchPlan;
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;

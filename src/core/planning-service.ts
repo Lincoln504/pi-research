@@ -325,7 +325,7 @@ export class PlanningService implements IPlanningService {
       .replace('{QUERY_BUDGET}', PlanningUtils.getQueryBudget(complexity).toString())
       .replace('{COMPLEXITY_LABEL}', complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)')
       .replace('{COMPLEXITY_GUIDANCE}', PlanningUtils.getEvaluatorComplexityGuidance(complexity))
-      .replace('{ROUND_PHASE_GUIDANCE}', PlanningUtils.getRoundPhaseGuidance(round, maxRounds, complexity))
+      .replace('{ROUND_PHASE_GUIDANCE}', PlanningUtils.getRoundPhaseGuidance(round, maxRounds, complexity, maxTeamSize))
       .replace('{{previous_queries_section}}', previousQueriesSection)
       .replace('{{initial_agenda_section}}', initialAgendaSection)
       .replace('{{additional_considerations}}', steeringSection)
@@ -563,8 +563,8 @@ export class PlanningService implements IPlanningService {
     return PlanningUtils.getEvaluatorComplexityGuidance(complexity);
   }
 
-  getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3): string {
-    return PlanningUtils.getRoundPhaseGuidance(currentRound, maxRounds, complexity);
+  getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3, maxTeamSize: number): string {
+    return PlanningUtils.getRoundPhaseGuidance(currentRound, maxRounds, complexity, maxTeamSize);
   }
 
   capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan {

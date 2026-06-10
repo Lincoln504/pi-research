@@ -155,71 +155,88 @@ describe('getEvaluatorComplexityGuidance', () => {
 describe('getRoundPhaseGuidance', () => {
   // Early phase: roundRatio <= 0.5 → round 1 of 4 = 0.25
   it('early phase (level 1): round 1 of 4', () => {
-    const result = getRoundPhaseGuidance(1, 4, 1);
+    const result = getRoundPhaseGuidance(1, 4, 1, 2);
     expect(result).toContain('EARLY');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('early phase (level 2): round 1 of 4', () => {
-    const result = getRoundPhaseGuidance(1, 4, 2);
+    const result = getRoundPhaseGuidance(1, 4, 2, 3);
     expect(result).toContain('EARLY');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('early phase (level 3): round 1 of 4', () => {
-    const result = getRoundPhaseGuidance(1, 4, 3);
+    const result = getRoundPhaseGuidance(1, 4, 3, 5);
     expect(result).toContain('EARLY');
     expect(result.length).toBeGreaterThan(0);
   });
 
   // Middle phase: 0.5 < roundRatio <= 0.8 → round 3 of 5 = 0.6
   it('middle phase (level 1): round 3 of 5', () => {
-    const result = getRoundPhaseGuidance(3, 5, 1);
+    const result = getRoundPhaseGuidance(3, 5, 1, 2);
     expect(result).toContain('MIDDLE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('middle phase (level 2): round 3 of 5', () => {
-    const result = getRoundPhaseGuidance(3, 5, 2);
+    const result = getRoundPhaseGuidance(3, 5, 2, 3);
     expect(result).toContain('MIDDLE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('middle phase (level 3): round 3 of 5', () => {
-    const result = getRoundPhaseGuidance(3, 5, 3);
+    const result = getRoundPhaseGuidance(3, 5, 3, 5);
     expect(result).toContain('MIDDLE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   // Late phase: roundRatio > 0.8 → round 4 of 5 = 0.8 is not > 0.8, use round 5 of 5 = 1.0
   it('late phase (level 1): round 5 of 5', () => {
-    const result = getRoundPhaseGuidance(5, 5, 1);
+    const result = getRoundPhaseGuidance(5, 5, 1, 2);
     expect(result).toContain('LATE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('late phase (level 2): round 5 of 5', () => {
-    const result = getRoundPhaseGuidance(5, 5, 2);
+    const result = getRoundPhaseGuidance(5, 5, 2, 3);
     expect(result).toContain('LATE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   it('late phase (level 3): round 5 of 5', () => {
-    const result = getRoundPhaseGuidance(5, 5, 3);
+    const result = getRoundPhaseGuidance(5, 5, 3, 5);
     expect(result).toContain('LATE');
     expect(result.length).toBeGreaterThan(0);
   });
 
   // Boundary: roundRatio exactly 0.5 is still early
   it('roundRatio exactly 0.5 is early phase', () => {
-    const result = getRoundPhaseGuidance(2, 4, 1);
+    const result = getRoundPhaseGuidance(2, 4, 1, 2);
     expect(result).toContain('EARLY');
   });
 
   // Boundary: roundRatio exactly 0.8 is still middle
   it('roundRatio exactly 0.8 is middle phase', () => {
-    const result = getRoundPhaseGuidance(4, 5, 1);
+    const result = getRoundPhaseGuidance(4, 5, 1, 2);
     expect(result).toContain('MIDDLE');
+  });
+
+  // The maxTeamSize count is surfaced in every phase so the evaluator is reminded
+  // it can use fewer than the full team when gaps are focused.
+  it('surfaces the researcher count in early phase', () => {
+    const result = getRoundPhaseGuidance(1, 4, 3, 5);
+    expect(result).toContain('all 5 researchers');
+  });
+
+  it('surfaces the researcher count in middle phase', () => {
+    const result = getRoundPhaseGuidance(3, 5, 3, 5);
+    expect(result).toContain('all 5 researchers');
+  });
+
+  it('surfaces the researcher count in late phase', () => {
+    const result = getRoundPhaseGuidance(5, 5, 3, 5);
+    expect(result).toContain('all 5 researchers');
   });
 });
 

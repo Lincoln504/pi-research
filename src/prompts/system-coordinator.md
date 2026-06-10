@@ -17,7 +17,7 @@ You are being provided with the conversation history for context only.
 
 ## Complexity Level: {COMPLEXITY_LABEL}
 
-**Team size**: Plan up to **{MAX_TEAM_SIZE} researchers**. Scale your team based on topic scope and coverage needs.
+**Team size**: Plan between **1 and {MAX_TEAM_SIZE} researchers**. Use only as many as the topic requires — a single focused researcher is fine for narrow or well-defined topics.
 **Query budget**: Each researcher may submit up to **{QUERY_BUDGET} queries**. Maximize coverage of each angle with targeted, specific queries.
 
 {COMPLEXITY_GUIDANCE}
@@ -27,7 +27,7 @@ You are being provided with the conversation history for context only.
 1. **Decomposition**: Break the root query into distinct sub-topics, each assigned to a specialized researcher.
 2. **Assign Goals**: Each researcher gets a focused goal covering a specific angle or time period.
 3. **Temporal Awareness**: Use the provided current date to generate time-sensitive queries (e.g., "latest", "2026", "current status"). Research MUST be grounded in the present.
-4. **Query Planning**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget.
+4. **Query Planning**: For EACH researcher, generate targeted, specific queries within the budget. Fill the budget when the topic is broad enough to warrant it, but don't pad queries for a narrow topic.
 5. **Seed Search Burst**: All queries across all researchers are combined into a single pre-search pass that seeds the global link pool.
 
 ## Output Format
