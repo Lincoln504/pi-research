@@ -27,6 +27,7 @@ import type {
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
+import { extractUsage } from '../types/llm.ts';
 import { getService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
@@ -79,7 +80,7 @@ const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
  * reads this as a signal to pivot to live web research.
  */
 const RESEARCH_KNOWLEDGE_MISS_STRING =
-  'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
+  'No results found. Live research can get the info.';
 
 /**
  * System string appended when the knowledge store returned partial results.
@@ -87,8 +88,7 @@ const RESEARCH_KNOWLEDGE_MISS_STRING =
  * continue with live research for a more complete answer.
  */
 const RESEARCH_KNOWLEDGE_MAYBE_STRING =
-  'Partial data found in research knowledge store. The synthesis above summarizes what is available. ' +
-  'You should still proceed with live web research to fill gaps and get a more complete answer.';
+  'Partial results found in knowledge store. Live research can fill gaps.';
 
 // ---------------------------------------------------------------------------
 // TUI Helpers
@@ -303,6 +303,16 @@ async function runBackgroundExtraction(
       { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
     ],
   }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+
+  // Track token and cost metrics for the background synthesis call
+  const rawUsage = (response as any).usage;
+  if (rawUsage) {
+    const { tokens, cost } = extractUsage(model, rawUsage);
+    if (tokens > 0 || cost > 0) {
+      metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_search' });
+      metrics.increment('llm_cost_total', cost, { component: 'knowledge_search' });
+    }
+  }
 
   // Extract text using the typed find pattern (matches planning-service.ts)
   const textContent = response.content?.find((c): c is TextContent => c.type === 'text');

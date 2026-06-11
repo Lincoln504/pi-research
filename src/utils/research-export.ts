@@ -192,7 +192,7 @@ export async function exportResearchReport(
  */
 export function appendExportMessage(result: string, filepath: string, totalCost?: number): string {
   let footer = `\n\n---\n\nResearch report saved to: ${filepath}`;
-  if (totalCost !== undefined) {
+  if (totalCost !== undefined && totalCost > 0) {
     const costStr = totalCost < 0.01 ? '<$0.01' : `$${totalCost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
     footer += `\nTotal cost: ${costStr}`;
   }

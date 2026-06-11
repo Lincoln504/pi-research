@@ -347,4 +347,38 @@ describe('tools/scrape — Session URL Pool footer', () => {
     expect(text).toContain('PROTOCOL COMPLETE');
     expect(text).not.toContain('Session URL Pool');
   });
+
+  it('should exclude own researcher\'s previously-scraped URLs from footer', async () => {
+    // Simulate: researcher R1 previously scraped sibling.com/page1 (registered in pool + researcherScrapes)
+    registerScrapedLinks(researchId, ['https://sibling.com/page1', 'https://other-researcher.com/page']);
+    const sharedLinks = await import('../../../src/utils/shared-links.ts');
+    sharedLinks.registerResearcherScrapes(researchId, 'R1', ['https://sibling.com/page1']);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      researcherId: 'R1',
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    const result = await tool.execute('call-1', { urls: ['https://new.com/page'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    expect(text).toContain('Session URL Pool');
+    // URL scraped by R1 should be excluded from R1's footer
+    expect(text).not.toContain('https://sibling.com/page1');
+    // URL from other researcher should still appear
+    expect(text).toContain('https://other-researcher.com/page');
+  });
 });

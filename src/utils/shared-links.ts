@@ -33,6 +33,7 @@ function startCleanupTimer(): void {
         sessionLinks.delete(researchId);
         sessionScrapedContent.delete(researchId);
         sessionTimestamps.delete(researchId);
+        researcherScrapes.delete(researchId);
         cleaned++;
       }
     }
@@ -202,11 +203,20 @@ export function getResearcherScrapes(researchId: string, researcherId: string): 
  */
 const MAX_FOOTER_URLS = 20;
 
-export function buildSessionPoolFooter(researchId: string, currentBatchUrls: string[]): string {
+export function buildSessionPoolFooter(researchId: string, currentBatchUrls: string[], researcherId?: string): string {
     const pool = sessionLinks.get(researchId);
     if (!pool || pool.size === 0) return '';
 
     const currentNormalized = new Set(currentBatchUrls.map(u => normalizeUrl(u)));
+    // Also exclude URLs the current researcher already scraped in earlier batches
+    if (researcherId) {
+      const ownScrapes = researcherScrapes.get(researchId)?.get(researcherId);
+      if (ownScrapes) {
+        for (const url of ownScrapes) {
+          currentNormalized.add(url);
+        }
+      }
+    }
     const eligible = Array.from(pool).filter(u => !currentNormalized.has(u));
     if (eligible.length === 0) return '';
 
@@ -214,7 +224,7 @@ export function buildSessionPoolFooter(researchId: string, currentBatchUrls: str
     const overflow = eligible.length - capped.length;
 
     let footer = '\n---\n## Session URL Pool\n';
-    footer += 'Other URLs scraped in this session (for discovery — skip any already read):\n';
+    footer += 'Info only — URLs scraped by other researchers in this session. Do NOT use these in your report.\n';
     for (const url of capped) {
         footer += `- ${url}\n`;
     }

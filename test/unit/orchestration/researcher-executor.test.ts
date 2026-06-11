@@ -63,9 +63,12 @@ const { mockPrompt, mockAbort, mockSubscribe, mockRegister, mockUnregister, mock
 
 vi.mock('../../../src/orchestration/researcher.ts', () => ({
   createResearcherSession: vi.fn(() => Promise.resolve({
-    prompt: mockPrompt,
-    abort: mockAbort,
-    subscribe: mockSubscribe,
+    session: {
+      prompt: mockPrompt,
+      abort: mockAbort,
+      subscribe: mockSubscribe,
+    },
+    resolvedModel: { id: 'test-model' } as any,
   })),
 }));
 

@@ -66,10 +66,11 @@ export const ConfigSchema = Type.Object({
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
   /** Timeout for individual browser tasks (default: 10000ms) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
-  /** LLM Model override for all research sub-tasks: researchers, coordinator, evaluator, and knowledge synthesis.
+  /** LLM Model override for researcher sub-agents and knowledge synthesis.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
-   *  When set, this overrides ctx.model for researcher sub-agents and the knowledge synthesis background LLM.
-   *  The coordinator and evaluator continue to use the caller's model unless explicitly overridden here.
+   *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
+   *  and the knowledge synthesis background LLM. The coordinator and evaluator always
+   *  use the caller's model (ctx.model).
    */
   RESEARCH_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */

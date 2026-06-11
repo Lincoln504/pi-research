@@ -30,7 +30,6 @@ export async function performSearch(
 
     metrics.setGauge('browser_search_max_workers', maxWorkers);
     metrics.increment('browser_search_orchestrations_total', 1);
-    metrics.increment('browser_search_queries_total', queries.length);
 
     logger.log(`[Search] Orchestrating ${queries.length} queries across ${maxWorkers} worker processes...`);
 

@@ -42,7 +42,13 @@ export interface CreateResearcherSessionOptions {
   config?: Config;
 }
 
-export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<AgentSession> {
+export interface ResolvedResearcherSession {
+  session: AgentSession;
+  /** The model actually used for this session (after RESEARCH_MODEL resolution). */
+  resolvedModel: Model<any>;
+}
+
+export async function createResearcherSession(options: CreateResearcherSessionOptions): Promise<ResolvedResearcherSession> {
   const {
     cwd,
     ctxModel,
@@ -138,7 +144,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       throw new Error('Session creation returned invalid result');
     }
 
-    return result.session;
+    return { session: result.session, resolvedModel: modelToUse };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create researcher session: ${errorMsg}`, {

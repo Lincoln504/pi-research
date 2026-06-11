@@ -127,7 +127,7 @@ export class QuickResearchOrchestrator {
         logger.debug(`[QuickOrchestrator] System Prompt:\n${prompt}`);
 
         let lastSeenSearchCount = 0;
-        const session = await createResearcherSession({
+        const { session, resolvedModel } = await createResearcherSession({
           cwd: ctx.cwd,
           ctxModel: model,
           modelRegistry: ctx.modelRegistry,
@@ -135,6 +135,7 @@ export class QuickResearchOrchestrator {
           systemPrompt: prompt,
           extensionCtx: ctx,
           excludeTools: this.options.excludeTools || ['grep'],
+          config: this.config,
           getGlobalState: (): SystemResearchState => ({
             version: 1,
             researchId: this.options.researchId,
@@ -188,7 +189,7 @@ export class QuickResearchOrchestrator {
 
                 const rawUsage = msg['usage'] as any;
                 if (rawUsage) {
-                    const { tokens, cost } = extractUsage(model, rawUsage);
+                    const { tokens, cost } = extractUsage(resolvedModel, rawUsage);
 
                     if (tokens > 0 || cost > 0) {
                         metrics.increment('llm_tokens_total', tokens, { component: 'quick_researcher', complexity: '0' });

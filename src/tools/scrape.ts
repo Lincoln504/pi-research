@@ -175,7 +175,7 @@ export function createScrapeTool(options: {
       if (dedupedUrls.length === 0 && duplicateResults.length === 0) {
         metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates_no_content' });
         // Add footer with alternative URLs for discovery
-        const earlyFooter = buildSessionPoolFooter(getGlobalState().researchId, rawUrls);
+        const earlyFooter = buildSessionPoolFooter(getGlobalState().researchId, rawUrls, options.researcherId);
         return {
           content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool, but no cached content was available.${earlyFooter}` }],
           details: { all_duplicates: true },
@@ -301,7 +301,7 @@ export function createScrapeTool(options: {
       }
 
       // Append Session URL Pool footer
-      markdown += buildSessionPoolFooter(getGlobalState().researchId, rawUrls);
+      markdown += buildSessionPoolFooter(getGlobalState().researchId, rawUrls, options.researcherId);
 
       return {
         content: [{ type: 'text', text: markdown }],

@@ -151,4 +151,32 @@ describe('appendExportMessage', () => {
 
     expect(final).toBe(`${result}\n\n---\n\nResearch report saved to: ${filepath}`);
   });
+
+  it('should show cost when totalCost > 0', () => {
+    const result = 'Research content';
+    const filepath = '/tmp/test.md';
+
+    const final = appendExportMessage(result, filepath, 0.05);
+
+    expect(final).toContain('Total cost: $0.05');
+  });
+
+  it('should NOT show cost when totalCost is 0', () => {
+    const result = 'Research content';
+    const filepath = '/tmp/test.md';
+
+    const final = appendExportMessage(result, filepath, 0);
+
+    expect(final).not.toContain('Total cost');
+    expect(final).toContain('Research report saved to');
+  });
+
+  it('should NOT show cost when totalCost is undefined', () => {
+    const result = 'Research content';
+    const filepath = '/tmp/test.md';
+
+    const final = appendExportMessage(result, filepath);
+
+    expect(final).not.toContain('Total cost');
+  });
 });

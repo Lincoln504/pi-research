@@ -47,6 +47,8 @@ export interface ResearchStats {
   errors: number;
   /** Total LLM tokens consumed. */
   tokens: number;
+  /** Total cost in USD across all LLM calls. */
+  cost: number;
   /** Tool usage counts. */
   toolUsage: {
     searches: number;
@@ -193,6 +195,9 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   // Tokens — sum all label variants
   const tokens = sumCounter(counters, 'llm_tokens_total');
 
+  // Cost — sum all label variants
+  const cost = sumCounter(counters, 'llm_cost_total');
+
   // Duration from histogram
   const durationMs = histograms['research_session_duration_ms{mode="deep",complexity="1",status="success"}']?.max ||
     histograms['research_session_duration_ms{mode="deep",complexity="2",status="success"}']?.max ||
@@ -232,6 +237,7 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
     urlsFailed,
     errors,
     tokens,
+    cost,
     toolUsage,
   };
 }
@@ -323,6 +329,10 @@ export function buildResearchSummary(
   const resourceParts: string[] = [];
   if (stats.tokens > 0) {
     resourceParts.push(`**${formatTokens(stats.tokens)}** tokens`);
+  }
+  if (stats.cost > 0) {
+    const costStr = stats.cost < 0.01 ? '<$0.01' : `$${stats.cost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
+    resourceParts.push(`cost: **${costStr}**`);
   }
   if (stats.durationMs > 0) {
     resourceParts.push(`completed in **${formatDuration(stats.durationMs)}**`);

@@ -32,8 +32,12 @@ Combine historical URLs and search results into a unified pool. Use previous ses
 ### Step 2: Scrape Round 1
 Identify the 4 most promising URLs and scrape them. Prioritize primary sources, authoritative references, and dense documentation.
 
-### Step 3: Discover and Scrape Round 2 (if needed)
-After analyzing your Batch 1 results, check the **Session URL Pool** at the bottom of each scrape response for URLs scraped by sibling researchers. Identify up to 4 additional high-value links to fill gaps or add source diversity. Do not re-scrape URLs you have already read.
+### Step 3: Scrape Round 2 (if needed)
+If your first batch did not yield enough material, scrape up to 4 additional URLs from **your own source list** that you haven't read yet. Before choosing, review the **Session URL Pool** at the bottom of each scrape response — it shows what topics and domains your sibling researchers are already covering. Use this to steer your remaining scrapes from your own list:
+- **Complement** your siblings: if they're covering area X, pick your own URLs that go deeper on X or fill adjacent gaps.
+- **Diversify**: if you have sources on an angle no one else is touching, prioritize those to maximize session coverage.
+- **Stay on mission**: regardless of what siblings are doing, make sure you have enough material for your assigned goal.
+Do NOT scrape URLs directly from the pool — only scrape URLs from your own source list.
 
 ### Step 4: Synthesize
 Write your report immediately after scraping is complete or if "Budget Reached". Make no further tool calls after beginning synthesis.
@@ -51,7 +55,7 @@ Write your report immediately after scraping is complete or if "Budget Reached".
   - `read`: Use ONLY if local codebase context is explicitly required.
 {{extra_tool_guidelines}}
 
-- **Pool Discovery**: URLs in the Session URL Pool footer are for discovery only. You must scrape a URL before citing it. Adding a URL to CITED LINKS that you did not personally scrape is a grounding violation.
+- **Session URL Pool**: Each scrape response includes a "Session URL Pool" section showing what URLs other researchers have scraped. Use it as directional context — it tells you what areas siblings are already covering so you can decide whether to complement or diverge with your remaining scrapes. **Do NOT scrape, cite, or reference any URL from the pool itself.** Only scrape URLs from your own source list. Your report's sources come exclusively from your own scraping.
 - **Specialized Tooling**: Use `stackexchange` and `security_search` only when the topic specifically requires them. Do not use as exploratory steps.
 - **Citations**: Use plain [N] markers. Do NOT bold the [N]. Example: "...was established in 226 CE [3][10]."
 - **Sources**: Every piece of information must come from a page you scraped or a tool result. Do not add context from your prior knowledge.

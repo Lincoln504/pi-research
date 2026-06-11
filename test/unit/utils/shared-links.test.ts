@@ -12,7 +12,8 @@ import {
   registerResearcherScrapes,
   didResearcherScrape,
   getResearcherScrapes,
-  cleanupSharedLinks
+  cleanupSharedLinks,
+  buildSessionPoolFooter
 } from '../../../src/utils/shared-links.ts';
 
 describe('shared-links', () => {
@@ -106,6 +107,56 @@ describe('shared-links', () => {
       registerResearcherScrapes(researchId, 'r1', ['https://a.com']);
       cleanupSharedLinks(researchId);
       expect(getResearcherScrapes(researchId, 'r1')).toEqual([]);
+    });
+  });
+
+  describe('buildSessionPoolFooter', () => {
+    it('should return empty string when pool is empty', () => {
+      expect(buildSessionPoolFooter(researchId, [])).toBe('');
+    });
+
+    it('should return URLs not in current batch', () => {
+      registerScrapedLinks(researchId, ['https://a.com', 'https://b.com', 'https://c.com']);
+      const footer = buildSessionPoolFooter(researchId, ['https://a.com']);
+      expect(footer).not.toContain('https://a.com');
+      expect(footer).toContain('https://b.com');
+      expect(footer).toContain('https://c.com');
+      cleanupSharedLinks(researchId);
+    });
+
+    it('should exclude URLs previously scraped by the given researcher', () => {
+      registerScrapedLinks(researchId, ['https://own.com/page', 'https://other.com/page']);
+      registerResearcherScrapes(researchId, 'R1', ['https://own.com/page']);
+      const footer = buildSessionPoolFooter(researchId, [], 'R1');
+      expect(footer).not.toContain('https://own.com/page');
+      expect(footer).toContain('https://other.com/page');
+      cleanupSharedLinks(researchId);
+    });
+
+    it('should return empty string when all URLs are excluded', () => {
+      registerScrapedLinks(researchId, ['https://a.com']);
+      const footer = buildSessionPoolFooter(researchId, ['https://a.com']);
+      expect(footer).toBe('');
+      cleanupSharedLinks(researchId);
+    });
+
+    it('should cap at 20 URLs with overflow', () => {
+      const urls = Array.from({ length: 25 }, (_, i) => `https://pool.com/${i}`);
+      registerScrapedLinks(researchId, urls);
+      const footer = buildSessionPoolFooter(researchId, []);
+      expect(footer).toContain('...and 5 more');
+      expect(footer).toContain('Session URL Pool');
+      cleanupSharedLinks(researchId);
+    });
+
+    it('should work without researcherId (no per-researcher filtering)', () => {
+      registerScrapedLinks(researchId, ['https://a.com', 'https://b.com']);
+      registerResearcherScrapes(researchId, 'R1', ['https://a.com']);
+      // Without researcherId, all pool URLs (minus current batch) appear
+      const footer = buildSessionPoolFooter(researchId, ['https://b.com']);
+      expect(footer).toContain('https://a.com');
+      expect(footer).not.toContain('https://b.com');
+      cleanupSharedLinks(researchId);
     });
   });
 });

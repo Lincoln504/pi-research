@@ -103,7 +103,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
 
-    const session = await createResearcherSession({
+    const { session, resolvedModel } = await createResearcherSession({
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
@@ -177,7 +177,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
         const rawUsage = msg['usage'] as any;
         if (rawUsage) {
-          const { tokens, cost } = extractUsage(model, rawUsage);
+          const { tokens, cost } = extractUsage(resolvedModel, rawUsage);
 
           if (tokens > 0 || cost > 0) {
             metrics.increment('llm_tokens_total', tokens, { component: 'researcher', complexity: String(complexity) });

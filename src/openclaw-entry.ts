@@ -28,7 +28,7 @@ import { randomUUID } from 'node:crypto';
 
 // pi-research internals (same imports used by sdk.ts)
 import { registerCoreServices, initializeCoreServices } from './core/service-initialization.ts';
-import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
+import { registerInfrastructureServices, shutdownInfrastructureServices } from './infrastructure/service-initialization.ts';
 import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
@@ -243,6 +243,7 @@ export async function shutdown(): Promise<void> {
   if (!initialized) return;
   try {
     await shutdownManager.runCleanup('openclaw_shutdown');
+    await shutdownInfrastructureServices();
     await disposeCoreServices();
     await resetServiceContainer();
   } finally {
@@ -314,7 +315,7 @@ export default {
             minimum: 0,
             maximum: 3,
             default: 1,
-            description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (up to 2 researchers, 2 rounds), 2=deep (up to 3 researchers, 3 rounds), 3=ultra (up to 5 researchers, 5 rounds).',
+            description: 'Research complexity. 0=quick (single researcher, fast), 1=normal (up to 2 researchers, 2 rounds), 2=deep (up to 3 researchers, 3 rounds), 3=ultra (up to 5 researchers, 3 rounds).',
           })),
           excludeTools: Type.Optional(Type.Array(Type.String(), {
             description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange). Defaults to ["grep", "read"].',

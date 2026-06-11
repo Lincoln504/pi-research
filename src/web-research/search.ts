@@ -32,7 +32,6 @@ export async function search(
   if (queries.length === 0) return [];
   
   logger.log(`[Search] Orchestrating ${queries.length} queries via Browser Queue...`);
-  metrics.increment('search_queries_total', queries.length);
   metrics.observe('search_query_count_per_request', queries.length);
   const searchStart = Date.now();
   
@@ -59,7 +58,6 @@ export async function search(
           message: 'Browser-based search returned no results. This may indicate an IP block or lack of relevant data.' 
         };
         failedQueries++;
-        metrics.increment('search_queries_total', 1, { status: 'empty_results' });
       }
       return result;
     });

@@ -64,7 +64,7 @@ describe('Flash queue system', () => {
   // Queue sequencing with inter-flash gaps
   // =========================================================================
 
-  it('plays queued flashes sequentially with 80ms gaps, triggering onUpdate at each transition', () => {
+  it('plays queued flashes sequentially with 150ms gaps, triggering onUpdate at each transition', () => {
     const state = makeState();
     const onUpdate = vi.fn();
     addSlice(state, '1', '1');
@@ -76,25 +76,25 @@ describe('Flash queue system', () => {
     flashSlice(state, '1', 'red', onUpdate);
     expect(state.slices.get('1')!.flash).toBe('green');
 
-    // Timeline: green(400) → gap(80) → red(700) → gap(80) → green(400) → gap(80) → red(700)
+    // Timeline: green(400) → gap(150) → red(700) → gap(150) → green(400) → gap(150) → red(700)
     const snapshot = () => state.slices.get('1')!.flash as string | null;
 
     vi.advanceTimersByTime(400);
     const atGap1 = snapshot(); // gap — null
 
-    vi.advanceTimersByTime(80);
+    vi.advanceTimersByTime(150);
     const atRed1 = snapshot(); // 2nd flash — red
 
     vi.advanceTimersByTime(700);
     const atGap2 = snapshot(); // gap — null
 
-    vi.advanceTimersByTime(80);
+    vi.advanceTimersByTime(150);
     const atGreen2 = snapshot(); // 3rd flash — green
 
     vi.advanceTimersByTime(400);
     const atGap3 = snapshot(); // gap — null
 
-    vi.advanceTimersByTime(80);
+    vi.advanceTimersByTime(150);
     const atRed2 = snapshot(); // 4th flash — red
 
     vi.advanceTimersByTime(700);
@@ -122,7 +122,7 @@ describe('Flash queue system', () => {
     flashSlice(state, '1', 'green', onUpdate);
     flashSlice(state, '1', 'red', onUpdate); // queued
 
-    // Advance past green into the 80ms gap
+    // Advance past green into the 150ms gap
     vi.advanceTimersByTime(400);
     expect(state.slices.get('1')!.flash).toBeNull(); // gap
 
@@ -130,11 +130,11 @@ describe('Flash queue system', () => {
     flashSlice(state, '1', 'green', onUpdate);
 
     // After gap ends, red (the already-queued second flash) should start, not green
-    vi.advanceTimersByTime(80);
+    vi.advanceTimersByTime(150);
     expect(state.slices.get('1')!.flash).toBe('red');
 
     // After red, green (the third flash) should follow
-    vi.advanceTimersByTime(700 + 80);
+    vi.advanceTimersByTime(700 + 150);
     expect(state.slices.get('1')!.flash).toBe('green');
 
     vi.advanceTimersByTime(400);
@@ -270,16 +270,16 @@ describe('Flash queue system', () => {
     }
 
     // Walk through the full timeline and count distinct flash appearances.
-    // Expected: 1 green (400ms) + 8 red (700ms each) + 8 gaps (80ms each) = 9 flashes
+    // Expected: 1 green (400ms) + 8 red (700ms each) + 8 gaps (150ms each) = 9 flashes
     const transitions: Array<string | null> = [];
     let prev = state.slices.get('1')!.flash;
 
-    // 1 green + 8 red with gaps = 400 + 8*(700+80) = 400 + 6240 = 6640ms total
+    // 1 green + 8 red with gaps = 400 + 8*(700+150) = 400 + 6800 = 7200ms total
     vi.advanceTimersByTime(400); // green expires → gap
     transitions.push(state.slices.get('1')!.flash);
 
     for (let i = 0; i < 8; i++) {
-      vi.advanceTimersByTime(80); // gap → red starts
+      vi.advanceTimersByTime(150); // gap → red starts
       transitions.push(state.slices.get('1')!.flash);
       vi.advanceTimersByTime(700); // red expires → gap (or done)
       transitions.push(state.slices.get('1')!.flash);
@@ -322,22 +322,22 @@ describe('Flash queue system', () => {
     expect(state.slices.get('a')!.flash).toBeNull(); // gap
     expect(state.slices.get('b')!.flash).toBe('red');
 
-    // t=480: a's gap ends → a starts red. b's red still active (220ms left)
-    vi.advanceTimersByTime(80);
+    // t=550: a's gap ends → a starts red. b still red (150ms left)
+    vi.advanceTimersByTime(150);
     expect(state.slices.get('a')!.flash).toBe('red');
     expect(state.slices.get('b')!.flash).toBe('red');
 
-    // t=700: b's red expires → b enters gap. a's red still active (280ms left)
-    vi.advanceTimersByTime(220);
+    // t=700: b's red expires → b enters gap. a's red still active (550ms left)
+    vi.advanceTimersByTime(150);
     expect(state.slices.get('a')!.flash).toBe('red');
     expect(state.slices.get('b')!.flash).toBeNull(); // gap
 
-    // t=780: b's gap ends → b starts green. a's red still active (200ms left)
-    vi.advanceTimersByTime(80);
+    // t=850: b's gap ends → b starts green. a's red still active (400ms left)
+    vi.advanceTimersByTime(150);
     expect(state.slices.get('a')!.flash).toBe('red');
     expect(state.slices.get('b')!.flash).toBe('green');
 
-    // t=1180: a's red expires (400+80+700=1180). b's green expired at t=780+400=1180
+    // Both expire at t=1250: a's red (550+700=1250), b's green (850+400=1250)
     vi.advanceTimersByTime(400);
     expect(state.slices.get('a')!.flash).toBeNull();
     expect(state.slices.get('b')!.flash).toBeNull();
@@ -381,8 +381,8 @@ describe('Flash queue system', () => {
     flashSlice(state, '1', 'green', onUpdate);
     flashSlice(state, '1', 'green', onUpdate);
 
-    // Drain: green(400) + gap(80) + green(400)
-    vi.advanceTimersByTime(400 + 80 + 400);
+    // Drain: green(400) + gap(150) + green(400)
+    vi.advanceTimersByTime(400 + 150 + 400);
     expect(state.slices.get('1')!.flash).toBeNull();
 
     // Batch 2: 3 URLs — a second scrape call in the same researcher
@@ -392,7 +392,7 @@ describe('Flash queue system', () => {
 
     expect(state.slices.get('1')!.flash).toBe('green');
 
-    vi.advanceTimersByTime(400 + 80 + 700 + 80 + 400);
+    vi.advanceTimersByTime(400 + 150 + 700 + 150 + 400);
     expect(state.slices.get('1')!.flash).toBeNull();
 
     // Batch 3: 1 URL — flashes still work after many rounds

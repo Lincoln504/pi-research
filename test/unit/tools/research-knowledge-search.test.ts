@@ -276,18 +276,16 @@ describe('Reference document token budget enforcement', () => {
 // ---------------------------------------------------------------------------
 describe('Orchestration steering — tri-state answer_status', () => {
   const MISS_STRING =
-    'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
+    'No results found. Live research can get the info.';
 
   const MAYBE_STRING =
-    'Partial data found in research knowledge store. The synthesis above summarizes what is available. ' +
-    'You should still proceed with live web research to fill gaps and get a more complete answer.';
+    'Partial results found in knowledge store. Live research can fill gaps.';
 
   it('returns the pivot string when answer_status is "no"', () => {
     const result = { answer_status: 'no' as const, synthesis: '', citations: [] };
     const output = result.answer_status === 'no' ? MISS_STRING : result.synthesis;
     expect(output).toBe(MISS_STRING);
-    expect(output).toContain('No relevant data found');
-    expect(output).toContain('proceed with live web research');
+    expect(output).toContain('No results found');
   });
 
   it('returns synthesis with Sources section when answer_status is "yes"', () => {
@@ -322,7 +320,7 @@ describe('Orchestration steering — tri-state answer_status', () => {
 
     expect(report).toContain('Partial: sky may be blue');
     expect(report).toContain(MAYBE_STRING);
-    expect(report).toContain('proceed with live web research');
+    expect(report).toContain('Live research can fill gaps');
   });
 
   it('returns synthesis without Sources section when citations are empty', () => {

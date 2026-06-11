@@ -19,7 +19,7 @@ export const FLASH_GREEN_DURATION_MS = 400;
 export const FLASH_RED_DURATION_MS = 700;
 
 /** Minimum gap (ms) between queued flashes for the same researcher column */
-export const FLASH_QUEUE_GAP_MS = 80;
+export const FLASH_QUEUE_GAP_MS = 150;
 
 // ==================== Research Constraints ====================
 
@@ -66,7 +66,7 @@ export const MAX_TEAM_SIZE_LEVEL_3 = 5;
 /** Maximum research rounds per complexity level */
 export const MAX_ROUNDS_LEVEL_1 = 2;
 export const MAX_ROUNDS_LEVEL_2 = 3;
-export const MAX_ROUNDS_LEVEL_3 = 5;
+export const MAX_ROUNDS_LEVEL_3 = 3;
 
 /**
  * Additional research rounds allowed past MAX_ROUNDS_LEVEL_n when queued
@@ -120,7 +120,6 @@ export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
 // ==================== UI Constants ====================
 
-export const MAX_REPORT_LENGTH = 200000;
 
 // ==================== Orchestrator Constants ====================
 
