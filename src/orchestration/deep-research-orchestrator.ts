@@ -390,6 +390,23 @@ export class DeepResearchOrchestrator {
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'error' });
       logger.error(`[DeepOrchestrator] Research failed: ${error instanceof Error ? error.message : String(error)}`);
       observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+
+      // Attempt fallback synthesis from collected reports before re-throwing
+      try {
+        const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+        if (synthesisService.hasReports(researchId)) {
+          let fallback = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
+          fallback = synthesisService.ensureCitedLinks(researchId, fallback);
+          logger.log(`[DeepOrchestrator] Returning fallback synthesis (${fallback.length} chars) from ${synthesisService.getReportCount(researchId)} collected reports`);
+          const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
+          const result = synthesisService.appendSteeringGuidance(fallback, finalSteeringMessages);
+          observer?.onComplete?.(result);
+          return result;
+        }
+      } catch (fallbackErr) {
+        logger.warn(`[DeepOrchestrator] Fallback synthesis also failed:`, fallbackErr);
+      }
+
       throw error;
     } finally {
       const orch = await this.getOrchestrationService();

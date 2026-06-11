@@ -140,9 +140,11 @@ vi.mock('../../src/utils/shared-links.ts', () => ({
   registerScrapedLinks: vi.fn(),
   getScrapedLinks: vi.fn(),
   deduplicateUrls: vi.fn(),
-  resetScrapedLinks: vi.fn(),
-  formatLightweightLinkUpdate: vi.fn(),
   normalizeUrl: vi.fn((u) => u),
+  registerResearcherScrapes: vi.fn(),
+  didResearcherScrape: vi.fn(),
+  getResearcherScrapes: vi.fn(() => []),
+  buildSessionPoolFooter: vi.fn(() => ''),
 }));
 
 vi.mock('../../src/utils/input-validation.ts', () => ({

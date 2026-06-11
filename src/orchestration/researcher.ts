@@ -31,8 +31,8 @@ export interface CreateResearcherSessionOptions {
   // Optional: real closures for global state management
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
-  /** Callback invoked when links are scraped (for real-time coordination) */
-  onLinksScraped?: (links: string[]) => void;
+  /** Optional researcher ID for per-researcher scrape tracking. */
+  researcherId?: string;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
   /** Fires for each individual URL scrape result (per-URL TUI flash). */
@@ -51,7 +51,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     extensionCtx,
     getGlobalState,
     updateGlobalLinks,
-    onLinksScraped,
+    researcherId,
     onSearchProgress,
     onUrlScrapeResult,
     excludeTools = [],
@@ -80,7 +80,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       tracker,
       getGlobalState,
       updateGlobalLinks: globalLinks,
-      onLinksScraped: onLinksScraped,
+      researcherId,
       onSearchProgress: onSearchProgress,
       onUrlScrapeResult: onUrlScrapeResult,
       config,

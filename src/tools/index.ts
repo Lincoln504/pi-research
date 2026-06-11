@@ -15,7 +15,6 @@ import type { SystemResearchState } from '../orchestration/deep-research-types.t
 import { createReadTool } from '@earendil-works/pi-coding-agent';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
-import { createLinksTool } from './links.ts';
 import { createSecuritySearchTool } from './security.ts';
 import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
@@ -27,8 +26,8 @@ interface CreateToolsOptions {
   tracker: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
-  /** Callback invoked when links are scraped (for real-time coordination) */
-  onLinksScraped?: (links: string[]) => void;
+  /** Optional researcher ID for per-researcher scrape tracking. */
+  researcherId?: string;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
   /** Fires for each individual URL as it completes (success or failure). Used for per-URL TUI flash. */
@@ -74,7 +73,6 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       ...resolvedOptions,
       onUrlScrapeResult: options.onUrlScrapeResult,
     }),
-    createLinksTool(resolvedOptions),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
     createGrepTool({ tracker: resolvedOptions.tracker, cwd: resolvedOptions.cwd }),
@@ -86,7 +84,6 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
  */
 export { createSearchTool } from './search.ts';
 export { createScrapeTool } from './scrape.ts';
-export { createLinksTool } from './links.ts';
 export { createSecuritySearchTool } from './security.ts';
 export { createStackexchangeTool } from './stackexchange.ts';
 export { createGrepTool } from './grep.ts';

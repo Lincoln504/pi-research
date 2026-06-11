@@ -5,12 +5,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   generateSessionId,
-  formatLightweightLinkUpdate,
   registerScrapedLinks,
   getScrapedLinks,
   deduplicateUrls,
   normalizeUrl,
-  resetScrapedLinks,
+  registerResearcherScrapes,
+  didResearcherScrape,
+  getResearcherScrapes,
   cleanupSharedLinks
 } from '../../../src/utils/shared-links.ts';
 
@@ -58,12 +59,6 @@ describe('shared-links', () => {
       expect(duplicates).toContain('http://a.com/');
     });
 
-    it('should reset pool', () => {
-      registerScrapedLinks(researchId, ['https://a.com']);
-      resetScrapedLinks(researchId);
-      expect(getScrapedLinks(researchId)).toHaveLength(0);
-    });
-
     it('should cleanup session', () => {
       registerScrapedLinks(researchId, ['https://a.com']);
       cleanupSharedLinks(researchId);
@@ -71,31 +66,46 @@ describe('shared-links', () => {
     });
   });
 
-  describe('formatLightweightLinkUpdate', () => {
-    it('returns empty string for empty URL list', () => {
-      expect(formatLightweightLinkUpdate([], 'r1', 'Researcher 1')).toBe('');
+  describe('Per-Researcher Scrape Tracking', () => {
+    it('should register and query per-researcher scrapes', () => {
+      registerResearcherScrapes(researchId, 'r1', ['https://a.com', 'https://b.com']);
+      registerResearcherScrapes(researchId, 'r2', ['https://c.com']);
+
+      expect(didResearcherScrape(researchId, 'r1', 'https://a.com')).toBe(true);
+      expect(didResearcherScrape(researchId, 'r1', 'https://c.com')).toBe(false);
+      expect(didResearcherScrape(researchId, 'r2', 'https://c.com')).toBe(true);
+      expect(didResearcherScrape(researchId, 'r2', 'https://a.com')).toBe(false);
     });
 
-    it('returns formatted advisory with researcher ID and URL list', () => {
-      const result = formatLightweightLinkUpdate(
-        ['https://a.com', 'https://b.com'],
-        'r2',
-        'Researcher 2',
-      );
-      expect(result).toContain('Researcher r2');
-      expect(result).toContain('https://a.com');
-      expect(result).toContain('https://b.com');
+    it('should get all scrapes for a researcher', () => {
+      registerResearcherScrapes(researchId, 'r1', ['https://a.com', 'https://b.com']);
+
+      const scrapes = getResearcherScrapes(researchId, 'r1');
+      expect(scrapes).toContain('https://a.com');
+      expect(scrapes).toContain('https://b.com');
+      expect(scrapes).toHaveLength(2);
     });
 
-    it('each URL appears on its own line', () => {
-      const result = formatLightweightLinkUpdate(
-        ['https://x.com', 'https://y.com'],
-        'r3',
-        'Researcher 3',
-      );
-      const lines = result.split('\n');
-      expect(lines.some(l => l.includes('https://x.com'))).toBe(true);
-      expect(lines.some(l => l.includes('https://y.com'))).toBe(true);
+    it('should return empty array for unknown researcher', () => {
+      expect(getResearcherScrapes(researchId, 'unknown')).toEqual([]);
+    });
+
+    it('should normalize URLs when registering', () => {
+      registerResearcherScrapes(researchId, 'r1', ['http://example.com/']);
+      expect(didResearcherScrape(researchId, 'r1', 'https://example.com')).toBe(true);
+    });
+
+    it('should accumulate scrapes across multiple calls', () => {
+      registerResearcherScrapes(researchId, 'r1', ['https://a.com']);
+      registerResearcherScrapes(researchId, 'r1', ['https://b.com']);
+
+      expect(getResearcherScrapes(researchId, 'r1')).toHaveLength(2);
+    });
+
+    it('should clean up per-researcher data on session cleanup', () => {
+      registerResearcherScrapes(researchId, 'r1', ['https://a.com']);
+      cleanupSharedLinks(researchId);
+      expect(getResearcherScrapes(researchId, 'r1')).toEqual([]);
     });
   });
 });

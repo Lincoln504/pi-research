@@ -56,7 +56,12 @@ export interface RunResearchersOptions {
 export interface IResearchSynthesisService extends IService {
   storeReport(researchId: string, researcherId: string, report: string): void;
   getAllReports(researchId: string): Map<string, string>;
+  getReport(researchId: string, id: string): string | undefined;
+  getReportsForRound(researchId: string, round: number): Map<string, string>;
+  getReportCount(researchId: string): number;
+  hasReports(researchId: string): boolean;
   clearReports(researchId?: string): void;
+  buildFallbackSynthesis(researchId: string, currentRound?: number): string;
   ensureCitedLinks(researchId: string, result: string): string;
   appendSteeringGuidance(result: string, steeringMessages: any[]): string;
 }

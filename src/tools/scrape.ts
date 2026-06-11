@@ -15,7 +15,7 @@ import { Value } from 'typebox/value';
 import { scrape } from '../web-research/web-scraper.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { deduplicateUrls, normalizeUrl, cacheScrapedContent, getCachedScrapedContent } from '../utils/shared-links.ts';
+import { deduplicateUrls, normalizeUrl, cacheScrapedContent, getCachedScrapedContent, registerResearcherScrapes, buildSessionPoolFooter } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
@@ -34,7 +34,8 @@ export function createScrapeTool(options: {
   tracker?: ToolUsageTracker;
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
-  onLinksScraped?: (links: string[]) => void;
+  /** Optional researcher ID for per-researcher scrape tracking. */
+  researcherId?: string;
   /** Fires for each individual URL as it completes (success or failure). Used for per-URL TUI flash. */
   onUrlScrapeResult?: (url: string, success: boolean) => void;
   /** Returns total tokens used so far in this researcher's session (for context gating). */
@@ -91,7 +92,6 @@ export function createScrapeTool(options: {
       batchProtocolText,
       `Up to ${MAX_SCRAPE_URLS} URLs per batch.`,
       'Handshake is ELIMINATED. Start scraping immediately.',
-      'Shared links from siblings are injected in real-time via steering.',
       'PDFs are auto-detected and extracted with high fidelity.',
     ],
     parameters: ScrapeParamsSchema,
@@ -174,14 +174,15 @@ export function createScrapeTool(options: {
 
       if (dedupedUrls.length === 0 && duplicateResults.length === 0) {
         metrics.increment('tool_scrape_calls_total', 1, { status: 'all_duplicates_no_content' });
+        // Add footer with alternative URLs for discovery
+        const earlyFooter = buildSessionPoolFooter(getGlobalState().researchId, rawUrls);
         return {
-          content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool, but no cached content was available.` }],
+          content: [{ type: 'text', text: `# ${batchLabel} Skipped\n\nAll URLs were already in the global pool, but no cached content was available.${earlyFooter}` }],
           details: { all_duplicates: true },
         };
       }
 
       const finalUrls = dedupedUrls.slice(0, MAX_SCRAPE_URLS);
-      updateGlobalLinks(finalUrls);
 
       const defaultConcurrency = callCount >= 1 ? BATCH_2_DEFAULT_CONCURRENCY : config.MAX_CONCURRENT_SCRAPES;
       const urlsToFetch = [...finalUrls];
@@ -244,15 +245,23 @@ export function createScrapeTool(options: {
       const successfulFresh = freshResults.filter(r => r.success);
       const failedFresh = freshResults.filter(r => !r.success);
 
+      // Register successfully scraped URLs in the global pool AFTER successful scrape
+      // (fixes premature registration bug — URLs only registered if content was actually retrieved)
+      const successfullyScrapedUrls = successfulFresh.map(r => r.url);
+      if (successfullyScrapedUrls.length > 0) {
+        updateGlobalLinks(successfullyScrapedUrls);
+      }
+
+      // Register per-researcher scrape tracking
+      if (options.researcherId && successfullyScrapedUrls.length > 0) {
+        registerResearcherScrapes(getGlobalState().researchId, options.researcherId, successfullyScrapedUrls);
+      }
+
       const allSuccessful: Array<typeof successfulFresh[number] & { source?: string }> = [
         ...duplicateResults.map(r => ({ ...r, error: undefined, source: 'session-cache' as const })),
         ...cachedResults.map(r => ({ ...r, success: true as const, error: undefined, source: 'knowledge-store' as const })),
         ...successfulFresh,
       ];
-
-      if (allSuccessful.length > 0 && options.onLinksScraped) {
-        options.onLinksScraped(allSuccessful.map(r => r.url));
-      }
 
       const totalDuration = Date.now() - callStartTime;
       const scrapeDuration = Date.now() - scrapeStartTime;
@@ -290,6 +299,9 @@ export function createScrapeTool(options: {
         }
         markdown += '\n';
       }
+
+      // Append Session URL Pool footer
+      markdown += buildSessionPoolFooter(getGlobalState().researchId, rawUrls);
 
       return {
         content: [{ type: 'text', text: markdown }],

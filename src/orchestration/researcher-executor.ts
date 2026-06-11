@@ -13,8 +13,9 @@ import { ensureAssistantResponse } from '../utils/text-utils.ts';
 import { extractUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
-import { ServiceNames } from '../core/interfaces/service-names.ts';
-import type { IResearchSynthesisService } from '../core/service-interfaces.ts';
+import { ServiceNames,
+  type IResearchSynthesisService,
+} from '../core/service-interfaces.ts';
 import { getService } from '../core/service-registry.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../utils/prompts.ts';
@@ -110,12 +111,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       systemPrompt: prompt,
       extensionCtx: ctx,
       excludeTools: mergedExclude,
+      researcherId: id,
       getGlobalState: (): SystemResearchState => ({
         version: 1,
         researchId,
         rootQuery: query,
         complexity,
-        currentRound: 1,
+        currentRound: round,
         status: 'researching',
         lastUpdated: Date.now(),
         initialAgenda: [],
@@ -249,6 +251,20 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.increment('researcher_errors_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
       lastError = err;
       const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Attempt to salvage partial content on timeout or error
+      try {
+        const partialResponse = ensureAssistantResponse(session, id);
+        if (partialResponse && partialResponse.trim().length > 50) {
+          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+          synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*⚠ This report was truncated due to a timeout/error. Content may be incomplete.*');
+          logger.log(`[ResearcherExecutor] Researcher ${id} salvaged partial content (${partialResponse.length} chars) after error: ${errMsg}`);
+          observer?.onResearcherComplete?.(id, partialResponse);
+          return;
+        }
+      } catch (salvageErr) {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} salvage attempt failed:`, salvageErr);
+      }
       
       if (signal?.aborted || errMsg === 'Aborted') {
         logger.debug(`[ResearcherExecutor] Researcher ${id} was aborted, skipping retries.`);

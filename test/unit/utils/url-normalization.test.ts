@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeUrl, registerScrapedLinks, deduplicateUrls, resetScrapedLinks } from '../../../src/utils/shared-links.ts';
+import { normalizeUrl, registerScrapedLinks, deduplicateUrls, cleanupSharedLinks } from '../../../src/utils/shared-links.ts';
 
 describe('shared-links normalization', () => {
   describe('normalizeUrl — Property-based tests', () => {
@@ -65,7 +65,7 @@ describe('shared-links normalization', () => {
     const sessionId = 'test-session';
 
     it('should recognize equivalent URLs', () => {
-      resetScrapedLinks(sessionId);
+      cleanupSharedLinks(sessionId);
       registerScrapedLinks(sessionId, ['http://example.com/']);
 
       const { kept, duplicates } = deduplicateUrls(['https://example.com#section'], sessionId);
@@ -75,7 +75,7 @@ describe('shared-links normalization', () => {
     });
 
     it('should keep unique URLs', () => {
-      resetScrapedLinks(sessionId);
+      cleanupSharedLinks(sessionId);
       registerScrapedLinks(sessionId, ['https://example.com/page1']);
 
       const { kept, duplicates } = deduplicateUrls(['https://example.com/page2'], sessionId);

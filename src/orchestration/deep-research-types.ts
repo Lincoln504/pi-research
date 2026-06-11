@@ -79,7 +79,6 @@ export type DeepResearchEvent =
   | { type: 'SIBLING_STARTED'; id: string }
   | { type: 'SIBLING_COMPLETED'; id: string; report: string }
   | { type: 'SIBLING_FAILED'; id: string; error: string }
-  | { type: 'LINKS_SCRAPED'; links: string[] }
   | { type: 'PROMOTION_STARTED'; id: string }
   | { type: 'PROMOTION_DECISION'; nextQueries: string[]; finalSynthesis?: string; maxRounds: number }
   | { type: 'SIBLING_TOKENS'; id: string; tokens: number; cost: number };

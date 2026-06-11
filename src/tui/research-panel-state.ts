@@ -24,10 +24,18 @@ interface FlashEntry {
 }
 
 interface SliceFlashState {
-  activeColor: 'green' | 'red' | null;
+  /** Non-null when a flash is active OR we are in the inter-flash gap. */
   activeTimeout: NodeJS.Timeout | null;
+  /** The color currently being displayed. Null during inter-flash gap. */
+  activeColor: 'green' | 'red' | null;
   queue: FlashEntry[];
 }
+
+/**
+ * Maximum queued flashes per slice. If more arrive while the queue is full
+ * they are silently dropped — the user has already seen plenty of feedback.
+ */
+const MAX_FLASH_QUEUE_SIZE = 8;
 
 /** Per-session flash state: Map<sliceId, SliceFlashState> */
 const sessionFlashState = new Map<string, Map<string, SliceFlashState>>();
@@ -74,7 +82,7 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
 /**
  * Flash a researcher slice green or red.
  *
- * If a flash is already active for this slice the new entry is queued.
+ * If a flash or gap is currently active for this slice the new entry is queued.
  * Each queued flash plays after the previous one expires plus a small gap
  * so rapid-fire per-URL results are visible as distinct pulses.
  */
@@ -89,9 +97,13 @@ export function flashSlice(
 
   const flash = getOrCreateSliceFlash(state.sessionId, sliceId);
 
-  // If a flash is currently active, queue this one.
-  if (flash.activeColor !== null) {
-    flash.queue.push({ color });
+  // If a flash or inter-flash gap is active, queue this one.
+  // Guard on activeTimeout (not activeColor) — activeColor is null during the
+  // gap but activeTimeout is set, preventing the gap-period preemption bug.
+  if (flash.activeTimeout !== null) {
+    if (flash.queue.length < MAX_FLASH_QUEUE_SIZE) {
+      flash.queue.push({ color });
+    }
     return;
   }
 
@@ -105,6 +117,7 @@ function startFlash(
   color: 'green' | 'red',
   onUpdate?: () => void,
 ): void {
+  // Re-read slice from state (never close over a stale reference).
   const slice = state.slices.get(sliceId);
   if (!slice || slice.completed) return;
 
@@ -117,22 +130,33 @@ function startFlash(
   flash.activeTimeout = setTimeout(() => {
     flash.activeColor = null;
     flash.activeTimeout = null;
-    slice.flash = null;
+
+    // Re-read slice inside callback to avoid stale closure.
+    const currentSlice = state.slices.get(sliceId);
+    if (currentSlice) currentSlice.flash = null;
 
     // Check queue
-    if (flash.queue.length > 0 && !slice.completed) {
-      const next = flash.queue.shift()!;
-      // Small gap between flashes so they're visually distinct
-      flash.activeTimeout = setTimeout(() => {
-        startFlash(state, sliceId, flash, next.color, onUpdate);
-      }, FLASH_QUEUE_GAP_MS);
-    } else {
-      onUpdate?.();
+    if (flash.queue.length > 0) {
+      const currentSliceCheck = state.slices.get(sliceId);
+      if (currentSliceCheck && !currentSliceCheck.completed) {
+        const next = flash.queue.shift()!;
+        // Small gap between flashes so they're visually distinct
+        flash.activeTimeout = setTimeout(() => {
+          startFlash(state, sliceId, flash, next.color, onUpdate);
+        }, FLASH_QUEUE_GAP_MS);
+        // Trigger a render during the gap so the brief "off" state is visible.
+        onUpdate?.();
+        return;
+      }
     }
+    onUpdate?.();
   }, duration);
 }
 
-/** Clear flash state for a specific slice (called on complete/reactivate). */
+/**
+ * Clean up flash state for a specific slice.
+ * Clears timeout, queue, and removes from the session map.
+ */
 function clearSliceFlash(sessionId: string, sliceId: string): void {
   const session = sessionFlashState.get(sessionId);
   if (!session) return;
@@ -150,16 +174,22 @@ function clearSliceFlash(sessionId: string, sliceId: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Add a new researcher column
+ * Add a new researcher column.
+ * If a slice with this id already exists, any leftover flash state is cleaned up.
  */
 export function addSlice(state: ResearchPanelState, id: string, label: string, queued: boolean = false): void {
+  // Clean up any leftover flash state from a previous slice with the same id
+  // (e.g., 'eval' being re-added across evaluation rounds).
+  clearSliceFlash(state.sessionId, id);
   state.slices.set(id, { id, label, completed: false, queued, flash: null });
 }
 
 /**
- * Remove a researcher column
+ * Remove a researcher column.
+ * Cleans up any flash state to prevent orphaned timers.
  */
 export function removeSlice(state: ResearchPanelState, id: string): void {
+  clearSliceFlash(state.sessionId, id);
   state.slices.delete(id);
 }
 
@@ -211,9 +241,12 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
 }
 
 /**
- * Re-mark a researcher as active (used when promoting a completed researcher to lead evaluator)
+ * Re-mark a researcher as active (used when promoting a completed researcher to lead evaluator).
+ * Cleans up any leftover flash state from the previous lifecycle phase.
  */
 export function reactivateSlice(state: ResearchPanelState, id: string): void {
+  // Clean up any flash state from the previous lifecycle (timers, queue).
+  clearSliceFlash(state.sessionId, id);
   const slice = state.slices.get(id);
   if (slice) {
     slice.completed = false;
@@ -229,6 +262,7 @@ export function clearCompletedResearchers(state: ResearchPanelState): void {
   const toRemove: string[] = [];
   for (const [id, slice] of state.slices.entries()) {
     if (slice.completed) {
+      clearSliceFlash(state.sessionId, id);
       toRemove.push(id);
     }
   }

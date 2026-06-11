@@ -142,3 +142,209 @@ describe('tools/scrape', () => {
     expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, undefined, expect.any(Function));
   });
 });
+
+describe('tools/scrape — Session URL Pool footer', () => {
+  // These tests use the real shared-links module (no mock) to verify footer behavior
+  const researchId = 'footer-test-session';
+
+  // We need to import the real shared-links functions for footer tests
+  // but the scrape tool still uses mocked web-scraper
+  let registerScrapedLinks: typeof import('../../../src/utils/shared-links.ts').registerScrapedLinks;
+  let cleanupSharedLinks: typeof import('../../../src/utils/shared-links.ts').cleanupSharedLinks;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockRebuildDocument.mockReset();
+    mockRebuildDocument.mockResolvedValue(null);
+    const sharedLinks = await import('../../../src/utils/shared-links.ts');
+    registerScrapedLinks = sharedLinks.registerScrapedLinks;
+    cleanupSharedLinks = sharedLinks.cleanupSharedLinks;
+    cleanupSharedLinks(researchId);
+  });
+
+  afterEach(() => {
+    cleanupSharedLinks(researchId);
+  });
+
+  it('should include footer when pool has URLs from other researchers', async () => {
+    // Pre-populate the pool with URLs from a "sibling" researcher
+    registerScrapedLinks(researchId, ['https://sibling.com/page1', 'https://sibling.com/page2']);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    const result = await tool.execute('call-1', { urls: ['https://new.com/page'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    expect(text).toContain('Session URL Pool');
+    expect(text).toContain('https://sibling.com/page1');
+    expect(text).toContain('https://sibling.com/page2');
+  });
+
+  it('should exclude current batch URLs from footer', async () => {
+    registerScrapedLinks(researchId, ['https://example.com/already-scraped']);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    // The current batch URL (https://example.com/already-scraped) is already in the pool
+    // so it will be deduplicated and won't be scraped fresh, but it should still be
+    // excluded from the footer since it's the current batch
+    const result = await tool.execute('call-1', { urls: ['https://example.com/already-scraped'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    // The URL is a duplicate and has no cached content — it will return "Batch Skipped"
+    // with a footer. The footer should be empty since the only pool URL is the current batch.
+    // (or the footer should not include the current batch URL)
+    expect(text).not.toContain('Session URL Pool');
+  });
+
+  it('should hide footer when pool is empty', async () => {
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    const result = await tool.execute('call-1', { urls: ['https://new.com/page'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    expect(text).not.toContain('Session URL Pool');
+  });
+
+  it('should show footer in all-duplicates-no-content early-return path', async () => {
+    // Register a URL in the pool but don't cache any content
+    registerScrapedLinks(researchId, ['https://already-scraped.com/page']);
+    // Also register a sibling URL that should appear in the footer
+    registerScrapedLinks(researchId, ['https://sibling.com/other']);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    // This URL is already in the pool — triggers all-duplicates-no-content path
+    const result = await tool.execute('call-1', { urls: ['https://already-scraped.com/page'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    // The response should be "Batch Skipped" but the footer should show the sibling URL
+    expect(text).toContain('Skipped');
+    // Footer should show the sibling URL (which isn't in the current batch)
+    expect(text).toContain('https://sibling.com/other');
+  });
+
+  it('should cap footer at 20 URLs with overflow message', async () => {
+    // Register 25 URLs in the pool
+    const poolUrls = Array.from({ length: 25 }, (_, i) => `https://pool.com/page${i + 1}`);
+    registerScrapedLinks(researchId, poolUrls);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    const result = await tool.execute('call-1', { urls: ['https://new.com/page'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    expect(text).toContain('Session URL Pool');
+    expect(text).toContain('...and 5 more');
+  });
+
+  it('should not show footer in rate-limit early return', async () => {
+    // Create a tool with a tracker that's already at limit
+    const { ToolUsageTracker, createDefaultToolLimits } = await import('../../../src/utils/tool-usage-tracker.ts');
+    const tracker = new ToolUsageTracker(createDefaultToolLimits());
+    // Exhaust the limit
+    for (let i = 0; i < 10; i++) tracker.recordCall('scrape');
+
+    registerScrapedLinks(researchId, ['https://pool.com/page']);
+
+    const tool = createScrapeTool({
+      ctx: {} as any,
+      tracker,
+      getGlobalState: () => ({
+        version: 1,
+        researchId,
+        rootQuery: 'test',
+        complexity: 1,
+        currentRound: 1,
+        status: 'researching',
+        lastUpdated: Date.now(),
+        initialAgenda: [],
+        allScrapedLinks: [],
+        aspects: {},
+      }),
+      updateGlobalLinks: (links: string[]) => registerScrapedLinks(researchId, links),
+    });
+
+    const result = await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined, undefined, {} as any);
+    const text = (result.content[0] as any).text;
+
+    // Should be rate-limited without footer
+    expect(text).toContain('PROTOCOL COMPLETE');
+    expect(text).not.toContain('Session URL Pool');
+  });
+});

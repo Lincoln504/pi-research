@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 
 const sessionLinks = new Map<string, Set<string>>();
 const sessionScrapedContent = new Map<string, Map<string, string>>();
+// Per-researcher scrape tracking: researchId → researcherId → Set<normalizedUrl>
+const researcherScrapes = new Map<string, Map<string, Set<string>>>();
 
 // FIX (Issue 12): Track creation timestamps for orphaned-entry cleanup.
 const sessionTimestamps = new Map<string, number>();
@@ -74,20 +76,6 @@ export function getCachedScrapedContent(researchId: string, url: string): string
  */
 export function generateSessionId(piSessionId: string): string {
     return `${piSessionId}-${randomUUID().replace(/-/g, '').substring(0, 8)}`;
-}
-
-/**
- * Format a compact link-scraped notice for sibling researchers.
- * The scrape tool enforces dedup automatically; this message is advisory context.
- */
-export function formatLightweightLinkUpdate(
-  newlyScrapedUrls: string[],
-  sourceResearcherId: string,
-  _sourceResearcherName: string
-): string {
-  if (newlyScrapedUrls.length === 0) return '';
-  return `[Researcher ${sourceResearcherId} scraped — skip these]\n` +
-    newlyScrapedUrls.map(url => `- ${url}`).join('\n');
 }
 
 /**
@@ -168,22 +156,70 @@ export function deduplicateUrls(urls: string[], researchId: string): { kept: str
 
 
 /**
- * Reset the scrape-dedup pool for a session (call between rounds so new researchers
- * can access URLs that were scraped in the previous round).
- */
-export function resetScrapedLinks(researchId: string) {
-    sessionLinks.set(researchId, new Set());
-    // Refresh the timestamp so this session isn't prematurely evicted by the orphan cleanup timer
-    sessionTimestamps.set(researchId, Date.now());
-    logger.debug(`[Shared Links] Reset scrape pool for: ${researchId}`);
-}
-
-/**
  * Cleanup session data.
  */
 export function cleanupSharedLinks(researchId: string) {
     sessionLinks.delete(researchId);
     sessionScrapedContent.delete(researchId);
     sessionTimestamps.delete(researchId);
+    researcherScrapes.delete(researchId);
     logger.debug(`[Shared Links] Cleaned up session: ${researchId}`);
+}
+
+/**
+ * Register that a specific researcher scraped a set of URLs.
+ */
+export function registerResearcherScrapes(researchId: string, researcherId: string, urls: string[]) {
+    if (!researcherScrapes.has(researchId)) {
+        researcherScrapes.set(researchId, new Map());
+    }
+    const map = researcherScrapes.get(researchId)!;
+    if (!map.has(researcherId)) {
+        map.set(researcherId, new Set());
+    }
+    const set = map.get(researcherId)!;
+    urls.forEach(url => set.add(normalizeUrl(url)));
+}
+
+/**
+ * Check if a specific researcher scraped a given URL.
+ */
+export function didResearcherScrape(researchId: string, researcherId: string, url: string): boolean {
+    return researcherScrapes.get(researchId)?.get(researcherId)?.has(normalizeUrl(url)) ?? false;
+}
+
+/**
+ * Get all URLs scraped by a specific researcher.
+ */
+export function getResearcherScrapes(researchId: string, researcherId: string): string[] {
+    return Array.from(researcherScrapes.get(researchId)?.get(researcherId) ?? []);
+}
+
+/**
+ * Build the Session URL Pool footer for scrape responses.
+ * Shows URLs previously scraped in the session, filtered to exclude the current batch.
+ * Capped at MAX_FOOTER_URLS (20).
+ */
+const MAX_FOOTER_URLS = 20;
+
+export function buildSessionPoolFooter(researchId: string, currentBatchUrls: string[]): string {
+    const pool = sessionLinks.get(researchId);
+    if (!pool || pool.size === 0) return '';
+
+    const currentNormalized = new Set(currentBatchUrls.map(u => normalizeUrl(u)));
+    const eligible = Array.from(pool).filter(u => !currentNormalized.has(u));
+    if (eligible.length === 0) return '';
+
+    const capped = eligible.slice(-MAX_FOOTER_URLS);
+    const overflow = eligible.length - capped.length;
+
+    let footer = '\n---\n## Session URL Pool\n';
+    footer += 'Other URLs scraped in this session (for discovery — skip any already read):\n';
+    for (const url of capped) {
+        footer += `- ${url}\n`;
+    }
+    if (overflow > 0) {
+        footer += `*...and ${overflow} more*\n`;
+    }
+    return footer;
 }
