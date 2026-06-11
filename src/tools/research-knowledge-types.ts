@@ -10,18 +10,36 @@
 import { Type, type Static, type TSchema } from 'typebox';
 
 /**
+ * Tri-state answer confidence.
+ *
+ * - `"yes"` — The documents contain a substantive, directly useful answer.
+ * - `"maybe"` — The documents contain partial or tangential information
+ *   that *might* be helpful but is NOT sufficient for a complete answer.
+ *   The host agent should still consider live research to fill gaps.
+ * - `"no"` — No relevant information found in the knowledge store.
+ */
+export const AnswerStatusEnum = Type.Union([
+  Type.Literal('yes'),
+  Type.Literal('maybe'),
+  Type.Literal('no'),
+]);
+
+export type AnswerStatus = Static<typeof AnswerStatusEnum>;
+
+/**
  * The internal schema the background LLM MUST output.
  *
- * - `answer_found`: Boolean indicating whether the reference documents
- *   contain a substantive answer to the user's question.
+ * - `answer_status`: Tri-state enum indicating answer confidence.
+ *   - `"yes"`: Documents contain a substantive answer.
+ *   - `"maybe"`: Documents contain partial/tangential info — useful but
+ *     insufficient. The synthesis (if present) summarizes what's available.
+ *   - `"no"`: No relevant information found.
  * - `synthesis`: Optional synthesized answer with inline citation markers
- *   [1], [2], etc. Present when answer_found is true.
+ *   [1], [2], etc. Present when answer_status is "yes" or "maybe".
  * - `citations`: Array of source URLs used to construct the answer.
  */
 export const ResearchKnowledgeSynthesisResponseSchema = Type.Object({
-  answer_found: Type.Boolean({
-    description: 'Whether the reference documents contain a substantive answer to the question.',
-  }),
+  answer_status: AnswerStatusEnum,
   synthesis: Type.Optional(Type.String({
     description: 'Synthesized answer with inline citation markers [1], [2], etc.',
   })),
@@ -37,3 +55,23 @@ export type ResearchKnowledgeSynthesisResponse = Static<typeof ResearchKnowledge
  */
 export const ResearchKnowledgeSynthesisResponseSchemaAsTSchema =
   ResearchKnowledgeSynthesisResponseSchema as unknown as TSchema;
+
+/**
+ * Map legacy boolean to tri-state for backward compatibility during
+ * Value.Convert coercion. If the LLM returns `answer_found: true/false`
+ * (the old field), this converts it to the new `answer_status` enum.
+ */
+export function legacyBooleanToStatus(value: unknown): { answer_status: AnswerStatus } | null {
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>;
+    // If answer_status already present, no conversion needed
+    if ('answer_status' in obj && typeof obj.answer_status === 'string') {
+      return null;
+    }
+    // Convert legacy answer_found boolean
+    if ('answer_found' in obj && typeof obj.answer_found === 'boolean') {
+      return { answer_status: obj.answer_found ? 'yes' : 'no' };
+    }
+  }
+  return null;
+}

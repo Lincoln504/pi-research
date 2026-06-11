@@ -18,9 +18,10 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 - The `research_knowledge_search` tool searches the research knowledge database for previously researched information.
 - **Unified Results**: It searches both your **Project Knowledge Store** and your **User Knowledge Store** simultaneously.
 - It is **instant and free** — always try it FIRST before using the live `research` tool.
-- If it finds an answer, it returns a clean, cited report with source attribution (e.g., [User Knowledge Store] or [Project Knowledge Store]).
-- If it doesn't find an answer, it explicitly tells you to use live web research.
-- You do NOT need both — if `research_knowledge_search` succeeds, skip live research for that query.
+- **Three result types:**
+  - **Complete answer** — returns a clean, cited report. No live research needed.
+  - **Partial answer** — returns what it found AND tells you to also do live research to fill gaps.
+  - **No answer** — explicitly tells you to use live web research.
 - Note: This tool is only available if at least one knowledge store is enabled in settings.
 
 ---

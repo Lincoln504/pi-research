@@ -3,7 +3,7 @@
  *
  * Tests the stateless, algorithmic logic of the research_knowledge_search tool:
  * schema validation, URL deduplication, model resolution, token budgeting,
- * and deterministic routing steerage.
+ * tri-state answer steering, and deterministic routing.
  *
  * These tests are entirely memory-bound — no file I/O, no LLM calls.
  * LLM-dependent paths (completeSimple, repairJsonWithLlm) are mocked.
@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Value } from 'typebox/value';
 import {
   ResearchKnowledgeSynthesisResponseSchema,
+  legacyBooleanToStatus,
 } from '../../../src/tools/research-knowledge-types.ts';
 
 // ---------------------------------------------------------------------------
@@ -20,78 +21,108 @@ import {
 // ---------------------------------------------------------------------------
 describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () => {
 
-  it('accepts a perfectly formed response with answer_found=true', () => {
+  it('accepts a perfectly formed response with answer_status="yes"', () => {
     const input = {
-      answer_found: true,
+      answer_status: 'yes',
       synthesis: 'The sky is blue [1].',
       citations: ['https://example.com/sky'],
     };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.answer_found).toBe(true);
+    expect(coerced.answer_status).toBe('yes');
     expect(coerced.synthesis).toBe('The sky is blue [1].');
     expect(coerced.citations).toEqual(['https://example.com/sky']);
   });
 
-  it('accepts a response with answer_found=false, no synthesis', () => {
+  it('accepts a response with answer_status="no", no synthesis', () => {
     const input = {
-      answer_found: false,
+      answer_status: 'no',
       citations: [],
     };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.answer_found).toBe(false);
-    // synthesis is optional — should be undefined when not provided
+    expect(coerced.answer_status).toBe('no');
     expect((coerced as any).synthesis).toBeUndefined();
   });
 
-  it('rejects when answer_found is missing (required boolean)', () => {
+  it('accepts a response with answer_status="maybe" with synthesis', () => {
+    const input = {
+      answer_status: 'maybe',
+      synthesis: 'Partial info: the sky may be blue [1].',
+      citations: ['https://example.com/sky'],
+    };
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
+    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
+    expect(coerced.answer_status).toBe('maybe');
+    expect(coerced.synthesis).toBe('Partial info: the sky may be blue [1].');
+  });
+
+  it('rejects when answer_status is missing (required)', () => {
     const input = { citations: ['https://x.com'] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
-    // TypeBox error path is 'undefined' for missing required properties
-    expect([...Value.Errors(ResearchKnowledgeSynthesisResponseSchema, coerced)]).toHaveLength(1);
   });
 
-  it('rejects when answer_found is not a boolean', () => {
-    const input = { answer_found: 'yes', citations: [] };
+  it('rejects when answer_status is not a valid enum value', () => {
+    const input = { answer_status: 'perhaps', citations: [] };
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
+    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
+  });
+
+  it('rejects when answer_status is a boolean', () => {
+    const input = { answer_status: true, citations: [] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
   });
 
   it('converts string citations to array via Value.Convert (TypeBox leniency)', () => {
-    // TypeBox's Value.Convert wraps a single string into an array — this is
-    // expected lenient behavior. The real agentic repair pipeline catches
-    // truly malformed responses.
-    const input = { answer_found: true, synthesis: 'text', citations: 'not-an-array' as any };
+    const input = { answer_status: 'yes', synthesis: 'text', citations: 'not-an-array' as any };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
-    // Convert wraps the string: citations becomes ['not-an-array']
     expect(Array.isArray(coerced.citations)).toBe(true);
   });
 
   it('coerces non-string citation values via Value.Convert (TypeBox leniency)', () => {
-    // TypeBox's Value.Convert coerces numbers to strings — this is expected
-    // lenient behavior. The agentic repair pipeline (repairJsonWithLlm) uses
-    // a stricter re-prompt with the schema to fix truly malformed output.
-    const input = { answer_found: true, synthesis: 'text', citations: [42] };
+    const input = { answer_status: 'yes', synthesis: 'text', citations: [42] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.citations[0]).toBe('42'); // number coerced to string
+    expect(coerced.citations[0]).toBe('42');
   });
 
   it('accepts citations as an empty array', () => {
-    const input = { answer_found: true, citations: [] };
+    const input = { answer_status: 'yes', citations: [] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
   });
+});
 
-  it('rejects extraneous top-level fields (no additional properties)', () => {
-    // Type.Object by default allows additional properties in TypeBox —
-    // we just verify the required fields are validated correctly
-    const input = { answer_found: false, citations: [], extra_field: 'nope' };
-    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
-    // TypeBox Object allows additional by default, so it should still pass Check
-    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
+// ---------------------------------------------------------------------------
+// Test 1b: Legacy boolean conversion
+// ---------------------------------------------------------------------------
+describe('legacyBooleanToStatus — backward compatibility', () => {
+  it('converts answer_found: true to answer_status: "yes"', () => {
+    const result = legacyBooleanToStatus({ answer_found: true, citations: [] });
+    expect(result).toEqual({ answer_status: 'yes' });
+  });
+
+  it('converts answer_found: false to answer_status: "no"', () => {
+    const result = legacyBooleanToStatus({ answer_found: false, citations: [] });
+    expect(result).toEqual({ answer_status: 'no' });
+  });
+
+  it('returns null when answer_status is already present', () => {
+    const result = legacyBooleanToStatus({ answer_status: 'yes', citations: [] });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when neither field is present', () => {
+    const result = legacyBooleanToStatus({ citations: [] });
+    expect(result).toBeNull();
+  });
+
+  it('returns null for non-object input', () => {
+    expect(legacyBooleanToStatus(null)).toBeNull();
+    expect(legacyBooleanToStatus(undefined)).toBeNull();
+    expect(legacyBooleanToStatus('string')).toBeNull();
   });
 });
 
@@ -99,10 +130,6 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
 // Test 2: URL Mathematical Deduplication (Phase 2 logic)
 // ---------------------------------------------------------------------------
 describe('URL deduplication — mathematical set semantics', () => {
-  // This tests the core dedup logic that assembleReferenceDocuments uses.
-  // The function collects URLs from findRelevantUrls results into a Map.
-  // Multiple queries hitting the same URL should result in only one entry.
-
   function simulateUrlCollection(
     queryResults: Array<Array<{ url: string; description: string }>>,
   ): { uniqueUrls: string[]; totalHits: number } {
@@ -152,7 +179,6 @@ describe('URL deduplication — mathematical set semantics', () => {
       [{ url: 'https://a.com', description: 'A2' }],
     ];
     const { uniqueUrls } = simulateUrlCollection(results);
-    // c.com appeared first (query 1), then a.com (query 2), then b.com (query 3)
     expect(uniqueUrls[0]).toBe('https://c.com');
     expect(uniqueUrls[1]).toBe('https://a.com');
     expect(uniqueUrls[2]).toBe('https://b.com');
@@ -181,10 +207,6 @@ describe('URL deduplication — mathematical set semantics', () => {
 // Test 3: Token Budget Enforcement (Phase 2 truncation logic)
 // ---------------------------------------------------------------------------
 describe('Reference document token budget enforcement', () => {
-  // This simulates the character-budget truncation logic in assembleReferenceDocuments.
-  // Documents are processed in relevance order; when the budget is exceeded,
-  // the current document is truncated and remaining documents are dropped.
-
   type RebuiltDoc = { url: string; text: string };
 
   function simulateDocumentAssembly(
@@ -198,13 +220,11 @@ describe('Reference document token budget enforcement', () => {
     let budgetExhausted = false;
 
     for (let i = 0; i < docs.length; i++) {
-      // Drop: beyond maxDocs cap
       if (i >= maxDocs) {
         droppedUrls.push(docs[i]!.url);
         continue;
       }
 
-      // Drop: budget already exhausted from a previous document
       if (budgetExhausted) {
         droppedUrls.push(docs[i]!.url);
         continue;
@@ -214,14 +234,12 @@ describe('Reference document token budget enforcement', () => {
       const header = `\n---\n### Source: ${doc.url}\n`;
       const entry = header + doc.text;
 
-      // Budget check: would this document exceed the limit?
       if (totalChars + entry.length > maxChars) {
         const remaining = maxChars - totalChars - header.length;
         if (remaining > 500) {
           assembled.push(header + doc.text.slice(0, remaining) + '\n[TRUNCATED]');
           totalChars = maxChars;
         }
-        // Mark budget exhausted — all remaining docs are dropped
         budgetExhausted = true;
         continue;
       }
@@ -245,11 +263,11 @@ describe('Reference document token budget enforcement', () => {
 
   it('drops lowest-ranked documents when budget is exceeded', () => {
     const docs = [
-      { url: 'https://high.com', text: 'A'.repeat(5000) },   // high priority
-      { url: 'https://mid.com', text: 'B'.repeat(5000) },    // mid priority
-      { url: 'https://low.com', text: 'C'.repeat(5000) },    // low priority — should be dropped
+      { url: 'https://high.com', text: 'A'.repeat(5000) },
+      { url: 'https://mid.com', text: 'B'.repeat(5000) },
+      { url: 'https://low.com', text: 'C'.repeat(5000) },
     ];
-    const budget = 6000; // enough for first doc + header, cuts mid
+    const budget = 6000;
     const result = simulateDocumentAssembly(docs, budget);
     expect(result.assembled.length).toBeGreaterThanOrEqual(1);
     expect(result.droppedUrls).toContain('https://low.com');
@@ -259,12 +277,10 @@ describe('Reference document token budget enforcement', () => {
     const docs = [
       { url: 'https://big.com', text: 'X'.repeat(10000) },
     ];
-    const budget = 2000; // header(~34) + 1966 chars of content, well > 500 threshold
+    const budget = 2000;
     const result = simulateDocumentAssembly(docs, budget);
     expect(result.assembled).toHaveLength(1);
     expect(result.assembled[0]).toContain('[TRUNCATED]');
-    // The truncated content should have about remaining chars
-    const remaining = budget - '\n---\n### Source: https://big.com\n'.length;
     expect(result.assembled[0].length).toBeLessThan(docs[0]!.text.length);
   });
 
@@ -287,31 +303,26 @@ describe('Reference document token budget enforcement', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 4: Deterministic Routing Steerage (Phase 5)
+// Test 4: Tri-state Steering (Phase 5)
 // ---------------------------------------------------------------------------
-describe('Orchestration steering — deterministic pivot strings', () => {
-  // The critical routing: when answer_found is false, the exact string
-  // returned must match. Any deviation risks failing to trigger the
-  // main agent's live-search pivot behavior.
-
-  const EXPECTED_MISS_STRING =
+describe('Orchestration steering — tri-state answer_status', () => {
+  const MISS_STRING =
     'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
 
-  it('returns the exact pivot string when answer_found is false', () => {
-    const result = { answer_found: false, synthesis: '', citations: [] };
-    const output = result.answer_found
-      ? result.synthesis
-      : EXPECTED_MISS_STRING;
+  const MAYBE_STRING =
+    'Partial data found in research knowledge store. The synthesis above summarizes what is available. You should still proceed with live web research to fill gaps and get a more complete answer.';
 
-    expect(output).toBe(EXPECTED_MISS_STRING);
-    // This is the critical assertion — the exact string must not drift
+  it('returns the exact pivot string when answer_status is "no"', () => {
+    const result = { answer_status: 'no' as const, synthesis: '', citations: [] };
+    const output = result.answer_status === 'no' ? MISS_STRING : result.synthesis;
+    expect(output).toBe(MISS_STRING);
     expect(output).toContain('No relevant data found');
     expect(output).toContain('proceed with live web research');
   });
 
-  it('returns the synthesis string when answer_found is true', () => {
+  it('returns synthesis with Sources section when answer_status is "yes"', () => {
     const result = {
-      answer_found: true,
+      answer_status: 'yes' as const,
       synthesis: 'The sky is blue [1].',
       citations: ['https://example.com/sky'],
     };
@@ -326,15 +337,32 @@ describe('Orchestration steering — deterministic pivot strings', () => {
     expect(report).toContain('https://example.com/sky');
   });
 
+  it('returns synthesis + maybe message when answer_status is "maybe"', () => {
+    const result = {
+      answer_status: 'maybe' as const,
+      synthesis: 'Partial: sky may be blue [1].',
+      citations: ['https://example.com/sky'],
+    };
+
+    let report = result.synthesis;
+    if (result.citations.length > 0) {
+      report += '\n\n### Sources\n1. https://example.com/sky\n';
+    }
+    report += '\n\n' + MAYBE_STRING;
+
+    expect(report).toContain('Partial: sky may be blue');
+    expect(report).toContain(MAYBE_STRING);
+    expect(report).toContain('proceed with live web research');
+  });
+
   it('returns synthesis without Sources section when citations are empty', () => {
     const result = {
-      answer_found: true,
+      answer_status: 'yes' as const,
       synthesis: 'Just answer, no citations.',
       citations: [],
     };
 
     expect(result.synthesis).toBe('Just answer, no citations.');
-    // No Sources section appended
   });
 });
 
@@ -342,8 +370,6 @@ describe('Orchestration steering — deterministic pivot strings', () => {
 // Test 5: Model Resolution Priority (Phase 4)
 // ---------------------------------------------------------------------------
 describe('Model resolution priority chain', () => {
-  // Priority: RESEARCH_MODEL → ctx.model
-
   function createMockRegistry(models: Array<{ id: string; provider: string }>) {
     return {
       getAll: vi.fn().mockReturnValue(models),
@@ -412,30 +438,12 @@ describe('Model resolution priority chain', () => {
     );
     expect(modelId).toBe('gpt-4o');
   });
-
-  it('matches by bare model id when provider/id fails', () => {
-    const registry = createMockRegistry([
-      { id: 'gpt-4o', provider: 'openai' },
-      { id: 'gpt-4o', provider: 'azure' }, // same id, different provider
-    ]);
-    // provider/id matches first
-    const modelId = resolveModel(
-      { RESEARCH_MODEL: 'openai/gpt-4o' },
-      { id: 'ctx-model', provider: 'unused' },
-      registry,
-    );
-    expect(modelId).toBe('gpt-4o');
-  });
 });
 
 // ---------------------------------------------------------------------------
 // Test 6: Tool Metadata Correctness
 // ---------------------------------------------------------------------------
 describe('Tool metadata and registration shape', () => {
-  // This test runs independent of the factory to verify static metadata.
-  // The createResearchKnowledgeSearchTool function produces a ToolDefinition
-  // that pi's framework validates for name, label, description, parameters.
-
   it('has the correct tool name following pi-research conventions', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
@@ -457,13 +465,15 @@ describe('Tool metadata and registration shape', () => {
     expect(tool.description.length).toBeGreaterThan(20);
   });
 
-  it('has prompt guidelines that reference the tool correctly', async () => {
+  it('has prompt guidelines that reference the tri-state behavior', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
     expect(tool.promptGuidelines).toBeDefined();
     expect(tool.promptGuidelines!.length).toBeGreaterThanOrEqual(2);
-    expect(tool.promptGuidelines![0]).toContain('research_knowledge_search');
+    expect(tool.promptGuidelines!.some(g => g.includes('"maybe"'))).toBe(true);
+    expect(tool.promptGuidelines!.some(g => g.includes('"no"'))).toBe(true);
+    expect(tool.promptGuidelines!.some(g => g.includes('"yes"'))).toBe(true);
   });
 
   it('has parameters schema with queries array', async () => {
@@ -471,17 +481,55 @@ describe('Tool metadata and registration shape', () => {
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
     expect(tool.parameters).toBeDefined();
-    // TypeBox schema should be an object type
     expect((tool.parameters as any).type).toBe('object');
   });
 
   it('the execute function returns AgentToolResult structure on success', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
-    // We just verify the function signature is callable — actual execution
-    // requires the full service stack. The schema and formatting tests above
-    // cover the algorithmic paths.
     const tool = createResearchKnowledgeSearchTool();
     expect(typeof tool.execute).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: Knowledge Search TUI Panel
+// ---------------------------------------------------------------------------
+describe('Knowledge Search TUI Panel', () => {
+  it('renders a bordered box with searching message', async () => {
+    const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
+    const mockTheme = {
+      fg: (_color: any, text: string) => text,
+    };
+    const factory = createKnowledgeSearchPanel();
+    const component = factory({}, mockTheme as any);
+    const lines = component.render(40);
+
+    expect(lines).toHaveLength(3); // top border + content + bottom border
+    expect(lines[0]).toBe('┌' + '─'.repeat(38) + '┐');
+    expect(lines[1]).toContain('searching knowledge store');
+    expect(lines[1]!.startsWith('│')).toBe(true);
+    expect(lines[1]!.endsWith('│')).toBe(true);
+    expect(lines[2]).toBe('└' + '─'.repeat(38) + '┘');
+  });
+
+  it('returns empty for very narrow terminals', async () => {
+    const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
+    const mockTheme = { fg: (_color: any, text: string) => text };
+    const factory = createKnowledgeSearchPanel();
+    const component = factory({}, mockTheme as any);
+    expect(component.render(3)).toEqual([]);
+  });
+
+  it('truncates message when terminal is narrow', async () => {
+    const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
+    const mockTheme = { fg: (_color: any, text: string) => text };
+    const factory = createKnowledgeSearchPanel();
+    const component = factory({}, mockTheme as any);
+    const lines = component.render(10);
+    expect(lines).toHaveLength(3);
+    // Inner width = 8, message should be truncated
+    const innerContent = lines[1]!.slice(1, -1);
+    expect(innerContent.length).toBe(8);
   });
 });

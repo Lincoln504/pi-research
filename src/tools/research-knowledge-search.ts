@@ -35,6 +35,7 @@ import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-ty
 import {
   ResearchKnowledgeSynthesisResponseSchema,
   ResearchKnowledgeSynthesisResponseSchemaAsTSchema,
+  legacyBooleanToStatus,
 } from './research-knowledge-types.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -43,6 +44,7 @@ import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { formatParentContext } from '../orchestration/session-context.ts';
 import { getConfig } from '../config.ts';
+import { createKnowledgeSearchPanel } from '../tui/knowledge-search-panel.ts';
 
 // ---------------------------------------------------------------------------
 // Phase 1: Tool Parameters
@@ -70,6 +72,9 @@ const MAX_REFERENCE_CHARS = 120_000;
 /** Maximum number of unique URLs to rebuild documents for */
 const MAX_DOCUMENTS = 10;
 
+/** Widget ID for the knowledge search TUI panel */
+const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
+
 /**
  * System string returned when the answer is NOT found in the research
  * knowledge database. The exact phrasing is critical — the main pi agent
@@ -77,6 +82,45 @@ const MAX_DOCUMENTS = 10;
  */
 const RESEARCH_KNOWLEDGE_MISS_STRING =
   'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
+
+/**
+ * System string returned when the knowledge store returned partial results.
+ * The host agent gets a synthesis of what was found but is also told to
+ * continue with live research for a more complete answer.
+ */
+const RESEARCH_KNOWLEDGE_MAYBE_STRING =
+  'Partial data found in research knowledge store. The synthesis above summarizes what is available. ' +
+  'You should still proceed with live web research to fill gaps and get a more complete answer.';
+
+// ---------------------------------------------------------------------------
+// TUI Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Show the knowledge search TUI widget (bordered box with "searching knowledge store").
+ * Only renders in TUI mode with UI available.
+ */
+function showKnowledgeSearchWidget(ctx: ExtensionContext): void {
+  if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+  try {
+    const panelFactory = createKnowledgeSearchPanel();
+    ctx.ui.setWidget(KNOWLEDGE_WIDGET_ID, panelFactory as any, { placement: 'aboveEditor' });
+  } catch (err) {
+    logger.debug(`[research-knowledge-search] Failed to show TUI widget: ${err}`);
+  }
+}
+
+/**
+ * Remove the knowledge search TUI widget.
+ */
+function hideKnowledgeSearchWidget(ctx: ExtensionContext): void {
+  if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+  try {
+    ctx.ui.setWidget(KNOWLEDGE_WIDGET_ID, undefined as any, { placement: 'aboveEditor' });
+  } catch (err) {
+    logger.debug(`[research-knowledge-search] Failed to hide TUI widget: ${err}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Phase 2: Safe Data Rehydration
@@ -215,6 +259,43 @@ function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; err
 }
 
 /**
+ * Coerce a raw LLM response into the tri-state schema.
+ *
+ * Handles both the new `answer_status` field and the legacy `answer_found`
+ * boolean. If the LLM returns the old field, it's converted automatically.
+ */
+function coerceResponse(raw: unknown): ResearchKnowledgeSynthesisResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  // Try legacy boolean conversion first
+  const legacy = legacyBooleanToStatus(raw);
+  if (legacy) {
+    const obj = { ...(raw as Record<string, unknown>), ...legacy };
+    delete (obj as Record<string, unknown>)['answer_found']; // remove old field
+    try {
+      const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, obj);
+      if (Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)) {
+        return coerced as ResearchKnowledgeSynthesisResponse;
+      }
+    } catch {
+      // Fall through to normal path
+    }
+  }
+
+  // Normal path: direct TypeBox coercion
+  try {
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, raw);
+    if (Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)) {
+      return coerced as ResearchKnowledgeSynthesisResponse;
+    }
+  } catch {
+    // Fall through
+  }
+
+  return null;
+}
+
+/**
  * Invoke the background LLM via completeSimple — a purely stateless call
  * with no agent session, no side effects, and no UI updates.
  *
@@ -222,7 +303,7 @@ function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; err
  *   1. Direct JSON extraction with full TypeBox schema validation
  *   2. Agentic repair fallback (re-prompts LLM with schema enforcement)
  *
- * If both phases fail, returns a safe default (answer_found: false).
+ * If both phases fail, returns a safe default (answer_status: "no").
  */
 async function runBackgroundExtraction(
   model: Model<any>,
@@ -259,16 +340,16 @@ async function runBackgroundExtraction(
     throw new Error('Background LLM returned no text content');
   }
 
-  // Phase 4b: Direct JSON extraction + TypeBox validation
-  // (matches the pattern in planning-utils.ts parseJsonPlan)
+  // Phase 4b: Direct JSON extraction + TypeBox validation with legacy coercion
   const extracted = extractJson<ResearchKnowledgeSynthesisResponse>(responseText, 'object');
   if (extracted.success && extracted.value) {
+    const coerced = coerceResponse(extracted.value);
+    if (coerced) {
+      return coerced;
+    }
+    // Log why validation failed
     try {
-      const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, extracted.value);
-      if (Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)) {
-        return coerced as ResearchKnowledgeSynthesisResponse;
-      }
-      const errors = [...Value.Errors(ResearchKnowledgeSynthesisResponseSchema, coerced)];
+      const errors = [...Value.Errors(ResearchKnowledgeSynthesisResponseSchema, extracted.value)];
       const errorDetail = errors.map((e: any) => `${e.path}: ${e.message}`).join(', ');
       logger.debug(`[research-knowledge-search] Schema validation failed: ${errorDetail}`);
     } catch (validationErr) {
@@ -277,8 +358,6 @@ async function runBackgroundExtraction(
   }
 
   // Phase 4c: Agentic Repair — re-prompt the LLM with the schema embedded
-  // so it knows the exact required shape. repairJsonWithLlm internally runs
-  // Value.Convert + Value.Check on each retry (up to 2 attempts).
   logger.warn('[research-knowledge-search] Background LLM response malformed, attempting agentic repair');
 
   const repaired = await repairJsonWithLlm<ResearchKnowledgeSynthesisResponse>(
@@ -295,12 +374,97 @@ async function runBackgroundExtraction(
   );
 
   if (repaired) {
-    return repaired;
+    // Agentic repair may return legacy format — coerce it
+    const coerced = coerceResponse(repaired);
+    if (coerced) return coerced;
+    // If coercion fails but repair returned something, try it as-is
+    if ('answer_status' in repaired) return repaired;
   }
 
   // Phase 4d: Safe fallback — treat as not found rather than crashing
   logger.error('[research-knowledge-search] Agentic repair failed, returning NOT_FOUND');
-  return { answer_found: false, synthesis: '', citations: [] };
+  return { answer_status: 'no', synthesis: '', citations: [] };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: Orchestration Steering
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the tool result based on the answer status.
+ *
+ * - "yes": Return the synthesis with citations. No live research needed.
+ * - "maybe": Return the synthesis with citations, BUT append a message
+ *   telling the host agent to also do live research to fill gaps.
+ * - "no": Return the miss string, authorizing live research.
+ */
+function buildSteeringResult(
+  result: ResearchKnowledgeSynthesisResponse,
+  urls: string[],
+): AgentToolResult<unknown> {
+  const status = result.answer_status;
+
+  // "no" — nothing found, pivot to live research
+  if (status === 'no') {
+    metrics.increment('research_knowledge_search_total', 1, { status: 'not_found' });
+    return {
+      content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
+      details: { source: 'research_knowledge_search', found: false, answerStatus: 'no' },
+    };
+  }
+
+  // "yes" or "maybe" — build the report
+  const synthesis = result.synthesis || '';
+  let report = synthesis;
+
+  if (result.citations.length > 0) {
+    report += '\n\n### Sources\n';
+    for (let i = 0; i < result.citations.length; i++) {
+      report += `${i + 1}. ${result.citations[i]}\n`;
+    }
+    report += '\n---';
+  }
+
+  if (status === 'maybe') {
+    metrics.increment('research_knowledge_search_total', 1, { status: 'partial' });
+    report += '\n\n' + RESEARCH_KNOWLEDGE_MAYBE_STRING;
+    return {
+      content: [{ type: 'text', text: report }],
+      details: {
+        source: 'research_knowledge_search',
+        found: true,
+        answerStatus: 'maybe',
+        citations: result.citations,
+        documentsSearched: urls.length,
+      },
+    };
+  }
+
+  // "yes" — complete answer
+  metrics.increment('research_knowledge_search_total', 1, { status: 'found' });
+  metrics.increment('research_knowledge_search_citations_total', result.citations.length);
+  return {
+    content: [{ type: 'text', text: report }],
+    details: {
+      source: 'research_knowledge_search',
+      found: true,
+      answerStatus: 'yes',
+      citations: result.citations,
+      documentsSearched: urls.length,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Error-path result builders
+// ---------------------------------------------------------------------------
+
+function missResult(reason: string): AgentToolResult<unknown> {
+  metrics.increment('research_knowledge_search_total', 1, { status: reason });
+  return {
+    content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
+    details: { source: 'research_knowledge_search', found: false, answerStatus: 'no', reason },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +488,9 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
     promptSnippet: 'Search research knowledge database for previously researched information',
     promptGuidelines: [
       'Always try `research_knowledge_search` first for any research question — it is instant and free.',
-      'If research_knowledge_search returns a miss, proceed with the `research` tool for live web investigation.',
+      'If research_knowledge_search returns "no" (not found), proceed with the `research` tool for live web investigation.',
+      'If research_knowledge_search returns "maybe" (partial), use the provided synthesis AND also do live research to fill gaps.',
+      'If research_knowledge_search returns "yes" (found), you have a complete answer — no live research needed.',
       'Do NOT call both research_knowledge_search and research for the same question simultaneously.',
     ],
     parameters: ResearchKnowledgeSearchParams,
@@ -339,6 +505,9 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
       const startTime = Date.now();
       const p = params as ResearchKnowledgeSearchParams;
 
+      // Show the TUI widget immediately
+      showKnowledgeSearchWidget(ctx);
+
       try {
         // ----------------------------------------------------------
         // Service resolution via central registry (not direct instantiation)
@@ -347,30 +516,18 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         try {
           storeService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
         } catch {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'store_unavailable' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: 'store_unavailable' },
-          };
+          return missResult('store_unavailable');
         }
 
         if (!storeService.isReady()) {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'store_not_ready' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: 'store_not_ready' },
-          };
+          return missResult('store_not_ready');
         }
 
         const store = await storeService.getStore();
 
         const count = await store.count();
         if (count === 0) {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'store_empty' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: 'store_empty' },
-          };
+          return missResult('store_empty');
         }
 
         // ----------------------------------------------------------
@@ -379,11 +536,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         const { text: referenceText, urls } = await assembleReferenceDocuments(p.queries, store);
 
         if (!referenceText || referenceText.length === 0) {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'no_results' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: 'no_results' },
-          };
+          return missResult('no_results');
         }
 
         // ----------------------------------------------------------
@@ -396,21 +549,13 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         // ----------------------------------------------------------
         const { model, error: modelError } = resolveSynthesisModel(ctx);
         if (modelError || !model) {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'no_model' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: modelError || 'no_model' },
-          };
+          return missResult(modelError || 'no_model');
         }
 
         const authResult = await ctx.modelRegistry.getApiKeyAndHeaders(model);
         if (!authResult.ok) {
           logger.warn(`[research-knowledge-search] Model auth failed: ${authResult.error}`);
-          metrics.increment('research_knowledge_search_total', 1, { status: 'auth_failed' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false, reason: 'auth_failed' },
-          };
+          return missResult('auth_failed');
         }
 
         const result = await runBackgroundExtraction(
@@ -427,38 +572,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         // ----------------------------------------------------------
         // Phase 5: Orchestration Steering
         // ----------------------------------------------------------
-        if (!result.answer_found) {
-          metrics.increment('research_knowledge_search_total', 1, { status: 'not_found' });
-          return {
-            content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-            details: { source: 'research_knowledge_search', found: false },
-          };
-        }
-
-        // The Delivery: format the synthesized answer with bibliography
-        metrics.increment('research_knowledge_search_total', 1, { status: 'found' });
-        metrics.increment('research_knowledge_search_citations_total', result.citations.length);
-
-        const synthesis = result.synthesis || '';
-        let report = synthesis;
-
-        if (result.citations.length > 0) {
-          report += '\n\n### Sources\n';
-          for (let i = 0; i < result.citations.length; i++) {
-            report += `${i + 1}. ${result.citations[i]}\n`;
-          }
-          report += '\n---';
-        }
-
-        return {
-          content: [{ type: 'text', text: report }],
-          details: {
-            source: 'research_knowledge_search',
-            found: true,
-            citations: result.citations,
-            documentsSearched: urls.length,
-          },
-        };
+        return buildSteeringResult(result, urls);
       } catch (error) {
         const durationMs = Date.now() - startTime;
         metrics.observe('research_knowledge_search_duration_ms', durationMs, { status: 'error' });
@@ -468,8 +582,11 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
 
         return {
           content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
-          details: { source: 'research_knowledge_search', found: false, error: String(error) },
+          details: { source: 'research_knowledge_search', found: false, answerStatus: 'no', error: String(error) },
         };
+      } finally {
+        // Always remove the TUI widget when done
+        hideKnowledgeSearchWidget(ctx);
       }
     },
   };
