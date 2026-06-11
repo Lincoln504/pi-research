@@ -10,6 +10,46 @@ import type {
   StoreDocument 
 } from '../core/interfaces/knowledge-interfaces.ts';
 
+/**
+ * Normalize a URL for deduplication and storage purposes.
+ *
+ * Strips trailing slashes, sorts query parameters, lowercases the hostname,
+ * removes default ports, removes empty hash fragments, and removes
+ * trailing `?` from URLs with empty query strings.
+ *
+ * Returns the original string unchanged if URL parsing fails.
+ */
+export function normalizeUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    // Lowercase hostname (scheme already lowercase from URL constructor)
+    parsed.hostname = parsed.hostname.toLowerCase();
+    // Remove default ports
+    if ((parsed.protocol === 'https:' && parsed.port === '443') ||
+        (parsed.protocol === 'http:' && parsed.port === '80')) {
+      parsed.port = '';
+    }
+    // Sort query parameters for consistent ordering
+    parsed.searchParams.sort();
+    // Remove empty hash
+    if (parsed.hash === '#' || parsed.hash === '') {
+      parsed.hash = '';
+    }
+    // Strip trailing slashes from pathname (URL constructor forces '/' for root)
+    while (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
+      parsed.pathname = parsed.pathname.slice(0, -1);
+    }
+    let result = parsed.toString();
+    // URL constructor always produces 'https://host/' for root — strip that trailing slash
+    if (result.endsWith('/')) {
+      result = result.slice(0, -1);
+    }
+    return result;
+  } catch {
+    return url;
+  }
+}
+
 function isConnectionRefused(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.includes('ECONNREFUSED');
@@ -96,7 +136,7 @@ export class WriterQueue implements IWriterQueue {
         // FIX (#2): Chain per-URL to serialize concurrent ingests of the same URL.
         // process() already runs sequentially, so we chain only for the race case
         // where two enqueue() calls trigger concurrent process() calls.
-        const urlKey = item.url;
+        const urlKey = normalizeUrl(item.url);
         const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
         const inflight = prev.then(() => this._ingestInner(item));
         this.inflightByUrl.set(urlKey, inflight);
@@ -133,7 +173,7 @@ export class WriterQueue implements IWriterQueue {
   }
 
   private async ingest(item: IngestionItem): Promise<void> {
-    const urlKey = item.url;
+    const urlKey = normalizeUrl(item.url);
     const prev = this.inflightByUrl.get(urlKey) ?? Promise.resolve();
     const inflight = prev.then(() => this._ingestInner(item));
     this.inflightByUrl.set(urlKey, inflight);
@@ -160,10 +200,15 @@ export class WriterQueue implements IWriterQueue {
       return;
     }
 
+    // Normalize URL for consistent deduplication and storage.
+    // The original URL is preserved in metadata for reference, but all
+    // dedup checks and store operations use the normalized form.
+    const normalizedUrl = normalizeUrl(item.url);
+
     const hash = createHash('sha256').update(item.markdown).update(item.content ?? '').digest('hex');
 
     if (this.options.store.isStoreClosed?.()) {
-      logger.warn(`[writer-queue] Skipping ingest for ${item.url} — store is closing`);
+      logger.warn(`[writer-queue] Skipping ingest for ${normalizedUrl} — store is closing`);
       return;
     }
 
@@ -176,15 +221,18 @@ export class WriterQueue implements IWriterQueue {
       validatedAt: Date.now(),
     };
 
-    const existing = await this.options.store.findByUrl(item.url);
+    // Dedup: check if we already have this exact URL+type with identical content.
+    // findByUrl applies scope filtering, so this only dedupes within the
+    // current project's visible scope (local workspace + global entries).
+    const existing = await this.options.store.findByUrl(normalizedUrl);
     const sameType = existing.filter(c => c.metadata['ingestionType'] === incomingType);
     if (sameType.length > 0 && sameType[0]!.metadata['contentHash'] === hash) {
-      logger.log(`[writer-queue] Skipping ${item.url} (${incomingType}) — content unchanged.`);
+      logger.log(`[writer-queue] Skipping ${normalizedUrl} (${incomingType}) — content unchanged.`);
       return;
     }
 
     if (sameType.length > 0) {
-      await this.options.store.deleteByUrlAndType(item.url, incomingType);
+      await this.options.store.deleteByUrlAndType(normalizedUrl, incomingType);
     }
 
     const rawChunks = this.options.chunker
@@ -194,11 +242,13 @@ export class WriterQueue implements IWriterQueue {
     if (rawChunks.length === 0) return;
 
     const docs: StoreDocument[] = rawChunks.map((chunk, i) => ({
-      url: item.url,
+      url: normalizedUrl,
       text: chunk.text,
       content: i === 0 ? (item.content ?? undefined) : undefined,
       metadata: {
         ...(item.metadata || {}),
+        // Preserve the original (pre-normalization) URL for debugging/display
+        originalUrl: item.url !== normalizedUrl ? item.url : undefined,
         contentHash: hash,
         ingestionType: incomingType,
         ...provenanceMeta,

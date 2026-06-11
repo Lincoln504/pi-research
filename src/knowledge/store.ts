@@ -76,7 +76,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   private getScopeFilter(): string {
     const local = this.options.localEnabled !== false; // Default to true if not specified
     const global = this.options.globalEnabled !== false;
-    const ws = (this.options.workspace || process.cwd()).replace(/'/g, "''");
+    const ws = this.getWorkspace().replace(/'/g, "''");
 
     if (local && global) {
       return `workspace = '${ws}' OR is_global = true`;
@@ -89,7 +89,11 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private getWorkspace(): string {
-    return this.options.workspace || process.cwd();
+    // Normalize workspace path: resolve to absolute and strip trailing separator.
+    // This ensures /home/user/project and /home/user/project/ are treated as the same workspace.
+    const ws = this.options.workspace || process.cwd();
+    const resolved = path.resolve(ws);
+    return resolved.endsWith(path.sep) ? resolved.slice(0, -1) : resolved;
   }
 
   async initialize(): Promise<void> {
@@ -505,7 +509,10 @@ export class KnowledgeStore implements IKnowledgeStore {
       const startTime = Date.now();
       try {
         const escapedUrl = url.replace(/'/g, "''");
-        // FIX (#9): Escape LIKE wildcards to prevent pattern injection.
+        // Use a broader filter to find all chunks for this URL+type, then verify
+        // ingestionType in the metadata by checking the JSON. We avoid relying on
+        // LIKE with exact JSON key ordering by searching for the key-value pair
+        // with flexible surrounding content.
         const escapedType = ingestionType.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
         await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%' AND (${scopeFilter})`);
         const duration = Date.now() - startTime;

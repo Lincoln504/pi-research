@@ -1,5 +1,48 @@
 import { describe, it, expect } from 'vitest';
-import { validateUrl } from '../../../src/knowledge/writer-queue.ts';
+import { validateUrl, normalizeUrl } from '../../../src/knowledge/writer-queue.ts';
+
+describe('normalizeUrl', () => {
+  it('should strip trailing slash', () => {
+    expect(normalizeUrl('https://example.com/')).toBe('https://example.com');
+    expect(normalizeUrl('https://example.com/path/')).toBe('https://example.com/path');
+  });
+
+  it('should lowercase hostname', () => {
+    expect(normalizeUrl('https://EXAMPLE.COM/path')).toBe('https://example.com/path');
+  });
+
+  it('should remove default ports', () => {
+    expect(normalizeUrl('https://example.com:443/path')).toBe('https://example.com/path');
+    expect(normalizeUrl('http://example.com:80/path')).toBe('http://example.com/path');
+  });
+
+  it('should keep non-default ports', () => {
+    expect(normalizeUrl('https://example.com:8443/path')).toBe('https://example.com:8443/path');
+    expect(normalizeUrl('http://example.com:8080/path')).toBe('http://example.com:8080/path');
+  });
+
+  it('should sort query parameters', () => {
+    expect(normalizeUrl('https://example.com?b=2&a=1')).toBe('https://example.com/?a=1&b=2');
+  });
+
+  it('should remove empty hash fragment', () => {
+    expect(normalizeUrl('https://example.com#')).toBe('https://example.com');
+  });
+
+  it('should return original string on parse failure', () => {
+    expect(normalizeUrl('not-a-url')).toBe('not-a-url');
+  });
+
+  it('should normalize equivalent URLs to same form', () => {
+    const a = normalizeUrl('https://Example.COM:443/path/?b=2&a=1');
+    const b = normalizeUrl('https://example.com/path?a=1&b=2');
+    expect(a).toBe(b);
+  });
+
+  it('should preserve non-trivial hash fragments', () => {
+    expect(normalizeUrl('https://example.com#section')).toBe('https://example.com/#section');
+  });
+});
 
 describe('WriterQueue URL Validation', () => {
   it('should accept valid HTTPS URLs', () => {

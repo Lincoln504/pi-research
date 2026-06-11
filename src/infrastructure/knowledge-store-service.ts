@@ -252,16 +252,22 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   }
 
   /**
-   * Clear only local project entries
+   * Clear only local project entries (workspace-scoped, NOT global).
+   * Entries that are both local AND global are left alone — use clearGlobal
+   * for those.
    */
   async clearLocal(): Promise<void> {
     const store = await this.getStore();
-    const workspace = process.cwd().replace(/'/g, "''");
-    await store.clear(`workspace = '${workspace}'`);
+    // Normalize workspace path to match how entries are stored
+    const resolved = path.resolve(process.cwd());
+    const workspace = resolved.replace(/'/g, "''");
+    // Only delete entries that are scoped to this project AND not global.
+    // Global entries (is_global = true) are managed by clearGlobal().
+    await store.clear(`workspace = '${workspace}' AND is_global = false`);
   }
 
   /**
-   * Clear only global entries
+   * Clear only global entries (cross-project, visible to all workspaces).
    */
   async clearGlobal(): Promise<void> {
     const store = await this.getStore();

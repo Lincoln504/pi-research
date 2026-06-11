@@ -103,7 +103,7 @@ describe('KnowledgeStoreService', () => {
     await service.clearLocal();
 
     const expectedWorkspace = process.cwd().replace(/'/g, "''");
-    expect(mockStore.clear).toHaveBeenCalledWith(`workspace = '${expectedWorkspace}'`);
+    expect(mockStore.clear).toHaveBeenCalledWith(`workspace = '${expectedWorkspace}' AND is_global = false`);
   });
 
   it('clearGlobal should use is_global filter', async () => {
