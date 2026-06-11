@@ -358,10 +358,15 @@ export default async function (pi: ExtensionAPI) {
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
       logger.debug('[pi-research] Research-related tool available, injecting best-practice instructions.');
       
-      const researchPrompt = loadPrompt('research-tool-usage')
+      let researchPrompt = loadPrompt('research-tool-usage')
         .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
         .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
         .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
+      
+      // Strip knowledge search section if tool isn't available
+      if (!isKnowledgeSearchAvailable) {
+        researchPrompt = researchPrompt.replace(/\n\*\*⚡ KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');
+      }
       
       return {
         systemPrompt: injectedSystemPrompt + '\n\n' + researchPrompt

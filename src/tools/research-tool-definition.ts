@@ -34,106 +34,42 @@ import { createResearchObserver, createObserverState, stopObserverWaveAnimation 
 import { getServiceContainer } from '../core/service-registry.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
+import { extractRunStats, buildResearchSummary } from '../utils/metrics-summary.ts';
 
 /**
- * Format a time ago string from an ISO timestamp
+ * Append a unified research summary to the result.
+ * Replaces the old separate error + scrape summaries.
+ *
+ * Design: No tables, no percentages — just counts.
+ * Emphasizes volume of work done. Errors are a concise footnote when present.
  */
-function formatTimeAgo(isoTimestamp: string): string {
-  const now = Date.now();
-  const then = new Date(isoTimestamp).getTime();
-  const diffMs = now - then;
-  
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes < 1) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
+function appendResearchSummary(
+  result: string,
+  metricsSnapshot: { counters?: Record<string, number>; histograms?: Record<string, any> },
+  errorReport: ErrorReport,
+): string {
+  const stats = extractRunStats(metricsSnapshot as any);
 
-/**
- * Append error summary to research result
- */
-function appendErrorSummary(result: string, errorReport: ErrorReport): string {
-  const { totalErrors, uniquePatterns, patterns, byDomain, byType } = errorReport;
-  
-  // Return unchanged if no errors
-  if (totalErrors === 0) {
-    return result;
-  }
-  
-  let summary = `\n\n## Error Summary\n\n`;
-  summary += `This research encountered **${totalErrors} error(s)** across **${uniquePatterns} unique pattern(s)**.\n\n`;
-  
-  // Most frequent errors (top 3)
-  summary += `**Most frequent error(s):**\n`;
-  const topPatterns = patterns.slice(0, 3);
-  for (const pattern of topPatterns) {
-    const timeAgo = formatTimeAgo(pattern.lastSeen);
-    summary += `- **${pattern.count}x**: ${pattern.message} (last: ${timeAgo})\n`;
-  }
-  
-  // Error types
-  if (byType.size > 0) {
-    summary += `\n**Error types:**\n`;
-    const sortedTypes = Array.from(byType.entries()).sort((a, b) => b[1] - a[1]);
-    for (const [type, count] of sortedTypes) {
-      const percentage = Math.round((count / totalErrors) * 100);
-      summary += `- ${type}: ${count} (${percentage}%)\n`;
+  if (!stats) {
+    // No meaningful metrics — still show errors if any
+    if (errorReport.totalErrors > 0) {
+      return result + `\n\n---\n\n*${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered during research.*`;
     }
-  }
-  
-  // Errors by domain (top 5)
-  if (byDomain.size > 0) {
-    summary += `\n**Errors by domain:**\n`;
-    const sortedDomains = Array.from(byDomain.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    for (const [domain, count] of sortedDomains) {
-      const percentage = Math.round((count / totalErrors) * 100);
-      summary += `- ${domain}: ${count} (${percentage}%)\n`;
-    }
-  }
-  
-  summary += `---`;
-  
-  return result + summary;
-}
-
-/**
- * Append scrape summary to research result
- */
-function appendScrapeSummary(result: string, metricsSnapshot: any): string {
-  const counters = metricsSnapshot.counters || {};
-  const fetchSuccess = counters['scrape_results_total{outcome="fetch_success"}'] || 0;
-  const browserSuccess = counters['scrape_results_total{outcome="browser_success"}'] || 0;
-  const totalFailure = counters['scrape_results_total{outcome="total_failure"}'] || 0;
-  const totalAttempts = fetchSuccess + browserSuccess + totalFailure;
-
-  if (totalAttempts === 0) {
     return result;
   }
 
-  const fetchPct = Math.round((fetchSuccess / totalAttempts) * 100);
-  const browserPct = Math.round((browserSuccess / totalAttempts) * 100);
-  const failPct = Math.round((totalFailure / totalAttempts) * 100);
+  // Override error count from the actual error tracker (more accurate)
+  stats.errors = errorReport.totalErrors;
 
-  let summary = `\n\n## Scrape Performance Summary\n\n`;
-  summary += `Total URLs attempted: **${totalAttempts}**\n\n`;
-  summary += `| Layer | Success Count | Percentage |\n`;
-  summary += `| :--- | :--- | :--- |\n`;
-  summary += `| **Fetch (Lightweight)** | ${fetchSuccess} | ${fetchPct}% |\n`;
-  summary += `| **Browser (Stealth)** | ${browserSuccess} | ${browserPct}% |\n`;
-  summary += `| **Failed (Both)** | ${totalFailure} | ${failPct}% |\n\n`;
-  
-  if (totalFailure > 0) {
-    summary += `*Note: ${totalFailure} URL(s) could not be scraped even with browser fallback.*\n`;
+  const summary = buildResearchSummary(stats);
+  if (!summary) {
+    if (errorReport.totalErrors > 0) {
+      return result + `\n\n---\n\n*${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered during research.*`;
+    }
+    return result;
   }
-  
-  summary += `---`;
-  
-  return result + summary;
+
+  return result + `\n\n---\n\n${summary}`;
 }
 
 /**
@@ -349,15 +285,9 @@ export function createResearchTool(): ToolDefinition {
               // Stop wave animation
               stopObserverWaveAnimation(observerState, panelState);
 
-              // Append error summary if errors occurred during research
+              // Append unified research summary (stats + errors)
               const errorReport = sessionTracker.getReport();
-              let resultWithSummaries = result;
-              if (errorReport.totalErrors > 0) {
-                resultWithSummaries = appendErrorSummary(result, errorReport);
-              }
-
-              // Append scrape summary
-              resultWithSummaries = appendScrapeSummary(resultWithSummaries, runRegistry.getSnapshot());
+              const resultWithSummaries = appendResearchSummary(result, runRegistry.getSnapshot(), errorReport);
 
               let finalResult = resultWithSummaries;
               if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
