@@ -498,19 +498,39 @@ async function showMetricsAction(_ctx: ExtensionContext, pi: ExtensionAPI): Prom
     lines.push('');
 
     if (lastStats) {
-      const detailParts: string[] = [];
-      if (lastStats.researchersLaunched > 0) detailParts.push(`**${lastStats.researchersLaunched}** researchers`);
-      if (lastStats.roundsCompleted > 0) detailParts.push(`**${lastStats.roundsCompleted}** rounds`);
-      if (lastStats.searchQueries > 0) detailParts.push(`**${lastStats.searchQueries}** searches`);
-      if (lastStats.urlsAnalyzed > 0) detailParts.push(`**${lastStats.urlsAnalyzed}** sources analyzed`);
-      if (lastStats.urlsFailed > 0) detailParts.push(`**${lastStats.urlsFailed}** failed`);
-      if (lastStats.errors > 0) detailParts.push(`**${lastStats.errors}** errors`);
-      if (lastStats.tokens > 0) detailParts.push(`**${lastStats.tokens.toLocaleString('en-US')}** tokens`);
+      const activityParts: string[] = [];
+      if (lastStats.researchersLaunched > 0) activityParts.push(`**${lastStats.researchersLaunched}** researchers`);
+      if (lastStats.roundsCompleted > 0) activityParts.push(`**${lastStats.roundsCompleted}** rounds`);
+      if (activityParts.length > 0) lines.push(activityParts.join(' · '));
 
-      if (detailParts.length > 0) {
-        lines.push(detailParts.join(' · '));
-        lines.push('');
+      const discoveryParts: string[] = [];
+      if (lastStats.searchQueries > 0) discoveryParts.push(`**${lastStats.searchQueries}** searches`);
+      if (lastStats.urlsDiscovered > 0) discoveryParts.push(`**${lastStats.urlsDiscovered}** discovered`);
+      if (lastStats.urlsAnalyzed > 0) {
+        const layerParts: string[] = [`${lastStats.urlsAnalyzed} analyzed`];
+        if (lastStats.fetchSuccess > 0 && lastStats.browserSuccess > 0) {
+          layerParts.push(`${lastStats.fetchSuccess} fetch`);
+          layerParts.push(`${lastStats.browserSuccess} browser`);
+        }
+        discoveryParts.push(`**${layerParts.join(', ')}**`);
       }
+      if (discoveryParts.length > 0) lines.push(discoveryParts.join(' · '));
+
+      const toolParts: string[] = [];
+      if (lastStats.toolUsage.searches > 0) toolParts.push(`${lastStats.toolUsage.searches} searches`);
+      if (lastStats.toolUsage.scrapes > 0) toolParts.push(`${lastStats.toolUsage.scrapes} scrapes`);
+      if (lastStats.toolUsage.securitySearches > 0) toolParts.push(`${lastStats.toolUsage.securitySearches} security`);
+      if (lastStats.toolUsage.stackexchangeQueries > 0) toolParts.push(`${lastStats.toolUsage.stackexchangeQueries} StackExchange`);
+      if (lastStats.toolUsage.knowledgeLookups > 0) toolParts.push(`${lastStats.toolUsage.knowledgeLookups} knowledge`);
+      if (toolParts.length > 0) lines.push(`Tools: ${toolParts.join(' · ')}`);
+
+      const resourceParts: string[] = [];
+      if (lastStats.tokens > 0) resourceParts.push(`**${lastStats.tokens.toLocaleString('en-US')}** tokens`);
+      if (lastStats.urlsFailed > 0) resourceParts.push(`**${lastStats.urlsFailed}** failed`);
+      if (lastStats.errors > 0) resourceParts.push(`**${lastStats.errors}** errors`);
+      if (resourceParts.length > 0) lines.push(resourceParts.join(' · '));
+
+      lines.push('');
     }
 
     // ── Prior Runs ─────────────────────────────────────────────────────

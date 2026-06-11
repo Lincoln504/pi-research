@@ -140,15 +140,20 @@ describe('Research Tool - Report Summaries', () => {
     const text = (result.content[0] as any).text;
     // The new unified summary format — no tables, no percentages, just counts
     expect(text).toContain('### Research Summary');
-    expect(text).toContain('**2** researcher agents dispatched');
-    expect(text).toContain('**2** pages scraped and analyzed');
+    expect(text).toContain('**2** researchers dispatched');
+    // Scrape layer breakdown shows fetch vs browser
+    expect(text).toContain('1 via fetch');
+    expect(text).toContain('1 via browser');
+    // Duration and tokens
+    expect(text).toContain('**5,000** tokens');
+    expect(text).toContain('**12.0s**');
     // No percentage symbols should appear
     expect(text).not.toMatch(/\d+%/);
     // No table formatting
     expect(text).not.toContain('|');
   });
 
-  it('does not include percentages in the output', async () => {
+  it('does not include percentages or table formatting in the output', async () => {
     const tool = createResearchTool();
     const ctx = {
       model: { id: 'test-model' },
@@ -159,9 +164,10 @@ describe('Research Tool - Report Summaries', () => {
     const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, ctx);
     const text = (result.content[0] as any).text;
     
-    // No percentage symbols anywhere
-    expect(text).not.toMatch(/\|\s*\*?\*?\d+%/);
+    // No old-style sections
     expect(text).not.toContain('Scrape Performance Summary');
     expect(text).not.toContain('Error Summary');
+    // No percentages
+    expect(text).not.toMatch(/\|\s*\*?\*?\d+%/);
   });
 });

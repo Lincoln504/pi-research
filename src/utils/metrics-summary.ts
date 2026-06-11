@@ -33,7 +33,13 @@ export interface ResearchStats {
   searchQueries: number;
   /** Number of unique URLs discovered via search. */
   urlsDiscovered: number;
-  /** Number of URLs successfully scraped/analyzed. */
+  /** Number of URLs successfully scraped via lightweight fetch. */
+  fetchSuccess: number;
+  /** Number of URLs successfully scraped via browser (stealth fallback). */
+  browserSuccess: number;
+  /** Number of URLs that fell back from fetch to browser. */
+  browserFallbacks: number;
+  /** Number of URLs successfully scraped/analyzed (fetch + browser). */
   urlsAnalyzed: number;
   /** Number of URLs that failed to scrape. */
   urlsFailed: number;
@@ -41,6 +47,14 @@ export interface ResearchStats {
   errors: number;
   /** Total LLM tokens consumed. */
   tokens: number;
+  /** Tool usage counts. */
+  toolUsage: {
+    searches: number;
+    scrapes: number;
+    securitySearches: number;
+    stackexchangeQueries: number;
+    knowledgeLookups: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,8 +172,18 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   const fetchSuccess = getLabeledCounter(counters, 'scrape_results_total', { outcome: 'fetch_success' });
   const browserSuccess = getLabeledCounter(counters, 'scrape_results_total', { outcome: 'browser_success' });
   const totalFailure = getLabeledCounter(counters, 'scrape_results_total', { outcome: 'total_failure' });
+  const browserFallbacks = sumCounter(counters, 'scrape_layer_fallbacks_total');
   const urlsAnalyzed = fetchSuccess + browserSuccess;
   const urlsFailed = totalFailure;
+
+  // Tool usage
+  const toolUsage = {
+    searches: sumCounter(counters, 'tool_search_calls_total'),
+    scrapes: sumCounter(counters, 'tool_scrape_calls_total'),
+    securitySearches: sumCounter(counters, 'tool_security_search_calls_total'),
+    stackexchangeQueries: sumCounter(counters, 'stackexchange_requests_total'),
+    knowledgeLookups: sumCounter(counters, 'research_knowledge_search_total'),
+  };
 
   // Errors
   const errors = sumCounter(counters, 'scrape_errors_total') +
@@ -201,10 +225,14 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
     roundsCompleted,
     searchQueries,
     urlsDiscovered,
+    fetchSuccess,
+    browserSuccess,
+    browserFallbacks,
     urlsAnalyzed,
     urlsFailed,
     errors,
     tokens,
+    toolUsage,
   };
 }
 
@@ -218,47 +246,121 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
  * Design principles:
  *   - No tables, no percentages — just counts
  *   - Highlights the volume of work done
- *   - Errors shown as a simple count, not a wall of detail
- *   - Feels like a quick achievement summary, not a diagnostic dump
+ *   - Shows scrape layer breakdown (fetch vs browser)
+ *   - Shows which tools were used
+ *   - Errors show top patterns and affected domains
+ *   - Feels informative but not like a diagnostic dump
  *
  * Returns empty string if no meaningful data.
  */
-export function buildResearchSummary(stats: ResearchStats): string {
+export function buildResearchSummary(
+  stats: ResearchStats,
+  errorReport?: { totalErrors: number; patterns: Array<{ message: string; count: number }>; byDomain: Map<string, number>; byType: Map<string, number> } | null,
+): string {
   const lines: string[] = [];
 
   lines.push('### Research Summary');
 
-  // Core "hype" stats — emphasize volume of work
-  const workLines: string[] = [];
+  // --- Core activity stats ---
+  const workParts: string[] = [];
 
   if (stats.researchersLaunched > 0) {
-    workLines.push(`**${stats.researchersLaunched}** researcher agent${stats.researchersLaunched > 1 ? 's' : ''} dispatched`);
-  }
-  if (stats.searchQueries > 0) {
-    workLines.push(`**${stats.searchQueries}** search queries executed`);
-  }
-  if (stats.urlsDiscovered > 0) {
-    workLines.push(`**${stats.urlsDiscovered}** source${stats.urlsDiscovered > 1 ? 's' : ''} discovered`);
-  }
-  if (stats.urlsAnalyzed > 0) {
-    workLines.push(`**${stats.urlsAnalyzed}** page${stats.urlsAnalyzed > 1 ? 's' : ''} scraped and analyzed`);
+    workParts.push(`**${stats.researchersLaunched}** researcher${stats.researchersLaunched > 1 ? 's' : ''} dispatched`);
   }
   if (stats.roundsCompleted > 1) {
-    workLines.push(`**${stats.roundsCompleted}** evaluation rounds completed`);
+    workParts.push(`**${stats.roundsCompleted}** evaluation rounds`);
   }
+  if (workParts.length > 0) {
+    lines.push(workParts.join(' · '));
+  }
+
+  // --- Discovery & analysis ---
+  const discoveryParts: string[] = [];
+  if (stats.searchQueries > 0) {
+    discoveryParts.push(`**${stats.searchQueries}** search queries`);
+  }
+  if (stats.urlsDiscovered > 0) {
+    discoveryParts.push(`**${stats.urlsDiscovered}** source${stats.urlsDiscovered > 1 ? 's' : ''} discovered`);
+  }
+  if (stats.urlsAnalyzed > 0) {
+    // Show scrape layer breakdown
+    const layerParts: string[] = [`${stats.urlsAnalyzed} analyzed`];
+    if (stats.fetchSuccess > 0 && stats.browserSuccess > 0) {
+      layerParts.push(`${stats.fetchSuccess} via fetch`);
+      layerParts.push(`${stats.browserSuccess} via browser`);
+    }
+    if (stats.browserFallbacks > 0) {
+      layerParts.push(`${stats.browserFallbacks} fetch→browser fallback${stats.browserFallbacks > 1 ? 's' : ''}`);
+    }
+    discoveryParts.push(`**${layerParts.join(', ')}**`);
+  }
+  if (discoveryParts.length > 0) {
+    lines.push(discoveryParts.join(' · '));
+  }
+
+  // --- Tools used ---
+  const toolParts: string[] = [];
+  if (stats.toolUsage.searches > 0) {
+    toolParts.push(`${stats.toolUsage.searches} searches`);
+  }
+  if (stats.toolUsage.scrapes > 0) {
+    toolParts.push(`${stats.toolUsage.scrapes} scrapes`);
+  }
+  if (stats.toolUsage.securitySearches > 0) {
+    toolParts.push(`${stats.toolUsage.securitySearches} security lookups`);
+  }
+  if (stats.toolUsage.stackexchangeQueries > 0) {
+    toolParts.push(`${stats.toolUsage.stackexchangeQueries} StackExchange queries`);
+  }
+  if (stats.toolUsage.knowledgeLookups > 0) {
+    toolParts.push(`${stats.toolUsage.knowledgeLookups} knowledge store queries`);
+  }
+  if (toolParts.length > 0) {
+    lines.push(`Tools: ${toolParts.join(' · ')}`);
+  }
+
+  // --- Resources ---
+  const resourceParts: string[] = [];
   if (stats.tokens > 0) {
-    workLines.push(`**${formatTokens(stats.tokens)}** tokens processed`);
+    resourceParts.push(`**${formatTokens(stats.tokens)}** tokens`);
   }
   if (stats.durationMs > 0) {
-    workLines.push(`Completed in **${formatDuration(stats.durationMs)}**`);
+    resourceParts.push(`completed in **${formatDuration(stats.durationMs)}**`);
+  }
+  if (resourceParts.length > 0) {
+    lines.push(resourceParts.join(' · '));
   }
 
-  if (workLines.length === 0) return '';
+  // --- Errors ---
+  if (stats.errors > 0 && errorReport && errorReport.totalErrors > 0) {
+    const errorLines: string[] = [];
+    errorLines.push(`${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered`);
 
-  lines.push(workLines.join(' · '));
+    // Top error patterns (up to 3, just message + count)
+    if (errorReport.patterns.length > 0) {
+      const topPatterns = errorReport.patterns.slice(0, 3);
+      for (const p of topPatterns) {
+        errorLines.push(`- ${p.count}× ${p.message}`);
+      }
+    }
 
-  // Errors — single concise line, only when present
-  if (stats.errors > 0) {
+    // Affected domains (up to 5, just domain + count)
+    if (errorReport.byDomain.size > 0) {
+      const sortedDomains = Array.from(errorReport.byDomain.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+      const domainStr = sortedDomains.map(([d, c]) => `${d} (${c})`).join(', ');
+      errorLines.push(`Affected domains: ${domainStr}`);
+    }
+
+    // Unretrievable URLs
+    if (stats.urlsFailed > 0) {
+      errorLines.push(`${stats.urlsFailed} URL${stats.urlsFailed > 1 ? 's' : ''} could not be retrieved`);
+    }
+
+    lines.push(`*${errorLines.join('\n')}*`);
+  } else if (stats.errors > 0) {
+    // No detailed error report — just show counts
     const errorParts: string[] = [`${stats.errors} error${stats.errors > 1 ? 's' : ''} encountered`];
     if (stats.urlsFailed > 0) {
       errorParts.push(`${stats.urlsFailed} URL${stats.urlsFailed > 1 ? 's' : ''} could not be retrieved`);
@@ -283,6 +385,13 @@ export interface SessionStats {
   totalUrlsDiscovered: number;
   totalSearchQueries: number;
   totalTokens: number;
+  totalToolUsage: {
+    searches: number;
+    scrapes: number;
+    securitySearches: number;
+    stackexchangeQueries: number;
+    knowledgeLookups: number;
+  };
 }
 
 /**
@@ -298,6 +407,13 @@ export function aggregateSessionStats(
   let totalUrlsDiscovered = 0;
   let totalSearchQueries = 0;
   let totalTokens = 0;
+  const totalToolUsage = {
+    searches: 0,
+    scrapes: 0,
+    securitySearches: 0,
+    stackexchangeQueries: 0,
+    knowledgeLookups: 0,
+  };
 
   for (const run of runHistory) {
     if (run.status === 'success') successfulRuns++;
@@ -311,6 +427,11 @@ export function aggregateSessionStats(
       totalUrlsDiscovered += stats.urlsDiscovered;
       totalSearchQueries += stats.searchQueries;
       totalTokens += stats.tokens;
+      totalToolUsage.searches += stats.toolUsage.searches;
+      totalToolUsage.scrapes += stats.toolUsage.scrapes;
+      totalToolUsage.securitySearches += stats.toolUsage.securitySearches;
+      totalToolUsage.stackexchangeQueries += stats.toolUsage.stackexchangeQueries;
+      totalToolUsage.knowledgeLookups += stats.toolUsage.knowledgeLookups;
     }
   }
 
@@ -324,6 +445,7 @@ export function aggregateSessionStats(
     totalUrlsDiscovered,
     totalSearchQueries,
     totalTokens,
+    totalToolUsage,
   };
 }
 
@@ -355,6 +477,17 @@ export function buildSessionOverview(stats: SessionStats): string {
   }
 
   lines.push(overviewParts.join(' · '));
+
+  // Tool usage line
+  const toolParts: string[] = [];
+  if (stats.totalToolUsage.searches > 0) toolParts.push(`${stats.totalToolUsage.searches} searches`);
+  if (stats.totalToolUsage.scrapes > 0) toolParts.push(`${stats.totalToolUsage.scrapes} scrapes`);
+  if (stats.totalToolUsage.securitySearches > 0) toolParts.push(`${stats.totalToolUsage.securitySearches} security lookups`);
+  if (stats.totalToolUsage.stackexchangeQueries > 0) toolParts.push(`${stats.totalToolUsage.stackexchangeQueries} StackExchange queries`);
+  if (stats.totalToolUsage.knowledgeLookups > 0) toolParts.push(`${stats.totalToolUsage.knowledgeLookups} knowledge store queries`);
+  if (toolParts.length > 0) {
+    lines.push(`Tools used: ${toolParts.join(' · ')}`);
+  }
 
   return lines.join('\n');
 }
