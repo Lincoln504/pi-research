@@ -54,8 +54,8 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
   let storeSection = '';
   if (historicalUrls.length > 0) {
-    storeSection = '\n## Historical Knowledge Store\n' +
-      'The following URLs were found in your local knowledge store from previous research sessions. ' +
+    storeSection = '\n## Knowledge Store\n' +
+      'The following URLs were found in the knowledge store from previous research sessions. ' +
       'Scrape each URL to retrieve its full current content. The summary below describes what was previously found at that URL — use it as a guide for what to expect.\n' +
       historicalUrls.map(e => `- ${e.url}\n  Previous summary: ${e.description}`).join('\n');
   }

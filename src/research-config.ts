@@ -18,12 +18,9 @@ import type { TUI } from '@earendil-works/pi-tui';
 import {
   SettingsList,
   type SettingItem,
-  truncateToWidth,
 } from '@earendil-works/pi-tui';
-import * as fs from 'node:fs';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
-// safeUnref removed — no polling timer in config menu anymore
-import { getConfig, saveConfig, resetConfig, getDbDir, getGlobalEnvFilePath, getLocalEnvFilePath } from './config.ts';
+import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService } from './core/service-registry.ts';
 import { ServiceNames, IKnowledgeStoreService } from './core/service-interfaces.ts';
@@ -32,21 +29,18 @@ import { clearEmbeddingInstance } from './infrastructure/embedding/embedding-fac
 import type { Theme } from './types/research-panel-types.ts';
 import { SUPPORTED_MODELS } from './knowledge/index.ts';
 import { metrics } from './utils/metrics.ts';
+import {
+  extractRunStats,
+  aggregateSessionStats,
+  buildSessionOverview,
+  buildRunCompactLine,
+} from './utils/metrics-summary.ts';
 import { logger } from './logger.ts';
+import { formatTimeAgo, formatDuration } from './utils/text-utils.ts';
 
 // ============================================================================
 // Utilities
 // ============================================================================
-
-function formatTimeAgo(isoTimestamp: string): string {
-  const diffMs = Date.now() - new Date(isoTimestamp).getTime();
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes < 1) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
 
 // ============================================================================
 // Command Handler
@@ -84,8 +78,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 
   const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
 
+  const anyKnowledgeStore = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
+
   const initialItems: SettingItem[] = [
-    // --- Core Research Settings ---
+    // --- Research ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
       label: '/research depth',
@@ -139,42 +135,43 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Knowledge Store ---
     {
       id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Project scope',
-      description: 'Enable project-specific knowledge for this directory.',
+      label: 'Project Knowledge Store',
+      description: 'Store research findings scoped to this project directory. When enabled, the knowledge search tool and researcher store injection become available.',
       currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Shared scope',
-      description: 'Enable shared knowledge (cross-project, different directories).',
+      label: 'User Knowledge Store',
+      description: 'Store research findings shared across all project directories. When enabled, the knowledge search tool becomes available for cross-project lookups.',
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
+    ...(anyKnowledgeStore ? [
+      {
+        id: 'EMBEDDING_MODEL',
+        label: 'Embed model',
+        description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.',
+        currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
+        values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
+      },
+      {
+        id: 'EMBEDDING_DEVICE',
+        label: 'Embed device',
+        description: 'Hardware backend (webgpu is significantly faster)',
+        currentValue: config.EMBEDDING_DEVICE,
+        values: ['webgpu', 'cpu'],
+      },
+      {
+        id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
+        label: 'Cache TTL (days)',
+        description: 'Retention period for research findings (1-365 days)',
+        currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+        values: ['7', '14', '30', '60', '90', '180', '365'],
+      },
+    ] as SettingItem[] : []),
 
-    {
-      id: 'EMBEDDING_MODEL',
-      label: 'Embed model',
-      description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.',
-      currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
-      values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
-    },
-    {
-      id: 'EMBEDDING_DEVICE',
-      label: 'Embed device',
-      description: 'Hardware backend (webgpu is significantly faster)',
-      currentValue: config.EMBEDDING_DEVICE,
-      values: ['webgpu', 'cpu'],
-    },
-    {
-      id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-      label: 'Cache TTL (days)',
-      description: 'Retention period for research findings (1-365 days)',
-      currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
-      values: ['7', '14', '30', '60', '90', '180', '365'],
-    },
-
-    // --- Actions & Diagnostics ---
+    // --- Actions ---
     {
       id: 'ACTION_HEALTH',
       label: 'Check system health',
@@ -182,27 +179,33 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: 'run',
       values: ['run'],
     },
-    {
-      id: 'ACTION_KNOWLEDGE_STATUS',
-      label: 'Show knowledge status',
-      description: 'Display detailed knowledge store statistics',
-      currentValue: 'run',
-      values: ['run'],
-    },
-    {
-      id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-      label: 'Clear project data',
-      description: 'Permanently delete all project-scoped entries',
-      currentValue: 'run',
-      values: ['run'],
-    },
-    {
-      id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-      label: 'Clear shared data',
-      description: 'Permanently delete all shared entries',
-      currentValue: 'run',
-      values: ['run'],
-    },
+    ...(anyKnowledgeStore ? [
+      {
+        id: 'ACTION_KNOWLEDGE_STATUS',
+        label: 'Show knowledge status',
+        description: 'Display detailed knowledge store statistics (entries, model, device)',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
+    ...(config.LOCAL_KNOWLEDGE_STORE_ENABLED ? [
+      {
+        id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
+        label: 'Clear project data',
+        description: 'Permanently delete all project-scoped entries from this directory',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
+    ...(config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? [
+      {
+        id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
+        label: 'Clear user data',
+        description: 'Permanently delete all shared (cross-project) entries',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
     {
       id: 'ACTION_METRICS_VIEW',
       label: 'View session metrics',
@@ -314,17 +317,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         return {
           render: (width: number) => {
             const border = theme.fg('muted', '─'.repeat(width));
-            const globalEnvPath = getGlobalEnvFilePath();
-            const localEnvPath = getLocalEnvFilePath();
-            const hasLocal = fs.existsSync(localEnvPath);
-            const activeEnvPath = hasLocal ? localEnvPath : globalEnvPath;
-            const footerLines = [
-              '',
-              theme.fg('dim', truncateToWidth(`  Config: ${activeEnvPath}`, width)),
-              theme.fg('dim', truncateToWidth(`  "Project" refers to this distinct directory on your system.`, width)),
-              theme.fg('dim', truncateToWidth(`  See file for all settings (PI_RESEARCH_MODEL, timeouts, paths, and more).`, width)),
-            ];
-            return [border, ...settingsList.render(width), border, ...footerLines, border];
+            const listLines = settingsList.render(width);
+            return [border, ...listLines, border];
           },
           handleInput: (data: string) => settingsList.handleInput(data),
           invalidate: () => settingsList.invalidate(),
@@ -366,14 +360,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             await showKnowledgeStatusAction(ctx, pi);
             break;
           case 'knowledge_clear_global': {
-            const confirmed = await ctx.ui.confirm('Clear Shared Data', 'Are you sure you want to delete all global shared knowledge store data?');
+            const confirmed = await ctx.ui.confirm('Clear User Data', 'Are you sure you want to delete all user (cross-project) knowledge store data?');
             if (confirmed) {
               try {
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
                 await service.clearGlobal();
-                ctx.ui.notify('Global shared data cleared', 'info');
+                ctx.ui.notify('User knowledge data cleared', 'info');
               } catch (e: unknown) {
-                ctx.ui.notify(`Failed to clear global store: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                ctx.ui.notify(`Failed to clear user store: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
             break;
@@ -464,7 +458,7 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **Shared Entries:** ${counts.global}, across ${counts.projects} Projects\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **User Entries:** ${counts.global}, across ${counts.projects} Projects\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {
@@ -475,84 +469,56 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
 }
 
 async function showMetricsAction(_ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
-  const sessionSnapshot = metrics.getSessionSnapshot();
   const runHistory     = metrics.getRunHistory();
   const sessionStart   = metrics.getSessionStartedAt();
 
-  const lines: string[] = ['## Pi Session Metrics', ''];
-  lines.push('Scope: current Pi session (resets when Pi exits or metrics are cleared manually)');
-  lines.push(`Session started: ${formatTimeAgo(new Date(sessionStart).toISOString())}`);
-  lines.push(`Runs this session: ${runHistory.length}`);
+  const lines: string[] = ['## Session Metrics', ''];
+  lines.push(`Session started ${formatTimeAgo(new Date(sessionStart).toISOString())}`);
   lines.push('');
 
-  // ── Session-level infrastructure data ──────────────────────────────────
-  const hasSessionCounters   = Object.keys(sessionSnapshot.counters).length > 0;
-  const hasSessionHistograms = Object.keys(sessionSnapshot.histograms).length > 0;
+  // ── Session Overview ──────────────────────────────────────────────────
+  const sessionStats = aggregateSessionStats(runHistory);
+  sessionStats.sessionStartedAt = sessionStart;
 
-  if (hasSessionCounters || hasSessionHistograms) {
-    lines.push('### Session Infrastructure (startup, locks, coordination)');
-    if (hasSessionCounters) {
-      for (const [key, value] of Object.entries(sessionSnapshot.counters)) {
-        lines.push(`- **${key}:** ${value}`);
-      }
-    }
-    if (hasSessionHistograms) {
-      for (const [key, stats] of Object.entries(sessionSnapshot.histograms)) {
-        lines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
-      }
-    }
-    lines.push('');
-  }
-
-  // ── Per-run history ─────────────────────────────────────────────────────
   if (runHistory.length === 0) {
     lines.push('_No research runs in this session._');
   } else {
-    const lastRun = runHistory[runHistory.length - 1]!;
-    const runIdShort = lastRun.runId.slice(0, 8);
-    const statusLabel = lastRun.status === 'success' ? '[OK]'
-                      : lastRun.status === 'cancelled' ? '[--]'
-                      : '[ERR]';
-
-    lines.push(`### Last Run \`${runIdShort}\``);
-    lines.push(`**Status:** ${statusLabel} ${lastRun.status} | **Duration:** ${(lastRun.durationMs / 1000).toFixed(1)}s | **Completed:** ${formatTimeAgo(new Date(lastRun.completedAt).toISOString())}`);
+    lines.push(buildSessionOverview(sessionStats));
     lines.push('');
 
-    const { counters, gauges, histograms } = lastRun.snapshot;
+    // ── Last Run Detail ──────────────────────────────────────────────────
+    const lastRun = runHistory[runHistory.length - 1]!;
+    const lastStats = extractRunStats(lastRun.snapshot);
 
-    if (Object.keys(counters).length > 0) {
-      lines.push('#### Counters');
-      for (const [key, value] of Object.entries(counters)) {
-        lines.push(`- **${key}:** ${value}`);
+    lines.push(`### Last Run`);
+    const statusIcon = lastRun.status === 'success' ? '✓'
+                     : lastRun.status === 'cancelled' ? '⊘'
+                     : '✗';
+    lines.push(`${statusIcon} \`${lastRun.runId.slice(0, 8)}\` — ${formatDuration(lastRun.durationMs)} — completed ${formatTimeAgo(new Date(lastRun.completedAt).toISOString())}`);
+    lines.push('');
+
+    if (lastStats) {
+      const detailParts: string[] = [];
+      if (lastStats.researchersLaunched > 0) detailParts.push(`**${lastStats.researchersLaunched}** researchers`);
+      if (lastStats.roundsCompleted > 0) detailParts.push(`**${lastStats.roundsCompleted}** rounds`);
+      if (lastStats.searchQueries > 0) detailParts.push(`**${lastStats.searchQueries}** searches`);
+      if (lastStats.urlsAnalyzed > 0) detailParts.push(`**${lastStats.urlsAnalyzed}** sources analyzed`);
+      if (lastStats.urlsFailed > 0) detailParts.push(`**${lastStats.urlsFailed}** failed`);
+      if (lastStats.errors > 0) detailParts.push(`**${lastStats.errors}** errors`);
+      if (lastStats.tokens > 0) detailParts.push(`**${lastStats.tokens.toLocaleString('en-US')}** tokens`);
+
+      if (detailParts.length > 0) {
+        lines.push(detailParts.join(' · '));
+        lines.push('');
       }
-      lines.push('');
     }
 
-    if (Object.keys(gauges).length > 0) {
-      lines.push('#### Gauges');
-      for (const [key, value] of Object.entries(gauges)) {
-        lines.push(`- **${key}:** ${value}`);
-      }
-      lines.push('');
-    }
-
-    if (Object.keys(histograms).length > 0) {
-      lines.push('#### Latency & Performance');
-      for (const [key, stats] of Object.entries(histograms)) {
-        lines.push(`- **${key}:** Count: ${stats.count}, Avg: ${stats.avg.toFixed(2)}ms, P99: ${stats.p99.toFixed(2)}ms`);
-      }
-      lines.push('');
-    }
-
-    // ── Prior run compact summary ─────────────────────────────────────────
+    // ── Prior Runs ─────────────────────────────────────────────────────
     if (runHistory.length > 1) {
       const prior = runHistory.slice(0, -1).slice().reverse();
-      lines.push(`### Prior Runs (${prior.length})`);
+      lines.push(`### Prior Runs`);
       for (const run of prior) {
-        const icon = run.status === 'success' ? '[OK]'
-                   : run.status === 'cancelled' ? '[--]'
-                   : '[ERR]';
-        lines.push(`- ${icon} \`${run.runId.slice(0, 8)}\` ${(run.durationMs / 1000).toFixed(1)}s — ${formatTimeAgo(new Date(run.completedAt).toISOString())}`);
+        lines.push(buildRunCompactLine(run as any));
       }
       lines.push('');
     }
@@ -562,12 +528,5 @@ async function showMetricsAction(_ctx: ExtensionContext, pi: ExtensionAPI): Prom
     customType: 'metrics-result',
     content: lines.join('\n'),
     display: true,
-    details: {
-      metrics: {
-        session: sessionSnapshot,
-        runs: runHistory,
-        sessionStartedAt: sessionStart,
-      },
-    },
   });
 }

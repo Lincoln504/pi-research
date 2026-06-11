@@ -50,7 +50,15 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
       counters: {
         'scrape_results_total{outcome="fetch_success"}': 1,
         'scrape_results_total{outcome="browser_success"}': 1,
-      }
+        'researchers_launched_total{mode="deep",complexity="1",round="1"}': 2,
+        'browser_search_queries_total': 3,
+        'llm_tokens_total{component="researcher",complexity="1"}': 5000,
+      },
+      histograms: {
+        'research_session_duration_ms{mode="deep",complexity="1",status="success"}': {
+          count: 1, min: 12000, max: 12000, avg: 12000, p99: 12000,
+        },
+      },
     }));
   },
   runWithRunRegistry: vi.fn(async (_registry, fn) => await fn()),
@@ -119,7 +127,7 @@ describe('Research Tool - Report Summaries', () => {
     });
   });
 
-  it('includes scrape performance summary when scrapes were performed', async () => {
+  it('includes research summary with stats when research was performed', async () => {
     const tool = createResearchTool();
     const ctx = {
       model: { id: 'test-model' },
@@ -130,8 +138,30 @@ describe('Research Tool - Report Summaries', () => {
     const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, ctx);
     
     const text = (result.content[0] as any).text;
-    expect(text).toContain('## Scrape Performance Summary');
-    expect(text).toContain('| **Fetch (Lightweight)** | 1 | 50% |');
-    expect(text).toContain('| **Browser (Stealth)** | 1 | 50% |');
+    // The new unified summary format — no tables, no percentages, just counts
+    expect(text).toContain('### Research Summary');
+    expect(text).toContain('**2** researcher agents dispatched');
+    expect(text).toContain('**2** pages scraped and analyzed');
+    // No percentage symbols should appear
+    expect(text).not.toMatch(/\d+%/);
+    // No table formatting
+    expect(text).not.toContain('|');
+  });
+
+  it('does not include percentages in the output', async () => {
+    const tool = createResearchTool();
+    const ctx = {
+      model: { id: 'test-model' },
+      modelRegistry: { getAll: () => [{ id: 'test-model' }] },
+      cwd: '/tmp',
+    } as any;
+
+    const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, ctx);
+    const text = (result.content[0] as any).text;
+    
+    // No percentage symbols anywhere
+    expect(text).not.toMatch(/\|\s*\*?\*?\d+%/);
+    expect(text).not.toContain('Scrape Performance Summary');
+    expect(text).not.toContain('Error Summary');
   });
 });
