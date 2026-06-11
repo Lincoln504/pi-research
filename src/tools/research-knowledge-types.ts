@@ -55,23 +55,3 @@ export type ResearchKnowledgeSynthesisResponse = Static<typeof ResearchKnowledge
  */
 export const ResearchKnowledgeSynthesisResponseSchemaAsTSchema =
   ResearchKnowledgeSynthesisResponseSchema as unknown as TSchema;
-
-/**
- * Map legacy boolean to tri-state for backward compatibility during
- * Value.Convert coercion. If the LLM returns `answer_found: true/false`
- * (the old field), this converts it to the new `answer_status` enum.
- */
-export function legacyBooleanToStatus(value: unknown): { answer_status: AnswerStatus } | null {
-  if (typeof value === 'object' && value !== null) {
-    const obj = value as Record<string, unknown>;
-    // If answer_status already present, no conversion needed
-    if ('answer_status' in obj && typeof obj.answer_status === 'string') {
-      return null;
-    }
-    // Convert legacy answer_found boolean
-    if ('answer_found' in obj && typeof obj.answer_found === 'boolean') {
-      return { answer_status: obj.answer_found ? 'yes' : 'no' };
-    }
-  }
-  return null;
-}

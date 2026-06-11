@@ -3,21 +3,20 @@
  *
  * Tests the stateless, algorithmic logic of the research_knowledge_search tool:
  * schema validation, URL deduplication, model resolution, token budgeting,
- * tri-state answer steering, and deterministic routing.
+ * tri-state answer steering, TUI panel rendering, and deterministic routing.
  *
  * These tests are entirely memory-bound — no file I/O, no LLM calls.
  * LLM-dependent paths (completeSimple, repairJsonWithLlm) are mocked.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Value } from 'typebox/value';
 import {
   ResearchKnowledgeSynthesisResponseSchema,
-  legacyBooleanToStatus,
 } from '../../../src/tools/research-knowledge-types.ts';
 
 // ---------------------------------------------------------------------------
-// Test 1: Schema Rejection & Validation (Phase 1)
+// Test 1: Schema Validation (Phase 1)
 // ---------------------------------------------------------------------------
 describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () => {
 
@@ -57,6 +56,15 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     expect(coerced.synthesis).toBe('Partial info: the sky may be blue [1].');
   });
 
+  it('accepts "maybe" without synthesis (synthesis is optional)', () => {
+    const input = {
+      answer_status: 'maybe',
+      citations: ['https://example.com/sky'],
+    };
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
+    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
+  });
+
   it('rejects when answer_status is missing (required)', () => {
     const input = { citations: ['https://x.com'] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
@@ -71,6 +79,12 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
 
   it('rejects when answer_status is a boolean', () => {
     const input = { answer_status: true, citations: [] };
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
+    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
+  });
+
+  it('rejects when citations is missing (required)', () => {
+    const input = { answer_status: 'yes' };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
   });
@@ -93,45 +107,20 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Test 1b: Legacy boolean conversion
-// ---------------------------------------------------------------------------
-describe('legacyBooleanToStatus — backward compatibility', () => {
-  it('converts answer_found: true to answer_status: "yes"', () => {
-    const result = legacyBooleanToStatus({ answer_found: true, citations: [] });
-    expect(result).toEqual({ answer_status: 'yes' });
-  });
-
-  it('converts answer_found: false to answer_status: "no"', () => {
-    const result = legacyBooleanToStatus({ answer_found: false, citations: [] });
-    expect(result).toEqual({ answer_status: 'no' });
-  });
-
-  it('returns null when answer_status is already present', () => {
-    const result = legacyBooleanToStatus({ answer_status: 'yes', citations: [] });
-    expect(result).toBeNull();
-  });
-
-  it('returns null when neither field is present', () => {
-    const result = legacyBooleanToStatus({ citations: [] });
-    expect(result).toBeNull();
-  });
-
-  it('returns null for non-object input', () => {
-    expect(legacyBooleanToStatus(null)).toBeNull();
-    expect(legacyBooleanToStatus(undefined)).toBeNull();
-    expect(legacyBooleanToStatus('string')).toBeNull();
+  it('rejects unknown answer_status values like "unknown"', () => {
+    const input = { answer_status: 'unknown', citations: [] };
+    const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
+    expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: URL Mathematical Deduplication (Phase 2 logic)
+// Test 2: URL Deduplication (Phase 2 logic)
 // ---------------------------------------------------------------------------
 describe('URL deduplication — mathematical set semantics', () => {
   function simulateUrlCollection(
-    queryResults: Array<Array<{ url: string; description: string }>>,
+    queryResults: Array<Array<{ url: string; provenance?: string }>>,
   ): { uniqueUrls: string[]; totalHits: number } {
     const allUrls = new Map<string, number>();
     let totalHits = 0;
@@ -159,10 +148,10 @@ describe('URL deduplication — mathematical set semantics', () => {
 
   it('deduplicates a URL returned by multiple queries', () => {
     const results = [
-      [{ url: 'https://a.com', description: 'A1' }],
-      [{ url: 'https://a.com', description: 'A2' }],
-      [{ url: 'https://b.com', description: 'B1' }],
-      [{ url: 'https://a.com', description: 'A3' }],
+      [{ url: 'https://a.com' }],
+      [{ url: 'https://a.com' }],
+      [{ url: 'https://b.com' }],
+      [{ url: 'https://a.com' }],
     ];
     const { uniqueUrls, totalHits } = simulateUrlCollection(results);
     expect(totalHits).toBe(4);
@@ -173,27 +162,19 @@ describe('URL deduplication — mathematical set semantics', () => {
 
   it('preserves first-appearance order as relevance ranking', () => {
     const results = [
-      [{ url: 'https://c.com', description: 'C1' }],
-      [{ url: 'https://a.com', description: 'A1' }],
-      [{ url: 'https://b.com', description: 'B1' }],
-      [{ url: 'https://a.com', description: 'A2' }],
+      [{ url: 'https://c.com' }],
+      [{ url: 'https://a.com' }],
+      [{ url: 'https://b.com' }],
+      [{ url: 'https://a.com' }],
     ];
     const { uniqueUrls } = simulateUrlCollection(results);
-    expect(uniqueUrls[0]).toBe('https://c.com');
-    expect(uniqueUrls[1]).toBe('https://a.com');
-    expect(uniqueUrls[2]).toBe('https://b.com');
+    expect(uniqueUrls).toEqual(['https://c.com', 'https://a.com', 'https://b.com']);
   });
 
   it('handles empty result sets gracefully', () => {
-    const results = [
-      [],
-      [],
-      [{ url: 'https://a.com', description: 'A1' }],
-      [],
-    ];
+    const results = [[], [], [{ url: 'https://a.com' }], []];
     const { uniqueUrls } = simulateUrlCollection(results);
-    expect(uniqueUrls).toHaveLength(1);
-    expect(uniqueUrls[0]).toBe('https://a.com');
+    expect(uniqueUrls).toEqual(['https://a.com']);
   });
 
   it('handles all-empty results', () => {
@@ -220,15 +201,8 @@ describe('Reference document token budget enforcement', () => {
     let budgetExhausted = false;
 
     for (let i = 0; i < docs.length; i++) {
-      if (i >= maxDocs) {
-        droppedUrls.push(docs[i]!.url);
-        continue;
-      }
-
-      if (budgetExhausted) {
-        droppedUrls.push(docs[i]!.url);
-        continue;
-      }
+      if (i >= maxDocs) { droppedUrls.push(docs[i]!.url); continue; }
+      if (budgetExhausted) { droppedUrls.push(docs[i]!.url); continue; }
 
       const doc = docs[i]!;
       const header = `\n---\n### Source: ${doc.url}\n`;
@@ -267,27 +241,22 @@ describe('Reference document token budget enforcement', () => {
       { url: 'https://mid.com', text: 'B'.repeat(5000) },
       { url: 'https://low.com', text: 'C'.repeat(5000) },
     ];
-    const budget = 6000;
-    const result = simulateDocumentAssembly(docs, budget);
+    const result = simulateDocumentAssembly(docs, 6000);
     expect(result.assembled.length).toBeGreaterThanOrEqual(1);
     expect(result.droppedUrls).toContain('https://low.com');
   });
 
   it('truncates a document at the budget boundary', () => {
-    const docs = [
-      { url: 'https://big.com', text: 'X'.repeat(10000) },
-    ];
-    const budget = 2000;
-    const result = simulateDocumentAssembly(docs, budget);
+    const docs = [{ url: 'https://big.com', text: 'X'.repeat(10000) }];
+    const result = simulateDocumentAssembly(docs, 2000);
     expect(result.assembled).toHaveLength(1);
     expect(result.assembled[0]).toContain('[TRUNCATED]');
-    expect(result.assembled[0].length).toBeLessThan(docs[0]!.text.length);
+    expect(result.assembled[0]!.length).toBeLessThan(docs[0]!.text.length);
   });
 
   it('respects maxDocs cap', () => {
     const docs = Array.from({ length: 20 }, (_, i) => ({
-      url: `https://doc-${i}.com`,
-      text: `Content of doc ${i}`,
+      url: `https://doc-${i}.com`, text: `Content of doc ${i}`,
     }));
     const result = simulateDocumentAssembly(docs, 100000, 5);
     expect(result.assembled).toHaveLength(5);
@@ -310,9 +279,10 @@ describe('Orchestration steering — tri-state answer_status', () => {
     'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
 
   const MAYBE_STRING =
-    'Partial data found in research knowledge store. The synthesis above summarizes what is available. You should still proceed with live web research to fill gaps and get a more complete answer.';
+    'Partial data found in research knowledge store. The synthesis above summarizes what is available. ' +
+    'You should still proceed with live web research to fill gaps and get a more complete answer.';
 
-  it('returns the exact pivot string when answer_status is "no"', () => {
+  it('returns the pivot string when answer_status is "no"', () => {
     const result = { answer_status: 'no' as const, synthesis: '', citations: [] };
     const output = result.answer_status === 'no' ? MISS_STRING : result.synthesis;
     expect(output).toBe(MISS_STRING);
@@ -371,9 +341,7 @@ describe('Orchestration steering — tri-state answer_status', () => {
 // ---------------------------------------------------------------------------
 describe('Model resolution priority chain', () => {
   function createMockRegistry(models: Array<{ id: string; provider: string }>) {
-    return {
-      getAll: vi.fn().mockReturnValue(models),
-    };
+    return { getAll: vi.fn().mockReturnValue(models) };
   }
 
   function resolveModel(
@@ -392,51 +360,35 @@ describe('Model resolution priority chain', () => {
   }
 
   it('uses RESEARCH_MODEL when configured and available', () => {
-    const registry = createMockRegistry([
-      { id: 'research-model', provider: 'openai' },
-    ]);
-    const modelId = resolveModel(
+    const registry = createMockRegistry([{ id: 'research-model', provider: 'openai' }]);
+    expect(resolveModel(
       { RESEARCH_MODEL: 'research-model' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
-    );
-    expect(modelId).toBe('research-model');
+    )).toBe('research-model');
   });
 
-  it('falls back to ctx.model when RESEARCH_MODEL is not available', () => {
-    const registry = createMockRegistry([
-      { id: 'unrelated', provider: 'openai' },
-    ]);
-    const modelId = resolveModel(
+  it('falls back to ctx.model when RESEARCH_MODEL is not found', () => {
+    const registry = createMockRegistry([{ id: 'unrelated', provider: 'openai' }]);
+    expect(resolveModel(
       { RESEARCH_MODEL: 'missing-model' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
-    );
-    expect(modelId).toBe('ctx-model');
+    )).toBe('ctx-model');
   });
 
   it('uses ctx.model when no RESEARCH_MODEL is set', () => {
-    const registry = createMockRegistry([
-      { id: 'some-model', provider: 'openai' },
-    ]);
-    const modelId = resolveModel(
-      {},
-      { id: 'ctx-model', provider: 'openai' },
-      registry,
-    );
-    expect(modelId).toBe('ctx-model');
+    const registry = createMockRegistry([{ id: 'some-model', provider: 'openai' }]);
+    expect(resolveModel({}, { id: 'ctx-model', provider: 'openai' }, registry)).toBe('ctx-model');
   });
 
   it('matches by "provider/id" format', () => {
-    const registry = createMockRegistry([
-      { id: 'gpt-4o', provider: 'openai' },
-    ]);
-    const modelId = resolveModel(
+    const registry = createMockRegistry([{ id: 'gpt-4o', provider: 'openai' }]);
+    expect(resolveModel(
       { RESEARCH_MODEL: 'openai/gpt-4o' },
       { id: 'ctx-model', provider: 'openai' },
       registry,
-    );
-    expect(modelId).toBe('gpt-4o');
+    )).toBe('gpt-4o');
   });
 });
 
@@ -444,7 +396,7 @@ describe('Model resolution priority chain', () => {
 // Test 6: Tool Metadata Correctness
 // ---------------------------------------------------------------------------
 describe('Tool metadata and registration shape', () => {
-  it('has the correct tool name following pi-research conventions', async () => {
+  it('has the correct tool name', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
@@ -465,26 +417,25 @@ describe('Tool metadata and registration shape', () => {
     expect(tool.description.length).toBeGreaterThan(20);
   });
 
-  it('has prompt guidelines that reference the tri-state behavior', async () => {
+  it('has prompt guidelines that reference all three tri-state values', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
     expect(tool.promptGuidelines).toBeDefined();
-    expect(tool.promptGuidelines!.length).toBeGreaterThanOrEqual(2);
-    expect(tool.promptGuidelines!.some(g => g.includes('"maybe"'))).toBe(true);
-    expect(tool.promptGuidelines!.some(g => g.includes('"no"'))).toBe(true);
-    expect(tool.promptGuidelines!.some(g => g.includes('"yes"'))).toBe(true);
+    const guidelines = tool.promptGuidelines!.join(' ');
+    expect(guidelines).toContain('"yes"');
+    expect(guidelines).toContain('"maybe"');
+    expect(guidelines).toContain('"no"');
   });
 
   it('has parameters schema with queries array', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
-    expect(tool.parameters).toBeDefined();
     expect((tool.parameters as any).type).toBe('object');
   });
 
-  it('the execute function returns AgentToolResult structure on success', async () => {
+  it('has an execute function', async () => {
     const { createResearchKnowledgeSearchTool } =
       await import('../../../src/tools/research-knowledge-search.ts');
     const tool = createResearchKnowledgeSearchTool();
@@ -496,16 +447,14 @@ describe('Tool metadata and registration shape', () => {
 // Test 7: Knowledge Search TUI Panel
 // ---------------------------------------------------------------------------
 describe('Knowledge Search TUI Panel', () => {
-  it('renders a bordered box with searching message', async () => {
+  it('renders a 3-row bordered box with searching message', async () => {
     const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
-    const mockTheme = {
-      fg: (_color: any, text: string) => text,
-    };
+    const mockTheme = { fg: (_color: any, text: string) => text };
     const factory = createKnowledgeSearchPanel();
     const component = factory({}, mockTheme as any);
     const lines = component.render(40);
 
-    expect(lines).toHaveLength(3); // top border + content + bottom border
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toBe('┌' + '─'.repeat(38) + '┐');
     expect(lines[1]).toContain('searching knowledge store');
     expect(lines[1]!.startsWith('│')).toBe(true);
@@ -528,7 +477,6 @@ describe('Knowledge Search TUI Panel', () => {
     const component = factory({}, mockTheme as any);
     const lines = component.render(10);
     expect(lines).toHaveLength(3);
-    // Inner width = 8, message should be truncated
     const innerContent = lines[1]!.slice(1, -1);
     expect(innerContent.length).toBe(8);
   });

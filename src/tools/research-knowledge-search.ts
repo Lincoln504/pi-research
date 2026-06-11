@@ -12,7 +12,7 @@
  *   Phase 2: Safe Data Rehydration — vector search → URL dedup → rebuildDocument
  *   Phase 3: Conversational Continuity — pi SDK's buildSessionContext pipeline
  *   Phase 4: Stateless Background Execution — completeSimple + agentic repair
- *   Phase 5: Orchestration Steering — pivot string on miss, clean report on hit
+ *   Phase 5: Orchestration Steering — tri-state result (yes/maybe/no)
  *
  * Registration: pi.registerTool() in src/index.ts (alongside research & health).
  * NOT in createResearchTools() — sub-researchers already get knowledge store
@@ -24,7 +24,6 @@ import type {
   AgentToolResult,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type { Config } from '../config.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
@@ -35,7 +34,6 @@ import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-ty
 import {
   ResearchKnowledgeSynthesisResponseSchema,
   ResearchKnowledgeSynthesisResponseSchemaAsTSchema,
-  legacyBooleanToStatus,
 } from './research-knowledge-types.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -84,7 +82,7 @@ const RESEARCH_KNOWLEDGE_MISS_STRING =
   'No relevant data found in research knowledge store. You are now authorized to proceed with live web research and scraping tools.';
 
 /**
- * System string returned when the knowledge store returned partial results.
+ * System string appended when the knowledge store returned partial results.
  * The host agent gets a synthesis of what was found but is also told to
  * continue with live research for a more complete answer.
  */
@@ -140,7 +138,7 @@ async function assembleReferenceDocuments(
   store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
 ): Promise<{ text: string; urls: string[] }> {
   const allUrls = new Map<string, number>();
-  const resultsMap = new Map<string, { url: string; description: string; provenance?: string }>();
+  const provenanceByUrl = new Map<string, string>();
 
   for (const query of queries) {
     try {
@@ -148,7 +146,7 @@ async function assembleReferenceDocuments(
       for (const entry of results) {
         if (!allUrls.has(entry.url)) {
           allUrls.set(entry.url, allUrls.size);
-          resultsMap.set(entry.url, entry);
+          provenanceByUrl.set(entry.url, entry.provenance || 'unknown');
         }
       }
     } catch (err) {
@@ -176,8 +174,7 @@ async function assembleReferenceDocuments(
         continue;
       }
 
-      // Find original entry for provenance
-      const provenance = resultsMap.get(url)?.provenance || 'unknown';
+      const provenance = provenanceByUrl.get(url) || 'unknown';
       const header = `\n---\n### Source: ${url}\n#### Provenance: ${provenance}\n`;
       const docText = rebuilt.text || '';
       const entry = header + docText;
@@ -208,11 +205,8 @@ async function assembleReferenceDocuments(
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize the current conversation branch using pi SDK's native pipeline:
- *   getBranch() → buildSessionContext → convertToLlm → serializeConversation
- *
- * This strips system metadata, compaction entries, and tool-result noise,
- * producing a dense conversational transcript the background LLM can use
+ * Serialize the current conversation branch using pi SDK's native pipeline.
+ * Produces a dense conversational transcript the background LLM can use
  * to understand the user's overarching intent.
  */
 async function serializeConversationHistory(ctx: ExtensionContext): Promise<string> {
@@ -230,19 +224,15 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
 
 /**
  * Resolve the model to use for the background synthesis LLM.
- *
- * Priority:
- *   1. RESEARCH_MODEL — the shared research model override
- *   2. ctx.model — the main agent's current model
+ * Priority: RESEARCH_MODEL → ctx.model
  */
 function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; error?: string } {
-  const config: Config = getConfig();
-  const modelRegistry = ctx.modelRegistry;
+  const config = getConfig();
   const ctxModel = ctx.model as Model<any> | undefined;
 
   if (config.RESEARCH_MODEL) {
     const target = config.RESEARCH_MODEL;
-    const found = modelRegistry.getAll().find(
+    const found = ctx.modelRegistry.getAll().find(
       (m) => `${m.provider}/${m.id}` === target || m.id === target,
     );
     if (found) {
@@ -259,30 +249,12 @@ function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; err
 }
 
 /**
- * Coerce a raw LLM response into the tri-state schema.
- *
- * Handles both the new `answer_status` field and the legacy `answer_found`
- * boolean. If the LLM returns the old field, it's converted automatically.
+ * Validate a raw object against the response schema using TypeBox
+ * coercion and checking.
  */
-function coerceResponse(raw: unknown): ResearchKnowledgeSynthesisResponse | null {
+function validateResponse(raw: unknown): ResearchKnowledgeSynthesisResponse | null {
   if (!raw || typeof raw !== 'object') return null;
 
-  // Try legacy boolean conversion first
-  const legacy = legacyBooleanToStatus(raw);
-  if (legacy) {
-    const obj = { ...(raw as Record<string, unknown>), ...legacy };
-    delete (obj as Record<string, unknown>)['answer_found']; // remove old field
-    try {
-      const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, obj);
-      if (Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)) {
-        return coerced as ResearchKnowledgeSynthesisResponse;
-      }
-    } catch {
-      // Fall through to normal path
-    }
-  }
-
-  // Normal path: direct TypeBox coercion
   try {
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, raw);
     if (Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)) {
@@ -340,12 +312,12 @@ async function runBackgroundExtraction(
     throw new Error('Background LLM returned no text content');
   }
 
-  // Phase 4b: Direct JSON extraction + TypeBox validation with legacy coercion
+  // Phase 4b: Direct JSON extraction + TypeBox validation
   const extracted = extractJson<ResearchKnowledgeSynthesisResponse>(responseText, 'object');
   if (extracted.success && extracted.value) {
-    const coerced = coerceResponse(extracted.value);
-    if (coerced) {
-      return coerced;
+    const validated = validateResponse(extracted.value);
+    if (validated) {
+      return validated;
     }
     // Log why validation failed
     try {
@@ -374,11 +346,8 @@ async function runBackgroundExtraction(
   );
 
   if (repaired) {
-    // Agentic repair may return legacy format — coerce it
-    const coerced = coerceResponse(repaired);
-    if (coerced) return coerced;
-    // If coercion fails but repair returned something, try it as-is
-    if ('answer_status' in repaired) return repaired;
+    const validated = validateResponse(repaired);
+    if (validated) return validated;
   }
 
   // Phase 4d: Safe fallback — treat as not found rather than crashing
@@ -456,7 +425,7 @@ function buildSteeringResult(
 }
 
 // ---------------------------------------------------------------------------
-// Error-path result builders
+// Error-path result builder
 // ---------------------------------------------------------------------------
 
 function missResult(reason: string): AgentToolResult<unknown> {
@@ -510,7 +479,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
 
       try {
         // ----------------------------------------------------------
-        // Service resolution via central registry (not direct instantiation)
+        // Service resolution via central registry
         // ----------------------------------------------------------
         let storeService: IKnowledgeStoreService;
         try {
