@@ -15,6 +15,7 @@ import type { Theme } from '../types/research-panel-types.ts';
 import {
   createMasterResearchPanel,
   createInitialPanelState,
+  clearAllFlashTimeouts,
 } from './research-panel.ts';
 import {
   registerSessionPanel,
@@ -141,6 +142,8 @@ export function createResearchTuiManager(
    * Dispose of TUI resources
    */
   const dispose = () => {
+    clearAllFlashTimeouts(piSessionId);
+
     if (refreshTimeout) {
       clearTimeout(refreshTimeout);
       refreshTimeout = null;

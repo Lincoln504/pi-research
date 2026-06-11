@@ -208,7 +208,7 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
   for (const key of Object.keys(counters)) {
     if (key.startsWith('research_sessions_total{')) {
       const match = key.match(/complexity="(\d+)"/);
-      if (match) complexity = parseInt(match[1], 10);
+      if (match?.[1]) complexity = parseInt(match[1], 10);
       break;
     }
   }

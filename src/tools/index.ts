@@ -31,6 +31,8 @@ interface CreateToolsOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
+  /** Fires for each individual URL as it completes (success or failure). Used for per-URL TUI flash. */
+  onUrlScrapeResult?: (url: string, success: boolean) => void;
   config?: Config;
 }
 
@@ -68,7 +70,10 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       ...resolvedOptions,
       onProgress: options.onSearchProgress,
     }),
-    createScrapeTool(resolvedOptions),
+    createScrapeTool({
+      ...resolvedOptions,
+      onUrlScrapeResult: options.onUrlScrapeResult,
+    }),
     createLinksTool(resolvedOptions),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),

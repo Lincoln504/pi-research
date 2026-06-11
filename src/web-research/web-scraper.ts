@@ -320,7 +320,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   }
 }
 
-export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<ScrapeResult[]> {
+export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string, onUrlComplete?: (result: ScrapeResult) => void): Promise<ScrapeResult[]> {
   metrics.increment('scrape_batches_total', 1);
   metrics.observe('scrape_urls_per_batch', urls.length);
   const batchStart = Date.now();
@@ -328,7 +328,13 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
   const results: ScrapeResult[] = [];
   for (let i = 0; i < urls.length; i += maxConcurrency) {
     const batch = urls.slice(i, i + maxConcurrency);
-    const batchRes = await Promise.all(batch.map(url => scrapeSingle(url, signal, config, sessionId)));
+    const batchRes = await Promise.all(
+      batch.map(async url => {
+        const result = await scrapeSingle(url, signal, config, sessionId);
+        onUrlComplete?.(result);
+        return result;
+      })
+    );
     results.push(...batchRes);
   }
   

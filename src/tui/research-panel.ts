@@ -38,6 +38,8 @@ export {
   reactivateSlice,
   clearCompletedResearchers,
   createInitialPanelState,
+  flashSlice,
+  clearAllFlashTimeouts,
 } from './research-panel-state.ts';
 
 /**
@@ -212,7 +214,8 @@ function renderPanelBlock(
 
       const rightWall12 = isEval ? '┊' : (nextIsEval ? '┊' : '│');
       rightRawRows[1]!.push(tokenStr + rightWall12);
-      rightColors[1]!.push(slice?.completed ? 'muted' : 'text');
+      const f1 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
+      rightColors[1]!.push(f1 || (slice?.completed ? 'muted' : 'text'));
 
       // Cost Row (row 2)
       let costStr: string;
@@ -237,7 +240,8 @@ function renderPanelBlock(
         costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
       }
       rightRawRows[2]!.push(costStr + rightWall12);
-      rightColors[2]!.push(slice?.completed ? 'muted' : 'text');
+      const f2 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;
+      rightColors[2]!.push(f2 || (slice?.completed ? 'muted' : 'text'));
 
       // Bottom Border
       let bottomContent;

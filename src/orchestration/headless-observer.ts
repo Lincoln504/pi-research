@@ -79,6 +79,10 @@ export class HeadlessObserver implements ResearchObserver {
     this.emit('researcher_failure', { id, error });
   }
 
+  onToolResult(researcherId: string, success: boolean): void {
+    this.emit('tool_result', { researcherId, success });
+  }
+
   onEvaluationStart(round: number): void {
     this.emit('evaluation_start', { round });
   }

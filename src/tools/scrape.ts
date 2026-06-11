@@ -35,6 +35,8 @@ export function createScrapeTool(options: {
   getGlobalState?: () => SystemResearchState;
   updateGlobalLinks?: (links: string[]) => void;
   onLinksScraped?: (links: string[]) => void;
+  /** Fires for each individual URL as it completes (success or failure). Used for per-URL TUI flash. */
+  onUrlScrapeResult?: (url: string, success: boolean) => void;
   /** Returns total tokens used so far in this researcher's session (for context gating). */
   getTokensUsed?: () => number;
   /** Context window size in tokens; defaults to DEFAULT_MODEL_CONTEXT_WINDOW. */
@@ -166,6 +168,7 @@ export function createScrapeTool(options: {
         const cachedContent = getCachedScrapedContent(getGlobalState().researchId, url);
         if (cachedContent) {
           duplicateResults.push({ url, markdown: cachedContent, success: true });
+          options.onUrlScrapeResult?.(url, true);
         }
       }
 
@@ -199,6 +202,7 @@ export function createScrapeTool(options: {
                 ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
                 : '';
               cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });
+              options.onUrlScrapeResult?.(url, true);
               const idx = urlsToFetch.indexOf(url);
               if (idx !== -1) urlsToFetch.splice(idx, 1);
             }
@@ -224,7 +228,9 @@ export function createScrapeTool(options: {
         const concurrency = p.maxConcurrency || defaultConcurrency;
         // Pass options.config directly (may be undefined) so the web-scraper
         // falls back to its own getConfig() when not explicitly provided.
-        const scrapeResults = await scrape(urlsToFetch, concurrency, signal, options.config);
+        const scrapeResults = await scrape(urlsToFetch, concurrency, signal, options.config, undefined, (result) => {
+          options.onUrlScrapeResult?.(result.url, result.success);
+        });
         freshResults = Array.isArray(scrapeResults) ? scrapeResults : [];
 
         // Cache fresh content for same-session retrieval

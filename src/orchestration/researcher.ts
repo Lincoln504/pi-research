@@ -35,6 +35,8 @@ export interface CreateResearcherSessionOptions {
   onLinksScraped?: (links: string[]) => void;
   /** Callback invoked during search with cumulative link count found so far */
   onSearchProgress?: (links: number) => void;
+  /** Fires for each individual URL scrape result (per-URL TUI flash). */
+  onUrlScrapeResult?: (url: string, success: boolean) => void;
   /** List of tool names to disable for this researcher. */
   excludeTools?: string[];
   config?: Config;
@@ -51,6 +53,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     updateGlobalLinks,
     onLinksScraped,
     onSearchProgress,
+    onUrlScrapeResult,
     excludeTools = [],
     config,
   } = options;
@@ -79,6 +82,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       updateGlobalLinks: globalLinks,
       onLinksScraped: onLinksScraped,
       onSearchProgress: onSearchProgress,
+      onUrlScrapeResult: onUrlScrapeResult,
       config,
     });
 

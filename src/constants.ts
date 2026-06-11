@@ -12,6 +12,15 @@ import { getConfig, type Config } from './config.ts';
 export const REQUEST_DELAY_MS_NVD = 6000;
 export const REQUEST_DELAY_MS_OTHER = 1000;
 
+/** Duration (ms) for a green (success) flash on a researcher column */
+export const FLASH_GREEN_DURATION_MS = 400;
+
+/** Duration (ms) for a red (failure) flash on a researcher column */
+export const FLASH_RED_DURATION_MS = 700;
+
+/** Minimum gap (ms) between queued flashes for the same researcher column */
+export const FLASH_QUEUE_GAP_MS = 80;
+
 // ==================== Research Constraints ====================
 
 /** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */

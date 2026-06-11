@@ -31,6 +31,9 @@ export interface ResearchObserver {
   onResearcherComplete?(id: string, report: string): void;
   onResearcherFailure?(id: string, error: string): void;
 
+  /** Per-URL or per-tool-action result feedback (triggers TUI flash). */
+  onToolResult?(researcherId: string, success: boolean): void;
+
   // Evaluation phase
   onEvaluationStart?(round: number): void;
   onEvaluationProgress?(status: string): void;

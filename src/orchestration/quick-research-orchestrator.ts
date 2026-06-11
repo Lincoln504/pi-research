@@ -152,6 +152,9 @@ export class QuickResearchOrchestrator {
             lastSeenSearchCount = links;
             observer?.onSearchProgress?.(links);
           },
+          onUrlScrapeResult: (_url, success) => {
+            observer?.onToolResult?.('quick', success);
+          },
         });
 
         const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
@@ -202,6 +205,10 @@ export class QuickResearchOrchestrator {
                 }
             } else if (event.type === 'tool_execution_end') {
                 observer?.onResearcherProgress?.('quick', `done:${event.toolName}`);
+                // Per-tool flash for non-scrape tools (scrape uses per-URL callback)
+                if (event.toolName !== 'scrape') {
+                    observer?.onToolResult?.('quick', !event.isError);
+                }
                 if (event.toolName === 'search') {
                     observer?.onSearchComplete?.(lastSeenSearchCount);
                 }

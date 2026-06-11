@@ -18,6 +18,7 @@ import {
   activateSlice,
   completeSlice,
   removeSlice,
+  flashSlice,
   updateSliceTokens,
   updateSliceStatus,
   reactivateSlice,
@@ -291,6 +292,11 @@ export function createResearchObserver(
       updateSliceStatus(panelState, sliceId, 'failed');
       completeSlice(panelState, sliceId);
       debouncedRefresh();
+    },
+
+    onToolResult: (researcherId, success) => {
+      const sliceId = researcherId === 'quick' ? state.quickSliceLabel : researcherId;
+      flashSlice(panelState, sliceId, success ? 'green' : 'red', debouncedRefresh);
     },
 
     onEvaluationStart: (_round) => {

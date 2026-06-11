@@ -83,7 +83,7 @@ describe('tools/scrape', () => {
       cached: 0,
       fresh: 1,
     });
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined);
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined, undefined, expect.any(Function));
   });
 
   it('should handle multiple URLs', async () => {
@@ -95,7 +95,7 @@ describe('tools/scrape', () => {
     expect(details.total).toBe(2);
     expect(details.successful).toBe(2);
     expect(details.fresh).toBe(2);
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined);
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined, undefined, expect.any(Function));
   });
 
   it('should return error for invalid parameters', async () => {
@@ -139,6 +139,6 @@ describe('tools/scrape', () => {
     const tool = createScrapeTool(mockOptions);
     await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined, undefined, {} as any);
 
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined);
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, undefined, expect.any(Function));
   });
 });

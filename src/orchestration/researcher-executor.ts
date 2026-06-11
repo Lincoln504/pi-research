@@ -126,6 +126,9 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       onSearchProgress: (links) => {
         observer?.onResearcherProgress?.(id, `${links} results`);
       },
+      onUrlScrapeResult: (_url, success) => {
+        observer?.onToolResult?.(id, success);
+      },
     });
 
     const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
@@ -185,6 +188,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         observer?.onResearcherProgress?.(id, `${event.toolName}`);
       } else if (event.type === 'tool_execution_end') {
         observer?.onResearcherProgress?.(id, `done:${event.toolName}`);
+        // Per-tool flash for non-scrape tools (scrape uses per-URL callback instead)
+        if (event.toolName !== 'scrape') {
+          observer?.onToolResult?.(id, !event.isError);
+        }
       }
     });
 
