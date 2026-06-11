@@ -81,17 +81,17 @@ export function getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string {
   } else if (complexity === 2) {
     return `**Level 2 (Deep)** - Thorough, multi-phase investigation with comprehensive citations.
 
-- **SYNTHESIZE when**: Multiple angles covered with substantial findings across all major topics, diverse sources cited throughout, and no significant gaps in coverage.
+- **SYNTHESIZE when**: You are confident the research is genuinely complete. This means multiple angles covered with substantial findings across all major topics, diverse sources cited throughout, and no significant gaps in coverage.
 - **DELEGATE when**: ANY gaps remain in major topics, insufficient source diversity, missing details, or areas that need deeper exploration. Don't synthesize prematurely.
 
-**IMPORTANT**: Level 2 is designed for multi-round research. Each round adds depth and citation diversity — but do not delegate unnecessarily. Synthesize after Round 1 if the researcher produced comprehensive coverage of the topic with good source diversity. If Round 1 has gaps, delegate Round 2 and then synthesize. A third round is only warranted when Round 2 still leaves significant holes. Scale researcher count to match the gaps — focused gaps may only need 1 researcher, while broad gaps benefit from the full team.`;
+**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. Level 2 is designed for multi-round research. Each round adds depth and citation diversity — but do not delegate unnecessarily. Synthesize after Round 1 ONLY if the researcher produced comprehensive coverage of the topic with good source diversity. If Round 1 has any gaps, delegate Round 2. A third round is only warranted when Round 2 still leaves significant holes. Scale researcher count to match the gaps — focused gaps may only need 1 researcher, while broad gaps benefit from the full team.`;
   } else {
     return `**Level 3 (Ultra)** - Exhaustive, comprehensive deep-dive with extensive citations.
 
-- **SYNTHESIZE when**: Exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, and no meaningful gaps remain.
+- **SYNTHESIZE when**: You are confident the research is genuinely and exhaustively complete. This means exhaustively covered across ALL substantial avenues with multiple diverse sources per major topic, comprehensive citations throughout, and no meaningful gaps remain.
 - **DELEGATE when**: ANY meaningful gaps, nuanced angles, insufficient source diversity, inadequate citations, or areas needing deeper investigation remain.
 
-**IMPORTANT**: Level 3 has ${MAX_ROUNDS_LEVEL_3} rounds available. Be generous with follow-up delegation — lean toward using all available rounds. Each round adds breadth, depth, and citation diversity. Delegate for follow-up whenever remaining gaps or under-explored angles exist, even if progress has been good. Only synthesize when you have genuinely comprehensive coverage across all major areas with no meaningful gaps that another round would address.
+**DEFAULT PATH: When in doubt, DELEGATE**. It is better to conduct additional research rounds than to synthesize with incomplete findings. Level 3 has ${MAX_ROUNDS_LEVEL_3} rounds available. Be generous with follow-up delegation — lean toward using all available rounds. Each round adds breadth, depth, and citation diversity. Delegate for follow-up whenever remaining gaps or under-explored angles exist, even if progress has been good. Only synthesize when you have genuinely comprehensive coverage across all major areas with no meaningful gaps that another round would address.
 
 **ULTRA-SPECIFICITY MANDATE**: For every fact, finding, or topic area where greater granularity adds value, delegate additional researchers to pursue it. This includes: exact figures and statistics, precise dates and timelines, technical mechanisms, named individuals and their specific contributions, primary-source verbatim data, edge cases, and any dimension where surface-level coverage would leave the reader with unanswered questions.`;
   }

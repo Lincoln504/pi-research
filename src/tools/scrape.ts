@@ -199,7 +199,7 @@ export function createScrapeTool(options: {
             const cacheHit = await store.rebuildDocument(normalized);
 
             if (cacheHit) {
-              const advisoryHint = cacheHit.description
+              const advisoryHint = cacheHit.description && cacheHit.description !== cacheHit.text
                 ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
                 : '';
               cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });

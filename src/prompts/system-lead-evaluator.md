@@ -5,6 +5,7 @@ You orchestrate the next phase of research.
 ## Your Context
 - **ROOT QUERY**: {ROOT_QUERY}
 - **Current round**: {ROUND_NUMBER} / {MAX_ROUNDS}
+- **Complexity Level**: {COMPLEXITY_LABEL}
 {{initial_agenda_section}}
 {{previous_queries_section}}
 {{additional_considerations}}
@@ -42,8 +43,6 @@ Before providing your JSON decision, use your internal reasoning to:
 **COMMON MISTAKES TO AVOID:**
 - Do NOT synthesize early just because you've done "enough" rounds. Synthesis should only occur when you have comprehensive, high-quality findings across all major topics.
 - Do NOT synthesize with gaps remaining, hoping they can be "filled in later". Complete the research first.
-- **Level 1 should almost always be a single round** — reserve Level 2 escalation for genuinely high/extreme research needs.
-- Remember: Each additional round adds depth and breadth. Delegating is the default path for Level 2.
 
 Use unique, targeted queries for any new researchers.
 
@@ -78,9 +77,6 @@ Use unique, targeted queries for any new researchers.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
 - **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps — a single well-targeted researcher is often sufficient for focused gaps.
 - **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
-- **DEFAULT TO SYNTHESIZE FOR LEVEL 1**: For Level 1 (Normal) complexity, the default should be to synthesize after Round 1. Only delegate Level 2 when research needs are genuinely high/extreme — multi-round investigation requires clear justification.
-
-**DEFAULT TO DELEGATE FOR LEVEL 2/3**: For Level 2 and 3, when in doubt, delegate. It is better to conduct additional research rounds than to synthesize with incomplete findings. Only synthesize when you are confident the research is genuinely complete.
 
 ---
 

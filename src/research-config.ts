@@ -458,7 +458,7 @@ async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}\n- **User Entries:** ${counts.global}, across ${counts.projects} Projects\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}, across ${counts.projects} Projects\n- **User Entries:** ${counts.global}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {

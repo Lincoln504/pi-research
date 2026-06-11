@@ -252,7 +252,7 @@ export class Embedder {
       await releaseGpuLock(this.stateManager, this.gpuLockHeld);
       this.gpuLockHeld = false;
       if (this.pipeline) {
-        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
+        try { if (typeof (this.pipeline as any).dispose === 'function') await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
         this.pipeline = null;
       }
       logger.error(`[embedder] Failed to initialize:`, err);
@@ -425,7 +425,7 @@ export class Embedder {
       }
 
       if (this.pipeline) {
-        try { await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
+        try { if (typeof (this.pipeline as any).dispose === 'function') await (this.pipeline as DisposablePipeline).dispose(); } catch (err) { logger.warn('[embedder] Error disposing pipeline:', err); }
         this.pipeline = null;
       }
       this.device = 'cpu';
@@ -481,7 +481,9 @@ export class Embedder {
 
       if (this.pipeline) {
         try {
-          await (this.pipeline as DisposablePipeline).dispose();
+          if (typeof (this.pipeline as any).dispose === 'function') {
+            await (this.pipeline as DisposablePipeline).dispose();
+          }
         } catch (err) {
           logger.warn('[embedder] Error during pipeline dispose:', err);
         }

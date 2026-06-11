@@ -21,6 +21,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { logger } from '../logger.ts';
 
 export type Labels = Record<string, string>;
 
@@ -82,6 +83,9 @@ export class MetricsRegistry {
   public increment(name: string, value: number = 1, labels?: Labels): void {
     const key = this.getKey(name, labels);
     this.counters.set(key, (this.counters.get(key) ?? 0) + value);
+    if (name === 'llm_cost_total' || name === 'llm_tokens_total') {
+      logger.debug(`[Metrics] Incremented ${name} by ${value}${labels ? ` (labels: ${JSON.stringify(labels)})` : ''}`);
+    }
   }
 
   public setGauge(name: string, value: number, labels?: Labels): void {

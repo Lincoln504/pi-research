@@ -208,7 +208,7 @@ describe('KnowledgeStore', () => {
     expect(rebuilt?.description).toBeNull();
   });
 
-  it('rebuildDocument returns null when synthesis-description row has no content field', async () => {
+  it('rebuildDocument returns text when synthesis-description row has no content field', async () => {
     await store.open();
     await store.addDocuments([{
       url: 'https://example.com/desc-only',
@@ -218,7 +218,8 @@ describe('KnowledgeStore', () => {
     }]);
 
     const result = await store.rebuildDocument('https://example.com/desc-only');
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe('researcher description');
   });
 
   it('rebuildDocument returns null for unknown URL', async () => {

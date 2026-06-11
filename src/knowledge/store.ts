@@ -610,7 +610,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     const results = await table
       .query()
-      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND content IS NOT NULL AND (${scopeFilter})`)
+      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND (${scopeFilter})`)
       .limit(1)
       .toArray();
 
@@ -627,9 +627,10 @@ export class KnowledgeStore implements IKnowledgeStore {
     try {
       const metadata = JSON.parse(r.metadata as string);
       const description: string | null = typeof metadata.description === 'string' ? metadata.description : null;
+      const textToReturn = (r.content as string) || (r.text as string) || description || '';
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'hit' });
-      logger.log(`[store] Cache hit: synthesis-description with content for ${url} (${(r.content as string).length} chars)`);
-      return { text: r.content as string, description, metadata };
+      logger.log(`[store] Cache hit: synthesis-description for ${url} (${textToReturn.length} chars)`);
+      return { text: textToReturn, description, metadata };
     } catch {
       logger.debug(`[store] Parse error reading cached content for ${url}`);
       metrics.increment('knowledge_store_cache_hits_total', 1, { status: 'parse_error' });
@@ -703,10 +704,9 @@ export class KnowledgeStore implements IKnowledgeStore {
   async countScoped(): Promise<{ local: number; global: number; projects: number }> {
     if (!this.db) return { local: 0, global: 0, projects: 0 };
     const table = await this.getFreshTable();
-    const ws = this.getWorkspace().replace(/'/g, "''");
     
     const [local, global, allRows] = await Promise.all([
-      table.countRows(`workspace = '${ws}'`),
+      table.countRows(`is_global = false`),
       table.countRows(`is_global = true`),
       table.query().select(['workspace']).toArray()
     ]);
