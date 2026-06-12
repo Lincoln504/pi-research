@@ -14,7 +14,7 @@
   },
   "files": [
     "src/",
-    "dist/",
+    "dist/openclaw-entry.js",
     "!src/.env",
     "!src/.env.local",
     "!src/.env.*.local",
