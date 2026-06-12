@@ -183,7 +183,7 @@ export class FileLockService implements IService {
         let handle: fs.FileHandle | null = null;
         try {
           // Open lock file and write UUID immediately (atomic)
-          handle = await fs.open(this.lockFilePath, 'wx');
+          handle = await fs.open(this.lockFilePath, 'wx', 0o600);
           await handle.write(this.lockUuid);
           await handle.sync(); // Ensure UUID is written to disk
 

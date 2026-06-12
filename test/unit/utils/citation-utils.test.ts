@@ -41,8 +41,6 @@ describe('citation-utils', () => {
       // https://other.com should have global ID 2 (first seen in res2)
       expect(globalCitations).toHaveLength(2);
       const commonId = globalCitations.find(c => c.url === 'https://common.com')?.id;
-      const otherId = globalCitations.find(c => c.url === 'https://other.com')?.id;
-
       expect(normalizedReports.get('res1')).toContain(`Info [${commonId}].`);
       expect(normalizedReports.get('res2')).toContain(`Info [${commonId}].`);
     });

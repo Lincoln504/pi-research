@@ -11,7 +11,6 @@ import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-
 import { getConfig } from '../../src/config.ts';
 import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
-import * as path from 'node:path';
 import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { logger } from '../../src/logger.ts';
@@ -100,8 +99,6 @@ interface ResearchWorkflowResult {
 describe('End-to-End Research Workflows', () => {
   let testContext: TestContext;
   let testDbDir: string;
-  const modelName = 'Xenova/all-MiniLM-L6-v2';
-
   beforeAll(async () => {
     testContext = await setupLifecycle();
 

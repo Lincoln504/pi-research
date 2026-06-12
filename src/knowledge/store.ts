@@ -120,7 +120,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     const tempPath = `${this.manifestPath}.tmp`;
     try {
       const content = JSON.stringify({ activeTableName: this.tableName }, null, 2);
-      await fsPromises.writeFile(tempPath, content, 'utf-8');
+      await fsPromises.writeFile(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
       await fsPromises.rename(tempPath, this.manifestPath);
     } catch (err) {
       logger.warn('[store] Failed to save manifest:', err);

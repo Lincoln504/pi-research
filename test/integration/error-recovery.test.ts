@@ -185,6 +185,7 @@ describe('Error Recovery and Resilience', () => {
         } catch {
           writeThrew = true;
         }
+        expect(writeThrew).toBe(true);
 
         // Critical: the store must NOT be left in a corrupted state. After the
         // failed write, a subsequent read operation should still succeed.
