@@ -10,7 +10,6 @@ import { QuickResearchOrchestrator } from '../../src/orchestration/quick-researc
 import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-orchestrator.ts';
 import { getConfig } from '../../src/config.ts';
 import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
-import { KnowledgeStore } from '../../src/knowledge/store.ts';
 import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { logger } from '../../src/logger.ts';
