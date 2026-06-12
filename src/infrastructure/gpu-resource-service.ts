@@ -1,238 +1,171 @@
 /**
  * GPU Resource Service
  *
- * Manages GPU resource locking and coordination across processes.
- * Provides exclusive GPU access control with staleness detection.
+ * Service wrapper for GPU resource management.
+ * Provides clean interface for acquiring and releasing the global GPU lock.
  */
 
-import type { SingletonState } from './types/state-types.ts';
-import { ProcessLifecycleService } from './process-lifecycle-service.ts';
+import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { logger } from '../logger.ts';
-import { metrics } from '../utils/metrics.ts';
-import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
-import { ServiceNames } from '../core/interfaces/service-names.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IGPUResourceService, IProcessLifecycle, IStateManager } from '../core/service-interfaces.ts';
+import type { SingletonState } from './types/state-types.ts';
 
 /**
- * GPU Resource Service
- *
- * Manages GPU resource locking with staleness detection and automatic recovery.
- * Ensures only one process can use GPU resources at a time.
+ * GPU Resource Service Options
  */
-export class GPUResourceService implements IService {
+export interface GPUResourceServiceOptions {
+  processLifecycle: IProcessLifecycle;
+  gpuLockStaleThresholdMs?: number;
+}
+
+/**
+ * GPU Resource Service Implementation
+ */
+export class GPUResourceService implements IGPUResourceService {
   readonly name = ServiceNames.GPU_RESOURCE_SERVICE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
-  private readonly processLifecycle: ProcessLifecycleService;
-  private readonly gpuLockStaleThresholdMs: number;
 
-  constructor(options: {
-    processLifecycle: ProcessLifecycleService;
-    gpuLockStaleThresholdMs?: number;
-  }) {
-    this.processLifecycle = options.processLifecycle;
-    // 120 seconds: must exceed the sum of (batch lock acquisition timeout 45s) +
-    // (typical batch embedding run time ≤60s) so the stale-reclaim path never fires
-    // while a live process is mid-embedding.  Still much better than the previous
-    // 180s default — a dead-process lock is reclaimed within 2 minutes instead of 3.
-    this.gpuLockStaleThresholdMs = options.gpuLockStaleThresholdMs ?? 120000;
-  }
+  private processLifecycle: IProcessLifecycle | null = null;
+  private gpuLockStaleThresholdMs: number = 1000 * 60 * 5; // 5 minutes default
 
-  /**
-   * Acquire the global GPU resource lock.
-   * Only one process can hold the GPU lock at a time.
-   *
-   * @param updateState Function to atomically update state
-   * @param sessionId Optional session ID for tracking
-   * @param timeoutMs Maximum time to wait for the lock (default: 30 seconds)
-   * @returns true if lock was acquired, false if timed out
-   */
-  async acquireGpuLock(
-    updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>,
-    sessionId?: string,
-    timeoutMs: number = 30000
-  ): Promise<boolean> {
-    const startTime = Date.now();
-    let retryCount = 0;
-
-    while (Date.now() - startTime < timeoutMs) {
-      let acquired = false;
-      await updateState(async (state) => {
-        const now = Date.now();
-        const currentOwner = state.gpuOwner;
-
-        if (currentOwner) {
-          // If we are already the owner, just update startedAt (re-entrant/heartbeat)
-          if (currentOwner.pid === this.processLifecycle.getCurrentPid()) {
-            currentOwner.startedAt = now;
-            if (sessionId) currentOwner.sessionId = sessionId;
-            acquired = true;
-            return state;
-          }
-
-          const isAlive = await this.processLifecycle.isProcessAlive(currentOwner.pid, currentOwner.startTime);
-          const lockAge = now - currentOwner.startedAt;
-
-          if (isAlive && lockAge < this.gpuLockStaleThresholdMs) {
-            // GPU is busy with a live process and lock is not stale
-            return state;
-          }
-
-          // Either owner is dead OR lock is stale - reclaim
-          if (!isAlive) {
-            logger.warn(
-              `[GPUResourceService] GPU owner PID ${currentOwner.pid} is dead or recycled. Reclaiming GPU lock.`
-            );
-          } else {
-            logger.warn(
-              `[GPUResourceService] GPU lock is stale (${lockAge}ms old, threshold is ${this.gpuLockStaleThresholdMs}ms). Reclaiming GPU lock.`
-            );
-          }
-        }
-
-        // Acquire lock
-        state.gpuOwner = {
-          pid: this.processLifecycle.getCurrentPid(),
-          startTime: (await this.processLifecycle.getCurrentProcessStartTime()) ?? undefined,
-          startedAt: now,
-          sessionId,
-        };
-        acquired = true;
-        return state;
-      });
-
-      if (acquired) {
-        const duration = Date.now() - startTime;
-        metrics.observe('gpu_lock_acquire_duration_ms', duration);
-        metrics.increment('gpu_lock_acquire_total', 1, { status: 'success' });
-        metrics.setGauge('gpu_lock_held', 1);
-        if (retryCount > 0) {
-          metrics.increment('gpu_lock_contention_total', 1);
-          metrics.observe('gpu_lock_contention_retries', retryCount);
-        }
-        return true;
-      }
-
-      retryCount++;
-      // Exponential backoff: 100ms → 200ms → 400ms → 800ms → 1600ms → 2000ms, capped.
-      // Exponent is clamped at 5 to prevent Math.pow(2, largeN) → Infinity.
-      // Avoids thundering-herd when multiple processes are all waiting for the lock.
-      const retryDelay = Math.min(100 * Math.pow(2, Math.min(retryCount - 1, 5)), 2000);
-      if (Date.now() - startTime + retryDelay < timeoutMs) {
-        await this.sleep(retryDelay);
-      } else {
-        break;
+  constructor(options?: GPUResourceServiceOptions) {
+    if (options) {
+      this.processLifecycle = options.processLifecycle;
+      if (options.gpuLockStaleThresholdMs) {
+        this.gpuLockStaleThresholdMs = options.gpuLockStaleThresholdMs;
       }
     }
-
-    metrics.increment('gpu_lock_acquire_total', 1, { status: 'timeout' });
-    return false;
   }
 
-  /**
-   * Release the global GPU resource lock if held by this process.
-   *
-   * @param updateState Function to atomically update state
-   * @param pid Optional PID to release for (defaults to current process)
-   */
-  async releaseGpuLock(
-    updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>,
-    pid: number = process.pid
-  ): Promise<void> {
-    await updateState((state) => {
-      if (state.gpuOwner?.pid === pid) {
-        delete state.gpuOwner;
-        metrics.setGauge('gpu_lock_held', 0);
-        metrics.increment('gpu_lock_release_total', 1, { status: 'success' });
-      }
-      return state;
-    });
-  }
-
-  /**
-   * Get information about the current GPU owner.
-   *
-   * @param readState Function to read current state
-   * @returns GPU owner information or null if not locked
-   */
-  async getGpuOwner(
-    readState: () => Promise<SingletonState>
-  ): Promise<SingletonState['gpuOwner'] | null> {
-    const state = await readState();
-    return state.gpuOwner ?? null;
-  }
-
-  /**
-   * Check if the GPU is currently locked.
-   *
-   * @param readState Function to read current state
-   * @returns true if GPU is locked
-   */
-  async isGpuLocked(readState: () => Promise<SingletonState>): Promise<boolean> {
-    const gpuOwner = await this.getGpuOwner(readState);
-    return gpuOwner !== null;
-  }
-
-  /**
-   * Check if the GPU lock is stale (older than threshold).
-   *
-   * @param readState Function to read current state
-   * @param staleThresholdMs Custom staleness threshold (defaults to service threshold)
-   * @returns true if lock is stale, false if not locked or not stale
-   */
-  async isGpuLockStale(
-    readState: () => Promise<SingletonState>,
-    staleThresholdMs?: number
-  ): Promise<boolean> {
-    const gpuOwner = await this.getGpuOwner(readState);
-    if (!gpuOwner) return false;
-
-    const threshold = staleThresholdMs ?? this.gpuLockStaleThresholdMs;
-    const lockAge = Date.now() - gpuOwner.startedAt;
-    return lockAge > threshold;
-  }
-
-  /**
-   * Check if the current process holds the GPU lock.
-   *
-   * @param readState Function to read current state
-   * @returns true if current process holds the lock
-   */
-  async doesCurrentProcessHoldGpuLock(readState: () => Promise<SingletonState>): Promise<boolean> {
-    const gpuOwner = await this.getGpuOwner(readState);
-    return gpuOwner?.pid === this.processLifecycle.getCurrentPid();
-  }
-
-  /**
-   * Get the GPU lock staleness threshold in milliseconds.
-   */
-  getGpuLockStaleThresholdMs(): number {
-    return this.gpuLockStaleThresholdMs;
-  }
-
-  async initialize(): Promise<void> {
+  async initialize(ctx?: any): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
       return;
     }
+
     this.lifecycle = ServiceLifecycle.INITIALIZING;
     logger.debug('[GPUResourceService] Initializing...');
+
+    const container = tryGetServiceContainerFromCtx(ctx);
+
+    if (!this.processLifecycle) {
+      this.processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE, ctx, container);
+    }
+
     this.lifecycle = ServiceLifecycle.INITIALIZED;
     logger.debug('[GPUResourceService] Initialized');
   }
 
   async dispose(): Promise<void> {
-    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
-      return;
-    }
-    this.lifecycle = ServiceLifecycle.DISPOSING;
-    logger.debug('[GPUResourceService] Disposing...');
     this.lifecycle = ServiceLifecycle.DISPOSED;
-    logger.debug('[GPUResourceService] Disposed');
   }
 
   /**
-   * Sleep for a specified number of milliseconds
-   * @param ms The number of milliseconds to sleep
+   * Internal logic to acquire the GPU lock
    */
-  private sleep(ms: number): Promise<void> {
-    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+  private async performAcquireGpuLock(
+    updateState: (updater: (state: SingletonState) => SingletonState | Promise<SingletonState>) => Promise<void>,
+    sessionId?: string,
+    timeoutMs?: number
+  ): Promise<boolean> {
+    const start = Date.now();
+    const pid = this.processLifecycle!.getCurrentPid();
+    const startTime = await this.processLifecycle!.getCurrentProcessStartTime();
+
+    while (true) {
+      let acquired = false;
+      let shouldRetry = false;
+
+      await updateState(async (state) => {
+        const currentOwner = state.gpuOwner;
+
+        // 1. Check if no one owns it
+        if (!currentOwner) {
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          acquired = true;
+          return state;
+        }
+
+        // 2. Check for re-entrancy (same PID and same process start time)
+        if (currentOwner.pid === pid && currentOwner.startTime === (startTime ?? undefined)) {
+          state.gpuOwner = { ...currentOwner, startedAt: Date.now(), sessionId: sessionId || currentOwner.sessionId };
+          acquired = true;
+          return state;
+        }
+
+        // 3. Check if owner is dead
+        const isAlive = await this.processLifecycle!.isProcessAlive(currentOwner.pid, currentOwner.startTime);
+        if (!isAlive) {
+          logger.warn(`[GPUResourceService] Reclaiming GPU lock from dead process ${currentOwner.pid}`);
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          acquired = true;
+          return state;
+        }
+
+        // 4. Check if lock is stale
+        const age = Date.now() - currentOwner.startedAt;
+        if (age > this.gpuLockStaleThresholdMs) {
+          logger.warn(`[GPUResourceService] Reclaiming stale GPU lock from process ${currentOwner.pid} (age: ${age}ms)`);
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          acquired = true;
+          return state;
+        }
+
+        // 5. Still held by another live process
+        if (timeoutMs && Date.now() - start < timeoutMs) {
+          shouldRetry = true;
+        }
+        return state;
+      });
+
+      if (acquired) return true;
+      if (!shouldRetry) return false;
+
+      // Wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  /**
+   * Acquire the global GPU lock
+   */
+  async acquireGpuLock(sessionId?: string | ((updater: any) => Promise<any>), timeoutMs?: number | string, ctx?: any): Promise<boolean> {
+    // Check if we are being called by StateManager (sessionId is actually updateState function)
+    if (typeof sessionId === 'function') {
+      const updateState = sessionId as any;
+      const actualSessionId = timeoutMs as any as string;
+      const actualTimeoutMs = ctx as any as number;
+      return this.performAcquireGpuLock(updateState, actualSessionId, actualTimeoutMs);
+    }
+
+    // Public service interface: delegate to StateManager
+    const container = tryGetServiceContainerFromCtx(ctx);
+    const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, ctx, container);
+    return stateManager.acquireGpuLock(sessionId as string | undefined, timeoutMs as number | undefined);
+  }
+
+  /**
+   * Release the global GPU lock
+   */
+  async releaseGpuLock(pid?: number | ((updater: any) => Promise<any>), ctx?: any): Promise<void> {
+    // Check if we are being called by StateManager (pid is actually updateState function)
+    if (typeof pid === 'function') {
+      const updateState = pid as any;
+      const actualPid = ctx as any as number;
+      const targetPid = actualPid || this.processLifecycle!.getCurrentPid();
+
+      await updateState(async (state: any) => {
+        if (state.gpuOwner && state.gpuOwner.pid === targetPid) {
+          delete state.gpuOwner;
+        }
+        return state;
+      });
+      return;
+    }
+
+    // Public service interface: delegate to StateManager
+    const container = tryGetServiceContainerFromCtx(ctx);
+    const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, ctx, container);
+    return stateManager.releaseGpuLock(pid as number | undefined);
   }
 }

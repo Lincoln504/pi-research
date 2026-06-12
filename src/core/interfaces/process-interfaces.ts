@@ -27,3 +27,11 @@ export interface IProcessLifecycle extends IService {
   isCurrentProcess(pid: number): boolean;
   getProcessInfo(pid: number): Promise<{ pid: number; alive: boolean; startTime?: number | null } | null>;
 }
+
+/**
+ * GPU Resource Service Interface
+ */
+export interface IGPUResourceService extends IService {
+  acquireGpuLock(sessionId?: string, timeoutMs?: number, ctx?: any): Promise<boolean>;
+  releaseGpuLock(pid?: number, ctx?: any): Promise<void>;
+}

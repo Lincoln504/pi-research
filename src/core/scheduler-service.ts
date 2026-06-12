@@ -1,387 +1,128 @@
 /**
  * Scheduler Service
  *
- * Service wrapper for the browser scheduler functionality.
- * Provides a clean interface for browser operations (search, scrape, health check)
- * and manages the scheduler lifecycle properly.
- *
- * All state is managed within the singleton instance, accessed via getSchedulerService().
+ * Coordinates the multi-process browser worker pool and task scheduling.
+ * Implements leader election to ensure only one browser pool is active.
  */
 
-import type { SearchResult, ScrapeResult, IScheduler } from './service-interfaces.ts';
-import { ServiceLifecycle } from './service-registry.ts';
+import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
-import { getService } from './service-registry.ts';
+import type { IScheduler, ISchedulerFactory, ISchedulerService, ISchedulerInternals, ISchedulerInstance } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
-import type { ISchedulerFactory } from './scheduler-factory.ts';
-import type { ISchedulerInstance, ISchedulerInternals } from './interfaces/scheduler-interfaces.ts';
-
-export type { ISchedulerInstance };
-
-// ============================================================================
-// Scheduler Service Implementation
-// ============================================================================
-
-// Internal scheduler type - matches the actual implementation
-interface ISchedulerInternal {
-  name?: string;
-  lifecycle?: ServiceLifecycle;
-  runSearch?: (query: string, config?: Config) => Promise<SearchResult[]>;
-  runScrape?: (url: string, config?: Config, signal?: AbortSignal) => Promise<ScrapeResult>;
-  runHealthCheck?: (config?: Config) => Promise<{ success: boolean }>;
-  schedulerId?: string;
-  shutdown?: () => Promise<void>;
-  resetIdleTimerOnActivity?: () => void;
-}
 
 /**
  * Scheduler Service Implementation
- * Wraps the browser scheduler with proper service lifecycle management
- * All state is managed within the instance - no module-level state
  */
-export class SchedulerService implements IScheduler, ISchedulerInternals {
+export class SchedulerService implements ISchedulerService, ISchedulerInternals {
   readonly name = ServiceNames.SCHEDULER;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
 
-  // ==========================================================================
-  // INSTANCE STATE - All state is instance-level, no module-level state
-  // ==========================================================================
-
-  // Internal scheduler instance (either BrowserTaskScheduler or BrowserClient)
-  private _scheduler: ISchedulerInternal | null = null;
-  
-  // Scheduler metadata
-  private _metadata: {
-    schedulerId: string;
-    schedulerVersion: string;
-    port?: number;
-    pid: number;
-    isLeader: boolean;
-  } | null = null;
-
-  // Initialization lock
-  private _initializationLock: Promise<IScheduler> | null = null;
-
-  // Shared scheduler state (for cross-module access)
-  // This replaces the module-level _internalState
-  private _sharedState: {
-    schedulerInstance: ISchedulerInstance | null;
-    schedulerVersion: string | null;
-    initializationPromise: Promise<ISchedulerInstance> | null;
-    isRestartInProgress: boolean;
-  } = {
-    schedulerInstance: null,
-    schedulerVersion: null,
-    initializationPromise: null,
-    isRestartInProgress: false,
-  };
-
-  // Tracks the fire-and-forget shutdown promise from forceSchedulerRestart so
-  // waitForBrowserPoolIdle can await it rather than blindly polling a flag.
-  private _pendingShutdownPromise: Promise<void> | null = null;
-
-  // ==========================================================================
-  // Service Lifecycle Methods
-  // ==========================================================================
+  private scheduler: IScheduler | null = null;
+  private initializationPromise: Promise<IScheduler> | null = null;
+  private schedulerVersion: string | null = null;
+  private pendingShutdownPromise: Promise<void> | null = null;
+  private restartInProgress = false;
 
   async initialize(): Promise<void> {
-    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
-      return;
-    }
-
-    this.lifecycle = ServiceLifecycle.INITIALIZING;
-    logger.debug('[SchedulerService] Initializing...');
-
-    // Don't eagerly create the scheduler - it will be created on first use
-    // This allows configuration to be loaded first
-
     this.lifecycle = ServiceLifecycle.INITIALIZED;
-    logger.debug('[SchedulerService] Initialized (scheduler will be created on first use)');
   }
 
   async dispose(): Promise<void> {
-    if (this.lifecycle === ServiceLifecycle.DISPOSED) {
-      return;
-    }
-
+    if (this.lifecycle === ServiceLifecycle.DISPOSED) return;
     this.lifecycle = ServiceLifecycle.DISPOSING;
-    logger.debug('[SchedulerService] Disposing...');
-
-    try {
-      // Import stopBrowserManager dynamically to avoid circular dependencies
-      const { stopBrowserManager } = await import('../infrastructure/browser/browser-lifecycle.ts');
-      await stopBrowserManager();
-      logger.debug('[SchedulerService] Browser manager stopped');
-    } catch (err) {
-      logger.warn('[SchedulerService] Error during browser manager shutdown:', err);
-    }
-
-    // Clear internal state
-    this._scheduler = null;
-    this._sharedState = {
-      schedulerInstance: null,
-      schedulerVersion: null,
-      initializationPromise: null,
-      isRestartInProgress: false,
-    };
-
-    this._metadata = null;
-    this._initializationLock = null;
-
-    this.lifecycle = ServiceLifecycle.DISPOSED;
-    logger.debug('[SchedulerService] Disposed');
-  }
-
-  // ==========================================================================
-  // State Management Methods (Instance Methods - No Module-Level State)
-  // ==========================================================================
-
-  /**
-   * Get the current scheduler instance
-   */
-  getSchedulerInstance(): ISchedulerInstance | null {
-    return this._sharedState.schedulerInstance;
-  }
-
-  /**
-   * Set the scheduler instance
-   */
-  setSchedulerInstance(scheduler: ISchedulerInstance | null): void {
-    this._sharedState.schedulerInstance = scheduler;
-  }
-
-  /**
-   * Get the scheduler version
-   */
-  getSchedulerVersion(): string | null {
-    return this._sharedState.schedulerVersion;
-  }
-
-  /**
-   * Set the scheduler version
-   */
-  setSchedulerVersion(version: string | null): void {
-    this._sharedState.schedulerVersion = version;
-  }
-
-  /**
-   * Get the scheduler initialization promise
-   */
-  getSchedulerInitializationPromise(): Promise<ISchedulerInstance> | null {
-    return this._sharedState.initializationPromise;
-  }
-
-  /**
-   * Set the scheduler initialization promise
-   */
-  setSchedulerInitializationPromise(promise: Promise<ISchedulerInstance> | null): void {
-    this._sharedState.initializationPromise = promise;
-  }
-
-  /**
-   * Check if a scheduler restart is in progress
-   */
-  isSchedulerRestartInProgress(): boolean {
-    return this._sharedState.isRestartInProgress;
-  }
-
-  /**
-   * Set the scheduler restart in progress state
-   */
-  setSchedulerRestartInProgress(inProgress: boolean): void {
-    this._sharedState.isRestartInProgress = inProgress;
-  }
-
-  /**
-   * Store the promise returned by a fire-and-forget background scheduler shutdown.
-   * Call with null once the shutdown has settled.
-   */
-  setPendingShutdownPromise(promise: Promise<void> | null): void {
-    this._pendingShutdownPromise = promise;
-  }
-
-  /**
-   * Return the pending background shutdown promise, or null if none is in flight.
-   */
-  getPendingShutdownPromise(): Promise<void> | null {
-    return this._pendingShutdownPromise;
-  }
-
-  /**
-   * Clear all scheduler state
-   */
-  clearSchedulerState(): void {
-    this._sharedState.schedulerInstance = null;
-    this._sharedState.schedulerVersion = null;
-    this._sharedState.initializationPromise = null;
-    this._sharedState.isRestartInProgress = false;
-  }
-
-  // ==========================================================================
-  // Scheduler Operations
-  // ==========================================================================
-
-  /**
-   * Get or create the scheduler instance
-   * This is the main entry point for scheduler access
-   */
-  private async getOrCreateScheduler(config?: Config): Promise<IScheduler> {
-    // Return existing scheduler if already initialized
-    if (this._scheduler) {
-      return this as unknown as IScheduler;
-    }
-
-    // Return existing initialization promise if in progress
-    if (this._initializationLock) {
-      return this._initializationLock as Promise<IScheduler>;
-    }
-
-    // Create a new initialization lock
-    const initPromise = (async () => {
+    
+    if (this.scheduler) {
       try {
-        // Get the scheduler from the factory function
-        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY);
+        await this.scheduler.shutdown();
+      } catch (err) {
+        logger.error('[SchedulerService] Error during scheduler shutdown:', err);
+      }
+      this.scheduler = null;
+    }
+    
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+  }
+
+  /**
+   * Ensure a scheduler is available for research
+   * This implements the leader election / connection logic
+   */
+  async ensureScheduler(config?: Config, ctx?: any): Promise<IScheduler> {
+    if (this.scheduler) return this.scheduler;
+    if (this.initializationPromise) return this.initializationPromise;
+
+    const container = tryGetServiceContainerFromCtx(ctx);
+
+    this.initializationPromise = (async () => {
+      try {
+        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY, ctx, container);
         const scheduler = await factory.getScheduler(config);
-        
-        // Store the scheduler instance
-        this._scheduler = scheduler as unknown as ISchedulerInternal;
-        
-        // Update metadata
-        const schedulerVersion = factory.getSchedulerVersion(config);
-        const schedulerId = this._scheduler.schedulerId || 'client';
-        const isLeader = schedulerId !== 'client';
-
-        this._metadata = {
-          schedulerId,
-          schedulerVersion,
-          pid: process.pid,
-          isLeader,
-        };
-
-        logger.debug('[SchedulerService] Scheduler created:', this._metadata);
-        return this as unknown as IScheduler;
+        this.scheduler = scheduler;
+        return scheduler;
       } finally {
-        // Clear the initialization lock
-        this._initializationLock = null;
+        this.initializationPromise = null;
       }
     })();
 
-    this._initializationLock = initPromise;
-    return initPromise as Promise<IScheduler>;
+    return this.initializationPromise;
   }
 
   /**
-   * Run a search query
+   * Get the current scheduler instance if initialized
    */
-  async runSearch(query: string, config?: Config): Promise<SearchResult[]> {
-    await this.getOrCreateScheduler(config);
-    if (!this._scheduler?.runSearch) {
-      throw new Error('Scheduler does not support runSearch');
-    }
-    return this._scheduler.runSearch(query, config);
+  getScheduler(): IScheduler | null {
+    return this.scheduler;
   }
 
   /**
-   * Scrape a URL
+   * Check if the scheduler is ready
    */
-  async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
-    await this.getOrCreateScheduler(config);
-    if (!this._scheduler?.runScrape) {
-      throw new Error('Scheduler does not support runScrape');
-    }
-    return this._scheduler.runScrape(url, config, signal);
+  isReady(): boolean {
+    return this.scheduler !== null;
   }
 
-  /**
-   * Run a health check
-   */
-  async runHealthCheck(config?: Config): Promise<{ success: boolean }> {
-    await this.getOrCreateScheduler(config);
-    if (!this._scheduler?.runHealthCheck) {
-      return { success: false };
-    }
-    return this._scheduler.runHealthCheck(config);
+  // ============================================================================
+  // ISchedulerInternals Implementation
+  // ============================================================================
+
+  getSchedulerInstance(): ISchedulerInstance | null {
+    return this.scheduler as unknown as ISchedulerInstance | null;
   }
 
-  /**
-   * Shutdown the scheduler
-   */
-  async shutdown(): Promise<void> {
-    if (this._scheduler?.shutdown) {
-      await this._scheduler.shutdown();
-    }
-    this._scheduler = null;
-    this._metadata = null;
+  setSchedulerInstance(instance: ISchedulerInstance | null): void {
+    this.scheduler = instance as unknown as IScheduler | null;
   }
 
-  /**
-   * Reset idle timer (for scheduler instances)
-   */
-  resetIdleTimerOnActivity(): void {
-    if (this._scheduler?.resetIdleTimerOnActivity) {
-      this._scheduler.resetIdleTimerOnActivity();
-    }
+  getSchedulerVersion(): string | null {
+    return this.schedulerVersion;
   }
 
-  // ==========================================================================
-  // Metadata and Query Methods
-  // ==========================================================================
-
-  /**
-   * Get the scheduler metadata
-   */
-  getMetadata(): typeof this._metadata {
-    return this._metadata;
+  setSchedulerVersion(version: string | null): void {
+    this.schedulerVersion = version;
   }
 
-  /**
-   * Check if the scheduler is initialized
-   */
-  isInitialized(): boolean {
-    return this._scheduler !== null;
+  getSchedulerInitializationPromise(): Promise<ISchedulerInstance> | null {
+    return this.initializationPromise as unknown as Promise<ISchedulerInstance> | null;
   }
 
-  /**
-   * Check if this process is the leader (has the browser pool)
-   */
-  isLeader(): boolean {
-    return this._metadata?.isLeader ?? false;
+  setSchedulerInitializationPromise(promise: Promise<ISchedulerInstance> | null): void {
+    this.initializationPromise = promise as unknown as Promise<IScheduler> | null;
   }
 
-  /**
-   * Get the scheduler ID
-   */
-  getSchedulerId(): string | null {
-    return this._metadata?.schedulerId ?? null;
+  getPendingShutdownPromise(): Promise<void> | null {
+    return this.pendingShutdownPromise;
   }
 
-  /**
-   * Force a scheduler restart
-   * Clears the current scheduler and creates a new one on next access
-   */
-  async forceRestart(): Promise<void> {
-    logger.debug('[SchedulerService] Forcing scheduler restart...');
+  setPendingShutdownPromise(promise: Promise<void> | null): void {
+    this.pendingShutdownPromise = promise;
+  }
 
-    // Shutdown the current scheduler
-    if (this._scheduler?.shutdown) {
-      try {
-        await this._scheduler.shutdown();
-      } catch (err) {
-        logger.warn('[SchedulerService] Error during scheduler shutdown:', err);
-      }
-      this._scheduler = null;
-    }
+  isSchedulerRestartInProgress(): boolean {
+    return this.restartInProgress;
+  }
 
-    // Clear metadata
-    this._metadata = null;
-
-    // Clear initialization lock
-    this._initializationLock = null;
-
-    // Clear shared state
-    this.clearSchedulerState();
-
-    logger.debug('[SchedulerService] Scheduler restart complete (will recreate on next access)');
+  setSchedulerRestartInProgress(inProgress: boolean): void {
+    this.restartInProgress = inProgress;
   }
 }

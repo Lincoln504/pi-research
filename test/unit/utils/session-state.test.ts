@@ -169,7 +169,7 @@ describe('utils/session-state', () => {
       
       expect(masterUpdate).not.toHaveBeenCalled();
       
-      vi.advanceTimersByTime(10);
+      vi.advanceTimersByTime(200);
       expect(masterUpdate).toHaveBeenCalledTimes(1);
       
       vi.useRealTimers();
@@ -199,7 +199,7 @@ describe('utils/session-state', () => {
       expect(isBottomMostSession(ps2, s2)).toBe(true); 
       
       refreshAllSessions(ps1);
-      vi.advanceTimersByTime(10);
+      vi.advanceTimersByTime(200);
       
       expect(masterUpdate1).toHaveBeenCalled();
       expect(masterUpdate2).not.toHaveBeenCalled(); 

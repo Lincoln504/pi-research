@@ -1,6 +1,6 @@
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { runHealthCheck } from '../../../src/healthcheck/index.ts';
+import { runHealthCheck, registerHealthChecks } from '../../../src/healthcheck/index.ts';
+import { HealthCheckRegistry } from '../../../src/healthcheck/registry.ts';
 import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
 import { registerService, resetServiceContainer, ServiceLifecycle } from '../../../src/core/service-registry.ts';
@@ -32,7 +32,7 @@ vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => (
 vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
   KnowledgeStoreService: vi.fn().mockImplementation(() => ({
     name: 'knowledge-store',
-    lifecycle: 'initialized',
+    lifecycle: ServiceLifecycle.INITIALIZED,
     isReady: () => true,
     async initialize() {},
     async dispose() {},
@@ -50,7 +50,7 @@ vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
 vi.mock('../../../src/infrastructure/state/state-manager.ts', () => ({
   StateManager: vi.fn().mockImplementation(() => ({
     name: 'state-manager',
-    lifecycle: 'initialized',
+    lifecycle: ServiceLifecycle.INITIALIZED,
     async initialize() {},
     async dispose() {},
     async getMetrics() {
@@ -86,9 +86,20 @@ describe('healthcheck', () => {
         isSchedulerRestartInProgress() { return false; },
         setSchedulerRestartInProgress() {},
         setSchedulerInstance() {},
-        isInitialized() { return true; },
+        isReady() { return true; },
         schedulerId: 'test',
       }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+
+    registerService(
+      ServiceNames.HEALTH_REGISTRY,
+      async () => {
+        const registry = new HealthCheckRegistry();
+        await registry.initialize();
+        registerHealthChecks(registry);
+        return registry;
+      },
       { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
     );
 

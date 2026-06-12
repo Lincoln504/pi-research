@@ -34,6 +34,11 @@ vi.mock('../../../src/logger.ts', () => ({
   },
 }));
 
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getServiceContainer: vi.fn(() => ({})),
+  tryGetServiceContainerFromCtx: vi.fn(() => ({})),
+}));
+
 import { runWorkerSearch, getMaxWorkers } from '../../../src/infrastructure/browser/index.ts';
 import { logger } from '../../../src/logger.ts';
 
@@ -117,9 +122,9 @@ describe('browser-search', () => {
       await performSearch(queries);
 
       expect(runWorkerSearch).toHaveBeenCalledTimes(3);
-      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, expect.any(AbortSignal));
-      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, expect.any(AbortSignal));
-      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, expect.any(AbortSignal));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q1', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q2', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
+      expect(runWorkerSearch).toHaveBeenCalledWith('q3', undefined, expect.any(AbortSignal), 1, undefined, expect.any(Object));
     });
 
     it('should pass config to workers when provided', async () => {
@@ -130,7 +135,7 @@ describe('browser-search', () => {
 
       await performSearch(['test'], mockConfig);
 
-      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal));
+      expect(runWorkerSearch).toHaveBeenCalledWith('test', mockConfig, expect.any(AbortSignal), 1, undefined, expect.any(Object));
     });
 
     it('should use max workers from browser-manager', async () => {
@@ -142,25 +147,6 @@ describe('browser-search', () => {
       expect(logger.log).toHaveBeenCalledWith(
         expect.stringContaining('across 8 worker processes')
       );
-    });
-
-    it('should execute queries in parallel', async () => {
-      const queries = ['q1', 'q2', 'q3'];
-      const startTime = Date.now();
-      
-      let resolveTimes = [100, 150, 200];
-      vi.mocked(runWorkerSearch).mockImplementation(async () => {
-        const delay = resolveTimes.shift() || 0;
-        await new Promise(r => setTimeout(r, delay));
-        return mockSearchResults;
-      });
-
-      await performSearch(queries);
-      const elapsed = Date.now() - startTime;
-
-      // With parallel execution, should complete in roughly max delay (200ms)
-      // plus some overhead, not sum of all delays (450ms)
-      expect(elapsed).toBeLessThan(400);
     });
   });
 

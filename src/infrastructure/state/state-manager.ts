@@ -347,11 +347,11 @@ export class StateManager {
   // ==================== GPU Lock API ====================
 
   public async acquireGpuLock(sessionId?: string, timeoutMs?: number): Promise<boolean> {
-    return this.gpuResourceService.acquireGpuLock(this.updateState.bind(this), sessionId, timeoutMs);
+    return this.gpuResourceService.acquireGpuLock(this.updateState.bind(this) as any, sessionId, timeoutMs);
   }
 
   public async releaseGpuLock(pid?: number): Promise<void> {
-    await this.gpuResourceService.releaseGpuLock(this.updateState.bind(this), pid);
+    await this.gpuResourceService.releaseGpuLock(this.updateState.bind(this) as any, pid);
   }
 
   public async getGpuOwner(): Promise<SingletonState['gpuOwner'] | null> {

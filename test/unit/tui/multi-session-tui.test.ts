@@ -35,7 +35,7 @@ describe('Multi-Session TUI Coordination', () => {
 
     // Initial refresh
     refreshAllSessions(piSessionId);
-    vi.advanceTimersByTime(10);
+    vi.advanceTimersByTime(200);
     expect(masterUpdate).toHaveBeenCalledTimes(1);
     
     let activePanels = getPiActivePanels(piSessionId);
@@ -49,7 +49,7 @@ describe('Multi-Session TUI Coordination', () => {
 
     // Refresh after adding s2
     refreshAllSessions(piSessionId);
-    vi.advanceTimersByTime(10);
+    vi.advanceTimersByTime(200);
     
     expect(masterUpdate).toHaveBeenCalledTimes(2);
     
@@ -63,7 +63,7 @@ describe('Multi-Session TUI Coordination', () => {
     endResearchSession(piSessionId, s1);
     
     refreshAllSessions(piSessionId);
-    vi.advanceTimersByTime(10);
+    vi.advanceTimersByTime(200);
 
     activePanels = getPiActivePanels(piSessionId);
     expect(activePanels).toHaveLength(1);

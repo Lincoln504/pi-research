@@ -19,7 +19,8 @@ vi.mock('../../../src/config.ts', async (importOriginal) => {
 // Mock dependencies
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getServiceContainer: vi.fn(() => ({ isReady: true })),
-  getService: vi.fn(),
+  getService: vi.fn(async (_name: any, _ctx?: any, _container?: any) => {}),
+  tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
 }));
 
 vi.mock('../../../src/logger.ts', () => {

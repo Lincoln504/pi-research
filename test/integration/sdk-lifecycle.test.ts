@@ -111,7 +111,7 @@ describe('SDK Lifecycle Integration', () => {
   it('runDeepResearch executes the coordinator→synthesis pipeline and returns the plan content', async () => {
     await initResearchSDK({ model: STUB_MODEL });
     const result = await runDeepResearch('What is TypeScript?', { depth: 1 });
-    expect(result).toContain('Mock deep research result');
+    expect(result).toContain('Mock synthesis result');
     expect(result).toContain('CITED LINKS');
   });
 

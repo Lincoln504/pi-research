@@ -8,14 +8,11 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import * as os from 'node:os';
 import { logger } from './logger.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-
-// Get the directory where this extension is installed
-const __filename = fileURLToPath(import.meta.url);
-const EXTENSION_DIR = path.dirname(__filename);
+import { normalizeWorkspacePath } from './utils/text-utils.ts';
 
 /**
  * Validates configuration schema using TypeBox.
@@ -87,29 +84,138 @@ export type Config = Static<typeof ConfigSchema>;
 export const DEFAULTS: Config = Value.Create(ConfigSchema);
 
 // ============================================================================
+// Centralized Project Settings Storage
+// ============================================================================
+
+/**
+ * Returns the path to the centralized project settings file.
+ */
+export function getProjectSettingsRegistryPath(): string {
+  return path.join(os.homedir(), '.pi', 'state', 'project-settings.json');
+}
+
+/**
+ * Load all project settings from the centralized registry.
+ */
+function loadProjectSettingsRegistry(): Record<string, Record<string, string>> {
+  const registryPath = getProjectSettingsRegistryPath();
+  try {
+    if (fs.existsSync(registryPath)) {
+      const content = fs.readFileSync(registryPath, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    logger.warn('[config] Failed to read project settings registry:', err);
+  }
+  return {};
+}
+
+/**
+ * Internal helper for synchronous sleep without busy-waiting.
+ * Uses Atomics.wait which is supported in Node.js main thread.
+ */
+function sleepSync(ms: number): void {
+  if (ms <= 0) return;
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    // Fallback to busy-wait if SharedArrayBuffer is restricted (unlikely in Node.js)
+    const end = Date.now() + ms;
+    while (Date.now() < end) {}
+  }
+}
+
+/**
+ * Save the centralized project settings registry.
+ */
+function saveProjectSettingsRegistry(registry: Record<string, Record<string, string>>): void {
+  const registryPath = getProjectSettingsRegistryPath();
+  const dir = path.dirname(registryPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  
+  const lockPath = `${registryPath}.lock`;
+  let lockFd: number | null = null;
+  const maxRetries = 100;
+  
+  try {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        lockFd = fs.openSync(lockPath, 'wx');
+        break;
+      } catch (err: any) {
+        if (err.code === 'EEXIST') {
+          // Stale lock check
+          try {
+            const stats = fs.statSync(lockPath);
+            if (Date.now() - stats.mtimeMs > 30000) {
+              fs.unlinkSync(lockPath);
+              continue;
+            }
+          } catch { /* ignore */ }
+          
+          sleepSync(50);
+          continue;
+        }
+        throw err;
+      }
+    }
+    
+    if (lockFd !== null) {
+      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+    } else {
+      logger.warn(`[config] Failed to acquire lock for registry after ${maxRetries} retries. Writing anyway to avoid data loss.`);
+      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+    }
+  } catch (err) {
+    logger.error('[config] Failed to save project settings registry:', err);
+  } finally {
+    if (lockFd !== null) {
+      try { fs.closeSync(lockFd); } catch { /* ignore */ }
+      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+    }
+  }
+}
+
+// ============================================================================
 // Env-file persistence
 // ============================================================================
 
-export function getGlobalEnvFilePath(): string {
-  return path.join(EXTENSION_DIR, '.env');
+/**
+ * Returns the global configuration directory (~/.pi/research).
+ */
+export function getGlobalConfigDir(): string {
+  return path.join(os.homedir(), '.pi', 'research');
 }
 
-export function getLocalEnvFilePath(): string {
-  return path.resolve(process.cwd(), '.pi-research.env');
+/**
+ * Returns the global environment file path (~/.pi/research/config.env).
+ */
+export function getGlobalEnvFilePath(): string {
+  return path.join(getGlobalConfigDir(), 'config.env');
+}
+
+/**
+ * Returns the local environment file path for a given directory.
+ * NOTE: This is now deprecated in favor of centralized storage.
+ */
+export function getLocalEnvFilePath(cwd: string = process.cwd()): string {
+  return path.resolve(cwd, '.pi-research.env');
 }
 
 /**
  * Returns the active database directory.
  */
-export function getDbDir(): string {
-  const config = getConfig();
-  if (config.KNOWLEDGE_STORE_DIR) {
-    return path.isAbsolute(config.KNOWLEDGE_STORE_DIR) 
-      ? config.KNOWLEDGE_STORE_DIR 
-      : path.resolve(process.cwd(), config.KNOWLEDGE_STORE_DIR);
+export function getDbDir(config?: Config, cwd: string = process.cwd()): string {
+  const cfg = config || getConfig(cwd);
+  if (cfg.KNOWLEDGE_STORE_DIR) {
+    return path.isAbsolute(cfg.KNOWLEDGE_STORE_DIR) 
+      ? cfg.KNOWLEDGE_STORE_DIR 
+      : path.resolve(cwd, cfg.KNOWLEDGE_STORE_DIR);
   }
-  const dbDir = path.resolve(EXTENSION_DIR, '..', 'knowledge_db');
-  return path.isAbsolute(dbDir) ? dbDir : path.resolve(process.cwd(), dbDir);
+  // Default unified database in the global config directory
+  return path.join(getGlobalConfigDir(), 'knowledge_db');
 }
 
 function parseDotEnv(content: string): Record<string, string> {
@@ -126,10 +232,14 @@ function parseDotEnv(content: string): Record<string, string> {
   return out;
 }
 
-function loadEnvFile(): Record<string, string> {
+/**
+ * Load environment variables from global and local files.
+ * Order: Defaults < Global File < Centralized Project Settings
+ */
+function loadEnvFiles(cwd: string): Record<string, string> {
   const merged: Record<string, string> = {};
   
-  // 1. Global defaults
+  // 1. Global user config
   try {
     const globalPath = getGlobalEnvFilePath();
     if (fs.existsSync(globalPath)) {
@@ -139,14 +249,29 @@ function loadEnvFile(): Record<string, string> {
     logger.warn('[config] Failed to read global env file:', err);
   }
 
-  // 2. Local overrides
+  // 2. Centralized project settings (replaces .pi-research.env)
   try {
-    const localPath = getLocalEnvFilePath();
-    if (fs.existsSync(localPath)) {
-      Object.assign(merged, parseDotEnv(fs.readFileSync(localPath, 'utf-8')));
+    const registry = loadProjectSettingsRegistry();
+    const normalizedCwd = normalizeWorkspacePath(cwd);
+    if (registry[normalizedCwd]) {
+      Object.assign(merged, registry[normalizedCwd]);
+    }
+    
+    // BACKWARD COMPATIBILITY: Also check for legacy .pi-research.env in CWD
+    const legacyPath = getLocalEnvFilePath(cwd);
+    if (fs.existsSync(legacyPath)) {
+      const legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
+      Object.assign(merged, legacyEnv);
+      
+      // Migration: Move legacy settings to central registry if they differ
+      if (!registry[normalizedCwd] || JSON.stringify(registry[normalizedCwd]) !== JSON.stringify(legacyEnv)) {
+        logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
+        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyEnv };
+        saveProjectSettingsRegistry(registry);
+      }
     }
   } catch (err) {
-    logger.warn('[config] Failed to read local env file:', err);
+    logger.warn(`[config] Failed to load centralized settings for ${cwd}:`, err);
   }
 
   return merged;
@@ -154,14 +279,8 @@ function loadEnvFile(): Record<string, string> {
 
 /**
  * Write config back to env file.
- * Automatically selects between local and global based on project presence.
  */
-export function saveConfig(config: Config): void {
-  const isProject = fs.existsSync(path.resolve(process.cwd(), '.git')) || 
-                    fs.existsSync(path.resolve(process.cwd(), 'package.json'));
-  
-  const p = isProject ? getLocalEnvFilePath() : getGlobalEnvFilePath();
-  
+export function saveConfig(config: Config, scope: 'local' | 'global' = 'local', cwd: string = process.cwd()): void {
   const newValues: Record<string, string> = {
     PI_RESEARCH_TIMEOUT_MS: String(config.RESEARCHER_TIMEOUT_MS),
     PI_RESEARCH_MAX_RESEARCHERS: String(config.MAX_CONCURRENT_RESEARCHERS),
@@ -191,13 +310,65 @@ export function saveConfig(config: Config): void {
     PI_RESEARCH_DEBUG: String(config.DEBUG),
   };
 
+  if (scope === 'local') {
+    // CENTRALIZED PROJECT STORAGE
+    const registry = loadProjectSettingsRegistry();
+    const normalizedCwd = normalizeWorkspacePath(cwd);
+    registry[normalizedCwd] = newValues;
+    saveProjectSettingsRegistry(registry);
+    
+    logger.debug(`[config] Saved project settings for ${normalizedCwd} to central registry.`);
+    return;
+  }
+
+  // GLOBAL STORAGE (remains in config.env)
+  const p = getGlobalEnvFilePath();
+  const lockPath = `${p}.lock`;
+  const dir = path.dirname(p);
+
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  // Simple synchronous file lock
+  let lockFd: number | null = null;
+  const lockRetryDelay = 50;
+  const lockMaxRetries = 100; // 5 seconds total
+
+  for (let i = 0; i < lockMaxRetries; i++) {
+    try {
+      lockFd = fs.openSync(lockPath, 'wx');
+      break;
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        // Check if lock is stale (older than 30s)
+        try {
+          const stats = fs.statSync(lockPath);
+          if (Date.now() - stats.mtimeMs > 30000) {
+            fs.unlinkSync(lockPath);
+            continue;
+          }
+        } catch { /* ignore */ }
+
+        const jitter = Math.floor(Math.random() * 20);
+        sleepSync(lockRetryDelay + jitter);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (lockFd === null) {
+    throw new Error(`Failed to acquire lock for ${p} after ${lockMaxRetries} retries`);
+  }
+  
   try {
     let lines: string[] = [];
     if (fs.existsSync(p)) {
       lines = fs.readFileSync(p, 'utf-8').split('\n');
     } else {
       lines = [
-        '# pi-research configuration',
+        `# pi-research global configuration`,
         '',
       ];
     }
@@ -228,7 +399,6 @@ export function saveConfig(config: Config): void {
     }
 
     for (const [key, val] of Object.entries(newValues)) {
-      // FIX (#33): Skip prototype pollution keys
       if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
       if (!updatedKeys.has(key) && val !== '') {
         if (outLines.length > 0 && outLines[outLines.length - 1]?.trim() !== '') {
@@ -239,13 +409,12 @@ export function saveConfig(config: Config): void {
       }
     }
 
-    // Atomic write: write to temp file then rename (crash-safe)
+    // Atomic write
     const tmpPath = `${p}.tmp.${Date.now()}`;
     fs.writeFileSync(tmpPath, outLines.join('\n'), 'utf-8');
     try {
       fs.renameSync(tmpPath, p);
     } catch (renameErr) {
-      // fs.renameSync fails on Windows if target exists (NTFS). Fall back to copy+delete.
       if (process.platform === 'win32') {
         fs.copyFileSync(tmpPath, p);
         try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
@@ -257,6 +426,13 @@ export function saveConfig(config: Config): void {
   } catch (err) {
     logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;
+  } finally {
+    if (lockFd !== null) {
+      fs.closeSync(lockFd);
+      try {
+        fs.unlinkSync(lockPath);
+      } catch { /* ignore */ }
+    }
   }
 }
 
@@ -264,11 +440,14 @@ export function saveConfig(config: Config): void {
 // Internal State
 // ============================================================================
 
-let currentConfig: Config | null = null;
+/**
+ * Global singleton for CLI mode. 
+ * SDK and OpenClaw should avoid this and use createConfig() or getConfig(cwd).
+ */
+let globalConfig: Config | null = null;
 
 /**
  * Internal factory for creating a configuration object from env.
- * Primarily used for testing.
  */
 export function createConfig(env: Record<string, string | undefined>, processEnv: Record<string, string | undefined>): Config {
   const e = { ...env, ...processEnv };
@@ -312,27 +491,37 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
 }
 
 /**
- * Robustly load current configuration.
- * Preference: process.env > local env file > global env file > defaults.
+ * Robustly load configuration for a specific directory.
+ * Resolution: Defaults < Global Config (~/.pi/research/config.env) < Local Config (CWD/.pi-research.env) < process.env.
  */
-export function getConfig(): Config {
-  if (currentConfig) return currentConfig;
+export function getConfig(cwd: string = process.cwd()): Config {
+  // If we are in CLI mode (no explicit CWD passed), we can use the global singleton
+  // to avoid re-parsing files constantly.
+  if (cwd === process.cwd() && globalConfig) {
+    return globalConfig;
+  }
 
-  const e = loadEnvFile();
-  currentConfig = createConfig(e, process.env);
-  return currentConfig;
+  const e = loadEnvFiles(cwd);
+  const config = createConfig(e, process.env);
+  
+  if (cwd === process.cwd()) {
+    globalConfig = config;
+  }
+  
+  return config;
 }
 
 /**
- * Manually override configuration (primarily for SDK/tests)
+ * Manually override configuration.
+ * Mutates the global singleton (for CLI/test compatibility).
  */
 export function setConfig(config: Partial<Config>): void {
   const current = getConfig();
-  currentConfig = { ...current, ...config };
+  globalConfig = { ...current, ...config };
 }
 
 export function resetConfig(): void {
-  currentConfig = null;
+  globalConfig = null;
 }
 
 /**
@@ -351,7 +540,6 @@ function parseEnvNumber(env: Record<string, string | undefined>, key: string, de
   if (v === undefined || v === '') return def;
   const n = parseFloat(v);
   if (isNaN(n)) {
-    // FIX (#16): Warn when env value is malformed instead of silently falling back
     logger.warn(`[config] Environment variable ${key}="${v}" is not a valid number, using default: ${def}`);
     return def;
   }

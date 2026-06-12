@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import { KnowledgeStore } from './store.ts';
 import { WriterQueue } from './writer-queue.ts';
 import { Chunker } from './chunker.ts';
-import { getConfig, validateConfig, getDbDir } from '../config.ts';
+import { getConfig, validateConfig, getDbDir, type Config } from '../config.ts';
 import { logger } from '../logger.ts';
 import { getModelChunkConfig } from './model-config.ts';
 import type { MigrationStrategy } from './migration.ts';
@@ -46,11 +46,13 @@ const MAX_RETRY_DELAY_MS = 30000;
 export async function createKnowledgeStoreComponents(
   embedderFactory: () => Promise<IEmbedder>,
   reconnectFactory?: () => Promise<IEmbedder>,
-  withLock?: <T>(fn: () => Promise<T>) => Promise<T>
-): Promise<KnowledgeStoreComponents> {
-  const config = getConfig();
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>,
+  config: Config = getConfig(),
+  workspace: string = process.cwd()
+): Promise<KnowledgeStoreComponents | null> {
   if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
-    throw new Error('Knowledge store is disabled in configuration');
+    logger.debug('[knowledge] Knowledge store is disabled in configuration');
+    return null;
   }
   validateConfig(config);
 
@@ -62,15 +64,16 @@ export async function createKnowledgeStoreComponents(
       const migrationStrategy = getMigrationStrategy();
       
       const store = new KnowledgeStore({
-        dbDir: getDbDir(),
+        dbDir: getDbDir(config, workspace),
         embedder,
         modelName: config.EMBEDDING_MODEL,
         migrationStrategy: migrationStrategy,
         reconnectFactory,
         withLock,
-        workspace: process.cwd(),
+        workspace,
         localEnabled: config.LOCAL_KNOWLEDGE_STORE_ENABLED,
         globalEnabled: config.GLOBAL_KNOWLEDGE_STORE_ENABLED,
+        ttlDays: config.KNOWLEDGE_STORE_CACHE_TTL_DAYS,
       });
 
       const chunkCfg = getModelChunkConfig(config.EMBEDDING_MODEL);
@@ -100,8 +103,8 @@ export async function createKnowledgeStoreComponents(
  * Force delete the entire knowledge database directory.
  * Used for system-level clearing or recovery from corruption.
  */
-export async function forceDeleteKnowledgeStore(): Promise<void> {
-  const dbDir = getDbDir();
+export async function forceDeleteKnowledgeStore(config?: Config, workspace?: string): Promise<void> {
+  const dbDir = getDbDir(config, workspace);
   if (fs.existsSync(dbDir)) {
     try {
       fs.rmSync(dbDir, { recursive: true, force: true });

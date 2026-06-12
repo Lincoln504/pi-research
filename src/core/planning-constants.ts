@@ -16,6 +16,8 @@ import {
   MAX_QUERIES_PER_RESEARCHER_LEVEL_3,
 } from '../constants.ts';
 
+import { ResearchPlanSchema } from './interfaces/planning-interfaces.ts';
+
 /**
  * Team size by complexity level
  */
@@ -24,6 +26,19 @@ export const TEAM_SIZE_BY_COMPLEXITY = {
   2: MAX_TEAM_SIZE_LEVEL_2,
   3: MAX_TEAM_SIZE_LEVEL_3,
 } as const;
+
+/**
+ * Get the max team size for any complexity
+ */
+export function getMaxTeamSize(): number {
+  return MAX_TEAM_SIZE_LEVEL_3;
+}
+
+/**
+ * Schemas for LLM response validation
+ */
+export const PlanningResponseSchemaAsTSchema = ResearchPlanSchema;
+export const EvaluationResponseSchemaAsTSchema = ResearchPlanSchema;
 
 /**
  * Max rounds by complexity level

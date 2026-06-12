@@ -5,6 +5,8 @@
  * in a session to prevent redundant work.
  */
 
+import { normalizeUrl } from './url-utils.ts';
+export { normalizeUrl };
 import { logger } from '../logger.ts';
 import { safeUnref } from './safe-unref.ts';
 import { randomUUID } from 'node:crypto';
@@ -77,43 +79,6 @@ export function getCachedScrapedContent(researchId: string, url: string): string
  */
 export function generateSessionId(piSessionId: string): string {
     return `${piSessionId}-${randomUUID().replace(/-/g, '').substring(0, 8)}`;
-}
-
-/**
- * Normalize a URL for deduplication purposes.
- * - Forces HTTPS
- * - Removes trailing slashes
- * - Removes hash fragments
- * - Lowercases the hostname
- */
-export function normalizeUrl(url: string): string {
-    try {
-        // Strip trailing markdown markers if any (e.g. trailing **)
-        const cleanUrl = url.trim().replace(/[*_~`]+$/, '');
-        const parsed = new URL(cleanUrl);
-        // Force https for deduplication purposes (http and https usually point to the same content)
-        parsed.protocol = 'https:';
-        // Remove hash fragments
-        parsed.hash = '';
-        // Build the normalized string
-        let normalized = parsed.toString();
-        // Remove trailing slash if present
-        if (normalized.endsWith('/')) {
-            normalized = normalized.slice(0, -1);
-        }
-        // Remove trailing question mark if present (no query params)
-        if (normalized.endsWith('?')) {
-            normalized = normalized.slice(0, -1);
-        }
-        return normalized;
-    } catch (_e) {
-        // If it's an invalid URL, return it as-is or cleaned up slightly
-        let cleaned = url.split('#')[0]!;
-        if (cleaned.endsWith('/')) {
-            cleaned = cleaned.slice(0, -1);
-        }
-        return cleaned.toLowerCase();
-    }
 }
 
 /**

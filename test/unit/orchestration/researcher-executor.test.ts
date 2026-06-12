@@ -17,9 +17,10 @@ import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 vi.mock('../../../src/core/service-registry.ts', () => ({
-  getService: vi.fn(),
+  getService: vi.fn(async (_name: any, _ctx?: any, _container?: any) => {}),
   registerService: vi.fn(),
   resetServiceContainer: vi.fn(),
+  tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
 }));
 
 vi.mock('../../../src/logger.ts', () => ({

@@ -15,7 +15,8 @@ import {
   initializeInfrastructureServices,
   shutdownInfrastructureServices
 } from './infrastructure/service-initialization.ts';
-import { getService, resetServiceContainer, disposeAllServices } from './core/service-registry.ts';
+import { getService, resetServiceContainer, disposeAllServices, createServiceContainer } from './core/service-registry.ts';
+import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { 
   IResearchOrchestration, 
@@ -25,7 +26,7 @@ import type {
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
-import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
+import { getConfig, validateConfig, type Config } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './utils/model-registry-factory.ts';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +42,8 @@ let globalRegistry: ModelRegistry | null = null;
 let globalModel: Model<any> | null = null;
 let globalCwd: string = process.cwd();
 let globalApiKey: string | undefined = undefined;
+let globalContainer: ServiceContainer | null = null;
+let globalConfig: Config | null = null;
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -88,18 +91,30 @@ export interface ResearchSDKOptions {
 }
 
 /**
+ * Get the internal service container used by the SDK.
+ * @internal For testing only.
+ */
+export function getSDKContainer(): ServiceContainer | null {
+  return globalContainer;
+}
+
+/**
  * Internal initializer — ensures services are registered and ready.
- * Can be called multiple times; subsequent calls are no-ops if successful.
+ * Supports re-initialization if the working directory (cwd) changes.
  */
 async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
+  const newCwd = options.cwd ? options.cwd : process.cwd();
+
   if (isInitialized) {
-    logger.warn('[SDK] SDK is already initialized');
-    return;
+    if (newCwd === globalCwd && !options.config && !options.model) {
+      logger.debug('[SDK] SDK already initialized for this directory.');
+      return;
+    }
+    logger.info('[SDK] Re-initializing SDK for new context...');
+    await shutdownResearchSDK();
   }
 
-  if (options.cwd) {
-    globalCwd = options.cwd;
-  }
+  globalCwd = newCwd;
 
   // Verbose logging setup
   if (options.verbose) {
@@ -107,16 +122,10 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   }
 
   // Seed configuration
+  globalConfig = { ...getConfig(globalCwd) };
   if (options.config) {
-    const oldConfig = { ...getConfig() };
-    try {
-      setConfig(options.config);
-      validateConfig(getConfig());
-    } catch (err) {
-      // Rollback on validation failure
-      setConfig(oldConfig);
-      throw err;
-    }
+    globalConfig = { ...globalConfig, ...options.config };
+    validateConfig(globalConfig);
   }
 
   globalApiKey = options.apiKey || process.env['PI_RESEARCH_API_KEY'];
@@ -145,13 +154,17 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     // Resolve model using unified logic.
     globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider);
 
-    // Register and initialize services
-    registerCoreServices();
-    registerInfrastructureServices();
+    // Create isolated container
+    globalContainer = createServiceContainer();
 
+    // Register and initialize services
+    registerCoreServices(globalContainer);
+    registerInfrastructureServices(globalContainer);
+
+    const mockCtx = createMockContext('init-session');
     const initResult = await Promise.all([
-      initializeCoreServices(createMockContext('init-session')),
-      initializeInfrastructureServices(createMockContext('init-session'))
+      initializeCoreServices(mockCtx, globalContainer),
+      initializeInfrastructureServices(mockCtx, globalContainer)
     ]);
 
     const allSucceeded = initResult.every(r => r && r.success);
@@ -203,11 +216,11 @@ export async function runDeepResearch(
   options: Omit<ResearchOptions, 'ctx' | 'query' | 'model' | 'sessionId' | 'researchId'> = {},
   signal?: AbortSignal
 ): Promise<string> {
-  if (!isInitialized) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+  if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
 
   const researchId = `sdk-${Date.now()}`;
   const sessionId = randomUUID();
-  const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+  const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, undefined, globalContainer);
   
   const researchStart = Date.now();
   const depth = options.depth ?? 1;
@@ -250,7 +263,8 @@ export async function runQuickResearch(
  * Retrieve all researcher reports gathered during a specific research ID.
  */
 export async function getResearchReports(researchId: string): Promise<Map<string, string>> {
-  const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+  if (!globalContainer) throw new Error('SDK not initialized');
+  const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
   return synthesis.getAllReports(researchId);
 }
 
@@ -258,27 +272,31 @@ export async function getResearchReports(researchId: string): Promise<Map<string
  * Shutdown the SDK and cleanup all background processes and resources.
  */
 export async function shutdownResearchSDK(): Promise<void> {
-  if (!isInitialized && !_initPromise) {
-    // Basic safety reset even if not initialized, to prevent registry collisions
-    await resetServiceContainer().catch(() => {});
+  if (!isInitialized && !_initPromise && !globalContainer) {
     return;
   }
   
   logger.log('[SDK] Shutting down Research SDK...');
   
   try {
-    await shutdownInfrastructureServices().catch(() => {});
-    await disposeCoreServices().catch(() => {});
-    await disposeAllServices().catch(() => {});
-    await resetServiceContainer().catch(() => {});
+    if (globalContainer) {
+      await shutdownInfrastructureServices(globalContainer).catch(() => {});
+      await disposeCoreServices(globalContainer).catch(() => {});
+      await disposeAllServices(globalContainer).catch(() => {});
+      await resetServiceContainer(globalContainer).catch(() => {});
+    }
   } catch (err) {
     logger.warn('[SDK] Error during shutdown:', err);
   } finally {
-    isInitialized = false;
-    _initPromise = null;
-    globalRegistry = null;
-    globalModel = null;
+  isInitialized = false;
+  _initPromise = null;
+  globalRegistry = null;
+  globalModel = null;
+  globalCwd = process.cwd();
+  globalContainer = null;
+  globalConfig = null;
   }
+
 }
 
 /** @deprecated Use shutdownResearchSDK */
@@ -295,6 +313,8 @@ export const disposeResearchSDK = shutdownResearchSDK;
 function createMockContext(sessionId: string): ExtensionContext {
   return {
     cwd: globalCwd,
+    config: globalConfig!,
+    container: globalContainer!,
     mode: 'print' as const, // SDK defaults to print mode
     hasUI: false,           // SDK is headless
     model: globalModel!,
@@ -315,3 +335,4 @@ function createMockContext(sessionId: string): ExtensionContext {
     },
   } as any;
 }
+

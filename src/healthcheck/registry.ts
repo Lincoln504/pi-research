@@ -1,3 +1,7 @@
+import type { IHealthRegistryService } from '../core/interfaces/health-check-interfaces.ts';
+import { ServiceLifecycle } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/interfaces/service-names.ts';
+
 export interface HealthCheckStatus {
   component: string;
   healthy: boolean;
@@ -22,8 +26,20 @@ interface RegisteredCheck {
   critical: boolean;
 }
 
-class HealthCheckRegistry {
+export class HealthCheckRegistry implements IHealthRegistryService {
+  readonly name = ServiceNames.HEALTH_REGISTRY;
+  lifecycle = ServiceLifecycle.UNINITIALIZED;
+
   private checks: RegisteredCheck[] = [];
+
+  async initialize(): Promise<void> {
+    this.lifecycle = ServiceLifecycle.INITIALIZED;
+  }
+
+  async dispose(): Promise<void> {
+    this.checks = [];
+    this.lifecycle = ServiceLifecycle.DISPOSED;
+  }
 
   public register(name: string, check: HealthCheckFn, options: { timeoutMs?: number; critical?: boolean } = {}) {
     this.checks.push({
@@ -97,7 +113,9 @@ class HealthCheckRegistry {
   }
 }
 
+// Global singleton for CLI/backward compatibility
 export const healthRegistry = new HealthCheckRegistry();
+healthRegistry.initialize().catch(() => {});
 
 // Helper function to check if a component is critical
 export function isCritical(componentName: string): boolean {

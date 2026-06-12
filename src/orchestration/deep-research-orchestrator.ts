@@ -24,7 +24,7 @@ import {
   type IKnowledgeStoreService,
   type IResearchSynthesisService,
 } from '../core/service-interfaces.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { getConfig } from '../config.ts';
 import type { Config } from '../config.ts';
 import type { PlanningService } from '../core/planning-service.ts';
@@ -56,7 +56,7 @@ export class DeepResearchOrchestrator {
   private orchestrationService: IResearchOrchestration | null = null;
 
   constructor(private options: DeepResearchOrchestratorOptions) {
-    this.config = options.config || getConfig();
+    this.config = options.config || getConfig(options.ctx.cwd);
     if (options.orchestrationService) {
       this.orchestrationService = options.orchestrationService;
     }
@@ -68,13 +68,15 @@ export class DeepResearchOrchestrator {
 
   private async getOrchestrationService(): Promise<IResearchOrchestration> {
     if (this.orchestrationService) return this.orchestrationService;
-    this.orchestrationService = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+    const container = tryGetServiceContainerFromCtx(this.options.ctx);
+    this.orchestrationService = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, this.options.ctx, container);
     return this.orchestrationService;
   }
 
   private async getPlanningService(): Promise<PlanningService> {
+    const container = tryGetServiceContainerFromCtx(this.options.ctx);
     // Pass ctx to ensure PlanningService has access to modelRegistry
-    return await getService<PlanningService>(ServiceNames.PLANNING, this.options.ctx);
+    return await getService<PlanningService>(ServiceNames.PLANNING, this.options.ctx, container);
   }
 
   private elapsed(): string {
@@ -86,7 +88,8 @@ export class DeepResearchOrchestrator {
    * Run the multi-round research loop
    */
   async run(signal?: AbortSignal): Promise<string> {
-    const { model, query, complexity, researchId, observer } = this.options;
+    const { model, query, complexity, researchId, observer, ctx } = this.options;
+    const container = tryGetServiceContainerFromCtx(ctx);
     
     const orchestrationService = await this.getOrchestrationService();
     const planningService = await this.getPlanningService();
@@ -147,7 +150,7 @@ export class DeepResearchOrchestrator {
         observer?.onRoundStart?.(this.currentRound);
 
         // Check infrastructure health (only if round > 1 or complexity > 1)
-        const healthy = await orchestrationService.checkHealth(this.currentRound, researchId);
+        const healthy = await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
         if (!healthy && this.currentRound > 1) {
             logger.warn(`[DeepOrchestrator] Infrastructure unhealthy at Round ${this.currentRound}, attempting to continue with existing data...`);
         }
@@ -162,13 +165,15 @@ export class DeepResearchOrchestrator {
                 query,
                 complexity,
                 model,
+                modelRegistry: ctx.modelRegistry,
+                cwd: ctx.cwd,
                 signal,
                 observer,
                 excludeTools: this.options.excludeTools,
                 steeringMessages: steeringTexts,
             });
         } else {
-            const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+            const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
             observer?.onEvaluationStart?.(this.currentRound);
             observer?.onEvaluationProgress?.('evaluating');
             plan = await planningService.updatePlanForRound({
@@ -177,6 +182,8 @@ export class DeepResearchOrchestrator {
                 complexity,
                 round: this.currentRound,
                 model,
+                modelRegistry: ctx.modelRegistry,
+                cwd: ctx.cwd,
                 reports: synthesisService.getAllReports(researchId),
                 previousPlan: planningService.getCurrentPlan(researchId),
                 totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
@@ -258,7 +265,7 @@ export class DeepResearchOrchestrator {
               observer?.onSearchStart?.(plan.allQueries!);
               const results = await orchestrationService.runSearchBurst(plan.allQueries!, this.config, signal, (links: number) => {
                   observer?.onSearchProgress?.(links);
-              });
+              }, ctx);
               observer?.onSearchComplete?.(results.reduce((sum, r) => sum + (r.results?.length || 0), 0));
               researcherLinks = await orchestrationService.distributeSearchResults(plan, results);
             })()
@@ -267,7 +274,7 @@ export class DeepResearchOrchestrator {
         const storeTask = ((this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) && plan.researchers && plan.researchers.length > 0)
           ? (async () => {
               try {
-                const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+                const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
                 if (!ksService.isReady()) {
                   logger.debug('[DeepOrchestrator] Knowledge store service not ready, skipping per-researcher store queries');
                   return;
@@ -315,7 +322,7 @@ export class DeepResearchOrchestrator {
         // Show embedding indicator in eval box while embedding runs
         observer?.onEvaluationStart?.(this.currentRound);
         observer?.onEvaluationProgress?.('embedding');
-        await orchestrationService.storeLinkDescriptions(researchId, this.currentRound, researchId, this.config);
+        await orchestrationService.storeLinkDescriptions(researchId, this.currentRound, researchId, this.config, ctx);
 
         // 5. Evaluation Phase
         observer?.onEvaluationProgress?.('evaluating');
@@ -338,13 +345,15 @@ export class DeepResearchOrchestrator {
           consumeQueuedMessages(this.options.sessionId);
           const finalSteeringTexts = getSteeringMessages(this.options.sessionId).map(m => m.text);
 
-          const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+          const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           finalReport = await planningService.updatePlanForRound({
               sessionId: researchId,
               query: query,
               complexity,
               round: maxRounds,
               model,
+              modelRegistry: ctx.modelRegistry,
+              cwd: ctx.cwd,
               reports: synthesisServiceFinal.getAllReports(researchId),
               previousPlan: planningService.getCurrentPlan(researchId),
               totalResearchersPlanned: planningService.getTotalResearchersPlanned(researchId),
@@ -370,7 +379,7 @@ export class DeepResearchOrchestrator {
       } catch { /* result is not JSON — use as-is */ }
 
       // Final post-processing: Ensure CITED LINKS section is accurate and consistent
-      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       result = synthesisService.ensureCitedLinks(researchId, result);
 
       // Append steering guidance — only active (consumed by orchestrator) messages
@@ -393,7 +402,7 @@ export class DeepResearchOrchestrator {
 
       // Attempt fallback synthesis from collected reports before re-throwing
       try {
-        const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+        const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
         if (synthesisService.hasReports(researchId)) {
           let fallback = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
           fallback = synthesisService.ensureCitedLinks(researchId, fallback);
@@ -410,7 +419,7 @@ export class DeepResearchOrchestrator {
       throw error;
     } finally {
       const orch = await this.getOrchestrationService();
-      await orch.cleanupResearchServices(undefined, researchId);
+      await orch.cleanupResearchServices(undefined, researchId, ctx);
     }
   }
 }

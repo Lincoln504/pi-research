@@ -18,12 +18,14 @@ import { parseCitations } from '../utils/text-utils.ts';
 import { logger, resetLogger } from '../logger.ts';
 import { healthRegistry } from '../healthcheck/index.ts';
 import { clearSessionCircuitBreaker } from '../infrastructure/browser/browser-error-utils.ts';
-import { getService, ServiceLifecycle, tryGetService } from '../core/service-registry.ts';
+import { getService, ServiceLifecycle, tryGetService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type {
   IWriterQueue,
   IKnowledgeStoreService,
+  IHealthRegistryService,
   IResearchOrchestration,
+  StoreUrlEntry,
   ResearchOptions,
   ResearchPlan,
   IPlanningService,
@@ -68,7 +70,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
 
     const researchStart = Date.now();
 
-    const researchConfig = config || getConfig();
+    const researchConfig = config || getConfig(ctx.cwd);
 
     let result: string;
     try {
@@ -116,12 +118,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
   /**
    * Cleanup and reset services for the current research run
    */
-  async cleanupResearchServices(sessionId?: string, researchId?: string): Promise<void> {
+  async cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any): Promise<void> {
     const targetId = researchId || sessionId;
+    const container = tryGetServiceContainerFromCtx(ctx);
     
     // Cleanup session service
     try {
-      const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+      const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
       if (sessionService && targetId) {
         await sessionService.cleanup(targetId);
       }
@@ -131,7 +134,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     
     // Clear synthesis reports
     try {
-      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       if (synthesisService && targetId) {
         synthesisService.clearReports(targetId);
       }
@@ -140,7 +143,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     }
     
     // Clear planning state
-    const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING);
+    const planningService = tryGetService<IPlanningService>(ServiceNames.PLANNING, container);
     if (planningService && targetId) {
       planningService.clearPlanningState(targetId);
       logger.debug(`[ResearchOrchestrationService] Cleared planning state for ${targetId}`);
@@ -159,9 +162,10 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * Distribute search results to researchers based on query matching
    * @param plan - Research plan with researchers and queries
    * @param results - Search results from queries
+   * @param _ctx - Optional context for container isolation
    * @returns Map of researcher ID -> array of URLs
    */
-  async distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[]): Promise<Map<string, string[]>> {
+  async distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[], _ctx?: any): Promise<Map<string, string[]>> {
     const startTime = Date.now();
     const queryToResults = new Map(results.map(r => [r.query, r.results || []]));
     const linkMap = new Map<string, string[]>();
@@ -185,15 +189,23 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * Run researchers concurrently with launch delay
    * @param options - Run options
    * @param researcherLinks - Optional map of researcher ID -> search results
+   * @param storeLinks - Optional map of researcher ID -> store results
+   * @param _ctx - Optional context for container isolation
    */
-  async runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>, storeLinks?: Map<string, { url: string; description: string }[]>): Promise<void> {
+  async runResearchers(
+    options: RunResearchersOptions, 
+    researcherLinks?: Map<string, string[]>, 
+    storeLinks?: Map<string, StoreUrlEntry[]>,
+    _ctx?: any
+  ): Promise<void> {
     const { plan, options: orchestratorOptions, currentRound, signal } = options;
-    const { sessionId, researchId, observer } = orchestratorOptions;
+    const { sessionId, researchId, observer, ctx } = orchestratorOptions;
+    const container = tryGetServiceContainerFromCtx(ctx);
 
     // Obtain the planning service once for all researchers in this round
     let planningService: IPlanningService;
     try {
-      planningService = await getService<IPlanningService>(ServiceNames.PLANNING);
+      planningService = await getService<IPlanningService>(ServiceNames.PLANNING, ctx, container);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // If the service container is already disposing (SIGTERM during active research),
@@ -243,7 +255,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
             // the per-researcher plan item goes into 'config' (overriding the spread),
             // and the app Config moves to 'researchConfig'.
             config: configItem,
-            researchConfig: orchestratorOptions.config ?? getConfig(),
+            researchConfig: orchestratorOptions.config ?? getConfig(ctx.cwd),
             round: currentRound,
             planningService,
             initialLinks,
@@ -274,7 +286,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       if (shouldStopResearch(sessionId, researchId)) {
-        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
         // Abort sessions specifically for this researchId, not the whole piSessionId
         await sessionService.abortAllSessions(researchId);
 
@@ -293,15 +305,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param config - Research configuration
    * @param signal - Optional abort signal
    * @param onProgress - Optional progress callback
+   * @param ctx - Optional context for container isolation
    * @returns Search results
    */
   async runSearchBurst(
     queries: string[],
     config: Config,
     signal?: AbortSignal,
-    onProgress?: (links: number) => void
+    onProgress?: (links: number) => void,
+    ctx?: any
   ): Promise<QueryResultWithError[]> {
-    const results = await search(queries, config, signal, onProgress);
+    const container = tryGetServiceContainerFromCtx(ctx);
+    const results = await search(queries, config, signal, onProgress, container);
     const totalResults = results.reduce((sum, r) => sum + (r.results?.length || 0), 0);
     logger.info(`[ResearchOrchestrationService] Search burst completed. Total results: ${totalResults}`);
     return results;
@@ -313,21 +328,20 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param round - Round number
    * @param researchId - Research ID
    * @param config - Research configuration
+   * @param ctx - Optional extension context for container isolation
    */
-  async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, config: Config): Promise<void> {
-    if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
-      logger.debug('[ResearchOrchestrationService] Knowledge store disabled, skipping link descriptions');
-      return;
-    }
+  async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, _config: Config, ctx?: any): Promise<void> {
+    const container = tryGetServiceContainerFromCtx(ctx);
 
     try {
-      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
-      const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
-      
-      if (!writer) {
-        logger.warn('[ResearchOrchestrationService] Writer queue not available, skipping link descriptions');
+      const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
+      if (!ksService.isReady()) {
+        logger.debug('[ResearchOrchestrationService] Knowledge store not ready, skipping link descriptions');
         return;
       }
+
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
+      const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE, ctx, container);
       
       const roundPrefix = `${round}.`;
       let enqueued = 0;
@@ -374,12 +388,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (enqueued > 0) {
         logger.info(`[ResearchOrchestrationService] Enqueued ${enqueued} citations from ${researcherCount} researchers for round ${round}`);
         await writer.drain();
-        const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
         if (ksService.isReady()) {
           const store = await ksService.getStore();
-          store.rebuildFtsIndex().catch(err => {
-            logger.warn('[ResearchOrchestrationService] FTS index rebuild failed (non-fatal):', err);
-          });
+          if (store) {
+            store.rebuildFtsIndex().catch(err => {
+              logger.warn('[ResearchOrchestrationService] FTS index rebuild failed (non-fatal):', err);
+            });
+          }
         }
       } else if (researcherCount > 0) {
         logger.warn(`[ResearchOrchestrationService] No valid citations found among ${researcherCount} researchers in round ${round}`);
@@ -393,13 +408,22 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * Run health check and log status
    * @param round - Current round number
    * @param _researchId - Research ID (optional)
+   * @param ctx - Optional extension context for container isolation
    * @returns Promise<boolean> - True if healthy or degraded, false if unhealthy
    */
-  async checkHealth(round: number, _researchId?: string): Promise<boolean> {
+  async checkHealth(round: number, _researchId?: string, ctx?: any): Promise<boolean> {
     if (round <= 1) return true;
 
     try {
-      const health = await healthRegistry.runAll();
+      const container = tryGetServiceContainerFromCtx(ctx);
+      let registry: IHealthRegistryService;
+      try {
+        registry = await getService<IHealthRegistryService>(ServiceNames.HEALTH_REGISTRY, ctx, container);
+      } catch {
+        registry = healthRegistry;
+      }
+
+      const health = await registry.runAll();
       if (health.status === 'healthy') {
         logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
         return true;

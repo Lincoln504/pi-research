@@ -15,7 +15,7 @@ import { Value } from 'typebox/value';
 import { scrape } from '../web-research/web-scraper.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { deduplicateUrls, normalizeUrl, cacheScrapedContent, getCachedScrapedContent, registerResearcherScrapes, buildSessionPoolFooter } from '../utils/shared-links.ts';
+import { deduplicateUrls, normalizeUrl, getCachedScrapedContent, registerResearcherScrapes, buildSessionPoolFooter } from '../utils/shared-links.ts';
 import {
   MAX_SCRAPE_URLS,
   BATCH_2_DEFAULT_CONCURRENCY,
@@ -23,7 +23,7 @@ import {
   DEFAULT_MODEL_CONTEXT_WINDOW,
 } from '../constants.ts';
 import { type Config, getConfig } from '../config.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { logger } from '../logger.ts';
@@ -44,8 +44,9 @@ export function createScrapeTool(options: {
   contextWindowSize?: number;
   config?: Config;
 }): ToolDefinition {
-  const config = options.config || getConfig();
+  const config = options.config || getConfig(options.ctx.cwd);
   const maxScrapeBatches = getMaxScrapeBatches(config);
+  const container = tryGetServiceContainerFromCtx(options.ctx);
 
   // Fallback global state when no orchestration context is provided
   const fallbackState: SystemResearchState = {
@@ -191,21 +192,23 @@ export function createScrapeTool(options: {
       // Attempt to retrieve from knowledge-store cache if enabled
       if (config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
         try {
-          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-          const store = await service.getStore();
+          const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container);
+          const store = await ksService.getStore();
 
-          for (const url of finalUrls) {
-            const normalized = normalizeUrl(url);
-            const cacheHit = await store.rebuildDocument(normalized);
+          if (store) {
+            for (const url of finalUrls) {
+              const normalized = normalizeUrl(url);
+              const cacheHit = await store.rebuildDocument(normalized);
 
-            if (cacheHit) {
-              const advisoryHint = cacheHit.description && cacheHit.description !== cacheHit.text
-                ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
-                : '';
-              cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });
-              options.onUrlScrapeResult?.(url, true);
-              const idx = urlsToFetch.indexOf(url);
-              if (idx !== -1) urlsToFetch.splice(idx, 1);
+              if (cacheHit) {
+                const advisoryHint = cacheHit.description && cacheHit.description !== cacheHit.text
+                  ? `> **Advisory Hint (from previous session):** ${cacheHit.description}\n\n`
+                  : '';
+                cachedResults.push({ url, markdown: advisoryHint + cacheHit.text });
+                options.onUrlScrapeResult?.(url, true);
+                const idx = urlsToFetch.indexOf(url);
+                if (idx !== -1) urlsToFetch.splice(idx, 1);
+              }
             }
           }
           if (cachedResults.length > 0) {
@@ -213,7 +216,7 @@ export function createScrapeTool(options: {
             logger.log(`[scrape] Cache: ${cachedResults.length} full-text hit(s) out of ${finalUrls.length} URL(s)`);
           }
         } catch (err) {
-          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE).catch(() => null);
+          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container).catch(() => null);
           if (!service?.isReady()) {
             metrics.increment('tool_scrape_cache_errors_total', 1, { reason: 'store_not_ready' });
             logger.warn(`[scrape] Knowledge store not initialized — all ${finalUrls.length} URL(s) will be scraped fresh`);
@@ -225,21 +228,20 @@ export function createScrapeTool(options: {
       }
 
       let freshResults: any[] = [];
-      if (urlsToFetch.length > 0) {
-        const concurrency = p.maxConcurrency || defaultConcurrency;
-        // Pass options.config directly (may be undefined) so the web-scraper
-        // falls back to its own getConfig() when not explicitly provided.
-        const scrapeResults = await scrape(urlsToFetch, concurrency, signal, options.config, undefined, (result) => {
+      const concurrency = p.maxConcurrency || defaultConcurrency;
+      
+      try {
+        const results = await scrape(urlsToFetch, concurrency, signal, options.config, getGlobalState().researchId, (result) => {
           options.onUrlScrapeResult?.(result.url, result.success);
-        });
-        freshResults = Array.isArray(scrapeResults) ? scrapeResults : [];
-
-        // Cache fresh content for same-session retrieval
-        for (const res of freshResults) {
-          if (res.success && res.markdown) {
-            cacheScrapedContent(getGlobalState().researchId, res.url, res.markdown);
-          }
-        }
+        }, container);
+        freshResults = Array.isArray(results) ? results : [];
+      } catch (error) {
+          logger.error(`[scrape tool] Scrape failed: ${error instanceof Error ? error.message : String(error)}`);
+          metrics.increment('tool_scrape_calls_total', 1, { status: 'error' });
+          return {
+            content: [{ type: 'text', text: `# Scrape Failed\n\n${error instanceof Error ? error.message : String(error)}` }],
+            details: { error: String(error) },
+          };
       }
 
       const successfulFresh = freshResults.filter(r => r.success);

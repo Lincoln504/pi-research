@@ -68,6 +68,7 @@ export async function setupLifecycle(): Promise<TestContext> {
       modelRegistry: {
         getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
         hasConfiguredAuth: () => true,
+        getAll: () => [{ id: 'test-model', provider: 'test' }],
       },
     };
     await initializeCoreServices(mockCtx);

@@ -5,13 +5,14 @@
  * Provides clean interface for embedding and storage operations.
  */
 
-import { ServiceLifecycle, getService } from '../core/service-registry.ts';
+import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
 import { logger } from '../logger.ts';
 import type { IEmbedder, IKnowledgeStore, IKnowledgeStoreService, IWriterQueue } from '../core/service-interfaces.ts';
 import { FileLockService } from './file-lock-service.ts';
 import { StatePathConfiguration } from './state/state-path-configuration.ts';
 import * as path from 'node:path';
+import { normalizeWorkspacePath } from '../utils/text-utils.ts';
 
 // Static imports from knowledge module
 import {
@@ -36,17 +37,27 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   private _store: IKnowledgeStore | null = null;
   private _writerQueue: IWriterQueue | null = null;
   private _initLock: FileLockService | null = null;
+  private _cwd: string = process.cwd();
 
   // Initialization promise to prevent concurrent initialization
   private _initializationPromise: Promise<void> | null = null;
 
-  async initialize(): Promise<void> {
-    if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+  async initialize(ctx?: any): Promise<void> {
+    const newCwd = ctx?.cwd || process.cwd();
+    
+    // If already initialized and CWD hasn't changed, return early
+    if ((this.lifecycle === ServiceLifecycle.INITIALIZED || this.lifecycle === ServiceLifecycle.DISABLED) && this._cwd === newCwd) {
       return;
     }
 
-    // Return existing initialization promise if in progress
-    if (this._initializationPromise) {
+    // If CWD changed, we must dispose the old store and re-initialize
+    if (this.lifecycle === ServiceLifecycle.INITIALIZED && this._cwd !== newCwd) {
+      logger.log(`[KnowledgeStoreService] CWD changed from ${this._cwd} to ${newCwd}. Re-initializing store...`);
+      await this.dispose();
+    }
+
+    // Return existing initialization promise if in progress for the same CWD
+    if (this._initializationPromise && this._cwd === newCwd) {
       return this._initializationPromise;
     }
 
@@ -56,7 +67,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     this._initializationPromise = (async () => {
       try {
         // Create the knowledge store components
-        const config = getConfig();
+        // Prefer config from context, fallback to loading for ctx.cwd, fallback to process.cwd()
+        this._cwd = ctx?.cwd || process.cwd();
+        const config = ctx?.config || getConfig(this._cwd);
         const embedderFactory = () => getEmbedder(config);
         const reconnectFactory = async () => {
           clearEmbeddingInstance();
@@ -64,7 +77,8 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         };
 
         // Acquire lock for initialization/migration
-        const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+        const container = tryGetServiceContainerFromCtx(ctx);
+        const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
         const lockPath = path.join(pathConfig.getLockDirPath(), 'knowledge-store-init.lock');
         
         // Re-use or create the init lock
@@ -82,7 +96,13 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         let components;
         try {
           components = await initLock.withLock(async () => {
-            return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
+            return createKnowledgeStoreComponents(
+              embedderFactory, 
+              reconnectFactory, 
+              (fn) => initLock.withLock(fn),
+              config,
+              this._cwd
+            );
           });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -90,9 +110,15 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           if (errorMsg.includes('Generic memory error') && errorMsg.includes('Invalid range 0..0')) {
             logger.warn('[KnowledgeStoreService] Detected corrupted Knowledge Store. Clearing and retrying initialization...');
             try {
-              await forceDeleteKnowledgeStore();
+              await forceDeleteKnowledgeStore(config, this._cwd);
               components = await initLock.withLock(async () => {
-                return createKnowledgeStoreComponents(embedderFactory, reconnectFactory, (fn) => initLock.withLock(fn));
+                return createKnowledgeStoreComponents(
+                  embedderFactory, 
+                  reconnectFactory, 
+                  (fn) => initLock.withLock(fn),
+                  config,
+                  this._cwd
+                );
               });
             } catch (retryErr) {
               logger.error('[KnowledgeStoreService] Retry after clearing store failed:', retryErr);
@@ -101,6 +127,15 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
           } else {
             throw err;
           }
+        }
+
+        if (!components) {
+          logger.debug('[KnowledgeStoreService] Knowledge store is disabled. Setting lifecycle to DISABLED.');
+          this.lifecycle = ServiceLifecycle.DISABLED;
+          this._embedder = null;
+          this._store = null;
+          this._writerQueue = null;
+          return;
         }
 
         this._embedder = components.embedder;
@@ -180,8 +215,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   /**
    * Get the embedder instance
    */
-  async getEmbedder(): Promise<IEmbedder> {
+  async getEmbedder(): Promise<IEmbedder | null> {
     await this.initialize();
+    if (this.lifecycle === ServiceLifecycle.DISABLED) {
+      return null;
+    }
     if (!this._embedder) {
       throw new Error('[KnowledgeStoreService] Embedder not initialized');
     }
@@ -191,8 +229,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   /**
    * Get the knowledge store instance
    */
-  async getStore(): Promise<IKnowledgeStore> {
+  async getStore(): Promise<IKnowledgeStore | null> {
     await this.initialize();
+    if (this.lifecycle === ServiceLifecycle.DISABLED) {
+      return null;
+    }
     if (!this._store) {
       throw new Error('[KnowledgeStoreService] Store not initialized');
     }
@@ -202,8 +243,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   /**
    * Get the writer queue instance
    */
-  async getWriterQueue(): Promise<IWriterQueue> {
+  async getWriterQueue(): Promise<IWriterQueue | null> {
     await this.initialize();
+    if (this.lifecycle === ServiceLifecycle.DISABLED) {
+      return null;
+    }
     if (!this._writerQueue) {
       throw new Error('[KnowledgeStoreService] Writer queue not initialized');
     }
@@ -229,6 +273,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    */
   async embed(text: string): Promise<number[]> {
     const embedder = await this.getEmbedder();
+    if (!embedder) {
+      throw new Error('[KnowledgeStoreService] Embedder not available (store disabled)');
+    }
     const result = await embedder.embed(text);
     return Array.from(result);
   }
@@ -238,6 +285,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    */
   async embedMany(texts: string[]): Promise<number[][]> {
     const embedder = await this.getEmbedder();
+    if (!embedder) {
+      throw new Error('[KnowledgeStoreService] Embedder not available (store disabled)');
+    }
     const results = await embedder.embedMany(texts);
     return results.map(r => Array.from(r));
   }
@@ -248,7 +298,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   async clear(): Promise<void> {
     const store = await this.getStore();
     // Clear everything by using a filter that matches everything
-    await store.clear('1 = 1');
+    if (store) {
+      await store.clear('1 = 1');
+    }
   }
 
   /**
@@ -258,12 +310,15 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    */
   async clearLocal(): Promise<void> {
     const store = await this.getStore();
-    // Normalize workspace path to match how entries are stored
-    const resolved = path.resolve(process.cwd());
-    const workspace = resolved.replace(/'/g, "''");
-    // Only delete entries that are scoped to this project AND not global.
-    // Global entries (is_global = true) are managed by clearGlobal().
-    await store.clear(`workspace = '${workspace}' AND is_global = false`);
+    if (!store) return;
+    
+    // Normalize workspace path to match how entries are stored (see KnowledgeStore.getWorkspace)
+    const workspace = normalizeWorkspacePath(this._cwd);
+    const escaped = workspace.replace(/'/g, "''");
+    
+    // Delete all entries that were contributed from this project workspace.
+    // If they were shared globally, they will also be removed from the global view.
+    await store.clear(`workspace = '${escaped}'`);
   }
 
   /**
@@ -271,7 +326,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    */
   async clearGlobal(): Promise<void> {
     const store = await this.getStore();
-    await store.clear('is_global = true');
+    if (store) {
+      await store.clear('is_global = true');
+    }
   }
 
   /**
@@ -279,7 +336,9 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
    */
   async exportForWeb(outputPath: string): Promise<void> {
     const store = await this.getStore();
-    await store.exportForWeb(outputPath);
+    if (store) {
+      await store.exportForWeb(outputPath);
+    }
   }
 
   /**

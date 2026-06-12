@@ -5,6 +5,10 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+vi.mock('../../src/utils/text-utils.ts', () => ({
+  normalizeWorkspacePath: vi.fn((p: string) => p),
+}));
+
 import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config, DEFAULTS } from '../../src/config';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -19,6 +23,9 @@ vi.mock('node:fs', async () => {
     renameSync: vi.fn(),
     copyFileSync: vi.fn(),
     unlinkSync: vi.fn(),
+    openSync: vi.fn(() => 42), // Mock file descriptor
+    closeSync: vi.fn(),
+    statSync: vi.fn(() => ({ mtimeMs: Date.now() })),
   };
 });
 
@@ -57,22 +64,41 @@ describe('config (refactored)', () => {
   });
 
   describe('saveConfig', () => {
-    it('should use atomic write via temp file', () => {
+    it('should use atomic write via temp file for GLOBAL scope', () => {
       const config = { ...DEFAULTS };
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('OLD_KEY=old_val');
       
-      saveConfig(config);
+      saveConfig(config, 'global');
 
       expect(fs.writeFileSync).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), expect.any(String), 'utf-8');
       expect(fs.renameSync).toHaveBeenCalled();
+      // Verify locking
+      expect(fs.openSync).toHaveBeenCalledWith(expect.stringContaining('.lock'), 'wx');
+      expect(fs.closeSync).toHaveBeenCalledWith(42);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.lock'));
+    });
+
+    it('should use centralized registry for LOCAL scope', () => {
+      const config = { ...DEFAULTS };
+      const cwd = '/test/project';
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      
+      saveConfig(config, 'local', cwd);
+
+      // Should write to project-settings.json
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('project-settings.json'),
+        expect.stringContaining(cwd),
+        'utf-8'
+      );
     });
 
     it('should protect against prototype pollution', () => {
       const config = { ...DEFAULTS };
       const writeSpy = vi.spyOn(fs, 'writeFileSync');
       
-      saveConfig(config);
+      saveConfig(config, 'global');
 
       const writtenContent = writeSpy.mock.calls[0]![1] as string;
       expect(writtenContent).not.toContain('__proto__');
@@ -80,12 +106,12 @@ describe('config (refactored)', () => {
       expect(writtenContent).not.toContain('prototype');
     });
 
-    it('should preserve comments in env file', () => {
+    it('should preserve comments in GLOBAL env file', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('# This is a comment\nPI_RESEARCH_MODEL=old-model');
       
       const config = { ...DEFAULTS, RESEARCH_MODEL: 'new-model' };
-      saveConfig(config);
+      saveConfig(config, 'global');
 
       const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
       expect(writtenContent).toContain('# This is a comment');

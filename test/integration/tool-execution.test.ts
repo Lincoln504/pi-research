@@ -24,6 +24,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
       modelRegistry: {
         getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
         hasConfiguredAuth: () => true,
+        getAll: () => [{ id: 'test-model', provider: 'test' }],
       },
     };
     await initializeCoreServices(mockCtx);
@@ -73,12 +74,13 @@ describe('Tool Execution After Service Registry Refactor', () => {
   describe('Tool Argument Preparation', () => {
     it('should prepare research arguments correctly', () => {
       const tool = createResearchTool();
+      const mockCtx = { cwd: process.cwd() };
       
       const args = tool.prepareArguments!({
         query: 'test query',
         depth: '1',
         model: 'test-model',
-      }) as any;
+      }, mockCtx as any) as any;
 
       expect(args.query).toBe('test query');
       expect(args.depth).toBe(1);
@@ -87,6 +89,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle missing depth parameter', () => {
       const tool = createResearchTool();
+      const mockCtx = { cwd: process.cwd() };
       
       // Force default depth to 1 for this test to ensure predictable fallback
       const originalDepth = process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'];
@@ -95,7 +98,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
       try {
         const args = tool.prepareArguments!({
           query: 'test query',
-        }) as any;
+        }, mockCtx as any) as any;
 
         expect(args.query).toBe('test query');
         // Tool schema enforces minimum: 1; depth 0 is SDK-only (not exposed via tool).
@@ -112,24 +115,25 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle invalid depth values', () => {
       const tool = createResearchTool();
+      const mockCtx = { cwd: process.cwd() };
 
       const args1 = tool.prepareArguments!({
         query: 'test query',
         depth: 'invalid',
-      }) as any;
+      }, mockCtx as any) as any;
       // Unparseable string → safe fallback of 1 (minimum valid depth)
       expect(args1.depth).toBe(1);
 
       const args2 = tool.prepareArguments!({
         query: 'test query',
         depth: 10,
-      }) as any;
+      }, mockCtx as any) as any;
       expect(args2.depth).toBe(3); // Should cap at 3
 
       const args3 = tool.prepareArguments!({
         query: 'test query',
         depth: -1,
-      }) as any;
+      }, mockCtx as any) as any;
       // Below-minimum depth clamped to 1 (minimum valid depth for this tool)
       expect(args3.depth).toBe(1);
     });
@@ -149,6 +153,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         modelRegistry: {
           getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
           hasConfiguredAuth: () => true,
+          getAll: () => [{ id: 'test-model', provider: 'test' }],
         },
       };
       
@@ -181,6 +186,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         modelRegistry: {
           getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
           hasConfiguredAuth: () => true,
+          getAll: () => [{ id: 'test-model', provider: 'test' }],
         },
       };
       
@@ -206,6 +212,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         modelRegistry: {
           getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
           hasConfiguredAuth: () => true,
+          getAll: () => [{ id: 'test-model', provider: 'test' }],
         },
         model: {
           id: 'test-model',
@@ -234,6 +241,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         modelRegistry: {
           getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
           hasConfiguredAuth: () => true,
+          getAll: () => [{ id: 'test-model', provider: 'test' }],
         },
         model: {
           id: 'test-model',
@@ -282,6 +290,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         modelRegistry: {
           getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
           hasConfiguredAuth: () => true,
+          getAll: () => [{ id: 'test-model', provider: 'test' }],
         },
       };
       

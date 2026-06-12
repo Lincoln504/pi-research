@@ -5,10 +5,11 @@
  */
 
 // Scheduler interfaces
-export type { SearchResult, ScrapeResult, IScheduler, SchedulerMetadata, ISchedulerInstance, ISchedulerInternals } from './interfaces/scheduler-interfaces.ts';
+export type { SearchResult, ScrapeResult, IScheduler, SchedulerMetadata, ISchedulerInstance, ISchedulerInternals, ISchedulerService } from './interfaces/scheduler-interfaces.ts';
+export type { ISchedulerFactory } from './scheduler-factory.ts';
 
 // Health check interfaces
-export type { HealthCheckResult, HealthCheckCache, IHealthCheckService } from './interfaces/health-check-interfaces.ts';
+export type { HealthCheckResult, HealthCheckCache, IHealthCheckService, IHealthRegistryService } from './interfaces/health-check-interfaces.ts';
 
 // Knowledge store interfaces
 export type { 
@@ -32,7 +33,7 @@ export type {
 export type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 
 // Process interfaces
-export type { IProcessLifecycle } from './interfaces/process-interfaces.ts';
+export type { IProcessLifecycle, IGPUResourceService } from './interfaces/process-interfaces.ts';
 
 // Observer interfaces
 export type { ResearchObserver } from './interfaces/observer-interfaces.ts';

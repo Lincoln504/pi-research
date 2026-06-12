@@ -5,7 +5,7 @@
  * Provides clean interface for cross-process state management.
  */
 
-import { ServiceLifecycle, getService } from '../../core/service-registry.ts';
+import { ServiceLifecycle, getService, tryGetServiceContainerFromCtx } from '../../core/service-registry.ts';
 import { logger } from '../../logger.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { IStateManager, IProcessLifecycle } from '../../core/service-interfaces.ts';
@@ -35,7 +35,7 @@ export class StateManagerService implements IStateManager {
   // The underlying state manager instance
   private _stateManager: StateManager | null = null;
 
-  async initialize(): Promise<void> {
+  async initialize(ctx?: any): Promise<void> {
     if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
       return;
     }
@@ -43,18 +43,20 @@ export class StateManagerService implements IStateManager {
     this.lifecycle = ServiceLifecycle.INITIALIZING;
     logger.debug('[StateManagerService] Initializing...');
 
-    // Resolve all dependencies
-    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE);
-    const fileLockService = await getService<FileLockService>(ServiceNames.FILE_LOCK_SERVICE);
-    const backupManager = await getService<StateBackupManager>(ServiceNames.STATE_BACKUP_MANAGER);
-    const gpuResourceService = await getService<GPUResourceService>(ServiceNames.GPU_RESOURCE_SERVICE);
-    const sessionManager = await getService<StateSessionManager>(ServiceNames.STATE_SESSION_MANAGER);
-    const browserManager = await getService<StateBrowserManager>(ServiceNames.STATE_BROWSER_MANAGER);
-    const metricsCollector = await getService<StateMetricsCollector>(ServiceNames.STATE_METRICS_COLLECTOR);
-    const validator = await getService<StateValidator>(ServiceNames.STATE_VALIDATOR);
+    const container = tryGetServiceContainerFromCtx(ctx);
+
+    // Resolve all dependencies using the container for isolation
+    const processLifecycle = await getService<IProcessLifecycle>(ServiceNames.PROCESS_LIFECYCLE, ctx, container);
+    const fileLockService = await getService<FileLockService>(ServiceNames.FILE_LOCK_SERVICE, ctx, container);
+    const backupManager = await getService<StateBackupManager>(ServiceNames.STATE_BACKUP_MANAGER, ctx, container);
+    const gpuResourceService = await getService<GPUResourceService>(ServiceNames.GPU_RESOURCE_SERVICE, ctx, container);
+    const sessionManager = await getService<StateSessionManager>(ServiceNames.STATE_SESSION_MANAGER, ctx, container);
+    const browserManager = await getService<StateBrowserManager>(ServiceNames.STATE_BROWSER_MANAGER, ctx, container);
+    const metricsCollector = await getService<StateMetricsCollector>(ServiceNames.STATE_METRICS_COLLECTOR, ctx, container);
+    const validator = await getService<StateValidator>(ServiceNames.STATE_VALIDATOR, ctx, container);
 
     // Resolve the state directory from StatePathConfiguration
-    const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+    const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, ctx, container);
     const stateDir = pathConfig.getStateDir();
 
     // Instantiate state manager with injected dependencies

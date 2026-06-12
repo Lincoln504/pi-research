@@ -12,6 +12,7 @@ import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { logger } from '../logger.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import { tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 
 export function createSearchTool(options: {
   ctx: ExtensionContext;
@@ -43,7 +44,7 @@ export function createSearchTool(options: {
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
     ],
     parameters: SearchParamsSchema,
-    async execute(_callId, params, signal, _onUpdate): Promise<AgentToolResult<unknown>> {
+    async execute(_callId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
 
       if (!Value.Check(SearchParamsSchema, params)) {
@@ -80,9 +81,10 @@ export function createSearchTool(options: {
       }
 
       try {
+        const container = tryGetServiceContainerFromCtx(ctx);
         const results = await search(queries, options.config, signal, (links) => {
           if (options.onProgress) options.onProgress(links);
-        });
+        }, container);
         const elapsed = Date.now() - startTime;
         
         const totalResults = results.reduce((sum, r) => sum + r.results.length, 0);

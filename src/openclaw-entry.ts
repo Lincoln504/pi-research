@@ -27,17 +27,17 @@ import { Type } from 'typebox';
 import { randomUUID } from 'node:crypto';
 
 // pi-research internals (same imports used by sdk.ts)
-import { registerCoreServices, initializeCoreServices } from './core/service-initialization.ts';
+import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { registerInfrastructureServices, shutdownInfrastructureServices } from './infrastructure/service-initialization.ts';
+import { createServiceContainer, resetServiceContainer } from './core/service-registry.ts';
+import type { ServiceContainer } from './core/service-registry.ts';
 import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { createResearchRunId, logger } from './logger.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
-import { getConfig, setConfig, validateConfig, type Config } from './config.ts';
-import { resetServiceContainer, getServiceContainer } from './core/service-registry.ts';
-import { disposeCoreServices } from './core/service-initialization.ts';
+import { getConfig, validateConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
@@ -95,52 +95,46 @@ let globalModel: Model<any> | null = null;
 let globalRegistry: ModelRegistry | null = null;
 let globalDefaultDepth: number = 1;
 let globalCwd: string = process.cwd();
+let globalContainer: ServiceContainer | null = null;
+let globalConfig: Config | null = null;
 // FIX (#14): Track the initialization promise to prevent concurrent init
 let _initPromise: Promise<void> | null = null;
 
 // ---------------------------------------------------------------------------
 // Config mapping: OpenClaw config → pi-research Config
-//
-// IMPORTANT: `defaultDepth` is NOT mapped to DEFAULT_RESEARCH_DEPTH because
-// the internal config schema requires minimum: 1. Depth 0 (quick research)
-// is an orchestration-level concept that only applies at execution time.
-// Instead, defaultDepth is stored separately and used in the research tool.
 // ---------------------------------------------------------------------------
 
-function applyOpenClawConfig(pluginConfig: OpenClawPluginConfig): void {
-  const overrides: Partial<Config> = {};
-
-  if (pluginConfig.timeoutMs !== undefined) overrides.RESEARCHER_TIMEOUT_MS = pluginConfig.timeoutMs;
-  if (pluginConfig.maxResearchers !== undefined) overrides.MAX_CONCURRENT_RESEARCHERS = pluginConfig.maxResearchers;
-  // NOTE: defaultDepth is NOT mapped here — see comment block above
-  if (pluginConfig.maxScrapeBatches !== undefined) overrides.MAX_SCRAPE_BATCHES = pluginConfig.maxScrapeBatches;
-  if (pluginConfig.maxConcurrentScrapes !== undefined) overrides.MAX_CONCURRENT_SCRAPES = pluginConfig.maxConcurrentScrapes;
-  if (pluginConfig.workerThreads !== undefined) overrides.WORKER_THREADS = pluginConfig.workerThreads;
-  if (pluginConfig.workerConcurrency !== undefined) overrides.WORKER_CONCURRENCY = pluginConfig.workerConcurrency;
+function resolveOpenClawConfig(pluginConfig: OpenClawPluginConfig): Config {
+  const config = { ...getConfig(globalCwd) };
+  
+  if (pluginConfig.timeoutMs !== undefined) config.RESEARCHER_TIMEOUT_MS = pluginConfig.timeoutMs;
+  if (pluginConfig.maxResearchers !== undefined) config.MAX_CONCURRENT_RESEARCHERS = pluginConfig.maxResearchers;
+  if (pluginConfig.maxScrapeBatches !== undefined) config.MAX_SCRAPE_BATCHES = pluginConfig.maxScrapeBatches;
+  if (pluginConfig.maxConcurrentScrapes !== undefined) config.MAX_CONCURRENT_SCRAPES = pluginConfig.maxConcurrentScrapes;
+  if (pluginConfig.workerThreads !== undefined) config.WORKER_THREADS = pluginConfig.workerThreads;
+  if (pluginConfig.workerConcurrency !== undefined) config.WORKER_CONCURRENCY = pluginConfig.workerConcurrency;
   if (pluginConfig.knowledgeEnabled !== undefined) {
-    overrides.GLOBAL_KNOWLEDGE_STORE_ENABLED = pluginConfig.knowledgeEnabled;
-    overrides.LOCAL_KNOWLEDGE_STORE_ENABLED = pluginConfig.knowledgeEnabled;
+    config.GLOBAL_KNOWLEDGE_STORE_ENABLED = pluginConfig.knowledgeEnabled;
+    config.LOCAL_KNOWLEDGE_STORE_ENABLED = pluginConfig.knowledgeEnabled;
   }
-  if (pluginConfig.embeddingModel !== undefined) overrides.EMBEDDING_MODEL = pluginConfig.embeddingModel;
-  if (pluginConfig.embeddingDevice !== undefined) overrides.EMBEDDING_DEVICE = pluginConfig.embeddingDevice;
-  if (pluginConfig.cacheTtlDays !== undefined) overrides.KNOWLEDGE_STORE_CACHE_TTL_DAYS = pluginConfig.cacheTtlDays;
-  if (pluginConfig.scrapeTimeoutMs !== undefined) overrides.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
-  if (pluginConfig.model !== undefined) overrides.RESEARCH_MODEL = pluginConfig.model;
-  if (pluginConfig.reportExportEnabled !== undefined) overrides.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
+  if (pluginConfig.embeddingModel !== undefined) config.EMBEDDING_MODEL = pluginConfig.embeddingModel;
+  if (pluginConfig.embeddingDevice !== undefined) config.EMBEDDING_DEVICE = pluginConfig.embeddingDevice;
+  if (pluginConfig.cacheTtlDays !== undefined) config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = pluginConfig.cacheTtlDays;
+  if (pluginConfig.scrapeTimeoutMs !== undefined) config.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
+  if (pluginConfig.model !== undefined) config.RESEARCH_MODEL = pluginConfig.model;
+  if (pluginConfig.reportExportEnabled !== undefined) config.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
 
   // SearXNG URL → env var (pi-research reads SEARXNG_URL from process.env)
   if (pluginConfig.searxngUrl) {
     process.env['SEARXNG_URL'] = pluginConfig.searxngUrl;
   }
 
-  // Store the plugin-level default depth (0-3 valid, NOT passed to internal config)
+  // Store the plugin-level default depth (0-3 valid)
   if (pluginConfig.defaultDepth !== undefined) {
     globalDefaultDepth = Math.max(0, Math.min(3, Math.round(pluginConfig.defaultDepth)));
   }
 
-  if (Object.keys(overrides).length > 0) {
-    setConfig(overrides);
-  }
+  return config;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +144,8 @@ function applyOpenClawConfig(pluginConfig: OpenClawPluginConfig): void {
 function createMockContext(model: Model<any>, registry: ModelRegistry): any {
   return {
     cwd: globalCwd,
+    config: globalConfig!,
+    container: globalContainer!,
     mode: 'print' as const,
     hasUI: false,
     model,
@@ -187,16 +183,24 @@ function createMockContext(model: Model<any>, registry: ModelRegistry): any {
 // ---------------------------------------------------------------------------
 
 async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<void> {
-  if (initialized) return;
+  // If already initialized, check if config changed significantly
+  if (initialized) {
+    const newConfig = resolveOpenClawConfig(pluginConfig);
+    // Simple deep-equality check for config change (excluding objects/functions)
+    const configChanged = JSON.stringify(newConfig) !== JSON.stringify(globalConfig);
+    if (!configChanged) return;
+    
+    logger.info('[OpenClaw] Configuration changed. Re-initializing pi-research...');
+    await shutdown();
+  }
+  
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
     try {
-      // Apply config overrides BEFORE validation.
-      // defaultDepth is stored as a plugin-level setting, NOT passed to internal config.
-      applyOpenClawConfig(pluginConfig);
-      const config = getConfig();
-      validateConfig(config);
+      // Resolve and validate config
+      globalConfig = resolveOpenClawConfig(pluginConfig);
+      validateConfig(globalConfig);
 
       // Build model registry
       globalRegistry = buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
@@ -204,14 +208,16 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
       // Resolve model
       globalModel = resolveModel(globalRegistry, pluginConfig.model, pluginConfig.provider);
 
-      // Register and initialize services (same sequence as SDK)
-      registerCoreServices();
-      registerInfrastructureServices();
+      // Create isolated container
+      globalContainer = createServiceContainer();
 
-      const mockCtx = createMockContext(globalModel, globalRegistry);
-      const result = await initializeCoreServices(mockCtx);
+      // Register and initialize services (same sequence as SDK)
+      registerCoreServices(globalContainer);
+      registerInfrastructureServices(globalContainer);
+
+      const mockCtx = createMockContext(globalModel!, globalRegistry!);
+      const result = await initializeCoreServices(mockCtx, globalContainer);
       if (result.failed.length === 0) {
-        getServiceContainer().isReady = true;
         logger.log('[OpenClaw] pi-research initialized successfully');
       } else {
         logger.error(`[OpenClaw] pi-research initialization incomplete: ${result.failed.join(', ')}`);
@@ -224,7 +230,8 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
       globalRegistry = null;
       globalDefaultDepth = 1;
       globalCwd = process.cwd();
-      try { await resetServiceContainer(); } catch { /* best-effort */ }
+      globalContainer = null;
+      globalConfig = null;
       logger.error('[OpenClaw] pi-research initialization failed:', err);
       throw err;
     } finally {
@@ -240,16 +247,18 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
  * Disposes all initialized services to prevent resource leaks.
  */
 export async function shutdown(): Promise<void> {
-  if (!initialized) return;
+  if (!initialized || !globalContainer) return;
   try {
     await shutdownManager.runCleanup('openclaw_shutdown');
-    await shutdownInfrastructureServices();
-    await disposeCoreServices();
-    await resetServiceContainer();
+    await shutdownInfrastructureServices(globalContainer);
+    await disposeCoreServices(globalContainer);
+    await resetServiceContainer(globalContainer);
   } finally {
     initialized = false;
     globalModel = null;
     globalRegistry = null;
+    globalContainer = null;
+    globalConfig = null;
   }
   logger.log('[OpenClaw] pi-research shutdown complete');
 }
@@ -299,7 +308,7 @@ export default {
   configSchema: OpenClawConfigSchema,
 
   get tools() {
-    const config = getConfig();
+    const config = globalConfig || getConfig();
     const knowledgeEnabled = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
 
     const allTools: any[] = [
@@ -359,7 +368,7 @@ export default {
                 sessionId,
                 researchId,
                 observer,
-                config: getConfig(),
+                config: globalConfig!,
                 excludeTools,
               } satisfies QuickResearchOrchestratorOptions);
               result = await orchestrator.run(signal);
@@ -374,13 +383,13 @@ export default {
                 sessionId,
                 researchId,
                 observer,
-                config: getConfig(),
+                config: globalConfig!,
                 excludeTools,
               } satisfies DeepResearchOrchestratorOptions);
               result = await orchestrator.run(signal);
             }
 
-            if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
+            if (globalConfig!.RESEARCH_REPORT_EXPORT_ENABLED) {
               const exportPath = await exportResearchReport(query, result, (depth ?? 0) === 0 ? 'quick' : 'deep', globalCwd);
               if (exportPath) {
                 result = appendExportMessage(result, exportPath);

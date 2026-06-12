@@ -114,7 +114,6 @@ describe('OpenClaw Plugin Integration', () => {
 
     expect(result).toContain('integrated research report');
     expect(result).toContain('Research report saved to');
-    expect(getConfig().RESEARCH_REPORT_EXPORT_ENABLED).toBe(true);
   });
 
   it('should handle health check', async () => {

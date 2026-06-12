@@ -22,7 +22,7 @@ import {
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
 import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
-import { getService, clearService } from './core/service-registry.ts';
+import { getService, clearService, tryGetServiceContainerFromCtx } from './core/service-registry.ts';
 import { ServiceNames, IKnowledgeStoreService } from './core/service-interfaces.ts';
 import { KnowledgeStoreService } from './infrastructure/knowledge-store-service.ts';
 import { clearEmbeddingInstance } from './infrastructure/embedding/embedding-factory.ts';
@@ -37,6 +37,7 @@ import {
 } from './utils/metrics-summary.ts';
 import { logger } from './logger.ts';
 import { formatTimeAgo, formatDuration } from './utils/text-utils.ts';
+import * as path from 'node:path';
 
 // ============================================================================
 // Utilities
@@ -72,8 +73,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   // Ensure the global TUI controller is initialized
   initGlobalTuiController(ctx.ui);
 
-  const initialConfig = { ...getConfig() };
-  const config = { ...getConfig() };
+  const cwd = ctx.cwd || process.cwd();
+  const initialConfig = { ...getConfig(cwd) };
+  const config = { ...getConfig(cwd) };
+  const container = tryGetServiceContainerFromCtx(ctx);
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
   const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
@@ -84,50 +87,50 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Research ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: '/research depth',
-      description: 'Default depth for the /research command (normal/deep/ultra)',
+      label: '/research depth (project)',
+      description: 'Default research depth (normal/deep/ultra). Per-directory.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
       id: 'MAX_CONCURRENT_RESEARCHERS',
-      label: 'Max concurrent',
-      description: 'Maximum researchers to run simultaneously (1-5)',
+      label: 'Max concurrent (project)',
+      description: 'Maximum simultaneous researchers. Per-directory.',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
     },
     {
       id: 'RESEARCH_REPORT_EXPORT_ENABLED',
-      label: 'Export report',
-      description: 'Automatically save a markdown report to disk when research completes.\nFiles go to a "research" or "docs" folder in your project, or your temp folder if at home.',
+      label: 'Export report (project)',
+      description: 'Export research reports as markdown. Per-directory.',
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'MAX_SCRAPE_BATCHES',
-      label: 'Scrape batches',
-      description: `Max scrape batches per researcher (0=unlimited).\nAlways capped at ${scrapePct}% of the context window.`,
+      label: 'Scrape batches (project)',
+      description: `Maximum scrape batches per researcher (0=unlimited). Per-directory.`,
       currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
       values: ['unlimited', '1', '2', '3', '5', '10', '15'],
     },
     {
       id: 'WORKER_THREADS',
-      label: 'Worker threads',
-      description: 'Number of parallel browser workers for search and scraping (1-10)',
+      label: 'Worker threads (global)',
+      description: 'Browser worker processes for search/scraping. Global.',
       currentValue: String(config.WORKER_THREADS),
       values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
     {
       id: 'RESEARCHER_TIMEOUT_MS',
-      label: 'Timeout (min)',
-      description: 'Per-researcher timeout in minutes (3-30)',
+      label: 'Timeout (min) (project)',
+      description: 'Per-researcher execution timeout in minutes. Per-directory.',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
     {
       id: 'DEBUG',
-      label: 'Debug logging',
-      description: 'Enable verbose debug logging to the log file.\nIncludes INFO and DEBUG level output for diagnosing issues.',
+      label: 'Debug logging (global)',
+      description: 'Enable verbose debug logging to file. Global.',
       currentValue: config.DEBUG ? 'true' : 'false',
       values: ['true', 'false'],
     },
@@ -135,55 +138,56 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // --- Knowledge Store ---
     {
       id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Project Knowledge Store',
-      description: 'Store research findings scoped to this project directory. When enabled, the knowledge search tool and researcher store injection become available.',
+      label: 'Project Knowledge Store (global)',
+      description: 'Enable project-scoped research storage. Global.',
       currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'User Knowledge Store',
-      description: 'Store research findings shared across all project directories. When enabled, the knowledge search tool becomes available for cross-project lookups.',
+      label: 'User Knowledge Store (global)',
+      description: 'Enable shared (cross-project) research storage. Global.',
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'EMBEDDING_MODEL',
-        label: 'Embed model',
-        description: 'Embedding model for the knowledge store.\nChanging model clears all stored data.',
+        label: 'Embed model (global)',
+        description: 'Vector embedding model. Changing clears all data. Global.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
       {
         id: 'EMBEDDING_DEVICE',
-        label: 'Embed device',
-        description: 'Hardware backend (webgpu is significantly faster)',
+        label: 'Embed device (global)',
+        description: 'Hardware backend (WebGPU/CPU). Global.',
         currentValue: config.EMBEDDING_DEVICE,
         values: ['webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-        label: 'Cache TTL (days)',
-        description: 'Retention period for research findings (1-365 days)',
+        label: 'Cache TTL (days) (global)',
+        description: 'Retention period for research findings. Global.',
         currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
         values: ['7', '14', '30', '60', '90', '180', '365'],
       },
     ] as SettingItem[] : []),
 
+
     // --- Actions ---
     {
       id: 'ACTION_HEALTH',
-      label: 'Check system health',
-      description: 'Run comprehensive diagnostics and display results',
+      label: 'Check health',
+      description: 'Run system diagnostics',
       currentValue: 'run',
       values: ['run'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'ACTION_KNOWLEDGE_STATUS',
-        label: 'Show knowledge status',
-        description: 'Display detailed knowledge store statistics (entries, model, device)',
+        label: 'Show stats',
+        description: 'Display knowledge store statistics',
         currentValue: 'run',
         values: ['run'],
       },
@@ -192,7 +196,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
         label: 'Clear project data',
-        description: 'Permanently delete all project-scoped entries from this directory',
+        description: 'Delete project-scoped entries from database',
         currentValue: 'run',
         values: ['run'],
       },
@@ -201,22 +205,22 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
         label: 'Clear user data',
-        description: 'Permanently delete all shared (cross-project) entries',
+        description: 'Delete all shared entries from database',
         currentValue: 'run',
         values: ['run'],
       },
     ] as SettingItem[] : []),
     {
       id: 'ACTION_METRICS_VIEW',
-      label: 'View session metrics',
-      description: 'Display session performance and latency report',
+      label: 'View performance',
+      description: 'Display session performance metrics',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
-      label: 'Reset session metrics',
-      description: 'Zero out all performance counters',
+      label: 'Reset performance',
+      description: 'Clear all performance counters',
       currentValue: 'run',
       values: ['run'],
     },
@@ -254,6 +258,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           async (id, newValue) => {
             // 1. Handle Settings Changes (Auto-save)
             let changed = true;
+            let scope: 'local' | 'global' = 'local';
+
             if (id === 'DEFAULT_RESEARCH_DEPTH') {
               const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
               config.DEFAULT_RESEARCH_DEPTH = depthMap[newValue] || 1;
@@ -263,29 +269,36 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               config.MAX_SCRAPE_BATCHES = newValue === 'unlimited' ? 0 : parseInt(newValue, 10);
             } else if (id === 'WORKER_THREADS') {
               config.WORKER_THREADS = parseInt(newValue, 10);
+              scope = 'global';
             } else if (id === 'RESEARCHER_TIMEOUT_MS') {
               config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
             } else if (id === 'DEBUG') {
               config.DEBUG = newValue === 'true';
+              scope = 'global';
             } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
               config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             } else if (id === 'LOCAL_KNOWLEDGE_STORE_ENABLED') {
               config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+              scope = 'global';
             } else if (id === 'GLOBAL_KNOWLEDGE_STORE_ENABLED') {
               config.GLOBAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+              scope = 'global';
             } else if (id === 'EMBEDDING_MODEL') {
               config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
+              scope = 'global';
             } else if (id === 'EMBEDDING_DEVICE') {
               config.EMBEDDING_DEVICE = newValue as 'webgpu' | 'cpu';
+              scope = 'global';
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
               config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);
+              scope = 'global';
             } else {
               changed = false;
             }
 
             if (changed) {
               try {
-                saveConfig(config);
+                saveConfig(config, scope, cwd);
                 resetConfig();
               } catch (e: unknown) {
                 ctx.ui.notify(`Failed to save: ${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -312,13 +325,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           { enableSearch: true }
         );
 
-        // No polling timer needed — stats removed from menu
-
         return {
           render: (width: number) => {
             const border = theme.fg('muted', '─'.repeat(width));
             const listLines = settingsList.render(width);
-            return [border, ...listLines, border];
+            const pathInfo = theme.fg('dim', ` Project: ${path.basename(cwd)}`);
+            const registryInfo = theme.fg('dim', ` Settings with (project) are unique to this directory and stored in the Centralized Registry (~/.pi/state/project-settings.json).`);
+            return [border, pathInfo, registryInfo, '', ...listLines, border];
           },
           handleInput: (data: string) => settingsList.handleInput(data),
           invalidate: () => settingsList.invalidate(),
@@ -331,20 +344,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       if (config.EMBEDDING_MODEL !== initialConfig.EMBEDDING_MODEL) {
         logger.info(`[research-config] Embedding model changed from ${initialConfig.EMBEDDING_MODEL} to ${config.EMBEDDING_MODEL}. Clearing knowledge store.`);
         try {
-          const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+          const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
           await service.clear();
-          await clearService(ServiceNames.KNOWLEDGE_STORE);
+          await clearService(ServiceNames.KNOWLEDGE_STORE, container);
           clearEmbeddingInstance();
-          ctx.ui.notify('Model changed: Knowledge store cleared', 'info');
-        } catch (e: unknown) {
+          ctx.ui.notify('Model updated. Store cleared.', 'info');
+          } catch (e: unknown) {
           logger.warn('[research-config] Failed to clear knowledge store on model change:', e);
-        }
-      } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
-        logger.info('[research-config] Device changed. Resetting service.');
-        try {
-          await clearService(ServiceNames.KNOWLEDGE_STORE);
+          }
+          } else if (config.EMBEDDING_DEVICE !== initialConfig.EMBEDDING_DEVICE) {
+          logger.info('[research-config] Device changed. Resetting service.');
+          try {
+          await clearService(ServiceNames.KNOWLEDGE_STORE, container);
           clearEmbeddingInstance();
-          ctx.ui.notify('Device changed: Service refreshed', 'info');
+          ctx.ui.notify('Device updated. Service refreshed.', 'info');
+
         } catch (e: unknown) {
           logger.warn('[research-config] Failed to refresh service on device change:', e);
         }
@@ -360,27 +374,27 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             await showKnowledgeStatusAction(ctx, pi);
             break;
           case 'knowledge_clear_global': {
-            const confirmed = await ctx.ui.confirm('Clear User Data', 'Are you sure you want to delete all user (cross-project) knowledge store data?');
+            const confirmed = await ctx.ui.confirm('Clear User Data', 'Permanently delete all cross-project data?');
             if (confirmed) {
               try {
-                const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+                const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
                 await service.clearGlobal();
-                ctx.ui.notify('User knowledge data cleared', 'info');
+                ctx.ui.notify('User data cleared.', 'info');
               } catch (e: unknown) {
-                ctx.ui.notify(`Failed to clear user store: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                ctx.ui.notify(`Clear failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
             break;
           }
           case 'knowledge_clear_local': {
-            const confirmed = await ctx.ui.confirm('Clear Project Data', 'Are you sure you want to delete project-specific data from the store?');
+            const confirmed = await ctx.ui.confirm('Clear Project Data', 'Permanently delete project data?');
             if (confirmed) {
               try {
-                const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+                const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
                 await service.clearLocal();
-                ctx.ui.notify('Project-specific data cleared', 'info');
+                ctx.ui.notify('Project data cleared.', 'info');
               } catch (e: unknown) {
-                ctx.ui.notify(`Failed to clear local project data: ${e instanceof Error ? e.message : String(e)}`, 'error');
+                ctx.ui.notify(`Clear failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
             }
             break;
@@ -390,7 +404,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             break;
           case 'metrics_clear':
             metrics.clearSession();
-            ctx.ui.notify('Session metrics reset', 'info');
+            ctx.ui.notify('Metrics reset.', 'info');
             break;
         }
       }
@@ -408,7 +422,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 
 async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   if (ctx.hasUI) {
-    ctx.ui.notify('Running health checks...', 'info');
+    ctx.ui.notify('Running health checks.', 'info');
   }
   try {
     const systemHealth = await healthRegistry.runAll({ force: true });
@@ -436,7 +450,7 @@ async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Pr
       details: { health: systemHealth },
     });
     if (ctx.hasUI) {
-      ctx.ui.notify(`Health check complete: ${systemHealth.status}`, 'info');
+      ctx.ui.notify(`Health check complete: ${systemHealth.status}.`, 'info');
     }
   } catch (error: unknown) {
     if (ctx.hasUI) {
@@ -447,18 +461,23 @@ async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Pr
 
 async function showKnowledgeStatusAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   try {
+    const cwd = ctx.cwd || process.cwd();
+    const container = tryGetServiceContainerFromCtx(ctx);
     // Reset config to ensure we read the latest from file (in case TUI changed it)
     resetConfig();
-    const config = getConfig();
+    const config = getConfig(cwd);
     
-    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+    const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
     const store = await service.getStore();
-    const counts = await store.countScoped();
-    const dbDir = getDbDir();
+    if (!store) {
+      throw new Error('Knowledge store is disabled or not initialized');
+    }
+    const counts = await store.countScoped(cwd);
+    const dbDir = getDbDir(config, cwd);
     
     pi.sendMessage({
       customType: 'knowledge-status',
-      content: `## Knowledge Store\n\n- **Status:** Operational\n- **Project Entries:** ${counts.local}, across ${counts.projects} Projects\n- **User Entries:** ${counts.global}\n- **Model:** ${config.EMBEDDING_MODEL}\n- **Device:** ${config.EMBEDDING_DEVICE}\n- **Unified Path:** \`${dbDir}\``,
+      content: `## Knowledge Store\n\n- Status: Operational\n- Project Entries: ${counts.local}\n- User Entries: ${counts.global}\n- Total Projects: ${counts.projects}\n- Model: ${config.EMBEDDING_MODEL}\n- Device: ${config.EMBEDDING_DEVICE}\n- Path: \`${dbDir}\``,
       display: true,
     });
   } catch (error: unknown) {

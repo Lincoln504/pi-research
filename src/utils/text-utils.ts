@@ -131,6 +131,21 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${remainingMinutes}m`;
 }
 
+import * as path from 'node:path';
+
+/**
+ * Consistently normalize a workspace path for database storage and filtering.
+ * Resolves to absolute path and removes trailing separators.
+ */
+export function normalizeWorkspacePath(wsPath: string): string {
+  if (!wsPath) return '';
+  const resolved = path.resolve(wsPath);
+  // Normalize trailing slash: /path/to/dir/ -> /path/to/dir
+  return (resolved.endsWith(path.sep) && resolved.length > 1) 
+    ? resolved.slice(0, -1) 
+    : resolved;
+}
+
 export interface Citation {
   url: string;
   description: string;

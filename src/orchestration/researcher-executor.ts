@@ -16,7 +16,7 @@ import { metrics } from '../utils/metrics.ts';
 import { ServiceNames,
   type IResearchSynthesisService,
 } from '../core/service-interfaces.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../utils/prompts.ts';
 import { injectCurrentDate } from '../utils/inject-date.ts';
@@ -45,6 +45,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   } = options;
   
   const id = String(researcherConfig.id);
+  const container = tryGetServiceContainerFromCtx(ctx);
   observer?.onResearcherStart?.(id, researcherConfig.name, researcherConfig.goal, round);
   metrics.increment('researchers_launched_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
 
@@ -133,7 +134,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       },
     });
 
-    const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+    const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
     sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
 
     const deliveredSteeringIds = new Set<string>();
@@ -240,7 +241,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round) });
       logger.debug(`[ResearcherExecutor] Researcher ${id} Final Response:\n${responseText}`);
 
-      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+      const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       synthesisService.storeReport(researchId, `${round}.${id}`, responseText);
 
       observer?.onResearcherComplete?.(id, responseText);
@@ -256,7 +257,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       try {
         const partialResponse = ensureAssistantResponse(session, id);
         if (partialResponse && partialResponse.trim().length > 50) {
-          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*⚠ This report was truncated due to a timeout/error. Content may be incomplete.*');
           logger.log(`[ResearcherExecutor] Researcher ${id} salvaged partial content (${partialResponse.length} chars) after error: ${errMsg}`);
           observer?.onResearcherComplete?.(id, partialResponse);

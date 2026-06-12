@@ -148,6 +148,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -182,6 +183,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -222,6 +224,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -283,6 +286,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -346,6 +350,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -380,6 +385,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -420,6 +426,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -439,6 +446,7 @@ describe('End-to-End Research Workflows', () => {
           modelRegistry: {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
+            getAll: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},

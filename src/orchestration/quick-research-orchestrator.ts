@@ -20,7 +20,7 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
@@ -47,11 +47,12 @@ export class QuickResearchOrchestrator {
   private config: Config;
 
   constructor(private options: QuickResearchOrchestratorOptions) {
-    this.config = options.config || getConfig();
+    this.config = options.config || getConfig(options.ctx.cwd);
   }
 
   async run(signal?: AbortSignal): Promise<string> {
     const { query, model, ctx, observer, researchId } = this.options;
+    const container = tryGetServiceContainerFromCtx(ctx);
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
     observer?.onStart?.(query, 0);
@@ -60,7 +61,7 @@ export class QuickResearchOrchestrator {
 
     try {
         // Pre-flight health check to ensure browser pool is operational
-        const health = await runHealthCheck();
+        const health = await runHealthCheck({ ctx });
         if (!health.success) {
           const error = health.error || 'Unknown health check failure';
           logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
@@ -70,28 +71,24 @@ export class QuickResearchOrchestrator {
 
         // Knowledge Store Context Injection
         let storeSection = '';
-        if (this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
-          try {
-            const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-            if (!ksService.isReady()) {
-                logger.debug('[QuickOrchestrator] Knowledge store service not ready');
-            } else {
-              const store = await ksService.getStore();
-              if (store && typeof store.findRelevantUrls === 'function') {
-                const historicalEntries = await store.findRelevantUrls(query, { limit: 5 });
-                if (historicalEntries.length > 0) {
-                  storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
-                    'The following URLs were found in your local knowledge store from previous research sessions. ' +
-                    'Scrape them to retrieve their full current content. Each summary describes what was previously found:\n' +
-                    historicalEntries.map((e: { url: string; description: string }) =>
-                      `- ${e.url}\n  Previous summary: ${e.description}`
-                    ).join('\n');
-                }
+        try {
+          const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
+          if (ksService.isReady()) {
+            const store = await ksService.getStore();
+            if (store && typeof store.findRelevantUrls === 'function') {
+              const historicalEntries = await store.findRelevantUrls(query, { limit: 5 });
+              if (historicalEntries.length > 0) {
+                storeSection = '\n## Historical Knowledge Store (Discovery)\n' +
+                  'The following URLs were found in your local knowledge store from previous research sessions. ' +
+                  'Scrape them to retrieve their full current content. Each summary describes what was previously found:\n' +
+                  historicalEntries.map((e: { url: string; description: string }) =>
+                    `- ${e.url}\n  Previous summary: ${e.description}`
+                  ).join('\n');
               }
             }
-          } catch (err) {
-            logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
           }
+        } catch (err) {
+          logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
         }
 
         const researcherPromptTemplate = loadPrompt('researcher', '..');
@@ -158,7 +155,7 @@ export class QuickResearchOrchestrator {
           },
         });
 
-        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE);
+        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
         sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
 
         let lastSteeringCheck = Date.now();
@@ -259,7 +256,7 @@ export class QuickResearchOrchestrator {
           let result = ensureAssistantResponse(session, 'Quick');
           
           // Store report in synthesis service so citations can be verified/processed
-          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE);
+          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(this.options.researchId, 'quick', result);
           
           // Ensure CITED LINKS section is accurate and consistent
@@ -275,42 +272,39 @@ export class QuickResearchOrchestrator {
           
           // Extract citations and store agent-synthesized descriptions for vector/semantic search
           // Quick research is single-pass, so this is the final synthesis point
-          if (this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
-            try {
-              const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE);
-              if (!writer) {
-                logger.warn('[QuickOrchestrator] Writer queue service not available');
-              } else {
-                const citations = parseCitations(result);
-                if (citations.length === 0) {
-                  logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
-                }
-                let enqueued = 0;
-                for (const cit of citations) {
-                  if (cit.url && cit.description) {
-                    const fullContent = getCachedScrapedContent(this.options.researchId, cit.url);
-                    writer.enqueue({
-                      url: normalizeUrl(cit.url),
-                      markdown: cit.description,
-                      content: fullContent,
-                      metadata: {
-                        ingestionType: 'synthesis-description',
-                        source: 'researcher',
-                        synthesizedAt: new Date().toISOString(),
-                        description: cit.description,
-                        fullContentSnippet: fullContent?.substring(0, 5000)
-                      }
-                    });
-                    enqueued++;
-                  }
-                }
-                // Drain so concurrent or subsequent sessions see these entries immediately
-                // rather than relying solely on shutdownKnowledgeStore's drain.
-                if (enqueued > 0) await writer.drain();
+          try {
+            const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
+            if (ksService.isReady()) {
+              const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE, ctx, container);
+              const citations = parseCitations(result);
+              if (citations.length === 0) {
+                logger.warn('[QuickOrchestrator] Researcher produced no parseable CITED LINKS — no descriptions stored for this session');
               }
-            } catch (err) {
-              logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
+              let enqueued = 0;
+              for (const cit of citations) {
+                if (cit.url && cit.description) {
+                  const fullContent = getCachedScrapedContent(this.options.researchId, cit.url);
+                  writer.enqueue({
+                    url: normalizeUrl(cit.url),
+                    markdown: cit.description,
+                    content: fullContent,
+                    metadata: {
+                      ingestionType: 'synthesis-description',
+                      source: 'researcher',
+                      synthesizedAt: new Date().toISOString(),
+                      description: cit.description,
+                      fullContentSnippet: fullContent?.substring(0, 5000)
+                    }
+                  });
+                  enqueued++;
+                }
+              }
+              // Drain so concurrent or subsequent sessions see these entries immediately
+              // rather than relying solely on shutdownKnowledgeStore's drain.
+              if (enqueued > 0) await writer.drain();
             }
+          } catch (err) {
+            logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
           }
 
           metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'success' });
@@ -326,7 +320,7 @@ export class QuickResearchOrchestrator {
     } finally {
         if (subscription) subscription();
         try {
-          const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+          const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
           await orch.cleanupResearchServices(undefined, researchId);
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);

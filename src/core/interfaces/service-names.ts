@@ -25,6 +25,7 @@ export const ServiceNames = {
   STATE_BACKUP_MANAGER: 'state-backup-manager',
   STATE_METRICS_COLLECTOR: 'state-metrics-collector',
   STATE_VALIDATOR: 'state-validator',
+  HEALTH_REGISTRY: 'health-registry',
   // Browser infrastructure services
   WORKER_POOL_MANAGER: 'worker-pool-manager',
   // Research session services

@@ -130,9 +130,11 @@ export class FileLockService implements IService {
    * @throws Error if unable to acquire lock within timeout
    */
   async acquireLock(): Promise<void> {
-    // 0. Support re-entrancy: check if the current async flow already holds this lock.
     const heldLocks = lockContext.getStore();
-    if (heldLocks?.has(this.lockFilePath)) {
+    const lockKey = `${this.lockFilePath}:${this.lockUuid}`;
+
+    // 0. Support re-entrancy: check if the current async flow already holds this lock instance.
+    if (heldLocks?.has(lockKey)) {
       if (this.lockHandle !== null) {
         this.lockCount++;
         return;
@@ -159,7 +161,7 @@ export class FileLockService implements IService {
 
     // Secondary re-entrancy check: if a previous turn in the queue already
     // acquired the lock for us (e.g. nested call that bypassed the queue).
-    if (heldLocks?.has(this.lockFilePath) && this.lockHandle !== null) {
+    if (heldLocks?.has(lockKey) && this.lockHandle !== null) {
       this.lockCount++;
       // Release our turn immediately so the next caller can proceed.
       if (myResolve) myResolve();
@@ -191,7 +193,7 @@ export class FileLockService implements IService {
 
           // Track in ALS for nested calls
           if (heldLocks) {
-            heldLocks.add(this.lockFilePath);
+            heldLocks.add(lockKey);
           }
 
           const duration = Date.now() - startTime;
@@ -327,7 +329,7 @@ export class FileLockService implements IService {
       // 3. Remove from ALS
       const heldLocks = lockContext.getStore();
       if (heldLocks) {
-        heldLocks.delete(this.lockFilePath);
+        heldLocks.delete(`${this.lockFilePath}:${this.lockUuid}`);
       }
 
       metrics.setGauge('state_lock_held', 0);
@@ -347,9 +349,11 @@ export class FileLockService implements IService {
    * Safe re-entrancy is supported within the same async flow.
    */
   async withLock<T>(callback: () => Promise<T> | T, _timeout: number = 30000): Promise<T> {
-    // If we already hold this lock in this async flow, just call the callback
     const heldLocks = lockContext.getStore();
-    if (heldLocks?.has(this.lockFilePath)) {
+    const lockKey = `${this.lockFilePath}:${this.lockUuid}`;
+
+    // If we already hold this lock instance in this async flow, just call the callback
+    if (heldLocks?.has(lockKey)) {
       return await callback();
     }
 
@@ -370,7 +374,10 @@ export class FileLockService implements IService {
   async cleanup(): Promise<void> {
     if (this.lockHandle) {
       try {
-        await fs.unlink(this.lockFilePath);
+        const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
+        if (content === this.lockUuid) {
+          await fs.unlink(this.lockFilePath).catch(() => {});
+        }
       } catch { /* ignore */ }
       try {
         await this.lockHandle.close();

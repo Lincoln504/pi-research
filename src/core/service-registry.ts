@@ -23,6 +23,7 @@ export enum ServiceLifecycle {
   UNINITIALIZED = 'uninitialized',
   INITIALIZING = 'initializing',
   INITIALIZED = 'initialized',
+  DISABLED = 'disabled',
   DISPOSING = 'disposing',
   DISPOSED = 'disposed',
 }
@@ -99,11 +100,13 @@ const initializationContext = new AsyncLocalStorage<string>();
 /**
  * Centralized service container for dependency injection
  */
-class ServiceContainer {
+export class ServiceContainer {
   private services: Map<string, ServiceRegistration<any>> = new Map();
   private dependencies: Map<string, Set<string>> = new Map();
   public isDisposing: boolean = false;
   public isReady: boolean = false;
+  public cwd: string = process.cwd();
+  public config: any = null;
   private readonly defaultOptions: Required<ServiceContainerOptions>;
 
   constructor(options: ServiceContainerOptions = {}) {
@@ -520,10 +523,10 @@ class ServiceContainer {
 
 /**
  * Global service container instance
- * This is the ONLY global state allowed in the application.
- * All other singletons should be registered here and accessed via dependency injection.
+ * This is the default container for the application.
+ * CLI mode typically uses this instance.
  */
-const globalServiceContainer = new ServiceContainer({
+let globalServiceContainer = new ServiceContainer({
   lazyInitialization: true,
   allowOverwrite: false,
   enableLogging: true,
@@ -537,14 +540,29 @@ export function getServiceContainer(): ServiceContainer {
 }
 
 /**
+ * Create a new service container instance
+ */
+export function createServiceContainer(options: ServiceContainerOptions = {}): ServiceContainer {
+  return new ServiceContainer(options);
+}
+
+/**
+ * Set the global service container instance
+ */
+export function setServiceContainer(container: ServiceContainer): void {
+  globalServiceContainer = container;
+}
+
+/**
  * Convenience function to register a service
  */
 export function registerService<T extends IService>(
   name: string,
   factory: ServiceFactory<T>,
-  options?: ServiceContainerOptions
+  options?: ServiceContainerOptions,
+  container: ServiceContainer = globalServiceContainer
 ): void {
-  globalServiceContainer.register(name, factory, options);
+  container.register(name, factory, options);
 }
 
 /**
@@ -553,71 +571,78 @@ export function registerService<T extends IService>(
 export function replaceService<T extends IService>(
   name: string,
   factory: ServiceFactory<T>,
-  options?: ServiceContainerOptions
+  options?: ServiceContainerOptions,
+  container: ServiceContainer = globalServiceContainer
 ): Promise<void> {
-  return globalServiceContainer.registerAndReplace(name, factory, options);
+  return container.registerAndReplace(name, factory, options);
 }
 
 /**
  * Convenience function to get a service
  */
-export function getService<T extends IService>(name: string, ctx?: any): Promise<T> {
-  return globalServiceContainer.get<T>(name, ctx);
+export function getService<T extends IService>(name: string, ctx?: any, container: ServiceContainer = globalServiceContainer): Promise<T> {
+  return container.get<T>(name, ctx);
 }
 
 /**
  * Convenience function to try getting a service synchronously
  */
-export function tryGetService<T extends IService>(name: string): T | null {
-  return globalServiceContainer.tryGet<T>(name);
+export function tryGetService<T extends IService>(name: string, container: ServiceContainer = globalServiceContainer): T | null {
+  return container.tryGet<T>(name);
 }
 
 /**
  * Convenience function to clear a service
  */
-export function clearService(name: string): Promise<void> {
-  return globalServiceContainer.clear(name);
+export function clearService(name: string, container: ServiceContainer = globalServiceContainer): Promise<void> {
+  return container.clear(name);
 }
 
 /**
  * Convenience function to replace a service instance
  */
-export function replaceServiceInstance<T extends IService>(name: string, instance: T): Promise<void> {
-  return globalServiceContainer.replace(name, instance);
+export function replaceServiceInstance<T extends IService>(name: string, instance: T, container: ServiceContainer = globalServiceContainer): Promise<void> {
+  return container.replace(name, instance);
 }
 
 /**
  * Convenience function to check if a service is registered
  */
-export function hasService(name: string): boolean {
-  return globalServiceContainer.has(name);
+export function hasService(name: string, container: ServiceContainer = globalServiceContainer): boolean {
+  return container.has(name);
 }
 
 /**
  * Convenience function to check if a service is initialized
  */
-export function isServiceInitialized(name: string): boolean {
-  return globalServiceContainer.isInitialized(name);
+export function isServiceInitialized(name: string, container: ServiceContainer = globalServiceContainer): boolean {
+  return container.isInitialized(name);
+}
+
+/**
+ * Helper to extract a service container from a context object, if present.
+ */
+export function tryGetServiceContainerFromCtx(ctx: any): ServiceContainer {
+  return (ctx?.container instanceof ServiceContainer) ? ctx.container : globalServiceContainer;
 }
 
 /**
  * Dispose all services
  */
-export function disposeAllServices(): Promise<void> {
-  return globalServiceContainer.disposeAll();
+export function disposeAllServices(container: ServiceContainer = globalServiceContainer): Promise<void> {
+  return container.disposeAll();
 }
 
 /**
  * Reset the global service container
- * This is primarily used for testing to ensure clean state between test runs
  */
-export function resetServiceContainer(): Promise<void> {
-  return globalServiceContainer.reset();
+export function resetServiceContainer(container: ServiceContainer = globalServiceContainer): Promise<void> {
+  return container.reset();
 }
 
 /**
  * Check if the service container is currently being disposed
  */
-export function isContainerDisposing(): boolean {
-  return globalServiceContainer.isDisposing;
+export function isContainerDisposing(container: ServiceContainer = globalServiceContainer): boolean {
+  return container.isDisposing;
 }

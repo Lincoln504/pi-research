@@ -5,19 +5,22 @@
  * This is the central place for service configuration and initialization.
  */
 
-import { registerService, getService, disposeAllServices, type IService } from './service-registry.ts';
+import { registerService, getService, disposeAllServices, type IService, getServiceContainer } from './service-registry.ts';
+import type { ServiceContainer } from './service-registry.ts';
 import { ServiceNames } from './service-interfaces.ts';
 import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { HealthCheckService } from './health-check-service.ts';
 import { PlanningService } from './planning-service.ts';
 import { ResearchOrchestrationService } from '../orchestration/research-orchestration-service.ts';
+import { HealthCheckRegistry } from '../healthcheck/registry.ts';
+import { registerHealthChecks } from '../healthcheck/index.ts';
 import { logger } from '../logger.ts';
 
 /**
  * Register all core services with the service registry
  */
-export function registerCoreServices(): void {
+export function registerCoreServices(container: ServiceContainer = getServiceContainer()): void {
   logger.debug('[ServiceInitialization] Registering core services...');
 
   // Register Scheduler Service
@@ -28,7 +31,8 @@ export function registerCoreServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Health Check Cache Service
@@ -39,7 +43,8 @@ export function registerCoreServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Planning Service
@@ -50,7 +55,25 @@ export function registerCoreServices(): void {
       lazyInitialization: false, // Planning service needs to be available early
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
+  );
+
+  // Register Health Registry Service
+  registerService(
+    ServiceNames.HEALTH_REGISTRY,
+    async () => {
+      const registry = new HealthCheckRegistry();
+      await registry.initialize();
+      registerHealthChecks(registry, container);
+      return registry;
+    },
+    {
+      lazyInitialization: false, // Eagerly register checks
+      allowOverwrite: false,
+      enableLogging: true,
+    },
+    container
   );
 
   // Register Research Orchestration Service
@@ -61,7 +84,8 @@ export function registerCoreServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   logger.debug('[ServiceInitialization] All core services registered');
@@ -72,8 +96,9 @@ export function registerCoreServices(): void {
  * This is called early in the application startup
  *
  * @param ctx - Optional extension context to pass to services
+ * @param container - Service container instance
  */
-export async function initializeCoreServices(ctx?: any): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
+export async function initializeCoreServices(ctx?: any, container: ServiceContainer = getServiceContainer()): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
   logger.log('[ServiceInitialization] Initializing core services...');
 
   const initialized: string[] = [];
@@ -93,6 +118,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ success: bool
     { name: ServiceNames.GPU_RESOURCE_SERVICE, label: 'GPU Resource Service' },
     { name: ServiceNames.STATE_MANAGER, label: 'State Manager Service' },
     { name: ServiceNames.HEALTH_CHECK_CACHE, label: 'Health Check Cache Service' },
+    { name: ServiceNames.HEALTH_REGISTRY, label: 'Health Registry Service' },
   ];
 
   // Services requiring eager initialization (marked with lazyInitialization: false)
@@ -115,7 +141,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ success: bool
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
         // getService will call initialize(ctx) if not already initialized
-        await getService<IService>(service.name, ctx);
+        await getService<IService>(service.name, ctx, container);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {
@@ -131,7 +157,7 @@ export async function initializeCoreServices(ctx?: any): Promise<{ success: bool
     for (const service of eagerServices) {
       try {
         logger.debug(`[ServiceInitialization] Initializing ${service.label}...`);
-        await getService<IService>(service.name, ctx);
+        await getService<IService>(service.name, ctx, container);
         initialized.push(service.label);
         logger.debug(`[ServiceInitialization] ${service.label} initialized`);
       } catch (err) {
@@ -167,15 +193,17 @@ export async function initializeCoreServices(ctx?: any): Promise<{ success: bool
 /**
  * Dispose all core services
  * This is called during application shutdown
+ * 
+ * @param container - Service container instance
  */
-export async function disposeCoreServices(): Promise<void> {
+export async function disposeCoreServices(container: ServiceContainer = getServiceContainer()): Promise<void> {
   logger.log('[ServiceInitialization] Disposing core services...');
 
   try {
     // Clear embedding server registration before parallel disposal so the
     // EmbeddingServer can deregister itself while the StateManager is still alive.
     try {
-      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
+      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
       await stateManager.clearEmbeddingServer();
       logger.debug('[ServiceInitialization] Cleared embedding server state before disposal');
     } catch {
@@ -183,7 +211,7 @@ export async function disposeCoreServices(): Promise<void> {
     }
 
     // Dispose services in reverse dependency order
-    await disposeAllServices();
+    await disposeAllServices(container);
 
     logger.log('[ServiceInitialization] Core services disposed successfully');
   } catch (err) {

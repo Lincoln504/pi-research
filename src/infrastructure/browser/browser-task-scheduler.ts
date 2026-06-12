@@ -11,7 +11,8 @@ import type { SearchResult, ScrapeResult } from '../../web-research/types.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
-import { getService } from '../../core/service-registry.ts';
+import { getService, getServiceContainer } from '../../core/service-registry.ts';
+import type { ServiceContainer } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
@@ -39,7 +40,8 @@ export class BrowserTaskScheduler implements IScheduler {
 
     constructor(
         public readonly schedulerId: string,
-        private readonly stateManager: IStateManager
+        private readonly stateManager: IStateManager,
+        private readonly container: ServiceContainer = getServiceContainer()
     ) {
         this.startLeadershipCheck();
         this.resetIdleTimer();
@@ -47,7 +49,7 @@ export class BrowserTaskScheduler implements IScheduler {
 
     private async getWorkerPoolManager(): Promise<WorkerPoolManager> {
         if (!this.workerPoolManager) {
-            this.workerPoolManager = await getService<WorkerPoolManager>(ServiceNames.WORKER_POOL_MANAGER);
+            this.workerPoolManager = await getService<WorkerPoolManager>(ServiceNames.WORKER_POOL_MANAGER, undefined, this.container);
             await this.workerPoolManager.initialize();
         }
         return this.workerPoolManager;
@@ -325,7 +327,7 @@ export class BrowserTaskScheduler implements IScheduler {
             this.leadershipTimer = null;
         }
 
-        const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER);
+        const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, this.container);
         const currentScheduler = schedulerService.getSchedulerInstance();
         if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
             schedulerService.setSchedulerInstance(null);

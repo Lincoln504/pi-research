@@ -19,11 +19,11 @@ import { healthRegistry } from '../healthcheck/index.ts';
 export function createHealthTool(): ToolDefinition {
   const parameters = Type.Object({
     verbose: Type.Optional(Type.Boolean({
-      description: 'Show detailed diagnostic information for each component',
+      description: 'Show detailed diagnostic information.',
       default: true,
     })),
     probe: Type.Optional(Type.Boolean({
-      description: 'Force liveness checks (spawns browser, loads GPU models)',
+      description: 'Force liveness checks (browser/GPU models).',
       default: false,
     })),
   });
@@ -33,8 +33,8 @@ export function createHealthTool(): ToolDefinition {
   return {
     name: 'health',
     label: 'Health Check',
-    description: 'Check system health status across all components (browser pool, knowledge store, GPU lock)',
-    promptSnippet: 'Run health checks on the research system',
+    description: 'Verify system status (browser pool, knowledge store, GPU lock).',
+    promptSnippet: 'Run system health checks',
     parameters,
     renderShell: 'self',
     executionMode: 'parallel',

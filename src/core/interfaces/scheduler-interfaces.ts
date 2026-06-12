@@ -34,6 +34,15 @@ export interface ISchedulerInternals extends IService {
 }
 
 /**
+ * Scheduler service interface
+ */
+export interface ISchedulerService extends IService {
+  isReady(): boolean;
+  ensureScheduler(config?: Config, ctx?: any): Promise<IScheduler>;
+  getScheduler(): IScheduler | null;
+}
+
+/**
  * Scheduler search result — matches the shape returned by the browser
  * infrastructure layer (BrowserTaskScheduler / BrowserClient).
  */

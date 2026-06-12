@@ -28,7 +28,7 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
-import { getService } from '../core/service-registry.ts';
+import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
@@ -54,8 +54,7 @@ const ResearchKnowledgeSearchParams = Type.Object({
     minItems: 1,
     maxItems: 5,
     description:
-      'Search queries to look up in the research knowledge database (1-5 queries). ' +
-      'Use multiple queries to cover different aspects of the topic.',
+      'Search queries for the knowledge database (1-5 queries).',
   }),
 });
 
@@ -227,7 +226,7 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
  * Priority: RESEARCH_MODEL → ctx.model
  */
 function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; error?: string } {
-  const config = getConfig();
+  const config = getConfig(ctx.cwd);
   const ctxModel = ctx.model as Model<any> | undefined;
 
   if (config.RESEARCH_MODEL) {
@@ -459,18 +458,17 @@ function missResult(reason: string): AgentToolResult<unknown> {
 export function createResearchKnowledgeSearchTool(): ToolDefinition {
   return {
     name: 'research_knowledge_search',
-    label: 'Research Knowledge Search',
+    label: 'Knowledge Search',
     description:
-      'A satellite tool for the main pi agent and pi-research. Queries the research knowledge database ' +
-      'for previously researched information. ALWAYS use this before performing live internet research ' +
-      'or scraping, as previous research sessions may have already solved this.',
-    promptSnippet: 'Search research knowledge database for previously researched information',
+      'Search the research knowledge database for previously investigated information. ' +
+      'Use this before performing live web research.',
+    promptSnippet: 'Search research knowledge database',
     promptGuidelines: [
-      'Always try `research_knowledge_search` first for any research question — it is instant and free.',
-      'If research_knowledge_search returns "no" (not found), proceed with the `research` tool for live web investigation.',
-      'If research_knowledge_search returns "maybe" (partial), use the provided synthesis AND also do live research to fill gaps.',
-      'If research_knowledge_search returns "yes" (found), you have a complete answer — no live research needed.',
-      'Do NOT call both research_knowledge_search and research for the same question simultaneously.',
+      'Query `research_knowledge_search` first for research tasks.',
+      'If status is "no", proceed with `research` for live investigation.',
+      'If status is "maybe", use the synthesis and fill gaps with live research.',
+      'If status is "yes", the answer is complete; no live research needed.',
+      'Do not call both knowledge search and research for the same query simultaneously.',
     ],
     parameters: ResearchKnowledgeSearchParams,
     executionMode: 'parallel',
@@ -483,6 +481,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
     ): Promise<AgentToolResult<unknown>> {
       const startTime = Date.now();
       const p = params as ResearchKnowledgeSearchParams;
+      const container = tryGetServiceContainerFromCtx(ctx);
 
       // Show the TUI widget immediately
       showKnowledgeSearchWidget(ctx);
@@ -493,16 +492,20 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         // ----------------------------------------------------------
         let storeService: IKnowledgeStoreService;
         try {
-          storeService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
+          storeService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
         } catch {
           return missResult('store_unavailable');
         }
 
         if (!storeService.isReady()) {
-          return missResult('store_not_ready');
+          const lifecycle = (storeService as any).lifecycle;
+          return missResult(lifecycle === 'disabled' ? 'store_disabled' : 'store_not_ready');
         }
 
         const store = await storeService.getStore();
+        if (!store) {
+          return missResult('store_disabled');
+        }
 
         const count = await store.count();
         if (count === 0) {

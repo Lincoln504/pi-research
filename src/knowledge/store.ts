@@ -15,13 +15,13 @@ import {
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
-import { getConfig } from '../config.ts';
 import { MigrationStrategy, MigrationResult } from './migration.ts';
 import { metrics } from '../utils/metrics.ts';
 import { createStoreTable, CURRENT_SCHEMA_VERSION } from './store-schema.ts';
 import { addDocumentsToStore, searchStore, findDocumentsByUrl, findRelevantUrls } from './store-operations.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
+import { normalizeWorkspacePath } from '../utils/text-utils.ts';
 
 export interface StoreOptions {
   dbDir: string;
@@ -37,6 +37,8 @@ export interface StoreOptions {
   workspace?: string;
   localEnabled?: boolean;
   globalEnabled?: boolean;
+  /** Cache TTL in days for automatic eviction */
+  ttlDays?: number;
 }
 
 function isConnectionRefused(err: unknown): boolean {
@@ -89,11 +91,7 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private getWorkspace(): string {
-    // Normalize workspace path: resolve to absolute and strip trailing separator.
-    // This ensures /home/user/project and /home/user/project/ are treated as the same workspace.
-    const ws = this.options.workspace || process.cwd();
-    const resolved = path.resolve(ws);
-    return resolved.endsWith(path.sep) ? resolved.slice(0, -1) : resolved;
+    return normalizeWorkspacePath(this.options.workspace || process.cwd());
   }
 
   async initialize(): Promise<void> {
@@ -272,15 +270,19 @@ export class KnowledgeStore implements IKnowledgeStore {
       for (let i = 0; i < totalDocs; i += batchSize) {
         const batchRows = await this.table.query().limit(batchSize).offset(i).toArray();
 
-        const batchDocs = batchRows.map(row => ({
-          url: row.url as string,
-          text: row.text as string,
-          content: row.content as string | undefined,
-          metadata: JSON.parse(row.metadata as string),
-          workspace: (row.workspace as string) || 'global',
-          is_global: !!row.is_global,
-          timestamp: Number(row.timestamp),
-        }));
+        const batchDocs = batchRows.map(row => {
+          const metadata = JSON.parse(row.metadata as string);
+          return {
+            url: row.url as string,
+            text: row.text as string,
+            content: row.content as string | undefined,
+            metadata,
+            workspace: (row.workspace as string) || 'global',
+            is_global: !!row.is_global,
+            ingestion_type: (row.ingestion_type as string) || metadata['ingestionType'] || 'synthesis-description',
+            timestamp: Number(row.timestamp),
+          };
+        });
 
         const texts = batchDocs.map(d => d.text);
         const vectors = await this.options.embedder.embedMany(texts);
@@ -293,6 +295,7 @@ export class KnowledgeStore implements IKnowledgeStore {
           metadata: JSON.stringify(doc.metadata),
           workspace: doc.workspace,
           is_global: doc.is_global,
+          ingestion_type: doc.ingestion_type,
           timestamp: BigInt(doc.timestamp),
         }));
 
@@ -509,12 +512,8 @@ export class KnowledgeStore implements IKnowledgeStore {
       const startTime = Date.now();
       try {
         const escapedUrl = url.replace(/'/g, "''");
-        // Use a broader filter to find all chunks for this URL+type, then verify
-        // ingestionType in the metadata by checking the JSON. We avoid relying on
-        // LIKE with exact JSON key ordering by searching for the key-value pair
-        // with flexible surrounding content.
-        const escapedType = ingestionType.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
-        await table.delete(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"${escapedType}"%' AND (${scopeFilter})`);
+        const escapedType = ingestionType.replace(/'/g, "''");
+        await table.delete(`url = '${escapedUrl}' AND ingestion_type = '${escapedType}' AND (${scopeFilter})`);
         const duration = Date.now() - startTime;
         metrics.observe('knowledge_store_delete_duration_ms', duration, { operation: 'by_url_and_type' });
         metrics.increment('knowledge_store_delete_total', 1, { operation: 'by_url_and_type', status: 'success' });
@@ -555,7 +554,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     // We only want the high-quality summaries and their vectors for semantic search in the UI.
     const results = await table
       .query()
-      .where(`metadata LIKE '%"ingestionType":"synthesis-description"%' AND (${scopeFilter})`)
+      .where(`ingestion_type = 'synthesis-description' AND (${scopeFilter})`)
       .toArray();
 
     // 2. Format for web
@@ -610,7 +609,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     const results = await table
       .query()
-      .where(`url = '${escapedUrl}' AND metadata LIKE '%"ingestionType":"synthesis-description"%' AND (${scopeFilter})`)
+      .where(`url = '${escapedUrl}' AND ingestion_type = 'synthesis-description' AND (${scopeFilter})`)
       .limit(1)
       .toArray();
 
@@ -677,8 +676,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     const table = await this.getFreshTable();
 
     try {
-      const config = getConfig();
-      const ttlDays = config.KNOWLEDGE_STORE_CACHE_TTL_DAYS;
+      const ttlDays = this.options.ttlDays ?? 0;
       if (ttlDays <= 0) return;
 
       const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
@@ -700,20 +698,36 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   /**
    * Get granular counts for local vs global entries.
+   * @param workspace - Optional workspace to filter project-specific counts.
+   *                    Defaults to the store's configured workspace.
    */
-  async countScoped(): Promise<{ local: number; global: number; projects: number }> {
+  async countScoped(workspace?: string): Promise<{ local: number; global: number; projects: number }> {
     if (!this.db) return { local: 0, global: 0, projects: 0 };
     const table = await this.getFreshTable();
+    const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
+    const escaped = ws.replace(/'/g, "''");
     
-    const [local, global, allRows] = await Promise.all([
-      table.countRows(`is_global = false`),
-      table.countRows(`is_global = true`),
-      table.query().select(['workspace']).toArray()
+    // We run local and global counts efficiently using table.countRows()
+    const [local, global] = await Promise.all([
+      table.countRows(`workspace = '${escaped}'`),
+      table.countRows(`is_global = true`)
     ]);
     
-    const workspaces = new Set(allRows.map(r => r.workspace));
+    // To count unique projects, we must query the workspace column.
+    // To be memory efficient, we stream or batch if the table is huge, 
+    // but for now we optimize by only selecting the 'workspace' field.
+    // LanceDB 0.12+ supports better aggregations, but for compatibility 
+    // we use a targeted select.
+    const allWorkspaces = await table.query()
+      .select(['workspace'])
+      .toArray();
     
-    return { local, global, projects: workspaces.size };
+    const uniqueWorkspaces = new Set<string>();
+    for (const row of allWorkspaces) {
+      if (row.workspace) uniqueWorkspaces.add(row.workspace as string);
+    }
+    
+    return { local, global, projects: uniqueWorkspaces.size };
   }
 
   async clear(filter?: string): Promise<void> {

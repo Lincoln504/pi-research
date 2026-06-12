@@ -60,7 +60,7 @@ vi.mock('../../../src/config.ts', () => ({
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn(), debug: vi.fn() },
 }));
 
 import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS, createKnowledgeStoreComponents, forceDeleteKnowledgeStore } from '../../../src/knowledge/index.ts';
@@ -70,14 +70,14 @@ import { getConfig } from '../../../src/config.ts';
 const ALL_MODEL_IDS = SUPPORTED_MODELS.map(m => m.id);
 
 describe('createKnowledgeStoreComponents', () => {
-  it('throws error if both local and global stores are disabled', async () => {
+  it('returns null if both local and global stores are disabled', async () => {
     vi.mocked(getConfig).mockReturnValueOnce({
       LOCAL_KNOWLEDGE_STORE_ENABLED: false,
       GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
     } as any);
 
-    await expect(createKnowledgeStoreComponents(() => Promise.resolve({} as any)))
-      .rejects.toThrow('Knowledge store is disabled in configuration');
+    const components = await createKnowledgeStoreComponents(() => Promise.resolve({} as any));
+    expect(components).toBeNull();
   });
 
   it('initializes and returns components successfully', async () => {

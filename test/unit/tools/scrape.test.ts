@@ -33,7 +33,7 @@ const mockKnowledgeStore = {
 };
 
 vi.mock('../../../src/core/service-registry.ts', () => ({
-  getService: vi.fn(async (name: any) => {
+  getService: vi.fn(async (name: any, _ctx?: any, _container?: any) => {
     if (name === ServiceNames.KNOWLEDGE_STORE) {
       return {
         isReady: vi.fn().mockReturnValue(true),
@@ -42,6 +42,7 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
     }
     throw new Error(`Service ${name} not mocked`);
   }),
+  tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
 }));
 
 describe('tools/scrape', () => {
@@ -83,7 +84,7 @@ describe('tools/scrape', () => {
       cached: 0,
       fresh: 1,
     });
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined, undefined, expect.any(Function));
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 3, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
   });
 
   it('should handle multiple URLs', async () => {
@@ -95,7 +96,7 @@ describe('tools/scrape', () => {
     expect(details.total).toBe(2);
     expect(details.successful).toBe(2);
     expect(details.fresh).toBe(2);
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined, undefined, expect.any(Function));
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1', 'https://example.com/2'], 3, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
   });
 
   it('should return error for invalid parameters', async () => {
@@ -139,7 +140,7 @@ describe('tools/scrape', () => {
     const tool = createScrapeTool(mockOptions);
     await tool.execute('call-1', { urls: ['https://example.com/1'], maxConcurrency: 5 }, undefined, undefined, {} as any);
 
-    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, undefined, expect.any(Function));
+    expect(scrape).toHaveBeenCalledWith(['https://example.com/1'], 5, undefined, undefined, 'standalone', expect.any(Function), expect.anything());
   });
 });
 

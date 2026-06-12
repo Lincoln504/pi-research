@@ -6,8 +6,10 @@
  * depending on Infrastructure layer.
  */
 
-import { registerService, getService, disposeAllServices, type IService } from '../core/service-registry.ts';
+import { registerService, getService, disposeAllServices, type IService, getServiceContainer } from '../core/service-registry.ts';
+import type { ServiceContainer } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { SchedulerFactoryService } from './scheduler-factory-service.ts';
 import { StateManagerService } from './state/state-manager-service.ts';
 import { KnowledgeStoreService } from './knowledge-store-service.ts';
@@ -29,7 +31,7 @@ import { logger } from '../logger.ts';
 /**
  * Register all infrastructure services with the service registry
  */
-export function registerInfrastructureServices(): void {
+export function registerInfrastructureServices(container: ServiceContainer = getServiceContainer()): void {
   logger.debug('[InfrastructureServiceInit] Registering infrastructure services...');
 
   // Register Process Lifecycle Service
@@ -40,7 +42,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: false, // Core infrastructure
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Path Configuration Service
@@ -52,7 +55,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: false, // Core infrastructure
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register File Lock Service
@@ -60,7 +64,7 @@ export function registerInfrastructureServices(): void {
   registerService(
     ServiceNames.FILE_LOCK_SERVICE,
     async () => {
-      const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+      const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
       return new FileLockService({
         lockFilePath: pathConfig.getLockFilePath(),
       });
@@ -69,7 +73,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Backup Manager Service
@@ -77,7 +82,7 @@ export function registerInfrastructureServices(): void {
   registerService(
     ServiceNames.STATE_BACKUP_MANAGER,
     async () => {
-      const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION);
+      const pathConfig = await getService<StatePathConfiguration>(ServiceNames.STATE_PATH_CONFIGURATION, undefined, container);
       return new StateBackupManager(
         pathConfig.getStateFilePath(),
         pathConfig.getBackupDirPath(),
@@ -88,7 +93,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Scheduler Factory Service
@@ -100,7 +106,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: false, // Always available
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Manager Service
@@ -111,7 +118,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Knowledge Store Service
@@ -122,7 +130,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Metrics Service
@@ -133,7 +142,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Writer Queue Service
@@ -141,14 +151,19 @@ export function registerInfrastructureServices(): void {
   registerService(
     ServiceNames.WRITER_QUEUE,
     async () => {
-      const storeService = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-      return storeService.getWriterQueue();
+      const storeService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, undefined, container);
+      const queue = await storeService.getWriterQueue();
+      if (!queue) {
+        throw new Error('Writer queue is disabled in configuration');
+      }
+      return queue;
     },
     {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register GPU Resource Service
@@ -156,14 +171,15 @@ export function registerInfrastructureServices(): void {
   registerService(
     ServiceNames.GPU_RESOURCE_SERVICE,
     async () => {
-      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE);
+      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
       return new GPUResourceService({ processLifecycle });
     },
     {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Session Manager Service
@@ -171,14 +187,15 @@ export function registerInfrastructureServices(): void {
   registerService(
     ServiceNames.STATE_SESSION_MANAGER,
     async () => {
-      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE);
+      const processLifecycle = await getService<ProcessLifecycleService>(ServiceNames.PROCESS_LIFECYCLE, undefined, container);
       return new StateSessionManager(processLifecycle);
     },
     {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Browser Manager Service
@@ -189,7 +206,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Metrics Collector Service
@@ -200,7 +218,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register State Validator Service
@@ -211,7 +230,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Worker Pool Manager Service
@@ -222,7 +242,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Research Session Service
@@ -233,7 +254,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   // Register Research Synthesis Service
@@ -244,7 +266,8 @@ export function registerInfrastructureServices(): void {
       lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
-    }
+    },
+    container
   );
 
   logger.debug('[InfrastructureServiceInit] Infrastructure services registered');
@@ -254,8 +277,9 @@ export function registerInfrastructureServices(): void {
  * Initialize all infrastructure services
  * 
  * @param ctx - Optional extension context
+ * @param container - Service container instance
  */
-export async function initializeInfrastructureServices(ctx?: any): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
+export async function initializeInfrastructureServices(ctx?: any, container: ServiceContainer = getServiceContainer()): Promise<{ success: boolean; initialized: string[]; failed: string[] }> {
   logger.log('[InfrastructureServiceInit] Initializing infrastructure services...');
   
   const initialized: string[] = [];
@@ -271,7 +295,7 @@ export async function initializeInfrastructureServices(ctx?: any): Promise<{ suc
 
   for (const service of eagerServices) {
     try {
-      await getService<IService>(service.name, ctx);
+      await getService<IService>(service.name, ctx, container);
       initialized.push(service.label);
     } catch (err) {
       const msg = `${service.label} init failed`;
@@ -289,8 +313,10 @@ export async function initializeInfrastructureServices(ctx?: any): Promise<{ suc
 
 /**
  * Shutdown all infrastructure services
+ * 
+ * @param container - Service container instance
  */
-export async function shutdownInfrastructureServices(): Promise<void> {
+export async function shutdownInfrastructureServices(container: ServiceContainer = getServiceContainer()): Promise<void> {
   logger.log('[InfrastructureServiceInit] Shutting down infrastructure services...');
-  await disposeAllServices();
+  await disposeAllServices(container);
 }

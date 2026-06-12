@@ -15,6 +15,7 @@ export interface StoreDocument {
   timestamp: number;
   workspace?: string;
   is_global?: boolean;
+  ingestion_type?: string;
 }
 
 /**
@@ -108,7 +109,7 @@ export interface IKnowledgeStore extends IService {
   rebuildDocument(url: string): Promise<{ text: string; description: string | null; metadata: Record<string, any> } | null>;
   findDocumentsByUrl(url: string): Promise<StoreDocument[]>;
   findByUrl(url: string): Promise<StoreDocument[]>;
-  countScoped(): Promise<{ local: number; global: number; projects: number }>;
+  countScoped(workspace?: string): Promise<{ local: number; global: number; projects: number }>;
   
   /** Extended operations */
   addDocuments(docs: StoreDocument[]): Promise<void>;
@@ -129,8 +130,9 @@ export interface IKnowledgeStore extends IService {
 export interface IKnowledgeStoreService extends IService {
   isReady(): boolean;
   getDevice(): string | null;
-  getStore(): Promise<IKnowledgeStore>;
-  getEmbedder(): Promise<IEmbedder>;
+  getStore(): Promise<IKnowledgeStore | null>;
+  getEmbedder(): Promise<IEmbedder | null>;
+  getWriterQueue(): Promise<IWriterQueue | null>;
   clear(): Promise<void>;
   clearLocal(): Promise<void>;
   clearGlobal(): Promise<void>;

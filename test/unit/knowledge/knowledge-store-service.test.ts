@@ -20,7 +20,8 @@ vi.mock('../../../src/infrastructure/embedding/embedding-factory.ts', () => ({
 }));
 
 vi.mock('../../../src/core/service-registry.ts', () => ({
-  getService: vi.fn(),
+  getService: vi.fn(async (_name: any, _ctx?: any, _container?: any) => {}),
+  tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
   ServiceLifecycle: {
     UNINITIALIZED: 'UNINITIALIZED',
     INITIALIZING: 'INITIALIZING',
@@ -103,7 +104,7 @@ describe('KnowledgeStoreService', () => {
     await service.clearLocal();
 
     const expectedWorkspace = process.cwd().replace(/'/g, "''");
-    expect(mockStore.clear).toHaveBeenCalledWith(`workspace = '${expectedWorkspace}' AND is_global = false`);
+    expect(mockStore.clear).toHaveBeenCalledWith(`workspace = '${expectedWorkspace}'`);
   });
 
   it('clearGlobal should use is_global filter', async () => {

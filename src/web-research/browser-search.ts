@@ -11,6 +11,8 @@ import { safeUnref } from '../utils/safe-unref.ts';
 import type { SearchResult } from './types.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import { getServiceContainer } from '../core/service-registry.ts';
+import type { ServiceContainer } from '../core/service-registry.ts';
 
 /**
  * Orchestrate high-fidelity search across multiple queries.
@@ -21,7 +23,8 @@ export async function performSearch(
     queries: string[], 
     config?: Config,
     signal?: AbortSignal,
-    onProgress?: (links: number) => void
+    onProgress?: (links: number) => void,
+    container: ServiceContainer = getServiceContainer()
 ): Promise<Map<string, SearchResult[]>> {
     const startTime = Date.now();
     const resultMap = new Map<string, SearchResult[]>();
@@ -61,7 +64,7 @@ export async function performSearch(
               ? AbortSignal.any([signal, timeoutController.signal])
               : timeoutController.signal;
 
-            const results = await runWorkerSearch(query, config, querySignal);
+            const results = await runWorkerSearch(query, config, querySignal, 1, undefined, container);
             const queryDuration = Date.now() - queryStartTime;
             metrics.observe('browser_search_query_duration_ms', queryDuration);
 

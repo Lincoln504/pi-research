@@ -17,6 +17,7 @@ export interface StatePaths {
   lockDirPath: string;
   backupDirPath: string;
   lockFilePath: string;
+  projectSettingsPath: string;
 }
 
 /**
@@ -34,6 +35,7 @@ export class StatePathConfiguration implements IService {
   private readonly lockDirPath: string;
   private readonly backupDirPath: string;
   private readonly lockFilePath: string;
+  private readonly projectSettingsPath: string;
 
   constructor(stateDir?: string) {
     const resolvedStateDir = stateDir || path.join(os.homedir(), '.pi', 'state');
@@ -42,6 +44,7 @@ export class StatePathConfiguration implements IService {
     this.lockDirPath = path.join(resolvedStateDir, '.locks');
     this.backupDirPath = path.join(resolvedStateDir, 'backups');
     this.lockFilePath = path.join(this.lockDirPath, 'research-state.lock');
+    this.projectSettingsPath = path.join(resolvedStateDir, 'project-settings.json');
   }
 
   async initialize(): Promise<void> {
@@ -66,6 +69,7 @@ export class StatePathConfiguration implements IService {
       lockDirPath: this.lockDirPath,
       backupDirPath: this.backupDirPath,
       lockFilePath: this.lockFilePath,
+      projectSettingsPath: this.projectSettingsPath,
     };
   }
 
@@ -103,4 +107,11 @@ export class StatePathConfiguration implements IService {
   getLockFilePath(): string {
     return this.lockFilePath;
   }
-}
+
+  /**
+   * Get the project settings file path
+   */
+  getProjectSettingsPath(): string {
+    return this.projectSettingsPath;
+  }
+  }

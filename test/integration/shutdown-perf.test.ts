@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initResearchSDK, disposeResearchSDK } from '../../src/sdk.ts';
+import { initResearchSDK, disposeResearchSDK, getSDKContainer } from '../../src/sdk.ts';
 import { getService } from '../../src/core/service-registry.ts';
 import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
 import type { ISchedulerInternals } from '../../src/core/interfaces/scheduler-interfaces.ts';
@@ -16,13 +16,14 @@ describe('Shutdown Performance', () => {
     await initResearchSDK({ model: {} as any });
     
     // 2. Trigger browser pool via healthcheck
-    const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER);
+    const container = getSDKContainer()!;
+    const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, container);
     const instance = schedulerService.getSchedulerInstance();
     if (instance && 'runHealthCheck' in instance) {
       await (instance as any).runHealthCheck();
     } else {
-      const stateManager = await getService<any>(ServiceNames.STATE_MANAGER);
-      const s = new BrowserTaskScheduler('perf-shutdown-test', stateManager);
+      const stateManager = await getService<any>(ServiceNames.STATE_MANAGER, undefined, container);
+      const s = new BrowserTaskScheduler('perf-shutdown-test', stateManager, container);
       await s.startServer();
       await s.runHealthCheck();
       schedulerService.setSchedulerInstance(s);

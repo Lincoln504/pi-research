@@ -11,12 +11,41 @@ import type { BrowserTask } from '../../types/index.ts';
 import { logger } from '../../logger.ts';
 import { errorTracker } from '../../utils/error-tracker.ts';
 import { getBrowserCircuitBreaker, browserCircuitBreaker, isTransientSocketError, isPoolShutdownError, isTaskTimeoutError, isCloudflareBlockError } from './browser-error-utils.ts';
-import { getScheduler, forceSchedulerRestart } from './scheduler-factory.ts';
+import { getScheduler as _getScheduler, forceSchedulerRestart as _forceSchedulerRestart } from './scheduler-factory.ts';
 import { waitForBrowserPoolIdle } from './browser-lifecycle.ts';
+import { getServiceContainer, getService } from '../../core/service-registry.ts';
+import type { ServiceContainer } from '../../core/service-registry.ts';
+import { ServiceNames } from '../../core/service-interfaces.ts';
+import type { ISchedulerFactory, IScheduler } from '../../core/scheduler-factory.ts';
 
 // Cooldown to prevent cascading scheduler restarts (thundering herd)
 let lastRestartTime = 0;
 const RESTART_COOLDOWN_MS = 10000;
+
+/**
+ * Get the scheduler from the factory, optionally using a specific container.
+ */
+async function getScheduler(config?: Config, container: ServiceContainer = getServiceContainer()): Promise<IScheduler> {
+    try {
+        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY, undefined, container);
+        return await factory.getScheduler(config);
+    } catch {
+        // Fallback to factory function if service resolution fails (e.g. during early init or tests)
+        return await _getScheduler(config, container);
+    }
+}
+
+/**
+ * Force a scheduler restart, optionally using a specific container.
+ */
+async function forceSchedulerRestart(forceClearRemoteState: boolean = false, container: ServiceContainer = getServiceContainer()): Promise<void> {
+    try {
+        const factory = await getService<ISchedulerFactory>(ServiceNames.SCHEDULER_FACTORY, undefined, container);
+        return await factory.forceSchedulerRestart(forceClearRemoteState);
+    } catch {
+        return await _forceSchedulerRestart(forceClearRemoteState, container);
+    }
+}
 
 /**
  * Dispatches a browser task to the unified worker pool.
@@ -26,7 +55,8 @@ export async function runBrowserTask<T>(
     type: 'search' | 'scrape' = 'scrape',
     config?: Config,
     signal?: AbortSignal,
-    retries = 1
+    retries = 1,
+    container: ServiceContainer = getServiceContainer()
 ): Promise<T> {
     if (signal?.aborted) throw new Error('Aborted');
 
@@ -37,7 +67,7 @@ export async function runBrowserTask<T>(
     try {
         return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
-            const scheduler = await getScheduler(config);
+            const scheduler = await getScheduler(config, container);
             if (type === 'search') {
                 const query = typeof taskOrUrl === 'string' ? taskOrUrl : (taskOrUrl as BrowserTask).query;
                 if (!query) throw new Error('Search task requires a query');
@@ -73,7 +103,7 @@ export async function runBrowserTask<T>(
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true);
+                    await forceSchedulerRestart(true, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     logger.warn(`[BrowserManager] Scheduler restart recently triggered, waiting for pool idle...`);
@@ -84,7 +114,7 @@ export async function runBrowserTask<T>(
             // Retry with jitter (100-500ms) to prevent thundering herd
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1);
+            return runBrowserTask<T>(taskOrUrl, type, config, signal, retries - 1, container);
         }
         throw error;
     }
@@ -93,10 +123,10 @@ export async function runBrowserTask<T>(
 /**
  * Run a browser health check with retry logic.
  */
-export async function runBrowserHealthCheck(config?: Config, retries = 1, signal?: AbortSignal): Promise<{ success: boolean }> {
+export async function runBrowserHealthCheck(config?: Config, retries = 1, signal?: AbortSignal, container: ServiceContainer = getServiceContainer()): Promise<{ success: boolean }> {
     try {
         return await browserCircuitBreaker.execute(async () => {
-            const scheduler = await getScheduler(config);
+            const scheduler = await getScheduler(config, container);
             return await scheduler.runHealthCheck(config, signal);
         });
     } catch (error: unknown) {
@@ -115,7 +145,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true);
+                    await forceSchedulerRestart(true, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
@@ -124,7 +154,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
 
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runBrowserHealthCheck(config, retries - 1, signal);
+            return runBrowserHealthCheck(config, retries - 1, signal, container);
         }
         throw error;
     }
@@ -133,7 +163,7 @@ export async function runBrowserHealthCheck(config?: Config, retries = 1, signal
 /**
  * Run a worker search query with retry logic.
  */
-export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string): Promise<SearchResult[]> {
+export async function runWorkerSearch(query: string, config?: Config, signal?: AbortSignal, retries = 1, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<SearchResult[]> {
     if (signal?.aborted) throw new Error('Aborted');
     
     const breaker = sessionId ? getBrowserCircuitBreaker(sessionId) : browserCircuitBreaker;
@@ -141,7 +171,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
     try {
         return await breaker.execute(async () => {
             if (signal?.aborted) throw new Error('Aborted');
-            const scheduler = await getScheduler(config);
+            const scheduler = await getScheduler(config, container);
             return await scheduler.runSearch(query, config, signal);
         });
     } catch (error: unknown) {
@@ -163,7 +193,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
                 if (now - lastRestartTime > RESTART_COOLDOWN_MS) {
                     lastRestartTime = now;
                     logger.warn(`[BrowserManager] Forcing scheduler restart and retrying...`);
-                    await forceSchedulerRestart(true);
+                    await forceSchedulerRestart(true, container);
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
                 } else {
                     await waitForBrowserPoolIdle(15000).catch((err) => logger.debug('Wait for browser idle timed out or failed:', err));
@@ -172,7 +202,7 @@ export async function runWorkerSearch(query: string, config?: Config, signal?: A
 
             const jitter = 100 + Math.floor(Math.random() * 400);
             await new Promise(resolve => setTimeout(resolve, jitter));
-            return runWorkerSearch(query, config, signal, retries - 1, sessionId);
+            return runWorkerSearch(query, config, signal, retries - 1, sessionId, container);
         }
         throw error;
     }

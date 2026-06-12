@@ -212,8 +212,10 @@ export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, 
 
   // 1. Normalize IDs to strings and cap individual researchers
   // CRITICAL: Only keep researchers with non-empty queries to guarantee search results
+  const maxTeam = getTeamSize(complexity);
   plan.researchers = plan.researchers
     .filter(r => r && typeof r === 'object' && Array.isArray(r.queries) && r.queries.length > 0)
+    .slice(0, maxTeam)
     .map(r => {
       const normalized = { ...r, id: String(r.id) };
       if (normalized.queries.length > budget) {
@@ -244,6 +246,13 @@ export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, 
   }
 
   plan.allQueries = plan.researchers.flatMap(r => r.queries);
+
+  // If no researchers remain with valid queries, force synthesis
+  if (plan.action === 'delegate' && plan.researchers.length === 0) {
+    logger.warn(`[${serviceName}] No valid researchers after query cap/filtering, forcing synthesize`);
+    return { ...plan, action: 'synthesize', researchers: [], allQueries: [] };
+  }
+
   return plan;
 }
 

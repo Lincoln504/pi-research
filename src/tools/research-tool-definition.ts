@@ -19,7 +19,8 @@ import type { ModelWithId, ExtendedExtensionContext } from '../types/extension-c
 import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
-import { getService } from '../core/service-registry.ts';
+import { tryGetServiceContainerFromCtx, getService } from '../core/service-registry.ts';
+
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IResearchOrchestration } from '../core/service-interfaces.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
@@ -31,7 +32,6 @@ import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
 
-import { getServiceContainer } from '../core/service-registry.ts';
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
 import { extractRunStats, buildResearchSummary } from '../utils/metrics-summary.ts';
@@ -78,24 +78,24 @@ function appendResearchSummary(
 export function createResearchTool(): ToolDefinition {
   const parameters = Type.Object({
     query: Type.String({
-      description: 'Research query or topic to investigate',
+      description: 'The research topic or query to investigate.',
     }),
     depth: Type.Optional(Type.Integer({
       minimum: 1,
       maximum: 3,
       description: [
-        'Research complexity 1-3.',
-        '1: Normal (coordinated, thorough)',
-        '2: Deep (multi-round, exhaustive)',
-        '3: Ultra (maximum depth, extreme rigor)',
+        'Research depth (1-3).',
+        '1: Normal (coordinated, thorough).',
+        '2: Deep (multi-round, exhaustive).',
+        '3: Ultra (maximum depth, extreme rigor).',
       ].join('\n'),
       default: 1,
     })),
     model: Type.Optional(Type.String({
-      description: 'Model ID to use for coordination (optional)',
+      description: 'Optional model ID override for coordination.',
     })),
     excludeTools: Type.Optional(Type.Array(Type.String(), {
-      description: 'List of internal research tools to disable (e.g., search, scrape, grep, security, stackexchange)',
+      description: 'List of internal tools to disable (e.g., search, scrape, security).',
     })),
   });
 
@@ -105,8 +105,8 @@ export function createResearchTool(): ToolDefinition {
     name: 'research',
     label: 'Research',
     description:
-      'Perform web/internet research using an internal multi-source system. Synthesizes findings from web search, scraping, security databases, and Stack Exchange.',
-    promptSnippet: 'Conduct comprehensive web/internet research',
+      'Perform multi-source web research using search, scraping, and specialized databases.',
+    promptSnippet: 'Execute comprehensive web research',
     parameters,
     renderShell: 'self',
     executionMode: 'parallel',
@@ -128,10 +128,6 @@ export function createResearchTool(): ToolDefinition {
         } else {
           normalized['depth'] = 1;
         }
-      } else {
-        // No depth argument provided — fall back to the configured default depth
-        // rather than always hardcoding 1, so user config is honoured.
-        normalized['depth'] = Math.max(1, getConfig().DEFAULT_RESEARCH_DEPTH);
       }
 
       return normalized;
@@ -144,7 +140,7 @@ export function createResearchTool(): ToolDefinition {
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
       // 1. System Readiness Check
-      const container = getServiceContainer();
+      const container = tryGetServiceContainerFromCtx(ctx);
       if (!container.isReady && process.env['PI_RESEARCH_FORCE_READY'] !== 'true') {
         return {
           content: [{
@@ -155,7 +151,10 @@ export function createResearchTool(): ToolDefinition {
         };
       }
 
-      const { query, depth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
+      const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
+      
+      // Default depth if not provided
+      const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
 
       // Inherit exclusions from parent context if possible (new in v0.77.0)
       const eCtx = ctx as ExtendedExtensionContext;
@@ -183,7 +182,7 @@ export function createResearchTool(): ToolDefinition {
       try {
         const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
           logger.runCapturingStderr(async () => {
-          const config = getConfig();
+          const config = getConfig(ctx.cwd);
           validateConfig(config);
 
           // When no explicit model parameter is given, use ctx.model directly.
@@ -269,7 +268,7 @@ export function createResearchTool(): ToolDefinition {
           const researchRunResult = await runWithTracker(sessionTracker, () => runWithLogger(researchLogger, async () => {
             try {
               // Run research via orchestration service
-              const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION);
+              const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
               const result = await orch.runResearch({
                 ctx,
                 query: sanitizedQuery,
@@ -290,7 +289,7 @@ export function createResearchTool(): ToolDefinition {
               const resultWithSummaries = appendResearchSummary(result, runRegistry.getSnapshot(), errorReport);
 
               let finalResult = resultWithSummaries;
-              if (getConfig().RESEARCH_REPORT_EXPORT_ENABLED) {
+              if (getConfig(ctx.cwd).RESEARCH_REPORT_EXPORT_ENABLED) {
                 const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd);
                 if (exportPath) {
                   finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState.totalCost);

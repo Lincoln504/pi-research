@@ -15,7 +15,7 @@ import {
 } from 'apache-arrow';
 import * as lancedb from '@lancedb/lancedb';
 
-export const CURRENT_SCHEMA_VERSION = '3';
+export const CURRENT_SCHEMA_VERSION = '4';
 
 /**
  * Create the knowledge store table schema
@@ -29,6 +29,7 @@ export function createStoreSchema(dim: number, modelName: string): Schema {
     new Field('metadata', new Utf8(), false), // JSON stringified
     new Field('workspace', new Utf8(), false), // local workspace path or 'global'
     new Field('is_global', new Bool(), false), // boolean indicating if it's shared globally
+    new Field('ingestion_type', new Utf8(), false), // e.g. 'synthesis-description'
     new Field('timestamp', new Int64(), false),
   ], new Map([
     ['embedding_model', modelName],
@@ -63,9 +64,12 @@ export async function createStoreTable(
   await table.createIndex('content', { config: lancedb.Index.fts() });
 
   // Create scalar indices for performance (B-Tree)
-  // These improve deleteByUrl and evictOldRecords performance significantly as the store grows.
+  // These improve deleteByUrl, countRows, and evictOldRecords performance significantly as the store grows.
   await table.createIndex('url', { config: lancedb.Index.btree() });
   await table.createIndex('timestamp', { config: lancedb.Index.btree() });
+  await table.createIndex('workspace', { config: lancedb.Index.btree() });
+  await table.createIndex('is_global', { config: lancedb.Index.btree() });
+  await table.createIndex('ingestion_type', { config: lancedb.Index.btree() });
 
   return table;
 }

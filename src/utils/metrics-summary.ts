@@ -271,7 +271,7 @@ export function buildResearchSummary(
   const workParts: string[] = [];
 
   if (stats.researchersLaunched > 0) {
-    workParts.push(`**${stats.researchersLaunched}** researcher${stats.researchersLaunched > 1 ? 's' : ''} dispatched`);
+    workParts.push(`**${stats.researchersLaunched}** researcher${stats.researchersLaunched > 1 ? 's' : ''} launched`);
   }
   if (stats.roundsCompleted > 1) {
     workParts.push(`**${stats.roundsCompleted}** evaluation rounds`);
@@ -296,7 +296,7 @@ export function buildResearchSummary(
       layerParts.push(`${stats.browserSuccess} via browser`);
     }
     if (stats.browserFallbacks > 0) {
-      layerParts.push(`${stats.browserFallbacks} fetch→browser fallback${stats.browserFallbacks > 1 ? 's' : ''}`);
+      layerParts.push(`${stats.browserFallbacks} fetch-browser fallback${stats.browserFallbacks > 1 ? 's' : ''}`);
     }
     discoveryParts.push(`**${layerParts.join(', ')}**`);
   }
@@ -313,13 +313,13 @@ export function buildResearchSummary(
     toolParts.push(`${stats.toolUsage.scrapes} scrapes`);
   }
   if (stats.toolUsage.securitySearches > 0) {
-    toolParts.push(`${stats.toolUsage.securitySearches} security lookups`);
+    toolParts.push(`${stats.toolUsage.securitySearches} security`);
   }
   if (stats.toolUsage.stackexchangeQueries > 0) {
-    toolParts.push(`${stats.toolUsage.stackexchangeQueries} StackExchange queries`);
+    toolParts.push(`${stats.toolUsage.stackexchangeQueries} StackExchange`);
   }
   if (stats.toolUsage.knowledgeLookups > 0) {
-    toolParts.push(`${stats.toolUsage.knowledgeLookups} knowledge store queries`);
+    toolParts.push(`${stats.toolUsage.knowledgeLookups} knowledge lookups`);
   }
   if (toolParts.length > 0) {
     lines.push(`Tools: ${toolParts.join(' · ')}`);

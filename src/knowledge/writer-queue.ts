@@ -1,3 +1,4 @@
+import { normalizeUrl, validateUrl } from '../utils/url-utils.ts';
 import { logger } from '../logger.ts';
 import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
@@ -10,88 +11,9 @@ import type {
   StoreDocument 
 } from '../core/interfaces/knowledge-interfaces.ts';
 
-/**
- * Normalize a URL for deduplication and storage purposes.
- *
- * Strips trailing slashes, sorts query parameters, lowercases the hostname,
- * removes default ports, removes empty hash fragments, and removes
- * trailing `?` from URLs with empty query strings.
- *
- * Returns the original string unchanged if URL parsing fails.
- */
-export function normalizeUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    // Lowercase hostname (scheme already lowercase from URL constructor)
-    parsed.hostname = parsed.hostname.toLowerCase();
-    // Remove default ports
-    if ((parsed.protocol === 'https:' && parsed.port === '443') ||
-        (parsed.protocol === 'http:' && parsed.port === '80')) {
-      parsed.port = '';
-    }
-    // Sort query parameters for consistent ordering
-    parsed.searchParams.sort();
-    // Remove empty hash
-    if (parsed.hash === '#' || parsed.hash === '') {
-      parsed.hash = '';
-    }
-    // Strip trailing slashes from pathname (URL constructor forces '/' for root)
-    while (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
-      parsed.pathname = parsed.pathname.slice(0, -1);
-    }
-    let result = parsed.toString();
-    // URL constructor always produces 'https://host/' for root — strip that trailing slash
-    if (result.endsWith('/')) {
-      result = result.slice(0, -1);
-    }
-    return result;
-  } catch {
-    return url;
-  }
-}
-
 function isConnectionRefused(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.includes('ECONNREFUSED');
-}
-
-export type { IngestionItem };
-
-export interface WriterQueueOptions {
-  store: IKnowledgeStore;
-  chunker?: Chunker;
-}
-
-/**
- * Validate URL format — rejects obviously malformed URLs from AI hallucinations.
- * Also provides basic SSRF defense-in-depth by rejecting internal network addresses.
- * FIX (Issues 3/4/8): This is the knowledge store's security boundary.
- */
-export function validateUrl(url: string): boolean {
-  if (!url || typeof url !== 'string') return false;
-  try {
-    const parsed = new URL(url);
-    // Only allow HTTP/HTTPS protocols
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    const hostname = parsed.hostname.toLowerCase();
-    // Must have a hostname
-    if (!hostname) return false;
-    // Reject localhost and loopback
-    if (hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
-    // Reject IPv6 loopback, link-local, unique local, and IPv4-mapped
-    if (hostname === '::1' || hostname === '[::1]') return false;
-    if (hostname.startsWith('fe80:') || hostname.startsWith('[fe80:')) return false;
-    if (hostname.startsWith('fc') || hostname.startsWith('[fc')) return false; // fc00::/7 unique local
-    if (hostname.startsWith('fd') || hostname.startsWith('[fd')) return false; // fd00::/8 unique local
-    if (hostname.startsWith('::ffff:') || hostname.startsWith('[::ffff:')) return false; // IPv4-mapped
-    // Reject private/internal network ranges (SSRF defense-in-depth)
-    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/.test(hostname)) return false;
-    // Reject hostnames without a public TLD
-    if (hostname.endsWith('.local') || hostname.endsWith('.internal')) return false;
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export class WriterQueue implements IWriterQueue {

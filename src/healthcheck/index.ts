@@ -8,118 +8,148 @@
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable } from '../infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
-import { getService } from '../core/service-registry.ts';
-import { ServiceNames, IStateManager } from '../core/service-interfaces.ts';
-import { SchedulerService } from '../core/scheduler-service.ts';
-import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
-import { healthRegistry } from './registry.ts';
+import { getService, tryGetServiceContainerFromCtx, getServiceContainer } from '../core/service-registry.ts';
+import type { ServiceContainer } from '../core/service-registry.ts';
+import { ServiceNames } from '../core/service-interfaces.ts';
+import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISchedulerService } from '../core/service-interfaces.ts';
+import { healthRegistry as globalHealthRegistry } from './registry.ts';
 
-// Register Browser Capability Check
-healthRegistry.register('BrowserCapability', async () => {
-  const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
-                   process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-  if (isBrowserAvailable() || mockMode) {
-    return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
-  } else {
-    return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
-  }
-}, { critical: true });
-
-// Register Browser Runtime Check
-healthRegistry.register('BrowserRuntime', async (options) => {
-  try {
-    const scheduler = await getService<SchedulerService>(ServiceNames.SCHEDULER);
-    
-    // Check if initialized but idle (unless forced)
-    if (!scheduler.isInitialized() && !options?.force) {
-      return { healthy: true, diagnostic: { status: 'ready (idle)' } };
-    }
-    
-    // Perform a real test
-    const searchResult = await runBrowserHealthCheck();
-    if (searchResult.success) {
-      return { healthy: true, diagnostic: { status: options?.force && !scheduler.isInitialized() ? 'initialized & active' : 'active' } };
+/**
+ * Register all health checks with a registry
+ */
+export function registerHealthChecks(registry: IHealthRegistryService, container: ServiceContainer = getServiceContainer()): void {
+  // Register Browser Capability Check
+  registry.register('BrowserCapability', async () => {
+    const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+                     process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+    if (isBrowserAvailable() || mockMode) {
+      return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
     } else {
-      return { healthy: false, error: 'Browser healthcheck failed: worker reported failure or page failed to load.' };
+      return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
     }
-  } catch (e) {
-    return { healthy: false, error: `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
-}, { timeoutMs: 150000, critical: true });
+  }, { critical: true });
 
-// Register Knowledge Store Check
-healthRegistry.register('KnowledgeStore', async (options) => {
-  const config = getConfig();
-  if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
-    return { healthy: true, diagnostic: { status: 'disabled in config' } };
-  }
-  try {
-    const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
-    const embedder = await service.getEmbedder();
-    
-    // Lazy-aware health check: if not initialized, we check if the store is open
-    // but don't force a model load to GPU just for the health check (unless forced).
-    if (!embedder.isInitialized() && !options?.force) {
-        return { 
-            healthy: true, 
-            diagnostic: { 
-                status: 'ready (idle)',
-                device: embedder.getOriginalDevice()
-            } 
-        };
+  // Register Browser Runtime Check
+  registry.register('BrowserRuntime', async (options) => {
+    try {
+      const scheduler = await getService<ISchedulerService>(ServiceNames.SCHEDULER, undefined, container);
+      
+      // Check if initialized but idle (unless forced)
+      if (!scheduler.isReady() && !options?.force) {
+        return { healthy: true, diagnostic: { status: 'ready (idle)' } };
+      }
+      
+      // Perform a real test
+      const searchResult = await runBrowserHealthCheck(undefined, 1, undefined, container);
+      if (searchResult.success) {
+        return { healthy: true, diagnostic: { status: options?.force && !scheduler.isReady() ? 'initialized & active' : 'active' } };
+      } else {
+        return { healthy: false, error: 'Browser healthcheck failed: worker reported failure or page failed to load.' };
+      }
+    } catch (e) {
+      return { healthy: false, error: `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
     }
+  }, { timeoutMs: 150000, critical: true });
 
-    // Force initialization if requested
-    if (options?.force && !embedder.isInitialized()) {
-        await embedder.embed(' ');
+  // Register Knowledge Store Check
+  registry.register('KnowledgeStore', async (options) => {
+    const cwd = (container as any)._cwd || process.cwd();
+    const config = getConfig(cwd);
+    if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
+      return { healthy: true, diagnostic: { status: 'disabled in config' } };
     }
+    try {
+      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, undefined, container);
+      const store = await service.getStore();
+      const counts = store ? await store.countScoped() : { local: 0, global: 0, projects: 0 };
+      const embedder = await service.getEmbedder();
+      
+      if (!embedder) {
+        return { healthy: false, error: 'Embedder service not available' };
+      }
 
-    const device = embedder.getDevice();
-    return { 
-        healthy: true, 
-        diagnostic: { 
-            status: 'initialized',
-            device,
-            model: getConfig().EMBEDDING_MODEL 
-        } 
-    };
-  } catch (e) {
-    return { healthy: false, error: `Knowledge store healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
-}, { timeoutMs: 45000 });
+      // Lazy-aware health check: if not initialized, we check if the store is open
+      // but don't force a model load to GPU just for the health check (unless forced).
+      if (!embedder.isInitialized() && !options?.force) {
+          return { 
+              healthy: true, 
+              diagnostic: { 
+                  status: 'ready (idle)',
+                  device: embedder.getOriginalDevice(),
+                  localEntries: counts.local,
+                  globalEntries: counts.global
+              } 
+          };
+      }
 
-// Register State Manager Check
-healthRegistry.register('StateManager', async () => {
-  try {
-    const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER);
-    const metrics = await stateManager.getMetrics();
-    const gpuOwner = await stateManager.getGpuOwner();
-    
-    return { 
-        healthy: true, 
-        diagnostic: { 
-            status: 'operational',
-            sessions: metrics.activeSessions,
-            gpuLocked: !!gpuOwner,
-            gpuOwner: gpuOwner?.sessionId || 'none'
-        } 
-    };
-  } catch (e) {
-    return { healthy: false, error: `State manager healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
-});
+      // Force initialization if requested
+      if (options?.force && !embedder.isInitialized()) {
+          await embedder.embed(' ');
+      }
+
+      const device = embedder.getDevice();
+      return { 
+          healthy: true, 
+          diagnostic: { 
+              status: 'initialized',
+              device,
+              model: config.EMBEDDING_MODEL,
+              localEntries: counts.local,
+              globalEntries: counts.global,
+              totalProjects: counts.projects
+          } 
+      };
+    } catch (e) {
+      return { healthy: false, error: `Knowledge store healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }, { timeoutMs: 45000 });
+
+  // Register State Manager Check
+  registry.register('StateManager', async () => {
+    try {
+      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
+      const stats = await stateManager.getMetrics();
+      const gpuOwner = await stateManager.getGpuOwner();
+      
+      return { 
+          healthy: true, 
+          diagnostic: { 
+              status: 'operational',
+              sessions: stats.activeSessions,
+              gpuLocked: !!gpuOwner,
+              gpuOwner: gpuOwner?.sessionId || 'none'
+          } 
+      };
+    } catch (e) {
+      return { healthy: false, error: `State manager healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  });
+}
+
+// Ensure global registry is populated
+registerHealthChecks(globalHealthRegistry);
 
 /**
  * Perform a full system health check
  */
-export async function runHealthCheck(options?: { force?: boolean }) {
-  const result = await healthRegistry.runAll(options);
+export async function runHealthCheck(options?: { force?: boolean; ctx?: any }) {
+  const container = tryGetServiceContainerFromCtx(options?.ctx);
+  
+  let registry: IHealthRegistryService;
+  try {
+    registry = await getService<IHealthRegistryService>(ServiceNames.HEALTH_REGISTRY, options?.ctx, container);
+  } catch {
+    // Fallback to global registry if service not found (CLI/Legacy)
+    registry = globalHealthRegistry;
+  }
+
+  const result = await registry.runAll(options);
   return {
     success: result.status !== 'unhealthy',
     status: result.status,
     components: result.components,
     error: result.status === 'unhealthy' 
-      ? result.components.find(c => !c.healthy && healthRegistry.isCritical(c.component))?.error
+      ? result.components.find(c => !c.healthy && registry.isCritical(c.component))?.error
       : undefined
   };
 }
@@ -127,4 +157,4 @@ export async function runHealthCheck(options?: { force?: boolean }) {
 /**
  * Export health registry for external use
  */
-export { healthRegistry };
+export { globalHealthRegistry as healthRegistry };

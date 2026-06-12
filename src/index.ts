@@ -74,12 +74,7 @@ export default async function (pi: ExtensionAPI) {
 
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
   // This ensures we capture steering even if initialization takes time.
-  // The SDK uses 'streamingBehavior === "steer"' to identify mid-run guidance.
-  // We capture these messages specifically for the active research run and 
-  // suppress the SDK's built-in steering UI to maintain TUI consistency.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
-    // PASSIVE: We only capture steering messages. 
-    // We NEVER swallow input (action: "handled") because it interferes with user experience.
     if (event.streamingBehavior === 'steer' && event.text) {
       try {
         const eCtx = ctx as ExtendedExtensionContext;
@@ -87,7 +82,6 @@ export default async function (pi: ExtensionAPI) {
         const sanitized = event.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
         if (!sanitized) return undefined;
 
-        // Only route steering if research is actually active
         const activeCount = getActiveSessionCount();
         if (activeCount === 0) return undefined;
 
@@ -100,8 +94,6 @@ export default async function (pi: ExtensionAPI) {
           const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
           if (activeSessions.length === 1) {
             sessionIds = [activeSessions[0]!];
-          } else if (activeSessions.length > 1) {
-            logger.warn(`[pi-research] ctx.sessionId missing and multiple active sessions exist — cannot route steering safely.`);
           }
         }
 
@@ -113,7 +105,7 @@ export default async function (pi: ExtensionAPI) {
       }
     }
     
-    return undefined; // Always let the host handle the input
+    return undefined;
   });
 
   // 2. REGISTER SHUTDOWN TASKS
@@ -132,14 +124,15 @@ export default async function (pi: ExtensionAPI) {
   // 3. SERVICE INITIALIZATION
   logger.log(`[pi-research] Activating extension (pi v${PI_VERSION})...`);
 
-  // Register and initialize services
+  // Register and initialize services into the global container
   try {
-    registerCoreServices();
-    registerInfrastructureServices();
+    const container = getServiceContainer();
+    registerCoreServices(container);
+    registerInfrastructureServices(container);
     logger.log('[pi-research] Services registered');
     
-    const container = getServiceContainer();
-    const result = await initializeCoreServices(pi);
+    // Pass pi as context — includes cwd for proper config loading
+    const result = await initializeCoreServices(pi, container);
     if (result.failed.length > 0) {
       logger.error(`[pi-research] ⚠ Service initialization incomplete: ${result.failed.join(', ')}`);
     } else {
@@ -151,9 +144,9 @@ export default async function (pi: ExtensionAPI) {
   }
 
 
-  // Validate config at startup
+  // Validate config at startup (using pi.cwd)
   try {
-    const config = getConfig();
+    const config = getConfig((pi as any).cwd);
     validateConfig(config);
     logger.debug('[pi-research] Config validated');
   } catch (err) {
@@ -161,8 +154,6 @@ export default async function (pi: ExtensionAPI) {
   }
 
   // Primary cleanup path for pi -p (print mode) and normal session end.
-  // Pi fires session_shutdown from disposeRuntime() before process.exit() so this
-  // reliably drains the writer queue and disposes the embedder even in non-signal exits.
   pi.on('session_shutdown', async () => {
     try {
       await shutdownManager.runCleanup('session_shutdown');
@@ -179,12 +170,9 @@ export default async function (pi: ExtensionAPI) {
   const healthTool: ToolDefinition = createHealthTool();
   pi.registerTool(healthTool);
 
-  // Create and register the Research Knowledge Search tool (local research knowledge database search).
-  // This is a top-level satellite tool for the main pi agent — NOT for researcher sub-agents.
-  // Only registered when knowledge store is enabled (project scope, shared scope, or both).
-  // The ExtensionContext is provided by pi at execution time inside the execute() closure.
+  // Create and register the Research Knowledge Search tool
   const researchKnowledgeSearchTool: ToolDefinition | null =
-    (getConfig().LOCAL_KNOWLEDGE_STORE_ENABLED || getConfig().GLOBAL_KNOWLEDGE_STORE_ENABLED)
+    (getConfig((pi as any).cwd).LOCAL_KNOWLEDGE_STORE_ENABLED || getConfig((pi as any).cwd).GLOBAL_KNOWLEDGE_STORE_ENABLED)
       ? createResearchKnowledgeSearchTool()
       : null;
   if (researchKnowledgeSearchTool) {
@@ -192,59 +180,42 @@ export default async function (pi: ExtensionAPI) {
   }
 
   // Alt+P — Pop queued steering messages back to pi's follow-up queue.
-  // The shortcut handler receives an ExtensionContext (not ExtensionAPI),
-  // but `pi` is captured in the closure and remains valid for the
-  // extension's lifetime. This is safe because extension reloads recreate
-  // the module and thus refresh the closure.
   pi.registerShortcut(Key.alt('p'), {
     description: 'Pop queued researcher steering messages back to chat',
     handler: (ctx: ExtensionContext) => {
       const eCtx = ctx as ExtendedExtensionContext;
-
-      // Improved session ID resolution: try explicit ID first, then fallback to active session
       let piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId();
 
       if (!piSessionId) {
         const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
         if (activeSessions.length === 1) {
           piSessionId = activeSessions[0]!;
-          logger.debug(`[pi-research] Alt+P: ctx.sessionId missing, falling back to only active session: ${piSessionId}`);
         } else if (activeSessions.length > 1) {
-          logger.warn(`[pi-research] Alt+P: ctx.sessionId missing and multiple active sessions exist — cannot pop safely.`);
-          if (ctx.hasUI) ctx.ui.notify('Multiple active sessions — cannot pop steering unambiguously', 'warning');
+          if (ctx.hasUI) ctx.ui.notify('Ambiguous sessions — cannot pop steering.', 'warning');
           return;
         } else {
           piSessionId = 'default';
         }
       }
 
-      // Only pop if there are queued messages and research is active
       const activeCount = getActiveSessionCount();
-      if (activeCount === 0) {
-        logger.debug(`[pi-research] Alt+P pressed but no active research (sessionId=${piSessionId}) — ignoring`);
-        return;
-      }
+      if (activeCount === 0) return;
 
       const queuedBefore = getSteeringMessages(piSessionId).filter(m => m.status === 'queued');
       const popped = popQueuedMessages(piSessionId);
 
-      logger.debug(`[pi-research] Alt+P: sessionId=${piSessionId}, queuedCount=${queuedBefore.length}, poppedCount=${popped.length}`);
-
       if (popped.length === 0) {
-        logger.debug(`[pi-research] Alt+P: no messages popped. queuedBefore=${queuedBefore.length}`);
         if (ctx.hasUI && queuedBefore.length === 0) {
-          ctx.ui.notify('No queued steering messages to pop', 'info');
+          ctx.ui.notify('No steering messages found.', 'info');
         }
         return;
       }
-      // Forward each popped message to pi's follow-up queue
       for (const msg of popped) {
-        logger.info(`[pi-research] Popping steering message: ${msg.text}`);
         pi.sendUserMessage(msg.text, { deliverAs: 'followUp' });
       }
       
       if (ctx.hasUI) {
-        ctx.ui.notify(`Popped ${popped.length} steering message(s) to chat`, 'info');
+        ctx.ui.notify(`Sent ${popped.length} steering message(s).`, 'info');
       }
     },
   });
@@ -257,10 +228,8 @@ export default async function (pi: ExtensionAPI) {
       if (!text) return;
 
       try {
-        const config = getConfig();
+        const config = getConfig(ctx.cwd);
         
-        // Directly invoke the research tool, bypassing the LLM entirely.
-        // The tool handles its own TUI panel, progress tracking, and cleanup.
         const result = await researchTool.execute(
           randomUUID(),
           { query: text, depth: config.DEFAULT_RESEARCH_DEPTH },
@@ -271,7 +240,6 @@ export default async function (pi: ExtensionAPI) {
 
         const output = extractResultText(result);
 
-        // Inject result as a custom message — no agent turn triggered.
         pi.sendMessage({
           customType: 'research-result',
           content: output,
@@ -283,7 +251,7 @@ export default async function (pi: ExtensionAPI) {
         });
 
         if (ctx.hasUI) {
-          ctx.ui.notify('Research complete', 'info');
+          ctx.ui.notify('Research finished.', 'info');
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -313,24 +281,19 @@ export default async function (pi: ExtensionAPI) {
 
   // JIT Prompt Injection (Simplified & Non-Intrusive)
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
-    
-    // Skip injection during mid-stream steering
     if (event.streamingBehavior === 'steer') {
       return { systemPrompt: event.systemPrompt };
     }
 
-    // Only initialize TUI features in TUI mode
     if (ctx.mode === 'tui' && ctx.hasUI) {
       initGlobalTuiController(ctx.ui, (ctx as ExtendedExtensionContext).sessionId);
     }
 
-    // Framing steering as "Additional considerations"
     const eCtx = ctx as ExtendedExtensionContext;
     const normalizedSid = normalizeSessionId(eCtx.sessionId);
     const steeringMessages = getSteeringMessages(normalizedSid);
     let injectedSystemPrompt = event.systemPrompt;
 
-    // Only inject steering messages when research is actually active.
     const activeCount = getActiveSessionCount();
     const hasSteeringMessages = steeringMessages.length > 0;
     const shouldInjectSteering = hasSteeringMessages && activeCount > 0;
@@ -339,31 +302,24 @@ export default async function (pi: ExtensionAPI) {
       injectedSystemPrompt += '\n\n### ADDITIONAL CONSIDERATIONS\n' + 
         'The user has provided the following additional considerations for this task:\n' + 
         steeringMessages.map(m => `- ${m.text}`).join('\n');
-      logger.debug(`[pi-research] Injected ${steeringMessages.length} steering message(s) into prompt`);
     }
 
-    // Do not inject rules into the sub-researchers
     const isResearcher = event.systemPrompt?.includes('RESEARCHER_AGENT_MARKER');
     if (isResearcher) {
       return { systemPrompt: injectedSystemPrompt };
     }
 
-    // Conservative Prompt Injection: Only inject research instructions if the tool is 
-    // actually selected/available for this turn.
     const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);
     const isKnowledgeSearchAvailable = researchKnowledgeSearchTool
       ? (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name))
       : false;
 
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
-      logger.debug('[pi-research] Research-related tool available, injecting best-practice instructions.');
-      
       let researchPrompt = loadPrompt('research-tool-usage')
         .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
         .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
         .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
       
-      // Strip knowledge search section if tool isn't available
       if (!isKnowledgeSearchAvailable) {
         researchPrompt = researchPrompt.replace(/\n\*\*⚡ KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');
       }
@@ -380,14 +336,13 @@ export default async function (pi: ExtensionAPI) {
   pi.on('after_provider_response', async (event: any, ctx: any) => {
     const { status, headers } = event;
 
-    // Log provider status for diagnostics
     if (status >= 500) {
       logger.warn(`[pi-research] Provider server error: ${status}`, { headers });
     } else if (status === 429) {
       const retryAfter = headers?.['retry-after'];
       logger.warn(`[pi-research] Rate limited by provider`, { retryAfter });
       if (retryAfter && ctx.hasUI) {
-        ctx.ui.notify(`Rate limited. Retry after ${retryAfter}s`, 'warning');
+        ctx.ui.notify(`Rate limited. Retry in ${retryAfter}s.`, 'warning');
       }
     } else if (status >= 400) {
       logger.warn(`[pi-research] Provider error: ${status}`, { headers });

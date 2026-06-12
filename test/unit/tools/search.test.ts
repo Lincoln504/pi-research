@@ -10,6 +10,11 @@ vi.mock('../../../src/web-research/search.ts', () => ({
   }),
 }));
 
+vi.mock('../../../src/core/service-registry.ts', () => ({
+  getServiceContainer: vi.fn(() => ({})),
+  tryGetServiceContainerFromCtx: vi.fn(() => ({})),
+}));
+
 describe('tools/search', () => {
   let tracker: ToolUsageTracker;
   const mockOptions = {
@@ -41,7 +46,8 @@ describe('tools/search', () => {
       expect.arrayContaining(Array(40).fill('q')),
       undefined, // options.config
       undefined, // signal
-      expect.any(Function) // implementation wraps onProgress in a lambda
+      expect.any(Function), // implementation wraps onProgress in a lambda
+      expect.any(Object) // container
     );
     expect(vi.mocked(search).mock.calls[0][0].length).toBe(40);
   });

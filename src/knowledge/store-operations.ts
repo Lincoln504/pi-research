@@ -40,6 +40,7 @@ export async function addDocumentsToStore(
       metadata: JSON.stringify(doc.metadata),
       workspace,
       is_global: isGlobal,
+      ingestion_type: doc.ingestion_type || (doc.metadata['ingestionType'] as string) || 'unknown',
       timestamp: BigInt(doc.timestamp),
     }));
 
@@ -84,7 +85,7 @@ export async function searchStore(
 
   const vector = await embedder.embed(query);
 
-  let filter = "metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'";
+  let filter = "ingestion_type = 'synthesis-description'";
   if (scopeFilter) {
     filter = `(${filter}) AND (${scopeFilter})`;
   }
@@ -195,7 +196,7 @@ export async function findRelevantUrls(
 
   const vector = await embedder.embed(query);
 
-  let filter = "metadata LIKE '%\"ingestionType\":\"synthesis-description\"%'";
+  let filter = "ingestion_type = 'synthesis-description'";
   if (scopeFilter) {
     filter = `(${filter}) AND (${scopeFilter})`;
   }

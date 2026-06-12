@@ -86,20 +86,19 @@ A `/research <query>` slash command is also available as a shortcut — it runs 
 
 ## Configuration
 
-Configurable via environment variables or the `/research-config` TUI dashboard. Key variables:
+Configure settings via the `/research-config` TUI dashboard. This manages global settings in `~/.pi/research/config.env` and project-specific settings in the Centralized Registry (`~/.pi/state/project-settings.json`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (3–30 min) |
+| `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher execution timeout (3–30 min) |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5) |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–10) |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
-| `PI_RESEARCH_MODEL` | _(session model)_ | Model override for researcher sub-agents |
-| `PI_RESEARCH_VERBOSE` | — | Set to `1` for diagnostic logs |
-| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key — raises rate limits |
-| `SEARXNG_URL` | — | External SearXNG URL (skips Docker) |
+| `PI_RESEARCH_MODEL` | _(session model)_ | Optional model override for researchers |
+| `PI_RESEARCH_DEBUG` | `true` | Enable verbose diagnostic logging |
+| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key for higher rate limits |
 
-Full variable reference: [docs/SDK.md](docs/SDK.md). Copy `.env.example` to `src/.env` to get started.
+Full variable reference: [docs/SDK.md](docs/SDK.md).
 
 ---
 

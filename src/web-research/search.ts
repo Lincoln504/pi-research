@@ -9,6 +9,8 @@ import { performSearch } from './browser-search.ts';
 import type { QueryResultWithError } from './types.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
+import { getServiceContainer } from '../core/service-registry.ts';
+import type { ServiceContainer } from '../core/service-registry.ts';
 
 // ============================================================================
 // Multiple Query Search
@@ -27,7 +29,8 @@ export async function search(
   queries: string[],
   config?: Config,
   signal?: AbortSignal,
-  onProgress?: (links: number) => void
+  onProgress?: (links: number) => void,
+  container: ServiceContainer = getServiceContainer()
 ): Promise<QueryResultWithError[]> {
   if (queries.length === 0) return [];
   
@@ -36,7 +39,7 @@ export async function search(
   const searchStart = Date.now();
   
   try {
-    const resultMap = await performSearch(queries, config, signal, onProgress);
+    const resultMap = await performSearch(queries, config, signal, onProgress, container);
     const searchDuration = Date.now() - searchStart;
     metrics.observe('search_latency_ms', searchDuration);
     

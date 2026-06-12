@@ -2,7 +2,11 @@
 
 ## Environment Variables
 
-All variables are optional — defaults apply if unset. Set them in `src/.env` (relative to the extension install directory) or pass them in your shell environment.
+Settings are loaded with the following precedence:
+1.  **Defaults**: Built-in fallback values.
+2.  **Global Config**: `~/.pi/research/config.env`.
+3.  **Project Registry**: `~/.pi/state/project-settings.json` (per-directory).
+4.  **Shell Environment**: Variables set in your shell (e.g., `export PI_RESEARCH_TIMEOUT_MS=600000`).
 
 ### Research
 
@@ -48,7 +52,10 @@ All variables are optional — defaults apply if unset. Set them in `src/.env` (
 
 ## Configuration TUI
 
-Run `/research-config` inside pi to edit any setting interactively. The TUI reads and writes `src/.env` in the extension directory.
+Run `/research-config` inside pi to manage settings. The TUI handles two levels of configuration:
+
+1.  **Global Settings**: Stored in `~/.pi/research/config.env`. These apply across all your projects.
+2.  **Project Settings**: Stored in the Centralized Registry (`~/.pi/state/project-settings.json`). These are scoped to your current working directory and automatically applied when you run research in that folder.
 
 ---
 

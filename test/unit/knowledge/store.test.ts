@@ -286,6 +286,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/all-MiniLM-L6-v2',
+      ttlDays: 30,
     });
     await newStore.open();
     try {

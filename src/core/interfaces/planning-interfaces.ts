@@ -4,6 +4,7 @@
 
 import type { IService } from '../service-registry.ts';
 import type { Model } from '@earendil-works/pi-ai';
+import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { ResearchObserver } from './observer-interfaces.ts';
 import type { ResearchPlan, ResearcherConfig } from './research-plan-types.ts';
 
@@ -26,6 +27,8 @@ export interface GeneratePlanOptions {
   query: string;
   complexity: 1 | 2 | 3;
   model: Model<any>;
+  modelRegistry: ModelRegistry;
+  cwd: string;
   signal?: AbortSignal;
   observer?: ResearchObserver;
   excludeTools?: string[];
@@ -53,6 +56,8 @@ export interface UpdatePlanOptions {
   query: string;
   complexity: 1 | 2 | 3;
   model: Model<any>;
+  modelRegistry: ModelRegistry;
+  cwd: string;
   signal?: AbortSignal;
   previousPlan: ResearchPlan | null;
   totalResearchersPlanned: number;
@@ -80,7 +85,7 @@ export interface IPlanningService extends IService {
   getComplexityGuidance(complexity: 1 | 2 | 3, maxTeamSize: number, queryBudget: number): string;
   getEvaluatorComplexityGuidance(complexity: 1 | 2 | 3): string;
   getRoundPhaseGuidance(currentRound: number, maxRounds: number, complexity: 1 | 2 | 3, maxTeamSize: number): string;
-  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3): ResearchPlan;
+  capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, serviceName: string): ResearchPlan;
   parseJsonPlan(text: string): ResearchPlan;
   buildFallbackCoordinatorPlan(rawText: string, query: string): ResearchPlan;
   clearPlanningState(sessionId?: string): void;

@@ -25,6 +25,9 @@ import {
 } from './types.ts';
 import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, } from './scraper-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
+import { getServiceContainer } from '../core/service-registry.ts';
+import type { ServiceContainer } from '../core/service-registry.ts';
+import { cacheScrapedContent } from '../utils/shared-links.ts';
 
 let playwrightAvailable: boolean = false;
 let markdownConverterPromise: Promise<(html: string) => Promise<string>> | null = null;
@@ -212,10 +215,10 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   }
 }
 
-async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string): Promise<ScrapeLayerResult> {
+async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
-    const result = await runBrowserTask<any>({ url: _url, sessionId }, 'scrape', config, signal);
+    const result = await runBrowserTask<any>({ url: _url, sessionId }, 'scrape', config, signal, 1, container);
     const browserDuration = Date.now() - browserStart;
 
     if (result.buffer) {
@@ -247,7 +250,7 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
   }
 }
 
-export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string): Promise<ScrapeResult> {
+export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult> {
   if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
@@ -276,6 +279,11 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     const duration = Date.now() - start;
     logger.log(`[Scrapers] fetch success for ${url} in ${duration}ms`);
     metrics.increment('scrape_results_total', 1, { outcome: 'fetch_success' });
+
+    if (sessionId && res.markdown) {
+      cacheScrapedContent(sessionId, url, res.markdown);
+    }
+
     return { ...res, url, success: true };
   } catch (e1) {
     const fetchDuration = Date.now() - start;
@@ -291,12 +299,17 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
     if (playwrightAvailable) {
       try {
         const browserStart = Date.now();
-        const res = await scrapeWithStealthBrowser(url, config, signal, sessionId);
+        const res = await scrapeWithStealthBrowser(url, config, signal, sessionId, container);
         const browserDuration = Date.now() - browserStart;
         const totalDuration = Date.now() - start;
         logger.log(`[Scrapers] browser success for ${url} in ${browserDuration}ms (total: ${totalDuration}ms)`);
         metrics.increment('scrape_layer_fallbacks_total', 1, { from_layer: 'fetch', to_layer: 'playwright' });
         metrics.increment('scrape_results_total', 1, { outcome: 'browser_success' });
+
+        if (sessionId && res.markdown) {
+          cacheScrapedContent(sessionId, url, res.markdown);
+        }
+
         return { ...res, url, success: true };
       } catch (e2) {
         const totalDuration = Date.now() - start;
@@ -320,7 +333,7 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   }
 }
 
-export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string, onUrlComplete?: (result: ScrapeResult) => void): Promise<ScrapeResult[]> {
+export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortSignal, config?: Config, sessionId?: string, onUrlComplete?: (result: ScrapeResult) => void, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult[]> {
   metrics.increment('scrape_batches_total', 1);
   metrics.observe('scrape_urls_per_batch', urls.length);
   const batchStart = Date.now();
@@ -330,7 +343,7 @@ export async function scrape(urls: string[], maxConcurrency = 5, signal?: AbortS
     const batch = urls.slice(i, i + maxConcurrency);
     const batchRes = await Promise.all(
       batch.map(async url => {
-        const result = await scrapeSingle(url, signal, config, sessionId);
+        const result = await scrapeSingle(url, signal, config, sessionId, container);
         onUrlComplete?.(result);
         return result;
       })
