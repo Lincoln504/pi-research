@@ -81,8 +81,6 @@ jobs:
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
 
       - run: npm ci --legacy-peer-deps
-      - name: Build worker bundle
-        run: npm run build:worker
       - run: npm run lint
       - run: npm run type-check
       - run: npm run test:unit

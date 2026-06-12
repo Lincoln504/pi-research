@@ -9,7 +9,6 @@
 config/
 tsconfig*.json
 vitest.config*.ts
-eslint.config.js
 
 # docs/ — only SDK.md, ARCHITECTURE.md, and OVERVIEW.md are in the files allowlist.
 docs/README-banner.jpg
