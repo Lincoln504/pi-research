@@ -38,8 +38,9 @@ export function getDefaultDebugLogPathTemplate(): string {
 /**
  * Check whether debug/verbose logging is enabled.
  *
- * Only source of truth: PI_RESEARCH_DEBUG env var (or the config DEBUG field
- * which reads from the same env var). Set to "true" to enable INFO+DEBUG logs.
+ * Reads PI_RESEARCH_DEBUG env var. This env var is kept in sync with
+ * config.DEBUG whenever the config is loaded or saved (see config.ts).
+ * Set to "true" to enable INFO+DEBUG logs.
  */
 export function isVerboseFromEnv(): boolean {
   return process.env['PI_RESEARCH_DEBUG'] === 'true';

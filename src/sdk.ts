@@ -152,7 +152,7 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
 
   try {
     // Resolve model using unified logic.
-    globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider);
+    globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider, globalApiKey);
 
     // Create isolated container
     globalContainer = createServiceContainer();

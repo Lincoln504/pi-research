@@ -8,6 +8,7 @@
 import type { Model, AssistantMessage } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { extractJson } from './json-utils.ts';
+import { createTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
 import type { TSchema } from 'typebox';
 import { Value } from 'typebox/value';
 
@@ -83,9 +84,13 @@ Return ONLY the valid JSON object. No prose before or after.`;
         logger.debug(`[${serviceName}] Salvage attempt ${attempt}/${maxAttempts}...`);
       }
 
-      const response = await completer(model, {
-        messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }]
-      }, { ...auth, signal });
+      const llmTimeout = getLlmTimeoutMs();
+      const response = await Promise.race([
+        completer(model, {
+          messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }]
+        }, { ...auth, signal }),
+        createTimeout(llmTimeout, `agentic-repair-${serviceName}`),
+      ]);
 
       const responseText = response.content.find((c) => c.type === 'text')?.text;
       if (!responseText) {

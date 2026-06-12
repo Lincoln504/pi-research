@@ -15,6 +15,14 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 
 /**
+ * Headers commonly required by third-party LLM providers
+ */
+function buildHeaders(provider?: string): Record<string, string> {
+  if (provider === 'openrouter') return { 'HTTP-Referer': 'https://pi.ai', 'X-Title': 'pi-research' };
+  return {};
+}
+
+/**
  * Create a ModelRegistry with the given credentials.
  *
  * @param apiKey  - Optional explicit API key
@@ -51,15 +59,39 @@ export function buildModelRegistry(apiKey?: string, provider?: string): ModelReg
 }
 
 /**
+ * Construct a minimal Model object directly from provider + modelId + apiKey.
+ *
+ * Used when the user provides credentials but has no pi config directory
+ * (e.g., SDK users, OpenClaw plugin users without pi installed).
+ * Bypasses the full ModelRegistry which would fail without models.json.
+ */
+export function constructMinimalModel(provider: string, modelId: string, _apiKey: string): Model<any> {
+  return {
+    provider,
+    id: modelId,
+    name: modelId,
+    supportsReasoning: false,
+    supportsImages: false,
+    isFree: false,
+    contextWindow: 128_000,
+    maxTokens: 32_768,
+    capabilities: { vision: false, audio: false, tool_use: true, structured_output: true },
+    isInternetConnected: false,
+    headers: buildHeaders(provider),
+  } as unknown as Model<any>;
+}
+
+/**
  * Resolve a Model instance from a registry based on an optional model string or provider.
  *
  * @param registry - The ModelRegistry to search in
  * @param modelSpec - Optional model string ("provider/modelId" or "modelId")
  * @param provider - Optional provider name to use as fallback
+ * @param apiKey - Optional API key to construct a fallback model when registry is empty
  * @returns The resolved Model instance
  * @throws Error if no model can be resolved
  */
-export function resolveModel(registry: ModelRegistry, modelSpec?: string, provider?: string): Model<any> {
+export function resolveModel(registry: ModelRegistry, modelSpec?: string, provider?: string, apiKey?: string): Model<any> {
   // 1. Explicit model string: "provider/modelId" or "modelId"
   if (modelSpec) {
     const slashIdx = modelSpec.indexOf('/');
@@ -68,6 +100,11 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
       const modelId = modelSpec.slice(slashIdx + 1);
       const found = registry.find(prov, modelId);
       if (found) return found;
+      
+      // Fallback for SDK/OpenClaw users without pi config: construct model from credentials
+      if (apiKey && provider) {
+        return constructMinimalModel(prov, modelId, apiKey);
+      }
       
       throw new Error(`Model "${modelSpec}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
     }
@@ -94,6 +131,19 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   // 4. Any model at all
   const all = registry.getAll();
   if (all.length > 0) return all[0]!;
+
+  // 5. Fallback: construct minimal model from credentials when registry is empty
+  if (apiKey && provider && modelSpec) {
+    const slashIdx = modelSpec.indexOf('/');
+    if (slashIdx > 0) {
+      return constructMinimalModel(
+        modelSpec.slice(0, slashIdx),
+        modelSpec.slice(slashIdx + 1),
+        apiKey,
+      );
+    }
+    return constructMinimalModel(provider, modelSpec, apiKey);
+  }
 
   throw new Error(
     'No LLM model available. Please configure your model registry (~/.pi/agent/models.json) or provide an explicit apiKey.',

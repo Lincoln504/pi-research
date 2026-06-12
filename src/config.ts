@@ -63,6 +63,9 @@ export const ConfigSchema = Type.Object({
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
   /** Timeout for individual browser tasks (default: 10000ms) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
+  /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-600s).
+   *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var. */
+  LLM_TIMEOUT_MS: Type.Number({ minimum: 60000, maximum: 600000, default: 300000 }),
   /** LLM Model override for researcher sub-agents and knowledge synthesis.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
    *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
@@ -305,6 +308,7 @@ export function saveConfig(config: Config, scope: 'local' | 'global' | 'user' = 
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
+    PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -476,6 +480,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
+    LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -488,6 +493,14 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
       (config as any)[key] = value;
     }
   }
+
+  // Keep PI_RESEARCH_DEBUG env var in sync with config.DEBUG
+  // so that isVerboseFromEnv() (which reads the env var) picks up
+  // TUI-configured debug settings without a circular import.
+  if (config.DEBUG && processEnv['PI_RESEARCH_DEBUG'] === undefined) {
+    processEnv['PI_RESEARCH_DEBUG'] = 'true';
+  }
+
   return config;
 }
 

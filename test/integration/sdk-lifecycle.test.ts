@@ -45,9 +45,21 @@ vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
     usage: { totalTokens: 50, cost: { total: 0.001 } },
     stopReason: 'stop',
   };
+
+  // Smart mock: return plan JSON for coordinator/evaluator calls, synthesis text otherwise.
+  // Detects coordinator calls by looking for 'coordinator' in the systemPrompt.
+  function pickResponse(args: any[]) {
+    const callContext = args[1] as { systemPrompt?: string } | undefined;
+    const systemPrompt = callContext?.systemPrompt ?? '';
+    if (systemPrompt.includes('coordinator') || systemPrompt.includes('evaluator') || systemPrompt.includes('research-knowledge')) {
+      return planResponse;
+    }
+    return synthResponse;
+  }
+
   return {
     ...actual,
-    completeSimple: vi.fn().mockResolvedValue(synthResponse),
+    completeSimple: vi.fn().mockImplementation((...args: any[]) => Promise.resolve(pickResponse(args))),
     complete: vi.fn().mockResolvedValue(planResponse),
   };
 });

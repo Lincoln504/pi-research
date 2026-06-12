@@ -29,6 +29,26 @@ export async function performSearch(
     const startTime = Date.now();
     const resultMap = new Map<string, SearchResult[]>();
     const seenUrls = new Set<string>();
+
+    // FULL_MOCK_MODE: When both PI_RESEARCH_MOCK_SEARCH and PI_RESEARCH_MOCK_SCRAPE
+    // are true, return deterministic mock results without spawning any worker processes.
+    // This gate keeps CI tests deterministic and fast, and prevents real worker pool
+    // failures from cascading into test flakiness.
+    const fullMockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+                         process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+    if (fullMockMode) {
+      logger.log('[Search] FULL_MOCK_MODE enabled — returning mock results without worker pool');
+      for (const q of queries) {
+        const domain = q.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().slice(0, 30);
+        resultMap.set(q, [{
+          title: `Mock result for: ${q}`,
+          url: `https://mock.example.com/${domain}`,
+          content: `This is a mock search result for query "${q}".`,
+        }]);
+      }
+      return resultMap;
+    }
+
     const maxWorkers = getMaxWorkers(config);
 
     metrics.setGauge('browser_search_max_workers', maxWorkers);

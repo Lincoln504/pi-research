@@ -23,6 +23,8 @@ import { extractUsage } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
 import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
 import { extractText } from '../utils/text-utils.ts';
+import { createTimeout } from '../utils/llm-timeout.ts';
+import { getConfig } from '../config.ts';
 import {
   PlanningResponseSchemaAsTSchema,
   EvaluationResponseSchemaAsTSchema,
@@ -197,12 +199,16 @@ export class PlanningService implements IPlanningService {
         throw new Error(`Failed to get API key for planning: ${authResult.error}`);
       }
 
-      const response = await completeSimple(model, {
-        systemPrompt,
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-        ],
-      }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal });
+      const llmTimeout = getConfig().LLM_TIMEOUT_MS;
+      const response = await Promise.race([
+        completeSimple(model, {
+          systemPrompt,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+          ],
+        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal }),
+        createTimeout(llmTimeout, 'coordinator-generatePlan'),
+      ]);
 
       // Track usage
       const rawUsage = (response as any).usage;
@@ -299,12 +305,16 @@ export class PlanningService implements IPlanningService {
         throw new Error(`Failed to get API key for evaluation: ${authResult.error}`);
       }
 
-      const response = await completeSimple(model, {
-        systemPrompt,
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-        ],
-      }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal });
+      const llmTimeout = getConfig().LLM_TIMEOUT_MS;
+      const response = await Promise.race([
+        completeSimple(model, {
+          systemPrompt,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+          ],
+        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal }),
+        createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
+      ]);
 
       // Track usage
       const rawUsage = (response as any).usage;

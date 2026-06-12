@@ -206,7 +206,7 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
       globalRegistry = buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
 
       // Resolve model
-      globalModel = resolveModel(globalRegistry, pluginConfig.model, pluginConfig.provider);
+      globalModel = resolveModel(globalRegistry, pluginConfig.model, pluginConfig.provider, pluginConfig.apiKey);
 
       // Create isolated container
       globalContainer = createServiceContainer();

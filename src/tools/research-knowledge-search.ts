@@ -29,6 +29,7 @@ import { Value } from 'typebox/value';
 import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
+import { createTimeout } from '../utils/llm-timeout.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
@@ -296,12 +297,16 @@ async function runBackgroundExtraction(
     'Analyze the reference documents above and extract the answer using the required JSON format.';
 
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects
-  const response = await completeSimple(model, {
-    systemPrompt,
-    messages: [
-      { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-    ],
-  }, { apiKey: auth.apiKey, headers: auth.headers, signal });
+  const llmTimeout = getConfig().LLM_TIMEOUT_MS;
+  const response = await Promise.race([
+    completeSimple(model, {
+      systemPrompt,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+      ],
+    }, { apiKey: auth.apiKey, headers: auth.headers, signal }),
+    createTimeout(llmTimeout, 'knowledge-search-extraction'),
+  ]);
 
   // Track token and cost metrics for the background synthesis call
   const rawUsage = (response as any).usage;
