@@ -67,9 +67,9 @@ Run `/research-config` inside pi to manage settings. The TUI handles two levels 
 import { 
   initResearchSDK, 
   runDeepResearch, 
-  disposeResearchSDK,
-  verifyUrl,
-  repairJson
+  runQuickResearch,
+  getResearchReports,
+  shutdownResearchSDK
 } from '@lincoln504/pi-research';
 
 // 1. Initialize
@@ -86,18 +86,17 @@ const markdown = await runDeepResearch('solid-state battery technology', {
   depth: 2, // 1-3
 });
 
-// 3. High-fidelity URL Verification (Stealth Browser)
-const exists = await verifyUrl('https://example.com/some-page');
+// 3. Quick research (depth 0)
+const quickResult = await runQuickResearch('what is the capital of France');
 
-// 4. Agentic JSON Repair
-const malformed = '{ "findings": [ { "url": "..." '; // truncated
-const repaired = await repairJson(malformed, MySchema);
+// 4. Retrieve previous reports
+const reports = await getResearchReports('my-research-id');
 
 // 5. Cleanup
-await disposeResearchSDK();
+await shutdownResearchSDK();
 ```
 
-Initialization is required before calling research or verification methods. `disposeResearchSDK()` is critical — it drains the writer queue, closes LanceDB, and terminates worker processes.
+Initialization is required before calling research methods. `shutdownResearchSDK()` (or the deprecated alias `disposeResearchSDK()`) is critical — it drains the writer queue, closes LanceDB, and terminates worker processes.
 
 ---
 

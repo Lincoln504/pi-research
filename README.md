@@ -105,7 +105,7 @@ Full variable reference: [docs/SDK.md](docs/SDK.md).
 ## Development
 
 ```bash
-npm run test:unit         # 1210 unit tests, no browser required
+npm run test:unit         # 1186 unit tests, no browser required
 npm run test:integration  # requires camoufox + Xvfb on Linux
 npm run type-check        # TypeScript strict mode
 npm run lint              # ESLint

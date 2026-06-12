@@ -65,7 +65,7 @@ npm run test:integration
 
 ### Load & Stress Tests
 
-Load tests (`test/load/`) run extended concurrent scenarios. Stress scripts (`test/stress/*.mjs`) run chaotic scheduling patterns. Neither runs in CI — trigger manually.
+Stress scripts (`test/stress/*.mjs`) run chaotic scheduling patterns. Not run in CI — trigger manually.
 
 ---
 

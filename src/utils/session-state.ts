@@ -544,7 +544,7 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
     'Troubleshooting:',
     '• Verify network connection is active',
     '• Check browser logs for automation detection signals',
-    '• Check PI_RESEARCH_RESEARCHER_TIMEOUT_MS if set (default: 6 minutes)',
+    '• Check PI_RESEARCH_TIMEOUT_MS if set (default: 5 minutes)',
     '',
     'Partial results may be available below.',
   ].join('\n');

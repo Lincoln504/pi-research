@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { normalizeUrl, validateUrl } from '../../src/utils/url-utils.ts';
-import { KnowledgeStore } from '../../src/knowledge/store.ts';
-import { WriterQueue } from '../../src/knowledge/writer-queue.ts';
+import { normalizeUrl, validateUrl } from '../../../src/utils/url-utils.ts';
+import { KnowledgeStore } from '../../../src/knowledge/store.ts';
+import { WriterQueue } from '../../../src/knowledge/writer-queue.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
