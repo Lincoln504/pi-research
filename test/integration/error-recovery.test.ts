@@ -326,12 +326,12 @@ describe('Error Recovery and Resilience', () => {
       try {
         for (let i = 0; i < maxFiles; i++) {
           const tempPath = path.join(testDbDir, `fd-test-${randomBytes(4).toString('hex')}.tmp`);
-          const fd = fs.openSync(tempPath, 'w');
+          const fd = fs.openSync(tempPath, 'w', 0o600);
           openFiles.push(fd);
         }
 
         // System should still be able to open more files
-        const testFd = fs.openSync(path.join(testDbDir, `fd-verify-${randomBytes(4).toString('hex')}.tmp`), 'w');
+        const testFd = fs.openSync(path.join(testDbDir, `fd-verify-${randomBytes(4).toString('hex')}.tmp`), 'w', 0o600);
         fs.closeSync(testFd);
         expect(true).toBe(true);
       } finally {
