@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { isWebGpuDeviceError } from '../../../src/knowledge/embedder-init.ts';
 
 describe('Embedder Init - isWebGpuDeviceError', () => {

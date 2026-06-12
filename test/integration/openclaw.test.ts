@@ -64,7 +64,7 @@ vi.mock('../../src/healthcheck/registry.ts', async () => ({
 }));
 
 import plugin, { shutdown } from '../../src/openclaw-entry.ts';
-import { resetConfig, getConfig } from '../../src/config.ts';
+import { resetConfig } from '../../src/config.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';

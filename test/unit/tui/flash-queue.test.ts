@@ -272,7 +272,6 @@ describe('Flash queue system', () => {
     // Walk through the full timeline and count distinct flash appearances.
     // Expected: 1 green (400ms) + 8 red (700ms each) + 8 gaps (150ms each) = 9 flashes
     const transitions: Array<string | null> = [];
-    let prev = state.slices.get('1')!.flash;
 
     // 1 green + 8 red with gaps = 400 + 8*(700+150) = 400 + 6800 = 7200ms total
     vi.advanceTimersByTime(400); // green expires → gap

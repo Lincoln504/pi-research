@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 import * as coreRegistry from '../../../src/core/service-registry.ts';

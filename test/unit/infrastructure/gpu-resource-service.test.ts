@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GPUResourceService } from '../../../src/infrastructure/gpu-resource-service.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
-import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import * as ServiceRegistry from '../../../src/core/service-registry.ts';
 import type { SingletonState } from '../../../src/infrastructure/types/state-types.ts';
 

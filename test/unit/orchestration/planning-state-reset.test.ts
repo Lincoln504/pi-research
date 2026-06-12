@@ -4,7 +4,7 @@
  * Tests that verify planning state is properly reset between research sessions
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
 import { resetServiceContainer, getService } from '../../../src/core/service-registry.ts';

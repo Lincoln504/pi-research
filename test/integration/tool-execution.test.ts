@@ -74,7 +74,6 @@ describe('Tool Execution After Service Registry Refactor', () => {
   describe('Tool Argument Preparation', () => {
     it('should prepare research arguments correctly', () => {
       const tool = createResearchTool();
-      const mockCtx = { cwd: process.cwd() };
       
       const args = tool.prepareArguments!({
         query: 'test query',
@@ -89,7 +88,6 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle missing depth parameter', () => {
       const tool = createResearchTool();
-      const mockCtx = { cwd: process.cwd() };
       
       // Force default depth to 1 for this test to ensure predictable fallback
       const originalDepth = process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'];
@@ -116,7 +114,6 @@ describe('Tool Execution After Service Registry Refactor', () => {
 
     it('should handle invalid depth values', () => {
       const tool = createResearchTool();
-      const mockCtx = { cwd: process.cwd() };
 
       const args1 = tool.prepareArguments!({
         query: 'test query',

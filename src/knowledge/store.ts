@@ -585,10 +585,8 @@ export class KnowledgeStore implements IKnowledgeStore {
     // 3. Save to file
     try {
       const dir = path.dirname(outputPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(outputPath, JSON.stringify(exportData), 'utf-8');
+      await fs.promises.mkdir(dir, { recursive: true });
+      await fs.promises.writeFile(outputPath, JSON.stringify(exportData), 'utf-8');
       logger.info(`[store] Successfully exported ${exportData.length} entries to ${outputPath}`);
     } catch (err) {
       logger.error(`[store] Failed to export knowledge store for web:`, err);

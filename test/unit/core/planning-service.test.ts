@@ -43,11 +43,6 @@ const MOCK_MODEL_REGISTRY = {
   getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: 'test-key', headers: {} }),
 } as any;
 
-const MOCK_CTX = {
-  modelRegistry: MOCK_MODEL_REGISTRY,
-  cwd: '/test/cwd',
-} as any;
-
 /** Build a mock `completeSimple()` response with text content. */
 function makeCompleteResponse(text: string, stopReason: StopReason = 'stop') {
   return {

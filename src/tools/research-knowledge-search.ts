@@ -185,7 +185,6 @@ async function assembleReferenceDocuments(
         const remaining = MAX_REFERENCE_CHARS - totalChars - header.length;
         if (remaining > 500) {
           documentParts.push(header + docText.slice(0, remaining) + '\n[TRUNCATED]');
-          totalChars = MAX_REFERENCE_CHARS;
         }
         break;
       }

@@ -24,10 +24,12 @@ export function normalizeUrl(url: string): string {
   if (!url || typeof url !== 'string') return url;
 
   try {
+    // Guard against pathological inputs (ReDoS defense for subsequent regex)
+    if (url.length > 4096) return url.trim().split('#')[0]!.toLowerCase();
     // 1. Strip trailing markdown markers and punctuation often found in LLM output
     const cleanUrl = url.trim()
-      .replace(/[*_~`]+$/, '')
-      .replace(/[,.)]+$/, '');
+      .replace(/[*_~`]{1,20}$/, '')
+      .replace(/[,.)]{1,20}$/, '');
     
     const parsed = new URL(cleanUrl);
     

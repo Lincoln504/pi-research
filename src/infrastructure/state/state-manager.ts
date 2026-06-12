@@ -223,7 +223,7 @@ export class StateManager {
       const tempFileName = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
       tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
       const content = JSON.stringify(state, null, 2);
-      await fs.writeFile(tempFilePath, content, 'utf-8');
+      await fs.writeFile(tempFilePath, content, { encoding: 'utf-8', mode: 0o600 });
       try {
         await fs.rename(tempFilePath, this.stateFilePath);
       } catch (renameErr) {

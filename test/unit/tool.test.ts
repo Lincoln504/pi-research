@@ -238,7 +238,6 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
 
 // Import mocked modules
 import * as panel from '../../src/tui/research-panel.ts';
-import { createResearchTuiManager } from '../../src/tui/research-tui-manager.ts';
 
 // ============================================================================
 // HELPERS

@@ -109,7 +109,6 @@ vi.mock('../../src/config.ts', () => ({
 import {
   initResearchSDK,
   runDeepResearch,
-  runQuickResearch,
   shutdownResearchSDK,
 } from '../../src/sdk.ts';
 import { 

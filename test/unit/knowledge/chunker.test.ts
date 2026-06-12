@@ -171,14 +171,6 @@ describe('Chunker', () => {
           }
           
           if (reconstructed !== text) {
-            // Find first mismatch for debugging
-            let mismatchInfo = '';
-            for (let j = 0; j < Math.max(text.length, reconstructed.length); j++) {
-                if (text[j] !== reconstructed[j]) {
-                    mismatchInfo = `Mismatch at index ${j}: expected ${JSON.stringify(text[j])}, got ${JSON.stringify(reconstructed[j])}`;
-                    break;
-                }
-            }
             expect(reconstructed).toBe(text);
           }
         }

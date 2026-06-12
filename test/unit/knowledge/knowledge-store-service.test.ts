@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStoreService } from '../../../src/infrastructure/knowledge-store-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
-import { ServiceNames } from '../../../src/core/interfaces/service-names.ts';
 import * as knowledge from '../../../src/knowledge/index.ts';
-import * as embeddingFactory from '../../../src/infrastructure/embedding/embedding-factory.ts';
 import * as coreRegistry from '../../../src/core/service-registry.ts';
 
 vi.mock('../../../src/knowledge/index.ts', () => ({

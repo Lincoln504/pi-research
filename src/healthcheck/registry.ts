@@ -1,6 +1,7 @@
 import type { IHealthRegistryService } from '../core/interfaces/health-check-interfaces.ts';
 import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
+import { logger } from '../logger.ts';
 
 export interface HealthCheckStatus {
   component: string;
@@ -71,7 +72,7 @@ export class HealthCheckRegistry implements IHealthRegistryService {
         });
 
         const checkPromise = registeredCheck.check(options);
-        checkPromise.catch((err: any) => console.debug(`[HealthCheck] Background check rejection: ${err instanceof Error ? err.message : String(err)}`));
+        checkPromise.catch((err: any) => logger.debug(`[HealthCheck] Background check rejection: ${err instanceof Error ? err.message : String(err)}`));
         const result = await Promise.race([checkPromise, timeoutPromise]);
         if (timeoutId) clearTimeout(timeoutId);
         

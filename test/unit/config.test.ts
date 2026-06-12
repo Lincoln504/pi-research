@@ -11,7 +11,6 @@ vi.mock('../../src/utils/text-utils.ts', () => ({
 
 import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config, DEFAULTS } from '../../src/config';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 
 // Mock fs to avoid reading .env during tests
 vi.mock('node:fs', async () => {

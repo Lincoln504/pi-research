@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeStore } from '../../../src/knowledge/store.ts';
-import { Embedder } from '../../../src/knowledge/embedder.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';

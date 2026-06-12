@@ -431,12 +431,11 @@ export function saveConfig(config: Config, scope: 'local' | 'global' | 'user' = 
     logger.error(`[config] Failed to write config to ${p}:`, err);
     throw err;
   } finally {
-    if (lockFd !== null) {
-      fs.closeSync(lockFd);
-      try {
-        fs.unlinkSync(lockPath);
-      } catch { /* ignore */ }
-    }
+    // lockFd is guaranteed non-null here (thrown before try if null)
+    fs.closeSync(lockFd!);
+    try {
+      fs.unlinkSync(lockPath);
+    } catch { /* ignore */ }
   }
 }
 

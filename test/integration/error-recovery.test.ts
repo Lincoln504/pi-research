@@ -15,7 +15,7 @@ import { CircuitBreaker } from '../../src/utils/circuit-breaker.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 
 // ============================================================================
 // Types
@@ -325,13 +325,13 @@ describe('Error Recovery and Resilience', () => {
 
       try {
         for (let i = 0; i < maxFiles; i++) {
-          const tempPath = path.join(testDbDir, `fd-test-${i}.tmp`);
+          const tempPath = path.join(testDbDir, `fd-test-${randomBytes(4).toString('hex')}.tmp`);
           const fd = fs.openSync(tempPath, 'w');
           openFiles.push(fd);
         }
 
         // System should still be able to open more files
-        const testFd = fs.openSync(path.join(testDbDir, 'fd-verify.tmp'), 'w');
+        const testFd = fs.openSync(path.join(testDbDir, `fd-verify-${randomBytes(4).toString('hex')}.tmp`), 'w');
         fs.closeSync(testFd);
         expect(true).toBe(true);
       } finally {
