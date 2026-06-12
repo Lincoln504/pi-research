@@ -22,6 +22,7 @@
     "docs/OVERVIEW.md",
     "docs/SDK.md",
     "docs/ARCHITECTURE.md",
+    "docs/README-banner.jpg",
     "scripts/setup.cjs",
     "scripts/cleanup.cjs",
     "LICENSE",

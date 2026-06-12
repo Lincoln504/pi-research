@@ -10,8 +10,7 @@ config/
 tsconfig*.json
 vitest.config*.ts
 
-# docs/ — only SDK.md, ARCHITECTURE.md, and OVERVIEW.md are in the files allowlist.
-docs/README-banner.jpg
+# docs/ — only SDK.md, ARCHITECTURE.md, OVERVIEW.md, and README-banner.jpg are in the files allowlist.
 docs/DEVELOPMENT.md
 
 # Tests
