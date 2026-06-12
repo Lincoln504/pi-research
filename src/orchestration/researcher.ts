@@ -11,7 +11,7 @@
  * - Knowledge store search for historical data
  */
 
-import type { AgentSession, ModelRegistry, SettingsManager, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, ModelRegistry, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { createAgentSession, SessionManager, SettingsManager as SettingsManagerClass } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import { createResearchTools } from '../tools/index.ts';
@@ -25,7 +25,6 @@ export interface CreateResearcherSessionOptions {
   cwd: string;
   ctxModel: Model<any> | undefined;
   modelRegistry: ModelRegistry;
-  settingsManager?: SettingsManager | undefined;
   systemPrompt: string;
   extensionCtx: ExtensionContext;
   // Optional: real closures for global state management

@@ -88,7 +88,6 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
   logger.debug(`[ResearcherExecutor] Researcher ${id} System Prompt:\n${prompt}`);
 
-  const extendedCtx = ctx as unknown as ExtendedExtensionContext;
   const maxAttempts = config.RESEARCHER_MAX_RETRIES + 1;
   let lastError: unknown;
   const researcherExecutionStartMs = Date.now();
@@ -108,7 +107,6 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       cwd: ctx.cwd,
       ctxModel: model,
       modelRegistry: ctx.modelRegistry,
-      settingsManager: extendedCtx['settingsManager'],
       systemPrompt: prompt,
       extensionCtx: ctx,
       excludeTools: mergedExclude,

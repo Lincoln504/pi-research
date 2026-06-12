@@ -43,10 +43,14 @@ export const FILTERED_TAGS = [
   'img', 'iframe',
 ] as const;
 
+/** Bot detection patterns used by scrapers and browser workers */
 export const BOT_PATTERNS: ReadonlyArray<[string, string]> = [
   ['_cf_chl_', 'Cloudflare challenge'],
+  ['cf_chl_opt', 'Cloudflare challenge opt'],
   ['cdn-cgi/challenge-platform', 'Cloudflare challenge platform'],
   ['ddos-guard', 'DDoS-Guard challenge'],
+  ['Just a moment...', 'Cloudflare interstitial'],
+  ['Checking your browser before accessing', 'Cloudflare interstitial'],
 ];
 
 export const IMAGE_LINK_PATTERN = /\[([^\]]*)\]\((data:image\/[^)]+|[^)\s]+\.(?:svg|png|jpe?g|gif|webp|bmp|ico)(?:\?[^)]*)?)\)/gi;

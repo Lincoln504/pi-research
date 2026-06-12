@@ -99,6 +99,8 @@ let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 // FIX (#14): Track the initialization promise to prevent concurrent init
 let _initPromise: Promise<void> | null = null;
+// Singleton observer — reused across research calls
+let _headlessObserver: HeadlessObserver | null = null;
 
 // ---------------------------------------------------------------------------
 // Config mapping: OpenClaw config → pi-research Config
@@ -383,7 +385,7 @@ export default {
           const researchId = createResearchRunId();
           const sessionId = `openclaw-${randomUUID()}`;
           const mockCtx = createMockContext(globalModel!, globalRegistry!);
-          const observer = new HeadlessObserver({ enableLogging: true });
+          const observer = _headlessObserver ??= new HeadlessObserver({ enableLogging: true });
 
           const researchStart = Date.now();
 

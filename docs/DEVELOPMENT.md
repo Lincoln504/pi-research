@@ -21,7 +21,6 @@ npm run build:worker       # required before integration tests
 | `npm run test:unit` | Unit tests (fast, no browser) |
 | `npm run test:integration` | Integration tests (parallel + serial groups) |
 | `npm run test:coverage` | Unit tests with v8 coverage report |
-| `npm run test:full` | Unit + integration + load |
 | `npm run deps:check` | Enforce dependency rules (depcruise) |
 | `npm run deps:generate` | Regenerate docs/deps.svg (requires graphviz) |
 | `npm run build:worker` | Bundle thread-worker.ts → thread-worker.mjs (esbuild) |
