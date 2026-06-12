@@ -168,8 +168,7 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
     if (lockFd !== null) {
       fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
     } else {
-      logger.warn(`[config] Failed to acquire lock for registry after ${maxRetries} retries. Writing anyway to avoid data loss.`);
-      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+      throw new Error(`Failed to acquire lock for project settings registry after ${maxRetries} retries. Aborting to prevent data corruption.`);
     }
   } catch (err) {
     logger.error('[config] Failed to save project settings registry:', err);

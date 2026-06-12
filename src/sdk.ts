@@ -15,7 +15,7 @@ import {
   initializeInfrastructureServices,
   shutdownInfrastructureServices
 } from './infrastructure/service-initialization.ts';
-import { getService, resetServiceContainer, disposeAllServices, createServiceContainer } from './core/service-registry.ts';
+import { getService, resetServiceContainer, createServiceContainer } from './core/service-registry.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { 
@@ -274,19 +274,38 @@ export async function shutdownResearchSDK(): Promise<void> {
   if (!isInitialized && !_initPromise && !globalContainer) {
     return;
   }
-  
+
   logger.log('[SDK] Shutting down Research SDK...');
-  
-  try {
-    if (globalContainer) {
-      await shutdownInfrastructureServices(globalContainer).catch(() => {});
-      await disposeCoreServices(globalContainer).catch(() => {});
-      await disposeAllServices(globalContainer).catch(() => {});
-      await resetServiceContainer(globalContainer).catch(() => {});
+
+  const errors: Error[] = [];
+
+  if (globalContainer) {
+    // Shutdown infra first (browser pool, embedding server, etc.)
+    try {
+      await shutdownInfrastructureServices(globalContainer);
+    } catch (err) {
+      logger.error('[SDK] Error shutting down infrastructure services:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
     }
-  } catch (err) {
-    logger.warn('[SDK] Error during shutdown:', err);
-  } finally {
+
+    // Dispose core services (orchestrators, planning, synthesis, etc.)
+    try {
+      await disposeCoreServices(globalContainer);
+    } catch (err) {
+      logger.error('[SDK] Error disposing core services:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
+    }
+
+    // Reset the container (clears registrations, resets lifecycle)
+    try {
+      await resetServiceContainer(globalContainer);
+    } catch (err) {
+      logger.error('[SDK] Error resetting service container:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  // Always reset globals so the SDK can be re-initialized
   isInitialized = false;
   _initPromise = null;
   globalRegistry = null;
@@ -294,8 +313,10 @@ export async function shutdownResearchSDK(): Promise<void> {
   globalCwd = process.cwd();
   globalContainer = null;
   globalConfig = null;
-  }
 
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `${errors.length} error(s) during SDK shutdown`);
+  }
 }
 
 /** @deprecated Use shutdownResearchSDK */

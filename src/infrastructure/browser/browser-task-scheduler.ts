@@ -36,7 +36,7 @@ export class BrowserTaskScheduler implements IScheduler {
     private readonly LEADERSHIP_CHECK_INTERVAL_MS: number = 5000;
     private readonly LEADERSHIP_MISS_THRESHOLD: number = 3;
     private isShuttingDown: boolean = false;
-    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+    private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes (was 30min — wasted RAM)
 
     constructor(
         public readonly schedulerId: string,

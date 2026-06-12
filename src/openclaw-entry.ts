@@ -248,19 +248,50 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<vo
  */
 export async function shutdown(): Promise<void> {
   if (!initialized || !globalContainer) return;
+
+  const errors: Error[] = [];
+
   try {
     await shutdownManager.runCleanup('openclaw_shutdown');
-    await shutdownInfrastructureServices(globalContainer);
-    await disposeCoreServices(globalContainer);
-    await resetServiceContainer(globalContainer);
-  } finally {
-    initialized = false;
-    globalModel = null;
-    globalRegistry = null;
-    globalContainer = null;
-    globalConfig = null;
+  } catch (err) {
+    logger.error('[OpenClaw] Error during shutdown cleanup:', err);
+    errors.push(err instanceof Error ? err : new Error(String(err)));
   }
+
+  if (globalContainer) {
+    try {
+      await shutdownInfrastructureServices(globalContainer);
+    } catch (err) {
+      logger.error('[OpenClaw] Error shutting down infrastructure services:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
+    }
+
+    try {
+      await disposeCoreServices(globalContainer);
+    } catch (err) {
+      logger.error('[OpenClaw] Error disposing core services:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
+    }
+
+    try {
+      await resetServiceContainer(globalContainer);
+    } catch (err) {
+      logger.error('[OpenClaw] Error resetting service container:', err);
+      errors.push(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  initialized = false;
+  globalModel = null;
+  globalRegistry = null;
+  globalContainer = null;
+  globalConfig = null;
+
   logger.log('[OpenClaw] pi-research shutdown complete');
+
+  if (errors.length > 0) {
+    logger.warn(`[OpenClaw] ${errors.length} error(s) during shutdown`);
+  }
 }
 
 // ---------------------------------------------------------------------------
