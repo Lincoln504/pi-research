@@ -206,7 +206,7 @@ export class PlanningService implements IPlanningService {
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal }),
+        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal, reasoning: 'minimal' }),
         createTimeout(llmTimeout, 'coordinator-generatePlan'),
       ]);
 
@@ -312,7 +312,7 @@ export class PlanningService implements IPlanningService {
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal }),
+        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal, reasoning: 'minimal' }),
         createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
       ]);
 

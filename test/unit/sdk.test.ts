@@ -56,7 +56,7 @@ vi.mock('../../src/core/service-registry.ts', () => ({
   getService: vi.fn().mockImplementation((name, _ctx, _container) => {
     if (name === 'research-orchestration') return { runResearch: mockDeepRun };
     if (name === 'session-service') return { registerSession: vi.fn(), cleanup: vi.fn() };
-    if (name === 'synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()) };
+    if (name === 'research-synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()), appendMetadata: vi.fn((result: string) => result) };
     return {};
   }),
   tryGetService: vi.fn().mockImplementation((name) => {

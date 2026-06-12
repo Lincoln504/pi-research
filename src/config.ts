@@ -30,7 +30,7 @@ export const ConfigSchema = Type.Object({
   /** Target depth for recursive research (default: 1, range: 1-3) */
   DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
-  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
+  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 3 }),
   /** Number of parallel browser pool workers (default: 4, range: 1-10) */
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */

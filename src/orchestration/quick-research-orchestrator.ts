@@ -264,8 +264,9 @@ export class QuickResearchOrchestrator {
           const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
           result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
-          // Append research metadata (model used)
-          result = synthesisService.appendMetadata(result, resolvedModel.id);
+          // NOTE: Model metadata (appendMetadata) is now applied at the very end
+          // of the result chain in research-tool-definition.ts (or sdk.ts for SDK
+          // users) so it always appears after metrics/summaries.
 
           const sessionDuration = Date.now() - sessionStart;
           metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'success' });

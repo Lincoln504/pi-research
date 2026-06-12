@@ -227,7 +227,7 @@ export async function runDeepResearch(
   const complexity = Math.max(1, Math.min(3, options.complexity ?? 1));
 
   try {
-    const result = await orchestrator.runResearch({
+    let result = await orchestrator.runResearch({
       ...options,
       ctx: createMockContext(sessionId),
       query,
@@ -237,6 +237,10 @@ export async function runDeepResearch(
       depth: depth as ResearchDepth,
       complexity: complexity as 1 | 2 | 3,
     }, signal ?? options.signal);
+
+    // Append research metadata (model used) at the very end
+    const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
+    result = synthesisService.appendMetadata(result, globalModel!.id);
 
     metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
     return result;

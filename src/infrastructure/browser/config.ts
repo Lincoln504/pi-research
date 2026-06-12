@@ -162,18 +162,19 @@ export function getSchedulerVersion(config?: Config): string {
  * Single point of control: all existing skipTests() checks use this function.
  */
 export function isBrowserAvailable(): boolean {
-    // Check if we're in full mock mode - browser pool tests are not meaningful
-    const fullMockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
-                         process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-    if (fullMockMode) {
-        return false;
-    }
-    
-    // Check if camoufox-js package and binary are available
     try {
         import.meta.resolve('camoufox-js');
         return existsSync(getCamoufoxBinaryPath());
     } catch {
         return false;
     }
+}
+
+/**
+ * Check whether search and scrape are mocked (used by tests that need real
+ * browser behavior — mock mode short-circuits in runTask()).
+ */
+export function isFullMockMode(): boolean {
+    return process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+           process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
 }

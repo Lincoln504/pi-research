@@ -22,7 +22,7 @@ import { validateConfig, getConfig } from '../config.ts';
 import { tryGetServiceContainerFromCtx, getService } from '../core/service-registry.ts';
 
 import { ServiceNames } from '../core/service-interfaces.ts';
-import type { IResearchOrchestration } from '../core/service-interfaces.ts';
+import type { IResearchOrchestration, IResearchSynthesisService } from '../core/service-interfaces.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.ts';
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
@@ -298,6 +298,10 @@ export function createResearchTool(): ToolDefinition {
                   finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState.totalCost);
                 }
               }
+
+              // Append research metadata (model used) at the very end, after metrics/summaries
+              const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
+              finalResult = synthesisService.appendMetadata(finalResult, selectedModel.id);
 
               return { result: finalResult, tokens: panelState.totalTokens, researchId };
             } catch (error) {

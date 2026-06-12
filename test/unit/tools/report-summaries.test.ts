@@ -124,6 +124,11 @@ describe('Research Tool - Report Summaries', () => {
           runResearch: vi.fn().mockResolvedValue('Research result'),
         } as any;
       }
+      if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) {
+        return {
+          appendMetadata: vi.fn((result: string) => result),
+        } as any;
+      }
       return null;
     });
   });

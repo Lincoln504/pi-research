@@ -24,7 +24,7 @@ export const FLASH_QUEUE_GAP_MS = 150;
 // ==================== Research Constraints ====================
 
 /** Maximum gathering (tool) calls per researcher (search, security_search, stackexchange, grep — shared budget) */
-export const MAX_GATHERING_CALLS = 10;
+export const MAX_GATHERING_CALLS = 12;
 
 /**
  * Get the maximum scrape batches from config.
@@ -39,8 +39,8 @@ export function getMaxScrapeBatches(config?: Config): number {
   }
 }
 
-/** Maximum URLs to scrape per batch (Batch 1 and 2) */
-export const MAX_SCRAPE_URLS = 4;
+/** Maximum URLs to scrape per batch */
+export const MAX_SCRAPE_URLS = 5;
 
 /**
  * Get the units per researcher for the progress bar.

@@ -386,8 +386,9 @@ export class DeepResearchOrchestrator {
       const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
       result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
-      // Append research metadata (model used)
-      result = synthesisService.appendMetadata(result, model.id);
+      // NOTE: Model metadata (appendMetadata) is now applied at the very end
+      // of the result chain in research-tool-definition.ts (or sdk.ts for SDK
+      // users) so it always appears after metrics/summaries.
 
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
