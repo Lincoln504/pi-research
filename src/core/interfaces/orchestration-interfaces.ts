@@ -64,6 +64,7 @@ export interface IResearchSynthesisService extends IService {
   buildFallbackSynthesis(researchId: string, currentRound?: number): string;
   ensureCitedLinks(researchId: string, result: string): string;
   appendSteeringGuidance(result: string, steeringMessages: any[]): string;
+  appendMetadata(result: string, modelId: string): string;
 }
 
 /**

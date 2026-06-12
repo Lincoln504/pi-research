@@ -171,19 +171,16 @@ describe('Chunker', () => {
           }
           
           if (reconstructed !== text) {
-            console.log(`FAILED CONFIG: targetSize=${config.targetSize}, overlap=${config.overlap}`);
-            console.log(`CHUNKS:`, chunks.map(c => ({ len: c.text.length, overlap: c.actual_overlap, text: c.text.slice(0, 20) + '...' })));
             // Find first mismatch for debugging
+            let mismatchInfo = '';
             for (let j = 0; j < Math.max(text.length, reconstructed.length); j++) {
                 if (text[j] !== reconstructed[j]) {
-                    console.log(`Mismatch at index ${j}: expected ${JSON.stringify(text[j])}, got ${JSON.stringify(reconstructed[j])}`);
-                    console.log(`Context Expected: ...${text.slice(Math.max(0, j-20), j+20)}...`);
-                    console.log(`Context Received: ...${reconstructed.slice(Math.max(0, j-20), j+20)}...`);
+                    mismatchInfo = `Mismatch at index ${j}: expected ${JSON.stringify(text[j])}, got ${JSON.stringify(reconstructed[j])}`;
                     break;
                 }
             }
+            expect(reconstructed).toBe(text);
           }
-          expect(reconstructed).toBe(text);
         }
       }
     });

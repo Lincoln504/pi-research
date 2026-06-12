@@ -129,6 +129,7 @@ describe('DeepResearchOrchestrator', () => {
       getReportCount: vi.fn(() => 0),
       ensureCitedLinks: vi.fn((_id: string, text: string) => text),
       appendSteeringGuidance: vi.fn((text: string) => text),
+      appendMetadata: vi.fn((text: string) => text),
     };
 
     // Default getService implementation

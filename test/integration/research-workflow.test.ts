@@ -199,10 +199,10 @@ describe('End-to-End Research Workflows', () => {
       // We verify the store is accessible and that IF docs were stored they are searchable.
       const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
       const store = await service.getStore();
-      const docCount = await store.count();
+      const docCount = await store!.count();
       expect(docCount).toBeGreaterThanOrEqual(0);
       if (docCount > 0) {
-        const searchResults = await store.search('TypeScript features');
+        const searchResults = await store!.search('TypeScript features');
         expect(searchResults.length).toBeGreaterThanOrEqual(0);
       }
     }, 60000);
@@ -398,12 +398,12 @@ describe('End-to-End Research Workflows', () => {
       // Without a real API key, count stays 0 — verify accessibility only.
       const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE);
       const store = await service.getStore();
-      const docCount = await store.count();
+      const docCount = await store!.count();
       expect(docCount).toBeGreaterThanOrEqual(0);
 
       if (docCount > 0) {
         // Verify stored documents are searchable
-        const searchResults = await store.search('Rust security');
+        const searchResults = await store!.search('Rust security');
         expect(searchResults.length).toBeGreaterThan(0);
         expect(searchResults[0]!.text.length).toBeGreaterThan(10);
       }

@@ -161,7 +161,11 @@ export async function findDocumentsByUrl(
 
   return results.map(r => {
     let metadata: Record<string, unknown> = {};
-    try { metadata = JSON.parse(r.metadata as string); } catch { logger.debug('[store-operations] Corrupted metadata in findDocumentsByUrl, skipping row'); }
+    try { 
+      metadata = JSON.parse(r.metadata as string); 
+    } catch {
+      logger.debug('[store-operations] Corrupted metadata in findDocumentsByUrl, using empty object');
+    }
     return {
     url: r.url as string,
     text: r.text as string,

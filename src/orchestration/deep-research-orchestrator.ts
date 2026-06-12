@@ -386,6 +386,9 @@ export class DeepResearchOrchestrator {
       const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
       result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
 
+      // Append research metadata (model used)
+      result = synthesisService.appendMetadata(result, model.id);
+
       const sessionDuration = Date.now() - this.sessionStart;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'success' });
       

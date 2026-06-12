@@ -80,7 +80,7 @@ describe('Tool Execution After Service Registry Refactor', () => {
         query: 'test query',
         depth: '1',
         model: 'test-model',
-      }, mockCtx as any) as any;
+      }) as any;
 
       expect(args.query).toBe('test query');
       expect(args.depth).toBe(1);
@@ -98,12 +98,13 @@ describe('Tool Execution After Service Registry Refactor', () => {
       try {
         const args = tool.prepareArguments!({
           query: 'test query',
-        }, mockCtx as any) as any;
+        }) as any;
 
         expect(args.query).toBe('test query');
         // Tool schema enforces minimum: 1; depth 0 is SDK-only (not exposed via tool).
-        // Missing depth falls back to DEFAULT_RESEARCH_DEPTH (1) clamped to ≥1.
-        expect(args.depth).toBe(1);
+        // prepareArguments only normalizes provided values — it does not apply defaults.
+        // The execute function handles default depth via rawDepth ?? config.DEFAULT_RESEARCH_DEPTH.
+        expect(args.depth).toBeUndefined();
       } finally {
         if (originalDepth === undefined) {
           delete process.env['PI_RESEARCH_DEFAULT_RESEARCH_DEPTH'];
@@ -120,20 +121,20 @@ describe('Tool Execution After Service Registry Refactor', () => {
       const args1 = tool.prepareArguments!({
         query: 'test query',
         depth: 'invalid',
-      }, mockCtx as any) as any;
+      }) as any;
       // Unparseable string → safe fallback of 1 (minimum valid depth)
       expect(args1.depth).toBe(1);
 
       const args2 = tool.prepareArguments!({
         query: 'test query',
         depth: 10,
-      }, mockCtx as any) as any;
+      }) as any;
       expect(args2.depth).toBe(3); // Should cap at 3
 
       const args3 = tool.prepareArguments!({
         query: 'test query',
         depth: -1,
-      }, mockCtx as any) as any;
+      }) as any;
       // Below-minimum depth clamped to 1 (minimum valid depth for this tool)
       expect(args3.depth).toBe(1);
     });

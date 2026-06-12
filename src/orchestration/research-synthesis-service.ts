@@ -136,6 +136,18 @@ export class ResearchSynthesisService implements IService {
   }
 
   /**
+   * Append research metadata (model used) to the end of the synthesis
+   */
+  appendMetadata(synthesis: string, modelId: string): string {
+    const metadataSection = [
+      '---',
+      `*Research performed using ${modelId}*`,
+    ].join('\n');
+
+    return `${synthesis.trim()}\n\n${metadataSection}`;
+  }
+
+  /**
    * Ensure the synthesis has an accurate and consistent ### CITED LINKS section.
    * Rebuilds the section from all researcher reports to guarantee sequential numbering [1], [2], [3]...
    * and unique URLs, regardless of what the LLM produced.

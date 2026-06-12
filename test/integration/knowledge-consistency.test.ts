@@ -70,7 +70,7 @@ describe('Knowledge Store & URL Consistency Integration', () => {
     // Note: We bypass addDocuments to avoid needing a full writer queue for this simple count test
     // or we can use the writer queue to be more "integration-y".
     
-    const writer = new WriterQueue({ store });
+    const writer = new WriterQueue({ store, chunker: null });
     await writer.initialize();
 
     await writer.enqueue({
@@ -92,7 +92,7 @@ describe('Knowledge Store & URL Consistency Integration', () => {
       globalEnabled: true
     });
     await storeB.initialize();
-    const writerB = new WriterQueue({ store: storeB });
+    const writerB = new WriterQueue({ store: storeB, chunker: null });
     await writerB.initialize();
 
     await writerB.enqueue({

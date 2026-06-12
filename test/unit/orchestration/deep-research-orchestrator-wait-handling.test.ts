@@ -96,6 +96,7 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
       getAllReports: vi.fn(() => new Map()),
       ensureCitedLinks: vi.fn((_id: string, text: string) => text),
       appendSteeringGuidance: vi.fn((text: string) => text),
+      appendMetadata: vi.fn((text: string) => text),
     };
 
     vi.mocked(getService).mockImplementation(async (name) => {

@@ -141,7 +141,7 @@ describe('Research Tool - Report Summaries', () => {
     const text = (result.content[0] as any).text;
     // The new unified summary format — no tables, no percentages, just counts
     expect(text).toContain('### Research Summary');
-    expect(text).toContain('**2** researchers dispatched');
+    expect(text).toContain('**2** researchers launched');
     // Scrape layer breakdown shows fetch vs browser
     expect(text).toContain('1 via fetch');
     expect(text).toContain('1 via browser');

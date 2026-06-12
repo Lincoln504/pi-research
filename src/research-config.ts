@@ -18,6 +18,8 @@ import type { TUI } from '@earendil-works/pi-tui';
 import {
   SettingsList,
   type SettingItem,
+  visibleWidth,
+  truncateToWidth,
 } from '@earendil-works/pi-tui';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
 import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
@@ -79,115 +81,114 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const container = tryGetServiceContainerFromCtx(ctx);
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
-  const scrapePct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
-
   const anyKnowledgeStore = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
 
   const initialItems: SettingItem[] = [
-    // --- Research ---
+    // --- Research (Project-scoped) ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: '/research depth (project)',
-      description: 'Default research depth (normal/deep/ultra). Per-directory.',
+      label: '/research depth [project]',
+      description: 'Default complexity (normal/deep/ultra) for /research command.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
-      id: 'MAX_CONCURRENT_RESEARCHERS',
-      label: 'Max concurrent (project)',
-      description: 'Maximum simultaneous researchers. Per-directory.',
-      currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
-      values: ['1', '2', '3', '4', '5'],
-    },
-    {
-      id: 'RESEARCH_REPORT_EXPORT_ENABLED',
-      label: 'Export report (project)',
-      description: 'Export research reports as markdown. Per-directory.',
-      currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
-      values: ['true', 'false'],
-    },
-    {
-      id: 'MAX_SCRAPE_BATCHES',
-      label: 'Scrape batches (project)',
-      description: `Maximum scrape batches per researcher (0=unlimited). Per-directory.`,
-      currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
-      values: ['unlimited', '1', '2', '3', '5', '10', '15'],
-    },
-    {
-      id: 'WORKER_THREADS',
-      label: 'Worker threads (global)',
-      description: 'Browser worker processes for search/scraping. Global.',
-      currentValue: String(config.WORKER_THREADS),
-      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-    },
-    {
       id: 'RESEARCHER_TIMEOUT_MS',
-      label: 'Timeout (min) (project)',
-      description: 'Per-researcher execution timeout in minutes. Per-directory.',
+      label: 'Research timeout [project]',
+      description: 'Maximum time in minutes allowed for a single research track.',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
     {
-      id: 'DEBUG',
-      label: 'Debug logging (global)',
-      description: 'Enable verbose debug logging to file. Global.',
-      currentValue: config.DEBUG ? 'true' : 'false',
+      id: 'MAX_CONCURRENT_RESEARCHERS',
+      label: 'Concurrency [project]',
+      description: 'Max parallel researcher threads. Manages token/resource load, not task delegation.',
+      currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
+      values: ['1', '2', '3', '4', '5'],
+    },
+    {
+      id: 'MAX_SCRAPE_BATCHES',
+      label: 'Scrape batches [project]',
+      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited).',
+      currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
+      values: ['unlimited', '1', '2', '3', '5', '10', '15'],
+    },
+    {
+      id: 'RESEARCH_REPORT_EXPORT_ENABLED',
+      label: 'Auto-export [project]',
+      description: 'Automatically save a markdown report when research completes.',
+      currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
 
-    // --- Knowledge Store ---
+    // --- Knowledge Store (Hybrid) ---
     {
       id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Project Knowledge Store (global)',
-      description: 'Enable project-scoped research storage. Global.',
+      label: 'Project store [project]',
+      description: 'Save findings to a local database for this specific directory.',
       currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'User Knowledge Store (global)',
-      description: 'Enable shared (cross-project) research storage. Global.',
+      label: 'User store [user]',
+      description: 'Save findings to a shared user database for cross-project memory.',
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
+    },
+
+    // --- Infrastructure (User) ---
+    {
+      id: 'WORKER_THREADS',
+      label: 'Worker threads [user]',
+      description: 'Browser processes for searching/scraping. Affects CPU/RAM.',
+      currentValue: String(config.WORKER_THREADS),
+      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'EMBEDDING_MODEL',
-        label: 'Embed model (global)',
-        description: 'Vector embedding model. Changing clears all data. Global.',
+        label: 'Embed model [user]',
+        description: 'Vector model for store. Changing this deletes all current data.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
       {
         id: 'EMBEDDING_DEVICE',
-        label: 'Embed device (global)',
-        description: 'Hardware backend (WebGPU/CPU). Global.',
+        label: 'Embed device [user]',
+        description: 'Hardware backend (WebGPU or CPU). CPU is safer for servers.',
         currentValue: config.EMBEDDING_DEVICE,
         values: ['webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-        label: 'Cache TTL (days) (global)',
-        description: 'Retention period for research findings. Global.',
+        label: 'Cache retention [user]',
+        description: 'Number of days to keep research findings in the database.',
         currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
         values: ['7', '14', '30', '60', '90', '180', '365'],
       },
     ] as SettingItem[] : []),
-
+    {
+      id: 'DEBUG',
+      label: 'Diagnostic logs [user]',
+      description: 'Enable verbose logging to file for troubleshooting errors.',
+      currentValue: config.DEBUG ? 'true' : 'false',
+      values: ['true', 'false'],
+    },
 
     // --- Actions ---
     {
       id: 'ACTION_HEALTH',
-      label: 'Check health',
-      description: 'Run system diagnostics',
+      label: 'Run diagnostics',
+      description: 'Test browser pool, GPU, and database connectivity.',
       currentValue: 'run',
       values: ['run'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'ACTION_KNOWLEDGE_STATUS',
-        label: 'Show stats',
-        description: 'Display knowledge store statistics',
+        label: 'Database status',
+        description: 'Show entry counts and disk usage for the knowledge store.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -195,8 +196,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.LOCAL_KNOWLEDGE_STORE_ENABLED ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-        label: 'Clear project data',
-        description: 'Delete project-scoped entries from database',
+        label: 'Clear project store',
+        description: 'Permanently delete all project-scoped store entries.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -204,8 +205,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-        label: 'Clear user data',
-        description: 'Delete all shared entries from database',
+        label: 'Clear user store',
+        description: 'Permanently delete all user-scoped store entries.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -213,14 +214,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'ACTION_METRICS_VIEW',
       label: 'View performance',
-      description: 'Display session performance metrics',
+      description: 'Show token usage, costs, and success rates for this session.',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
-      label: 'Reset performance',
-      description: 'Clear all performance counters',
+      label: 'Reset session',
+      description: 'Clear the current session performance counters.',
       currentValue: 'run',
       values: ['run'],
     },
@@ -234,9 +235,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
           description: (text: string) => {
-            // SettingsList calls this once per word-wrapped line (already has "  " prefix).
-            // Check for the warning keyword to highlight destructive-action lines.
-            if (text.includes('delete') || text.includes('clear')) {
+            // Apply warning color to the entire line if it contains destructive keywords.
+            // The SettingsList already passes text split into wrapped lines.
+            if (text.toLowerCase().includes('delete') || text.toLowerCase().includes('clear')) {
               return theme.fg('warning', text);
             }
             return theme.fg('dim', text);
@@ -258,7 +259,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           async (id, newValue) => {
             // 1. Handle Settings Changes (Auto-save)
             let changed = true;
-            let scope: 'local' | 'global' = 'local';
+            let scope: 'local' | 'global' | 'user' = 'local';
 
             if (id === 'DEFAULT_RESEARCH_DEPTH') {
               const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
@@ -268,32 +269,32 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             } else if (id === 'MAX_SCRAPE_BATCHES') {
               config.MAX_SCRAPE_BATCHES = newValue === 'unlimited' ? 0 : parseInt(newValue, 10);
             } else if (id === 'WORKER_THREADS') {
-              config.WORKER_THREADS = parseInt(newValue, 10);
-              scope = 'global';
+            config.WORKER_THREADS = parseInt(newValue, 10);
+            scope = 'user';
             } else if (id === 'RESEARCHER_TIMEOUT_MS') {
-              config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+            config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
             } else if (id === 'DEBUG') {
-              config.DEBUG = newValue === 'true';
-              scope = 'global';
+            config.DEBUG = newValue === 'true';
+            scope = 'user';
             } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
-              config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
+            config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             } else if (id === 'LOCAL_KNOWLEDGE_STORE_ENABLED') {
-              config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-              scope = 'global';
+            config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+            scope = 'local';
             } else if (id === 'GLOBAL_KNOWLEDGE_STORE_ENABLED') {
-              config.GLOBAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-              scope = 'global';
+            config.GLOBAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
+            scope = 'user';
             } else if (id === 'EMBEDDING_MODEL') {
-              config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
-              scope = 'global';
+            config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
+            scope = 'user';
             } else if (id === 'EMBEDDING_DEVICE') {
-              config.EMBEDDING_DEVICE = newValue as 'webgpu' | 'cpu';
-              scope = 'global';
+            config.EMBEDDING_DEVICE = newValue as 'webgpu' | 'cpu';
+            scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
-              config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);
-              scope = 'global';
+            config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);
+            scope = 'user';
             } else {
-              changed = false;
+            changed = false;
             }
 
             if (changed) {
@@ -325,13 +326,41 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           { enableSearch: true }
         );
 
+        const wrapText = (text: string, width: number): string[] => {
+          const words = text.split(' ');
+          const lines: string[] = [];
+          let currentLine = '';
+          for (const word of words) {
+            if ((currentLine.length + word.length + 1) > width) {
+              if (currentLine) lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = currentLine ? `${currentLine} ${word}` : word;
+            }
+          }
+          if (currentLine) lines.push(currentLine);
+          return lines;
+        };
+
         return {
           render: (width: number) => {
+            if (width < 4) return [];
             const border = theme.fg('muted', '─'.repeat(width));
             const listLines = settingsList.render(width);
-            const pathInfo = theme.fg('dim', ` Project: ${path.basename(cwd)}`);
-            const registryInfo = theme.fg('dim', ` Settings with (project) are unique to this directory and stored in the Centralized Registry (~/.pi/state/project-settings.json).`);
-            return [border, pathInfo, registryInfo, '', ...listLines, border];
+            
+            const pathInfoText = `Project: ${path.basename(cwd)}`;
+            const wrappedPathInfo = wrapText(pathInfoText, width - 2).map(line => theme.fg('dim', ` ${line}`));
+            
+            const registryDesc = `Settings marked [project] are unique to this directory, stored in the Centralized Registry (~/.pi/state/project-settings.json). Settings marked [user] apply across all projects.`;
+            const wrappedRegistry = wrapText(registryDesc, width - 2).map(line => theme.fg('dim', ` ${line}`));
+            
+            const lines = [border, ...wrappedPathInfo, ...wrappedRegistry, '', ...listLines, border];
+            return lines.map(line => {
+              if (visibleWidth(line) > width) {
+                return truncateToWidth(line, width);
+              }
+              return line;
+            });
           },
           handleInput: (data: string) => settingsList.handleInput(data),
           invalidate: () => settingsList.invalidate(),
@@ -374,12 +403,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             await showKnowledgeStatusAction(ctx, pi);
             break;
           case 'knowledge_clear_global': {
-            const confirmed = await ctx.ui.confirm('Clear User Data', 'Permanently delete all cross-project data?');
+            const confirmed = await ctx.ui.confirm('Clear User Store', 'Permanently delete all user-scoped store data?');
             if (confirmed) {
               try {
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
                 await service.clearGlobal();
-                ctx.ui.notify('User data cleared.', 'info');
+                ctx.ui.notify('User store cleared.', 'info');
               } catch (e: unknown) {
                 ctx.ui.notify(`Clear failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }
@@ -387,12 +416,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             break;
           }
           case 'knowledge_clear_local': {
-            const confirmed = await ctx.ui.confirm('Clear Project Data', 'Permanently delete project data?');
+            const confirmed = await ctx.ui.confirm('Clear Project Store', 'Permanently delete all project-scoped store data?');
             if (confirmed) {
               try {
                 const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
                 await service.clearLocal();
-                ctx.ui.notify('Project data cleared.', 'info');
+                ctx.ui.notify('Project store cleared.', 'info');
               } catch (e: unknown) {
                 ctx.ui.notify(`Clear failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
               }

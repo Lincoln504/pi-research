@@ -130,6 +130,9 @@ export function createResearchTool(): ToolDefinition {
         }
       }
 
+      // Depth stays undefined when not provided.
+      // The execute function handles defaults via rawDepth ?? config.DEFAULT_RESEARCH_DEPTH.
+
       return normalized;
     },
     async execute(

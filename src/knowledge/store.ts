@@ -676,9 +676,7 @@ export class KnowledgeStore implements IKnowledgeStore {
     const table = await this.getFreshTable();
 
     try {
-      const ttlDays = this.options.ttlDays ?? 0;
-      if (ttlDays <= 0) return;
-
+      const ttlDays = this.options.ttlDays ?? 30;
       const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
       await table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
       logger.log(`[store] Ran eviction for records older than ${ttlDays} days`);
@@ -703,54 +701,87 @@ export class KnowledgeStore implements IKnowledgeStore {
    */
   async countScoped(workspace?: string): Promise<{ local: number; global: number; projects: number }> {
     if (!this.db) return { local: 0, global: 0, projects: 0 };
-    const table = await this.getFreshTable();
-    const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
-    const escaped = ws.replace(/'/g, "''");
-    
-    // We run local and global counts efficiently using table.countRows()
-    const [local, global] = await Promise.all([
-      table.countRows(`workspace = '${escaped}'`),
-      table.countRows(`is_global = true`)
-    ]);
-    
-    // To count unique projects, we must query the workspace column.
-    // To be memory efficient, we stream or batch if the table is huge, 
-    // but for now we optimize by only selecting the 'workspace' field.
-    // LanceDB 0.12+ supports better aggregations, but for compatibility 
-    // we use a targeted select.
-    const allWorkspaces = await table.query()
-      .select(['workspace'])
-      .toArray();
-    
-    const uniqueWorkspaces = new Set<string>();
-    for (const row of allWorkspaces) {
-      if (row.workspace) uniqueWorkspaces.add(row.workspace as string);
+
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 100;
+
+    while (retryCount <= MAX_RETRIES) {
+      try {
+        const table = await this.getFreshTable();
+        const ws = normalizeWorkspacePath(workspace || this.getWorkspace());
+        const escaped = ws.replace(/'/g, "''");
+
+        const [local, global] = await Promise.all([
+          table.countRows(`workspace = '${escaped}'`),
+          table.countRows(`is_global = true`)
+        ]);
+
+        const allWorkspaces = await table.query()
+          .select(['workspace'])
+          .toArray();
+
+        const uniqueWorkspaces = new Set<string>();
+        for (const row of allWorkspaces) {
+          if (row.workspace) uniqueWorkspaces.add(row.workspace as string);
+        }
+
+        return { local, global, projects: uniqueWorkspaces.size };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+          retryCount++;
+          if (retryCount > MAX_RETRIES) throw err;
+          const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+          logger.debug(`[store] Read contention detected in countScoped, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
     }
-    
-    return { local, global, projects: uniqueWorkspaces.size };
+    return { local: 0, global: 0, projects: 0 }; // Should not be reached
   }
 
   async clear(filter?: string): Promise<void> {
     if (!this.db) throw new Error('Store not open');
-    const table = await this.getFreshTable();
-    const scopeFilter = filter || this.getScopeFilter();
 
-    const startTime = Date.now();
-    try {
-      // Scoped clear instead of dropping table to preserve other workspace data
-      await table.delete(scopeFilter);
-      
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_clear_duration_ms', duration);
-      metrics.increment('knowledge_store_clear_total', 1, { status: 'success' });
-      metrics.setGauge('knowledge_store_total_documents', 0);
-      logger.info(`[store] Knowledge store cleared for scope: ${scopeFilter}`);
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      metrics.observe('knowledge_store_clear_duration_ms', duration, { status: 'error' });
-      metrics.increment('knowledge_store_clear_total', 1, { status: 'error' });
-      logger.error('[store] Failed to clear knowledge store:', err);
-      throw err;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 100;
+
+    while (retryCount <= MAX_RETRIES) {
+      try {
+        const table = await this.getFreshTable();
+        const scopeFilter = filter || this.getScopeFilter();
+        const startTime = Date.now();
+
+        // Scoped clear instead of dropping table to preserve other workspace data
+        await table.delete(scopeFilter);
+
+        const duration = Date.now() - startTime;
+        metrics.observe('knowledge_store_clear_duration_ms', duration);
+        metrics.increment('knowledge_store_clear_total', 1, { status: 'success' });
+        metrics.setGauge('knowledge_store_total_documents', 0);
+        logger.info(`[store] Knowledge store cleared for scope: ${scopeFilter}`);
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Version mismatch') || msg.includes('Lock error') || msg.includes('Commit error')) {
+          retryCount++;
+          if (retryCount > MAX_RETRIES) {
+            metrics.increment('knowledge_store_clear_total', 1, { status: 'error' });
+            throw err;
+          }
+          const delay = Math.floor(Math.random() * (BASE_DELAY * Math.pow(2, retryCount - 1)));
+          logger.debug(`[store] Write contention detected in clear, retrying ${retryCount}/${MAX_RETRIES} after ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        metrics.increment('knowledge_store_clear_total', 1, { status: 'error' });
+        logger.error('[store] Failed to clear knowledge store:', err);
+        throw err;
+      }
     }
   }
 

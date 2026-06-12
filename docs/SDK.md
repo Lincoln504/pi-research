@@ -45,8 +45,9 @@ Settings are loaded with the following precedence:
 
 | Variable | Description |
 |----------|-------------|
-| `PI_RESEARCH_VERBOSE` | Set to `1` to write JSONL diagnostic logs to OS temp dir |
+| `PI_RESEARCH_DEBUG` | Set to `true` to enable verbose diagnostic logs to OS temp dir |
 | `PI_RESEARCH_LOG_PATH` | Override path for the verbose diagnostic log file |
+| `PI_RESEARCH_STATE_DIR` | Override the state directory (default: `~/.pi/state`) |
 
 ---
 

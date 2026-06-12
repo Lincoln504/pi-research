@@ -105,12 +105,12 @@ describe('PlanningService', () => {
     });
 
     it('transitions to INITIALIZED after initialize()', async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
       expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
     });
 
     it('isReady() is true after initialization', async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
       expect(service.isReady()).toBe(true);
     });
 
@@ -119,13 +119,13 @@ describe('PlanningService', () => {
     });
 
     it('transitions to DISPOSED after dispose()', async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
       await service.dispose();
       expect(service.lifecycle).toBe(ServiceLifecycle.DISPOSED);
     });
 
     it('dispose() clears all planning state', async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
       service.addToQueryHistory('test-session', ['q1', 'q2']);
       service.incrementTotalResearchersPlanned('test-session', 3);
       await service.dispose();
@@ -139,7 +139,7 @@ describe('PlanningService', () => {
 
   describe('query history', () => {
     beforeEach(async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
     });
 
     it('starts with an empty history', () => {
@@ -162,7 +162,7 @@ describe('PlanningService', () => {
 
   describe('totalResearchersPlanned', () => {
     beforeEach(async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
     });
 
     it('starts at 0', () => {
@@ -178,7 +178,7 @@ describe('PlanningService', () => {
 
   describe('clearPlanningState', () => {
     beforeEach(async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
     });
 
     it('resets queryHistory, currentPlan, and totalResearchersPlanned', () => {
@@ -222,7 +222,7 @@ describe('PlanningService', () => {
     };
 
     beforeEach(async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
     });
 
     it('throws if model auth fails', async () => {
@@ -291,7 +291,7 @@ describe('PlanningService', () => {
     };
 
     beforeEach(async () => {
-      await service.initialize(MOCK_CTX);
+      await service.initialize();
     });
 
     it('returns a synthesize plan when the LLM returns a synthesize action', async () => {

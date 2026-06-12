@@ -118,10 +118,10 @@ function sleepSync(ms: number): void {
   if (ms <= 0) return;
   try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
+  } catch (_err) {
     // Fallback to busy-wait if SharedArrayBuffer is restricted (unlikely in Node.js)
     const end = Date.now() + ms;
-    while (Date.now() < end) {}
+    while (Date.now() < end) { /* spin */ }
   }
 }
 
@@ -253,6 +253,7 @@ function loadEnvFiles(cwd: string): Record<string, string> {
   try {
     const registry = loadProjectSettingsRegistry();
     const normalizedCwd = normalizeWorkspacePath(cwd);
+
     if (registry[normalizedCwd]) {
       Object.assign(merged, registry[normalizedCwd]);
     }
@@ -280,7 +281,7 @@ function loadEnvFiles(cwd: string): Record<string, string> {
 /**
  * Write config back to env file.
  */
-export function saveConfig(config: Config, scope: 'local' | 'global' = 'local', cwd: string = process.cwd()): void {
+export function saveConfig(config: Config, scope: 'local' | 'global' | 'user' = 'local', cwd: string = process.cwd()): void {
   const newValues: Record<string, string> = {
     PI_RESEARCH_TIMEOUT_MS: String(config.RESEARCHER_TIMEOUT_MS),
     PI_RESEARCH_MAX_RESEARCHERS: String(config.MAX_CONCURRENT_RESEARCHERS),

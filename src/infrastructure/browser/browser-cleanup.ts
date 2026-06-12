@@ -46,6 +46,7 @@ export async function cleanupOrphanedCamoufoxProcesses(): Promise<void> {
 async function cleanupOrphanedProcessesUnix(): Promise<void> {
   try {
     // Find Camoufox/firefox processes and their parent PIDs
+    // Simplified regex to just match PID and PPID reliably
     const { stdout } = await execAsync(
       'ps -eo pid,ppid,comm | grep -E "(firefox|camoufox)" | grep -v grep',
     );
@@ -54,22 +55,32 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
     const cleanupTasks: Promise<void>[] = [];
     
     for (const line of lines) {
-      const match = line.trim().match(/^\s*(\d+)\s+(\d+)\s+(\S+)/);
-      if (!match || !match[1] || !match[2] || !match[3]) continue;
+      // Capture PID and PPID from the start of the line
+      const match = line.trim().match(/^\s*(\d+)\s+(\d+)/);
+      if (!match || !match[1] || !match[2]) continue;
       
       const pid = parseInt(match[1], 10);
       const ppid = parseInt(match[2], 10);
-      const comm = match[3];
+      const comm = line.trim().split(/\s+/)[2] || 'unknown';
       
-      // Check if parent process is still alive
-      try {
-        process.kill(ppid, 0);
-        // Parent is alive, this is not an orphan
-        continue;
-      } catch {
-        // Parent is dead - this is an orphan
+      // Determine if orphan:
+      // 1. PPID is 1 (adopted by init)
+      // 2. Parent PID is dead (process.kill(ppid, 0) throws)
+      let isOrphan = false;
+      if (ppid === 1) {
+        isOrphan = true;
+      } else {
+        try {
+          process.kill(ppid, 0);
+          isOrphan = false;
+        } catch {
+          isOrphan = true;
+        }
+      }
+
+      if (isOrphan) {
         cleanupTasks.push((async () => {
-          logger.log(`[BrowserCleanup] Found orphaned ${comm} process: PID ${pid}, dead parent PID ${ppid}`);
+          logger.log(`[BrowserCleanup] Found orphaned ${comm} process: PID ${pid}, parent PID ${ppid}`);
           
           try {
             // Kill the orphaned process gracefully

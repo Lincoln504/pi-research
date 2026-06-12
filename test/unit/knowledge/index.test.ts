@@ -86,9 +86,9 @@ describe('createKnowledgeStoreComponents', () => {
 
     const components = await createKnowledgeStoreComponents(embedderFactory);
 
-    expect(components.embedder).toBe(mockEmbedder);
-    expect(components.store).toBeDefined();
-    expect(components.writerQueue).toBeDefined();
+    expect(components!.embedder).toBe(mockEmbedder);
+    expect(components!.store).toBeDefined();
+    expect(components!.writerQueue).toBeDefined();
     expect(embedderFactory).toHaveBeenCalled();
   });
 });

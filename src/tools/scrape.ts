@@ -227,7 +227,7 @@ export function createScrapeTool(options: {
         }
       }
 
-      let freshResults: any[] = [];
+      let freshResults: any[];
       const concurrency = p.maxConcurrency || defaultConcurrency;
       
       try {

@@ -276,13 +276,13 @@ describe('Flash queue system', () => {
 
     // 1 green + 8 red with gaps = 400 + 8*(700+150) = 400 + 6800 = 7200ms total
     vi.advanceTimersByTime(400); // green expires → gap
-    transitions.push(state.slices.get('1')!.flash);
+    transitions.push(state.slices.get('1')!.flash ?? null);
 
     for (let i = 0; i < 8; i++) {
       vi.advanceTimersByTime(150); // gap → red starts
-      transitions.push(state.slices.get('1')!.flash);
+      transitions.push(state.slices.get('1')!.flash ?? null);
       vi.advanceTimersByTime(700); // red expires → gap (or done)
-      transitions.push(state.slices.get('1')!.flash);
+      transitions.push(state.slices.get('1')!.flash ?? null);
     }
 
     // All transitions: gap, red, gap, red, ..., gap, null

@@ -6,10 +6,19 @@ import { ServiceLifecycle } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { 
   IWriterQueue, 
-  IngestionItem, 
-  IKnowledgeStore, 
+  IngestionItem,
   StoreDocument 
 } from '../core/interfaces/knowledge-interfaces.ts';
+
+interface WriterQueueOptions {
+  store: {
+    isStoreClosed?: () => boolean;
+    findByUrl: (url: string) => Promise<StoreDocument[]>;
+    deleteByUrlAndType: (url: string, type: string) => Promise<void>;
+    addDocuments: (docs: StoreDocument[]) => Promise<void>;
+  };
+  chunker: Chunker | null;
+}
 
 function isConnectionRefused(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);

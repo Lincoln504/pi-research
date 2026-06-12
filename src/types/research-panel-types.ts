@@ -19,8 +19,8 @@ export interface SliceState {
   tokens?: number; // Tokens for this specific agent
   cost?: number;   // Cost for this specific agent
   status?: string; // Optional status message like "Searching..."
-  /** Active flash color — set by flashSlice, cleared by timeout */
-  flash?: 'green' | 'red' | null;
+  /** Active flash color — set by flashSlice, cleared by timeout. Always present. */
+  flash: 'green' | 'red' | null;
 }
 
 export interface ResearchProgress {

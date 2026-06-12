@@ -458,7 +458,7 @@ function missResult(reason: string): AgentToolResult<unknown> {
 export function createResearchKnowledgeSearchTool(): ToolDefinition {
   return {
     name: 'research_knowledge_search',
-    label: 'Knowledge Search',
+    label: 'Research Knowledge Search',
     description:
       'Search the research knowledge database for previously investigated information. ' +
       'Use this before performing live web research.',

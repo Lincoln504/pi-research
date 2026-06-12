@@ -190,8 +190,7 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
  */
 export async function initResearchSDK(options: ResearchSDKOptions = {}): Promise<void> {
   if (isInitialized) {
-    // Trigger the warning logic in _doInit
-    await _doInit(options);
+    logger.warn('[SDK] Research SDK already initialized. Call shutdownResearchSDK() first if you want to re-initialize with new options.');
     return;
   }
   if (_initPromise) return _initPromise;

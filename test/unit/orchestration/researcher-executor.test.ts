@@ -148,6 +148,7 @@ describe('runResearcher', () => {
           storeReport: mockStoreReport,
           appendSteeringGuidance: vi.fn((text) => text),
           ensureCitedLinks: vi.fn((_id, text) => text),
+          appendMetadata: vi.fn((_text, _modelId) => _text),
         } as any;
       }
       return null;

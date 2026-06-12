@@ -22,7 +22,7 @@ describe('WriterQueue', () => {
     mockStore.deleteByUrl.mockResolvedValue(undefined);
     mockStore.deleteByUrlAndType.mockResolvedValue(undefined);
     mockStore.isStoreClosed.mockReturnValue(false);
-    queue = new WriterQueue({ store: mockStore });
+    queue = new WriterQueue({ store: mockStore, chunker: null });
   });
 
   it('should process items in the queue with correct url and text', async () => {

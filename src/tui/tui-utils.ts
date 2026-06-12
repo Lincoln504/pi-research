@@ -7,6 +7,8 @@
 import type { Component, TUI } from '@earendil-works/pi-tui';
 import type { Theme } from '../types/research-panel-types.ts';
 
+import { truncateToWidth } from '@earendil-works/pi-tui';
+
 /**
  * Component Proxy
  *
@@ -47,11 +49,21 @@ export function createSafeWidget(
 ): (tui: TUI, theme: Theme) => Component {
   return (tui: TUI, theme: Theme) => {
     try {
-      return factory(tui, theme);
+      const component = factory(tui, theme);
+      const originalRender = component.render;
+      component.render = (width: number) => {
+        try {
+          if (width < 4) return [];
+          return originalRender.call(component, width);
+        } catch {
+          return [truncateToWidth('[TUI Error]', width)];
+        }
+      };
+      return component;
     } catch {
-      // Fallback component on error
+      // Fallback component on factory error
       return {
-        render: () => ['[TUI Error]'],
+        render: (width: number) => [truncateToWidth('[TUI Error]', width)],
         invalidate: () => {},
       };
     }

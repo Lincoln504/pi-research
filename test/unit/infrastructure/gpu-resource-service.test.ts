@@ -138,7 +138,7 @@ describe('GPUResourceService', () => {
       };
       vi.mocked(ServiceRegistry.getService).mockImplementation(async (name) => {
         if (name === ServiceNames.STATE_MANAGER) return mockStateManager;
-        return null;
+        return { name: 'stub', lifecycle: 0 } as any;
       });
 
       const success = await service.acquireGpuLock('session-1', 1000);
