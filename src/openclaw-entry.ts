@@ -62,7 +62,7 @@ const OpenClawConfigSchema = Type.Object({
   embeddingDevice: Type.Optional(Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' })),
   cacheTtlDays: Type.Optional(Type.Number({ minimum: 1, maximum: 365, default: 30 })),
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),
-  searxngUrl: Type.Optional(Type.String()),
+  stackexchangeApiKey: Type.Optional(Type.String({ description: 'Stack Exchange API key for higher rate limits' })),
   reportExportEnabled: Type.Optional(Type.Boolean({ default: false })),
 });
 
@@ -82,7 +82,7 @@ type OpenClawPluginConfig = {
   embeddingDevice?: 'webgpu' | 'cpu';
   cacheTtlDays?: number;
   scrapeTimeoutMs?: number;
-  searxngUrl?: string;
+  stackexchangeApiKey?: string;
   reportExportEnabled?: boolean;
 };
 
@@ -124,9 +124,9 @@ function resolveOpenClawConfig(pluginConfig: OpenClawPluginConfig): Config {
   if (pluginConfig.model !== undefined) config.RESEARCH_MODEL = pluginConfig.model;
   if (pluginConfig.reportExportEnabled !== undefined) config.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
 
-  // SearXNG URL → env var (pi-research reads SEARXNG_URL from process.env)
-  if (pluginConfig.searxngUrl) {
-    process.env['SEARXNG_URL'] = pluginConfig.searxngUrl;
+  // Stack Exchange API key (pi-research reads STACKEXCHANGE_API_KEY from process.env)
+  if (pluginConfig.stackexchangeApiKey) {
+    process.env['STACKEXCHANGE_API_KEY'] = pluginConfig.stackexchangeApiKey;
   }
 
   // Store the plugin-level default depth (0-3 valid)

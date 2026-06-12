@@ -175,7 +175,6 @@ From `src/sdk.ts`, the minimum viable context is:
 | `cacheTtlDays` | `KNOWLEDGE_STORE_CACHE_TTL_DAYS` | `PI_RESEARCH_CACHE_TTL_DAYS` | 30 |
 | `scrapeTimeoutMs` | `SCRAPE_TIMEOUT_MS` | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | 15000 |
 | `model` | `RESEARCH_MODEL` | `PI_RESEARCH_MODEL` | (empty = context model) |
-| `searxngUrl` | (env only) | `SEARXNG_URL` | (empty) |
 
 **Strategy**: OpenClaw config values are mapped to pi-research's `Config` object via `setConfig()` before initialization. Env vars continue to work as overrides (highest priority).
 
@@ -188,7 +187,7 @@ Static manifest declaring:
 - Config schema (maps to pi-research config fields)
 - Tool contracts (`contracts.tools: ["research", "health"]`)
 - Activation metadata (`onStartup: true`)
-- Setup providers (env vars for SearXNG, StackExchange, etc.)
+- Setup providers (env vars for StackExchange, etc.)
 - UI hints for config surface
 
 ### 7.2 `src/openclaw-entry.ts` (NEW — ~150 lines)

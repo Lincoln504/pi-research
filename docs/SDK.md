@@ -38,7 +38,6 @@ Settings are loaded with the following precedence:
 
 | Variable | Description |
 |----------|-------------|
-| `SEARXNG_URL` | External SearXNG instance URL — skips Docker management entirely |
 | `STACKEXCHANGE_API_KEY` | Stack Exchange API key — raises rate limits from 300/day to 10,000/day |
 
 ### Diagnostics

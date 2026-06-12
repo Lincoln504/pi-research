@@ -97,9 +97,9 @@
         "minimum": 5000,
         "maximum": 120000
       },
-      "searxngUrl": {
+      "stackexchangeApiKey": {
         "type": "string",
-        "description": "External SearXNG instance URL. When set, skips Docker management."
+        "description": "Stack Exchange API key for higher rate limits. Obtain from https://stackapps.com/apps/oauth."
       },
       "reportExportEnabled": {
         "type": "boolean",
@@ -132,7 +132,6 @@
       {
         "id": "pi-research",
         "envVars": [
-          "SEARXNG_URL",
           "STACKEXCHANGE_API_KEY",
           "PI_RESEARCH_MODEL"
         ]
@@ -155,7 +154,7 @@
     "embeddingDevice": { "label": "Embedding Device", "advanced": true },
     "cacheTtlDays": { "label": "Cache TTL (days)", "advanced": true },
     "scrapeTimeoutMs": { "label": "Scrape Timeout (ms)", "advanced": true },
-    "searxngUrl": { "label": "SearXNG URL", "advanced": true },
+    "stackexchangeApiKey": { "label": "StackExchange API Key", "advanced": true },
     "reportExportEnabled": { "label": "Export Report", "advanced": true }
   }
 }
