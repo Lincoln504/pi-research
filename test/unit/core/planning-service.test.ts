@@ -268,7 +268,7 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeLessThanOrEqual(maxSize);
     });
 
-    it('populates prompts correctly with query and uses reasoning: medium', async () => {
+    it('populates prompts correctly with query and uses reasoning: minimal', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
       await service.generatePlan(BASE_OPTIONS);
       
@@ -277,7 +277,7 @@ describe('PlanningService', () => {
       const callOptions = lastCall![2] as { reasoning: string };
       
       expect(callContext.systemPrompt).toContain('test query');
-      expect(callOptions.reasoning).toBe('medium');
+      expect(callOptions.reasoning).toBe('minimal');
     });
   });
 

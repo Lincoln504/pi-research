@@ -133,6 +133,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   if (all.length > 0) return all[0]!;
 
   // 5. Fallback: construct minimal model from credentials when registry is empty
+  // (Re-checking modelSpec with slash check is redundant but kept for logic safety)
   if (apiKey && provider && modelSpec) {
     const slashIdx = modelSpec.indexOf('/');
     if (slashIdx > 0) {
@@ -142,6 +143,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
         apiKey,
       );
     }
+    // No slash: use the explicit provider and the modelSpec as the ID
     return constructMinimalModel(provider, modelSpec, apiKey);
   }
 
