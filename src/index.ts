@@ -1,3 +1,8 @@
+// Set ONNX Runtime logging level early (before library load) to prevent 
+// "Attempt to use DefaultLogger but none has been registered" crash on exit.
+// Level 3 = Error, 4 = Fatal.
+process.env['ORT_LOGGING_LEVEL'] = '3';
+
 import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ExtendedExtensionContext } from './types/extension-context.ts';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
@@ -10,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
+import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
 import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './utils/session-state.ts';
@@ -205,7 +211,7 @@ export default async function (pi: ExtensionAPI) {
 
   // Alt+P — Pop queued steering messages back to pi's follow-up queue.
   pi.registerShortcut(Key.alt('p'), {
-    description: 'Pop queued researcher steering messages back to chat',
+    description: 'Pop queued research steering messages back to chat',
     handler: (ctx: ExtensionContext) => {
       const eCtx = ctx as ExtendedExtensionContext;
       let piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId();
@@ -392,4 +398,11 @@ export default async function (pi: ExtensionAPI) {
   }, 2000);
 
   logger.log('[pi-research] Extension loaded');
+}
+
+/**
+ * Extension Deactivation
+ */
+export async function deactivate(): Promise<void> {
+  await shutdownManager.runCleanup('extension-deactivate');
 }

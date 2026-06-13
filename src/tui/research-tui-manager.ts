@@ -72,7 +72,7 @@ export function createResearchTuiManager(
   // Ensure the global TUI controller is initialized (handles cancellation and protocol leaks)
   // Only in TUI mode with UI available
   if (ctx.mode === 'tui' && ctx.hasUI) {
-    initGlobalTuiController(ctx.ui);
+    initGlobalTuiController(ctx.ui, piSessionId);
   }
 
   let unsubOrder: (() => void) | null = null;
@@ -90,6 +90,12 @@ export function createResearchTuiManager(
     if (ctx.mode !== 'tui') return;
 
     if (refreshScheduled) return;
+
+    // Do not schedule background refreshes if a foreground interactive menu is active.
+    // This prevents background processing from stealing focus or fighting with the 
+    // interactive TUI's own rendering loop.
+    if (isInteractiveTuiActive()) return;
+
     refreshScheduled = true;
     
     refreshTimeout = setTimeout(() => {

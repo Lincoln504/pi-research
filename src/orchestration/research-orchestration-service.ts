@@ -100,6 +100,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           onUpdate,
           config: researchConfig,
           excludeTools,
+          initialLinks: options.initialLinks,
         });
         result = await orchestrator.run(signal);
       } else {
@@ -115,6 +116,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           config: researchConfig,
           excludeTools,
           orchestrationService: this,
+          initialLinks: options.initialLinks,
         });
         result = await orchestrator.run(signal);
       }

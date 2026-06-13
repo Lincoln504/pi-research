@@ -166,16 +166,17 @@ describe('TUI Research Panel', () => {
       const component = componentCreator({} as any, mockTheme as Theme);
       const lines = component.render(80);
 
-      const steeringLine = lines.find(l => l.includes('QUEUED RESEARCHER STEERING'));
+      const steeringLine = lines.find(l => l.includes('QUEUED RESEARCH STEERING'));
       expect(steeringLine).toBeDefined();
       expect(steeringLine).toContain('Focus on X');
       
       // Hint should include alt+p
       const hintLine = lines.find(l => l.includes('alt+p'));
       expect(hintLine).toBeDefined();
+      expect(hintLine).toContain('cancel research');
     });
 
-    it('should render active steering messages with RESEARCHER STEERING prefix', async () => {
+    it('should render active steering messages with RESEARCH STEERING prefix', async () => {
       const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
@@ -188,7 +189,7 @@ describe('TUI Research Panel', () => {
       const component = componentCreator({} as any, mockTheme as Theme);
       const lines = component.render(80);
 
-      const steeringLine = lines.find(l => l.includes('RESEARCHER STEERING'));
+      const steeringLine = lines.find(l => l.includes('RESEARCH STEERING'));
       expect(steeringLine).toBeDefined();
       expect(steeringLine).toContain('Focus on Y');
       // Should NOT show QUEUED prefix
@@ -209,7 +210,7 @@ describe('TUI Research Panel', () => {
       const component = componentCreator({} as any, mockTheme as Theme);
       const lines = component.render(80);
 
-      const hintLine = lines.find(l => l.includes('esc to cancel'));
+      const hintLine = lines.find(l => l.includes('esc to cancel research'));
       expect(hintLine).toBeDefined();
     });
 

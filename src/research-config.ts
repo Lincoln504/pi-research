@@ -73,7 +73,8 @@ export async function handleResearchConfigCommand(
  */
 async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   // Ensure the global TUI controller is initialized
-  initGlobalTuiController(ctx.ui);
+  const piSessionId = (ctx as any).sessionId || (ctx as any).sessionManager?.getSessionId();
+  initGlobalTuiController(ctx.ui, piSessionId);
 
   const cwd = ctx.cwd || process.cwd();
   const initialConfig = { ...getConfig(cwd) };
@@ -368,7 +369,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             const registryDesc = `Most settings now apply globally ([user]). The Centralized Registry (~/.pi/state/project-settings.json) can still hold directory-specific overrides if configured manually.`;
             const wrappedRegistry = wrapText(registryDesc, width - 2).map(line => theme.fg('dim', ` ${line}`));
             
-            const lines = [border, ...wrappedPathInfo, ...wrappedRegistry, '', ...listLines, border];
+            const lines = [border, ...listLines, '', ...wrappedPathInfo, ...wrappedRegistry, border];
             return lines.map(line => {
               if (visibleWidth(line) > width) {
                 return truncateToWidth(line, width);

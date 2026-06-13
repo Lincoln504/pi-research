@@ -20,6 +20,7 @@ import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
 import type { ResearchObserver } from './research-observer.ts';
+import { HeadlessObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
@@ -36,21 +37,31 @@ export interface QuickResearchOrchestratorOptions {
   query: string;
   sessionId: string;
   researchId: string;
-  observer?: ResearchObserver;
+  observer?: ResearchObserver | HeadlessObserverOptions;
   onUpdate?: (update: AgentToolResult<any>) => void;
   config?: Config;
   excludeTools?: string[];
+  initialLinks?: string[];
 }
 
 export class QuickResearchOrchestrator {
   private config: Config;
+  private observer: ResearchObserver | undefined;
 
   constructor(private options: QuickResearchOrchestratorOptions) {
     this.config = options.config || getConfig(options.ctx.cwd);
+
+    // Resolve observer: if options were provided instead of an instance, create the instance
+    if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
+       this.observer = new HeadlessObserver(options.observer as HeadlessObserverOptions);
+    } else {
+       this.observer = options.observer as ResearchObserver | undefined;
+    }
   }
 
   async run(signal?: AbortSignal): Promise<string> {
-    const { query, model, ctx, observer, researchId } = this.options;
+    const { query, model, ctx, researchId } = this.options;
+    const observer = this.observer;
     const container = tryGetServiceContainerFromCtx(ctx);
     const sessionStart = Date.now();
     logger.log(`[QuickOrchestrator] Starting research: "${query}"`);
@@ -113,10 +124,16 @@ export class QuickResearchOrchestrator {
                 steeringMessages.map(m => `- ${m.text}`).join('\n');
         }
 
+        const evidenceLines = [];
+        if (this.options.initialLinks && this.options.initialLinks.length > 0) {
+          evidenceLines.push('## Initial Links\nInvestigate these provided URLs first:\n' + this.options.initialLinks.map(l => `- ${l}`).join('\n'));
+        }
+        evidenceLines.push(quickEvidenceSection);
+
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
             .replace('{{goal}}', query + steeringSection)
             .replace('{{store_section}}', storeSection)
-            .replace('{{evidence_section}}', quickEvidenceSection)
+            .replace('{{evidence_section}}', evidenceLines.join('\n\n'))
             .replace('{{coordination_section}}', '')
             .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
 

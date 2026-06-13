@@ -27,6 +27,7 @@ import {
   unregisterGlobalEmbedder,
   initializeDawnWebGPU,
   initializeONNXEnv,
+  isShuttingDown
 } from './embedder-utils.ts';
 import {
   isWebGpuDeviceError,
@@ -480,14 +481,23 @@ export class Embedder {
       }
 
       if (this.pipeline) {
-        try {
-          if (typeof (this.pipeline as any).dispose === 'function') {
-            await (this.pipeline as DisposablePipeline).dispose();
+        // If the process is shutting down, we MUST skip disposing the pipeline
+        // if onnxruntime is involved, because the C++ LoggingManager might already
+        // be destroyed, leading to a 'terminate called' abort when the session
+        // tries to log its own destruction.
+        if (isShuttingDown()) {
+          logger.debug('[embedder] Skipping pipeline.dispose() during process shutdown to prevent onnxruntime crash');
+          this.pipeline = null;
+        } else {
+          try {
+            if (typeof (this.pipeline as any).dispose === 'function') {
+              await (this.pipeline as DisposablePipeline).dispose();
+            }
+          } catch (err) {
+            logger.warn('[embedder] Error during pipeline dispose:', err);
           }
-        } catch (err) {
-          logger.warn('[embedder] Error during pipeline dispose:', err);
+          this.pipeline = null;
         }
-        this.pipeline = null;
       }
 
       // Release GPU lock if still held (shouldn't happen after normal init, but safe for edge cases)

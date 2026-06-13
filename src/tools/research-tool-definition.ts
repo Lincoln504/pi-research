@@ -97,6 +97,9 @@ export function createResearchTool(): ToolDefinition {
     excludeTools: Type.Optional(Type.Array(Type.String(), {
       description: 'List of internal tools to disable (e.g., search, scrape, security).',
     })),
+    initialLinks: Type.Optional(Type.Array(Type.String(), {
+      description: 'Optional seed URLs to investigate before (or instead of) web search.',
+    })),
   });
 
   type ResearchParams = Static<typeof parameters>;
@@ -116,6 +119,7 @@ export function createResearchTool(): ToolDefinition {
         query: rawArgs['query'] ?? '',
         model: rawArgs['model'],
         excludeTools: rawArgs['excludeTools'],
+        initialLinks: rawArgs['initialLinks'],
       };
 
       const rawDepth = rawArgs['depth'];
@@ -151,7 +155,7 @@ export function createResearchTool(): ToolDefinition {
         };
       }
 
-      const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
+      const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools, initialLinks } = params as ResearchParams;
       const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
       const eCtx = ctx as ExtendedExtensionContext;
       const parentExcludeTools = eCtx.excludeTools || [];
@@ -169,8 +173,8 @@ export function createResearchTool(): ToolDefinition {
       let panelState: any;
       let cleanup: () => Promise<void>;
 
-      if (!query) {
-        return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
+      if (!query && (!initialLinks || initialLinks.length === 0)) {
+        return { content: [{ type: 'text', text: 'Error: Research query or initialLinks are required' }], details: {} };
       }
 
       // Each run gets its own isolated registry; session-level counter is incremented
@@ -280,7 +284,7 @@ export function createResearchTool(): ToolDefinition {
               // Run research via orchestration service
               const result = await orch.runResearch({
                 ctx,
-                query: sanitizedQuery,
+                query: sanitizedQuery || (initialLinks?.[0] ?? 'Initial Links Research'),
                 depth: (depth ?? 1) as ResearchDepth,
                 model: selectedModel,
                 observer,
@@ -288,6 +292,7 @@ export function createResearchTool(): ToolDefinition {
                 sessionId: piSessionId,
                 researchId,
                 excludeTools,
+                initialLinks,
               }, internalAbort.signal);
 
               // Stop wave animation

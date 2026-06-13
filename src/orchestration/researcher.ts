@@ -140,7 +140,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
       // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
-      thinkingLevel: 'minimal',
+      thinkingLevel: (config?.THINKING_LEVEL === 'high' ? 'high' : config?.THINKING_LEVEL) || 'minimal',
     });
 
     // Customize thinking label for researchers to distinguish them in the TUI

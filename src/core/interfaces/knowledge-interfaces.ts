@@ -22,16 +22,18 @@ export interface StoreDocument {
  * ONNX runtime environment
  */
 export interface ONNXRuntimeEnv {
-  logLevel?: string;
+  logLevel?: 'verbose' | 'info' | 'warning' | 'error' | 'fatal';
   debug?: boolean;
 }
 
 /**
- * HuggingFace environment with ONNX support
+ * HuggingFace environment with ONNX support (Transformers.js v4)
  */
 export interface HFEnv {
   cacheDir: string;
-  onnx?: ONNXRuntimeEnv;
+  backends: {
+    onnx: ONNXRuntimeEnv;
+  };
 }
 
 /**

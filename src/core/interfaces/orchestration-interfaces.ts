@@ -11,6 +11,7 @@ import type { StoreUrlEntry } from './knowledge-interfaces.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import type { ResearchObserver } from './observer-interfaces.ts';
+import type { HeadlessObserverOptions } from '../../orchestration/headless-observer.ts';
 
 /**
  * Options for running a research task
@@ -21,12 +22,13 @@ export interface ResearchOptions {
   depth?: 0 | 1 | 2 | 3;
   complexity?: 1 | 2 | 3;
   model?: Model<any>;
-  observer?: ResearchObserver;
+  observer?: ResearchObserver | HeadlessObserverOptions;
   onUpdate?: (update: AgentToolResult<any>) => void;
   sessionId: string;
   researchId: string;
   config?: Config;
   excludeTools?: string[];
+  initialLinks?: string[];
   signal?: AbortSignal;
 }
 
@@ -45,6 +47,7 @@ export interface RunResearchersOptions {
     model: Model<any>;
     config?: Config;
     observer?: ResearchObserver;
+    initialLinks?: string[];
   };
   currentRound: number;
   signal?: AbortSignal;

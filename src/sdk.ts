@@ -18,6 +18,7 @@ import {
 import { getService, resetServiceContainer, createServiceContainer } from './core/service-registry.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
+import type { IKnowledgeStoreService } from './core/interfaces/knowledge-interfaces.ts';
 import type { 
   IResearchOrchestration, 
   IResearchSynthesisService,
@@ -240,6 +241,53 @@ export async function initResearchSDK(options: ResearchSDKOptions = {}): Promise
 // Research API
 // ---------------------------------------------------------------------------
 
+import { runBrowserTask } from './infrastructure/browser/task-execution-service.ts';
+import { repairJson as piAiRepairJson } from '@earendil-works/pi-ai';
+
+/**
+ * Repairs malformed JSON string literals by escaping control characters 
+ * and fixing common LLM formatting errors.
+ */
+export function repairJson(json: string): string {
+  return piAiRepairJson(json);
+}
+
+/**
+ * Export the current knowledge store contents for use in a web frontend or backup.
+ * 
+ * @param outputPath - Path where the JSON export should be saved.
+ */
+export async function exportKnowledge(outputPath: string): Promise<void> {
+  if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+  
+  const ks = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, undefined, globalContainer);
+  if (!ks) throw new Error('Knowledge store service not available');
+  
+  await ks.exportForWeb(outputPath);
+}
+
+/**
+ * Verify if a URL exists and is reachable using the stealth browser.
+ */
+export async function verifyUrl(url: string, signal?: AbortSignal): Promise<boolean> {
+  if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+
+  try {
+    const result = await runBrowserTask<{ content: string; success: boolean }>(
+      url,
+      'scrape',
+      globalConfig!,
+      signal,
+      1,
+      globalContainer
+    );
+    return !!(result && result.success);
+  } catch (err) {
+    logger.debug(`[SDK] URL verification failed for ${url}:`, err);
+    return false;
+  }
+}
+
 /**
  * Run a "Deep" research task (multi-round, multi-agent).
  *
@@ -274,6 +322,7 @@ export async function runDeepResearch(
       researchId,
       depth: depth as ResearchDepth,
       complexity: complexity as 1 | 2 | 3,
+      initialLinks: options.initialLinks,
     }, signal ?? options.signal);
 
     // Append research metadata (model used) at the very end

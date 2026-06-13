@@ -407,7 +407,7 @@ export function createMasterResearchPanel(
             allLines.push(theme.fg('dim', ` ... and ${hiddenCount} older steering message(s) hidden`));
           }
           for (const msg of visibleSteering) {
-            const prefix = msg.status === 'queued' ? ' QUEUED RESEARCHER STEERING: ' : ' RESEARCHER STEERING: ';
+            const prefix = msg.status === 'queued' ? ' QUEUED RESEARCH STEERING: ' : ' RESEARCH STEERING: ';
             const display = truncateToWidth(`${prefix}${msg.text}`, width);
             // Use 'warning' style for queued (amber/yellow), 'muted' for active
             const color = msg.status === 'queued' ? 'warning' : 'muted';
@@ -422,7 +422,7 @@ export function createMasterResearchPanel(
         if (panels.length > 0) {
           // Hint line: show pop steering hint whenever there are queued (poppable) messages
           const hasQueued = allSteering.some(m => m.status === 'queued');
-          const hint = hasQueued ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
+          const hint = hasQueued ? ' esc cancel research | alt+p pop steering' : ' esc to cancel research';
           allLines.push(theme.fg('muted', hint));
         }
 

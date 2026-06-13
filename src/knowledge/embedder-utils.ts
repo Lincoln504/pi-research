@@ -65,12 +65,17 @@ export function markWebGpuFallback(): void {
   hasWebGpuFallbackOccurred = true;
 }
 
+// Module-level flags to track shutdown state
+let isProcessExiting = false;
+
+/**
+ * Check if the process is in a fatal shutdown state (exiting)
+ */
+export function isShuttingDown(): boolean {
+  return isProcessExiting;
+}
+
 // Global embedder reference for process-exit cleanup.
-// Stores the active Embedder instance so the beforeExit handler can call dispose()
-// before the Node.js process tears down the ONNX C++ runtime's global logger.
-// Without this, an active InferenceSession accessed after C++ teardown triggers
-// `terminate called after throwing OnnxRuntimeException: Attempt to use DefaultLogger
-// but none has been registered` — an uncatchable crash via std::terminate.
 let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
 
 /**
@@ -80,7 +85,9 @@ let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
 export function registerGlobalEmbedder(e: { dispose: () => Promise<void> }): void {
   globalEmbedderRef = e;
   
-  // Register with shutdown manager for graceful extension shutdown
+  // Register with shutdown manager for graceful extension shutdown.
+  // Note: we DO NOT set isProcessExiting here because shutdownManager
+  // tasks run during reloads too, and we still want to dispose there.
   shutdownManager.register(async () => {
     if (globalEmbedderRef === e) {
       const ref = globalEmbedderRef;
@@ -98,19 +105,21 @@ export function unregisterGlobalEmbedder(): void {
   globalEmbedderRef = null;
 }
 
-// Belt-and-suspenders fallback for graceful (no-signal) exits.
-// Node re-fires 'beforeExit' as long as async work keeps the event loop alive.
-// We use a listener that can be cleaned up.
+// Exit handler for process-level teardown (SIGTERM, SIGINT, beforeExit).
+// During these events, the native ONNX environment is often in a race 
+// with the JS event loop. Calling dispose() here is risky and redundant.
 const exitHandler = async () => {
+  isProcessExiting = true;
   if (globalEmbedderRef) {
-    const ref = globalEmbedderRef;
-    globalEmbedderRef = null; // Clear first to prevent re-entry
-    try { await ref.dispose(); } catch { /* ignore */ }
+    globalEmbedderRef = null; 
+    // We intentionally DO NOT call dispose here during process exit 
+    // to prevent the OnnxRuntimeException: DefaultLogger crash.
+    // The OS will reclaim the memory.
+    logger.debug('[embedder] Process exiting, skipping native disposal to prevent crash');
   }
 };
-// Register via shutdownManager only — it internally calls process.on() and
-// tracks the listener for clean removal during runCleanup(). Calling
-// process.on() separately would register the listener twice.
+
+// Register via shutdownManager only — it internally calls process.on()
 shutdownManager.registerEventListener(process, 'beforeExit', exitHandler);
 
 /**
@@ -124,9 +133,12 @@ export function initializeONNXEnv(): void {
 
   try {
     const envObj = hfEnv as unknown as HFEnv;
-    if (envObj.onnx) {
-      envObj.onnx.logLevel = 'error';
-      envObj.onnx.debug = false;
+    if (envObj.backends?.onnx) {
+      envObj.backends.onnx.logLevel = 'error';
+    }
+    // Fallback for older transformers.js versions if any
+    if ((envObj as any).onnx) {
+      (envObj as any).onnx.logLevel = 'error';
     }
   } catch (e) {
     logger.debug('[embedder] Failed to set ONNX logLevel:', e);

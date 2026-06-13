@@ -46,6 +46,7 @@ export interface LoggerOptions {
   verbose: boolean;
   logFilePath?: string;
   researchRunId?: string;
+  consoleLog?: boolean;
 }
 
 export function getDefaultDebugLogPathTemplate(): string {
@@ -59,6 +60,7 @@ const LOGGER_BRAND = Symbol.for('pi-research.Logger');
 
 export class Logger implements ILogger {
   private verbose: boolean;
+  private consoleLog: boolean;
   private logFile: string;
   private logDir: string;
   private readonly sessionId: string | undefined;
@@ -69,6 +71,7 @@ export class Logger implements ILogger {
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
+    this.consoleLog = options.consoleLog ?? (process.env['PI_RESEARCH_CONSOLE_LOG'] === 'true');
     // Consolidated logging: always use the same file regardless of run ID
     this.logFile = options.logFilePath ?? buildDefaultDebugLogPath();
     this.logDir = path.dirname(this.logFile);
@@ -120,6 +123,17 @@ export class Logger implements ILogger {
       appendFileSync(this.logFile, line);
     } catch {
       // Silently ignore file write errors
+    }
+
+    // Optional console output
+    if (this.consoleLog) {
+      const color = level === LogLevel.ERROR ? '\x1b[31m' : 
+                    level === LogLevel.WARN ? '\x1b[33m' : 
+                    level === LogLevel.DEBUG ? '\x1b[90m' : '\x1b[36m';
+      const reset = '\x1b[0m';
+      const msg = args.map(formatArg).join(' ');
+      const prefix = this.sessionId ? `[${this.sessionId}] ` : '';
+      console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
   }
 
@@ -196,14 +210,21 @@ export function getLogger(sessionId?: string): Logger {
   if (sessionId) {
     let lg = sessionLoggers.get(sessionId);
     if (!lg) {
-      lg = new Logger({ verbose: isVerboseFromEnv(), researchRunId: sessionId });
+      lg = new Logger({ 
+        verbose: isVerboseFromEnv(), 
+        researchRunId: sessionId,
+        consoleLog: process.env['PI_RESEARCH_CONSOLE_LOG'] === 'true'
+      });
       sessionLoggers.set(sessionId, lg);
     }
     return lg;
   }
   // Fall back to creating a global logger if no context-bound logger is available
   if (!_globalLogger) {
-    _globalLogger = new Logger({ verbose: isVerboseFromEnv() });
+    _globalLogger = new Logger({ 
+      verbose: isVerboseFromEnv(),
+      consoleLog: process.env['PI_RESEARCH_CONSOLE_LOG'] === 'true'
+    });
   }
   return _globalLogger;
 }
@@ -233,6 +254,9 @@ export function hasSessionLogger(sessionId: string): boolean {
 }
 
 export function createLogger(options: Partial<LoggerOptions> = {}): Logger {
+  if (options.consoleLog === undefined) {
+    options.consoleLog = process.env['PI_RESEARCH_CONSOLE_LOG'] === 'true';
+  }
   return new Logger(options);
 }
 

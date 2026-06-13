@@ -17,6 +17,7 @@ import {
 import type {
   ResearchObserver,
 } from './research-observer.ts';
+import { HeadlessObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import {
   ServiceNames,
   type IResearchOrchestration,
@@ -36,11 +37,12 @@ export interface DeepResearchOrchestratorOptions {
   complexity: 1 | 2 | 3;
   sessionId: string;
   researchId: string;
-  observer?: ResearchObserver;
+  observer?: ResearchObserver | HeadlessObserverOptions;
   onUpdate?: (update: AgentToolResult<any>) => void;
   config?: Config;
   orchestrationService?: IResearchOrchestration;
   excludeTools?: string[];
+  initialLinks?: string[];
 }
 
 /**
@@ -50,6 +52,7 @@ export interface DeepResearchOrchestratorOptions {
  */
 export class DeepResearchOrchestrator {
   private currentRound = 0;
+  private observer: ResearchObserver | undefined;
   private startTime: number = Date.now();
   private config: Config;
   private readonly sessionStart: number = Date.now();
@@ -57,6 +60,14 @@ export class DeepResearchOrchestrator {
 
   constructor(private options: DeepResearchOrchestratorOptions) {
     this.config = options.config || getConfig(options.ctx.cwd);
+    
+    // Resolve observer: if options were provided instead of an instance, create the instance
+    if (options.observer && typeof (options.observer as any).onProgress === 'function' && !(options.observer instanceof HeadlessObserver)) {
+       this.observer = new HeadlessObserver(options.observer as HeadlessObserverOptions);
+    } else {
+       this.observer = options.observer as ResearchObserver | undefined;
+    }
+
     if (options.orchestrationService) {
       this.orchestrationService = options.orchestrationService;
     }
@@ -88,7 +99,8 @@ export class DeepResearchOrchestrator {
    * Run the multi-round research loop
    */
   async run(signal?: AbortSignal): Promise<string> {
-    const { model, query, complexity, researchId, observer, ctx } = this.options;
+    const { model, query, complexity, researchId, ctx } = this.options;
+    const observer = this.observer;
     const container = tryGetServiceContainerFromCtx(ctx);
     
     const orchestrationService = await this.getOrchestrationService();
@@ -289,8 +301,26 @@ export class DeepResearchOrchestrator {
               }, ctx);
               observer?.onSearchComplete?.(results.reduce((sum, r) => sum + (r.results?.length || 0), 0));
               researcherLinks = await orchestrationService.distributeSearchResults(plan, results);
+
+              // Merge initialLinks into Round 1 researchers if provided
+              if (this.currentRound === 1 && this.options.initialLinks && this.options.initialLinks.length > 0) {
+                if (!researcherLinks) researcherLinks = new Map();
+                for (const researcher of plan.researchers || []) {
+                  const id = String(researcher.id);
+                  const existing = researcherLinks.get(id) || [];
+                  researcherLinks.set(id, [...new Set([...existing, ...this.options.initialLinks!])]);
+                }
+              }
             })()
-          : Promise.resolve();
+          : (async () => {
+              // Even if no queries were generated, if we have initialLinks in Round 1, distribute them
+              if (this.currentRound === 1 && this.options.initialLinks && this.options.initialLinks.length > 0) {
+                researcherLinks = new Map();
+                for (const researcher of plan.researchers || []) {
+                  researcherLinks.set(String(researcher.id), [...this.options.initialLinks!]);
+                }
+              }
+            })();
 
         const storeTask = ((this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) && plan.researchers && plan.researchers.length > 0)
           ? (async () => {
@@ -333,6 +363,7 @@ export class DeepResearchOrchestrator {
                     ...this.options,
                     config: this.config,
                     excludeTools: this.options.excludeTools || ['grep'],
+                    observer: this.observer,
                 },
                 currentRound: this.currentRound,
                 signal
@@ -414,9 +445,12 @@ export class DeepResearchOrchestrator {
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       result = synthesisService.ensureCitedLinks(researchId, result);
 
-      // Append steering guidance — only active (consumed by orchestrator) messages
+      // Append steering guidance — all consumed messages throughout the session
       const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
-      result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
+      if (finalSteeringMessages.length > 0) {
+          logger.debug(`[DeepOrchestrator] Appending guidance from ${finalSteeringMessages.length} steering messages to final report`);
+          result = synthesisService.appendSteeringGuidance(result, finalSteeringMessages);
+      }
 
       // NOTE: Model metadata (appendMetadata) is now applied at the very end
       // of the result chain in research-tool-definition.ts (or sdk.ts for SDK

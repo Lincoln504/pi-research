@@ -104,6 +104,14 @@
         "maximum": 365,
         "default": 30
       },
+      "thinkingLevel": {
+        "anyOf": [
+          { "type": "string", "const": "off" },
+          { "type": "string", "const": "minimal" },
+          { "type": "string", "const": "high" }
+        ],
+        "default": "minimal"
+      },
       "scrapeTimeoutMs": {
         "type": "number",
         "minimum": 5000,
@@ -187,6 +195,11 @@
     },
     "cacheTtlDays": {
       "label": "Cache TTL (days)",
+      "advanced": true
+    },
+    "thinkingLevel": {
+      "label": "Thinking Level",
+      "help": "off=no reasoning, minimal=fast, full=deep reasoning",
       "advanced": true
     },
     "scrapeTimeoutMs": {
