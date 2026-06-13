@@ -18,6 +18,9 @@ export const FLASH_GREEN_DURATION_MS = 400;
 /** Duration (ms) for a red (failure) flash on a researcher column */
 export const FLASH_RED_DURATION_MS = 700;
 
+/** Duration (ms) for a tool status 'pop' (word flash) in a researcher column */
+export const FLASH_STATUS_DURATION_MS = 800;
+
 /** Minimum gap (ms) between queued flashes for the same researcher column */
 export const FLASH_QUEUE_GAP_MS = 150;
 

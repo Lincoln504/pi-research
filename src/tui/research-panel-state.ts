@@ -12,6 +12,7 @@ import type {
 import {
   FLASH_GREEN_DURATION_MS,
   FLASH_RED_DURATION_MS,
+  FLASH_STATUS_DURATION_MS,
   FLASH_QUEUE_GAP_MS,
 } from '../constants.ts';
 
@@ -24,18 +25,23 @@ interface FlashEntry {
 }
 
 interface SliceFlashState {
-  /** Non-null when a flash is active OR we are in the inter-flash gap. */
+  /** Non-null when a color flash is active OR we are in the inter-flash gap. */
   activeTimeout: NodeJS.Timeout | null;
   /** The color currently being displayed. Null during inter-flash gap. */
   activeColor: 'green' | 'red' | null;
-  queue: FlashEntry[];
+  colorQueue: FlashEntry[];
+
+  /** Non-null when a status 'pop' is active OR we are in the inter-flash gap. */
+  statusTimeout: NodeJS.Timeout | null;
+  /** The status text currently being displayed. Null during inter-flash gap. */
+  activeStatus: string | null;
+  statusQueue: string[];
 }
 
 /**
- * Maximum queued flashes per slice. If more arrive while the queue is full
- * they are silently dropped — the user has already seen plenty of feedback.
+ * Maximum queued items per slice.
  */
-const MAX_FLASH_QUEUE_SIZE = 8;
+const MAX_QUEUE_SIZE = 8;
 
 /** Per-session flash state: Map<sliceId, SliceFlashState> */
 const sessionFlashState = new Map<string, Map<string, SliceFlashState>>();
@@ -48,7 +54,14 @@ function getOrCreateSliceFlash(sessionId: string, sliceId: string): SliceFlashSt
   }
   let slice = session.get(sliceId);
   if (!slice) {
-    slice = { activeColor: null, activeTimeout: null, queue: [] };
+    slice = { 
+      activeColor: null, 
+      activeTimeout: null, 
+      colorQueue: [],
+      activeStatus: null,
+      statusTimeout: null,
+      statusQueue: []
+    };
     session.set(sliceId, slice);
   }
   return slice;
@@ -63,9 +76,13 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
     if (session) {
       for (const slice of session.values()) {
         if (slice.activeTimeout) clearTimeout(slice.activeTimeout);
+        if (slice.statusTimeout) clearTimeout(slice.statusTimeout);
         slice.activeTimeout = null;
         slice.activeColor = null;
-        slice.queue.length = 0;
+        slice.colorQueue.length = 0;
+        slice.statusTimeout = null;
+        slice.activeStatus = null;
+        slice.statusQueue.length = 0;
       }
       sessionFlashState.delete(sessionId);
     }
@@ -73,6 +90,7 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
     for (const session of sessionFlashState.values()) {
       for (const slice of session.values()) {
         if (slice.activeTimeout) clearTimeout(slice.activeTimeout);
+        if (slice.statusTimeout) clearTimeout(slice.statusTimeout);
       }
     }
     sessionFlashState.clear();
@@ -97,12 +115,9 @@ export function flashSlice(
 
   const flash = getOrCreateSliceFlash(state.sessionId, sliceId);
 
-  // If a flash or inter-flash gap is active, queue this one.
-  // Guard on activeTimeout (not activeColor) — activeColor is null during the
-  // gap but activeTimeout is set, preventing the gap-period preemption bug.
   if (flash.activeTimeout !== null) {
-    if (flash.queue.length < MAX_FLASH_QUEUE_SIZE) {
-      flash.queue.push({ color });
+    if (flash.colorQueue.length < MAX_QUEUE_SIZE) {
+      flash.colorQueue.push({ color });
     }
     return;
   }
@@ -117,7 +132,6 @@ function startFlash(
   color: 'green' | 'red',
   onUpdate?: () => void,
 ): void {
-  // Re-read slice from state (never close over a stale reference).
   const slice = state.slices.get(sliceId);
   if (!slice || slice.completed) return;
 
@@ -131,26 +145,82 @@ function startFlash(
     flash.activeColor = null;
     flash.activeTimeout = null;
 
-    // Re-read slice inside callback to avoid stale closure.
     const currentSlice = state.slices.get(sliceId);
     if (currentSlice) currentSlice.flash = null;
 
-    // Check queue
-    if (flash.queue.length > 0) {
+    if (flash.colorQueue.length > 0) {
       const currentSliceCheck = state.slices.get(sliceId);
       if (currentSliceCheck && !currentSliceCheck.completed) {
-        const next = flash.queue.shift()!;
-        // Small gap between flashes so they're visually distinct
+        const next = flash.colorQueue.shift()!;
         flash.activeTimeout = setTimeout(() => {
           startFlash(state, sliceId, flash, next.color, onUpdate);
         }, FLASH_QUEUE_GAP_MS);
-        // Trigger a render during the gap so the brief "off" state is visible.
         onUpdate?.();
         return;
       }
     }
     onUpdate?.();
   }, duration);
+}
+
+/**
+ * Flash a status message (tool name) in the researcher box for a fixed duration.
+ */
+export function flashStatus(
+  state: ResearchPanelState,
+  sliceId: string,
+  status: string,
+  onUpdate?: () => void,
+): void {
+  const slice = state.slices.get(sliceId);
+  if (!slice || slice.completed || slice.queued) return;
+
+  const flash = getOrCreateSliceFlash(state.sessionId, sliceId);
+
+  if (flash.statusTimeout !== null) {
+    if (flash.statusQueue.length < MAX_QUEUE_SIZE) {
+      flash.statusQueue.push(status);
+    }
+    return;
+  }
+
+  startStatusPop(state, sliceId, flash, status, onUpdate);
+}
+
+function startStatusPop(
+  state: ResearchPanelState,
+  sliceId: string,
+  flash: SliceFlashState,
+  status: string,
+  onUpdate?: () => void,
+): void {
+  const slice = state.slices.get(sliceId);
+  if (!slice || slice.completed) return;
+
+  flash.activeStatus = status;
+  slice.status = status;
+  onUpdate?.();
+
+  flash.statusTimeout = setTimeout(() => {
+    flash.activeStatus = null;
+    flash.statusTimeout = null;
+
+    const currentSlice = state.slices.get(sliceId);
+    if (currentSlice) currentSlice.status = undefined;
+
+    if (flash.statusQueue.length > 0) {
+      const currentSliceCheck = state.slices.get(sliceId);
+      if (currentSliceCheck && !currentSliceCheck.completed) {
+        const next = flash.statusQueue.shift()!;
+        flash.statusTimeout = setTimeout(() => {
+          startStatusPop(state, sliceId, flash, next, onUpdate);
+        }, FLASH_QUEUE_GAP_MS);
+        onUpdate?.();
+        return;
+      }
+    }
+    onUpdate?.();
+  }, FLASH_STATUS_DURATION_MS);
 }
 
 /**
@@ -163,9 +233,13 @@ function clearSliceFlash(sessionId: string, sliceId: string): void {
   const flash = session.get(sliceId);
   if (!flash) return;
   if (flash.activeTimeout) clearTimeout(flash.activeTimeout);
+  if (flash.statusTimeout) clearTimeout(flash.statusTimeout);
   flash.activeTimeout = null;
   flash.activeColor = null;
-  flash.queue.length = 0;
+  flash.colorQueue.length = 0;
+  flash.statusTimeout = null;
+  flash.activeStatus = null;
+  flash.statusQueue.length = 0;
   session.delete(sliceId);
 }
 
@@ -219,11 +293,22 @@ export function updateSliceTokens(state: ResearchPanelState, id: string, tokens:
 
 /**
  * Update researcher status message (e.g. "Searching...")
+ * For researchers, this uses flashStatus to provide timed "pops" of tool names.
  */
-export function updateSliceStatus(state: ResearchPanelState, id: string, status: string | undefined): void {
+export function updateSliceStatus(state: ResearchPanelState, id: string, status: string | undefined, onUpdate?: () => void): void {
   const slice = state.slices.get(id);
-  if (slice) {
+  if (!slice) return;
+
+  // For researchers (numeric labels or 'quick' slice), use the timed pop logic
+  // for non-empty status strings. This makes fast tool names visible.
+  // Core agents (coord/eval) keep persistent statuses for long-running phases.
+  const isResearcher = !isNaN(parseInt(slice.label, 10)) || slice.id.includes('researching:');
+  
+  if (status && isResearcher) {
+    flashStatus(state, id, status, onUpdate);
+  } else {
     slice.status = status;
+    if (onUpdate) onUpdate();
   }
 }
 

@@ -62,7 +62,7 @@ export function createResearchObserver(
         state.quickSliceLabel = `researching: ${truncatedQuery}`;
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
-        updateSliceStatus(panelState, state.quickSliceLabel, 'researching');
+        updateSliceStatus(panelState, state.quickSliceLabel, 'researching', debouncedRefresh);
         panelState.statusMessage = 'researching';
         
         const units = getUnitsPerResearcher();
@@ -77,13 +77,13 @@ export function createResearchObserver(
         activateSlice(panelState, 'coord');
       }
       const status = attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning';
-      updateSliceStatus(panelState, 'coord', status);
+      updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
       panelState.statusMessage = status;
       debouncedRefresh();
     },
 
     onPlanningProgress: (status) => {
-      updateSliceStatus(panelState, 'coord', status);
+      updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
       panelState.statusMessage = status;
       debouncedRefresh();
     },
@@ -142,7 +142,7 @@ export function createResearchObserver(
           reactivateSlice(panelState, sliceId);
           activateSlice(panelState, sliceId); // Ensure not queued
       }
-      updateSliceStatus(panelState, sliceId, 'searching');
+      updateSliceStatus(panelState, sliceId, 'searching', debouncedRefresh);
       panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
@@ -178,7 +178,7 @@ export function createResearchObserver(
       }
       
       const status = `${count} results`;
-      updateSliceStatus(panelState, sliceId, status);
+      updateSliceStatus(panelState, sliceId, status, debouncedRefresh);
       panelState.statusMessage = `searching: ${status}`;
       debouncedRefresh();
     },
@@ -204,7 +204,7 @@ export function createResearchObserver(
           sliceId = 'eval';
       }
       
-      updateSliceStatus(panelState, sliceId, `${count} results`);
+      updateSliceStatus(panelState, sliceId, `${count} results`, debouncedRefresh);
       completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
@@ -249,7 +249,7 @@ export function createResearchObserver(
             const toolName = status.slice(5);
             // Only clear status if it matches the current tool or if it's the specific tool that finished
             // For now, we clear it to signal progress, but preserve it if it's null
-            updateSliceStatus(panelState, sliceId, undefined);
+            updateSliceStatus(panelState, sliceId, undefined, debouncedRefresh);
             if (panelState.progress) {
                 const current = progressCredits.get(id) ?? 0;
                 // Increment for the first tool call (setup/search) OR any scrape batch
@@ -260,7 +260,7 @@ export function createResearchObserver(
                 }
             }
         } else if (status) {
-            updateSliceStatus(panelState, sliceId, status);
+            updateSliceStatus(panelState, sliceId, status, debouncedRefresh);
         }
       }
       if (tokens !== undefined && cost !== undefined) {
@@ -297,7 +297,7 @@ export function createResearchObserver(
           progressCredits.set(id, unitsPerResearcher);
         }
       }
-      updateSliceStatus(panelState, sliceId, 'failed');
+      updateSliceStatus(panelState, sliceId, 'failed', debouncedRefresh);
       completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
@@ -316,13 +316,13 @@ export function createResearchObserver(
 
       addSlice(panelState, 'eval', 'eval', false);
       activateSlice(panelState, 'eval');
-      updateSliceStatus(panelState, 'eval', 'evaluating');
+      updateSliceStatus(panelState, 'eval', 'evaluating', debouncedRefresh);
       panelState.statusMessage = 'evaluating';
       debouncedRefresh();
     },
 
     onEvaluationProgress: (status) => {
-      updateSliceStatus(panelState, 'eval', status);
+      updateSliceStatus(panelState, 'eval', status, debouncedRefresh);
       panelState.statusMessage = status;
       debouncedRefresh();
     },
