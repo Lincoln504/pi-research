@@ -90,15 +90,6 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
   }
 }
 
-// Build the thread worker bundle
-try {
-  console.log('pi-research: building thread-worker bundle...');
-  execSync('npm run build:worker', { stdio: 'inherit', cwd: projectRoot });
-  console.log('pi-research: thread-worker bundle built');
-} catch (e) {
-  console.warn(`WARNING: could not build thread-worker bundle: ${e instanceof Error ? e.message : String(e)}`);
-}
-
 // Verify
 const cachePath = camoufoxCachePath();
 if (existsSync(cachePath)) {

@@ -45,6 +45,39 @@ let globalApiKey: string | undefined = undefined;
 let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 
+// Signal handler state — registered once, removed on clean shutdown.
+let _onSigint: (() => void) | null = null;
+let _onSigterm: (() => void) | null = null;
+let _shuttingDown = false;
+
+function _registerSignalHandlers(): void {
+  if (_onSigint) return; // already registered
+
+  const handler = (signal: string) => {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
+    logger.warn(`[SDK] Received ${signal} — shutting down gracefully...`);
+    // Fire-and-forget shutdown; force-exit after a hard deadline.
+    shutdownResearchSDK().catch(err => logger.error('[SDK] Signal shutdown error:', err));
+    setTimeout(() => {
+      logger.error(`[SDK] Forced exit after ${signal} (shutdown timed out)`);
+      process.exit(1);
+    }, 15000).unref();
+  };
+
+  _onSigint = () => handler('SIGINT');
+  _onSigterm = () => handler('SIGTERM');
+  process.on('SIGINT', _onSigint);
+  process.on('SIGTERM', _onSigterm);
+}
+
+function _removeSignalHandlers(): void {
+  if (_onSigint) process.removeListener('SIGINT', _onSigint);
+  if (_onSigterm) process.removeListener('SIGTERM', _onSigterm);
+  _onSigint = null;
+  _onSigterm = null;
+}
+
 // ---------------------------------------------------------------------------
 // Initialization
 // ---------------------------------------------------------------------------
@@ -175,6 +208,11 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
 
     isInitialized = true;
     logger.log('[SDK] Research SDK initialized successfully');
+
+    // Register graceful-shutdown signal handlers (SIGINT/SIGTERM).
+    // These are a safety net for scripts and long-running embedders —
+    // the cooperative shutdownResearchSDK() API is still the primary path.
+    _registerSignalHandlers();
   } catch (err) {
     logger.error('[SDK] Initialization failed:', err);
     // Cleanup on failure
@@ -311,12 +349,16 @@ export async function shutdownResearchSDK(): Promise<void> {
 
   // Always reset globals so the SDK can be re-initialized
   isInitialized = false;
+  _shuttingDown = false;
   _initPromise = null;
   globalRegistry = null;
   globalModel = null;
   globalCwd = process.cwd();
   globalContainer = null;
   globalConfig = null;
+
+  // Remove signal handlers — caller is shutting down cooperatively.
+  _removeSignalHandlers();
 
   if (errors.length > 0) {
     throw new AggregateError(errors, `${errors.length} error(s) during SDK shutdown`);

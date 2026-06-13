@@ -159,12 +159,11 @@ describe('Research Tool - Report Summaries', () => {
     const result = await tool.execute('call-1', { query: 'test' }, undefined, () => {}, ctx);
     
     const text = (result.content[0] as any).text;
-    // The new unified summary format — no tables, no percentages, just counts
+    // The new simplified summary format — work line + resource line + optional error footnote
     expect(text).toContain('### Research Summary');
-    expect(text).toContain('**2** researchers launched');
-    // Scrape layer breakdown shows fetch vs browser
-    expect(text).toContain('1 via fetch');
-    expect(text).toContain('1 via browser');
+    expect(text).toContain('**2** researchers');
+    expect(text).toContain('**3** searches');
+    expect(text).toContain('**2** sources analyzed');
     // Duration and tokens
     expect(text).toContain('**5,000** tokens');
     expect(text).toContain('**12.0s**');
@@ -172,9 +171,13 @@ describe('Research Tool - Report Summaries', () => {
     expect(text).not.toMatch(/\d+%/);
     // No table formatting
     expect(text).not.toContain('|');
+    // No scrape-internal breakdown
+    expect(text).not.toContain('via fetch');
+    expect(text).not.toContain('via browser');
+    expect(text).not.toContain('fallback');
   });
 
-  it('does not include percentages or table formatting in the output', async () => {
+  it('does not include percentages, table formatting, or internal scrape details', async () => {
     const tool = createResearchTool();
     const ctx = {
       model: { id: 'test-model' },
@@ -190,5 +193,10 @@ describe('Research Tool - Report Summaries', () => {
     expect(text).not.toContain('Error Summary');
     // No percentages
     expect(text).not.toMatch(/\|\s*\*?\*?\d+%/);
+    // No internal tool breakdown
+    expect(text).not.toMatch(/Tools:/);
+    // No diagnostic error dumps
+    expect(text).not.toContain('Affected domains');
+    expect(text).not.toContain('×');
   });
 });

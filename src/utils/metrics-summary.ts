@@ -247,135 +247,66 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
 // ---------------------------------------------------------------------------
 
 /**
- * Build a concise, impressive summary for the END of a research result.
+ * Build a concise human-readable summary for the END of a research result.
  *
  * Design principles:
- *   - No tables, no percentages — just counts
- *   - Highlights the volume of work done
- *   - Shows scrape layer breakdown (fetch vs browser)
- *   - Shows which tools were used
- *   - Errors show top patterns and affected domains
- *   - Feels informative but not like a diagnostic dump
+ *   - One line for work done, one line for cost/resources
+ *   - Errors collapsed to a single sentence (details belong in the log)
+ *   - No tables, percentages, scrape-internal breakdowns, or diagnostic dumps
+ *   - Consistent single bolding on key numbers
  *
  * Returns empty string if no meaningful data.
  */
-export function buildResearchSummary(
-  stats: ResearchStats,
-  errorReport?: { totalErrors: number; patterns: Array<{ message: string; count: number }>; byDomain: Map<string, number>; byType: Map<string, number> } | null,
-): string {
+export function buildResearchSummary(stats: ResearchStats): string {
   const lines: string[] = [];
 
   lines.push('### Research Summary');
 
-  // --- Core activity stats ---
+  // --- Work line: researchers, rounds, searches, sources ---
   const workParts: string[] = [];
 
   if (stats.researchersLaunched > 0) {
-    workParts.push(`**${stats.researchersLaunched}** researcher${stats.researchersLaunched > 1 ? 's' : ''} launched`);
+    workParts.push(`**${stats.researchersLaunched}** researcher${stats.researchersLaunched > 1 ? 's' : ''}`);
   }
   if (stats.roundsCompleted > 1) {
-    workParts.push(`**${stats.roundsCompleted}** evaluation rounds`);
+    workParts.push(`**${stats.roundsCompleted}** rounds`);
   }
+  if (stats.searchQueries > 0) {
+    workParts.push(`**${stats.searchQueries}** searches`);
+  }
+  if (stats.urlsAnalyzed > 0) {
+    if (stats.urlsDiscovered > stats.urlsAnalyzed) {
+      workParts.push(`**${stats.urlsAnalyzed}** of **${stats.urlsDiscovered}** sources analyzed`);
+    } else {
+      workParts.push(`**${stats.urlsAnalyzed}** sources analyzed`);
+    }
+  } else if (stats.urlsDiscovered > 0) {
+    workParts.push(`**${stats.urlsDiscovered}** sources discovered`);
+  }
+
   if (workParts.length > 0) {
     lines.push(workParts.join(' · '));
   }
 
-  // --- Discovery & analysis ---
-  const discoveryParts: string[] = [];
-  if (stats.searchQueries > 0) {
-    discoveryParts.push(`**${stats.searchQueries}** search queries`);
-  }
-  if (stats.urlsDiscovered > 0) {
-    discoveryParts.push(`**${stats.urlsDiscovered}** source${stats.urlsDiscovered > 1 ? 's' : ''} discovered`);
-  }
-  if (stats.urlsAnalyzed > 0) {
-    // Show scrape layer breakdown
-    const layerParts: string[] = [`${stats.urlsAnalyzed} analyzed`];
-    if (stats.fetchSuccess > 0 && stats.browserSuccess > 0) {
-      layerParts.push(`${stats.fetchSuccess} via fetch`);
-      layerParts.push(`${stats.browserSuccess} via browser`);
-    }
-    if (stats.browserFallbacks > 0) {
-      layerParts.push(`${stats.browserFallbacks} fetch-browser fallback${stats.browserFallbacks > 1 ? 's' : ''}`);
-    }
-    discoveryParts.push(`**${layerParts.join(', ')}**`);
-  }
-  if (discoveryParts.length > 0) {
-    lines.push(discoveryParts.join(' · '));
-  }
-
-  // --- Tools used ---
-  const toolParts: string[] = [];
-  if (stats.toolUsage.searches > 0) {
-    toolParts.push(`${stats.toolUsage.searches} searches`);
-  }
-  if (stats.toolUsage.scrapes > 0) {
-    toolParts.push(`${stats.toolUsage.scrapes} scrapes`);
-  }
-  if (stats.toolUsage.securitySearches > 0) {
-    toolParts.push(`${stats.toolUsage.securitySearches} security`);
-  }
-  if (stats.toolUsage.stackexchangeQueries > 0) {
-    toolParts.push(`${stats.toolUsage.stackexchangeQueries} StackExchange`);
-  }
-  if (stats.toolUsage.knowledgeLookups > 0) {
-    toolParts.push(`${stats.toolUsage.knowledgeLookups} knowledge lookups`);
-  }
-  if (toolParts.length > 0) {
-    lines.push(`Tools: ${toolParts.join(' · ')}`);
-  }
-
-  // --- Resources ---
+  // --- Resource line: tokens, cost, duration ---
   const resourceParts: string[] = [];
   if (stats.tokens > 0) {
     resourceParts.push(`**${formatTokens(stats.tokens)}** tokens`);
   }
   if (stats.cost > 0) {
-    const costStr = stats.cost < 0.01 ? '<$0.01' : `$${stats.cost.toFixed(4)}`.replace(/0+$/, '').replace(/\.$/, '');
-    resourceParts.push(`cost: **${costStr}**`);
+    const costStr = stats.cost < 0.01 ? '<$0.01' : `$${stats.cost.toFixed(2)}`;
+    resourceParts.push(`**${costStr}**`);
   }
   if (stats.durationMs > 0) {
-    resourceParts.push(`completed in **${formatDuration(stats.durationMs)}**`);
+    resourceParts.push(`**${formatDuration(stats.durationMs)}**`);
   }
   if (resourceParts.length > 0) {
     lines.push(resourceParts.join(' · '));
   }
 
-  // --- Errors ---
-  if (stats.errors > 0 && errorReport && errorReport.totalErrors > 0) {
-    const errorLines: string[] = [];
-    errorLines.push(`${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered`);
-
-    // Top error patterns (up to 3, just message + count)
-    if (errorReport.patterns.length > 0) {
-      const topPatterns = errorReport.patterns.slice(0, 3);
-      for (const p of topPatterns) {
-        errorLines.push(`- ${p.count}× ${p.message}`);
-      }
-    }
-
-    // Affected domains (up to 5, just domain + count)
-    if (errorReport.byDomain.size > 0) {
-      const sortedDomains = Array.from(errorReport.byDomain.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-      const domainStr = sortedDomains.map(([d, c]) => `${d} (${c})`).join(', ');
-      errorLines.push(`Affected domains: ${domainStr}`);
-    }
-
-    // Unretrievable URLs
-    if (stats.urlsFailed > 0) {
-      errorLines.push(`${stats.urlsFailed} URL${stats.urlsFailed > 1 ? 's' : ''} could not be retrieved`);
-    }
-
-    lines.push(`*${errorLines.join('\n')}*`);
-  } else if (stats.errors > 0) {
-    // No detailed error report — just show counts
-    const errorParts: string[] = [`${stats.errors} error${stats.errors > 1 ? 's' : ''} encountered`];
-    if (stats.urlsFailed > 0) {
-      errorParts.push(`${stats.urlsFailed} URL${stats.urlsFailed > 1 ? 's' : ''} could not be retrieved`);
-    }
-    lines.push(`*${errorParts.join(' · ')} — research completed successfully despite these.*`);
+  // --- Errors: single sentence footnote ---
+  if (stats.urlsFailed > 0) {
+    lines.push(`*${stats.urlsFailed} source${stats.urlsFailed > 1 ? 's' : ''} couldn't be retrieved.*`);
   }
 
   return lines.join('\n');

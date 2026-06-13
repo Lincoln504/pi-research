@@ -61,7 +61,7 @@ function appendResearchSummary(
   // Override error count from the actual error tracker (more accurate)
   stats.errors = errorReport.totalErrors;
 
-  const summary = buildResearchSummary(stats, errorReport);
+  const summary = buildResearchSummary(stats);
   if (!summary) {
     if (errorReport.totalErrors > 0) {
       return result + `\n\n---\n\n*${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered during research.*`;
