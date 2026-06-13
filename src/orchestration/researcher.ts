@@ -73,10 +73,29 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
   }
 
   // Create tool usage tracker for this researcher
-  const tracker = new ToolUsageTracker(createDefaultToolLimits());
+  const tracker = new ToolUsageTracker(createDefaultToolLimits(config));
 
   // Use provided closures or fallback to safe dummies
   const globalLinks = updateGlobalLinks || (() => {});
+
+  // Create a mutable reference to the session so the tools can access it
+  // before the createAgentSession call returns.
+  const sessionRef: { session: AgentSession | null } = { session: null };
+
+  // Prefer config.RESEARCH_MODEL for researcher sub-agents if provided.
+  let modelToUse = ctxModel;
+  if (config?.RESEARCH_MODEL) {
+    const target = config.RESEARCH_MODEL;
+    const found = modelRegistry.getAll().find(
+      m => `${m.provider}/${m.id}` === target || m.id === target
+    );
+    if (found) {
+      modelToUse = found;
+      logger.info(`[Researcher] Using RESEARCH_MODEL override: ${target}`);
+    } else {
+      logger.warn(`[Researcher] RESEARCH_MODEL '${target}' not found in registry; falling back to default.`);
+    }
+  }
 
   try {
     const customTools = createResearchTools({
@@ -88,6 +107,24 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       researcherId,
       onSearchProgress: onSearchProgress,
       onUrlScrapeResult: onUrlScrapeResult,
+      getTokensUsed: () => {
+        if (!sessionRef.session) return 0;
+        
+        // Prefer getContextUsage as it accounts for the full context window history
+        if (typeof (sessionRef.session as any).getContextUsage === 'function') {
+          const usage = (sessionRef.session as any).getContextUsage();
+          if (usage && typeof usage.tokens === 'number') return usage.tokens;
+        }
+        
+        // Fallback to cumulative session usage
+        if (typeof (sessionRef.session as any).getUsage === 'function') {
+          const usage = (sessionRef.session as any).getUsage();
+          return (usage.input || 0) + (usage.output || 0);
+        }
+        
+        return 0;
+      },
+      contextWindowSize: modelToUse.contextWindow,
       config,
     });
 
@@ -96,21 +133,6 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     const mergedExclude = [...new Set([...defaultExclude, ...excludeTools])];
 
     const tools = customTools.map(t => t.name).filter(name => !mergedExclude.includes(name));
-
-    // Prefer config.RESEARCH_MODEL for researcher sub-agents if provided.
-    let modelToUse = ctxModel;
-    if (config?.RESEARCH_MODEL) {
-      const target = config.RESEARCH_MODEL;
-      const found = modelRegistry.getAll().find(
-        m => `${m.provider}/${m.id}` === target || m.id === target
-      );
-      if (found) {
-        modelToUse = found;
-        logger.info(`[Researcher] Using RESEARCH_MODEL override: ${target}`);
-      } else {
-        logger.warn(`[Researcher] RESEARCH_MODEL '${target}' not found in registry; falling back to default.`);
-      }
-    }
 
     // Build a researcher-scoped settings manager with provider retries restored to 2.
     // v0.76.0 changed the SDK default to 0; transient network errors during long researcher
@@ -142,6 +164,8 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');
     }
+
+    sessionRef.session = result.session;
 
     return { session: result.session, resolvedModel: modelToUse };
   } catch (error) {

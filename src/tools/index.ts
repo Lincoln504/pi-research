@@ -32,6 +32,10 @@ interface CreateToolsOptions {
   onSearchProgress?: (links: number) => void;
   /** Fires for each individual URL as it completes (success or failure). Used for per-URL TUI flash. */
   onUrlScrapeResult?: (url: string, success: boolean) => void;
+  /** Returns total tokens used so far in this researcher's session (for context gating). */
+  getTokensUsed?: () => number;
+  /** Context window size in tokens. */
+  contextWindowSize?: number;
   config?: Config;
 }
 
@@ -72,6 +76,8 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createScrapeTool({
       ...resolvedOptions,
       onUrlScrapeResult: options.onUrlScrapeResult,
+      getTokensUsed: options.getTokensUsed,
+      contextWindowSize: options.contextWindowSize,
     }),
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),

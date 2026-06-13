@@ -212,6 +212,13 @@ export function createResearchObserver(
     onResearcherStart: (id, _name, _goal, _roundNumber) => {
       if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
 
+      // Deferred clearing: remove researchers from previous rounds only when the
+      // first researcher of the current round starts.
+      if (panelState.needsClear) {
+        clearCompletedResearchers(panelState);
+        panelState.needsClear = false;
+      }
+
       // Map internal hierarchical ID to sequential display number for TUI
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       
@@ -308,12 +315,6 @@ export function createResearchObserver(
     },
 
     onEvaluationStart: (_round) => {
-      // Deferred clearing for evaluation-only paths
-      if (panelState.needsClear) {
-        clearCompletedResearchers(panelState);
-        panelState.needsClear = false;
-      }
-
       addSlice(panelState, 'eval', 'eval', false);
       activateSlice(panelState, 'eval');
       updateSliceStatus(panelState, 'eval', 'evaluating', debouncedRefresh);

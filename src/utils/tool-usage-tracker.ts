@@ -8,6 +8,7 @@
 
 import { logger } from '../logger.ts';
 import { MAX_GATHERING_CALLS, getMaxScrapeBatches } from '../constants.ts';
+import type { Config } from '../config.ts';
 
 export interface ToolLimits {
   // Combined gathering limit (search, security_search, stackexchange, grep)
@@ -173,10 +174,10 @@ export class ToolUsageTracker {
 /**
  * Create default tool limits for a researcher
  */
-export function createDefaultToolLimits(): ToolLimits {
+export function createDefaultToolLimits(config?: Config): ToolLimits {
   return {
     gathering: MAX_GATHERING_CALLS,
-    scrape: getMaxScrapeBatches(),
+    scrape: getMaxScrapeBatches(config),
     search: 1,
     read: undefined,
   };
