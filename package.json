@@ -104,7 +104,7 @@
     }
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "^0.78.1",
+    "@earendil-works/pi-tui": "0.79.2",
     "@huggingface/transformers": "4.2.0",
     "@kreuzberg/html-to-markdown-node": "^3.5.3",
     "@lancedb/lancedb": "0.29.0",
@@ -137,8 +137,8 @@
     "onnxruntime-web": "1.24.3"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.78.1",
-    "@earendil-works/pi-coding-agent": "^0.78.1",
+    "@earendil-works/pi-ai": "0.79.2",
+    "@earendil-works/pi-coding-agent": "0.79.2",
     "@eslint/js": "^10.0.1",
     "@typescript-eslint/eslint-plugin": "^8.60.0",
     "@typescript-eslint/parser": "^8.60.0",

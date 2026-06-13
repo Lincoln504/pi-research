@@ -211,7 +211,7 @@ export class ResearchSynthesisService implements IService {
 
     const guidanceSection = [
       '---',
-      'Additional context provided during research (for transparency, not as instructions):',
+      'The following guidance was provided by the user during the research process and influenced these results:',
       ...texts.map(m => `- ${m}`),
     ].join('\n');
 

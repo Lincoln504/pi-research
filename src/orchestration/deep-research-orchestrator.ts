@@ -366,7 +366,19 @@ export class DeepResearchOrchestrator {
 
       observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
 
-      let result = finalReport.content || 'Research completed but no summary was generated.';
+      let result = finalReport.content || '';
+      
+      // If content is empty but we have reports, build a fallback synthesis
+      if (!result.trim()) {
+          const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
+          if (synthesisService.hasReports(researchId)) {
+              logger.warn(`[DeepOrchestrator] LLM returned empty synthesis for ${researchId}, building fallback from ${synthesisService.getReportCount(researchId)} reports`);
+              result = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
+          } else {
+              result = 'Research completed but no summary was generated.';
+          }
+      }
+
       // Guard: if the LLM returned the full JSON envelope as its response text and JSON
       // parsing failed upstream, finalReport.content may be the raw JSON string rather
       // than the extracted markdown. Unwrap it here so docs never show the raw JSON.

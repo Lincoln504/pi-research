@@ -5,10 +5,12 @@
  * using an LLM-based correction pass.
  */
 
-import type { Model, AssistantMessage } from '@earendil-works/pi-ai';
+import type { Model, AssistantMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { extractJson } from './json-utils.ts';
 import { createTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
+// getLlmTimeoutMs is used below to bound each repair attempt.
+import { buildSafeOptions, validateAndExtractText } from './llm-utils.ts';
 import type { TSchema } from 'typebox';
 import { Value } from 'typebox/value';
 
@@ -34,7 +36,7 @@ export interface JsonRepairOptions {
 export type LlmCompleter = (
   model: Model<any>,
   context: { systemPrompt?: string; messages: any[] },
-  options: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal; reasoning?: any }
+  options?: SimpleStreamOptions
 ) => Promise<AssistantMessage>;
 
 /**
@@ -78,28 +80,31 @@ If the response was truncated, do your best to salvage as much data as possible 
 Return ONLY the valid JSON object. No prose before or after.`;
 
   const maxAttempts = 2;
+  const systemPrompt = "You are an expert JSON repair assistant. Your goal is to fix malformed JSON responses and ensure the output is valid JSON according to the provided schema (if any).";
+  const llmTimeout = getLlmTimeoutMs();
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       if (attempt > 1) {
         logger.debug(`[${serviceName}] Salvage attempt ${attempt}/${maxAttempts}...`);
       }
-
-      const llmTimeout = getLlmTimeoutMs();
       const response = await Promise.race([
         completer(model, {
-          messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }],
-        }, { 
+          systemPrompt,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() },
+          ],
+        }, buildSafeOptions(model, { 
           ...auth, 
-          signal,
-          // Use minimal reasoning for repair passes
-          reasoning: 'minimal' as any 
-        }),
+          signal
+        }, 4096)),
         createTimeout(llmTimeout, `agentic-repair-${serviceName}`),
       ]);
 
-      const responseText = response.content.find((c) => c.type === 'text')?.text;
-      if (!responseText) {
-        logger.warn(`[${serviceName}] Salvage attempt ${attempt} failed: empty LLM response`);
+      let responseText: string;
+      try {
+        responseText = validateAndExtractText(response, `JSON Repair (${serviceName})`);
+      } catch (error) {
+        logger.warn(`[${serviceName}] Salvage attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
 
@@ -117,7 +122,7 @@ Return ONLY the valid JSON object. No prose before or after.`;
         if (!Value.Check(schema, coerced)) {
           const errors = [...Value.Errors(schema, coerced)];
           const errorDetail = errors.map((e: any) => `${e.path}: ${e.message}`).join(', ');
-          logger.warn(`[${serviceName}] Salvage attempt ${attempt} succeeded but validation failed: ${errorDetail}`);
+          logger.warn(`[${serviceName}] Salvage attempt ${attempt} succeeded but validation failed: ${errorDetail}. Salvaged: ${JSON.stringify(salvaged)}, Coerced: ${JSON.stringify(coerced)}`);
           
           if (attempt < maxAttempts) {
             // Modify prompt for retry to include the errors

@@ -7,8 +7,9 @@ Research: "{{root_query}}"
 
 {{additional_considerations}}
 
-## CRITICAL: Goal Isolation
+## CRITICAL: Goal Isolation & Steering
 You are being provided with the conversation history for context only. 
+- **STRICT STEERING**: If there is an "ADDITIONAL USER GUIDANCE" section above, you MUST treat every point in it as a **mandatory rule and instruction** for your plan. Do not ignore them. They are directional requirements.
 - **STAY FOCUSED**: You must ONLY plan research for the specific goal stated above: "{{root_query}}".
 - **IGNORE OTHER TOPICS**: Do NOT plan research for any other topics or tasks mentioned in the conversation history unless they are explicitly part of the current goal "{{root_query}}".
 - **NO CROSS-TALK**: If the user previously asked for other research, ignore those requests now. Focus exclusively on {{root_query}}.

@@ -22,7 +22,7 @@ import { loadPrompt } from '../utils/prompts.ts';
 import { extractUsage } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
 import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
-import { extractText } from '../utils/text-utils.ts';
+import { buildSafeOptions, validateAndExtractText } from '../utils/llm-utils.ts';
 import { createTimeout } from '../utils/llm-timeout.ts';
 import { getConfig } from '../config.ts';
 import {
@@ -201,7 +201,7 @@ export class PlanningService implements IPlanningService {
     // Inject steering if present
     let steeringSection = '';
     if (steeringMessages && steeringMessages.length > 0) {
-        steeringSection = '\n\n### ADDITIONAL USER GUIDANCE (Apply these rules to your plan)\n' +
+        steeringSection = '\n\n### ADDITIONAL USER GUIDANCE (Apply these rules and instructions to your plan and decisions)\n' +
             steeringMessages.map(m => `- ${m}`).join('\n');
     }
 
@@ -236,12 +236,11 @@ export class PlanningService implements IPlanningService {
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { 
+        }, buildSafeOptions(model, { 
           apiKey: authResult.apiKey || '', 
           headers: authResult.headers, 
-          signal,
-          reasoning: 'minimal' as any
-        }),
+          signal
+        }, 4096)),
         createTimeout(llmTimeout, 'coordinator-generatePlan'),
       ]);
 
@@ -256,8 +255,7 @@ export class PlanningService implements IPlanningService {
         }
       }
 
-      const responseText = extractText(response);
-      if (!responseText) throw new Error('Coordinator returned no text content');
+      const responseText = validateAndExtractText(response, 'Coordinator');
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;
@@ -382,12 +380,11 @@ export class PlanningService implements IPlanningService {
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { 
+        }, buildSafeOptions(model, { 
           apiKey: authResult.apiKey || '', 
           headers: authResult.headers, 
-          signal,
-          reasoning: 'minimal' as any
-        }),
+          signal
+        }, 4096)),
         createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
       ]);
 
@@ -402,8 +399,7 @@ export class PlanningService implements IPlanningService {
         }
       }
 
-      const responseText = extractText(response);
-      if (!responseText) throw new Error('Evaluator returned no text content');
+      const responseText = validateAndExtractText(response, 'Evaluator');
 
       // Extract and validate JSON
       let plan: ResearchPlan | null = null;

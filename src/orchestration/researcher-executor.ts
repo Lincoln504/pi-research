@@ -65,11 +65,8 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   const researcherPromptTemplate = loadPrompt('researcher', '..');
   if (initialLinks.length === 0 && historicalUrls.length === 0) {
     logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
-    // FIX (New Issue C): Record as a partial failure rather than silently skipping,
-    // so the orchestration layer knows coverage was reduced.
     recordResearcherFailure((ctx as ExtendedExtensionContext).sessionId, researchId, id);
     metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
-    // Notify failure (not completion) since coverage was reduced
     observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');
     return;
   }
@@ -79,18 +76,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     evidenceSection = `## Evidence Provided\nInitial search results provided the following URLs to investigate:\n${initialLinks.map(l => `- ${l}`).join('\n')}`;
   }
 
-  const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-    .replace('{{goal}}', researcherConfig.goal)
-    .replace('{{store_section}}', storeSection)
-    .replace('{{evidence_section}}', evidenceSection)
-    .replace('{{coordination_section}}', previousQueriesSection)
-    .replace('{{extra_tool_guidelines}}', '');
-
-  logger.debug(`[ResearcherExecutor] Researcher ${id} System Prompt:\n${prompt}`);
-
   const maxAttempts = config.RESEARCHER_MAX_RETRIES + 1;
   let lastError: unknown;
   const researcherExecutionStartMs = Date.now();
+  const deliveredSteeringIds = new Set<string>();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (attempt > 1) {
@@ -99,6 +88,27 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       observer?.onResearcherProgress?.(id, 'retry');
       await new Promise(r => setTimeout(r, delay));
     }
+
+    // Generate prompt for this attempt, incorporating ALL steering messages delivered so far
+    const allSteering = getSteeringMessages(sessionId);
+    let steeringSection = '';
+    if (allSteering.length > 0) {
+        steeringSection = '\n\n### ADDITIONAL USER GUIDANCE (Mandatory directional rules for your research)\n' +
+            allSteering.map(m => {
+                deliveredSteeringIds.add(m.id);
+                return `- ${m.text}`;
+            }).join('\n');
+    }
+
+    const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
+      .replace('{{goal}}', researcherConfig.goal)
+      .replace('{{store_section}}', storeSection)
+      .replace('{{evidence_section}}', evidenceSection)
+      .replace('{{coordination_section}}', previousQueriesSection)
+      .replace('{{extra_tool_guidelines}}', '')
+      .trim() + steeringSection;
+
+    logger.debug(`[ResearcherExecutor] Researcher ${id} attempt ${attempt} System Prompt:\n${prompt}`);
 
     const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
@@ -135,7 +145,6 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
     sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
 
-    const deliveredSteeringIds = new Set<string>();
     let lastSteeringCheck = Date.now();
 
     const subscription = session.subscribe((event: any) => {

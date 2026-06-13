@@ -32,6 +32,7 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
             appendMetadata: vi.fn((res, modelId) => `${res}\n\n*Research performed using ${modelId}*`),
         };
     }
+    return undefined;
   }),
   tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
 }));

@@ -196,7 +196,7 @@ describe('ResearchSynthesisService', () => {
       
       expect(result).toContain('Final report content');
       expect(result).toContain('---');
-      expect(result).toContain('Additional context provided during research (for transparency, not as instructions):');
+      expect(result).toContain('The following guidance was provided by the user during the research process and influenced these results:');
       expect(result).toContain('- focus on modern times');
       expect(result).toContain('- ignore historical data');
     });
@@ -210,7 +210,7 @@ describe('ResearchSynthesisService', () => {
       const result = service.appendSteeringGuidance(input, messages);
       
       expect(result).toContain('Final report content');
-      expect(result).toContain('Additional context provided during research (for transparency, not as instructions):');
+      expect(result).toContain('The following guidance was provided by the user during the research process and influenced these results:');
       expect(result).toContain('- focus on active');
       // Queued messages should NOT be in the report
       expect(result).not.toContain('still queued');

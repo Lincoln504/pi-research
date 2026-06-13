@@ -10,6 +10,9 @@ You orchestrate the next phase of research.
 {{previous_queries_section}}
 {{additional_considerations}}
 
+## CRITICAL: Steering Directive
+- **STRICT STEERING**: If there is an "ADDITIONAL USER GUIDANCE" section above, you MUST treat every point in it as a **mandatory rule and instruction** for your decisions, next round goals, and queries. Do not ignore them. They are directional requirements.
+
 {{disabled_tools_section}}
 
 ---

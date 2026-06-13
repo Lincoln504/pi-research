@@ -26,8 +26,9 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { completeSimple, type TextContent, type Model } from '@earendil-works/pi-ai';
+import { completeSimple, type Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
+import { buildSafeOptions, validateAndExtractText } from '../utils/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { createTimeout } from '../utils/llm-timeout.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -296,13 +297,11 @@ async function runBackgroundExtraction(
       messages: [
         { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
       ],
-    }, { 
+    }, buildSafeOptions(model, { 
       apiKey: auth.apiKey, 
       headers: auth.headers, 
-      signal,
-      // Knowledge synthesis should be fast — minimal reasoning helps quality
-      reasoning: 'minimal' as any
-    }),
+      signal
+    }, 4096)),
     createTimeout(llmTimeout, 'knowledge-search-extraction'),
   ]);
 
@@ -316,13 +315,7 @@ async function runBackgroundExtraction(
     }
   }
 
-  // Extract text using the typed find pattern (matches planning-service.ts)
-  const textContent = response.content?.find((c): c is TextContent => c.type === 'text');
-  const responseText = textContent?.text;
-
-  if (!responseText) {
-    throw new Error('Background LLM returned no text content');
-  }
+  const responseText = validateAndExtractText(response, 'Knowledge Extraction');
 
   // Phase 4b: Direct JSON extraction + TypeBox validation
   const extracted = extractJson<ResearchKnowledgeSynthesisResponse>(responseText, 'object');

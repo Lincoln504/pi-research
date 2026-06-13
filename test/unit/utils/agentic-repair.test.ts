@@ -17,9 +17,20 @@ describe('repairJsonWithLlm', () => {
     mockCompleter.mockReset();
   });
 
+  const baseMessage = {
+      role: 'assistant',
+      api: 'openai-completions',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      timestamp: Date.now()
+  };
+
   it('salvages valid JSON from a malformed response', async () => {
     mockCompleter.mockResolvedValue({
-      content: [{ type: 'text', text: '```json\n{"foo": "fixed", "bar": 42}\n```' }]
+      ...baseMessage,
+      content: [{ type: 'text', text: '```json\n{"foo": "fixed", "bar": 42}\n```' }],
+      stopReason: 'stop'
     });
 
     const result = await repairJsonWithLlm('{"foo": "broken", "bar": "nan"', mockCompleter, auth, {
@@ -37,7 +48,9 @@ describe('repairJsonWithLlm', () => {
 
   it('returns null if repair pass still produces invalid JSON', async () => {
     mockCompleter.mockResolvedValue({
-      content: [{ type: 'text', text: 'still not json' }]
+      ...baseMessage,
+      content: [{ type: 'text', text: 'still not json' }],
+      stopReason: 'stop'
     });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {
@@ -48,7 +61,11 @@ describe('repairJsonWithLlm', () => {
   });
 
   it('returns null if LLM returns empty response', async () => {
-    mockCompleter.mockResolvedValue({ content: [] });
+    mockCompleter.mockResolvedValue({ 
+        ...baseMessage,
+        content: [],
+        stopReason: 'stop'
+    });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {
       model: stubModel
@@ -59,7 +76,9 @@ describe('repairJsonWithLlm', () => {
 
   it('coerces values if schema is provided', async () => {
     mockCompleter.mockResolvedValue({
-      content: [{ type: 'text', text: '{"foo": "fixed", "bar": "42"}' }] // Note "42" as string
+      ...baseMessage,
+      content: [{ type: 'text', text: '{"foo": "fixed", "bar": "42"}' }],
+      stopReason: 'stop'
     });
 
     const result = await repairJsonWithLlm('{', mockCompleter, auth, {

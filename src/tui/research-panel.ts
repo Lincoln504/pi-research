@@ -104,21 +104,11 @@ function renderPanelBlock(
   });
 
   const numSlices = sliceIds.length;
-  
-  // Dynamically calculate MAX_VISIBLE_SLICES based on width
-  // Each column needs at least 3 chars (1 wall + 2 content) for minimal visibility
-  const minColWidth = 3;
-  const maxPossibleSlices = Math.max(1, Math.floor(rightInner / (minColWidth + 1)));
-  const MAX_VISIBLE_SLICES = Math.min(8, maxPossibleSlices);
-
-  const showIndicator = numSlices > MAX_VISIBLE_SLICES;
-  const hiddenCount = showIndicator ? numSlices - MAX_VISIBLE_SLICES : 0;
-  const visibleSliceIds = showIndicator
-    ? sliceIds.slice(numSlices - MAX_VISIBLE_SLICES)
-    : sliceIds;
-
-  const numVisible = showIndicator ? MAX_VISIBLE_SLICES : numSlices;
-  const totalCols = showIndicator ? numVisible + 1 : numVisible;
+  const visibleSliceIds = sliceIds;
+  const numVisible = numSlices;
+  const totalCols = numVisible;
+  const showIndicator = false;
+  const hiddenCount = 0;
 
   // Calculate column widths for the right section
   const dividers = totalCols - 1;

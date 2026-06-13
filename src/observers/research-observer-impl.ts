@@ -62,7 +62,7 @@ export function createResearchObserver(
         state.quickSliceLabel = `researching: ${truncatedQuery}`;
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
-        updateSliceStatus(panelState, state.quickSliceLabel, 'researching', debouncedRefresh);
+        updateSliceStatus(panelState, state.quickSliceLabel, 'starting...', debouncedRefresh);
         panelState.statusMessage = 'researching';
         
         const units = getUnitsPerResearcher();
@@ -96,6 +96,7 @@ export function createResearchObserver(
     },
 
     onPlanningSuccess: (plan) => {
+      updateSliceStatus(panelState, 'coord', 'ready', debouncedRefresh);
       completeSlice(panelState, 'coord');
       panelState.statusMessage = undefined;
       const unitsPerResearcher = getUnitsPerResearcher();
@@ -135,6 +136,7 @@ export function createResearchObserver(
          sliceId = 'eval';
          if (!hasEval) {
             addSlice(panelState, 'eval', 'eval', false);
+            updateSliceStatus(panelState, 'eval', 'starting...', debouncedRefresh);
          }
       }
 
@@ -142,7 +144,7 @@ export function createResearchObserver(
           reactivateSlice(panelState, sliceId);
           activateSlice(panelState, sliceId); // Ensure not queued
       }
-      updateSliceStatus(panelState, sliceId, 'searching', debouncedRefresh);
+      updateSliceStatus(panelState, sliceId, 'searching...', debouncedRefresh);
       panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
@@ -211,6 +213,11 @@ export function createResearchObserver(
 
     onResearcherStart: (id, _name, _goal, _roundNumber) => {
       if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
+      // Clear the completed evaluator box when the next round's researchers begin,
+      // so the evaluator never lingers alongside the new round. This complements
+      // the deferred clearing below (which may already have run during onSearchStart,
+      // consuming needsClear and leaving a reused/completed 'eval' slice behind).
+      if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
 
       // Deferred clearing: remove researchers from previous rounds only when the
       // first researcher of the current round starts.
@@ -235,6 +242,7 @@ export function createResearchObserver(
         addSlice(panelState, sliceId, label, true);
       }
       activateSlice(panelState, sliceId);
+      updateSliceStatus(panelState, sliceId, 'starting...', debouncedRefresh);
       debouncedRefresh();
     },
 

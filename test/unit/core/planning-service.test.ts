@@ -268,16 +268,16 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeLessThanOrEqual(maxSize);
     });
 
-    it('populates prompts correctly with query and uses reasoning: minimal', async () => {
+    it('populates prompts correctly with query and uses maxTokens', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
       await service.generatePlan(BASE_OPTIONS);
       
       const lastCall = vi.mocked(completeSimple).mock.calls[0];
       const callContext = lastCall![1] as { systemPrompt: string };
-      const callOptions = lastCall![2] as { reasoning: string };
+      const callOptions = lastCall![2] as { maxTokens: number };
       
       expect(callContext.systemPrompt).toContain('test query');
-      expect(callOptions.reasoning).toBe('minimal');
+      expect(callOptions.maxTokens).toBe(4096);
     });
   });
 

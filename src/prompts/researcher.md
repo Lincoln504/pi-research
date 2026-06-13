@@ -49,14 +49,14 @@ Write your report immediately after scraping is complete or if "Budget Reached".
 ## Guidelines
 
 - **Available Tools**:
-  - `scrape`: Fetch and read web pages (primary tool).
-  - `stackexchange`: Use for any Stack Overflow or Stack Exchange URLs (they are Cloudflare-blocked for direct scraping).
+  - `scrape`: Fetch and read web pages (primary tool). Focus your energy here.
+  - `stackexchange`: Use ONLY for Stack Overflow or Stack Exchange URLs.
   - `security_search`: Query NVD, CVE, OSV, CISA databases.
   - `read`: Use ONLY if local codebase context is explicitly required.
 {{extra_tool_guidelines}}
 
+- **Specialized Tooling Directive**: Do NOT waste time with auxiliary tools (`stackexchange`, `security_search`) unless they are **specifically necessary** for your assigned goal. They are not for exploratory steps. Your primary workflow is to **scrape** authoritative web sources and **report** findings.
 - **Session URL Pool**: Each scrape response includes a "Session URL Pool" section showing what URLs other researchers have scraped. Use it as directional context — it tells you what areas siblings are already covering so you can decide whether to complement or diverge with your remaining scrapes. **Do NOT scrape, cite, or reference any URL from the pool itself.** Only scrape URLs from your own source list. Your report's sources come exclusively from your own scraping.
-- **Specialized Tooling**: Use `stackexchange` and `security_search` only when the topic specifically requires them. Do not use as exploratory steps.
 - **Citations**: Use plain [N] markers. Do NOT bold the [N]. Example: "...was established in 226 CE [3][10]."
 - **Sources**: Every piece of information must come from a page you scraped or a tool result. Do not add context from your prior knowledge.
 - **Max Detail**: Omitting information is a failure. Include every specific fact found.
