@@ -100,6 +100,10 @@ export default async function (pi: ExtensionAPI) {
         for (const sid of sessionIds) {
           addSteeringMessage(sid, sanitized);
         }
+        
+        // Return handled to indicate we have fully processed this input 
+        // and Pi should not echo it into the main chat log.
+        return { action: 'handled' };
       } catch (err) {
         logger.debug('[pi-research] Input handler error:', err);
       }
