@@ -435,8 +435,35 @@ function buildSteeringResult(
 
 function missResult(reason: string): AgentToolResult<unknown> {
   metrics.increment('research_knowledge_search_total', 1, { status: reason });
+  logger.info('[research-knowledge-search] Knowledge store miss:', reason);
+
+  let text = RESEARCH_KNOWLEDGE_MISS_STRING;
+  switch (reason) {
+    case 'store_empty':
+      text = 'No results found (knowledge store is empty). Live research can get the info.';
+      break;
+    case 'store_disabled':
+      text = 'No results found (knowledge store is disabled in settings). Live research can get the info.';
+      break;
+    case 'store_not_ready':
+      text = 'No results found (knowledge store is initializing). Live research can get the info.';
+      break;
+    case 'store_unavailable':
+      text = 'No results found (knowledge store unavailable). Live research can get the info.';
+      break;
+    case 'no_results':
+      text = 'No results found (no matching content). Live research can get the info.';
+      break;
+    case 'no_model':
+      text = 'No results found (no model configured). Live research can get the info.';
+      break;
+    case 'auth_failed':
+      text = 'No results found (authentication error). Live research can get the info.';
+      break;
+  }
+
   return {
-    content: [{ type: 'text', text: RESEARCH_KNOWLEDGE_MISS_STRING }],
+    content: [{ type: 'text', text }],
     details: { source: 'research_knowledge_search', found: false, answerStatus: 'no', reason },
   };
 }

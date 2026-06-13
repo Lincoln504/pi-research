@@ -32,7 +32,7 @@ Settings are loaded with the following precedence:
 | `PI_RESEARCH_EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |
-| `PI_RESEARCH_MIGRATION_STRATEGY` | `drop` | drop, re-embed | What to do when embedding model changes |
+| `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` | drop, backup, re-embed | What to do when embedding model changes |
 
 ### API Keys
 

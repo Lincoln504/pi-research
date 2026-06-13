@@ -177,6 +177,8 @@ export default async function (pi: ExtensionAPI) {
   // Primary cleanup path for pi -p (print mode) and normal session end.
   pi.on('session_shutdown', async () => {
     try {
+      // Add watchdog timer to prevent zombie processes if cleanup hangs (e.g. ONNX teardown)
+      shutdownManager.forceExitAfter(8000);
       await shutdownManager.runCleanup('session_shutdown');
     } catch (_err) {
       logger.error('[pi-research] session_shutdown cleanup failed:', _err);

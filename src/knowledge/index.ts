@@ -13,17 +13,17 @@ import type {
 
 export { SUPPORTED_MODELS, getModelEmbedderConfig, getModelChunkConfig } from './model-config.ts';
 
-/** Migration strategy for model changes (read from env or config) */
-function getMigrationStrategy(): MigrationStrategy | undefined {
-  const strategy = process.env['PI_RESEARCH_MIGRATION_STRATEGY'];
+/** Migration strategy for model changes (read from config) */
+function getMigrationStrategy(config: Config): MigrationStrategy | undefined {
+  const strategy = config.MIGRATION_STRATEGY;
   if (!strategy) return undefined;
   
-  const validStrategies: MigrationStrategy[] = ['drop', 're-embed'];
+  const validStrategies: MigrationStrategy[] = ['drop', 're-embed', 'backup'];
   if (validStrategies.includes(strategy as MigrationStrategy)) {
     return strategy as MigrationStrategy;
   }
   
-  logger.warn(`[knowledge] Invalid migration strategy '${strategy}'. Valid options: drop, re-embed. Falling back to default (drop).`);
+  logger.warn(`[knowledge] Invalid migration strategy '${strategy}'. Valid options: drop, re-embed, backup. Falling back to default (backup).`);
   return undefined;
 }
 
@@ -61,7 +61,7 @@ export async function createKnowledgeStoreComponents(
       logger.info(`[knowledge] Creating Knowledge Store components (attempt ${attempt}/${MAX_INIT_RETRIES})...`);
 
       const embedder = await embedderFactory();
-      const migrationStrategy = getMigrationStrategy();
+      const migrationStrategy = getMigrationStrategy(config);
       
       const store = new KnowledgeStore({
         dbDir: getDbDir(config, workspace),

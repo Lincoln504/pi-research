@@ -44,7 +44,7 @@ describe('KnowledgeStore Migration Error Paths', () => {
     vi.restoreAllMocks();
   });
 
-  it('handleModelChange falls back to drop for unknown strategy', async () => {
+  it('handleModelChange falls back to backup for unknown strategy', async () => {
     store = new KnowledgeStore({
       dbDir: testDbDir,
       embedder: mockEmbedder,

@@ -77,6 +77,12 @@ export const ConfigSchema = Type.Object({
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
   /** Whether to automatically export a markdown research report to disk at the end (default: false) */
   RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
+  /** Strategy for database schema/model migrations: 'drop', 're-embed', or 'backup' (default: 'backup') */
+  MIGRATION_STRATEGY: Type.Union([
+    Type.Literal('drop'),
+    Type.Literal('re-embed'),
+    Type.Literal('backup'),
+  ], { default: 'backup' }),
   /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: true) */
   DEBUG: Type.Boolean({ default: true }),
 });
@@ -236,14 +242,44 @@ function parseDotEnv(content: string): Record<string, string> {
 
 /**
  * Load environment variables from global and local files.
- * Order: Defaults < Global File < Centralized Project Settings
+ * Order: Global File < Legacy .env < Centralized Registry (WINS)
  */
 function loadEnvFiles(cwd: string): Record<string, string> {
   const merged: Record<string, string> = {};
-  
-  // 1. Global user config
+  const globalPath = getGlobalEnvFilePath();
+  const registry = loadProjectSettingsRegistry();
+  const normalizedCwd = normalizeWorkspacePath(cwd);
+  const homeRegistry = registry[normalizeWorkspacePath(os.homedir())];
+
+  // 1. ONE-TIME MIGRATION: Populate config.env from HOME registry if missing
   try {
-    const globalPath = getGlobalEnvFilePath();
+    if (!fs.existsSync(globalPath) && homeRegistry && Object.keys(homeRegistry).length > 0) {
+      logger.info('[config] config.env missing. Initializing from user settings in central registry...');
+      const userLevelKeys = [
+        'PI_RESEARCH_EMBEDDING_MODEL', 'PI_RESEARCH_EMBEDDING_DEVICE', 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS',
+        'PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED', 'PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED', 'PI_RESEARCH_CACHE_TTL_DAYS',
+        'PI_RESEARCH_WORKER_THREADS', 'PI_RESEARCH_WORKER_CONCURRENCY', 'PI_RESEARCH_DEBUG', 'PI_RESEARCH_MODEL',
+        'PI_RESEARCH_LLM_TIMEOUT_MS', 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', 'PI_RESEARCH_SCRAPE_TIMEOUT_MS',
+        'PI_RESEARCH_SEARCH_TIMEOUT_MS', 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', 'PI_RESEARCH_REPORT_EXPORT_ENABLED',
+        'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
+        'PI_RESEARCH_MIGRATION_STRATEGY'
+      ];
+      const migrated: Record<string, string> = {};
+      for (const key of userLevelKeys) {
+        if (homeRegistry[key] !== undefined) migrated[key] = homeRegistry[key];
+      }
+      if (Object.keys(migrated).length > 0) {
+        // We use a dummy config to trigger saveConfig('user')
+        const dummyConfig = createConfig(migrated, {});
+        saveConfig(dummyConfig, 'user', cwd);
+      }
+    }
+  } catch (err) {
+    logger.warn('[config] Failed one-time config.env migration:', err);
+  }
+
+  // 2. Load Global user config
+  try {
     if (fs.existsSync(globalPath)) {
       Object.assign(merged, parseDotEnv(fs.readFileSync(globalPath, 'utf-8')));
     }
@@ -251,30 +287,37 @@ function loadEnvFiles(cwd: string): Record<string, string> {
     logger.warn('[config] Failed to read global env file:', err);
   }
 
-  // 2. Centralized project settings (replaces .pi-research.env)
-  try {
-    const registry = loadProjectSettingsRegistry();
-    const normalizedCwd = normalizeWorkspacePath(cwd);
-
-    if (registry[normalizedCwd]) {
-      Object.assign(merged, registry[normalizedCwd]);
-    }
-    
-    // BACKWARD COMPATIBILITY: Also check for legacy .pi-research.env in CWD
-    const legacyPath = getLocalEnvFilePath(cwd);
-    if (fs.existsSync(legacyPath)) {
-      const legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
+  // 3. Load Legacy .pi-research.env in CWD
+  const legacyPath = getLocalEnvFilePath(cwd);
+  let legacyEnv: Record<string, string> = {};
+  if (fs.existsSync(legacyPath)) {
+    try {
+      legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
       Object.assign(merged, legacyEnv);
       
-      // Migration: Move legacy settings to central registry if they differ
+      // Auto-migrate legacy settings to central registry if they differ
       if (!registry[normalizedCwd] || JSON.stringify(registry[normalizedCwd]) !== JSON.stringify(legacyEnv)) {
         logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
         registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyEnv };
         saveProjectSettingsRegistry(registry);
       }
+    } catch (err) {
+      logger.warn(`[config] Failed to load legacy settings for ${cwd}:`, err);
     }
-  } catch (err) {
-    logger.warn(`[config] Failed to load centralized settings for ${cwd}:`, err);
+  }
+
+  // 4. Load Centralized project settings (REGISTRY WINS)
+  if (registry[normalizedCwd]) {
+    // Conflict detection
+    for (const [key, val] of Object.entries(registry[normalizedCwd])) {
+      if (legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
+        logger.warn(`[config] Config divergence for ${key} in ${cwd}: Registry="${val}" vs Legacy="${legacyEnv[key]}". Registry wins.`);
+      }
+    }
+    Object.assign(merged, registry[normalizedCwd]);
+  } else if (Object.keys(merged).length === 0 && !fs.existsSync(legacyPath) && !fs.existsSync(globalPath)) {
+    // 5. Warning for missing config
+    logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);
   }
 
   return merged;
@@ -301,13 +344,14 @@ export function saveConfig(config: Config, scope: 'local' | 'global' | 'user' = 
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
-    PI_RESEARCH_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
+    PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
@@ -479,6 +523,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS),
+    MIGRATION_STRATEGY: parseEnvString(e, 'PI_RESEARCH_MIGRATION_STRATEGY', DEFAULTS.MIGRATION_STRATEGY) as 'drop' | 're-embed' | 'backup',
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),

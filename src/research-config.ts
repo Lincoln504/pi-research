@@ -264,23 +264,28 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             if (id === 'DEFAULT_RESEARCH_DEPTH') {
               const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
               config.DEFAULT_RESEARCH_DEPTH = depthMap[newValue] || 1;
+              scope = 'user';
             } else if (id === 'MAX_CONCURRENT_RESEARCHERS') {
               config.MAX_CONCURRENT_RESEARCHERS = parseInt(newValue, 10);
+              scope = 'user';
             } else if (id === 'MAX_SCRAPE_BATCHES') {
               config.MAX_SCRAPE_BATCHES = newValue === 'unlimited' ? 0 : parseInt(newValue, 10);
+              scope = 'user';
             } else if (id === 'WORKER_THREADS') {
             config.WORKER_THREADS = parseInt(newValue, 10);
             scope = 'user';
             } else if (id === 'RESEARCHER_TIMEOUT_MS') {
             config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
+            scope = 'user';
             } else if (id === 'DEBUG') {
             config.DEBUG = newValue === 'true';
             scope = 'user';
             } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
             config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
+            scope = 'user';
             } else if (id === 'LOCAL_KNOWLEDGE_STORE_ENABLED') {
             config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-            scope = 'local';
+            scope = 'user';
             } else if (id === 'GLOBAL_KNOWLEDGE_STORE_ENABLED') {
             config.GLOBAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
             scope = 'user';

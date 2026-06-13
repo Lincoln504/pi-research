@@ -11,7 +11,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 // Mock fs and os
-vi.mock('node:fs', () => ({
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<any>()),
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
   mkdirSync: vi.fn(),
@@ -22,7 +23,8 @@ vi.mock('node:fs', () => ({
   statSync: vi.fn(),
 }));
 
-vi.mock('node:os', () => ({
+vi.mock('node:os', async (importOriginal) => ({
+  ...(await importOriginal<any>()),
   homedir: () => '/home/user',
 }));
 

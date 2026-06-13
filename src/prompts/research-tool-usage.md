@@ -36,10 +36,13 @@ The `research` tool (from pi-research extension) is your tool for web/internet r
 
 #### What is NOT web research (use other tools for these)
 
-- Reading files in the project → use `read` tool
-- Running commands or tests → use `bash` tool
-- Analyzing code in this repository
-- Questions about the project itself
+The `research` tool retrieves from the internet. Do NOT use it when the answer can be found in local files on this machine:
+
+- Reading files in this project → use other codebase / filesystem / investigation tools
+- Running commands or tests → use other codebase / filesystem / investigation tools
+- Analyzing code in this repository → use other codebase / filesystem / investigation tools
+- Investigating bugs, configuration, architecture, or source code of this project → use other codebase / filesystem / investigation tools
+- Searching for information that should be in the local codebase or your own logs.
 
 ---
 

@@ -33,7 +33,10 @@ describe('logger', () => {
     delete process.env['PI_RESEARCH_DEBUG'];
 
     // Clean up test log files
-    const testLogPaths = [TEST_LOG_PATH];
+    const testLogPaths = [
+      TEST_LOG_PATH,
+      path.join(os.tmpdir(), 'pi-research-run-test1234.log')
+    ];
     for (const path of testLogPaths) {
       try {
         unlinkSync(path);

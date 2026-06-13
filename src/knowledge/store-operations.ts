@@ -77,7 +77,7 @@ export async function searchStore(
 ): Promise<StoreDocument[]> {
   const startTime = Date.now();
 
-  const rowCount = await table.countRows();
+  const rowCount = scopeFilter ? await table.countRows(scopeFilter) : await table.countRows();
   if (rowCount === 0) {
     metrics.increment('knowledge_store_search_total', 1, { status: 'empty' });
     return [];
@@ -192,7 +192,7 @@ export async function findRelevantUrls(
   scopeFilter?: string
 ): Promise<{ url: string; description: string; provenance?: string }[]> {
   const startTime = Date.now();
-  const rowCount = await table.countRows();
+  const rowCount = scopeFilter ? await table.countRows(scopeFilter) : await table.countRows();
   if (rowCount === 0) {
     metrics.increment('knowledge_store_find_urls_total', 1, { status: 'empty' });
     return [];

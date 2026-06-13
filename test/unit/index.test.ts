@@ -35,7 +35,8 @@ vi.mock('../../src/logger.ts', () => ({
   },
 }));
 
-vi.mock('node:fs', () => ({
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<any>()),
   readFileSync: vi.fn(() => 'MOCK_USAGE_PROMPT'),
 }));
 

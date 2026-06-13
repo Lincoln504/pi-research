@@ -58,7 +58,7 @@ const OpenClawConfigSchema = Type.Object({
   workerThreads: Type.Optional(Type.Number({ minimum: 1, maximum: 10, default: 4 })),
   workerConcurrency: Type.Optional(Type.Number({ minimum: 1, maximum: 10, default: 2 })),
   knowledgeEnabled: Type.Optional(Type.Boolean({ default: true })),
-  embeddingModel: Type.Optional(Type.String({ default: 'Xenova/all-MiniLM-L6-v2' })),
+  embeddingModel: Type.Optional(Type.String({ description: 'Embedding model (defaults to user config)' })),
   embeddingDevice: Type.Optional(Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' })),
   cacheTtlDays: Type.Optional(Type.Number({ minimum: 1, maximum: 365, default: 30 })),
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),

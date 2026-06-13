@@ -184,7 +184,7 @@ export class KnowledgeStore implements IKnowledgeStore {
           if (isModelMismatch || isVersionMismatch) {
             const reason = isModelMismatch ? 'Model change' : 'Schema version change';
             logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
-            const strategy = this.options.migrationStrategy || 'drop';
+            const strategy = this.options.migrationStrategy || 'backup';
 
             try {
               await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
@@ -192,10 +192,12 @@ export class KnowledgeStore implements IKnowledgeStore {
               const errorMsg = `Model migration failed using strategy '${strategy}': ${err instanceof Error ? err.message : String(err)}`;
               logger.error(`[store] ${errorMsg}`);
 
-              if (strategy !== 'drop') {
-                logger.warn('[store] Falling back to drop strategy after migration failure');
-                await this.db.dropTable(this.tableName);
-                this.table = await this.createTable();
+              if (strategy !== 'drop' && strategy !== 'backup') {
+                logger.warn('[store] Falling back to backup strategy after migration failure');
+                await this.handleModelChange(storedModel || 'unknown', this.options.modelName, 'backup');
+              } else if (strategy === 'backup') {
+                logger.warn('[store] Falling back to drop strategy after backup failure');
+                await this.handleModelChange(storedModel || 'unknown', this.options.modelName, 'drop');
               } else {
                 throw new Error(errorMsg, { cause: err });
               }
@@ -224,10 +226,47 @@ export class KnowledgeStore implements IKnowledgeStore {
         return this.migrationDrop(oldModel, newModel);
       case 're-embed':
         return this.migrationReEmbed(oldModel, newModel);
+      case 'backup':
+        return this.migrationBackup(oldModel, newModel);
       default:
-        logger.warn(`[store] Unknown migration strategy '${strategy}', falling back to 'drop'`);
-        return this.migrationDrop(oldModel, newModel);
+        logger.warn(`[store] Unknown migration strategy '${strategy}', falling back to 'backup'`);
+        return this.migrationBackup(oldModel, newModel);
     }
+  }
+
+  private async migrationBackup(_oldModel: string, newModel: string): Promise<MigrationResult> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupTableName = `${this.tableName}_backup_${timestamp}`;
+    logger.warn(`[store] Backing up table to ${backupTableName} and recreating with model ${newModel}`);
+
+    if (!this.table || !this.db) {
+      throw new Error('Table not connected');
+    }
+
+    const count = await this.table.countRows();
+    
+    // Close current table handle
+    this.table = null;
+    
+    // In LanceDB, tables are directories. Rename the .lance directory.
+    const oldDir = path.join(this.options.dbDir, `${this.tableName}.lance`);
+    const backupDir = path.join(this.options.dbDir, `${backupTableName}.lance`);
+    
+    try {
+      if (fs.existsSync(oldDir)) {
+        await fsPromises.rename(oldDir, backupDir);
+        logger.info(`[store] Successfully backed up database directory to ${backupDir}`);
+      }
+    } catch (err) {
+      logger.error(`[store] Atomic backup failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+
+    // Create fresh table
+    this.table = await this.createTable();
+    logger.info(`[store] Migration complete: ${count} documents backed up, fresh table created with model ${newModel}`);
+
+    return { strategy: 'backup', success: true, documentsProcessed: count };
   }
 
   private async migrationDrop(_oldModel: string, newModel: string): Promise<MigrationResult> {

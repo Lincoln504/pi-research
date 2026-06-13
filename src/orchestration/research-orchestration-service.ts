@@ -380,17 +380,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         logger.debug(`[ResearchOrchestrationService] Storing ${links.length} citations for researcher ${key}`);
 
         for (const link of links) {
-          if (link.url && link.description) {
+          if (link.url) {
             const cachedContent = getCachedScrapedContent(researchId, link.url) ?? undefined;
+            const markdown = link.description || `(source: ${link.url})`;
             writer.enqueue({
               url: normalizeUrl(link.url),
-              markdown: link.description,
+              markdown: markdown,
               content: cachedContent,
               metadata: {
                 researchId,
                 round,
                 researcherId: key,
-                description: link.description,
+                description: link.description || '',
                 sourceOrigin: link.url,
                 source: link.source || 'unknown',
               }

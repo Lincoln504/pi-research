@@ -275,17 +275,18 @@ export class QuickResearchOrchestrator {
               }
               let enqueued = 0;
               for (const cit of citations) {
-                if (cit.url && cit.description) {
+                if (cit.url) {
                   const fullContent = getCachedScrapedContent(this.options.researchId, cit.url);
+                  const markdown = cit.description || `(source: ${cit.url})`;
                   writer.enqueue({
                     url: normalizeUrl(cit.url),
-                    markdown: cit.description,
+                    markdown: markdown,
                     content: fullContent,
                     metadata: {
                       ingestionType: 'synthesis-description',
                       source: 'researcher',
                       synthesizedAt: new Date().toISOString(),
-                      description: cit.description,
+                      description: cit.description || '',
                       fullContentSnippet: fullContent?.substring(0, 5000)
                     }
                   });
