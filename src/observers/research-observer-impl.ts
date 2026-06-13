@@ -13,6 +13,7 @@ import type { ResearchObserver } from '../orchestration/research-observer.ts';
 
 import { getUnitsPerResearcher, LEAD_EVAL_UNITS } from '../constants.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';
+import { tuiPulse } from '../tui/pulse.ts';
 import {
   addSlice,
   activateSlice,
@@ -35,7 +36,7 @@ export interface ObserverState {
   progressCredits: Map<string, number>;
   quickSliceLabel: string;
   idToNumberMap: Map<string, string>;
-  waveTimer: NodeJS.Timeout | null;
+  unsubPulse: (() => void) | null;
 }
 
 /**
@@ -145,19 +146,22 @@ export function createResearchObserver(
       panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
-      // Start wave animation timer
-      panelState.waveFrame = 0;
-      if (state.waveTimer) clearInterval(state.waveTimer);
-      state.waveTimer = setInterval(() => {
+      // Start wave animation via global pulse subscription
+      // Using the global frame directly ensures synchronization across all panels
+      panelState.waveFrame = tuiPulse.getFrame();
+      
+      if (state.unsubPulse) state.unsubPulse();
+      state.unsubPulse = tuiPulse.subscribe((globalFrame) => {
         if (!panelState.isSearching) {
-          clearInterval(state.waveTimer!);
-          state.waveTimer = null;
+          if (state.unsubPulse) {
+            state.unsubPulse();
+            state.unsubPulse = null;
+          }
           return;
         }
-        panelState.waveFrame = (panelState.waveFrame ?? 0) + 1;
+        panelState.waveFrame = globalFrame;
         debouncedRefresh();
-      }, 33); // 33ms = ~30 FPS
-      if (state.waveTimer.unref) state.waveTimer.unref();
+      });
 
       debouncedRefresh();
     },
@@ -182,10 +186,10 @@ export function createResearchObserver(
     onSearchComplete: (count) => {
       panelState.isSearching = false;
 
-      // Stop wave animation timer
-      if (state.waveTimer) {
-        clearInterval(state.waveTimer);
-        state.waveTimer = null;
+      // Stop wave animation
+      if (state.unsubPulse) {
+        state.unsubPulse();
+        state.unsubPulse = null;
       }
       panelState.waveFrame = undefined;
       panelState.waveColors = undefined; // Clear persistent colors for next search
@@ -379,7 +383,7 @@ export function createObserverState(): ObserverState {
     progressCredits: new Map<string, number>(),
     quickSliceLabel: '',
     idToNumberMap: new Map<string, string>(),
-    waveTimer: null,
+    unsubPulse: null,
   };
 }
 
@@ -387,9 +391,9 @@ export function createObserverState(): ObserverState {
  * Stop wave animation in the observer
  */
 export function stopObserverWaveAnimation(state: ObserverState, panelState: ResearchPanelState): void {
-  if (state.waveTimer) {
-    clearInterval(state.waveTimer);
-    state.waveTimer = null;
+  if (state.unsubPulse) {
+    state.unsubPulse();
+    state.unsubPulse = null;
   }
   panelState.waveFrame = undefined;
   panelState.waveColors = undefined;
