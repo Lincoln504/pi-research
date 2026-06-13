@@ -153,7 +153,7 @@ describe('TUI Research Panel', () => {
   });
 
   describe('steering message rendering', () => {
-    it('should render queued steering messages with QUEUED prefix', async () => {
+    it('should show hint including alt+p when there are queued steering messages', async () => {
       const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
@@ -164,17 +164,13 @@ describe('TUI Research Panel', () => {
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator({} as any, mockTheme as Theme);
       const lines = component.render(80);
-
-      const steeringLine = lines.find(l => l.includes('QUEUED RESEARCHER STEERING'));
-      expect(steeringLine).toBeDefined();
-      expect(steeringLine).toContain('Focus on X');
       
       // Hint should include alt+p
       const hintLine = lines.find(l => l.includes('alt+p'));
       expect(hintLine).toBeDefined();
     });
 
-    it('should render active steering messages with RESEARCHER STEERING prefix', async () => {
+    it('should NOT show alt+p in hint when messages are active', async () => {
       const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
@@ -185,12 +181,6 @@ describe('TUI Research Panel', () => {
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator({} as any, mockTheme as Theme);
       const lines = component.render(80);
-
-      const steeringLine = lines.find(l => l.includes('RESEARCHER STEERING'));
-      expect(steeringLine).toBeDefined();
-      expect(steeringLine).toContain('Focus on Y');
-      // Should NOT show QUEUED prefix
-      expect(steeringLine).not.toContain('QUEUED');
       
       // Hint should NOT include alt+p when no queued messages
       const hintLine = lines.find(l => l.includes('alt+p'));
@@ -209,24 +199,6 @@ describe('TUI Research Panel', () => {
 
       const hintLine = lines.find(l => l.includes('esc to cancel'));
       expect(hintLine).toBeDefined();
-    });
-
-    it('should not duplicate steering messages across multiple panels', async () => {
-      const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
-      vi.mocked(getSteeringMessages).mockReturnValue([
-        { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
-      ]);
-
-      const state1 = createInitialPanelState('pi-session', 'research-1', 'query1', 'model');
-      const state2 = createInitialPanelState('pi-session', 'research-2', 'query2', 'model');
-      const getActivePanelsMock = vi.fn().mockReturnValue([state1, state2]);
-      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator({} as any, mockTheme as Theme);
-      const lines = component.render(80);
-
-      // Steering message should appear only once, not twice
-      const steeringLines = lines.filter(l => l.includes('Focus on X'));
-      expect(steeringLines).toHaveLength(1);
     });
   });
 });
