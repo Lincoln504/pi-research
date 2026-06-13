@@ -396,8 +396,10 @@ export function createMasterResearchPanel(
         const allSteering = getSteeringMessages(piSessionId);
         const isSteeringAcceptable = panels.some(p => p.steeringAcceptable === true);
 
-        if (isSteeringAcceptable && allSteering.length > 0) {
-          // Steering is acceptable and there are messages — show the queued ones
+        if (allSteering.length > 0) {
+          // Messages exist (queued or active) — show them regardless of phase.
+          // Queued messages persist through eval/coordinator phases so the user
+          // can see what's waiting to be consumed at the next round boundary.
           const maxSteeringLines = 3;
           const visibleSteering = allSteering.slice(-maxSteeringLines);
           if (allSteering.length > maxSteeringLines) {
@@ -412,19 +414,15 @@ export function createMasterResearchPanel(
             allLines.push(theme.fg(color as any, display));
           }
         } else if (isSteeringAcceptable) {
-          // Steering is acceptable but no messages yet — show the "available" hint
+          // No messages yet but steering is acceptable — show the "available" hint
           allLines.push(theme.fg('muted', ' available for research steering'));
         }
-        // When steering is not acceptable, we show nothing (the line goes away).
-        // Any steering input during this phase is popped to pi's follow-up queue
-        // by the input handler in index.ts.
+        // When steering is not acceptable and there are no messages: show nothing.
 
         if (panels.length > 0) {
-          // Hint line: show pop steering hint only when there are queued messages
-          // AND steering is acceptable (otherwise poppable via input handler redirect)
+          // Hint line: show pop steering hint whenever there are queued (poppable) messages
           const hasQueued = allSteering.some(m => m.status === 'queued');
-          const showPopHint = hasQueued && isSteeringAcceptable;
-          const hint = showPopHint ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
+          const hint = hasQueued ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
           allLines.push(theme.fg('muted', hint));
         }
 

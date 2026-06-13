@@ -119,7 +119,10 @@ export class DeepResearchOrchestrator {
     const baseMaxRounds = getMaxRounds(complexity);
     const queuedAtStart = getSteeringMessages(this.options.sessionId).length;
     const steeringBonusRounds = Math.min(queuedAtStart, MAX_EXTRA_ROUNDS_WITH_STEERING);
-    const maxRounds = baseMaxRounds + steeringBonusRounds;
+    let maxRounds = baseMaxRounds + steeringBonusRounds;
+    // Track total steering-driven extra rounds already granted.
+    // New steering consumed mid-run can add more budget up to the cap.
+    let totalSteeringExtraRounds = steeringBonusRounds;
     if (steeringBonusRounds > 0) {
       logger.log(
         `[DeepOrchestrator] Extending round budget from ${baseMaxRounds} to ${maxRounds} ` +
@@ -139,9 +142,27 @@ export class DeepResearchOrchestrator {
         this.startTime = Date.now();
 
         // Refresh steering messages and consume any new queued ones at round start
+        const beforeConsume = getSteeringMessages(this.options.sessionId).filter(m => m.status === 'active').length;
         consumeQueuedMessages(this.options.sessionId);
         const steeringMessages = getSteeringMessages(this.options.sessionId);
         const steeringTexts = steeringMessages.map(m => m.text);
+
+        // Dynamically extend round budget when new steering messages are consumed mid-run.
+        // The initial budget only accounts for messages present at research start;
+        // messages entered mid-research need fresh budget so the evaluator can act on them.
+        const newlyConsumed = steeringMessages.filter(m => m.status === 'active').length - beforeConsume;
+        if (newlyConsumed > 0 && totalSteeringExtraRounds < MAX_EXTRA_ROUNDS_WITH_STEERING) {
+          const additionalRounds = Math.min(newlyConsumed, MAX_EXTRA_ROUNDS_WITH_STEERING - totalSteeringExtraRounds);
+          maxRounds += additionalRounds;
+          totalSteeringExtraRounds += additionalRounds;
+          if (additionalRounds > 0) {
+            logger.log(
+              `[DeepOrchestrator] Extended round budget from ${maxRounds - additionalRounds} to ${maxRounds} ` +
+              `(${additionalRounds} extra round(s) for ${newlyConsumed} newly consumed steering message(s), ` +
+              `total steering extra: ${totalSteeringExtraRounds}/${MAX_EXTRA_ROUNDS_WITH_STEERING})`
+            );
+          }
+        }
 
         const roundLabel = this.currentRound > baseMaxRounds
           ? `Round ${this.currentRound}/${maxRounds} (extra, steering-driven, base=${baseMaxRounds})`
