@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
 
 // Must mock all heavy dependencies before importing the module under test
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<any>()),
+  existsSync: vi.fn(),
+  rmSync: vi.fn(),
+}));
+
 vi.mock('../../../src/knowledge/embedder.ts', () => ({
   Embedder: vi.fn().mockImplementation(function(opts: any) {
     return {
@@ -94,14 +101,13 @@ describe('createKnowledgeStoreComponents', () => {
 });
 
 describe('forceDeleteKnowledgeStore', () => {
+  afterEach(() => {
+    vi.mocked(fs.existsSync).mockRestore();
+    vi.mocked(fs.rmSync).mockRestore();
+  });
+
   it('should not throw if directory does not exist', async () => {
-    vi.mock('node:fs', async () => {
-      const actual = await vi.importActual('node:fs') as any;
-      return {
-        ...actual,
-        existsSync: vi.fn().mockReturnValue(false),
-      };
-    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
 
     await expect(forceDeleteKnowledgeStore()).resolves.toBeUndefined();
   });
@@ -109,14 +115,14 @@ describe('forceDeleteKnowledgeStore', () => {
 
 describe('getModelEmbedderConfig', () => {
   it('returns mean pooling and no prefix for unknown models', () => {
-    const cfg = getModelEmbedderConfig('some/unknown-model');
-    expect(cfg.pooling).toBe('mean');
-    expect(cfg.queryPrefix).toBeUndefined();
+    const result = getModelEmbedderConfig('some/unknown-model');
+    expect(result.pooling).toBe('mean');
+    expect(result.queryPrefix).toBeUndefined();
   });
 
-  it('returns mean pooling for Xenova/all-MiniLM-L6-v2 (default model)', () => {
-    const cfg = getModelEmbedderConfig('Xenova/all-MiniLM-L6-v2');
-    expect(cfg.pooling).toBe('mean');
+  it('returns mean pooling for Xenova/all-MiniLM-L6-v2', () => {
+    const result = getModelEmbedderConfig('Xenova/all-MiniLM-L6-v2');
+    expect(result.pooling).toBe('mean');
   });
 
   it('returns mean pooling for multilingual-e5-small', () => {

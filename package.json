@@ -149,6 +149,7 @@
     "eslint": "^10.4.0",
     "madge": "^8.0.0",
     "npm-check-updates": "^22.2.1",
+    "openclaw": "^2026.6.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

@@ -5,7 +5,7 @@
  * scoped by parent Pi session to prevent cross-context interference.
  */
 
-import { generateSessionId as generateUniqueSessionId } from './shared-links.ts';
+import { generateSessionId as generateUniqueSessionId, clearAllSharedLinks } from './shared-links.ts';
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';
@@ -477,6 +477,7 @@ export function clearAllSessionState(): void {
     }
   }
   piSessions.clear();
+  clearAllSharedLinks();
   logger.log('[session-state] All session state cleared');
 }
 

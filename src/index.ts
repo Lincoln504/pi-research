@@ -133,6 +133,7 @@ export default async function (pi: ExtensionAPI) {
   shutdownManager.register(async () => {
     try {
       clearAllSessionState();
+      metrics.clear();
       logger.info('[pi-research] All session state cleared');
       disposeGlobalTuiController();
       await disposeCoreServices();

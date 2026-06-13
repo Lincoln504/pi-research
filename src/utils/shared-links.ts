@@ -133,6 +133,22 @@ export function cleanupSharedLinks(researchId: string) {
 }
 
 /**
+ * Cleanup ALL session data and stop the background timer.
+ * Used during system shutdown to prevent memory leaks.
+ */
+export function clearAllSharedLinks(): void {
+    if (cleanupInterval) {
+        clearInterval(cleanupInterval);
+        cleanupInterval = null;
+    }
+    sessionLinks.clear();
+    sessionScrapedContent.clear();
+    sessionTimestamps.clear();
+    researcherScrapes.clear();
+    logger.debug('[Shared Links] All global state cleared');
+}
+
+/**
  * Register that a specific researcher scraped a set of URLs.
  */
 export function registerResearcherScrapes(researchId: string, researcherId: string, urls: string[]) {

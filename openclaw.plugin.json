@@ -8,123 +8,120 @@
     "properties": {
       "apiKey": {
         "type": "string",
-        "description": "LLM API key for research coordination and researcher sub-agents. Required when no pi config files exist (~/.pi/agent/auth.json)."
+        "description": "LLM API key"
       },
       "provider": {
         "type": "string",
-        "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'openrouter'). Required when no pi config files exist."
+        "description": "LLM provider name"
       },
       "model": {
         "type": "string",
-        "description": "Model ID override for researcher sub-agents (e.g., 'openai/gpt-4o'). Defaults to the active model."
+        "description": "Model ID override for researcher sub-agents"
       },
       "timeoutMs": {
         "type": "number",
-        "description": "Per-researcher timeout in milliseconds.",
-        "default": 300000,
         "minimum": 180000,
-        "maximum": 1800000
+        "maximum": 1800000,
+        "default": 300000
       },
       "maxResearchers": {
         "type": "number",
-        "description": "Maximum number of concurrent researchers.",
-        "default": 3,
         "minimum": 1,
-        "maximum": 5
+        "maximum": 5,
+        "default": 3
       },
       "defaultDepth": {
         "type": "number",
-        "description": "Default research depth (0-3). 0=quick, 1=normal, 2=deep, 3=ultra.",
-        "default": 1,
         "minimum": 0,
-        "maximum": 3
+        "maximum": 3,
+        "default": 1
       },
       "maxScrapeBatches": {
         "type": "number",
-        "description": "Scrape batches per researcher (0=unlimited).",
-        "default": 3,
         "minimum": 0,
-        "maximum": 99
+        "maximum": 99,
+        "default": 2
       },
       "maxConcurrentScrapes": {
         "type": "number",
-        "description": "Concurrent URLs fetched per scrape batch.",
-        "default": 3,
         "minimum": 1,
-        "maximum": 20
+        "maximum": 20,
+        "default": 3
       },
       "workerThreads": {
         "type": "number",
-        "description": "Browser worker processes for search and scraping.",
-        "default": 4,
         "minimum": 1,
-        "maximum": 10
+        "maximum": 10,
+        "default": 4
       },
       "workerConcurrency": {
         "type": "number",
-        "description": "Concurrent tasks per worker process.",
-        "default": 2,
         "minimum": 1,
-        "maximum": 10
+        "maximum": 10,
+        "default": 2
       },
       "knowledgeEnabled": {
         "type": "boolean",
-        "description": "Enable vector knowledge store for cross-session research memory (both project-scoped and shared).",
         "default": true
       },
       "embeddingModel": {
         "type": "string",
-        "description": "Embedding model for the knowledge store (defaults to granite)."
+        "description": "Embedding model (defaults to user config)"
       },
       "embeddingDevice": {
-        "type": "string",
-        "enum": ["webgpu", "cpu"],
-        "description": "Inference backend for embeddings.",
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "webgpu"
+          },
+          {
+            "type": "string",
+            "const": "cpu"
+          }
+        ],
         "default": "webgpu"
+      },
+      "migrationStrategy": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "drop"
+          },
+          {
+            "type": "string",
+            "const": "re-embed"
+          },
+          {
+            "type": "string",
+            "const": "backup"
+          }
+        ],
+        "default": "backup"
       },
       "cacheTtlDays": {
         "type": "number",
-        "description": "Days to keep cached scrapes.",
-        "default": 30,
         "minimum": 1,
-        "maximum": 365
+        "maximum": 365,
+        "default": 30
       },
       "scrapeTimeoutMs": {
         "type": "number",
-        "description": "Scrape page load timeout in milliseconds.",
-        "default": 15000,
         "minimum": 5000,
-        "maximum": 120000
+        "maximum": 120000,
+        "default": 15000
       },
       "stackexchangeApiKey": {
         "type": "string",
-        "description": "Stack Exchange API key for higher rate limits. Obtain from https://stackapps.com/apps/oauth."
+        "description": "Stack Exchange API key for higher rate limits"
       },
       "reportExportEnabled": {
         "type": "boolean",
-        "description": "Automatically save a markdown report to disk when research completes.",
         "default": false
       }
-    },
-    "additionalProperties": false
-  },
-  "contracts": {
-    "tools": ["research", "health", "research_knowledge_search"]
-  },
-  "toolMetadata": {
-    "research": {
-      "description": "Multi-agent web research with search, scraping, security databases, and Stack Exchange."
-    },
-    "health": {
-      "description": "System health checks across browser pool, knowledge store, and GPU lock."
-    },
-    "research_knowledge_search": {
-      "description": "Satellite tool for the main pi agent. Search the research knowledge database for previously researched information before live research."
     }
   },
   "activation": {
-    "onStartup": true,
-    "onCapabilities": ["tool"]
+    "onStartup": true
   },
   "setup": {
     "providers": [
@@ -138,22 +135,89 @@
     ]
   },
   "uiHints": {
-    "apiKey": { "label": "LLM API Key", "sensitive": true },
-    "provider": { "label": "LLM Provider" },
-    "model": { "label": "Research Model Override", "advanced": true },
-    "timeoutMs": { "label": "Research Timeout (ms)", "advanced": true },
-    "maxResearchers": { "label": "Max Concurrent Researchers" },
-    "defaultDepth": { "label": "Default Research Depth", "help": "0=quick, 1=normal, 2=deep, 3=ultra" },
-    "maxScrapeBatches": { "label": "Max Scrape Batches", "advanced": true },
-    "maxConcurrentScrapes": { "label": "Max Concurrent Scrapes", "advanced": true },
-    "workerThreads": { "label": "Browser Workers", "advanced": true },
-    "workerConcurrency": { "label": "Worker Concurrency", "advanced": true },
-    "knowledgeEnabled": { "label": "Knowledge Store", "advanced": true },
-    "embeddingModel": { "label": "Embedding Model", "advanced": true },
-    "embeddingDevice": { "label": "Embedding Device", "advanced": true },
-    "cacheTtlDays": { "label": "Cache TTL (days)", "advanced": true },
-    "scrapeTimeoutMs": { "label": "Scrape Timeout (ms)", "advanced": true },
-    "stackexchangeApiKey": { "label": "StackExchange API Key", "advanced": true },
-    "reportExportEnabled": { "label": "Export Report", "advanced": true }
+    "apiKey": {
+      "label": "LLM API Key",
+      "sensitive": true
+    },
+    "provider": {
+      "label": "LLM Provider"
+    },
+    "model": {
+      "label": "Research Model Override",
+      "advanced": true
+    },
+    "timeoutMs": {
+      "label": "Research Timeout (ms)",
+      "advanced": true
+    },
+    "maxResearchers": {
+      "label": "Max Concurrent Researchers"
+    },
+    "defaultDepth": {
+      "label": "Default Research Depth",
+      "help": "0=quick, 1=normal, 2=deep, 3=ultra"
+    },
+    "maxScrapeBatches": {
+      "label": "Max Scrape Batches",
+      "advanced": true
+    },
+    "maxConcurrentScrapes": {
+      "label": "Max Concurrent Scrapes",
+      "advanced": true
+    },
+    "workerThreads": {
+      "label": "Browser Workers",
+      "advanced": true
+    },
+    "workerConcurrency": {
+      "label": "Worker Concurrency",
+      "advanced": true
+    },
+    "knowledgeEnabled": {
+      "label": "Knowledge Store",
+      "advanced": true
+    },
+    "embeddingModel": {
+      "label": "Embedding Model",
+      "advanced": true
+    },
+    "embeddingDevice": {
+      "label": "Embedding Device",
+      "advanced": true
+    },
+    "cacheTtlDays": {
+      "label": "Cache TTL (days)",
+      "advanced": true
+    },
+    "scrapeTimeoutMs": {
+      "label": "Scrape Timeout (ms)",
+      "advanced": true
+    },
+    "stackexchangeApiKey": {
+      "label": "StackExchange API Key",
+      "advanced": true
+    },
+    "reportExportEnabled": {
+      "label": "Export Report",
+      "advanced": true
+    }
+  },
+  "contracts": {
+    "tools": [
+      "research",
+      "health",
+      "research_knowledge_search"
+    ]
+  },
+  "toolMetadata": {
+    "research": {
+      "description": "Multi-agent web research with search, scraping, security databases, and Stack Exchange."
+    },
+    "health": {
+      "description": "System health checks across browser pool, knowledge store, and GPU lock."
+    },
+    "research_knowledge_search": {
+      "description": "Satellite tool for the main pi agent. Search the research knowledge database for previously researched information before live research."
+    }
   }
 }

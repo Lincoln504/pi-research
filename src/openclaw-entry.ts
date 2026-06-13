@@ -41,6 +41,9 @@ import { getConfig, validateConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
+import { clearAllSessionState } from './utils/session-state.ts';
+
+import { defineToolPlugin } from 'openclaw/plugin-sdk/tool-plugin';
 
 // ---------------------------------------------------------------------------
 // Config schema — mirrors openclaw.plugin.json configSchema
@@ -60,6 +63,7 @@ const OpenClawConfigSchema = Type.Object({
   knowledgeEnabled: Type.Optional(Type.Boolean({ default: true })),
   embeddingModel: Type.Optional(Type.String({ description: 'Embedding model (defaults to user config)' })),
   embeddingDevice: Type.Optional(Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' })),
+  migrationStrategy: Type.Optional(Type.Union([Type.Literal('drop'), Type.Literal('re-embed'), Type.Literal('backup')], { default: 'backup' })),
   cacheTtlDays: Type.Optional(Type.Number({ minimum: 1, maximum: 365, default: 30 })),
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),
   stackexchangeApiKey: Type.Optional(Type.String({ description: 'Stack Exchange API key for higher rate limits' })),
@@ -80,6 +84,7 @@ type OpenClawPluginConfig = {
   knowledgeEnabled?: boolean;
   embeddingModel?: string;
   embeddingDevice?: 'webgpu' | 'cpu';
+  migrationStrategy?: 'drop' | 're-embed' | 'backup';
   cacheTtlDays?: number;
   scrapeTimeoutMs?: number;
   stackexchangeApiKey?: string;
@@ -121,6 +126,7 @@ function resolveOpenClawConfig(pluginConfig: OpenClawPluginConfig): Config {
   }
   if (pluginConfig.embeddingModel !== undefined) config.EMBEDDING_MODEL = pluginConfig.embeddingModel;
   if (pluginConfig.embeddingDevice !== undefined) config.EMBEDDING_DEVICE = pluginConfig.embeddingDevice;
+  if (pluginConfig.migrationStrategy !== undefined) config.MIGRATION_STRATEGY = pluginConfig.migrationStrategy;
   if (pluginConfig.cacheTtlDays !== undefined) config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = pluginConfig.cacheTtlDays;
   if (pluginConfig.scrapeTimeoutMs !== undefined) config.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
   if (pluginConfig.model !== undefined) config.RESEARCH_MODEL = pluginConfig.model;
@@ -260,6 +266,14 @@ export async function shutdown(): Promise<void> {
     errors.push(err instanceof Error ? err : new Error(String(err)));
   }
 
+  try {
+    clearAllSessionState();
+    metrics.clear();
+  } catch (err) {
+    logger.error('[OpenClaw] Error clearing session state:', err);
+    errors.push(err instanceof Error ? err : new Error(String(err)));
+  }
+
   if (globalContainer) {
     try {
       await shutdownInfrastructureServices(globalContainer);
@@ -334,18 +348,15 @@ function formatHealthResult(systemHealth: any, verbose: boolean): string {
 // Plugin definition
 // ---------------------------------------------------------------------------
 
-export default {
+export default defineToolPlugin({
   id: 'pi-research',
   name: 'Pi Research',
   description: 'Multi-agent web research with stealth browser, security databases, and Stack Exchange integration.',
   configSchema: OpenClawConfigSchema,
 
-  get tools() {
-    const config = globalConfig || getConfig();
-    const knowledgeEnabled = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
-
-    const allTools: any[] = [
-      {
+  tools: (tool) => {
+    const tools = [
+      tool({
         name: 'research',
         label: 'Research',
         description:
@@ -364,11 +375,7 @@ export default {
           })),
         }),
 
-        async execute(
-          params: { query: string; depth?: number; excludeTools?: string[] },
-          config: OpenClawPluginConfig,
-          context: { signal?: AbortSignal },
-        ): Promise<string> {
+        async execute(params, config, context) {
           await ensureInitialized(config);
 
           const query = params.query?.trim();
@@ -450,9 +457,9 @@ export default {
             return `Research failed: ${message}`;
           }
         },
-      },
+      }),
 
-      {
+      tool({
         name: 'health',
         label: 'Health Check',
         description: 'Check system health status across all research components (browser pool, knowledge store, GPU lock).',
@@ -467,11 +474,7 @@ export default {
           })),
         }),
 
-        async execute(
-          params: { verbose?: boolean; probe?: boolean },
-          config: OpenClawPluginConfig,
-          _context: { signal?: AbortSignal },
-        ): Promise<string> {
+        async execute(params, config) {
           await ensureInitialized(config);
 
           const { verbose = true, probe = false } = params;
@@ -484,11 +487,9 @@ export default {
             return `**Health check failed**\n\n${message}`;
           }
         },
-      },
-    ];
+      }),
 
-    if (knowledgeEnabled) {
-      allTools.push({
+      tool({
         name: 'research_knowledge_search',
         label: 'Research Knowledge Search',
         description: 'Search the research knowledge database for previously researched information.',
@@ -500,15 +501,11 @@ export default {
           }),
         }),
 
-        async execute(
-          params: { queries: string[] },
-          config: OpenClawPluginConfig,
-          context: { signal?: AbortSignal },
-        ): Promise<string> {
+        async execute(params, config, context) {
           await ensureInitialized(config);
           const mockCtx = createMockContext(globalModel!, globalRegistry!);
           const tool = createResearchKnowledgeSearchTool();
-          
+
           try {
             const result = await tool.execute(
               randomUUID(),
@@ -528,9 +525,22 @@ export default {
             return `Knowledge search failed: ${message}`;
           }
         },
-      });
-    }
+      }),
+    ];
 
-    return allTools;
+    return tools;
   },
-};
+
+  async register(api) {
+    // Register lifecycle hooks to ensure clean shutdown when the plugin is disabled or OpenClaw exits.
+    api.registerRuntimeLifecycle({
+      id: 'pi-research-lifecycle',
+      description: 'Cleans up research sub-agents, browser processes, and knowledge store connections.',
+      cleanup: async () => {
+        logger.info('[OpenClaw] Shutdown signal received via lifecycle hook.');
+        await shutdown();
+      },
+    });
+  },
+});
+

@@ -309,6 +309,9 @@ export async function getResearchReports(researchId: string): Promise<Map<string
   return synthesis.getAllReports(researchId);
 }
 
+import { clearAllSessionState } from './utils/session-state.ts';
+import { shutdownManager } from './utils/shutdown-manager.ts';
+
 /**
  * Shutdown the SDK and cleanup all background processes and resources.
  */
@@ -320,6 +323,21 @@ export async function shutdownResearchSDK(): Promise<void> {
   logger.log('[SDK] Shutting down Research SDK...');
 
   const errors: Error[] = [];
+
+  try {
+    await shutdownManager.runCleanup('sdk_shutdown');
+  } catch (err) {
+    logger.error('[SDK] Error during shutdown cleanup:', err);
+    errors.push(err instanceof Error ? err : new Error(String(err)));
+  }
+
+  try {
+    clearAllSessionState();
+    metrics.clear();
+  } catch (err) {
+    logger.error('[SDK] Error clearing session state:', err);
+    errors.push(err instanceof Error ? err : new Error(String(err)));
+  }
 
   if (globalContainer) {
     // Shutdown infra first (browser pool, embedding server, etc.)

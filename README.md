@@ -46,6 +46,14 @@ pi install npm:@lincoln504/pi-research
 
 This installs dependencies and the stealth browser engine. Takes a few minutes on first install.
 
+### OpenClaw Plugin
+
+`pi-research` is a native OpenClaw plugin. To use it in [OpenClaw](https://openclaw.ai):
+
+```bash
+openclaw plugins install npm:@lincoln504/pi-research
+```
+
 **Local install** (from repo):
 
 ```bash
