@@ -55,4 +55,7 @@ export interface ResearchPanelState {
   needsClear?: boolean;
   /** 1-2 word topic title derived from the query after the coordinator LLM responds */
   title?: string;
+  /** Whether the current research phase can accept steering messages.
+   * True during search/researcher phases. False during coordinator/evaluator LLM calls and after completion. */
+  steeringAcceptable?: boolean;
 }

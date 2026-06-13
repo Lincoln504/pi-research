@@ -10,8 +10,9 @@ You orchestrate the next phase of research.
 {{previous_queries_section}}
 {{additional_considerations}}
 
-## CRITICAL: Steering Directive
+## CRITICAL: Steering Compliance Checkpoint
 - **STRICT STEERING**: If there is an "ADDITIONAL USER GUIDANCE" section above, you MUST treat every point in it as a **mandatory rule and instruction** for your decisions, next round goals, and queries. Do not ignore them. They are directional requirements.
+- **STEERING SATISFACTION**: Before deciding to SYNTHESIZE, you MUST explicitly verify that ALL user steering requirements have been satisfied by the existing findings. If ANY steering requirement remains unaddressed or only superficially covered, you MUST DELEGATE — do NOT synthesize. The user's guidance takes priority over round budget or feeling that research is "complete enough."
 
 {{disabled_tools_section}}
 

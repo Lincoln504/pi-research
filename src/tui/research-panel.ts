@@ -329,9 +329,6 @@ export function createMasterResearchPanel(
         if (panels.length === 0) return [];
 
         const allLines: string[] = [];
-        // Render steering messages ONCE at the bottom of the master panel,
-        // not duplicated under each research panel.
-        const allSteering = getSteeringMessages(piSessionId);
         for (let i = 0; i < panels.length; i++) {
           const panel = panels[i]!;
 
@@ -396,25 +393,38 @@ export function createMasterResearchPanel(
         }
 
         // Render steering messages once at the bottom (not duplicated under each panel)
-        const maxSteeringLines = 3;
-        const visibleSteering = allSteering.slice(-maxSteeringLines);
-        if (allSteering.length > maxSteeringLines) {
-          const hiddenCount = allSteering.length - maxSteeringLines;
-          allLines.push(theme.fg('dim', ` ... and ${hiddenCount} older steering message(s) hidden`));
-        }
+        const allSteering = getSteeringMessages(piSessionId);
+        const isSteeringAcceptable = panels.some(p => p.steeringAcceptable === true);
 
-        for (const msg of visibleSteering) {
-          const prefix = msg.status === 'queued' ? ' QUEUED RESEARCHER STEERING: ' : ' RESEARCHER STEERING: ';
-          const display = truncateToWidth(`${prefix}${msg.text}`, width);
-          // Use 'warning' style for queued (amber/yellow), 'muted' for active
-          const color = msg.status === 'queued' ? 'warning' : 'muted';
-          allLines.push(theme.fg(color as any, display));
+        if (isSteeringAcceptable && allSteering.length > 0) {
+          // Steering is acceptable and there are messages — show the queued ones
+          const maxSteeringLines = 3;
+          const visibleSteering = allSteering.slice(-maxSteeringLines);
+          if (allSteering.length > maxSteeringLines) {
+            const hiddenCount = allSteering.length - maxSteeringLines;
+            allLines.push(theme.fg('dim', ` ... and ${hiddenCount} older steering message(s) hidden`));
+          }
+          for (const msg of visibleSteering) {
+            const prefix = msg.status === 'queued' ? ' QUEUED RESEARCHER STEERING: ' : ' RESEARCHER STEERING: ';
+            const display = truncateToWidth(`${prefix}${msg.text}`, width);
+            // Use 'warning' style for queued (amber/yellow), 'muted' for active
+            const color = msg.status === 'queued' ? 'warning' : 'muted';
+            allLines.push(theme.fg(color as any, display));
+          }
+        } else if (isSteeringAcceptable) {
+          // Steering is acceptable but no messages yet — show the "available" hint
+          allLines.push(theme.fg('muted', ' available for research steering'));
         }
+        // When steering is not acceptable, we show nothing (the line goes away).
+        // Any steering input during this phase is popped to pi's follow-up queue
+        // by the input handler in index.ts.
 
         if (panels.length > 0) {
-          // Dynamic hint line based on whether there are queued (poppable) messages
+          // Hint line: show pop steering hint only when there are queued messages
+          // AND steering is acceptable (otherwise poppable via input handler redirect)
           const hasQueued = allSteering.some(m => m.status === 'queued');
-          const hint = hasQueued ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
+          const showPopHint = hasQueued && isSteeringAcceptable;
+          const hint = showPopHint ? ' esc cancel | alt+p pop steering' : ' esc to cancel';
           allLines.push(theme.fg('muted', hint));
         }
 

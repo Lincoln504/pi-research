@@ -12,7 +12,7 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder } from './utils/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './utils/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
@@ -98,7 +98,24 @@ export default async function (pi: ExtensionAPI) {
         }
 
         for (const sid of sessionIds) {
-          addSteeringMessage(sid, sanitized);
+          // Check if any active research panel in this session can accept steering.
+          // During eval/coordinator LLM calls, steering is popped to follow-up instead
+          // of being queued, since the running LLM call cannot be interrupted and the
+          // message might not be consumed before the research ends.
+          const activePanels = getPiActivePanels(sid);
+          const steeringAcceptable = activePanels.some(p => p.steeringAcceptable === true);
+
+          if (steeringAcceptable) {
+            addSteeringMessage(sid, sanitized);
+          } else {
+            // Steering not acceptable — immediately pop to pi's follow-up queue
+            logger.debug(`[pi-research] Steering not acceptable for session ${sid}, popping to follow-up: ${sanitized}`);
+            try {
+              pi.sendUserMessage(sanitized, { deliverAs: 'followUp' });
+            } catch (err) {
+              logger.warn('[pi-research] Failed to send popped steering to follow-up:', err);
+            }
+          }
         }
         
         // Return handled to indicate we have fully processed this input 

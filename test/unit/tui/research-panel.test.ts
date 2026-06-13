@@ -160,6 +160,7 @@ describe('TUI Research Panel', () => {
       ]);
 
       const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
+      state.steeringAcceptable = true;
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator({} as any, mockTheme as Theme);
@@ -181,6 +182,7 @@ describe('TUI Research Panel', () => {
       ]);
 
       const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
+      state.steeringAcceptable = true;
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator({} as any, mockTheme as Theme);
@@ -218,7 +220,9 @@ describe('TUI Research Panel', () => {
       ]);
 
       const state1 = createInitialPanelState('pi-session', 'research-1', 'query1', 'model');
+      state1.steeringAcceptable = true;
       const state2 = createInitialPanelState('pi-session', 'research-2', 'query2', 'model');
+      state2.steeringAcceptable = true;
       const getActivePanelsMock = vi.fn().mockReturnValue([state1, state2]);
       const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
       const component = componentCreator({} as any, mockTheme as Theme);

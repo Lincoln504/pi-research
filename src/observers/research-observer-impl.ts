@@ -68,6 +68,8 @@ export function createResearchObserver(
         const units = getUnitsPerResearcher();
         panelState.progress = { expected: units, made: 0 };
       }
+      // Quick research: researcher is running → steering is acceptable
+      panelState.steeringAcceptable = true;
       debouncedRefresh();
     },
 
@@ -79,6 +81,8 @@ export function createResearchObserver(
       const status = attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning';
       updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
       panelState.statusMessage = status;
+      // Coordinator LLM is running — do not accept steering during the call
+      panelState.steeringAcceptable = false;
       debouncedRefresh();
     },
 
@@ -104,6 +108,8 @@ export function createResearchObserver(
       const units = (count * unitsPerResearcher) + LEAD_EVAL_UNITS;
       panelState.progress = { expected: units, made: 0 };
       panelState.title = plan.title?.trim() || 'Research';
+      // Coordinator done — about to start search then researchers → steering acceptable
+      panelState.steeringAcceptable = true;
       debouncedRefresh();
     },
 
@@ -147,6 +153,9 @@ export function createResearchObserver(
       updateSliceStatus(panelState, sliceId, 'searching...', debouncedRefresh);
       panelState.statusMessage = 'searching';
       panelState.isSearching = true;
+
+      // Search phase — steering is acceptable (will be consumed at next round boundary)
+      panelState.steeringAcceptable = true;
 
       // Start wave animation via global pulse subscription
       // Using the global frame directly ensures synchronization across all panels
@@ -243,6 +252,8 @@ export function createResearchObserver(
       }
       activateSlice(panelState, sliceId);
       updateSliceStatus(panelState, sliceId, 'starting...', debouncedRefresh);
+      // Researcher phase — steering is acceptable (will be consumed at next round boundary)
+      panelState.steeringAcceptable = true;
       debouncedRefresh();
     },
 
@@ -327,6 +338,10 @@ export function createResearchObserver(
       activateSlice(panelState, 'eval');
       updateSliceStatus(panelState, 'eval', 'evaluating', debouncedRefresh);
       panelState.statusMessage = 'evaluating';
+      // Evaluator LLM is running — do not accept steering during the call.
+      // Messages entered now would only be consumed at the next round boundary
+      // (if the evaluator delegates), not during this decision.
+      panelState.steeringAcceptable = false;
       debouncedRefresh();
     },
 
@@ -360,12 +375,15 @@ export function createResearchObserver(
       }
       if (action === 'synthesize') {
         if (panelState.progress) panelState.progress.made = panelState.progress.expected;
+        // Final synthesis — steering no longer acceptable
+        panelState.steeringAcceptable = false;
       } else {
-        // Delegation: prepare for new round's researchers
+        // Delegation: prepare for new round's search → researchers → steering acceptable
         if (plan?.researchers && plan.researchers.length > 0 && panelState.progress) {
           const unitsPerResearcher = getUnitsPerResearcher();
           panelState.progress.expected += (plan.researchers.length * unitsPerResearcher) + LEAD_EVAL_UNITS;
         }
+        panelState.steeringAcceptable = true;
       }
       debouncedRefresh();
     },
@@ -373,12 +391,14 @@ export function createResearchObserver(
     onComplete: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
       panelState.statusMessage = undefined;
+      panelState.steeringAcceptable = false;
       debouncedRefresh();
     },
 
     onError: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
       panelState.statusMessage = undefined;
+      panelState.steeringAcceptable = false;
       debouncedRefresh();
     }
   };
