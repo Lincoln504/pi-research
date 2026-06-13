@@ -74,8 +74,7 @@
       },
       "embeddingModel": {
         "type": "string",
-        "description": "Embedding model for the knowledge store.",
-        "default": "Xenova/all-MiniLM-L6-v2"
+        "description": "Embedding model for the knowledge store (defaults to granite)."
       },
       "embeddingDevice": {
         "type": "string",

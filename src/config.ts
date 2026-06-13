@@ -40,7 +40,7 @@ export const ConfigSchema = Type.Object({
   /** Whether the global knowledge store is enabled (default: true) */
   GLOBAL_KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: true }),
   /** Embedding model to use for the knowledge store */
-  EMBEDDING_MODEL: Type.String({ default: 'Xenova/all-MiniLM-L6-v2' }),
+  EMBEDDING_MODEL: Type.String({ default: 'onnx-community/granite-embedding-small-english-r2-ONNX' }),
   /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
   EMBEDDING_DEVICE: Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' }),
   /** Timeout for scraping operations in milliseconds (default: 15000, range: 5-120 seconds) */
