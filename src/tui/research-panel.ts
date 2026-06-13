@@ -109,7 +109,7 @@ function renderPanelBlock(
   // Each column needs at least 3 chars (1 wall + 2 content) for minimal visibility
   const minColWidth = 3;
   const maxPossibleSlices = Math.max(1, Math.floor(rightInner / (minColWidth + 1)));
-  const MAX_VISIBLE_SLICES = Math.min(6, maxPossibleSlices);
+  const MAX_VISIBLE_SLICES = Math.min(8, maxPossibleSlices);
 
   const showIndicator = numSlices > MAX_VISIBLE_SLICES;
   const hiddenCount = showIndicator ? numSlices - MAX_VISIBLE_SLICES : 0;

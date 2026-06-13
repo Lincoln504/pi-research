@@ -11,6 +11,7 @@
  */
 
 import type { Model } from '@earendil-works/pi-ai';
+import { resolveResearchModel } from '../utils/research-model-resolver.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
 import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
@@ -59,33 +60,30 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
   }
 
   /**
+   * Resolve the model for research based on options and config.
+   */
+  async resolveResearchModel(options: ResearchOptions): Promise<Model<any>> {
+    const { ctx, model, config } = options;
+    return resolveResearchModel({
+      modelRegistry: ctx.modelRegistry,
+      config: config || getConfig(ctx.cwd),
+      modelId: (model as any)?.id,
+      hostModel: ctx.model as Model<any>,
+      cwd: ctx.cwd,
+    });
+  }
+
+  /**
    * Run a research task (Quick or Deep)
    */
   async runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string> {
-    const { ctx, query, depth = 0, model, observer, onUpdate, sessionId, researchId, config, excludeTools } = options;
+    const { ctx, query, depth = 0, observer, onUpdate, sessionId, researchId, config, excludeTools } = options;
     
     const researchConfig = config || getConfig(ctx.cwd);
     
-    // Resolve model priority: explicit parameter > config.RESEARCH_MODEL > ctx.model
-    let selectedModel = model;
-    if (!selectedModel && researchConfig.RESEARCH_MODEL) {
-      const target = researchConfig.RESEARCH_MODEL;
-      const found = ctx.modelRegistry.getAll().find(
-        m => `${m.provider}/${m.id}` === target || m.id === target
-      );
-      if (found) {
-        selectedModel = found as Model<any>;
-        logger.info(`[ResearchOrchestrationService] Using RESEARCH_MODEL override for planning: ${target}`);
-      }
-    }
-    
-    if (!selectedModel) {
-      selectedModel = ctx.model;
-    }
-
-    if (!selectedModel) {
-      throw new Error('No model provided for research.');
-    }
+    // Resolve model using centralized priority logic
+    const selectedModel = await this.resolveResearchModel(options);
+    logger.info(`[ResearchOrchestrationService] Using model: ${selectedModel.provider}/${selectedModel.id}`);
 
     const researchStart = Date.now();
 

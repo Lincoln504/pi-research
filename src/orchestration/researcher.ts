@@ -21,6 +21,8 @@ import type { SystemResearchState } from './deep-research-types.ts';
 import type { Config } from '../config.ts';
 import { logger } from '../logger.ts';
 
+import { resolveResearchModel } from '../utils/research-model-resolver.ts';
+
 export interface CreateResearcherSessionOptions {
   cwd: string;
   ctxModel: Model<any> | undefined;
@@ -63,41 +65,30 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     config,
   } = options;
 
-  // Validate required parameters
-  if (!ctxModel) {
-    throw new Error('No model selected. Please select a model before using the research tool.');
-  }
-
   if (!systemPrompt || typeof systemPrompt !== 'string') {
     throw new Error('Invalid system prompt: must be a non-empty string');
   }
-
-  // Create tool usage tracker for this researcher
-  const tracker = new ToolUsageTracker(createDefaultToolLimits(config));
-
-  // Use provided closures or fallback to safe dummies
-  const globalLinks = updateGlobalLinks || (() => {});
 
   // Create a mutable reference to the session so the tools can access it
   // before the createAgentSession call returns.
   const sessionRef: { session: AgentSession | null } = { session: null };
 
-  // Prefer config.RESEARCH_MODEL for researcher sub-agents if provided.
-  let modelToUse = ctxModel;
-  if (config?.RESEARCH_MODEL) {
-    const target = config.RESEARCH_MODEL;
-    const found = modelRegistry.getAll().find(
-      m => `${m.provider}/${m.id}` === target || m.id === target
-    );
-    if (found) {
-      modelToUse = found;
-      logger.info(`[Researcher] Using RESEARCH_MODEL override: ${target}`);
-    } else {
-      logger.warn(`[Researcher] RESEARCH_MODEL '${target}' not found in registry; falling back to default.`);
-    }
-  }
+  // Resolve model using centralized priority logic
+  const modelToUse = resolveResearchModel({
+    modelRegistry,
+    config,
+    hostModel: ctxModel,
+    cwd,
+  });
+
+  logger.info(`[Researcher] Using model for researcher ${researcherId}: ${modelToUse.provider}/${modelToUse.id}`);
 
   try {
+    const tracker = new ToolUsageTracker(createDefaultToolLimits(config));
+
+    // Use provided closures or fallback to safe dummies
+    const globalLinks = updateGlobalLinks || (() => {});
+
     const customTools = createResearchTools({
       cwd,
       ctx: extensionCtx,

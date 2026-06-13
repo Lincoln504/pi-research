@@ -71,6 +71,7 @@ export interface IResearchSynthesisService extends IService {
  * Research Orchestration Service Interface
  */
 export interface IResearchOrchestration extends IService {
+  resolveResearchModel(options: ResearchOptions): Promise<Model<any>>;
   runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string>;
   cleanupResearchServices(sessionId?: string, researchId?: string, ctx?: any): Promise<void>;
   distributeSearchResults(plan: ResearchPlan, results: QueryResultWithError[], ctx?: any): Promise<Map<string, string[]>>;

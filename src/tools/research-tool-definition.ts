@@ -14,8 +14,7 @@ import type {
   ExtensionContext,
   AgentToolUpdateCallback,
 } from '@earendil-works/pi-coding-agent';
-import { type Model } from '@earendil-works/pi-ai';
-import type { ModelWithId, ExtendedExtensionContext } from '../types/extension-context.ts';
+import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
 import { validateConfig, getConfig } from '../config.ts';
@@ -186,23 +185,22 @@ export function createResearchTool(): ToolDefinition {
           const config = getConfig(ctx.cwd);
           validateConfig(config);
 
-          // When no explicit model parameter is given, use ctx.model directly.
-          let selectedModel: ModelWithId | undefined;
-          if (modelId) {
-            selectedModel = eCtx.modelRegistry.getAll().find((m) => m.id === modelId) as ModelWithId | undefined;
-            if (!selectedModel) {
-              logger.warn(`[research] Model ${modelId} not found, falling back to context model.`);
-              selectedModel = ctx.model as ModelWithId;
-            }
-          } else {
-            selectedModel = ctx.model as ModelWithId;
-          }
-
-          if (!selectedModel) {
-             throw new Error('No research model specified or available in context.');
-          }
-
           const sanitizedQuery = validateAndSanitizeQuery(query);
+
+          // Get orchestration service
+          const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
+          
+          // Resolve model using centralized service logic
+          const selectedModel = await orch.resolveResearchModel({
+            ctx,
+            query: sanitizedQuery,
+            model: modelId ? { id: modelId } as any : undefined,
+            config,
+            sessionId: piSessionId,
+            researchId,
+          });
+
+          logger.info(`[research] Resolved research model: ${selectedModel.provider}/${selectedModel.id}`);
           
           // Setup TUI or Headless Observer based on context
           if (ctx.mode === 'tui' && ctx.hasUI) {
@@ -280,12 +278,11 @@ export function createResearchTool(): ToolDefinition {
           const researchRunResult = await runWithTracker(sessionTracker, () => runWithLogger(researchLogger, async () => {
             try {
               // Run research via orchestration service
-              const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
               const result = await orch.runResearch({
                 ctx,
                 query: sanitizedQuery,
                 depth: (depth ?? 1) as ResearchDepth,
-                model: selectedModel as Model<any>,
+                model: selectedModel,
                 observer,
                 onUpdate,
                 sessionId: piSessionId,

@@ -19,7 +19,20 @@ vi.mock('../../../src/config.ts', async (importOriginal) => {
 // Mock dependencies
 vi.mock('../../../src/core/service-registry.ts', () => ({
   getServiceContainer: vi.fn(() => ({ isReady: true })),
-  getService: vi.fn(async (_name: any, _ctx?: any, _container?: any) => {}),
+  getService: vi.fn(async (name: any, _ctx?: any, _container?: any) => {
+    if (name === ServiceNames.RESEARCH_ORCHESTRATION) {
+      return {
+        runResearch: vi.fn().mockResolvedValue('Research report content'),
+        resolveResearchModel: vi.fn().mockResolvedValue({ id: 'test-model', provider: 'test', contextWindow: 128000 }),
+        cleanupResearchServices: vi.fn(),
+      };
+    }
+    if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) {
+        return {
+            appendMetadata: vi.fn((res, modelId) => `${res}\n\n*Research performed using ${modelId}*`),
+        };
+    }
+  }),
   tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
 }));
 
@@ -122,6 +135,7 @@ describe('Research Tool - Report Summaries', () => {
       if (name === ServiceNames.RESEARCH_ORCHESTRATION) {
         return {
           runResearch: vi.fn().mockResolvedValue('Research result'),
+          resolveResearchModel: vi.fn().mockResolvedValue({ id: 'test-model', provider: 'test', contextWindow: 128000 }),
         } as any;
       }
       if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) {

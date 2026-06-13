@@ -73,6 +73,11 @@ import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
 
 // Mock IResearchOrchestration
 const mockRunResearch = vi.fn(async () => 'research result');
+const mockResolveResearchModel = vi.fn(async (options: any) => ({
+  id: options.model?.id || options.ctx?.model?.id || 'ctx-model',
+  provider: 'mock-provider',
+  contextWindow: 128000,
+}));
 
 vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
   const actual = await importOriginal() as any;
@@ -85,6 +90,7 @@ vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
       if (name === ServiceNames.RESEARCH_ORCHESTRATION) {
         return {
           runResearch: mockRunResearch,
+          resolveResearchModel: mockResolveResearchModel,
           cleanupResearchServices: vi.fn(),
         };
       }
@@ -357,7 +363,7 @@ describe('createResearchTool', () => {
       const tool = createResearchTool();
       await tool.execute('id', { query: 'test', depth: 1 }, undefined, undefined, context);
       expect(mockRunResearch).toHaveBeenCalledWith(
-        expect.objectContaining({ model: context.model }),
+        expect.objectContaining({ model: expect.objectContaining({ id: 'test-model' }) }),
         expect.any(AbortSignal)
       );
     });

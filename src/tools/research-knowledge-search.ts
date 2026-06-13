@@ -217,6 +217,8 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
   }
 }
 
+import { resolveResearchModel } from '../utils/research-model-resolver.ts';
+
 // ---------------------------------------------------------------------------
 // Phase 4: Stateless Background Execution + Agentic Repair
 // ---------------------------------------------------------------------------
@@ -226,25 +228,16 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
  * Priority: RESEARCH_MODEL → ctx.model
  */
 function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; error?: string } {
-  const config = getConfig(ctx.cwd);
-  const ctxModel = ctx.model as Model<any> | undefined;
-
-  if (config.RESEARCH_MODEL) {
-    const target = config.RESEARCH_MODEL;
-    const found = ctx.modelRegistry.getAll().find(
-      (m) => `${m.provider}/${m.id}` === target || m.id === target,
-    );
-    if (found) {
-      return { model: found };
-    }
-    logger.warn(`[research-knowledge-search] RESEARCH_MODEL '${target}' not found`);
+  try {
+    const model = resolveResearchModel({
+      modelRegistry: ctx.modelRegistry,
+      hostModel: ctx.model as Model<any>,
+      cwd: ctx.cwd,
+    });
+    return { model };
+  } catch (err) {
+    return { error: String(err) };
   }
-
-  if (ctxModel) {
-    return { model: ctxModel };
-  }
-
-  return { error: 'No model available for knowledge synthesis' };
 }
 
 /**
