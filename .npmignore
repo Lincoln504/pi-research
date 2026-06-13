@@ -1,38 +1,28 @@
-# Development infrastructure
-# Note: the `files` field in package.json is the primary allowlist.
-# This file provides defence-in-depth for anything that leaks through.
-.git/
-.gitignore
-.gitattributes
-.github/
-.nvmrc
+# Defence-in-depth blocklist for npm pack.
+# The `files` field in package.json is the primary allowlist — this file
+# catches anything that might accidentally leak through src/ or future additions.
+
+# Never ship config or test infrastructure
 config/
 tsconfig*.json
 vitest.config*.ts
+.nvmrc
 
-# docs/ — only SDK.md, ARCHITECTURE.md, OVERVIEW.md, and README-banner.jpg are in the files allowlist.
-docs/DEVELOPMENT.md
-
-# Tests
-test/
-test/stress/
+# Never ship test files (even if they end up under src/)
 *.test.ts
 *.spec.ts
-
-# Test output
+test/
+test/stress/
 coverage/
 .nyc_output/
 test-results/
-playwright-report/
-testing-results/
-testing/*-results/
 
-# Build artifacts
-build/
-out/
-*.tsbuildinfo
+# Build tooling (defence-in-depth; not in files[])
+.github/
+.eslint*
+prettier*
 
-# IDE / editor
+# IDE and editor
 .vscode/
 .idea/
 *.swp
@@ -40,35 +30,46 @@ out/
 *~
 .claude/
 
-# Environment
+# Environment and secrets
 .env
 .env.local
 .env.*.local
 .pi-research.env
 
-# Logs
+# Logs, temp, and generated output
 logs/
 *.log
-config-debug.log
-
-# Temporary and patch files
 *.tmp
 .temp/
 .tmp/
 *.patch
 *.diff
-COMMIT_MESSAGE*.txt
 
-# Runtime generated files (never publish)
+# Runtime databases
 knowledge_db/
 state_db/
-shared-links-pool-*.json
-pi-research-*.md
-ts-errors*.log
-test-results.txt
-integration-test-run.log
 
-# Session / planning artifacts
+# Research output (exported reports, pool files)
+pi-research-*.md
+shared-links-pool-*.json
+
+# Browser and playwright caches
+.browser/
+.playwright/
+playwright-report/
+playwright/.cache/
+
+# Build artifacts
+build/
+out/
+*.tsbuildinfo
+
+# OS cruft
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Session / planning artifacts (never belong in a release)
 planchat.txt
 *_SUMMARY.md
 *_REPORT.md
@@ -82,9 +83,3 @@ planchat.txt
 CIRCULAR_*.md
 ZERO_SCOPE_CREEP_REMEDIATION.md
 VERIFICATION_REPORT.md
-
-# Browser cache
-.browser/
-
-# Playwright
-.playwright/

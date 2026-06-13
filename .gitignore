@@ -8,14 +8,11 @@ node_modules/
 .pi-research.env
 
 # Generated files
-config/tor-settings-generated.yml
-config/proxy-settings-generated.yml
-config/runtime-settings-*.yml
 /tmp/
-config-debug.log
 
 # Research output files
 pi-research-*.md
+docs/pi-research-test-*.md
 
 # TypeScript
 *.tsbuildinfo

@@ -108,7 +108,9 @@ const exitHandler = async () => {
     try { await ref.dispose(); } catch { /* ignore */ }
   }
 };
-process.on('beforeExit', exitHandler);
+// Register via shutdownManager only — it internally calls process.on() and
+// tracks the listener for clean removal during runCleanup(). Calling
+// process.on() separately would register the listener twice.
 shutdownManager.registerEventListener(process, 'beforeExit', exitHandler);
 
 /**
