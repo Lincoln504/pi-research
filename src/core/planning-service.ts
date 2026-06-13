@@ -240,7 +240,7 @@ export class PlanningService implements IPlanningService {
           apiKey: authResult.apiKey || '', 
           headers: authResult.headers, 
           signal,
-          reasoning: 'off' as any
+          reasoning: 'medium' as any
         }),
         createTimeout(llmTimeout, 'coordinator-generatePlan'),
       ]);
@@ -386,7 +386,7 @@ export class PlanningService implements IPlanningService {
           apiKey: authResult.apiKey || '', 
           headers: authResult.headers, 
           signal,
-          reasoning: 'off' as any
+          reasoning: 'medium' as any
         }),
         createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
       ]);

@@ -127,7 +127,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
       // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
-      thinkingLevel: 'off',
+      thinkingLevel: 'minimal',
     });
 
     // Customize thinking label for researchers to distinguish them in the TUI
@@ -137,7 +137,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     }
 
     // Log to confirm thinking level was set
-    logger.log(`[Researcher] Created session with thinkingLevel='off', model=${modelToUse?.id || 'unknown'}`);
+    logger.log(`[Researcher] Created session with thinkingLevel='minimal', model=${modelToUse?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');

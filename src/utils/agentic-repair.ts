@@ -91,8 +91,8 @@ Return ONLY the valid JSON object. No prose before or after.`;
         }, { 
           ...auth, 
           signal,
-          // Ensure no reasoning for repair passes
-          reasoning: 'off' 
+          // Use minimal reasoning for repair passes
+          reasoning: 'minimal' as any 
         }),
         createTimeout(llmTimeout, `agentic-repair-${serviceName}`),
       ]);

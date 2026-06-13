@@ -307,8 +307,8 @@ async function runBackgroundExtraction(
       apiKey: auth.apiKey, 
       headers: auth.headers, 
       signal,
-      // Knowledge synthesis should be fast — no reasoning needed
-      reasoning: 'off' as any
+      // Knowledge synthesis should be fast — minimal reasoning helps quality
+      reasoning: 'minimal' as any
     }),
     createTimeout(llmTimeout, 'knowledge-search-extraction'),
   ]);
