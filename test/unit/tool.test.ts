@@ -289,6 +289,9 @@ describe('createResearchTool', () => {
 
     it('creates TUI panel with the query text and model name before calling runResearch', async () => {
       const context = createMockContext();
+      context.mode = 'tui';
+      context.hasUI = true;
+      
       const tool = createResearchTool();
       await tool.execute('id', { query: 'panel test query', depth: 1 }, undefined, undefined, context);
 

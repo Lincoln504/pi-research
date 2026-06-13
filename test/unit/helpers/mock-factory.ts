@@ -53,6 +53,11 @@ export function createMockModel(overrides: Partial<Model<Api>> = {}): Model<Api>
     api: 'openai-completions',
     baseUrl: 'https://api.openai.com/v1',
     reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 32_768,
+    headers: {},
     ...overrides,
   } as Model<Api>;
 }

@@ -173,15 +173,6 @@ export class QuickResearchOrchestrator {
                 const msg = event.message as unknown as ResearchMessage;
                 if (msg?.['role'] !== 'assistant') return;
 
-                // Log thinking content if present
-                const content = msg['content'];
-                if (Array.isArray(content)) {
-                    const thinking = content.find(c => c.type === 'thinking');
-                    if (thinking?.thinking) {
-                        logger.debug(`[QuickOrchestrator] Researcher Thinking:\n${thinking.thinking}`);
-                    }
-                }
-
                 const rawUsage = msg['usage'] as any;
                 if (rawUsage) {
                     const { tokens, cost } = extractUsage(resolvedModel, rawUsage);

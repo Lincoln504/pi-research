@@ -316,9 +316,9 @@ export default async function (pi: ExtensionAPI) {
 
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
       let researchPrompt = loadPrompt('research-tool-usage')
-        .replace('{MAX_TEAM_SIZE_L1}', MAX_TEAM_SIZE_LEVEL_1.toString())
-        .replace('{MAX_TEAM_SIZE_L2}', MAX_TEAM_SIZE_LEVEL_2.toString())
-        .replace('{MAX_TEAM_SIZE_L3}', MAX_TEAM_SIZE_LEVEL_3.toString());
+        .replace('{{max_team_size_l1}}', MAX_TEAM_SIZE_LEVEL_1.toString())
+        .replace('{{max_team_size_l2}}', MAX_TEAM_SIZE_LEVEL_2.toString())
+        .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());
       
       if (!isKnowledgeSearchAvailable) {
         researchPrompt = researchPrompt.replace(/\n\*\*⚡ KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');

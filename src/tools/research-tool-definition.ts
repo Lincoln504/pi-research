@@ -14,7 +14,7 @@ import type {
   ExtensionContext,
   AgentToolUpdateCallback,
 } from '@earendil-works/pi-coding-agent';
-import type { Model } from '@earendil-works/pi-ai';
+import { type Model } from '@earendil-works/pi-ai';
 import type { ModelWithId, ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
@@ -31,6 +31,7 @@ import { startResearchSession, registerSessionAbort, clearSteeringMessages } fro
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
+import { HeadlessObserver } from '../orchestration/headless-observer.ts';
 
 import { ensureFunctionalHealth, createHealthMonitor } from '../tui/research-health.ts';
 import { ErrorTracker, runWithTracker, type ErrorReport } from '../utils/error-tracker.ts';
@@ -130,9 +131,6 @@ export function createResearchTool(): ToolDefinition {
         }
       }
 
-      // Depth stays undefined when not provided.
-      // The execute function handles defaults via rawDepth ?? config.DEFAULT_RESEARCH_DEPTH.
-
       return normalized;
     },
     async execute(
@@ -155,11 +153,7 @@ export function createResearchTool(): ToolDefinition {
       }
 
       const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools } = params as ResearchParams;
-      
-      // Default depth if not provided
       const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
-
-      // Inherit exclusions from parent context if possible (new in v0.77.0)
       const eCtx = ctx as ExtendedExtensionContext;
       const parentExcludeTools = eCtx.excludeTools || [];
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
@@ -171,6 +165,10 @@ export function createResearchTool(): ToolDefinition {
       const internalAbort = new AbortController();
       let tuiManager: ReturnType<typeof createResearchTuiManager> | null = null;
       let healthMonitorInstance: ReturnType<typeof createHealthMonitor> | null = null;
+      let observer: any;
+      let observerState: any;
+      let panelState: any;
+      let cleanup: () => Promise<void>;
 
       if (!query) {
         return { content: [{ type: 'text', text: 'Error: Research query is required' }], details: {} };
@@ -206,55 +204,66 @@ export function createResearchTool(): ToolDefinition {
 
           const sanitizedQuery = validateAndSanitizeQuery(query);
           
-          // Setup TUI
-          tuiManager = createResearchTuiManager({
-            piSessionId,
-            researchId,
-            query: sanitizedQuery,
-            modelId: selectedModel.id,
-          }, { ctx });
-          
-          tuiManager.initializePanel();
-          const { panelState } = tuiManager;
+          // Setup TUI or Headless Observer based on context
+          if (ctx.mode === 'tui' && ctx.hasUI) {
+            tuiManager = createResearchTuiManager({
+              piSessionId,
+              researchId,
+              query: sanitizedQuery,
+              modelId: selectedModel.id,
+            }, { ctx });
+            
+            tuiManager.initializePanel();
+            panelState = tuiManager.panelState;
 
-          // Perform health check
-          await ensureFunctionalHealth({
-            panelState,
-            onUpdate: () => tuiManager?.debouncedRefresh(),
-          });
+            // Perform health check
+            await ensureFunctionalHealth({
+              panelState,
+              onUpdate: () => tuiManager?.debouncedRefresh(),
+            });
 
-          // Start health monitor for periodic checks
-          healthMonitorInstance = createHealthMonitor();
-          healthMonitorInstance.start();
+            // Start health monitor for periodic checks
+            healthMonitorInstance = createHealthMonitor();
+            healthMonitorInstance.start();
 
-          // Register with session state
-          const sessionResearchId = startResearchSession(piSessionId, researchId);
-          registerSessionAbort(piSessionId, sessionResearchId, internalAbort);
+            // Setup TUI observer
+            observerState = createObserverState();
+            observer = createResearchObserver(
+              { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 1 },
+              observerState
+            );
 
-          // Setup observer
-          const observerState = createObserverState();
-          const observer = createResearchObserver(
-            { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 1 },
-            observerState
-          );
+            // Setup cleanup
+            const cleanupCtx: CleanupContext = {
+              researchId: startResearchSession(piSessionId, researchId),
+              piSessionId,
+              masterWidgetId: tuiManager.masterWidgetId,
+              panelState,
+              waveTimer: null,
+              unsubOrder: null,
+            };
+            registerSessionAbort(piSessionId, cleanupCtx.researchId, internalAbort);
+            
+            cleanup = createCleanupFunction(cleanupCtx, { ctx });
+            const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
+            updateUnsubOrder(cleanupCtx, tuiManager.unsubOrder);
+          } else {
+            // Headless mode (CLI / SDK / OpenClaw)
+            observer = new HeadlessObserver({ enableLogging: true });
+            
+            const sessionResearchId = startResearchSession(piSessionId, researchId);
+            registerSessionAbort(piSessionId, sessionResearchId, internalAbort);
 
-          // Setup cleanup (will be updated with actual unsubscribe functions after TUI initialization)
-          const cleanupCtx: CleanupContext = {
-            researchId: sessionResearchId,
-            piSessionId,
-            masterWidgetId: tuiManager.masterWidgetId,
-            panelState,
-            waveTimer: null,
-            unsubOrder: null,
-          };
-          const cleanup = createCleanupFunction(cleanupCtx, { ctx });
-          
-          // Update cleanup with actual unsubscribe functions from TUI manager
-          const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
-          updateUnsubOrder(cleanupCtx, tuiManager.unsubOrder);
-          // Note: wave timer will be set by the observer when searching starts
+            cleanup = async () => {
+              clearSteeringMessages(piSessionId);
+            };
+            
+            // Stub for stopObserverWaveAnimation
+            panelState = { totalTokens: 0, totalCost: 0 };
+            observerState = {};
+          }
 
-          // Handle abort signal — use { once: true } so the listener is auto-removed after the first fire
+          // Handle abort signal
           if (aborted) {
             aborted.addEventListener('abort', () => internalAbort.abort(), { once: true });
           }
@@ -285,7 +294,7 @@ export function createResearchTool(): ToolDefinition {
               }, internalAbort.signal);
 
               // Stop wave animation
-              stopObserverWaveAnimation(observerState, panelState);
+              if (observerState && panelState) stopObserverWaveAnimation(observerState, panelState);
 
               // Append unified research summary (stats + errors)
               const errorReport = sessionTracker.getReport();
@@ -295,15 +304,15 @@ export function createResearchTool(): ToolDefinition {
               if (getConfig(ctx.cwd).RESEARCH_REPORT_EXPORT_ENABLED) {
                 const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd);
                 if (exportPath) {
-                  finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState.totalCost);
+                  finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState?.totalCost ?? 0);
                 }
               }
 
               // Append research metadata (model used) at the very end, after metrics/summaries
               const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-              finalResult = synthesisService.appendMetadata(finalResult, selectedModel.id);
+              finalResult = synthesisService.appendMetadata(finalResult, selectedModel!.id);
 
-              return { result: finalResult, tokens: panelState.totalTokens, researchId };
+              return { result: finalResult, tokens: panelState?.totalTokens ?? 0, researchId };
             } catch (error) {
               if (aborted?.aborted || internalAbort.signal.aborted) {
                 return { result: 'Research cancelled.', tokens: 0, researchId };
@@ -315,20 +324,19 @@ export function createResearchTool(): ToolDefinition {
               }
 
               // Stop wave animation unconditionally
-              stopObserverWaveAnimation(observerState, panelState);
+              if (observerState && panelState) stopObserverWaveAnimation(observerState, panelState);
 
               // Clear steering messages when the research run ends
-              // to prevent them from leaking into follow-up agent turns.
               clearSteeringMessages(piSessionId);
 
-              // Run cleanup (wrap in try-catch to allow other cleanup to run)
+              // Run cleanup
               try {
                 await cleanup();
               } catch (cleanupError) {
                 logger.error('[research] Cleanup failed:', cleanupError);
               }
 
-              // Dispose TUI manager (wrap in try-catch)
+              // Dispose TUI manager
               try {
                 if (tuiManager) {
                   tuiManager.dispose();
@@ -341,9 +349,7 @@ export function createResearchTool(): ToolDefinition {
           return researchRunResult;
         }));  // end runCapturingStderr / runWithRunRegistry
 
-        // Snapshot the run registry now that the run context has exited.
-        // recordRunSummary() is called outside the run context so it lands
-        // in the session-level history, not back into the run registry.
+        // Snapshot the run registry
         metrics.recordRunSummary({
           runId: researchId,
           startedAt: runStartedAt,
@@ -367,7 +373,6 @@ export function createResearchTool(): ToolDefinition {
           return { content: [{ type: 'text', text: 'Research cancelled.' }], details: {} };
         }
 
-        // Record error summary before returning any error response.
         metrics.recordRunSummary({
           runId: researchId,
           startedAt: runStartedAt,

@@ -58,6 +58,15 @@ export function setupUncaughtExceptionHandler(): void {
     logToDebugFile('ERROR', `[Worker-${workerId}] Uncaught Exception: ${err.stack || err.message}`);
     // Don't crash immediately unless it's critical, the worker will be replaced by poolifier if it hangs
   });
+
+  process.on('unhandledRejection', (reason: unknown) => {
+    const errMsg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    logToDebugFile('ERROR', `[Worker-${workerId}] Unhandled Rejection: ${errMsg}`);
+    
+    // Critical: Explicitly exit to ensure Poolifier replaces this broken worker,
+    // but trap the error here so it doesn't print to stderr and corrupt the TUI.
+    process.exit(1);
+  });
 }
 
 // Orphaned worker protection: If parent dies, kill the worker.

@@ -305,7 +305,7 @@ export class DeepResearchOrchestrator {
             // options.config may be undefined). runResearcher accesses researchConfig.RESEARCHER_MAX_RETRIES
             // and similar fields — passing undefined crashes immediately.
             // Default excludeTools to ['grep'] if not explicitly set — mirrors QuickResearchOrchestrator
-            // so that advanced reasoning models can't waste time on developer-only tools.
+            // so that high-capability models don't waste time on developer-only tools.
             await orchestrationService.runResearchers({
                 plan,
                 options: {
@@ -320,7 +320,6 @@ export class DeepResearchOrchestrator {
 
         // 4. Store synthesized descriptions for semantic search
         // Show embedding indicator in eval box while embedding runs
-        observer?.onEvaluationStart?.(this.currentRound);
         observer?.onEvaluationProgress?.('embedding');
         await orchestrationService.storeLinkDescriptions(researchId, this.currentRound, researchId, this.config, ctx);
 

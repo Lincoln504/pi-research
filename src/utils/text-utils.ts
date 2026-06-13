@@ -12,7 +12,7 @@ import { logger } from '../logger.ts';
  * Extract text content from a message
  *
  * Handles various message content formats:
- * - String content
+ * - String content (with tag-based thinking removal)
  * - Array of content blocks (TextContent, ThinkingContent, ToolCall, etc.)
  * - Accepts any object with a content field for robustness
  *
@@ -30,7 +30,7 @@ export function extractText(message: unknown): string {
 
   // Handle string content
   if (typeof content === 'string') {
-    return content;
+    return stripThinkingTags(content);
   }
 
   // Handle array of content blocks
@@ -41,7 +41,8 @@ export function extractText(message: unknown): string {
         .map((b) => {
           const blockObj = b as Record<string, unknown>;
           const text = blockObj['text'];
-          return typeof text === 'string' ? text : '';
+          // Ensure we also strip tags if the text block itself contains them (rare but possible)
+          return typeof text === 'string' ? stripThinkingTags(text) : '';
         })
         .filter((t: string) => t.length > 0) // Filter empty strings
         .join('\n');
@@ -52,6 +53,23 @@ export function extractText(message: unknown): string {
 
   // Unknown content format
   return '';
+}
+
+/**
+ * Robustly remove thinking/reasoning tags from a string.
+ * Handles <thought>, <thinking>, and <reasoning> tags (case-insensitive).
+ */
+export function stripThinkingTags(text: string): string {
+  if (!text) return '';
+  
+  // Replace tags and their content: <thought>...</thought>, etc.
+  // Using dotAll (s flag) to handle multi-line thinking blocks.
+  // Also handles unclosed tags at the end of the string (truncated responses).
+  return text
+    .replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, '')
+    .replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/gi, '')
+    .replace(/<reasoning>[\s\S]*?(?:<\/reasoning>|$)/gi, '')
+    .trim();
 }
 
 /**
@@ -92,9 +110,8 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
 
   const text = extractText(last);
   if (!text.trim()) {
-    // No text content blocks in the final assistant message. This typically means
-    // all tool calls failed and the model produced only
-    // thinking blocks, or the session ended without a visible response.
+    // zero text content blocks in the final assistant message. This typically means
+    // all tool calls failed, or the session ended without a visible response.
     throw new Error(
       `${label}: Researcher produced no text output. ` +
       `This usually means the browser-based search engine was unavailable during the run — check system resources and retry.`

@@ -34,7 +34,7 @@ export interface JsonRepairOptions {
 export type LlmCompleter = (
   model: Model<any>,
   context: { systemPrompt?: string; messages: any[] },
-  options: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal }
+  options: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal; reasoning?: any }
 ) => Promise<AssistantMessage>;
 
 /**
@@ -87,8 +87,13 @@ Return ONLY the valid JSON object. No prose before or after.`;
       const llmTimeout = getLlmTimeoutMs();
       const response = await Promise.race([
         completer(model, {
-          messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }]
-        }, { ...auth, signal }),
+          messages: [{ role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() }],
+        }, { 
+          ...auth, 
+          signal,
+          // Ensure no reasoning for repair passes
+          reasoning: 'off' 
+        }),
         createTimeout(llmTimeout, `agentic-repair-${serviceName}`),
       ]);
 

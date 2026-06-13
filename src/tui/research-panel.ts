@@ -347,13 +347,12 @@ export function createMasterResearchPanel(
 
           // Header line for each block (fixed width, rounded corners)
           const pctStr = renderProgressPct(panel.progress);
-          const status = panel.statusMessage ? `[${panel.statusMessage}]` : '';
           const label = panel.title ?? 'Research';
           let headerText: string;
           if (pctStr) {
-            headerText = status ? ` ${label}: ${pctStr} (${status})` : ` ${label}: ${pctStr}`;
+            headerText = ` ${label}: ${pctStr}`;
           } else {
-            headerText = status ? ` ${label} (${status})` : ` ${label}`;
+            headerText = ` ${label}`;
           }
 
           const maxWidth = Math.max(20, width - 4);
@@ -361,14 +360,14 @@ export function createMasterResearchPanel(
             if (pctStr) {
               const remainingLen = maxWidth - ` ${label}: ${pctStr} `.length;
               if (remainingLen > 6) {
-                headerText = ` ${label}: ${pctStr} ${status.slice(0, remainingLen - 4)}..`;
+                headerText = ` ${label}: ${pctStr} ..`;
               } else {
                 headerText = ` ${label}: ${pctStr}`;
               }
             } else {
               const remainingLen = maxWidth - ` ${label} `.length;
               if (remainingLen > 6) {
-                headerText = ` ${label} ${status.slice(0, remainingLen - 4)}..`;
+                headerText = ` ${label} ..`;
               } else {
                 headerText = ` ${label}`;
               }

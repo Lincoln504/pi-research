@@ -25,7 +25,7 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
 }));
 
 vi.mock('../../../src/utils/prompts.ts', () => ({
-  loadPrompt: vi.fn(() => 'system prompt {{goal}}'),
+  loadPrompt: vi.fn(() => 'system prompt {{root_query}}'),
 }));
 
 vi.mock('../../../src/utils/inject-date.ts', () => ({
@@ -266,6 +266,18 @@ describe('PlanningService', () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(planJson));
       const plan = await service.generatePlan(BASE_OPTIONS);
       expect(plan.researchers!.length).toBeLessThanOrEqual(maxSize);
+    });
+
+    it('populates prompts correctly with query and uses reasoning: off', async () => {
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
+      await service.generatePlan(BASE_OPTIONS);
+      
+      const lastCall = vi.mocked(completeSimple).mock.calls[0];
+      const callContext = lastCall![1] as { systemPrompt: string };
+      const callOptions = lastCall![2] as { reasoning: string };
+      
+      expect(callContext.systemPrompt).toContain('test query');
+      expect(callOptions.reasoning).toBe('off');
     });
   });
 

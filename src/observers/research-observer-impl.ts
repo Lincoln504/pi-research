@@ -62,9 +62,10 @@ export function createResearchObserver(
         addSlice(panelState, state.quickSliceLabel, state.quickSliceLabel, false);
         activateSlice(panelState, state.quickSliceLabel);
         updateSliceStatus(panelState, state.quickSliceLabel, 'researching');
+        panelState.statusMessage = 'researching';
         
         const units = getUnitsPerResearcher();
-        panelState['progress'] = { expected: units, made: 0 };
+        panelState.progress = { expected: units, made: 0 };
       }
       debouncedRefresh();
     },
@@ -74,12 +75,15 @@ export function createResearchObserver(
         addSlice(panelState, 'coord', `coordinator`, false);
         activateSlice(panelState, 'coord');
       }
-      updateSliceStatus(panelState, 'coord', attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning');
+      const status = attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning';
+      updateSliceStatus(panelState, 'coord', status);
+      panelState.statusMessage = status;
       debouncedRefresh();
     },
 
     onPlanningProgress: (status) => {
       updateSliceStatus(panelState, 'coord', status);
+      panelState.statusMessage = status;
       debouncedRefresh();
     },
 
@@ -92,6 +96,7 @@ export function createResearchObserver(
 
     onPlanningSuccess: (plan) => {
       completeSlice(panelState, 'coord');
+      panelState.statusMessage = undefined;
       const unitsPerResearcher = getUnitsPerResearcher();
       const count = plan.researchers?.length || 0;
       const units = (count * unitsPerResearcher) + LEAD_EVAL_UNITS;
@@ -101,14 +106,22 @@ export function createResearchObserver(
     },
 
     onRoundStart: (round) => {
-      // Mark that we need to clear completed slices once the next round's researchers start.
-      // This keeps previous round findings visible during the evaluation and search burst phases.
+      // Mark that we need to clear completed slices once the next round's evaluation or search starts.
+      // This keeps previous round findings visible during the evaluation phase.
       if (round > 1) {
         panelState.needsClear = true;
       }
     },
 
     onSearchStart: (_queries) => {
+      // Deferred clearing: remove researchers from previous rounds only when the
+      // new round's search phase starts. This ensures results remain visible
+      // throughout the evaluation phase that preceded this search.
+      if (panelState.needsClear) {
+        clearCompletedResearchers(panelState);
+        panelState.needsClear = false;
+      }
+
       let sliceId = 'coord';
       const hasEval = panelState.slices.has('eval');
       const hasCoord = panelState.slices.has('coord');
@@ -119,8 +132,9 @@ export function createResearchObserver(
          // Use eval if it already exists (from a previous round's evaluation)
          // or if coord is missing (removed after Round 1 started).
          sliceId = 'eval';
-         // Always add/reset slice to ensure it's fresh (clear previous round tokens/cost)
-         addSlice(panelState, 'eval', 'eval', false);
+         if (!hasEval) {
+            addSlice(panelState, 'eval', 'eval', false);
+         }
       }
 
       if (panelState.slices.has(sliceId)) {
@@ -128,6 +142,7 @@ export function createResearchObserver(
           activateSlice(panelState, sliceId); // Ensure not queued
       }
       updateSliceStatus(panelState, sliceId, 'searching');
+      panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
       // Start wave animation timer
@@ -158,7 +173,9 @@ export function createResearchObserver(
           sliceId = 'eval';
       }
       
-      updateSliceStatus(panelState, sliceId, `${count} results`);
+      const status = `${count} results`;
+      updateSliceStatus(panelState, sliceId, status);
+      panelState.statusMessage = `searching: ${status}`;
       debouncedRefresh();
     },
 
@@ -172,6 +189,7 @@ export function createResearchObserver(
       }
       panelState.waveFrame = undefined;
       panelState.waveColors = undefined; // Clear persistent colors for next search
+      panelState.statusMessage = undefined;
 
       let sliceId = 'coord';
       const hasEval = panelState.slices.has('eval');
@@ -183,26 +201,12 @@ export function createResearchObserver(
       }
       
       updateSliceStatus(panelState, sliceId, `${count} results`);
-
-      if (panelState.slices.has('coord')) {
-        completeSlice(panelState, 'coord');
-      } else if (!state.quickSliceLabel && panelState.slices.has('eval')) {
-        // Search burst for next round used eval slice
-        completeSlice(panelState, 'eval');
-      }
+      completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
 
     onResearcherStart: (id, _name, _goal, _roundNumber) => {
       if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
-      if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
-
-      // Deferred clearing: remove researchers from previous rounds only when the
-      // first researcher of the current round starts.
-      if (panelState.needsClear) {
-        clearCompletedResearchers(panelState);
-        panelState.needsClear = false;
-      }
 
       // Map internal hierarchical ID to sequential display number for TUI
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
@@ -278,7 +282,7 @@ export function createResearchObserver(
       debouncedRefresh();
     },
 
-    onResearcherFailure: (id) => {
+    onResearcherFailure: (id, _error) => {
       const sliceId = id === 'quick' ? state.quickSliceLabel : id;
       if (panelState.progress) {
         const unitsPerResearcher = getUnitsPerResearcher();
@@ -300,14 +304,22 @@ export function createResearchObserver(
     },
 
     onEvaluationStart: (_round) => {
+      // Deferred clearing for evaluation-only paths
+      if (panelState.needsClear) {
+        clearCompletedResearchers(panelState);
+        panelState.needsClear = false;
+      }
+
       addSlice(panelState, 'eval', 'eval', false);
       activateSlice(panelState, 'eval');
       updateSliceStatus(panelState, 'eval', 'evaluating');
+      panelState.statusMessage = 'evaluating';
       debouncedRefresh();
     },
 
     onEvaluationProgress: (status) => {
       updateSliceStatus(panelState, 'eval', status);
+      panelState.statusMessage = status;
       debouncedRefresh();
     },
 
@@ -320,6 +332,7 @@ export function createResearchObserver(
 
     onEvaluationDecision: (action, plan, round) => {
       completeSlice(panelState, 'eval');
+      panelState.statusMessage = undefined;
       // Only clear completed researchers when returning final synthesis
       // On delegation, researchers stay visible while new round researchers are added
       if (action === 'synthesize') {
@@ -346,11 +359,13 @@ export function createResearchObserver(
 
     onComplete: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
+      panelState.statusMessage = undefined;
       debouncedRefresh();
     },
 
     onError: () => {
       if (panelState.progress) panelState.progress.made = panelState.progress.expected;
+      panelState.statusMessage = undefined;
       debouncedRefresh();
     }
   };

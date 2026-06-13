@@ -213,7 +213,7 @@ export async function executeSearchTask(
 
     return { results, jitter };
   } catch (error) {
-    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
+    await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
     throw error;
   }
 }
@@ -288,7 +288,7 @@ export async function executeScrapeTask(
                       html.includes('<noscript>');
 
     if (needsWait) {
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch((err: any) => console.debug('Swallowed page close/wait error:', err));
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
       html = await page.content();
     }
 
@@ -301,7 +301,7 @@ export async function executeScrapeTask(
     await page.close();
     return { contentType, html, jitter };
   } catch (error) {
-    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
+    await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
     throw error;
   }
 }
@@ -330,7 +330,7 @@ async function executeHealthCheckAttempt(
     await page.close();
     return { success: !!title, navMs };
   } catch (error) {
-    await page.close().catch((err: any) => console.debug('Swallowed page close/wait error:', err));
+    await page.close().catch((err: any) => logToDebugFile('DEBUG', `[ThreadWorker] Swallowed page close/wait error: ${err.message || String(err)}`));
     throw error;
   }
 }

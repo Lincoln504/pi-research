@@ -42,7 +42,7 @@
       "maxScrapeBatches": {
         "type": "number",
         "description": "Scrape batches per researcher (0=unlimited).",
-        "default": 2,
+        "default": 3,
         "minimum": 0,
         "maximum": 99
       },

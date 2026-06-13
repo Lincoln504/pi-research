@@ -70,13 +70,13 @@ export function constructMinimalModel(provider: string, modelId: string, _apiKey
     provider,
     id: modelId,
     name: modelId,
-    supportsReasoning: false,
-    supportsImages: false,
-    isFree: false,
+    api: provider === 'openai' ? 'openai-completions' : (provider + '-conversations' as any),
+    baseUrl: '', // Provider-specific base URLs are handled by pi-ai internal registry
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 32_768,
-    capabilities: { vision: false, audio: false, tool_use: true, structured_output: true },
-    isInternetConnected: false,
     headers: buildHeaders(provider),
   } as unknown as Model<any>;
 }

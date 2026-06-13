@@ -172,15 +172,32 @@ export class PlanningService implements IPlanningService {
   }
 
   /**
+   * Helper to populate prompt templates with placeholders.
+   */
+  private populatePrompt(template: string, replacements: Record<string, string | number>): string {
+    let result = template;
+    for (const [key, value] of Object.entries(replacements)) {
+      const placeholder = `{{${key}}}`;
+      result = result.split(placeholder).join(String(value));
+    }
+    return result;
+  }
+
+  /**
    * Generate initial research plan
    */
   async generatePlan(options: GeneratePlanOptions): Promise<ResearchPlan> {
-    const { sessionId, query, model, signal, observer, steeringMessages, modelRegistry } = options;
+    const { sessionId, query, complexity, model, signal, observer, steeringMessages, modelRegistry } = options;
     
-    logger.log(`[PlanningService] Generating initial plan for: "${query}"`);
+    logger.log(`[PlanningService] Generating initial plan for: "${query}" (Complexity: ${complexity})`);
     
+    const config = getConfig(options.cwd);
     const promptTemplate = loadPrompt('system-coordinator', '..');
     
+    const maxTeamSize = this.getTeamSize(complexity);
+    const queryBudget = this.getQueryBudget(complexity);
+    const complexityGuidance = this.getComplexityGuidance(complexity, maxTeamSize, queryBudget);
+
     // Inject steering if present
     let steeringSection = '';
     if (steeringMessages && steeringMessages.length > 0) {
@@ -188,8 +205,20 @@ export class PlanningService implements IPlanningService {
             steeringMessages.map(m => `- ${m}`).join('\n');
     }
 
-    const systemPrompt = injectCurrentDate(promptTemplate, 'coordinator')
-        .replace('{{goal}}', query + steeringSection);
+    const disabledToolsSection = options.excludeTools && options.excludeTools.length > 0
+      ? `\n## DISABLED TOOLS\nThe following tools are DISABLED for this session: ${options.excludeTools.join(', ')}. Do NOT reference or attempt to use them.\n`
+      : '';
+
+    const systemPrompt = injectCurrentDate(promptTemplate, 'coordinator');
+    const populatedPrompt = this.populatePrompt(systemPrompt, {
+      root_query: query,
+      additional_considerations: steeringSection,
+      complexity_label: complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)',
+      max_team_size: maxTeamSize,
+      query_budget: queryBudget,
+      complexity_guidance: complexityGuidance,
+      disabled_tools_section: disabledToolsSection,
+    });
 
     const userMessage = `Generate the initial research plan for: "${query}"`;
 
@@ -199,14 +228,20 @@ export class PlanningService implements IPlanningService {
         throw new Error(`Failed to get API key for planning: ${authResult.error}`);
       }
 
-      const llmTimeout = getConfig().LLM_TIMEOUT_MS;
+      const llmTimeout = config.LLM_TIMEOUT_MS;
+
       const response = await Promise.race([
         completeSimple(model, {
-          systemPrompt,
+          systemPrompt: populatedPrompt,
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal, reasoning: 'minimal' }),
+        }, { 
+          apiKey: authResult.apiKey || '', 
+          headers: authResult.headers, 
+          signal,
+          reasoning: 'off' as any
+        }),
         createTimeout(llmTimeout, 'coordinator-generatePlan'),
       ]);
 
@@ -215,8 +250,8 @@ export class PlanningService implements IPlanningService {
       if (rawUsage) {
         const { tokens, cost } = extractUsage(model, rawUsage);
         if (tokens > 0 || cost > 0) {
-          metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(options.complexity) });
-          metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(options.complexity) });
+          metrics.increment('llm_tokens_total', tokens, { component: 'coordinator', complexity: String(complexity) });
+          metrics.increment('llm_cost_total', cost, { component: 'coordinator', complexity: String(complexity) });
           observer?.onTokensConsumed?.(tokens, cost);
         }
       }
@@ -258,7 +293,7 @@ export class PlanningService implements IPlanningService {
       }
 
       // Final safety cap
-      plan = this.capResearcherQueries(plan, options.complexity, this.name);
+      plan = this.capResearcherQueries(plan, complexity, this.name);
       if (plan.action !== 'synthesize') {
           plan.action = 'delegate';
       }
@@ -279,8 +314,15 @@ export class PlanningService implements IPlanningService {
     
     logger.log(`[PlanningService] Evaluating Round ${round} findings for: "${query}"`);
 
+    const config = getConfig(options.cwd);
     const promptTemplate = loadPrompt('system-lead-evaluator', '..');
     
+    const maxTeamSize = this.getTeamSize(complexity);
+    const queryBudget = this.getQueryBudget(complexity);
+    const maxRounds = _getMaxRounds(complexity);
+    const complexityGuidance = this.getEvaluatorComplexityGuidance(complexity);
+    const roundPhaseGuidance = this.getRoundPhaseGuidance(round, maxRounds, complexity, maxTeamSize);
+
     // Inject steering if present
     let steeringSection = '';
     if (steeringMessages && steeringMessages.length > 0) {
@@ -288,8 +330,35 @@ export class PlanningService implements IPlanningService {
             steeringMessages.map(m => `- ${m}`).join('\n');
     }
 
-    const systemPrompt = injectCurrentDate(promptTemplate, 'evaluator')
-        .replace('{{goal}}', query + steeringSection);
+    const disabledToolsSection = options.excludeTools && options.excludeTools.length > 0
+      ? `\n## DISABLED TOOLS\nThe following tools are DISABLED for this session: ${options.excludeTools.join(', ')}. Do NOT reference or attempt to use them.\n`
+      : '';
+
+    const previousPlan = options.previousPlan;
+    const initialAgendaSection = previousPlan && previousPlan.researchers && previousPlan.researchers.length > 0
+      ? `\n## Initial Research Agenda\n${previousPlan.researchers.map(r => `- ${r.name}: ${r.goal}`).join('\n')}\n`
+      : '';
+
+    const previousQueries = this.getQueryHistory(sessionId);
+    const previousQueriesSection = previousQueries.length > 0
+      ? `\n## Previously Executed Queries\n${previousQueries.map(q => `- ${q}`).join('\n')}\n`
+      : '';
+
+    const systemPrompt = injectCurrentDate(promptTemplate, 'evaluator');
+    const populatedPrompt = this.populatePrompt(systemPrompt, {
+      root_query: query,
+      round_number: round,
+      max_rounds: maxRounds,
+      complexity_label: complexity === 1 ? 'Level 1 (Normal)' : complexity === 2 ? 'Level 2 (Deep)' : 'Level 3 (Ultra)',
+      initial_agenda_section: initialAgendaSection,
+      previous_queries_section: previousQueriesSection,
+      additional_considerations: steeringSection,
+      disabled_tools_section: disabledToolsSection,
+      complexity_guidance: complexityGuidance,
+      round_phase_guidance: roundPhaseGuidance,
+      max_team_size: maxTeamSize,
+      query_budget: queryBudget,
+    });
 
     const findings = Array.from(reports.entries())
         .map(([id, report]) => `### Researcher ${id}\n${report}`)
@@ -305,14 +374,20 @@ export class PlanningService implements IPlanningService {
         throw new Error(`Failed to get API key for evaluation: ${authResult.error}`);
       }
 
-      const llmTimeout = getConfig().LLM_TIMEOUT_MS;
+      const llmTimeout = config.LLM_TIMEOUT_MS;
+
       const response = await Promise.race([
         completeSimple(model, {
-          systemPrompt,
+          systemPrompt: populatedPrompt,
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, { apiKey: authResult.apiKey || '', headers: authResult.headers, signal, reasoning: 'minimal' }),
+        }, { 
+          apiKey: authResult.apiKey || '', 
+          headers: authResult.headers, 
+          signal,
+          reasoning: 'off' as any
+        }),
         createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
       ]);
 

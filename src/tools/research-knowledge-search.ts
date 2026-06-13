@@ -303,7 +303,13 @@ async function runBackgroundExtraction(
       messages: [
         { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
       ],
-    }, { apiKey: auth.apiKey, headers: auth.headers, signal }),
+    }, { 
+      apiKey: auth.apiKey, 
+      headers: auth.headers, 
+      signal,
+      // Knowledge synthesis should be fast — no reasoning needed
+      reasoning: 'off' as any
+    }),
     createTimeout(llmTimeout, 'knowledge-search-extraction'),
   ]);
 

@@ -1,12 +1,9 @@
 /**
  * Text Utilities Unit Tests
- *
- * Tests pure functions that don't require refactoring.
- * Can run immediately with existing code.
  */
 
 import { describe, it, expect } from 'vitest';
-import { extractText, ensureAssistantResponse, parseCitations } from '../../../src/utils/text-utils';
+import { extractText, ensureAssistantResponse, parseCitations, stripThinkingTags } from '../../../src/utils/text-utils';
 
 describe('text-utils', () => {
   describe('extractText', () => {
@@ -26,7 +23,15 @@ describe('text-utils', () => {
       expect(extractText(message)).toBe('Line 1\nLine 2');
     });
 
-    // Edge cases (null, undefined, empty) covered by integration tests
+    it('should strip thinking tags from string content', () => {
+      const message = { content: '<thought>Internal monologue</thought>Visible response' };
+      expect(extractText(message)).toBe('Visible response');
+    });
+
+    it('should strip multiple thinking tags from string content', () => {
+      const message = { content: '<thinking>Wait</thinking>Hello <reasoning>Checking</reasoning>World' };
+      expect(extractText(message)).toBe('Hello World');
+    });
 
     it('should handle empty array', () => {
       expect(extractText({ content: [] })).toBe('');
@@ -40,6 +45,33 @@ describe('text-utils', () => {
         ],
       };
       expect(extractText(message)).toBe('');
+    });
+  });
+
+  describe('stripThinkingTags', () => {
+    it('should remove <thought> tags', () => {
+      expect(stripThinkingTags('<thought>secret</thought>public')).toBe('public');
+    });
+
+    it('should remove <thinking> tags', () => {
+      expect(stripThinkingTags('<thinking>secret</thinking>public')).toBe('public');
+    });
+
+    it('should remove <reasoning> tags', () => {
+      expect(stripThinkingTags('<reasoning>secret</reasoning>public')).toBe('public');
+    });
+
+    it('should handle multi-line tags', () => {
+      expect(stripThinkingTags('<thought>\nline1\nline2\n</thought>content')).toBe('content');
+    });
+
+    it('should be case-insensitive', () => {
+      expect(stripThinkingTags('<THOUGHT>secret</THOUGHT>public')).toBe('public');
+    });
+
+    it('should handle mixed tags', () => {
+      const input = '<thought>T1</thought>A<thinking>T2</thinking>B<reasoning>T3</reasoning>C';
+      expect(stripThinkingTags(input)).toBe('ABC');
     });
   });
 
@@ -125,7 +157,6 @@ describe('text-utils', () => {
         messages: [
           { role: 'user', content: 'hello' },
           { role: 'assistant', content: [
-            { type: 'thinking', content: 'Internal reasoning...' },
             { type: 'tool_call', tool: 'search', args: { query: 'test' } },
           ] },
         ],

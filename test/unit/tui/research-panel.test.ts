@@ -52,7 +52,7 @@ describe('TUI Research Panel', () => {
       expect(headerLine).toMatch(/Research.*50%/);
     });
 
-    it('should render status message in header if present', () => {
+    it('should NOT render status message in header if present (removed per user preference)', () => {
       const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
       state.statusMessage = 'planning';
       
@@ -62,7 +62,7 @@ describe('TUI Research Panel', () => {
       const lines = component.render(80);
       
       const headerLine = lines[0];
-      expect(headerLine).toContain('planning');
+      expect(headerLine).not.toContain('planning');
     });
   });
 

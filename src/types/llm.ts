@@ -33,7 +33,7 @@ export interface TokenUsage {
 }
 
 /**
- * Text content block in a message
+ * Text content block
  */
 export interface TextContentBlock {
   type: 'text';
@@ -41,18 +41,27 @@ export interface TextContentBlock {
 }
 
 /**
- * Thinking content block in a message (supported in newer pi-ai versions)
+ * Thinking/Reasoning content block
  */
 export interface ThinkingContentBlock {
   type: 'thinking';
-  thinking: string;
-  redacted?: boolean;
+  content: string;
 }
 
 /**
- * Message content block (can be text or thinking)
+ * Tool call block
  */
-export type MessageBlock = TextContentBlock | ThinkingContentBlock;
+export interface ToolCallBlock {
+  type: 'tool_call';
+  id?: string;
+  name: string;
+  arguments: any;
+}
+
+/**
+ * Message content block
+ */
+export type MessageBlock = TextContentBlock | ThinkingContentBlock | ToolCallBlock;
 
 /**
  * Message content (can be a string or array of blocks)
@@ -72,18 +81,6 @@ export function isTextContentBlock(block: unknown): block is TextContentBlock {
 }
 
 /**
- * Filter for thinking content blocks
- */
-export function isThinkingContentBlock(block: unknown): block is ThinkingContentBlock {
-  return (
-    block !== null &&
-    typeof block === 'object' &&
-    (block as Record<string, unknown>)['type'] === 'thinking' &&
-    typeof (block as Record<string, unknown>)['thinking'] === 'string'
-  );
-}
-
-/**
  * Extract text from a message content block or string
  */
 export function extractTextFromContent(content: MessageContent): string {
@@ -94,22 +91,6 @@ export function extractTextFromContent(content: MessageContent): string {
     return content
       .filter(isTextContentBlock)
       .map(block => block.text)
-      .join('\n');
-  }
-  return '';
-}
-
-/**
- * Extract thinking content from a message content block or string
- */
-export function extractThinkingFromContent(content: MessageContent): string {
-  if (typeof content === 'string') {
-    return '';
-  }
-  if (Array.isArray(content)) {
-    return content
-      .filter(isThinkingContentBlock)
-      .map(block => block.thinking)
       .join('\n');
   }
   return '';

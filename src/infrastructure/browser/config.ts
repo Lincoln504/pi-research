@@ -162,6 +162,7 @@ export function getSchedulerVersion(config?: Config): string {
  * Single point of control: all existing skipTests() checks use this function.
  */
 export function isBrowserAvailable(): boolean {
+    if (isFullMockMode()) return false;
     try {
         import.meta.resolve('camoufox-js');
         return existsSync(getCamoufoxBinaryPath());
