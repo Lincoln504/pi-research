@@ -38,6 +38,7 @@ export interface ILogger {
   error(...args: unknown[]): void;
   warn(...args: unknown[]): void;
   debug(...args: unknown[]): void;
+  clear(): void;
   runCapturingStderr<T>(task: () => Promise<T>): Promise<T>;
 }
 
@@ -68,7 +69,8 @@ export class Logger implements ILogger {
 
   constructor(options: Partial<LoggerOptions> = {}) {
     this.verbose = options.verbose ?? isVerboseFromEnv();
-    this.logFile = options.logFilePath ?? buildDefaultDebugLogPath(options.researchRunId);
+    // Consolidated logging: always use the same file regardless of run ID
+    this.logFile = options.logFilePath ?? buildDefaultDebugLogPath();
     this.logDir = path.dirname(this.logFile);
     this.sessionId = options.researchRunId;
 
@@ -155,6 +157,10 @@ export class Logger implements ILogger {
     this.emit(LogLevel.DEBUG, ...args);
   }
 
+  clear(): void {
+    this.rotation.clearLogs(this.logFile, this.logDir);
+  }
+
   getLogFilePath(): string | null {
     return this.logFile;
   }
@@ -239,6 +245,7 @@ export const logger: ILogger = {
   error: (...args: unknown[]) => getLogger().error(...args),
   warn:  (...args: unknown[]) => getLogger().warn(...args),
   debug: (...args: unknown[]) => getLogger().debug(...args),
+  clear: () => getLogger().clear(),
   runCapturingStderr: <T>(task: () => Promise<T>) => getLogger().runCapturingStderr(task),
 };
 

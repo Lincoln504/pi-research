@@ -22,13 +22,14 @@ export interface LogContext {
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
 
-export function buildDefaultDebugLogPath(researchRunId?: string): string {
+export function buildDefaultDebugLogPath(_researchRunId?: string): string {
   const override = process.env['PI_RESEARCH_LOG_PATH'];
   if (override) return override;
-  if (researchRunId) {
-    return path.join(os.tmpdir(), `pi-research-${researchRunId}.log`);
-  }
   return path.join(os.tmpdir(), 'pi-research.log');
+}
+
+export function getConsolidatedLogPath(): string {
+  return buildDefaultDebugLogPath();
 }
 
 export function getDefaultDebugLogPathTemplate(): string {

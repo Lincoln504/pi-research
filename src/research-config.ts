@@ -84,55 +84,55 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const anyKnowledgeStore = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
 
   const initialItems: SettingItem[] = [
-    // --- Research (Project-scoped) ---
+    // --- Research (User-level) ---
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: '/research depth [project]',
-      description: 'Default complexity (normal/deep/ultra) for /research command.',
+      label: '/research depth [user]',
+      description: 'Default complexity (normal/deep/ultra) for /research command. Applies to all projects.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
       id: 'RESEARCHER_TIMEOUT_MS',
-      label: 'Research timeout [project]',
-      description: 'Maximum time in minutes allowed for a single research track.',
+      label: 'Research timeout [user]',
+      description: 'Maximum time in minutes allowed for a single research track. Shared across all projects.',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
     {
       id: 'MAX_CONCURRENT_RESEARCHERS',
-      label: 'Concurrency [project]',
-      description: 'Max parallel researcher threads. Manages token/resource load, not task delegation.',
+      label: 'Concurrency [user]',
+      description: 'Max parallel researcher threads. Shared resource limit for all research sessions.',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
     },
     {
       id: 'MAX_SCRAPE_BATCHES',
-      label: 'Scrape batches [project]',
-      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited).',
+      label: 'Scrape batches [user]',
+      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited). Shared default.',
       currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
       values: ['unlimited', '1', '2', '3', '5', '10', '15'],
     },
     {
       id: 'RESEARCH_REPORT_EXPORT_ENABLED',
-      label: 'Auto-export [project]',
-      description: 'Automatically save a markdown report when research completes.',
+      label: 'Auto-export [user]',
+      description: 'Automatically save a markdown report when research completes. Shared default.',
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
 
-    // --- Knowledge Store (Hybrid) ---
+    // --- Knowledge Store (User-level) ---
     {
       id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Project store [project]',
-      description: 'Save findings to a local database for this specific directory.',
+      label: 'Enable research memory [user]',
+      description: 'Save findings to your knowledge store for cross-project recall and future search.',
       currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'User store [user]',
-      description: 'Save findings to a shared user database for cross-project memory.',
+      label: 'Legacy user store [user]',
+      description: 'Shared user database for cross-project memory (deprecated in favor of unified store).',
       currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
@@ -141,7 +141,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'WORKER_THREADS',
       label: 'Worker threads [user]',
-      description: 'Browser processes for searching/scraping. Affects CPU/RAM.',
+      description: 'Browser processes for searching/scraping. Affects CPU/RAM usage globally.',
       currentValue: String(config.WORKER_THREADS),
       values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
@@ -149,21 +149,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'EMBEDDING_MODEL',
         label: 'Embed model [user]',
-        description: 'Vector model for store. Changing this deletes all current data.',
+        description: 'Vector model for store. Changing this renames current data to a backup and starts fresh.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
       {
         id: 'EMBEDDING_DEVICE',
         label: 'Embed device [user]',
-        description: 'Hardware backend (WebGPU or CPU). CPU is safer for servers.',
+        description: 'Hardware backend (WebGPU or CPU). CPU is safer for headless/server environments.',
         currentValue: config.EMBEDDING_DEVICE,
         values: ['webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
         label: 'Cache retention [user]',
-        description: 'Number of days to keep research findings in the database.',
+        description: 'Number of days to keep research findings before automated eviction.',
         currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
         values: ['7', '14', '30', '60', '90', '180', '365'],
       },
@@ -171,7 +171,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'DEBUG',
       label: 'Diagnostic logs [user]',
-      description: 'Enable verbose logging to file for troubleshooting errors.',
+      description: 'Enable verbose logging for troubleshooting. Writes to /tmp/pi-research.log.',
       currentValue: config.DEBUG ? 'true' : 'false',
       values: ['true', 'false'],
     },
@@ -188,7 +188,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'ACTION_KNOWLEDGE_STATUS',
         label: 'Database status',
-        description: 'Show entry counts and disk usage for the knowledge store.',
+        description: 'Show entry counts, disk usage, and model info for the knowledge store.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -196,8 +196,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.LOCAL_KNOWLEDGE_STORE_ENABLED ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-        label: 'Clear project store',
-        description: 'Permanently delete all project-scoped store entries.',
+        label: 'Clear project scope',
+        description: 'Permanently delete all store entries associated with this specific directory.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -205,8 +205,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-        label: 'Clear user store',
-        description: 'Permanently delete all user-scoped store entries.',
+        label: 'Clear global scope',
+        description: 'Permanently delete all entries that are not tied to a specific project.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -222,6 +222,13 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       id: 'ACTION_METRICS_CLEAR',
       label: 'Reset session',
       description: 'Clear the current session performance counters.',
+      currentValue: 'run',
+      values: ['run'],
+    },
+    {
+      id: 'ACTION_LOGS_CLEAR',
+      label: 'Clear diagnostic logs',
+      description: 'Delete the main diagnostic log file and all archived rotation files.',
       currentValue: 'run',
       values: ['run'],
     },
@@ -324,6 +331,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               wrappedDone({ type: 'action', action: 'metrics_view' });
             } else if (id === 'ACTION_METRICS_CLEAR') {
               wrappedDone({ type: 'action', action: 'metrics_clear' });
+            } else if (id === 'ACTION_LOGS_CLEAR') {
+              wrappedDone({ type: 'action', action: 'logs_clear' });
             }
 
           },
@@ -356,7 +365,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             const pathInfoText = `Project: ${path.basename(cwd)}`;
             const wrappedPathInfo = wrapText(pathInfoText, width - 2).map(line => theme.fg('dim', ` ${line}`));
             
-            const registryDesc = `Settings marked [project] are unique to this directory, stored in the Centralized Registry (~/.pi/state/project-settings.json). Settings marked [user] apply across all projects.`;
+            const registryDesc = `Most settings now apply globally ([user]). The Centralized Registry (~/.pi/state/project-settings.json) can still hold directory-specific overrides if configured manually.`;
             const wrappedRegistry = wrapText(registryDesc, width - 2).map(line => theme.fg('dim', ` ${line}`));
             
             const lines = [border, ...wrappedPathInfo, ...wrappedRegistry, '', ...listLines, border];
@@ -440,6 +449,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             metrics.clearSession();
             ctx.ui.notify('Metrics reset.', 'info');
             break;
+          case 'logs_clear': {
+            const confirmed = await ctx.ui.confirm('Clear Logs', 'Delete the main diagnostic log file and all archived rotation files?');
+            if (confirmed) {
+              logger.clear();
+              ctx.ui.notify('Diagnostic logs cleared.', 'info');
+            }
+            break;
+          }
         }
       }
     });

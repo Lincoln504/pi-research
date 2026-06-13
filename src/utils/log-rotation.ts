@@ -12,12 +12,37 @@ export interface RotationLogger {
 
 export class LogRotation {
   private readonly MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB max file size
-  private readonly MAX_LOG_FILES = 5; // Keep last 5 archived logs
+  private readonly MAX_LOG_FILES = 10; // Keep last 10 archived logs
   private lastRotationCheck: number = 0;
   private readonly logger: RotationLogger;
 
   constructor(logger: RotationLogger) {
     this.logger = logger;
+  }
+
+  /**
+   * Clear all research logs including archives.
+   */
+  clearLogs(logFile: string, logDir: string): void {
+    try {
+      if (fs.existsSync(logFile)) {
+        fs.unlinkSync(logFile);
+      }
+      
+      const files = fs.readdirSync(logDir);
+      const baseName = path.basename(logFile);
+      const archives = files.filter(f => f.startsWith(baseName) && f !== baseName);
+      
+      for (const archive of archives) {
+        try {
+          fs.unlinkSync(path.join(logDir, archive));
+        } catch { /* ignore */ }
+      }
+      
+      this.logger.log('[Logger] All logs and archives cleared.');
+    } catch (err) {
+      this.logger.log('[Logger] Failed to clear logs:', err);
+    }
   }
 
   /**

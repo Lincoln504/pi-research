@@ -170,32 +170,31 @@ describe('logger', () => {
       expect(logger.isVerbose()).toBe(true);
     });
 
-    it('should create per-run log file when researchRunId is provided', () => {
+    it('should use the consolidated log file even when researchRunId is provided', () => {
       const runId = 'run-a1b2c3d4';
       const logger = createLogger({ verbose: true, researchRunId: runId });
       
       const logPath = logger.getLogFilePath();
-      expect(logPath).toContain(runId);
-      expect(logPath).toMatch(/pi-research-run-a1b2c3d4\.log$/);
+      expect(logPath).toBe(path.join(os.tmpdir(), 'pi-research.log'));
     });
 
-    it('should create default log file when no researchRunId is provided', () => {
+    it('should use the default log file when no researchRunId is provided', () => {
       const logger = createLogger({ verbose: true });
       
       const logPath = logger.getLogFilePath();
       expect(logPath).toBe(path.join(os.tmpdir(), 'pi-research.log'));
     });
 
-    it('should write to per-run log file', () => {
+    it('should write to the consolidated log file with context', () => {
       const runId = 'run-test1234';
       const logger = createLogger({ verbose: true, researchRunId: runId });
       
       runWithLogContext({ researchRunId: runId, toolName: 'test' }, () => {
-        logger.info('test message for per-run log');
+        logger.info('test message for consolidated log');
       });
       
       const content = readFileSync(logger.getLogFilePath()!, 'utf-8');
-      expect(content).toContain('test message for per-run log');
+      expect(content).toContain('test message for consolidated log');
       expect(content).toContain(`"researchRunId":"${runId}"`);
     });
     it('should throw if setting the wrapper as the global logger', () => {
