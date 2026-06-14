@@ -14,7 +14,7 @@ import {
   stopBrowserManager,
 } from '../../src/infrastructure/browser/index.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder, skipsLiveNetwork } from './helpers/setup.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -79,7 +79,7 @@ describe('Concurrent Operations', () => {
 
   describe('Concurrent Browser Task Queue Management', () => {
     it('should handle multiple concurrent search operations', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const concurrency = 3;
       const queries = Array.from(
@@ -119,7 +119,7 @@ describe('Concurrent Operations', () => {
     }, 420000);
 
     it('should handle mixed search and scrape operations concurrently', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const searchTasks = [
         runBrowserTask<any>({ query: 'mixed test 1' }, 'search').catch(err => ({ error: err })),
@@ -159,7 +159,7 @@ describe('Concurrent Operations', () => {
     }, 420000);
 
     it('should handle burst of concurrent operations', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const burstSize = 4;
       const queries = Array.from(
@@ -323,7 +323,7 @@ describe('Concurrent Operations', () => {
 
   describe('Browser Pool Thread Safety', () => {
     it('should handle rapid sequential task submissions', { timeout: 120000 }, async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       // Single task to verify the pool handles sequential submission.
       // Previously used 4 tasks, each taking 5-75s, totaling 300s.
@@ -352,7 +352,7 @@ describe('Concurrent Operations', () => {
     });
 
     it('should handle task submission during pool restart', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const promises: Promise<any>[] = [];
 
@@ -403,7 +403,7 @@ describe('Concurrent Operations', () => {
 
   describe('Resource Management Under Concurrency', () => {
     it('should not leak file handles under concurrent load', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const fs = await import('node:fs');
       const getOpenFileCount = async () => {
@@ -448,7 +448,7 @@ describe('Concurrent Operations', () => {
     }, 60000);
 
     it('should maintain stable memory usage under concurrent load', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const memoryBefore = process.memoryUsage().heapUsed;
 
@@ -479,7 +479,7 @@ describe('Concurrent Operations', () => {
 
   describe('Concurrency Metrics', () => {
     it('should calculate and report concurrency metrics accurately', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const concurrency = 3;
       const queries = Array.from(

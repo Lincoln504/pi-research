@@ -133,6 +133,22 @@ export async function teardownLifecycle(context: TestContext): Promise<void> {
 }
 
 /**
+ * Whether tests that depend on LIVE external network success (DuckDuckGo search,
+ * real web scrape) should be skipped.
+ *
+ * These tests pass locally (residential IP) but flake on shared CI datacenter
+ * IPs: search providers rate-limit/block concurrent bursts, so live searches
+ * return zero results and the assertions fail — an environment problem, not a
+ * code bug. CI sets PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS=true so these skip
+ * VISIBLY (ctx.skip → reported as skipped, never a silent false-green pass)
+ * while still running for real locally. Browser launch itself is still covered
+ * in CI by the dedicated "Verify camoufox launches" step.
+ */
+export function skipsLiveNetwork(): boolean {
+  return process.env['PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS'] === 'true';
+}
+
+/**
  * Skip test if lifecycle is not initialized
  */
 export function skipIfNotInitialized(context: TestContext, testFn: () => void | Promise<void>) {
