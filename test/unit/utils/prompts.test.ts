@@ -34,7 +34,7 @@ describe('utils/prompts', () => {
 
   describe('loadPrompt - happy path', () => {
     it('loads an existing prompt file successfully', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       // Create a test prompt file
       const testContent = '# Test Prompt\n\nThis is a test prompt with some content.';
@@ -42,13 +42,13 @@ describe('utils/prompts', () => {
       writeFileSync(testFile, testContent, 'utf-8');
 
       // Temporarily override the prompts directory for this test
-      const originalLoadPrompt = await import('../../../src/utils/prompts.ts');
+      const originalLoadPrompt = await import('../../../src/core/llm/prompts.ts');
       // Note: We can't easily override the internal path, so test with real prompts
       // or ensure test file is in the right location
     });
 
     it('loads the real researcher prompt file', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('researcher');
 
       expect(typeof content).toBe('string');
@@ -58,7 +58,7 @@ describe('utils/prompts', () => {
     });
 
     it('returns non-empty content for known prompts', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const prompts = ['researcher', 'coordinator', 'agent'];
 
       for (const promptName of prompts) {
@@ -77,27 +77,27 @@ describe('utils/prompts', () => {
 
   describe('loadPrompt - error handling', () => {
     it('returns empty string for non-existent prompt', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('does-not-exist-xyz-12345');
       expect(content).toBe('');
     });
 
     it('handles empty prompt name', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('');
       expect(typeof content).toBe('string');
       // Empty string should result in empty content or error
     });
 
     it('handles special characters in prompt name', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('../etc/passwd');
       // Should handle path traversal attempts safely
       expect(typeof content).toBe('string');
     });
 
     it('handles null/undefined prompt name gracefully', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       expect(() => loadPrompt(null as any)).not.toThrow();
       expect(() => loadPrompt(undefined as any)).not.toThrow();
     });
@@ -105,7 +105,7 @@ describe('utils/prompts', () => {
 
   describe('loadPrompt - content validation', () => {
     it('returns string content for valid prompt', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('researcher');
 
       expect(content).toBeTypeOf('string');
@@ -114,7 +114,7 @@ describe('utils/prompts', () => {
     });
 
     it('handles prompts with unicode characters', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       // Test with a real prompt that might have unicode
       const content = loadPrompt('researcher');
 
@@ -124,7 +124,7 @@ describe('utils/prompts', () => {
     });
 
     it('handles prompts with special markdown characters', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('researcher');
 
       // Should preserve markdown formatting
@@ -133,16 +133,16 @@ describe('utils/prompts', () => {
   });
 
   describe('loadPrompt - edge cases', () => {
-    it('loads prompt with custom relative path argument', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
-      const content = loadPrompt('researcher', '..');
+    it('loads prompt without throwing', async () => {
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
+      const content = loadPrompt('researcher');
 
       // Should not throw - either loads content or returns empty string
       expect(typeof content).toBe('string');
     });
 
     it('handles multiple consecutive loads of the same prompt', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       const content1 = loadPrompt('researcher');
       const content2 = loadPrompt('researcher');
@@ -154,7 +154,7 @@ describe('utils/prompts', () => {
     });
 
     it('handles prompts with different cases', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       // On case-sensitive filesystems (Linux) only the exact name matches;
       // on case-insensitive filesystems all three return the same content.
@@ -165,7 +165,7 @@ describe('utils/prompts', () => {
     });
 
     it('handles prompts with file extension', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       const withExtension = loadPrompt('researcher.md');
       const withoutExtension = loadPrompt('researcher');
@@ -178,7 +178,7 @@ describe('utils/prompts', () => {
 
   describe('loadPrompt - performance and large files', () => {
     it('handles large prompt files efficiently', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const startTime = Date.now();
 
       const content = loadPrompt('researcher');
@@ -190,7 +190,7 @@ describe('utils/prompts', () => {
     });
 
     it('does not cache stale content', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       // Load twice, ensure we're getting fresh content
       const content1 = loadPrompt('researcher');
@@ -203,7 +203,7 @@ describe('utils/prompts', () => {
 
   describe('loadPrompt - security', () => {
     it('does not allow directory traversal attacks', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
 
       // Try various path traversal attempts
       const maliciousNames = [
@@ -222,7 +222,7 @@ describe('utils/prompts', () => {
     });
 
     it('handles very long prompt names', async () => {
-      const { loadPrompt } = await import('../../../src/utils/prompts.ts');
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const longName = 'a'.repeat(10000);
 
       expect(() => loadPrompt(longName)).not.toThrow();

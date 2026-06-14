@@ -11,6 +11,7 @@ import { type Embedder } from '../../../src/knowledge/embedder.ts';
 import { createHash } from 'node:crypto';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
+import { registerOrchestrationServices, initializeOrchestrationServices } from '../../../src/orchestration/service-initialization.ts';
 import { resetServiceContainer } from '../../../src/core/service-registry.ts';
 import * as pathmod from 'node:path';
 import * as os from 'node:os';
@@ -62,6 +63,7 @@ export async function setupLifecycle(): Promise<TestContext> {
   try {
     registerCoreServices();
     registerInfrastructureServices();
+    registerOrchestrationServices();
     // Provide a mock context for services that need it (like PlanningService)
     const mockCtx = {
       cwd: process.cwd(),
@@ -72,6 +74,7 @@ export async function setupLifecycle(): Promise<TestContext> {
       },
     };
     await initializeCoreServices(mockCtx);
+    await initializeOrchestrationServices(mockCtx);
     const { getServiceContainer } = await import('../../../src/core/service-registry.ts');
     getServiceContainer().isReady = true;
     logger.log('[test] Service Registry initialized for integration tests');

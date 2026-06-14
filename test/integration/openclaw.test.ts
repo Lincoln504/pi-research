@@ -63,7 +63,7 @@ vi.mock('../../src/healthcheck/registry.ts', async () => ({
     }
 }));
 
-import plugin, { shutdown } from '../../src/openclaw-entry.ts';
+import plugin from '../../src/openclaw-entry.ts';
 import { resetConfig } from '../../src/config.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -71,54 +71,83 @@ import * as os from 'node:os';
 
 describe('OpenClaw Plugin Integration', () => {
   let tmpDir: string;
+  let registeredTools: any[] = [];
+  let registeredLifecycles: any[] = [];
+  
+  const mockApi = {
+    registerTool: (tool: any) => registeredTools.push(tool),
+    registerRuntimeLifecycle: (lifecycle: any) => registeredLifecycles.push(lifecycle),
+    pluginConfig: {},
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
     resetConfig();
     tmpDir = path.join(os.tmpdir(), `pi-openclaw-it-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
+    registeredTools = [];
+    registeredLifecycles = [];
   });
 
   afterEach(async () => {
-    await shutdown();
+    // Run all registered lifecycles to trigger shutdown
+    for (const lc of registeredLifecycles) {
+      if (lc.cleanup) await lc.cleanup();
+    }
     if (fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('should initialize and provide tools', () => {
+  it('should initialize and provide tools', async () => {
     expect(plugin.id).toBe('pi-research');
-    expect(plugin.tools).toHaveLength(3);
+    await plugin.register(mockApi as any);
+    expect(registeredTools).toHaveLength(3);
   });
 
   it('should execute research via OpenClaw interface', async () => {
-    const researchTool = plugin.tools.find(t => t.name === 'research')!;
-    const result = await researchTool.execute(
-        { query: 'test', depth: 0 }, 
-        { apiKey: 'test', provider: 'mock', model: 'mock-model' }, 
-        {}
-    );
-    expect(result).toBe('integrated research report');
+    await plugin.register(mockApi as any);
+    const researchTool = registeredTools.find(t => t.name === 'research')!;
+    
+    // Simulate openclaw context by injecting config into the mock API
+    mockApi.pluginConfig = { apiKey: 'test', provider: 'mock', model: 'mock-model' };
+    
+    const result = await researchTool.execute('call-id', { query: 'test', depth: 0 });
+    expect(result.content[0].text).toBe('integrated research report');
   });
 
   it('should respect reportExportEnabled', async () => {
-    const researchTool = plugin.tools.find(t => t.name === 'research')!;
+    await plugin.register(mockApi as any);
+    const researchTool = registeredTools.find(t => t.name === 'research')!;
     const exportCwd = path.join(tmpDir, 'project');
     fs.mkdirSync(exportCwd, { recursive: true });
 
-    const result = await researchTool.execute(
-        { query: 'test', depth: 0 }, 
-        { apiKey: 'test', provider: 'mock', model: 'mock-model', reportExportEnabled: true }, 
-        { cwd: exportCwd } as any
-    );
+    mockApi.pluginConfig = { 
+        apiKey: 'test', 
+        provider: 'mock', 
+        model: 'mock-model', 
+        reportExportEnabled: true,
+        reportExportPath: exportCwd
+    };
 
-    expect(result).toContain('integrated research report');
-    expect(result).toContain('Research report saved to');
+    // Note: OpenClaw tools don't take context as 3rd arg in the new API.
+    // They read config. We can mock process.cwd in tests, or rely on reportExportPath config
+    const originalCwd = process.cwd;
+    process.cwd = () => exportCwd;
+
+    try {
+        const result = await researchTool.execute('call-id', { query: 'test', depth: 0 });
+        expect(result.content[0].text).toContain('integrated research report');
+        expect(result.content[0].text).toContain('Research report saved to');
+    } finally {
+        process.cwd = originalCwd;
+    }
   });
 
   it('should handle health check', async () => {
-    const healthTool = plugin.tools.find(t => t.name === 'health')!;
-    const result = await healthTool.execute({} as any, {} as any, {});
-    expect(result).toContain('Status');
+    await plugin.register(mockApi as any);
+    const healthTool = registeredTools.find(t => t.name === 'health')!;
+    const result = await healthTool.execute('call-id', {});
+    expect(result.content[0].text).toContain('status');
   });
 });

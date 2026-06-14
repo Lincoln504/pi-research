@@ -3,7 +3,7 @@ import {
   splitTerminalSequences,
   isEscapeSequence,
   isInteractionKey
-} from '../../../src/utils/terminal-state.ts';
+} from '../../../src/tui/utils/terminal-state.ts';
 
 describe('terminal-state', () => {
   describe('splitTerminalSequences', () => {

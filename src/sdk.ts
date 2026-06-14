@@ -15,7 +15,11 @@ import {
   initializeInfrastructureServices,
   shutdownInfrastructureServices
 } from './infrastructure/service-initialization.ts';
-import { getService, resetServiceContainer, createServiceContainer } from './core/service-registry.ts';
+import { 
+  registerOrchestrationServices, 
+  initializeOrchestrationServices 
+} from './orchestration/service-initialization.ts';
+import { getService, resetServiceContainer, getServiceContainer } from './core/service-registry.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from './core/interfaces/knowledge-interfaces.ts';
@@ -29,7 +33,7 @@ import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-
 import { logger, createLogger, setLogger } from './logger.ts';
 import { getConfig, validateConfig, type Config } from './config.ts';
 import { metrics } from './utils/metrics.ts';
-import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './utils/model-registry-factory.ts';
+import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
 
@@ -47,16 +51,19 @@ let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 
 // Signal handler state — registered once, removed on clean shutdown.
-let _onSigint: (() => void) | null = null;
-let _onSigterm: (() => void) | null = null;
+let _onSignal: ((signal: string) => void) | null = null;
 let _shuttingDown = false;
 
 function _registerSignalHandlers(): void {
-  if (_onSigint) return; // already registered
+  if (_onSignal) return; // already registered
 
-  const handler = (signal: string) => {
+  _onSignal = (signal: string) => {
     if (_shuttingDown) return;
     _shuttingDown = true;
+    
+    // Mark that the process is going down so native addons know to skip risky teardowns
+    process.env['PI_PROCESS_EXITING'] = '1';
+
     logger.warn(`[SDK] Received ${signal} — shutting down gracefully...`);
     // Fire-and-forget shutdown; force-exit after a hard deadline.
     shutdownResearchSDK().catch(err => logger.error('[SDK] Signal shutdown error:', err));
@@ -66,17 +73,25 @@ function _registerSignalHandlers(): void {
     }, 15000).unref();
   };
 
-  _onSigint = () => handler('SIGINT');
-  _onSigterm = () => handler('SIGTERM');
-  process.on('SIGINT', _onSigint);
-  process.on('SIGTERM', _onSigterm);
+  process.on('SIGINT', () => _onSignal?.('SIGINT'));
+  process.on('SIGTERM', () => _onSignal?.('SIGTERM'));
+  process.on('SIGHUP', () => _onSignal?.('SIGHUP'));
+  if (process.platform === 'win32') {
+    process.on('SIGBREAK', () => _onSignal?.('SIGBREAK'));
+  }
 }
 
 function _removeSignalHandlers(): void {
-  if (_onSigint) process.removeListener('SIGINT', _onSigint);
-  if (_onSigterm) process.removeListener('SIGTERM', _onSigterm);
-  _onSigint = null;
-  _onSigterm = null;
+  if (_onSignal) {
+    // Note: Node.js process.removeAllListeners is safer when wrapping closures.
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('SIGHUP');
+    if (process.platform === 'win32') {
+      process.removeAllListeners('SIGBREAK');
+    }
+  }
+  _onSignal = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,17 +203,19 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     // Resolve model using unified logic.
     globalModel = resolveModel(globalRegistry, typeof options.model === 'string' ? options.model : undefined, parsedProvider, globalApiKey);
 
-    // Create isolated container
-    globalContainer = createServiceContainer();
+    // Use the global container to ensure internal services can resolve dependencies
+    globalContainer = getServiceContainer();
 
     // Register and initialize services
     registerCoreServices(globalContainer);
     registerInfrastructureServices(globalContainer);
+    registerOrchestrationServices(globalContainer);
 
     const mockCtx = createMockContext('init-session');
     const initResult = await Promise.all([
       initializeCoreServices(mockCtx, globalContainer),
-      initializeInfrastructureServices(mockCtx, globalContainer)
+      initializeInfrastructureServices(mockCtx, globalContainer),
+      initializeOrchestrationServices(mockCtx, globalContainer)
     ]);
 
     const allSucceeded = initResult.every(r => r && r.success);
@@ -358,7 +375,7 @@ export async function getResearchReports(researchId: string): Promise<Map<string
   return synthesis.getAllReports(researchId);
 }
 
-import { clearAllSessionState } from './utils/session-state.ts';
+import { clearAllSessionState } from './orchestration/session/session-state.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
 /**

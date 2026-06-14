@@ -125,7 +125,7 @@ vi.mock('../../src/tui/research-panel.ts', () => ({
   })),
 }));
 
-vi.mock('../../src/utils/session-state.ts', () => ({
+vi.mock('../../src/orchestration/session/session-state.ts', () => ({
   startResearchSession: vi.fn((_psid) => 'session-123'),
   endResearchSession: vi.fn(),
   isBottomMostSession: vi.fn((_psid, _sid) => true),

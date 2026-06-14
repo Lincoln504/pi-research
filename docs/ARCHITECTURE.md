@@ -124,19 +124,20 @@ const foo = await getService<IFoo>(ServiceNames.FOO);
 Services that hold resources implement `dispose()` for clean shutdown. The registry handles disposal in reverse dependency order.
 
 Core services (`src/core/`): `PlanningService`, `SchedulerService`
-Infrastructure services (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`, and several state sub-services.
+Infrastructure services (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`.
+Orchestration services (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`.
 
 ---
 
 ### State Management
 
-Cross-session and cross-process state (active sessions, browser status, metrics) is managed by `StateManagerService` using file-based locking (`FileLockService`) to serialize concurrent writes.
+Cross-session and cross-process state (active sessions, browser status, metrics) is managed by `StateManagerService` (in `src/infrastructure/state/`) using file-based locking (`FileLockService`) to serialize concurrent writes.
 
 ---
 
 ### TUI
 
-The research TUI uses `@earendil-works/pi-tui` to render live progress panels. Terminal state (keyboard protocol, mouse tracking, bracketed paste) is tracked and reset on all exit paths to prevent escape sequence leakage to the shell.
+The research TUI uses `@earendil-works/pi-tui` to render live progress panels. Terminal state (keyboard protocol, mouse tracking, bracketed paste) and stdio capture are managed by utilities in `src/tui/utils/` to ensure a clean exit.
 
 ---
 
@@ -149,8 +150,11 @@ src/
 ├── logger.ts             structured logger (JSONL, TUI-safe)
 ├── tool.ts               tool definitions (research, health)
 ├── sdk.ts                programmatic SDK (non-extension use)
+├── openclaw-entry.ts     OpenClaw plugin entry point
 ├── research-config.ts    /research-config TUI
 ├── core/
+│   ├── llm/              agentic repair, prompts, model resolution, inject-date
+│   ├── interfaces/       abstraction contracts (observer, planning, orchestration)
 │   ├── service-registry.ts
 │   ├── service-interfaces.ts
 │   ├── service-initialization.ts
@@ -158,25 +162,36 @@ src/
 │   └── scheduler-service.ts
 ├── infrastructure/
 │   ├── browser/          worker pool, task scheduler, IPC, camoufox config
+│   ├── state/            state manager, session tracking, metrics collector
+│   ├── embedding/        local embedding server management
+│   ├── types/            infrastructure-level types
 │   ├── knowledge-store-service.ts
-│   ├── state-manager-service.ts
 │   ├── metrics-service.ts
-│   └── ...
+│   ├── process-lifecycle-service.ts
+│   ├── file-lock-service.ts
+│   └── service-initialization.ts
 ├── orchestration/
+│   ├── session/          in-memory research session tracking, PI session metadata
 │   ├── deep-research-orchestrator.ts
 │   ├── quick-research-orchestrator.ts
 │   ├── research-orchestration-service.ts
-│   └── researcher-executor.ts
-├── tools/                search, scrape, security, stackexchange, grep, links
+│   ├── researcher-executor.ts
+│   ├── researcher.ts
+│   └── service-initialization.ts
+├── prompts/              Markdown prompt templates for all agents
+├── tools/                search, scrape, security, stackexchange, grep, links, read
 ├── web-research/         DuckDuckGo search, scraper, retry logic
 ├── knowledge/            embedder, store, writer queue, chunker, migration
-├── tui/                  TUI panels, multi-session layout
+├── tui/
+│   ├── utils/            terminal state, stdio capture
+│   └── ...               panels, layout, controller, wave animation
 ├── healthcheck/          health check registry and checks
 ├── cleanup/              research result cleanup
-├── observers/            headless observer (SDK use)
+├── observers/            research-observer implementation
 ├── security/             NVD, CISA KEV, OSV, GitHub Advisory clients
 ├── stackexchange/        Stack Exchange API client
-└── utils/                circuit breaker, metrics, error tracking, shutdown manager
+├── types/                shared index types and TUI types
+└── utils/                circuit breaker, text-utils, shared-links, metrics, error tracking
 ```
 
 ---

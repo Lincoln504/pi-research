@@ -39,8 +39,6 @@ describe('Infrastructure Service Initialization', () => {
       ServiceNames.STATE_METRICS_COLLECTOR,
       ServiceNames.STATE_VALIDATOR,
       ServiceNames.WORKER_POOL_MANAGER,
-      ServiceNames.RESEARCH_SESSION_SERVICE,
-      ServiceNames.RESEARCH_SYNTHESIS_SERVICE,
     ];
 
     const registeredNames = vi.mocked(coreRegistry.registerService).mock.calls.map(call => call[0]);

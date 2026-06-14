@@ -31,6 +31,10 @@ const { mockModelRegistryInstance, STUB_MODEL } = vi.hoisted(() => {
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
+vi.mock('../../src/orchestration/service-initialization.ts', () => ({
+  registerOrchestrationServices: vi.fn(),
+}));
+
 vi.mock('../../src/core/service-initialization.ts', () => ({
   registerCoreServices: vi.fn(),
   initializeCoreServices: vi.fn().mockResolvedValue({ success: true, initialized: [], failed: [] }),
@@ -49,23 +53,27 @@ vi.mock('../../src/utils/shutdown-manager.ts', () => ({
   },
 }));
 
-vi.mock('../../src/core/service-registry.ts', () => ({
-  resetServiceContainer: vi.fn().mockResolvedValue(undefined),
-  getServiceContainer: vi.fn().mockReturnValue({ isReady: false }),
-  createServiceContainer: vi.fn().mockReturnValue({ isReady: false, register: vi.fn() }),
-  getService: vi.fn().mockImplementation((name, _ctx, _container) => {
-    if (name === 'research-orchestration') return { runResearch: mockDeepRun };
-    if (name === 'session-service') return { registerSession: vi.fn(), cleanup: vi.fn() };
-    if (name === 'research-synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()), appendMetadata: vi.fn((result: string) => result) };
-    return {};
-  }),
-  tryGetService: vi.fn().mockImplementation((name) => {
-    if (name === 'research-orchestration') return { runResearch: mockDeepRun };
-    return {};
-  }),
-  tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
-  disposeAllServices: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('../../src/core/service-registry.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/service-registry.ts')>();
+  return {
+    ...actual,
+    resetServiceContainer: vi.fn().mockResolvedValue(undefined),
+    getServiceContainer: vi.fn().mockReturnValue({ isReady: false }),
+    createServiceContainer: vi.fn().mockReturnValue({ isReady: false, register: vi.fn() }),
+    getService: vi.fn().mockImplementation((name, _ctx, _container) => {
+      if (name === 'research-orchestration') return { runResearch: mockDeepRun };
+      if (name === 'session-service') return { registerSession: vi.fn(), cleanup: vi.fn() };
+      if (name === 'research-synthesis-service') return { getAllReports: vi.fn().mockResolvedValue(new Map()), appendMetadata: vi.fn((result: string) => result) };
+      return {};
+    }),
+    tryGetService: vi.fn().mockImplementation((name) => {
+      if (name === 'research-orchestration') return { runResearch: mockDeepRun };
+      return {};
+    }),
+    tryGetServiceContainerFromCtx: vi.fn((ctx: any) => ctx?.container || { isReady: true }),
+    disposeAllServices: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   ModelRegistry: {
@@ -118,6 +126,9 @@ import {
 import { 
   registerInfrastructureServices, 
 } from '../../src/infrastructure/service-initialization.ts';
+import { 
+  registerOrchestrationServices, 
+} from '../../src/orchestration/service-initialization.ts';
 import { logger } from '../../src/logger.ts';
 import { getConfig } from '../../src/config.ts';
 import { resetServiceContainer, disposeAllServices } from '../../src/core/service-registry.ts';
@@ -140,6 +151,7 @@ describe('SDK Lifecycle', () => {
     
     vi.mocked(registerCoreServices).mockClear();
     vi.mocked(registerInfrastructureServices).mockClear();
+    vi.mocked(registerOrchestrationServices).mockClear();
     vi.mocked(initializeCoreServices).mockClear().mockResolvedValue({ success: true, initialized: [], failed: [] } as any);
     vi.mocked(disposeAllServices).mockClear().mockResolvedValue(undefined);
     vi.mocked(resetServiceContainer).mockClear().mockResolvedValue(undefined);
@@ -157,10 +169,11 @@ describe('SDK Lifecycle', () => {
   });
 
   describe('initResearchSDK', () => {
-    it('registers core and infrastructure services', async () => {
+    it('registers core, infrastructure, and orchestration services', async () => {
       await initSDK();
       expect(registerCoreServices).toHaveBeenCalledOnce();
       expect(registerInfrastructureServices).toHaveBeenCalledOnce();
+      expect(registerOrchestrationServices).toHaveBeenCalledOnce();
     });
 
     it('calls initializeCoreServices with a context object', async () => {
@@ -179,9 +192,11 @@ describe('SDK Lifecycle', () => {
     it('warns and returns early when called a second time without disposing', async () => {
       await initSDK();
       vi.mocked(registerCoreServices).mockClear();
+      vi.mocked(registerOrchestrationServices).mockClear();
       await initSDK();
       expect(vi.mocked(logger.warn)).toHaveBeenCalledOnce();
       expect(registerCoreServices).not.toHaveBeenCalled();
+      expect(registerOrchestrationServices).not.toHaveBeenCalled();
     });
 
     it('uses process.cwd() when no cwd option is provided', async () => {

@@ -24,11 +24,11 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
   metrics: { increment: vi.fn(), observe: vi.fn() },
 }));
 
-vi.mock('../../../src/utils/prompts.ts', () => ({
+vi.mock('../../../src/core/llm/prompts.ts', () => ({
   loadPrompt: vi.fn(() => 'system prompt {{root_query}}'),
 }));
 
-vi.mock('../../../src/utils/inject-date.ts', () => ({
+vi.mock('../../../src/core/llm/inject-date.ts', () => ({
   injectCurrentDate: vi.fn((_prompt: string, _tag: string) => _prompt),
 }));
 

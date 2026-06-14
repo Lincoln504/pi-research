@@ -19,7 +19,7 @@ import {
   registerMasterUpdate,
   registerSessionAbort,
   abortAllSessions,
-} from '../../../src/utils/session-state.ts';
+} from '../../../src/orchestration/session/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
 describe('utils/session-state', () => {

@@ -42,7 +42,7 @@ GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
 }));
 
 // Mock session-state for steering functions
-vi.mock('../../../src/utils/session-state.ts', () => ({
+vi.mock('../../../src/orchestration/session/session-state.ts', () => ({
   getSteeringMessages: vi.fn(() => []),
   getQueuedSteeringMessages: vi.fn(() => []),
   consumeQueuedMessages: vi.fn(() => []),
@@ -259,7 +259,7 @@ describe('DeepResearchOrchestrator', () => {
     // research run begins. For complexity 1, the base budget is 2 rounds;
     // with 2 queued messages we should get up to 2 extra rounds (capped
     // at MAX_EXTRA_ROUNDS_WITH_STEERING = 2).
-    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
     vi.mocked(getSteeringMessages).mockReturnValue([
       { id: '1', text: 'focus on X', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
       { id: '2', text: 'and Y', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
@@ -291,7 +291,7 @@ describe('DeepResearchOrchestrator', () => {
 
   it('should NOT extend round budget when no queued steering messages exist', async () => {
     // Explicitly reset steering mock in case a previous test set it.
-    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
     vi.mocked(getSteeringMessages).mockReturnValue([]);
 
     mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
@@ -316,7 +316,7 @@ describe('DeepResearchOrchestrator', () => {
 
   it('should cap extra rounds at MAX_EXTRA_ROUNDS_WITH_STEERING even with many queued messages', async () => {
     // 5 queued messages — but cap is 2, so we should only get 2 extra rounds.
-    const { getSteeringMessages } = await import('../../../src/utils/session-state.ts');
+    const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
     vi.mocked(getSteeringMessages).mockReturnValue(
       Array.from({ length: 5 }, (_, i) => ({
         id: String(i),

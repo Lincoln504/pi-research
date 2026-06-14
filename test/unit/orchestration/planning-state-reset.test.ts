@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
+import { registerOrchestrationServices } from '../../../src/orchestration/service-initialization.ts';
 import { resetServiceContainer, getService } from '../../../src/core/service-registry.ts';
 import { ServiceNames, type IResearchOrchestration, type IPlanningService } from '../../../src/core/service-interfaces.ts';
 
@@ -17,6 +18,7 @@ describe('Planning Service State Reset', () => {
     await resetServiceContainer();
     registerCoreServices();
     registerInfrastructureServices();
+    registerOrchestrationServices();
     
     const mockCtx = {
       cwd: process.cwd(),

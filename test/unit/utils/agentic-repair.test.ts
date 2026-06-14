@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { repairJsonWithLlm } from '../../../src/utils/agentic-repair.ts';
+import { repairJsonWithLlm } from '../../../src/core/llm/agentic-repair.ts';
 import { Type } from 'typebox';
 import type { Model } from '@earendil-works/pi-ai';
 

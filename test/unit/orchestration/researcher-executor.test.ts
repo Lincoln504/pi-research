@@ -31,11 +31,11 @@ vi.mock('../../../src/utils/metrics.ts', () => ({
   metrics: { increment: vi.fn(), observe: vi.fn() },
 }));
 
-vi.mock('../../../src/utils/prompts.ts', () => ({
+vi.mock('../../../src/core/llm/prompts.ts', () => ({
   loadPrompt: vi.fn(() => 'researcher prompt {{goal}} {{store_section}} {{evidence_section}} {{coordination_section}} {{extra_tool_guidelines}}'),
 }));
 
-vi.mock('../../../src/utils/inject-date.ts', () => ({
+vi.mock('../../../src/core/llm/inject-date.ts', () => ({
   injectCurrentDate: vi.fn((_t: string) => _t),
 }));
 
