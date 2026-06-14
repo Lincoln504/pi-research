@@ -35,7 +35,7 @@ describe('KnowledgeStore Scoping', () => {
 
   async function createStore(options: { 
     workspace?: string, 
-    knowledgeMode: 'none' | 'project'
+    knowledgeMode: 'none' | 'project' | 'global'
   }) {
     const store = new KnowledgeStore({
       dbDir: testDbDir,

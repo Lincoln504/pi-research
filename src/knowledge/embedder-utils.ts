@@ -105,28 +105,23 @@ export function unregisterGlobalEmbedder(): void {
   globalEmbedderRef = null;
 }
 
-// Exit handler for process-level teardown (exit, beforeExit).
-// MUST be synchronous because async operations are ignored in the 'exit' phase.
-// During these events, the native ONNX environment is often in a race 
-// with the JS event loop. Calling dispose() here is risky and redundant.
-const exitHandler = () => {
+// Last-resort safety net: during beforeExit the C++ ORT LoggingManager is still
+// alive, so async disposal is safe. session_shutdown should have already disposed
+// the embedder; this only fires if somehow it didn't (e.g. a crash path).
+// We do NOT register on 'exit' — by then C++ statics may already be destroyed.
+const beforeExitHandler = () => {
   isProcessExiting = true;
   if (globalEmbedderRef) {
-    globalEmbedderRef = null; 
-    // We intentionally DO NOT call dispose here during process exit 
-    // to prevent the OnnxRuntimeException: DefaultLogger crash.
-    // The OS will reclaim the memory.
-    try {
-      logger.debug('[embedder] Process exiting, skipping native disposal to prevent crash');
-    } catch {
-      // Ignore logger errors if stdout is already closed
-    }
+    const ref = globalEmbedderRef;
+    globalEmbedderRef = null;
+    // Fire async dispose — beforeExit allows scheduling async tasks.
+    ref.dispose().catch(() => {
+      // Silently ignore — process is shutting down, OS reclaims memory.
+    });
   }
 };
 
-// Register via shutdownManager only — it internally calls process.on()
-shutdownManager.registerEventListener(process, 'beforeExit', exitHandler);
-shutdownManager.registerEventListener(process, 'exit', exitHandler);
+shutdownManager.registerEventListener(process, 'beforeExit', beforeExitHandler);
 
 /**
  * Initialize the ONNX environment

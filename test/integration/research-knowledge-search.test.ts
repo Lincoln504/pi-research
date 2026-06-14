@@ -294,9 +294,7 @@ describe('research_knowledge_search — store interaction layer', () => {
     const scopedStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir,
       embedder,
       modelName: 'synthetic-64',
-      workspace: '/test/project-a',
-      localEnabled: true,
-      globalEnabled: false, });
+      workspace: '/test/project-a' });
     await scopedStore.open();
 
     await seedStore(scopedStore, [
@@ -312,9 +310,7 @@ describe('research_knowledge_search — store interaction layer', () => {
     const otherStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir,
       embedder,
       modelName: 'synthetic-64',
-      workspace: '/test/project-b',
-      localEnabled: true,
-      globalEnabled: false, });
+      workspace: '/test/project-b' });
     await otherStore.open();
 
     const results = await otherStore.findRelevantUrls('project A', { limit: 5 });

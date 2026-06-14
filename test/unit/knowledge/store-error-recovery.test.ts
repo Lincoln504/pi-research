@@ -63,7 +63,6 @@ describe('KnowledgeStore Error Recovery', () => {
       } as any,
       modelName: 'Xenova/all-MiniLM-L6-v2',
       reconnectFactory,
-      knowledgeMode: 'project',
     });
     await storeWithReconnect.initialize();
     await storeWithReconnect.addDocuments([{ url: 'https://retry.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);

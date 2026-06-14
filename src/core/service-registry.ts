@@ -15,7 +15,7 @@
 
 import { logger } from '../logger.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { isShuttingDown } from '../knowledge/embedder-utils.ts';
+
 
 /**
  * Service lifecycle stages
@@ -397,14 +397,10 @@ export class ServiceContainer {
         for (const name of toDispose) {
           const registration = this.services.get(name)!;
           if (registration.instance && registration.instance.dispose) {
-            if (isShuttingDown()) {
-              logger.debug(`[ServiceContainer] Skipping disposal of '${name}' during shutdown`);
-            } else {
-              try {
-                await registration.instance.dispose();
-              } catch (err: unknown) {
-                logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
-              }
+            try {
+              await registration.instance.dispose();
+            } catch (err: unknown) {
+              logger.warn(`[ServiceContainer] Error disposing service '${name}':`, err);
             }
           }
           registration.instance = null;

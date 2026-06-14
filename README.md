@@ -113,13 +113,11 @@ Full variable reference: [docs/SDK.md](docs/SDK.md).
 ## Development
 
 ```bash
-npm run test:unit         # 1186 unit tests, no browser required
+npm run test:unit         # 1200 unit tests, no browser required
 npm run test:integration  # requires camoufox + Xvfb on Linux
 npm run type-check        # TypeScript strict mode
 npm run lint              # ESLint
 npm run deps:check        # architectural rule enforcement
 ```
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for full setup, CI details, and contribution guide.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design and service patterns.

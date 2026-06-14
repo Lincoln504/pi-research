@@ -17,7 +17,7 @@ import type { IStateManager } from '../../core/interfaces/state-manager-interfac
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 import { Embedder } from '../../knowledge/embedder.ts';
 import { getModelEmbedderConfig } from '../../knowledge/model-config.ts';
-import { isShuttingDown } from '../../knowledge/embedder-utils.ts';
+
 import { EmbeddingServer } from './embedding-server.ts';
 import { EmbeddingClient } from './embedding-client.ts';
 
@@ -223,14 +223,10 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
 
 export async function clearEmbeddingInstance(): Promise<void> {
   if (_embeddingInstance) {
-    if (isShuttingDown()) {
-      logger.debug('[EmbeddingFactory] Skipping dispose during shutdown to prevent onnxruntime crash');
-    } else {
-      try {
-        await _embeddingInstance.dispose?.();
-      } catch (err) {
-        logger.warn('[EmbeddingFactory] Error disposing old embedding instance:', err);
-      }
+    try {
+      await _embeddingInstance.dispose?.();
+    } catch (err) {
+      logger.warn('[EmbeddingFactory] Error disposing old embedding instance:', err);
     }
   }
   _embeddingInstance = null;

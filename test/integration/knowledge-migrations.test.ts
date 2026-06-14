@@ -77,9 +77,7 @@ describe('Knowledge Store Persistence', () => {
       const localStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
         embedder, 
         modelName: 'synthetic-64',
-        workspace: '/project/a',
-        localEnabled: true,
-        globalEnabled: false });
+        workspace: '/project/a' });
       await localStore.open();
       await localStore.addDocuments([{
         url: 'https://local-a.com',
@@ -89,38 +87,34 @@ describe('Knowledge Store Persistence', () => {
       }]);
       await localStore.close();
 
-      // 2. Add global data
-      const globalStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
-        embedder, 
-        modelName: 'synthetic-64',
-        workspace: '/project/b', // Different workspace
-        localEnabled: false,
-        globalEnabled: true });
-      await globalStore.open();
-      await globalStore.addDocuments([{
-        url: 'https://global.com',
-        text: 'Global shared content',
-        metadata: {},
-        timestamp: Date.now()
-      }]);
-      await globalStore.close();
-
-      // 3. Verify project B only sees global data
+      // 2. Add data to a different workspace (both are project-mode, simulating two projects)
       const storeB = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
         embedder, 
         modelName: 'synthetic-64',
-        workspace: '/project/b',
-        localEnabled: true,
-        globalEnabled: true });
+        workspace: '/project/b' });
       await storeB.open();
+      await storeB.addDocuments([{
+        url: 'https://project-b-local.com',
+        text: 'Project B content',
+        metadata: {},
+        timestamp: Date.now()
+      }]);
+      await storeB.close();
+
+      // 3. Verify project B only sees its own data (workspace isolation)
+      const storeB2 = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
+        embedder, 
+        modelName: 'synthetic-64',
+        workspace: '/project/b' });
+      await storeB2.open();
       
-      const foundGlobal = await storeB.findByUrl('https://global.com');
-      expect(foundGlobal).toHaveLength(1);
+      const foundLocalB = await storeB2.findByUrl('https://project-b-local.com');
+      expect(foundLocalB).toHaveLength(1);
       
-      const foundLocalA = await storeB.findByUrl('https://local-a.com');
+      const foundLocalA = await storeB2.findByUrl('https://local-a.com');
       expect(foundLocalA).toHaveLength(0); // Should be invisible to project B
 
-      await storeB.close();
+      await storeB2.close();
     });
   });
 

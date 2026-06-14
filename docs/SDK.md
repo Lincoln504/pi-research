@@ -15,7 +15,7 @@ Settings are loaded with the following precedence:
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | 180000–1800000 | Per-researcher timeout (3–30 min) |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | 1–5 | Parallel researchers |
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | `1` | 1–3 | Default depth for `/research` command |
-| `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | 0–99 | Scrape batches per researcher (0 = unlimited) |
+| `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `3` | 0–99 | Scrape batches per researcher (0 = unlimited) |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs per batch |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process |
@@ -27,7 +27,7 @@ Settings are loaded with the following precedence:
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `none` | — | Knowledge store mode: 'none' or 'project' |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `none` | — | Knowledge store mode: 'none', 'project', or 'global' |
 | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |

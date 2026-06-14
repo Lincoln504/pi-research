@@ -110,7 +110,56 @@ describe('KnowledgeStore', () => {
     expect(results.every(r => r.url === 'https://example.com/a')).toBe(true);
   });
 
-  // Test removed: 'global' knowledge mode is no longer supported
+  // global mode: writes is_global=true; scoped reads only match global rows
+  // Project-mode stores cannot see global-mode data, but other global-mode stores can
+  it('global mode: writes and reads with is_global scope', async () => {
+    const gStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'global',
+    });
+    await gStore.open();
+
+    // Write
+    await gStore.addDocuments([{
+      url: 'https://global.example.com/doc',
+      text: 'Shared global knowledge',
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now()
+    }]);
+
+    // Verify global-mode visibility
+    const found = await gStore.findByUrl('https://global.example.com/doc');
+    expect(found).toHaveLength(1);
+    expect(found[0]!.text).toBe('Shared global knowledge');
+
+    // Project-mode store on same DB must NOT see the global doc
+    const pStore = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'project',
+      workspace: '/other',
+    });
+    await pStore.open();
+    expect(await pStore.findByUrl('https://global.example.com/doc')).toHaveLength(0);
+
+    // Another global-mode store (different workspace) MUST see it
+    const g2 = new KnowledgeStore({
+      dbDir: testDbDir,
+      embedder: mockEmbedder,
+      modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'global',
+      workspace: '/other2',
+    });
+    await g2.open();
+    expect(await g2.findByUrl('https://global.example.com/doc')).toHaveLength(1);
+
+    await gStore.close();
+    await pStore.close();
+    await g2.close();
+  });
 
   it('findByUrl returns empty array for URL with no documents', async () => {
     await store.open();

@@ -58,9 +58,7 @@ describe('Knowledge Store & URL Consistency Integration', () => {
     const store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder as any,
       modelName: 'test-model',
-      workspace: '/project/a',
-      localEnabled: true,
-      globalEnabled: true });
+      workspace: '/project/a' });
 
     await store.initialize();
 
@@ -84,9 +82,7 @@ describe('Knowledge Store & URL Consistency Integration', () => {
     const storeB = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder as any,
       modelName: 'test-model',
-      workspace: '/project/b',
-      localEnabled: true,
-      globalEnabled: true });
+      workspace: '/project/b' });
     await storeB.initialize();
     const writerB = new WriterQueue({ store: storeB, chunker: null });
     await writerB.initialize();

@@ -165,12 +165,12 @@ From `src/sdk.ts`, the minimum viable context is:
 | `timeoutMs` | `RESEARCHER_TIMEOUT_MS` | `PI_RESEARCH_TIMEOUT_MS` | 300000 |
 | `maxResearchers` | `MAX_CONCURRENT_RESEARCHERS` | `PI_RESEARCH_MAX_RESEARCHERS` | 3 |
 | `defaultDepth` | `DEFAULT_RESEARCH_DEPTH` | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` | 1 |
-| `maxScrapeBatches` | `MAX_SCRAPE_BATCHES` | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | 2 |
+| `maxScrapeBatches` | `MAX_SCRAPE_BATCHES` | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | 3 |
 | `maxConcurrentScrapes` | `MAX_CONCURRENT_SCRAPES` | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | 3 |
 | `workerThreads` | `WORKER_THREADS` | `PI_RESEARCH_WORKER_THREADS` | 4 |
 | `workerConcurrency` | `WORKER_CONCURRENCY` | `PI_RESEARCH_WORKER_CONCURRENCY` | 2 |
 | `knowledgeMode` | `KNOWLEDGE_STORE_MODE` | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | 'none' |
-| `embeddingModel` | `EMBEDDING_MODEL` | `PI_RESEARCH_EMBEDDING_MODEL` | Xenova/all-MiniLM-L6-v2 |
+| `embeddingModel` | `EMBEDDING_MODEL` | `PI_RESEARCH_EMBEDDING_MODEL` | onnx-community/granite-embedding-small-english-r2-ONNX |
 | `embeddingDevice` | `EMBEDDING_DEVICE` | `PI_RESEARCH_EMBEDDING_DEVICE` | webgpu |
 | `cacheTtlDays` | `KNOWLEDGE_STORE_CACHE_TTL_DAYS` | `PI_RESEARCH_CACHE_TTL_DAYS` | 30 |
 | `scrapeTimeoutMs` | `SCRAPE_TIMEOUT_MS` | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | 15000 |

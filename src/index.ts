@@ -139,12 +139,14 @@ export default async function (pi: ExtensionAPI) {
   // 2. REGISTER SHUTDOWN TASKS
   shutdownManager.register(async () => {
     try {
+      // Dispose native resources (ONNX pipeline) while C++ statics are still alive.
+      await disposeCoreServices();
+      logger.log('[pi-research] All services disposed');
+      // Clear in-memory state after disposal.
+      disposeGlobalTuiController();
       clearAllSessionState();
       metrics.clear();
       logger.info('[pi-research] All session state cleared');
-      disposeGlobalTuiController();
-      await disposeCoreServices();
-      logger.log('[pi-research] All services disposed');
     } catch (err) {
       logger.error('[pi-research] Shutdown task failed:', err);
     }

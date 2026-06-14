@@ -35,7 +35,7 @@ export interface StoreOptions {
   
   /** Scoping options for unified database */
   workspace?: string;
-  knowledgeMode: 'none' | 'project';
+  knowledgeMode: 'none' | 'project' | 'global';
   /** Cache TTL in days for automatic eviction */
   ttlDays?: number;
 }
@@ -74,6 +74,8 @@ export class KnowledgeStore implements IKnowledgeStore {
     switch (this.options.knowledgeMode) {
       case 'project':
         return `workspace = '${ws}'`;
+      case 'global':
+        return 'is_global = true';
       default: // 'none'
         return '1 = 0';
     }
@@ -440,13 +442,14 @@ export class KnowledgeStore implements IKnowledgeStore {
 
         while (retryCount <= MAX_RETRIES) {
           try {
-            await addDocumentsToStore(
+            const isGlobal = this.options.knowledgeMode === 'global';
+          await addDocumentsToStore(
               table, 
               docs, 
               embedder, 
               () => this.isClosing,
               workspace,
-              false
+              isGlobal
             );
             return;
           } catch (err) {

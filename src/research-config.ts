@@ -89,9 +89,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'KNOWLEDGE_STORE_MODE',
       label: 'Knowledge mode [project]',
-      description: 'Set knowledge store isolation mode (none, global, project).',
+      description: 'Set knowledge store isolation mode (none, project, global).',
       currentValue: config.KNOWLEDGE_STORE_MODE,
-      values: ['none', 'project'],
+      values: ['none', 'project', 'global'],
     },
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
@@ -182,18 +182,27 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         label: 'Database status',
         description: 'Show entry counts, disk usage, and model info for the knowledge store.',
         currentValue: 'run',
-        values: ['none', 'project'],
-        },
-        ] as SettingItem[] : []),
-        ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
-        {
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
+    ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
+      {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
         label: 'Clear project scope',
         description: 'Permanently delete all store entries associated with this specific directory.',
         currentValue: 'run',
         values: ['run'],
-        },
-        ] as SettingItem[] : []),
+      },
+    ] as SettingItem[] : []),
+    ...(config.KNOWLEDGE_STORE_MODE === 'global' ? [
+      {
+        id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
+        label: 'Clear user store',
+        description: 'Permanently delete all globally shared store entries.',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
         {
         id: 'ACTION_METRICS_VIEW',
 
@@ -283,7 +292,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
-              config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project';
+              config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';
               scope = 'user';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;

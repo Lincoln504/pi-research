@@ -239,7 +239,7 @@ describe('Concurrent embedding — WriterQueue serialization', () => {
 // ---------------------------------------------------------------------------
 // Real model inference — skipped when model is not cached locally
 // ---------------------------------------------------------------------------
-describe('Real model inference — requires npm run models:download', () => {
+describe('Real model inference — requires pre-cached models', () => {
   for (const modelId of SUPPORTED_MODELS) {
     const cached = isModelCachedLocally(modelId);
 

@@ -9,8 +9,6 @@
 // Set mock env vars before any module-level code in imported modules sees them.
 process.env['PI_RESEARCH_MOCK_SEARCH'] = 'true';
 process.env['PI_RESEARCH_MOCK_SCRAPE'] = 'true';
-process.env['PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED'] = 'false';
-process.env['PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED'] = 'false';
 
 import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import type { Model } from '@earendil-works/pi-ai';

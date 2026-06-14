@@ -93,7 +93,7 @@ This keeps the knowledge store integration deterministic and pipeline-controlled
 ```
 WriterQueue (async, non-blocking)
 └── KnowledgeStore
-    ├── Embedder  (Xenova/all-MiniLM-L6-v2 via @huggingface/transformers)
+    ├── Embedder  (onnx-community/granite-embedding-small-english-r2-ONNX via @huggingface/transformers)
     │   └── inference backend: webgpu (Dawn/Vulkan/Metal/D3D12) or cpu
     └── LanceDB   (knowledge_db/ directory, Arrow-backed vector table)
 ```
