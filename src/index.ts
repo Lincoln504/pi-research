@@ -3,7 +3,7 @@
 // Level 3 = Error, 4 = Fatal.
 process.env['ORT_LOGGING_LEVEL'] = '3';
 
-import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext, SessionShutdownEvent } from '@earendil-works/pi-coding-agent';
 import type { ExtendedExtensionContext } from './types/extension-context.ts';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import { Key } from '@earendil-works/pi-tui';
@@ -191,13 +191,16 @@ export default async function (pi: ExtensionAPI) {
   }
 
   // Primary cleanup path for pi -p (print mode) and normal session end.
-  pi.on('session_shutdown', async () => {
+  // Only arm force-exit and mark PI_PROCESS_EXITING on a genuine quit — not on
+  // reload/new/resume/fork where the process continues under a rebuilt extension.
+  pi.on('session_shutdown', async (event: SessionShutdownEvent) => {
     try {
-      // Mark that the process is going down so native addons know to skip risky teardowns
-      process.env['PI_PROCESS_EXITING'] = '1';
-      // Add watchdog timer to prevent zombie processes if cleanup hangs (e.g. ONNX teardown)
-      shutdownManager.forceExitAfter(8000);
-      await shutdownManager.runCleanup('session_shutdown');
+      if (event.reason === 'quit') {
+        process.env['PI_PROCESS_EXITING'] = '1';
+        // Watchdog: browser pool + ONNX teardown can take up to ~30s in worst case.
+        shutdownManager.forceExitAfter(35000);
+      }
+      await shutdownManager.runCleanup(`session_shutdown:${event.reason}`);
     } catch (_err) {
       logger.error('[pi-research] session_shutdown cleanup failed:', _err);
     }

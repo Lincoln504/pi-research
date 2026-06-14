@@ -72,7 +72,7 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
   if (!data) {
     return { error: 'No task data provided', duration: 0 };
   }
-  const { type, query, url, queuedAt: _queuedAt, taskTimeoutMs: _taskTimeoutMs } = data;
+  const { type, query, url, queuedAt: _queuedAt, taskTimeoutMs } = data;
   const startTime = Date.now();
 
   if (FULL_MOCK_MODE) {
@@ -96,6 +96,12 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
     }
   }
 
+  const abortController = new AbortController();
+  let taskTimer: ReturnType<typeof setTimeout> | undefined;
+  if (taskTimeoutMs && taskTimeoutMs > 0) {
+    taskTimer = setTimeout(() => abortController.abort(new Error(`Task timed out after ${taskTimeoutMs}ms`)), taskTimeoutMs);
+  }
+
   try {
     await initBrowser();
     const initMs = Date.now() - startTime;
@@ -116,6 +122,10 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
       result = { error: 'Unknown task type', duration: Date.now() - startTime };
     }
 
+    if (abortController.signal.aborted) {
+      return { error: `Task timed out after ${taskTimeoutMs}ms`, duration: Date.now() - startTime };
+    }
+
     return result;
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -129,6 +139,8 @@ async function runTask(data: TaskData | undefined): Promise<TaskResult> {
       error: errMsg,
       duration: Date.now() - startTime
     };
+  } finally {
+    if (taskTimer !== undefined) clearTimeout(taskTimer);
   }
 }
 

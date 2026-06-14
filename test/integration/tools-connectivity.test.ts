@@ -54,10 +54,8 @@ describe('Search and Scrape Tools Connectivity', () => {
   });
 
   describe('Search Tool - Basic Functionality', () => {
-    it('should execute search with valid results structure', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should execute search with valid results structure', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -81,10 +79,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(typeof (firstContent as any).text).toBe('string');
     });
 
-    it('should return markdown formatted results with expected sections', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should return markdown formatted results with expected sections', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -125,10 +121,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       });
     };
 
-    it('should scrape Wikipedia successfully with substantial content', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should scrape Wikipedia successfully with substantial content', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);
@@ -158,10 +152,8 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
 
   describe('Scrape Tool - Error Scenarios', () => {
-    it('should handle invalid URL gracefully', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle invalid URL gracefully', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);
@@ -186,10 +178,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       }
     });
 
-    it('should handle non-existent URL gracefully', { timeout: 60000 }, async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle non-existent URL gracefully', { timeout: 60000 }, async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);
@@ -214,10 +204,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       }
     });
 
-    it('should handle mixed valid and invalid URLs', { timeout: 300000 }, async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle mixed valid and invalid URLs', { timeout: 300000 }, async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);
@@ -249,10 +237,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       }
     });
 
-    it('should handle empty URL list', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle empty URL list', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);
@@ -272,10 +258,8 @@ describe('Search and Scrape Tools Connectivity', () => {
   });
 
   describe('Search Tool - Error Scenarios', () => {
-    it('should handle empty query gracefully', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle empty query gracefully', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -294,10 +278,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
     });
 
-    it('should handle very long query', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle very long query', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -317,10 +299,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
     });
 
-    it('should handle special characters in query', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle special characters in query', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -342,10 +322,8 @@ describe('Search and Scrape Tools Connectivity', () => {
   });
 
   describe('Tool Failure Cascade Prevention', () => {
-    it('should prevent search failure from affecting subsequent searches', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should prevent search failure from affecting subsequent searches', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tool = createSearchTool({ 
         ctx: mockExtensionCtx as any, 
@@ -374,10 +352,8 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result2.content).toBeDefined();
     });
 
-    it('should prevent scrape failure from affecting subsequent scrapes', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should prevent scrape failure from affecting subsequent scrapes', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ scrape: 10 });
       const tool = createScrapeToolInstance(tracker);

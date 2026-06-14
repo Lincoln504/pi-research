@@ -76,22 +76,28 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
     }
   }
 
-  // FIX (#8): Resolve hostname via DNS and check the resulting IP addresses.
+  // Resolve hostname via DNS (both IPv4 and IPv6) and check all resulting addresses.
   // This catches DNS rebinding, decimal IP representations (2130706433),
-  // and other hostname-based bypasses that pass the regex checks above.
-  try {
-    const result = await dns.resolve4(hostname);
-    for (const ip of result) {
-      if (isPrivateIp(ip)) {
-        metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'dns_rebinding' });
-        throw new Error('Hostname resolves to a private/reserved IP address');
-      }
+  // AAAA-only hosts (::1, fc00::/7) and other hostname-based bypasses.
+  const [v4Results, v6Results] = await Promise.allSettled([
+    dns.resolve4(hostname),
+    dns.resolve6(hostname),
+  ]);
+
+  const v4Addresses = v4Results.status === 'fulfilled' ? v4Results.value : [];
+  const v6Addresses = v6Results.status === 'fulfilled' ? v6Results.value : [];
+
+  for (const ip of v4Addresses) {
+    if (isPrivateIp(ip)) {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'dns_rebinding_v4' });
+      throw new Error('Hostname resolves to a private/reserved IPv4 address');
     }
-  } catch (err) {
-    // Re-throw our own security errors
-    if (err instanceof Error && err.message.includes('private/reserved')) throw err;
-    // DNS resolution failure (NXDOMAIN, etc.) — allow through, the HTTP request
-    // will fail on its own. Only block resolved-internal addresses.
+  }
+  for (const ip of v6Addresses) {
+    if (isPrivateIpv6(ip)) {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'dns_rebinding_v6' });
+      throw new Error('Hostname resolves to a private/reserved IPv6 address');
+    }
   }
 }
 
@@ -112,6 +118,30 @@ function isPrivateIp(ip: string): boolean {
     (a === 192 && b === 168) ||
     a >= 224
   );
+}
+
+/**
+ * Check if an IPv6 address is private/reserved/loopback.
+ * Covers: ::1 (loopback), fc00::/7 (unique local), fe80::/10 (link-local),
+ * ::ffff:0:0/96 (IPv4-mapped — blocked if the mapped address is private).
+ */
+function isPrivateIpv6(ip: string): boolean {
+  const normalized = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  // Loopback
+  if (normalized === '::1') return true;
+  // Unique local (fc00::/7 covers fc:: and fd::)
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  // Link-local (fe80::/10)
+  if (normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+  // IPv4-mapped ::ffff:x.x.x.x — check the embedded IPv4 part
+  const mappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedMatch && mappedMatch[1]) {
+    return isPrivateIp(mappedMatch[1]);
+  }
+  // All-zeros (unspecified address)
+  if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
+  return false;
 }
 
 /**

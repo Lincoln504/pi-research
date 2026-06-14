@@ -102,13 +102,17 @@ export class FileLockService implements IService {
    */
   private async cleanupStaleLocksOnStartup(): Promise<void> {
     try {
+      const rawContent = await fs.readFile(this.lockFilePath, 'utf-8').catch(() => null);
+      if (rawContent === null) return; // No lock file — nothing to do
+
       const stats = await fs.stat(this.lockFilePath);
       const lockAge = Date.now() - stats.mtimeMs;
+      const parsed = this._parseLockContent(rawContent);
+      const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
 
-      // Clean up locks older than stale threshold (15 seconds)
-      if (lockAge > this.lockStaleThreshold) {
+      if (!ownerAlive || lockAge > this.lockStaleThreshold) {
         logger.log(
-          `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old)`
+          `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old, owner alive: ${ownerAlive})`
         );
         await fs.unlink(this.lockFilePath);
         logger.log('[FileLockService] Stale lock removed');
@@ -182,10 +186,10 @@ export class FileLockService implements IService {
         // the lock is fully and successfully acquired.
         let handle: fs.FileHandle | null = null;
         try {
-          // Open lock file and write UUID immediately (atomic)
+          // Open lock file and write owner identity immediately (atomic)
           handle = await fs.open(this.lockFilePath, 'wx', 0o600);
-          await handle.write(this.lockUuid);
-          await handle.sync(); // Ensure UUID is written to disk
+          await handle.write(this._makeLockContent());
+          await handle.sync(); // Ensure content is written to disk
 
           // Fully acquired — commit to instance state
           this.lockHandle = handle;
@@ -227,39 +231,41 @@ export class FileLockService implements IService {
             const errnoError = error as NodeJS.ErrnoException;
             if (errnoError.code === 'EEXIST') {
               contentionCount++;
-              // Read lock UUID to verify ownership before considering stale
+              // Read lock content to verify ownership and liveness before considering stale
               try {
-                const lockContent = await fs.readFile(this.lockFilePath, 'utf-8');
-                const lockUuid = lockContent.trim();
+                const rawContent = await fs.readFile(this.lockFilePath, 'utf-8');
+                const parsed = this._parseLockContent(rawContent);
+                const lockUuid = parsed?.uuid ?? '';
                 const stats = await fs.stat(this.lockFilePath);
                 const lockAge = Date.now() - stats.mtimeMs;
 
-                // Only delete if lock is stale AND we can verify it's not owned by a live process
-                if (lockAge > this.lockStaleThreshold) {
-                  if (lockUuid === this.lockUuid) {
-                    // This is our own lock (shouldn't happen, but handle gracefully)
-                    // We found our UUID but we don't have a handle, so a previous 
-                    // attempt must have been interrupted. Unlink and try again properly.
+                if (lockUuid === this.lockUuid) {
+                  // This is our own lock — a previous attempt was interrupted. Reclaim.
+                  try { await fs.unlink(this.lockFilePath); } catch { /* ignore */ }
+                  continue;
+                }
+
+                // Reclaim immediately if the owner process is dead (PID-liveness check).
+                // Fall through to mtime-staleness only for processes that appear alive.
+                const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
+                if (!ownerAlive || lockAge > this.lockStaleThreshold) {
+                  if (ownerAlive && lockAge <= this.lockStaleThreshold) {
+                    // Alive but not stale — genuine contention, keep waiting
+                  } else {
+                    const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
                     try {
-                      await fs.unlink(this.lockFilePath);
+                      await fs.rename(this.lockFilePath, trashPath);
+                      const trashContent = await fs.readFile(trashPath, 'utf-8');
+                      const trashParsed = this._parseLockContent(trashContent);
+                      if ((trashParsed?.uuid ?? '') !== lockUuid) {
+                        try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
+                        await fs.unlink(trashPath);
+                        continue;
+                      }
+                      await fs.unlink(trashPath);
                     } catch { /* ignore */ }
                     continue;
                   }
-
-                  const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-                  try {
-                    await fs.rename(this.lockFilePath, trashPath);
-                    const trashContent = await fs.readFile(trashPath, 'utf-8');
-                    if (trashContent.trim() !== lockUuid) {
-                      try {
-                        await fs.link(trashPath, this.lockFilePath);
-                      } catch { /* ignore */ }
-                      await fs.unlink(trashPath);
-                      continue;
-                    }
-                    await fs.unlink(trashPath);
-                  } catch { /* ignore */ }
-                  continue;
                 }
               } catch (_statError) {
                 const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
@@ -317,7 +323,8 @@ export class FileLockService implements IService {
     try {
       // 1. Double check ownership before unlinking
       const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
-      if (content === this.lockUuid) {
+      const parsed = this._parseLockContent(content);
+      if (parsed?.uuid === this.lockUuid) {
         await fs.unlink(this.lockFilePath).catch(() => {});
       }
       
@@ -375,7 +382,8 @@ export class FileLockService implements IService {
     if (this.lockHandle) {
       try {
         const content = await fs.readFile(this.lockFilePath, 'utf8').catch(() => '');
-        if (content === this.lockUuid) {
+        const parsed = this._parseLockContent(content);
+        if (parsed?.uuid === this.lockUuid) {
           await fs.unlink(this.lockFilePath).catch(() => {});
         }
       } catch { /* ignore */ }
@@ -399,6 +407,47 @@ export class FileLockService implements IService {
    */
   getLockUuid(): string {
     return this.lockUuid;
+  }
+
+  /**
+   * Encode the lock file content with owner identity for liveness checks.
+   */
+  private _makeLockContent(): string {
+    return JSON.stringify({ uuid: this.lockUuid, pid: process.pid });
+  }
+
+  /**
+   * Parse lock file content — handles both legacy bare-UUID and new JSON format.
+   * Returns null if content is empty or unparseable.
+   */
+  private _parseLockContent(content: string): { uuid: string; pid: number | null } | null {
+    const trimmed = content.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed) as { uuid?: string; pid?: number };
+      if (typeof parsed.uuid === 'string') {
+        return { uuid: parsed.uuid, pid: typeof parsed.pid === 'number' ? parsed.pid : null };
+      }
+    } catch {
+      // Legacy format: bare UUID string
+      return { uuid: trimmed, pid: null };
+    }
+    return null;
+  }
+
+  /**
+   * Check whether the process that wrote the lock file is still alive.
+   * Returns true (assume alive) if we cannot determine liveness.
+   */
+  private _isOwnerAlive(pid: number | null): boolean {
+    if (pid === null) return true; // Legacy lock — can't check, assume alive
+    if (pid === process.pid) return true; // Our own PID
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

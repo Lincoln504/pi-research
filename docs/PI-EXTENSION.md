@@ -59,6 +59,7 @@ See [SDK.md](SDK.md) for the full environment variable reference.
 
 ## Extension Lifecycle
 
-- `activate` — registers commands, tools, TUI controller, and initializes the SDK
-- `deactivate` — disposes SDK, clears service registry, cleans up browser pool
+- `activate` — registers commands, tools (`research`, `health`, `research_knowledge_search`), TUI controller, and initializes the SDK
+- `deactivate` — runs all shutdown cleanup tasks: drains the writer queue, closes LanceDB, terminates browser pool workers, and disposes the embedding model
+- `session_shutdown` — branches on `event.reason`: a `quit` event triggers process-exit cleanup; reload/new/resume/fork events run cleanup without forcing process exit
 - `/reload` support — extension state is isolated per pi session

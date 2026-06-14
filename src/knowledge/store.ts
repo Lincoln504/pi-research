@@ -203,7 +203,8 @@ export class KnowledgeStore implements IKnowledgeStore {
       }
 
       await this.evictOldRecords();
-      
+      await this.pruneOrphanedMigrationDirs();
+
       // Persist manifest after every successful open so that table name
       // changes (from migration, re-embed rename, etc.) survive crashes.
       await this.saveManifest();
@@ -309,9 +310,12 @@ export class KnowledgeStore implements IKnowledgeStore {
       for (let i = 0; i < totalDocs; i += batchSize) {
         const batchRows = await this.table.query().limit(batchSize).offset(i).toArray();
 
-        const batchDocs = batchRows.map(row => {
-          const metadata = JSON.parse(row.metadata as string);
-          return {
+        const batchDocs = batchRows.flatMap(row => {
+          let metadata: Record<string, any> = {};
+          try { metadata = JSON.parse(row.metadata as string); } catch {
+            logger.warn('[store] Skipping row with corrupted metadata during re-embed migration');
+          }
+          return [{
             url: row.url as string,
             text: row.text as string,
             content: row.content as string | undefined,
@@ -320,7 +324,7 @@ export class KnowledgeStore implements IKnowledgeStore {
             is_global: !!row.is_global,
             ingestion_type: (row.ingestion_type as string) || metadata['ingestionType'] || 'synthesis-description',
             timestamp: Number(row.timestamp),
-          };
+          }];
         });
 
         const texts = batchDocs.map(d => d.text);
@@ -713,12 +717,36 @@ export class KnowledgeStore implements IKnowledgeStore {
     const table = await this.getFreshTable();
 
     try {
+      const scopeFilter = this.getScopeFilter();
+      // knowledgeMode='none' means no store is active — nothing to evict.
+      if (scopeFilter === '1 = 0') return;
+
       const ttlDays = this.options.ttlDays ?? 30;
       const cutoffTimestamp = Date.now() - (ttlDays * 24 * 60 * 60 * 1000);
-      await table.delete(`timestamp < ${BigInt(cutoffTimestamp)}`);
-      logger.log(`[store] Ran eviction for records older than ${ttlDays} days`);
+      // Scope eviction to this workspace only — do not evict other projects' data.
+      await table.delete(`timestamp < ${BigInt(cutoffTimestamp)} AND (${scopeFilter})`);
+      logger.log(`[store] Ran eviction for records older than ${ttlDays} days [scope: ${scopeFilter}]`);
     } catch (err) {
       logger.warn('[store] Failed to evict old records:', err);
+    }
+  }
+
+  private async pruneOrphanedMigrationDirs(): Promise<void> {
+    try {
+      const canonicalDir = `${this.tableName}.lance`;
+      const entries = await fsPromises.readdir(this.options.dbDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const name = entry.name;
+        if (name !== canonicalDir && name.endsWith('.lance') &&
+            (name.includes('_backup_') || name.includes('_migration_'))) {
+          const fullPath = path.join(this.options.dbDir, name);
+          logger.info(`[store] Removing orphaned migration/backup directory: ${name}`);
+          await fsPromises.rm(fullPath, { recursive: true, force: true });
+        }
+      }
+    } catch (err) {
+      logger.warn('[store] Failed to prune orphaned migration directories:', err);
     }
   }
 

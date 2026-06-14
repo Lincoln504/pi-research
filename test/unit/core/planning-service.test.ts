@@ -328,7 +328,8 @@ describe('PlanningService', () => {
     });
 
     it('falls back to a synthesize plan wrapping the raw text when JSON parsing completely fails', async () => {
-      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('completely unparseable text'));
+      const longFallbackText = 'This is completely unparseable text that cannot be parsed as valid JSON by any means whatsoever.';
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(longFallbackText));
       const plan = await service.updatePlanForRound(BASE_OPTIONS);
       expect(plan.action).toBe('synthesize');
       expect(plan.content).toBeTruthy();

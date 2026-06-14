@@ -431,7 +431,8 @@ export class PlanningService implements IPlanningService {
 
       if (!plan) {
         logger.warn('[PlanningService] Failed to generate valid evaluation, falling back to synthesize');
-        plan = { action: 'synthesize', content: responseText, researchers: [] };
+        const safeContent = responseText.length > 50 ? responseText : '';
+        plan = { action: 'synthesize', content: safeContent, researchers: [] };
       }
 
       const finalPlan = plan as ResearchPlan;

@@ -126,25 +126,7 @@ Initialization is required before calling research methods. `shutdownResearchSDK
 
 ## Extension API (internal)
 
-`runResearch` is the internal entry point used by pi extension tools. It requires a pi `ExtensionContext` and is not intended for external callers — use the SDK above instead.
-
-```typescript
-// extension tool handler context only
-import { runResearch } from '@lincoln504/pi-research';
-import { createResearchRunId } from '@lincoln504/pi-research/logger';
-
-const output: string = await runResearch({
-  ctx,                    // ExtensionContext — provided by pi runtime
-  query,
-  depth,                  // 0 | 1 | 2 | 3
-  sessionId,              // ctx.sessionId
-  researchId: createResearchRunId(),
-  model,                  // optional: override ctx.model
-  observer,               // optional: ResearchObserver
-  config,                 // optional: Config override
-  excludeTools,           // optional: string[] of tool names to skip
-}, abortSignal);
-```
+`runResearch` is the internal entry point used by pi extension tools. It is wired up automatically via `src/index.ts` when the extension activates — it requires a pi `ExtensionContext` and is not intended for external callers. Use the SDK instead.
 
 ---
 
@@ -152,35 +134,19 @@ const output: string = await runResearch({
 
 The `health` tool (registered in pi) runs all registered health checks and returns a structured status report. Checks cover: browser pool, knowledge store, embedding model, network connectivity, and environment configuration.
 
-Individual checks can be queried via the service registry:
+The same checks are available via the SDK helper:
 
 ```typescript
-import { getService } from '@lincoln504/pi-research';
-import { ServiceNames } from '@lincoln504/pi-research/core/service-interfaces';
+import { runHealthCheck } from '@lincoln504/pi-research/sdk';
 
-const hc = await getService(ServiceNames.HEALTH_CHECK_CACHE);
-const result = await hc.getHealth();
-// result: { status: 'ok' | 'degraded' | 'error', checks: [...] }
+const result = await runHealthCheck();
+// result: { success: boolean, status: 'healthy' | 'degraded' | 'unhealthy', components: [...] }
 ```
 
 ---
 
 ## Knowledge Store API
 
-The knowledge store is accessible via the service registry for custom read/write operations:
+The knowledge store is an internal service not exposed as a public SDK export. Access it through `runDeepResearch` / `runQuickResearch`, which populate it automatically during research runs. Use the `research_knowledge_search` pi tool to query stored findings across sessions.
 
-```typescript
-import { getService } from '@lincoln504/pi-research';
-import { ServiceNames } from '@lincoln504/pi-research/core/service-interfaces';
-
-const ks = await getService(ServiceNames.KNOWLEDGE_STORE);
-
-// search
-const results = await ks.search('WebAssembly performance', { limit: 10 });
-
-// write (prefer using WriterQueue for non-blocking writes)
-const wq = await getService(ServiceNames.WRITER_QUEUE);
-await wq.enqueue({ url, text, metadata });
-```
-
-Vector dimension is model-dependent (auto-detected at runtime). Stored fields: `text`, `vector`, `url`, `metadata`, `createdAt`.
+Vector dimension is model-dependent (auto-detected at runtime). Stored fields: `text`, `vector`, `url`, `metadata`, `timestamp`.

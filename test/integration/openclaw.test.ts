@@ -76,7 +76,9 @@ describe('OpenClaw Plugin Integration', () => {
   
   const mockApi = {
     registerTool: (tool: any) => registeredTools.push(tool),
-    registerRuntimeLifecycle: (lifecycle: any) => registeredLifecycles.push(lifecycle),
+    lifecycle: {
+      registerRuntimeLifecycle: (lifecycle: any) => registeredLifecycles.push(lifecycle),
+    },
     pluginConfig: {},
   };
 

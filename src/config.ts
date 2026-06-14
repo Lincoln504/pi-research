@@ -83,8 +83,8 @@ export const ConfigSchema = Type.Object({
   ], { default: 'backup' }),
   /** Whether to mirror logs to the console (stdout/stderr). (default: false) */
   CONSOLE_LOG: Type.Boolean({ default: false }),
-  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: true) */
-  DEBUG: Type.Boolean({ default: true }),
+  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: false) */
+  DEBUG: Type.Boolean({ default: false }),
 });
 
 export type Config = Static<typeof ConfigSchema>;
@@ -152,7 +152,9 @@ const USER_MIGRATION_KEYS = [
  * Returns the path to the centralized project settings file.
  */
 export function getProjectSettingsRegistryPath(): string {
-  return path.join(os.homedir(), '.pi', 'state', 'project-settings.json');
+  const stateDir = process.env['PI_RESEARCH_STATE_DIR']
+    ?? path.join(os.homedir(), '.pi', 'state');
+  return path.join(stateDir, 'project-settings.json');
 }
 
 /**
@@ -291,6 +293,7 @@ function parseDotEnv(content: string): Record<string, string> {
     if (eq < 1) continue;
     const key = line.slice(0, eq).trim();
     const val = line.slice(eq + 1).replace(/\r$/, '');
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     if (key) out[key] = val;
   }
   return out;
@@ -565,34 +568,34 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
   const e = { ...env, ...processEnv };
 
   const raw = {
-    RESEARCHER_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_TIMEOUT_MS', DEFAULTS.RESEARCHER_TIMEOUT_MS),
-    MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_RESEARCHERS', DEFAULTS.MAX_CONCURRENT_RESEARCHERS),
-    RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES),
-    RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS),
-    DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH),
-    MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
-    WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
-    WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
+    RESEARCHER_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_TIMEOUT_MS', DEFAULTS.RESEARCHER_TIMEOUT_MS, 180000, 1800000),
+    MAX_CONCURRENT_RESEARCHERS: parseEnvNumber(e, 'PI_RESEARCH_MAX_RESEARCHERS', DEFAULTS.MAX_CONCURRENT_RESEARCHERS, 1, 5),
+    RESEARCHER_MAX_RETRIES: parseEnvNumber(e, 'PI_RESEARCH_MAX_RETRIES', DEFAULTS.RESEARCHER_MAX_RETRIES, 0, 5),
+    RESEARCHER_MAX_RETRY_DELAY_MS: parseEnvNumber(e, 'PI_RESEARCH_RETRY_DELAY_MS', DEFAULTS.RESEARCHER_MAX_RETRY_DELAY_MS, 100, 10000),
+    DEFAULT_RESEARCH_DEPTH: parseEnvNumber(e, 'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH', DEFAULTS.DEFAULT_RESEARCH_DEPTH, 1, 3),
+    MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99),
+    WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10),
+    WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10),
     KNOWLEDGE_STORE_MODE: (parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', 'none') as 'none' | 'project' | 'global'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
-    SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
+    SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS, 5000, 120000),
     // Accept both canonical name and legacy name for backward compatibility.
     // saveConfig writes the canonical name (PI_RESEARCH_CACHE_TTL_DAYS) but
     // older sessions may have written PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS.
     KNOWLEDGE_STORE_CACHE_TTL_DAYS:
       e['PI_RESEARCH_CACHE_TTL_DAYS'] !== undefined
-        ? parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS)
-        : parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
-    EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
-    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
-    AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
-    MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES),
-    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS),
-    SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS),
-    TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS),
-    BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
-    LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS),
+        ? parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS, 1, 365)
+        : parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS, 1, 365),
+    EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS, 10000, 600000),
+    MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING, 0.05, 1.0),
+    AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE, 500, 10000),
+    MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES, 1, 20),
+    HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
+    SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
+    TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
+    BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS, 2000, 120000),
+    LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS, 60000, 600000),
     MIGRATION_STRATEGY: parseEnvString(e, 'PI_RESEARCH_MIGRATION_STRATEGY', DEFAULTS.MIGRATION_STRATEGY) as 'drop' | 're-embed' | 'backup',
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
@@ -611,8 +614,8 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
   // Keep PI_RESEARCH_DEBUG env var in sync with config.DEBUG
   // so that isVerboseFromEnv() (which reads the env var) picks up
   // TUI-configured debug settings without a circular import.
-  if (config.DEBUG && processEnv['PI_RESEARCH_DEBUG'] === undefined) {
-    processEnv['PI_RESEARCH_DEBUG'] = 'true';
+  if (processEnv['PI_RESEARCH_DEBUG'] === undefined) {
+    processEnv['PI_RESEARCH_DEBUG'] = String(config.DEBUG);
   }
 
   return config;
@@ -663,13 +666,21 @@ export function validateConfig(config: Config): void {
 }
 
 // Helpers
-function parseEnvNumber(env: Record<string, string | undefined>, key: string, def: number): number {
+function parseEnvNumber(env: Record<string, string | undefined>, key: string, def: number, min?: number, max?: number): number {
   const v = env[key];
   if (v === undefined || v === '') return def;
   const n = parseFloat(v);
   if (isNaN(n)) {
     logger.warn(`[config] Environment variable ${key}="${v}" is not a valid number, using default: ${def}`);
     return def;
+  }
+  if (min !== undefined && n < min) {
+    logger.warn(`[config] ${key}=${n} is below minimum ${min}, clamping`);
+    return min;
+  }
+  if (max !== undefined && n > max) {
+    logger.warn(`[config] ${key}=${n} is above maximum ${max}, clamping`);
+    return max;
   }
   return n;
 }

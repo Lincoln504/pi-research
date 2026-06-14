@@ -125,13 +125,32 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 
   const fetchStart = Date.now();
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': getRandomUserAgent(),
-        'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
-      },
-    });
+    // Manual redirect following so we can SSRF-validate each hop's Location header.
+    // Using redirect:'follow' would bypass validateUrlForSSRF on 3xx targets.
+    const MAX_REDIRECTS = 10;
+    let currentUrl = url;
+    let response!: Response;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      response = await fetch(currentUrl, {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: {
+          'User-Agent': getRandomUserAgent(),
+          'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
+        },
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) break; // No Location header — treat as final response
+        const resolved = new URL(location, currentUrl).href;
+        await validateUrlForSSRF(resolved); // Block SSRF targets in redirects
+        currentUrl = resolved;
+        continue;
+      }
+      break; // Non-redirect response
+    }
 
     if (!response.ok) {
       metrics.increment('scrape_errors_total', 1, { error_type: 'http_error', status_code: String(response.status) });

@@ -223,10 +223,10 @@ jobs:
         run: npm run test:integration:serial
         env:
           PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
-          PI_RESEARCH_MOCK_SEARCH: "true"
-          PI_RESEARCH_MOCK_SCRAPE: "true"
-          # 2 workers are safe in mock mode on 2-vCPU runners.
-          # Helps avoid single-worker deadlocks in poolifier.
+          # No MOCK_SEARCH/MOCK_SCRAPE here: camoufox + Xvfb are installed above,
+          # so isBrowserAvailable() returns true and browser tests actually execute.
+          # Setting both mock vars triggers isFullMockMode() which causes all serial
+          # browser tests to silently skip (false-green).
           PI_RESEARCH_WORKER_THREADS: "2"
       - name: Upload worker diagnostics on failure
         if: failure()

@@ -49,9 +49,14 @@ let globalCwd: string = process.cwd();
 let globalApiKey: string | undefined = undefined;
 let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
+let _lastSessionId: string | null = null;
 
 // Signal handler state — registered once, removed on clean shutdown.
 let _onSignal: ((signal: string) => void) | null = null;
+let _sigintHandler: (() => void) | null = null;
+let _sigtermHandler: (() => void) | null = null;
+let _sighupHandler: (() => void) | null = null;
+let _sigbreakHandler: (() => void) | null = null;
 let _shuttingDown = false;
 
 function _registerSignalHandlers(): void {
@@ -60,7 +65,7 @@ function _registerSignalHandlers(): void {
   _onSignal = (signal: string) => {
     if (_shuttingDown) return;
     _shuttingDown = true;
-    
+
     // Mark that the process is going down so native addons know to skip risky teardowns
     process.env['PI_PROCESS_EXITING'] = '1';
 
@@ -73,24 +78,24 @@ function _registerSignalHandlers(): void {
     }, 15000).unref();
   };
 
-  process.on('SIGINT', () => _onSignal?.('SIGINT'));
-  process.on('SIGTERM', () => _onSignal?.('SIGTERM'));
-  process.on('SIGHUP', () => _onSignal?.('SIGHUP'));
+  // Store named refs so we can remove only our handlers without nuking the host's.
+  _sigintHandler  = () => _onSignal?.('SIGINT');
+  _sigtermHandler = () => _onSignal?.('SIGTERM');
+  _sighupHandler  = () => _onSignal?.('SIGHUP');
+  process.on('SIGINT',  _sigintHandler);
+  process.on('SIGTERM', _sigtermHandler);
+  process.on('SIGHUP',  _sighupHandler);
   if (process.platform === 'win32') {
-    process.on('SIGBREAK', () => _onSignal?.('SIGBREAK'));
+    _sigbreakHandler = () => _onSignal?.('SIGBREAK');
+    process.on('SIGBREAK', _sigbreakHandler);
   }
 }
 
 function _removeSignalHandlers(): void {
-  if (_onSignal) {
-    // Note: Node.js process.removeAllListeners is safer when wrapping closures.
-    process.removeAllListeners('SIGINT');
-    process.removeAllListeners('SIGTERM');
-    process.removeAllListeners('SIGHUP');
-    if (process.platform === 'win32') {
-      process.removeAllListeners('SIGBREAK');
-    }
-  }
+  if (_sigintHandler)   { process.removeListener('SIGINT',   _sigintHandler);   _sigintHandler   = null; }
+  if (_sigtermHandler)  { process.removeListener('SIGTERM',  _sigtermHandler);  _sigtermHandler  = null; }
+  if (_sighupHandler)   { process.removeListener('SIGHUP',   _sighupHandler);   _sighupHandler   = null; }
+  if (_sigbreakHandler) { process.removeListener('SIGBREAK', _sigbreakHandler); _sigbreakHandler = null; }
   _onSignal = null;
 }
 
@@ -311,10 +316,11 @@ export async function verifyUrl(url: string, signal?: AbortSignal): Promise<bool
  * @param query - The research objective
  * @param options - Research configuration (depth, complexity, observer)
  * @param signal - Optional abort signal
- * @returns The final synthesized research report (Markdown)
+ * @returns The final synthesized research report (Markdown) and the sessionId
+ *          needed to retrieve per-researcher reports via getResearchReports().
  */
 export async function runDeepResearch(
-  query: string, 
+  query: string,
   options: Omit<ResearchOptions, 'ctx' | 'query' | 'model' | 'sessionId' | 'researchId'> = {},
   signal?: AbortSignal
 ): Promise<string> {
@@ -322,6 +328,7 @@ export async function runDeepResearch(
 
   const researchId = `sdk-${Date.now()}`;
   const sessionId = randomUUID();
+  _lastSessionId = sessionId;
   const orchestrator = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, undefined, globalContainer);
   
   const researchStart = Date.now();
@@ -367,12 +374,16 @@ export async function runQuickResearch(
 }
 
 /**
- * Retrieve all researcher reports gathered during a specific research ID.
+ * Retrieve all researcher reports gathered during the most recent runDeepResearch() call.
+ * Reports are keyed by researcher ID. Pass the sessionId returned from runDeepResearch to
+ * access reports from a specific run; omit to use the last run's session.
  */
-export async function getResearchReports(researchId: string): Promise<Map<string, string>> {
+export async function getResearchReports(sessionId?: string): Promise<Map<string, string>> {
   if (!globalContainer) throw new Error('SDK not initialized');
+  const sid = sessionId ?? _lastSessionId;
+  if (!sid) return new Map();
   const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
-  return synthesis.getAllReports(researchId);
+  return synthesis.getAllReports(sid);
 }
 
 import { clearAllSessionState } from './orchestration/session/session-state.ts';
@@ -440,6 +451,7 @@ export async function shutdownResearchSDK(): Promise<void> {
   globalCwd = process.cwd();
   globalContainer = null;
   globalConfig = null;
+  _lastSessionId = null;
 
   // Remove signal handlers — caller is shutting down cooperatively.
   _removeSignalHandlers();

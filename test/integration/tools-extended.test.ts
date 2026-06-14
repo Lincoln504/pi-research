@@ -67,10 +67,8 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Security Search Tool - CVE Search', () => {
-    it('should search for a known CVE and return structured results', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should search for a known CVE and return structured results', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -104,10 +102,8 @@ describe('Extended Tools Integration', () => {
       expect(text.length).toBeGreaterThan(50);
     }, 60000);
 
-    it('should search for multiple CVEs in single request', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should search for multiple CVEs in single request', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 10 });
       const tool = createSecuritySearchTool({ 
@@ -133,10 +129,8 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Security Search Tool - Package Vulnerabilities', () => {
-    it('should search for npm package vulnerabilities', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should search for npm package vulnerabilities', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -162,10 +156,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should search for Python package vulnerabilities', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should search for Python package vulnerabilities', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -209,10 +201,8 @@ describe('Extended Tools Integration', () => {
       expect((result.content[0] as any).text).toContain('Invalid parameters');
     });
 
-    it('should handle invalid database names gracefully', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle invalid database names gracefully', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -232,10 +222,8 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
     }, 60000);
 
-    it('should handle special characters in search terms', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle special characters in search terms', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -259,10 +247,8 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Security Search Tool - Advanced Parameters', () => {
-    it('should handle severity parameter for filtering', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle severity parameter for filtering', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -287,10 +273,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle maxResults parameter', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle maxResults parameter', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -315,10 +299,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle includeExploited parameter', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle includeExploited parameter', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -343,10 +325,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle githubRepo parameter for package vulnerabilities', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle githubRepo parameter for package vulnerabilities', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createSecuritySearchTool({ 
@@ -390,10 +370,8 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Stack Exchange Tool - Search Functionality', () => {
-    it('should search for technical questions on Stack Overflow', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should search for technical questions on Stack Overflow', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 
@@ -425,10 +403,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle different Stack Exchange sites', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle different Stack Exchange sites', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 
@@ -457,10 +433,8 @@ describe('Extended Tools Integration', () => {
   });
 
   describe('Stack Exchange Tool - Error Handling', () => {
-    it('should handle tags parameter for filtered search', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle tags parameter for filtered search', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 
@@ -486,10 +460,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle format parameter for different output formats', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle format parameter for different output formats', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 
@@ -516,10 +488,8 @@ describe('Extended Tools Integration', () => {
       }
     }, 60000);
 
-    it('should handle invalid site names gracefully', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle invalid site names gracefully', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 
@@ -539,10 +509,8 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
     }, 60000);
 
-    it('should handle queries with special characters', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle queries with special characters', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
       
       const tracker = new ToolUsageTracker({ gathering: 6 });
       const tool = createStackexchangeTool({ 

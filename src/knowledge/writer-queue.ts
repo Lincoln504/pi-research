@@ -25,6 +25,12 @@ function isConnectionRefused(err: unknown): boolean {
   return msg.includes('ECONNREFUSED');
 }
 
+function isNoSpace(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  const msg = err instanceof Error ? err.message : String(err);
+  return code === 'ENOSPC' || msg.includes('ENOSPC') || msg.toLowerCase().includes('no space left');
+}
+
 export class WriterQueue implements IWriterQueue {
   readonly name = ServiceNames.WRITER_QUEUE;
   lifecycle = ServiceLifecycle.UNINITIALIZED;
@@ -87,6 +93,8 @@ export class WriterQueue implements IWriterQueue {
           } catch (retryErr) {
             logger.error(`[writer-queue] Retry failed for ${item.url}, dropping:`, retryErr);
           }
+        } else if (isNoSpace(err)) {
+          logger.error(`[writer-queue] ENOSPC: disk full — dropping ${item.url}. Free up disk space to resume knowledge ingestion.`);
         } else {
           logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
         }

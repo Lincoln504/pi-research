@@ -33,12 +33,14 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
 import { clearAllSessionState } from './orchestration/session/session-state.ts';
 
-import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
+import { definePluginEntry, buildJsonPluginConfigSchema } from 'openclaw/plugin-sdk/plugin-entry';
 
 // ---------------------------------------------------------------------------
 // Config schema — mirrors openclaw.plugin.json configSchema
 // ---------------------------------------------------------------------------
 
+// Used for OpenClawPluginConfig type derivation via Static<typeof ...>
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const OpenClawConfigSchema = Type.Object({
   apiKey: Type.Optional(Type.String({ description: 'LLM API key' })),
   provider: Type.Optional(Type.String({ description: 'LLM provider name' })),
@@ -78,7 +80,8 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   if (isInitialized) return;
 
   const cwd = process.cwd();
-  globalConfig = getConfig(cwd);
+  // Clone so we don't mutate the shared configCache reference.
+  globalConfig = { ...getConfig(cwd) };
 
   // Map OpenClaw config to pi-research Config
   if (pluginConfig.timeoutMs !== undefined) globalConfig.RESEARCHER_TIMEOUT_MS = pluginConfig.timeoutMs;
@@ -94,6 +97,9 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   if (pluginConfig.scrapeTimeoutMs !== undefined) globalConfig.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
   if (pluginConfig.model !== undefined) globalConfig.RESEARCH_MODEL = pluginConfig.model;
   if (pluginConfig.reportExportEnabled !== undefined) globalConfig.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
+  if (pluginConfig.stackexchangeApiKey !== undefined) {
+    process.env['STACKEXCHANGE_API_KEY'] = pluginConfig.stackexchangeApiKey;
+  }
 
   if (pluginConfig.knowledgeEnabled !== undefined) {
     globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'project' : 'none';
@@ -181,11 +187,33 @@ export default definePluginEntry({
   id: 'pi-research',
   name: 'Pi Research',
   description: 'Multi-agent web research with stealth browser, security databases, and Stack Exchange integration.',
-  configSchema: OpenClawConfigSchema as any,
+  configSchema: buildJsonPluginConfigSchema({
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string', description: 'LLM API key' },
+      provider: { type: 'string', description: 'LLM provider name' },
+      model: { type: 'string', description: 'Model ID override for researcher sub-agents' },
+      timeoutMs: { type: 'number', minimum: 180000, maximum: 1800000, default: 300000 },
+      maxResearchers: { type: 'number', minimum: 1, maximum: 5, default: 3 },
+      defaultDepth: { type: 'number', minimum: 0, maximum: 3, default: 1 },
+      maxScrapeBatches: { type: 'number', minimum: 0, maximum: 99, default: 2 },
+      maxConcurrentScrapes: { type: 'number', minimum: 1, maximum: 20, default: 3 },
+      workerThreads: { type: 'number', minimum: 1, maximum: 10, default: 4 },
+      workerConcurrency: { type: 'number', minimum: 1, maximum: 10, default: 2 },
+      knowledgeEnabled: { type: 'boolean', default: true },
+      embeddingModel: { type: 'string', description: 'Embedding model (defaults to user config)' },
+      embeddingDevice: { type: 'string', enum: ['webgpu', 'cpu'], default: 'webgpu' },
+      migrationStrategy: { type: 'string', enum: ['drop', 're-embed', 'backup'], default: 'backup' },
+      cacheTtlDays: { type: 'number', minimum: 1, maximum: 365, default: 30 },
+      scrapeTimeoutMs: { type: 'number', minimum: 5000, maximum: 120000, default: 15000 },
+      stackexchangeApiKey: { type: 'string', description: 'Stack Exchange API key for higher rate limits' },
+      reportExportEnabled: { type: 'boolean', default: false },
+    },
+  }),
 
   async register(api) {
     // 1. Lifecycle
-    api.registerRuntimeLifecycle({
+    api.lifecycle.registerRuntimeLifecycle({
       id: 'pi-research-lifecycle',
       description: 'Cleans up research sub-agents, browser processes, and knowledge store connections.',
       cleanup: async () => {
@@ -315,6 +343,9 @@ export default definePluginEntry({
       async execute(toolCallId, params, signal) {
         const config = (api as any).pluginConfig ?? {};
         await ensureInitialized(config);
+        if (globalConfig?.KNOWLEDGE_STORE_MODE === 'none') {
+          throw new Error('Knowledge store is disabled (knowledgeEnabled: false). Enable it in plugin settings to use this tool.');
+        }
         const mockCtx = createMockContext(globalModel!, globalRegistry!);
         const tool = createResearchKnowledgeSearchTool();
         const result = await tool.execute(toolCallId, params, signal, undefined, mockCtx);

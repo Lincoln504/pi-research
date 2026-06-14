@@ -62,11 +62,10 @@ export function setupUncaughtExceptionHandler(): void {
 
   process.on('unhandledRejection', (reason: unknown) => {
     const errMsg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
-    logToDebugFile('ERROR', `[Worker-${workerId}] Unhandled Rejection: ${errMsg}`);
-    
-    // Critical: Explicitly exit to ensure Poolifier replaces this broken worker,
-    // but trap the error here so it doesn't print to stderr and corrupt the TUI.
-    process.exit(1);
+    // Log but do NOT exit — a stray Playwright background rejection (e.g. cancelled
+    // navigation) would kill an otherwise healthy worker and cause pool churn.
+    // Poolifier's own health-check will replace the worker if it becomes truly broken.
+    logToDebugFile('WARN', `[Worker-${workerId}] Unhandled Rejection (non-fatal): ${errMsg}`);
   });
 }
 

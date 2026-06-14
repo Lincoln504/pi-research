@@ -22,14 +22,30 @@ import type { Embedder } from '../../knowledge/embedder.ts';
 class SerialQueue {
   private running = false;
   private readonly tasks: Array<() => Promise<void>> = [];
+  private readonly maxDepth: number;
+  private readonly timeoutMs: number;
+
+  constructor(maxDepth = 200, timeoutMs = 120000) {
+    this.maxDepth = maxDepth;
+    this.timeoutMs = timeoutMs;
+  }
 
   enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.tasks.length >= this.maxDepth) {
+      return Promise.reject(new Error(`SerialQueue at capacity (${this.maxDepth}). Embed request dropped.`));
+    }
     return new Promise<T>((resolve, reject) => {
       this.tasks.push(async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error(`SerialQueue: embed request timed out after ${this.timeoutMs}ms`)), this.timeoutMs);
+        });
         try {
-          resolve(await fn());
+          resolve(await Promise.race([fn(), timeoutPromise]));
         } catch (e) {
           reject(e);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
         }
       });
       if (!this.running) void this.pump();

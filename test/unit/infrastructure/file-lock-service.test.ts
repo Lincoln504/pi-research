@@ -38,14 +38,16 @@ describe('FileLockService', () => {
   // ---------------------------------------------------------------------------
 
   describe('basic lock acquisition and release', () => {
-    it('acquireLock() creates a lock file with the service UUID as content', async () => {
+    it('acquireLock() creates a lock file with JSON containing the service UUID and PID', async () => {
       service = new FileLockService({ lockFilePath });
       await service.initialize();
 
       await service.acquireLock();
 
       const content = await fs.readFile(lockFilePath, 'utf-8');
-      expect(content.trim()).toBe(service.getLockUuid());
+      const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+      expect(parsed.uuid).toBe(service.getLockUuid());
+      expect(parsed.pid).toBe(process.pid);
 
       await service.releaseLock();
     });
@@ -60,14 +62,15 @@ describe('FileLockService', () => {
       await expect(fs.access(lockFilePath)).rejects.toThrow();
     });
 
-    it('reading the lock file before release returns the UUID written during acquisition', async () => {
+    it('reading the lock file before release returns JSON with the UUID written during acquisition', async () => {
       service = new FileLockService({ lockFilePath });
       await service.initialize();
 
       await service.acquireLock();
 
       const content = await fs.readFile(lockFilePath, 'utf-8');
-      expect(content.trim()).toBe(service.getLockUuid());
+      const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+      expect(parsed.uuid).toBe(service.getLockUuid());
 
       await service.releaseLock();
     });
@@ -99,10 +102,11 @@ describe('FileLockService', () => {
       // Should succeed without timing out
       await expect(service.acquireLock()).resolves.toBeUndefined();
 
-      // New content must be our service's UUID, not the foreign one
+      // New content must contain our service's UUID, not the foreign one
       const content = await fs.readFile(lockFilePath, 'utf-8');
-      expect(content.trim()).toBe(service.getLockUuid());
-      expect(content.trim()).not.toBe(foreignUuid);
+      const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+      expect(parsed.uuid).toBe(service.getLockUuid());
+      expect(parsed.uuid).not.toBe(foreignUuid);
 
       await service.releaseLock();
     });
@@ -188,7 +192,8 @@ describe('FileLockService', () => {
         await service.withLock(async () => {
           expect(service.isLocked()).toBe(true);
           const content = await fs.readFile(lockFilePath, 'utf-8');
-          expect(content.trim()).toBe(service.getLockUuid());
+          const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+          expect(parsed.uuid).toBe(service.getLockUuid());
         });
         expect(service.isLocked()).toBe(true);
       });

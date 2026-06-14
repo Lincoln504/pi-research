@@ -25,9 +25,11 @@ export class PriorityTaskQueue {
     private scrapeQueue: QueuedTask<any>[] = [];
     private activeCount = 0;
     private maxTotalConcurrency: number;
+    private readonly maxQueueDepth: number;
 
-    constructor(maxTotalConcurrency: number) {
+    constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
         this.maxTotalConcurrency = maxTotalConcurrency;
+        this.maxQueueDepth = maxQueueDepth;
     }
 
     /**
@@ -40,6 +42,11 @@ export class PriorityTaskQueue {
 
             if (signal?.aborted) {
                 return reject(new Error(`Task ${type} aborted before enqueuing`));
+            }
+
+            const totalDepth = this.healthcheckQueue.length + this.searchQueue.length + this.scrapeQueue.length;
+            if (totalDepth >= this.maxQueueDepth) {
+                return reject(new Error(`PriorityTaskQueue at capacity (${this.maxQueueDepth} tasks). Dropping ${type} task.`));
             }
 
             let onAbort: (() => void) | undefined;

@@ -78,10 +78,8 @@ describe('Concurrent Operations', () => {
   }, 300000); // Extended: browser pool teardown (pool.destroy up to 5s + 200ms drain) can take ~10s
 
   describe('Concurrent Browser Task Queue Management', () => {
-    it('should handle multiple concurrent search operations', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle multiple concurrent search operations', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const concurrency = 3;
       const queries = Array.from(
@@ -120,10 +118,8 @@ describe('Concurrent Operations', () => {
       );
     }, 420000);
 
-    it('should handle mixed search and scrape operations concurrently', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle mixed search and scrape operations concurrently', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const searchTasks = [
         runBrowserTask<any>({ query: 'mixed test 1' }, 'search').catch(err => ({ error: err })),
@@ -162,10 +158,8 @@ describe('Concurrent Operations', () => {
       );
     }, 420000);
 
-    it('should handle burst of concurrent operations', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle burst of concurrent operations', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const burstSize = 4;
       const queries = Array.from(
@@ -328,10 +322,8 @@ describe('Concurrent Operations', () => {
   });
 
   describe('Browser Pool Thread Safety', () => {
-    it('should handle rapid sequential task submissions', { timeout: 120000 }, async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle rapid sequential task submissions', { timeout: 120000 }, async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       // Single task to verify the pool handles sequential submission.
       // Previously used 4 tasks, each taking 5-75s, totaling 300s.
@@ -359,10 +351,8 @@ describe('Concurrent Operations', () => {
       );
     });
 
-    it('should handle task submission during pool restart', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should handle task submission during pool restart', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const promises: Promise<any>[] = [];
 
@@ -412,10 +402,8 @@ describe('Concurrent Operations', () => {
   });
 
   describe('Resource Management Under Concurrency', () => {
-    it('should not leak file handles under concurrent load', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should not leak file handles under concurrent load', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const fs = await import('node:fs');
       const getOpenFileCount = async () => {
@@ -459,10 +447,8 @@ describe('Concurrent Operations', () => {
       expect(increase).toBeLessThan(20);
     }, 60000);
 
-    it('should maintain stable memory usage under concurrent load', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should maintain stable memory usage under concurrent load', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const memoryBefore = process.memoryUsage().heapUsed;
 
@@ -492,10 +478,8 @@ describe('Concurrent Operations', () => {
   });
 
   describe('Concurrency Metrics', () => {
-    it('should calculate and report concurrency metrics accurately', async () => {
-      if (testContext.skipTests()) {
-        return;
-      }
+    it('should calculate and report concurrency metrics accurately', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const concurrency = 3;
       const queries = Array.from(

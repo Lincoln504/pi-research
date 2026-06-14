@@ -128,8 +128,8 @@ describe('End-to-End Research Workflows', () => {
   });
 
   describe('Quick Research Workflow', () => {
-    it('should complete full quick research workflow: query → search → scrape → synthesis', async () => {
-      if (testContext.skipTests()) return;
+    it('should complete full quick research workflow: query → search → scrape → synthesis', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const query = 'What is the current status of TypeScript 5.5?';
       const sessionId = `session-${randomUUID()}`;
@@ -163,8 +163,8 @@ describe('End-to-End Research Workflows', () => {
       expect(duration).toBeGreaterThan(0);
     }, 60000);
 
-    it('should handle research with knowledge store integration', async () => {
-      if (testContext.skipTests()) return;
+    it('should handle research with knowledge store integration', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const query = 'TypeScript 5.5 features';
       const sessionId = `session-${randomUUID()}`;
@@ -204,8 +204,8 @@ describe('End-to-End Research Workflows', () => {
       }
     }, 60000);
 
-    it('should handle empty or minimal search results gracefully', async () => {
-      if (testContext.skipTests()) return;
+    it('should handle empty or minimal search results gracefully', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const query = 'NonExistentQueryXYZ123';
       const sessionId = `session-${randomUUID()}`;
@@ -235,8 +235,8 @@ describe('End-to-End Research Workflows', () => {
   });
 
   describe('Deep Research Workflow', () => {
-    it('should complete full deep research workflow: coordinator → researchers → aggregation', async () => {
-      if (testContext.skipTests()) return;
+    it('should complete full deep research workflow: coordinator → researchers → aggregation', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       // Update pi-ai mock for this specific test to return a valid JSON plan
       const { completeSimple, complete } = await import('@earendil-works/pi-ai');
@@ -303,8 +303,8 @@ describe('End-to-End Research Workflows', () => {
       expect(duration).toBeGreaterThan(0);
     }, 300000);
 
-    it('should handle multi-round research with different sub-queries', async () => {
-      if (testContext.skipTests()) return;
+    it('should handle multi-round research with different sub-queries', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       // Update pi-ai mock for this specific test
       const { complete } = await import('@earendil-works/pi-ai');
@@ -365,8 +365,8 @@ describe('End-to-End Research Workflows', () => {
   });
 
   describe('Workflow State Persistence', () => {
-    it('should persist research state to knowledge store', async () => {
-      if (testContext.skipTests()) return;
+    it('should persist research state to knowledge store', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const query = 'Rust language security features';
       const sessionId = `session-${randomUUID()}`;
@@ -406,8 +406,8 @@ describe('End-to-End Research Workflows', () => {
       }
     }, 60000);
 
-    it('should retrieve relevant information from knowledge store in subsequent queries', async () => {
-      if (testContext.skipTests()) return;
+    it('should retrieve relevant information from knowledge store in subsequent queries', async (ctx) => {
+      if (testContext.skipTests()) return ctx.skip();
 
       const query1 = 'PostgreSQL performance tuning';
       const query2 = 'PostgreSQL indexing strategies';

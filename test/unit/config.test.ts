@@ -178,36 +178,43 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(DEFAULTS)).not.toThrow();
     });
 
-    it('should throw for RESEARCHER_TIMEOUT_MS below minimum (180000)', () => {
+    it('should clamp RESEARCHER_TIMEOUT_MS to minimum (180000) when below range', () => {
       const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '60000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 180000');
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(180000);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for RESEARCHER_TIMEOUT_MS above maximum (1800000)', () => {
+    it('should clamp RESEARCHER_TIMEOUT_MS to maximum (1800000) when above range', () => {
       const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '9999999' }, {});
-      expect(() => validateConfig(config)).toThrow('must be <= 1800000');
+      expect(config.RESEARCHER_TIMEOUT_MS).toBe(1800000);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for MAX_CONCURRENT_RESEARCHERS below 1', () => {
+    it('should clamp MAX_CONCURRENT_RESEARCHERS to minimum (1) when below range', () => {
       const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '0' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 1');
+      expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(1);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for MAX_CONCURRENT_RESEARCHERS above 5', () => {
+    it('should clamp MAX_CONCURRENT_RESEARCHERS to maximum (5) when above range', () => {
       const config = createConfig({ PI_RESEARCH_MAX_RESEARCHERS: '6' }, {});
-      expect(() => validateConfig(config)).toThrow('must be <= 5');
+      expect(config.MAX_CONCURRENT_RESEARCHERS).toBe(5);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for DEFAULT_RESEARCH_DEPTH outside 1–3', () => {
+    it('should clamp DEFAULT_RESEARCH_DEPTH to range 1–3', () => {
       const low = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '0' }, {});
-      expect(() => validateConfig(low)).toThrow('must be >= 1');
+      expect(low.DEFAULT_RESEARCH_DEPTH).toBe(1);
+      expect(() => validateConfig(low)).not.toThrow();
       const high = createConfig({ PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '4' }, {});
-      expect(() => validateConfig(high)).toThrow('must be <= 3');
+      expect(high.DEFAULT_RESEARCH_DEPTH).toBe(3);
+      expect(() => validateConfig(high)).not.toThrow();
     });
 
-    it('should throw for WORKER_CONCURRENCY outside 1–10', () => {
+    it('should clamp WORKER_CONCURRENCY to range 1–10', () => {
       const low = createConfig({ PI_RESEARCH_WORKER_CONCURRENCY: '0' }, {});
-      expect(() => validateConfig(low)).toThrow('must be >= 1');
+      expect(low.WORKER_CONCURRENCY).toBe(1);
+      expect(() => validateConfig(low)).not.toThrow();
     });
 
     it('should throw for EMBEDDING_DEVICE with an unsupported value', () => {
@@ -230,19 +237,22 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for SCRAPE_TIMEOUT_MS below minimum', () => {
+    it('should clamp SCRAPE_TIMEOUT_MS to minimum (5000) when below range', () => {
       const config = createConfig({ PI_RESEARCH_SCRAPE_TIMEOUT_MS: '1000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 5000');
+      expect(config.SCRAPE_TIMEOUT_MS).toBe(5000);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for HEALTH_CHECK_TIMEOUT_MS below 2000', () => {
+    it('should clamp HEALTH_CHECK_TIMEOUT_MS to minimum (2000) when below range', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '1000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be >= 2000');
+      expect(config.HEALTH_CHECK_TIMEOUT_MS).toBe(2000);
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should throw for HEALTH_CHECK_TIMEOUT_MS above 120000', () => {
+    it('should clamp HEALTH_CHECK_TIMEOUT_MS to maximum (120000) when above range', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '200000' }, {});
-      expect(() => validateConfig(config)).toThrow('must be <= 120000');
+      expect(config.HEALTH_CHECK_TIMEOUT_MS).toBe(120000);
+      expect(() => validateConfig(config)).not.toThrow();
     });
   });
 

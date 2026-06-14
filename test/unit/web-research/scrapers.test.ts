@@ -55,6 +55,15 @@ vi.mock('@kreuzberg/html-to-markdown-node', () => ({
   CodeBlockStyle: { Backticks: {} },
 }));
 
+// Mock SSRF validation so unit tests don't perform real DNS lookups
+vi.mock('../../../src/web-research/scraper-utils.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/web-research/scraper-utils.ts')>();
+  return {
+    ...original,
+    validateUrlForSSRF: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 import { scrapeSingle, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';
 import { MetricsRegistry, runWithRunRegistry } from '../../../src/utils/metrics.ts';
 

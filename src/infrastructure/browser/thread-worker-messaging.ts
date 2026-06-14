@@ -232,6 +232,20 @@ export async function executeScrapeTask(
 
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
+
+    // Intercept navigation redirects and validate each hop against SSRF rules.
+    // Without this, Playwright follows 3xx natively and could reach internal IPs.
+    const { validateUrlForSSRF: validateForWorker } = await import('../../web-research/scraper-utils.ts');
+    page.on('request', async (req: any) => {
+      if (req.isNavigationRequest() && req.redirectedFrom() != null) {
+        try {
+          await validateForWorker(req.url());
+        } catch (_ssrfErr: unknown) {
+          await req.abort('blockedbyclient').catch(() => {});
+        }
+      }
+    });
+
     // High-fidelity wait: try domcontentloaded first for speed
     const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
     const contentType = (await response?.headerValue('content-type')) || '';

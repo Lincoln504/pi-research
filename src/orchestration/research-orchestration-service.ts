@@ -468,7 +468,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           const failures = (this.failureCounts.get(researchId) || 0) + 1;
           this.failureCounts.set(researchId, failures);
           
-          if (failures > 3) {
+          if (failures >= 3) {
             const failed = health.components.filter(c => !c.healthy).map(c => c.component);
             logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: [ERROR] Unhealthy after ${failures} attempts (${failed.join(', ')})`);
             return false; // Hard failure
