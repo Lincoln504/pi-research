@@ -17,6 +17,7 @@ coverage/
 .nyc_output/
 test-results/
 
+
 # Build tooling (defence-in-depth; not in files[])
 .github/
 .eslint*

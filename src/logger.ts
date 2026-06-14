@@ -23,7 +23,7 @@ import {
 } from './utils/log-utils.ts';
 import { LogRotation } from './utils/log-rotation.ts';
 import { DiskSpaceChecker } from './utils/disk-space-checker.ts';
-import { captureStdio } from './tui/utils/stdio-capture.ts';
+import { captureStdio } from './utils/stdio-capture.ts';
 
 export enum LogLevel {
   INFO = 'INFO',

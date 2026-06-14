@@ -8,7 +8,7 @@
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { logger } from '../../logger.ts';
-import { captureStdio } from '../../tui/utils/stdio-capture.ts';
+import { captureStdio } from '../../utils/stdio-capture.ts';
 import { buildDefaultDebugLogPath } from '../../utils/log-utils.ts';
 import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';

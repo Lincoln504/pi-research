@@ -18,6 +18,7 @@
     "!src/.env",
     "!src/.env.local",
     "!src/.env.*.local",
+    "!src/tui/utils/terminal-state.ts",
     "openclaw.plugin.json",
     "docs/SDK.md",
     "docs/ARCHITECTURE.md",
@@ -80,6 +81,7 @@
     "setup": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "deps:check": "depcruise --config config/.dependency-cruiser.cjs --output-type err-long src",
+    "deps:generate": "depcruise --config config/.dependency-cruiser.cjs --output-type dot src | dot -T svg -o docs/deps.svg",
     "analyze:dependencies": "ncu",
     "analyze:compatibility": "depngn"
   },
