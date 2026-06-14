@@ -312,9 +312,27 @@ jobs:
             exit 1
           fi
           echo '✅ Committed dist/ artifacts are up to date'
-      - name: Verify npm package completeness
+      - name: Verify tarball manifest (required files present, no junk)
+        run: node scripts/verify-package.cjs manifest
+      - name: Pack real tarball
         run: |
-          npm pack --dry-run 2>&1 | tee /tmp/pack-output.txt
-          grep -q index.ts /tmp/pack-output.txt || { echo '❌ src/index.ts missing from package'; exit 1; }
-          grep -q dist/openclaw-entry.js /tmp/pack-output.txt || { echo '❌ dist/openclaw-entry.js missing from package'; exit 1; }
-          echo '✅ npm package verification passed'
+          TAR_FILE="$(npm pack --ignore-scripts | tail -1)"
+          echo "TAR_FILE=$TAR_FILE" >> "$GITHUB_ENV"
+      - name: Install packed tarball in a clean project (strict, real postinstall)
+        # Mirrors how a real consumer / `pi install` resolves the package:
+        #  - NO --legacy-peer-deps, so a peer/ERESOLVE conflict (the class that
+        #    broke the fresh install) fails CI instead of shipping.
+        #  - scripts enabled so our setup.cjs postinstall is exercised and must
+        #    exit 0; browser download skipped to keep it fast and deterministic.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
+        run: |
+          WORK="$(mktemp -d)"
+          cp "$TAR_FILE" "$WORK/"
+          cd "$WORK"
+          npm init -y >/dev/null
+          npm install "./$TAR_FILE"
+          echo "INSTALLED_DIR=$WORK/node_modules/@lincoln504/pi-research" >> "$GITHUB_ENV"
+      - name: Verify installed package layout (entry points, bundles, worker, prompts)
+        run: node scripts/verify-package.cjs installed "$INSTALLED_DIR"

@@ -39,27 +39,23 @@ jobs:
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
 
+      - name: Verify tarball manifest (required files present, no junk)
+        run: node scripts/verify-package.cjs manifest
+
       - name: Test install from tarball in clean environment
+        # postinstall enabled so setup.cjs is exercised; browser download skipped
+        # for speed/determinism. Strict resolution (no --legacy-peer-deps) so a
+        # consumer-facing peer/ERESOLVE conflict blocks the release.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
         run: |
-          # Create a temporary directory for a clean install test
           cd /tmp
-          mkdir pi-test-install
-          cd pi-test-install
-
-          # Initialize a fresh package.json
+          rm -rf pi-test-install && mkdir pi-test-install && cd pi-test-install
           npm init -y
-
-          # Install the packed tarball with postinstall enabled
-          npm install "${{ github.workspace }}/${TAR_FILE}" --ignore-scripts=false
-
-          # Verify key files exist
-          test -d node_modules/@lincoln504/pi-research/src || { echo "❌ src/ not found in installed package"; exit 1; }
-          test -d node_modules/@lincoln504/pi-research/scripts || { echo "❌ scripts/ not found in installed package"; exit 1; }
-          test -f node_modules/@lincoln504/pi-research/package.json || { echo "❌ package.json not found in installed package"; exit 1; }
-
-          # Verify setup.cjs exists
-          test -f node_modules/@lincoln504/pi-research/scripts/setup.cjs || { echo "❌ scripts/setup.cjs not found in installed package"; exit 1; }
-
+          npm install "${{ github.workspace }}/${TAR_FILE}"
+          node "${{ github.workspace }}/scripts/verify-package.cjs" installed \
+            "$(pwd)/node_modules/@lincoln504/pi-research"
           echo "✅ Install smoke-test passed"
 
   publish:
