@@ -146,7 +146,7 @@ describe('extractJsonObject', () => {
     const result = extractJsonObject(text);
     expect(result.success).toBe(true);
     const val = result.value as any;
-    expect(val.researchers[0].queries).toEqual(['a', 'b']);
+    expect(val.researchers[0]!.queries).toEqual(['a', 'b']);
   });
 
   it('attempts local repair for truncated JSON', () => {
@@ -289,7 +289,7 @@ describe('normalizeStringArrayDetailed', () => {
   it('stringifies objects with no recognized key and warns', () => {
     const result = normalizeStringArrayDetailed([{ unknown: 'field' }]);
     expect(result.strings).toHaveLength(1);
-    expect(result.strings[0]).toContain('unknown');
+    expect(result.strings[0]!).toContain('unknown');
     expect(result.warnings.some(w => w.includes('stringified'))).toBe(true);
   });
 

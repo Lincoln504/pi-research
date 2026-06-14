@@ -28,9 +28,9 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.answer_status).toBe('yes');
-    expect(coerced.synthesis).toBe('The sky is blue [1].');
-    expect(coerced.citations).toEqual(['https://example.com/sky']);
+    expect(coerced['answer_status']).toBe('yes');
+    expect(coerced['synthesis']).toBe('The sky is blue [1].');
+    expect(coerced['citations']).toEqual(['https://example.com/sky']);
   });
 
   it('accepts a response with answer_status="no", no synthesis', () => {
@@ -40,8 +40,8 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.answer_status).toBe('no');
-    expect((coerced as any).synthesis).toBeUndefined();
+    expect(coerced['answer_status']).toBe('no');
+    expect((coerced as any)['synthesis']).toBeUndefined();
   });
 
   it('accepts a response with answer_status="maybe" with synthesis', () => {
@@ -52,8 +52,8 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
     };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.answer_status).toBe('maybe');
-    expect(coerced.synthesis).toBe('Partial info: the sky may be blue [1].');
+    expect(coerced['answer_status']).toBe('maybe');
+    expect(coerced['synthesis']).toBe('Partial info: the sky may be blue [1].');
   });
 
   it('accepts "maybe" without synthesis (synthesis is optional)', () => {
@@ -92,14 +92,14 @@ describe('ResearchKnowledgeSynthesisResponseSchema — TypeBox validation', () =
   it('converts string citations to array via Value.Convert (TypeBox leniency)', () => {
     const input = { answer_status: 'yes', synthesis: 'text', citations: 'not-an-array' as any };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
-    expect(Array.isArray(coerced.citations)).toBe(true);
+    expect(Array.isArray(coerced['citations'])).toBe(true);
   });
 
   it('coerces non-string citation values via Value.Convert (TypeBox leniency)', () => {
     const input = { answer_status: 'yes', synthesis: 'text', citations: [42] };
     const coerced = Value.Convert(ResearchKnowledgeSynthesisResponseSchema, input) as Record<string, any>;
     expect(Value.Check(ResearchKnowledgeSynthesisResponseSchema, coerced)).toBe(true);
-    expect(coerced.citations[0]).toBe('42');
+    expect(coerced['citations'][0]!).toBe('42');
   });
 
   it('accepts citations as an empty array', () => {
@@ -156,7 +156,7 @@ describe('URL deduplication — mathematical set semantics', () => {
     const { uniqueUrls, totalHits } = simulateUrlCollection(results);
     expect(totalHits).toBe(4);
     expect(uniqueUrls).toHaveLength(2);
-    expect(uniqueUrls[0]).toBe('https://a.com');
+    expect(uniqueUrls[0]!).toBe('https://a.com');
     expect(uniqueUrls[1]).toBe('https://b.com');
   });
 
@@ -250,7 +250,7 @@ describe('Reference document token budget enforcement', () => {
     const docs = [{ url: 'https://big.com', text: 'X'.repeat(10000) }];
     const result = simulateDocumentAssembly(docs, 2000);
     expect(result.assembled).toHaveLength(1);
-    expect(result.assembled[0]).toContain('[TRUNCATED]');
+    expect(result.assembled[0]!).toContain('[TRUNCATED]');
     expect(result.assembled[0]!.length).toBeLessThan(docs[0]!.text.length);
   });
 
@@ -283,7 +283,7 @@ describe('Orchestration steering — tri-state answer_status', () => {
 
   it('returns the pivot string when answer_status is "no"', () => {
     const result = { answer_status: 'no' as const, synthesis: '', citations: [] };
-    const output = result.answer_status === 'no' ? MISS_STRING : result.synthesis;
+    const output = result['answer_status'] === 'no' ? MISS_STRING : result['synthesis'];
     expect(output).toBe(MISS_STRING);
     expect(output).toContain('No results found');
   });
@@ -295,8 +295,8 @@ describe('Orchestration steering — tri-state answer_status', () => {
       citations: ['https://example.com/sky'],
     };
 
-    let report = result.synthesis;
-    if (result.citations.length > 0) {
+    let report = result['synthesis'];
+    if (result['citations'].length > 0) {
       report += '\n\n### Sources\n1. https://example.com/sky\n';
     }
 
@@ -312,8 +312,8 @@ describe('Orchestration steering — tri-state answer_status', () => {
       citations: ['https://example.com/sky'],
     };
 
-    let report = result.synthesis;
-    if (result.citations.length > 0) {
+    let report = result['synthesis'];
+    if (result['citations'].length > 0) {
       report += '\n\n### Sources\n1. https://example.com/sky\n';
     }
     report += '\n\n' + MAYBE_STRING;
@@ -330,7 +330,7 @@ describe('Orchestration steering — tri-state answer_status', () => {
       citations: [],
     };
 
-    expect(result.synthesis).toBe('Just answer, no citations.');
+    expect(result['synthesis']).toBe('Just answer, no citations.');
   });
 });
 
@@ -453,7 +453,7 @@ describe('Knowledge Search TUI Panel', () => {
     const lines = component.render(40);
 
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toBe('┌' + '─'.repeat(38) + '┐');
+    expect(lines[0]!).toBe('┌' + '─'.repeat(38) + '┐');
     expect(lines[1]).toContain('searching knowledge store');
     expect(lines[1]!.startsWith('│')).toBe(true);
     expect(lines[1]!.endsWith('│')).toBe(true);

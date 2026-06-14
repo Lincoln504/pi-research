@@ -31,7 +31,7 @@ describe('Knowledge Store & URL Consistency Integration', () => {
 
     const normalized = urls.map(u => normalizeUrl(u));
 
-    expect(normalized[0]).toBe('https://example.com');
+    expect(normalized[0]!).toBe('https://example.com');
     expect(normalized[1]).toBe('https://example.com');
     expect(normalized[2]).toBe('https://example.com/PATH');
     expect(normalized[3]).toBe('https://example.com/path?a=1&b=2');

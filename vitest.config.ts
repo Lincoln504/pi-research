@@ -7,11 +7,6 @@
  *
  * To run all tests sequentially:
  *   npm run test:all
- *
- * This mirrors config/tooling/vitest.config.unit.ts with correct root-level
- * resolve aliases. The tooling/base config uses relative aliases that resolve
- * only when loaded from config/tooling/ (via --config flag). This root config
- * ensures 'npx vitest run' resolves @/ and @test/ paths correctly.
  */
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
@@ -30,10 +25,13 @@ export default defineConfig({
     name: 'unit',
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
-    pool: 'forks',
-    forks: {
-      maxForks,
-      minForks: 2,
+    pool: 'forks' as const,
+    // @ts-expect-error Vitest 4.x runtime supports poolOptions.forks
+    poolOptions: {
+      forks: {
+        maxForks,
+        minForks: 2,
+      },
     },
     testTimeout: 30000,
     hookTimeout: 15000,

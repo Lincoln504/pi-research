@@ -232,7 +232,7 @@ vi.mock('../../src/utils/error-tracker.ts', () => ({
 
 vi.mock('../../src/utils/research-export.ts', () => ({
   exportResearchReport: vi.fn(async () => undefined),
-  appendExportMessage: vi.fn((result, path, cost) => `${result}\n\nExported to: ${path}`),
+  appendExportMessage: vi.fn((result, path, _cost) => `${result}\n\nExported to: ${path}`),
 }));
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({

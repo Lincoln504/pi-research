@@ -55,7 +55,7 @@ vi.mock('@kreuzberg/html-to-markdown-node', () => ({
   CodeBlockStyle: { Backticks: {} },
 }));
 
-import { scrapeSingle, scrape, getDependencyStatus, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';
+import { scrapeSingle, initScraperDependencies } from '../../../src/web-research/web-scraper.ts';
 import { MetricsRegistry, runWithRunRegistry } from '../../../src/utils/metrics.ts';
 
 describe('scrapers', () => {

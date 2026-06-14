@@ -41,7 +41,7 @@ describe('repairJsonWithLlm', () => {
 
     expect(result).toEqual({ foo: 'fixed', bar: 42 });
     expect(mockCompleter).toHaveBeenCalledOnce();
-    const prompt = mockCompleter.mock.calls[0][1].messages[0].content[0].text;
+    const prompt = mockCompleter.mock.calls[0][1].messages[0]!.content[0]!.text;
     expect(prompt).toContain('JSON Schema');
     expect(prompt).toContain('MALFORMED RESPONSE');
   });

@@ -71,7 +71,7 @@ describe('shared-links normalization', () => {
       const { kept, duplicates } = deduplicateUrls(['https://example.com#section'], sessionId);
       expect(kept).toHaveLength(0);
       expect(duplicates).toHaveLength(1);
-      expect(duplicates[0]).toBe('https://example.com#section');
+      expect(duplicates[0]!).toBe('https://example.com#section');
     });
 
     it('should keep unique URLs', () => {
@@ -80,7 +80,7 @@ describe('shared-links normalization', () => {
 
       const { kept, duplicates } = deduplicateUrls(['https://example.com/page2'], sessionId);
       expect(kept).toHaveLength(1);
-      expect(kept[0]).toBe('https://example.com/page2');
+      expect(kept[0]!).toBe('https://example.com/page2');
       expect(duplicates).toHaveLength(0);
     });
   });

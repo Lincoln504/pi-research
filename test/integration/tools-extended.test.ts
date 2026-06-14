@@ -125,7 +125,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toContain('CVE-2024-21626');
         expect(text.length).toBeGreaterThan(50);
       }
@@ -154,7 +154,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toContain('lodash');
         expect(text).toMatch(/vulnerabilit(y|ies)/i);
         expect(text).toMatch(/open\s*source/i);
@@ -183,7 +183,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toContain('requests');
         expect(text.length).toBeGreaterThan(50);
       }
@@ -253,7 +253,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        expect(result.content[0].text as string).toBeDefined();
+        expect(result.content[0]!.text as string).toBeDefined();
       }
     }, 60000);
   });
@@ -280,7 +280,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (!isNetworkUnavailable(text)) {
           expect(text).toBeDefined();
         }
@@ -308,7 +308,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (!isNetworkUnavailable(text)) {
           expect(text.length).toBeGreaterThan(50);
         }
@@ -336,7 +336,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (!isNetworkUnavailable(text)) {
           expect(text.length).toBeGreaterThan(50);
         }
@@ -364,7 +364,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (!isNetworkUnavailable(text)) {
           expect(text.length).toBeGreaterThan(50);
         }
@@ -414,7 +414,7 @@ describe('Extended Tools Integration', () => {
       expect(Array.isArray(result.content)).toBe(true);
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           return;
         }
@@ -446,7 +446,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           return;
         }
@@ -478,7 +478,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           return;
         }
@@ -508,7 +508,7 @@ describe('Extended Tools Integration', () => {
 
         expect(result).toBeDefined();
         if (result.content[0]?.type === 'text') {
-          const text = result.content[0].text as string;
+          const text = result.content[0]!.text as string;
           if (!isNetworkUnavailable(text)) {
             expect(text.length).toBeGreaterThan(50);
           }
@@ -594,7 +594,7 @@ describe('Extended Tools Integration', () => {
       expect(Array.isArray(result.content)).toBe(true);
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         // SDK grep returns "filename:line: content" format (relative to searched dir)
         expect(text).toContain('createGrepTool');
         expect(text).toContain('grep.ts');
@@ -615,7 +615,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toContain('ToolUsageTracker');
         // Should appear multiple times
         expect(text.length).toBeGreaterThan(100);
@@ -636,7 +636,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toContain('createGrepTool');
       }
     });
@@ -658,7 +658,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         // SDK grep throws on missing path; wrapper converts to error result
         expect(text).toMatch(/no\s*matches|error|not\s*found/i);
       }
@@ -678,7 +678,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text).toMatch(/no\s*matches/i);
       }
     });
@@ -697,7 +697,7 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         expect(text.length).toBeGreaterThan(50);
       }
     });
@@ -707,12 +707,12 @@ describe('Extended Tools Integration', () => {
     it('should enforce global gathering limit across different tools', async () => {
       const tracker = new ToolUsageTracker({ gathering: 3 });
       
-      const searchTool = createSecuritySearchTool({
+      void createSecuritySearchTool({
         ctx: mockExtensionCtx as any,
         tracker
       });
-      const grepTool = createGrepTool({ tracker });
-      const seTool = createStackexchangeTool({ 
+      void createGrepTool({ tracker });
+      void createStackexchangeTool({ 
         ctx: mockExtensionCtx as any, 
         tracker 
       });
@@ -736,7 +736,7 @@ describe('Extended Tools Integration', () => {
 
     it('should track usage correctly across multiple tool types', async () => {
       const tracker = new ToolUsageTracker({ gathering: 5, scrape: 5 });
-      const grepTool = createGrepTool({ tracker });
+      void createGrepTool({ tracker });
       
       // Multiple calls should be tracked
       tracker.recordCall('grep');
@@ -771,7 +771,7 @@ describe('Extended Tools Integration', () => {
 
     it('should reset limits correctly', async () => {
       const tracker = new ToolUsageTracker({ gathering: 2 });
-      const grepTool = createGrepTool({ tracker });
+      void createGrepTool({ tracker });
       
       // Use up limit
       tracker.recordCall('grep');

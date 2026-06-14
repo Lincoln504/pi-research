@@ -90,7 +90,7 @@ describe('KnowledgeStore Scoping', () => {
     expect(await storeA2.count()).toBe(1);
     const searchA = await storeA2.search('Content');
     expect(searchA).toHaveLength(1);
-    expect(searchA[0].url).toBe('https://a.com');
+    expect(searchA[0]!.url).toBe('https://a.com');
 
     await storeB.close();
     await storeA2.close();
@@ -118,7 +118,7 @@ describe('KnowledgeStore Scoping', () => {
     expect(await storeB.count()).toBe(1);
     const searchB = await storeB.search('Global');
     expect(searchB).toHaveLength(1);
-    expect(searchB[0].url).toBe('https://global.com');
+    expect(searchB[0]!.url).toBe('https://global.com');
     await storeB.close();
   });
 

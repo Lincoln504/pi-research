@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import { createScrapeTool } from '../../../src/tools/scrape.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
@@ -73,7 +73,7 @@ describe('tools/scrape', () => {
     const result = await tool.execute('call-1', { urls: ['https://example.com/1'] }, undefined, undefined, {} as any);
 
     expect(result.content).toHaveLength(1);
-    expect(result.content[0].type).toBe('text');
+    expect(result.content[0]!.type).toBe('text');
     expect((result.content[0] as any).text).toContain('Scrape Results');
     expect((result.content[0] as any).text).toContain('https://example.com/1');
     const details = result.details as any;

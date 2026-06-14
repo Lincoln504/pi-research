@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)

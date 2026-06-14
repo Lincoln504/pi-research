@@ -113,7 +113,7 @@ describe('OpenClaw Plugin Integration', () => {
     mockApi.pluginConfig = { apiKey: 'test', provider: 'mock', model: 'mock-model' };
     
     const result = await researchTool.execute('call-id', { query: 'test', depth: 0 });
-    expect(result.content[0].text).toBe('integrated research report');
+    expect(result.content[0]!.text).toBe('integrated research report');
   });
 
   it('should respect reportExportEnabled', async () => {
@@ -137,8 +137,8 @@ describe('OpenClaw Plugin Integration', () => {
 
     try {
         const result = await researchTool.execute('call-id', { query: 'test', depth: 0 });
-        expect(result.content[0].text).toContain('integrated research report');
-        expect(result.content[0].text).toContain('Research report saved to');
+        expect(result.content[0]!.text).toContain('integrated research report');
+        expect(result.content[0]!.text).toContain('Research report saved to');
     } finally {
         process.cwd = originalCwd;
     }
@@ -148,6 +148,6 @@ describe('OpenClaw Plugin Integration', () => {
     await plugin.register(mockApi as any);
     const healthTool = registeredTools.find(t => t.name === 'health')!;
     const result = await healthTool.execute('call-id', {});
-    expect(result.content[0].text).toContain('status');
+    expect(result.content[0]!.text).toContain('status');
   });
 });

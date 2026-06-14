@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getBrowserCacheDir, getBrowserEnv, getCamoufoxBinaryPath } from '../../../src/infrastructure/browser/config.ts';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';

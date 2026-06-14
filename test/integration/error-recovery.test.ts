@@ -15,12 +15,14 @@ import { CircuitBreaker } from '../../src/utils/circuit-breaker.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 // ============================================================================
 // Types
 // ============================================================================
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // @ts-ignore TS6196
 interface RecoveryTestResult {
   scenario: string;
   recovered: boolean;
@@ -240,7 +242,7 @@ describe('Error Recovery and Resilience', () => {
       const opCount = 3;
       for (let i = 0; i < opCount; i++) {
         try {
-          const result = await circuitBreaker.execute(async () => {
+          await circuitBreaker.execute(async () => {
             return await runBrowserTask<any>(
               { query: `circuit breaker test ${i}` },
               'search'

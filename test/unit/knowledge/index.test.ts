@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 
 // Must mock all heavy dependencies before importing the module under test

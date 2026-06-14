@@ -200,7 +200,7 @@ describe('browser-search', () => {
       
       // Final call should have 3 unique URLs
       const finalCall = progressCb.mock.calls[progressCb.mock.calls.length - 1];
-      expect(finalCall[0]).toBe(3);
+      expect(finalCall![0]!).toBe(3);
     });
 
     it('should track unique URLs across all queries', async () => {
@@ -221,7 +221,7 @@ describe('browser-search', () => {
 
       // Should track unique URLs (1 shared + 3 unique = 4 total)
       const finalCall = progressCb.mock.calls[progressCb.mock.calls.length - 1];
-      expect(finalCall[0]).toBe(4);
+      expect(finalCall![0]!).toBe(4);
     });
 
     it('should handle progress callback errors gracefully', async () => {

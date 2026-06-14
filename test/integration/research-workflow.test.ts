@@ -9,10 +9,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { QuickResearchOrchestrator } from '../../src/orchestration/quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from '../../src/orchestration/deep-research-orchestrator.ts';
 import { getConfig } from '../../src/config.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
 import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { logger } from '../../src/logger.ts';
+// logger imported via helpers when needed
 import { getService } from '../../src/core/service-registry.ts';
 import { ServiceNames } from '../../src/core/service-interfaces.ts';
 import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-service.ts';
@@ -80,6 +80,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
 // Types
 // ============================================================================
 
+  // @ts-ignore TS6196
 interface ResearchWorkflowResult {
   query: string;
   success: boolean;

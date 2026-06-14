@@ -1,20 +1,22 @@
 import { defineConfig } from 'vitest/config';
-import baseConfig from './vitest.config';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import os from 'node:os';
 
-// onnxruntime-node is a native NAPI addon that cannot be loaded in worker threads.
-// Pool must remain 'forks'; parallelism comes from maxForks.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const cpuCount = os.cpus().length;
 const maxForks = Math.max(2, Math.min(cpuCount, 8));
 
 export default defineConfig({
-  ...baseConfig,
   test: {
-    ...baseConfig.test,
+    globals: true,
+    environment: 'node',
     name: 'unit',
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
-    pool: 'forks',
+    pool: 'forks' as const,
+    // @ts-expect-error Vitest 4.x runtime supports poolOptions.forks
     poolOptions: {
       forks: {
         maxForks,
@@ -24,5 +26,28 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 15000,
     teardownTimeout: 10000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      exclude: [
+        'node_modules/',
+        'dist/',
+        '**/*.test.ts',
+        '**/*.spec.ts',
+        '**/types.ts',
+        '**/index.ts',
+        'test/',
+      ],
+      reportOnFailure: true,
+    },
+    reporters: process.env['GITHUB_ACTIONS']
+      ? ['verbose', 'github-actions']
+      : ['verbose'],
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '../../src'),
+      '@test': path.resolve(__dirname, '../../test'),
+    },
   },
 });

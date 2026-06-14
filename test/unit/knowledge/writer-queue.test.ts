@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { WriterQueue } from '../../../src/knowledge/writer-queue.ts';
-import { KnowledgeStore } from '../../../src/knowledge/store.ts';
+
 
 // Mock Store
 const mockStore = {
@@ -30,8 +30,8 @@ describe('WriterQueue', () => {
     await queue.drain();
     expect(mockStore.addDocuments).toHaveBeenCalledOnce();
     const docs = vi.mocked(mockStore.addDocuments).mock.calls[0][0];
-    expect(docs[0].url).toBe('https://test.com');
-    expect(docs[0].text).toBe('description');
+    expect(docs[0]!.url).toBe('https://test.com');
+    expect(docs[0]!.text).toBe('description');
   });
 
   it('should skip ingestion if markdown is empty', async () => {
@@ -45,7 +45,7 @@ describe('WriterQueue', () => {
     await queue.drain();
     const docs = vi.mocked(mockStore.addDocuments).mock.calls[0][0];
     const expectedHash = createHash('sha256').update('description').update('').digest('hex');
-    expect(docs[0].metadata.contentHash).toBe(expectedHash);
+    expect(docs[0]!.metadata.contentHash).toBe(expectedHash);
   });
 
   it('should store full page content on the document', async () => {
@@ -57,7 +57,7 @@ describe('WriterQueue', () => {
     });
     await queue.drain();
     const docs = vi.mocked(mockStore.addDocuments).mock.calls[0][0];
-    expect(docs[0].content).toBe('full page markdown here');
+    expect(docs[0]!.content).toBe('full page markdown here');
   });
 
   it('raw-content items are written to the store (no special-case guard)', async () => {

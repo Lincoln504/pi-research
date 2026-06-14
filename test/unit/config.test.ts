@@ -9,7 +9,7 @@ vi.mock('../../src/utils/text-utils.ts', () => ({
   normalizeWorkspacePath: vi.fn((p: string) => p),
 }));
 
-import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config, DEFAULTS } from '../../src/config';
+import { createConfig, getConfig, setConfig, resetConfig, validateConfig, saveConfig, getDbDir, type Config as _Config, DEFAULTS } from '../../src/config';
 import * as fs from 'node:fs';
 
 // Mock fs to avoid reading .env during tests

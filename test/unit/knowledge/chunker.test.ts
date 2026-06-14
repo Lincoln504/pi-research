@@ -45,7 +45,7 @@ describe('Chunker', () => {
     // The code block should be in a single chunk if possible, or at least not split in the middle of a line?
     // Actually mandate says "never be split mid-block".
     const codeBlockChunks = chunks.filter(c => c.text.includes('const x = 1;'));
-    expect(codeBlockChunks[0].text).toContain('```js\nconst x = 1;\nconst y = 2;\nconst z = 3;\n```');
+    expect(codeBlockChunks[0]!.text).toContain('```js\nconst x = 1;\nconst y = 2;\nconst z = 3;\n```');
   });
 
   it('should split on sentence boundaries', () => {
@@ -55,11 +55,11 @@ describe('Chunker', () => {
     // Target size is 45. 
     // 'First long sentence that goes on for a bit.' is 43 chars.
     // So it should split right after the period.
-    expect(chunks[0].text).toBe('First long sentence that goes on for a bit.');
+    expect(chunks[0]!.text).toBe('First long sentence that goes on for a bit.');
     // Check lossless reconstruction
-    let reconstructed = chunks[0].text;
+    let reconstructed = chunks[0]!.text;
     for (let i = 1; i < chunks.length; i++) {
-      reconstructed += chunks[i].text.slice(chunks[i].actual_overlap);
+      reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
     }
     expect(reconstructed).toBe(text);
   });
@@ -68,9 +68,9 @@ describe('Chunker', () => {
     const text = '# Test\n' + 'Line of text.\n'.repeat(50);
     const chunks = chunker.chunk(text);
     
-    let reconstructed = chunks[0].text;
+    let reconstructed = chunks[0]!.text;
     for (let i = 1; i < chunks.length; i++) {
-      reconstructed += chunks[i].text.slice(chunks[i].actual_overlap);
+      reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
     }
     
     expect(reconstructed).toBe(text);
@@ -88,14 +88,14 @@ describe('Chunker', () => {
     const short = 'short text';
     const chunks = chunker.chunk(short);
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].text).toBe(short);
-    expect(chunks[0].actual_overlap).toBe(0);
+    expect(chunks[0]!.text).toBe(short);
+    expect(chunks[0]!.actual_overlap).toBe(0);
   });
 
   it('first chunk always has actual_overlap of 0 regardless of overlap setting', () => {
     const text = 'A '.repeat(200);
     const chunks = chunker.chunk(text);
-    expect(chunks[0].actual_overlap).toBe(0);
+    expect(chunks[0]!.actual_overlap).toBe(0);
   });
 
   it('no chunk should exceed targetSize + overlap characters', () => {
@@ -111,9 +111,9 @@ describe('Chunker', () => {
     const smallChunker = new Chunker({ targetSize: 30, overlap: 5 });
     const chunks = smallChunker.chunk(text);
 
-    let reconstructed = chunks[0].text;
+    let reconstructed = chunks[0]!.text;
     for (let i = 1; i < chunks.length; i++) {
-      reconstructed += chunks[i].text.slice(chunks[i].actual_overlap);
+      reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
     }
 
     expect(reconstructed).toBe(text);
@@ -167,9 +167,9 @@ describe('Chunker', () => {
             continue;
           }
 
-          let reconstructed = chunks[0].text;
+          let reconstructed = chunks[0]!.text;
           for (let i = 1; i < chunks.length; i++) {
-            reconstructed += chunks[i].text.slice(chunks[i].actual_overlap);
+            reconstructed += chunks[i]!.text.slice(chunks[i]!.actual_overlap);
           }
           
           if (reconstructed !== text) {

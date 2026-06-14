@@ -10,7 +10,7 @@ import { createResearchTool } from '../../src/tools/research-tool-definition.ts'
 import { createHealthTool } from '../../src/tools/health-tool-definition.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../src/infrastructure/service-initialization.ts';
-import { resetServiceContainer } from '../../src/core/service-registry.ts';
+// resetServiceContainer imported via helpers when needed
 
 describe('Tool Execution After Service Registry Refactor', () => {
   beforeAll(async () => {
@@ -166,8 +166,9 @@ describe('Tool Execution After Service Registry Refactor', () => {
       expect(result).toBeDefined();
       expect(result.content).toBeDefined();
       expect(Array.isArray(result.content)).toBe(true);
-      expect(result.content[0].type).toBe('text');
-      expect(typeof (result.content[0] as any).text).toBe('string');
+      expect(result!
+      .content![0].type).toBe('text');
+      expect(typeof (result.content![0] as any).text).toBe('string');
       expect(result.details).toBeDefined();
     });
 

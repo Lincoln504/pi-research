@@ -50,14 +50,15 @@ describe('Knowledge Store Persistence', () => {
   let embedder: any;
   let store: KnowledgeStore;
   let chunker: Chunker;
-  let queue: WriterQueue;
+  // WriterQueue not needed for these tests
+  let _queue: WriterQueue;
 
   beforeEach(async () => {
     tmpDir = path.join(os.tmpdir(), `pi-persistence-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     embedder = makeSyntheticEmbedder(64);
     store = await makeStore(tmpDir, embedder);
     chunker = new Chunker({ targetSize: 200, overlap: 30 });
-    queue = new WriterQueue({ store, chunker });
+    _queue = new WriterQueue({ store, chunker });
   });
 
   afterEach(async () => {
@@ -173,10 +174,10 @@ describe('Knowledge Store Persistence', () => {
       await store.close();
 
       const store2 = await makeStore(tmpDir, embedder);
-      const found = await store2.findByUrl(testData[0].url);
+      const found = await store2.findByUrl(testData[0]!.url);
       expect(found).toHaveLength(1);
-      expect(found[0]?.text).toBe(testData[0].text);
-      expect(found[0]?.metadata['customField']).toBe(testData[0].metadata.customField);
+      expect(found[0]!.text).toBe(testData[0]!.text);
+      expect(found[0]!.metadata['customField']).toBe(testData[0]!.metadata.customField);
 
       await store2.close();
     });

@@ -57,16 +57,16 @@ describe('KnowledgeStore', () => {
 
     const results = await store.search('hello', { limit: 1 });
     expect(results).toHaveLength(1);
-    expect(results[0].url).toBe('https://example.com');
-    expect(results[0].text).toBe('Hello world');
-    expect(results[0].content).toBe('full page content here');
-    expect(results[0].metadata['title']).toBe('Test');
-    expect(results[0].timestamp).toBe(timestamp);
+    expect(results[0]!.url).toBe('https://example.com');
+    expect(results[0]!.text).toBe('Hello world');
+    expect(results[0]!.content).toBe('full page content here');
+    expect(results[0]!.metadata['title']).toBe('Test');
+    expect(results[0]!.timestamp).toBe(timestamp);
 
     // Internal check: verify it was tagged with current workspace and not global
     const rawDocs = await (store as any).table.query().toArray();
-    expect(rawDocs[0].workspace).toBe(process.cwd());
-    expect(rawDocs[0].is_global).toBe(false);
+    expect(rawDocs[0]!.workspace).toBe(process.cwd());
+    expect(rawDocs[0]!.is_global).toBe(false);
   });
 
   it('should throw when addDocuments is called before open()', async () => {
@@ -247,8 +247,8 @@ describe('KnowledgeStore', () => {
     expect(uniqueUrls).toContain('https://example.com/dedup');
     expect(uniqueUrls).toContain('https://example.com/other');
     // Each entry should have url and description fields
-    expect(entries[0]).toHaveProperty('url');
-    expect(typeof entries[0].description).toBe('string');
+    expect(entries[0]!).toHaveProperty('url');
+    expect(typeof entries[0]!.description).toBe('string');
   });
 
   it('count() returns 0 before open and the number of documents after insertion', async () => {

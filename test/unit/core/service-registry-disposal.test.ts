@@ -5,7 +5,7 @@
  * This is critical for the fix where disposeAll() no longer clears registrations.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   registerService,
   getService,
@@ -14,7 +14,6 @@ import {
   resetServiceContainer,
   ServiceLifecycle,
 } from '../../../src/core/service-registry.ts';
-import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock service for testing
 class MockService {

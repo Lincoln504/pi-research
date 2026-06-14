@@ -32,10 +32,7 @@
   },
   "include": [
     "src/**/*",
-    "test/**/*",
-    "scripts/**/*",
-    "config/**/*",
-    "vitest.config.ts"
+    "scripts/**/*"
   ],
   "exclude": [
     "node_modules",

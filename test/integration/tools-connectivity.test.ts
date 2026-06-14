@@ -100,7 +100,7 @@ describe('Search and Scrape Tools Connectivity', () => {
 
       expect(result.content).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           // Skip test if network is unavailable
           return;
@@ -146,7 +146,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           return;
         }
@@ -179,7 +179,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         // Should have error information
         expect(text).toBeDefined();
         expect(typeof text).toBe('string');
@@ -207,7 +207,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         // Should report failure
         expect(text).toBeDefined();
         expect(typeof text).toBe('string');
@@ -239,7 +239,7 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result.content).toBeDefined();
       
       if (result.content[0]?.type === 'text') {
-        const text = result.content[0].text as string;
+        const text = result.content[0]!.text as string;
         if (isNetworkUnavailable(text)) {
           return;
         }

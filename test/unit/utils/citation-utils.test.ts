@@ -13,8 +13,8 @@ describe('citation-utils', () => {
 
       // Verify global citations
       expect(globalCitations).toHaveLength(2);
-      expect(globalCitations[0].url).toBe('https://example.com');
-      expect(globalCitations[0].id).toBe(1);
+      expect(globalCitations[0]!.url).toBe('https://example.com');
+      expect(globalCitations[0]!.id).toBe(1);
       expect(globalCitations[1].url).toBe('https://google.com');
       expect(globalCitations[1].id).toBe(2);
 

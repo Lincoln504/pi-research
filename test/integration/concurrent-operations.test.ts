@@ -14,7 +14,6 @@ import {
   stopBrowserManager,
 } from '../../src/infrastructure/browser/index.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
-import { getConfig } from '../../src/config.ts';
 import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
@@ -267,7 +266,7 @@ describe('Concurrent Operations', () => {
       ]);
 
       // Each search should return relevant results
-      searchResults.forEach((results, index) => {
+      searchResults.forEach((results, _index) => {
         expect(results).toBeDefined();
         expect(Array.isArray(results)).toBe(true);
       });
@@ -505,10 +504,10 @@ describe('Concurrent Operations', () => {
       );
 
       const results: ConcurrentTestResult[] = [];
-      const startTime = Date.now();
+      
 
       await Promise.all(
-        queries.map(async (query, index) => {
+        queries.map(async (query, _index) => {
           const sessionId = `session-${randomUUID()}`;
           const start = Date.now();
 
@@ -531,7 +530,7 @@ describe('Concurrent Operations', () => {
         })
       );
 
-      const totalDuration = Date.now() - startTime;
+      
 
       // Calculate metrics
       const metrics: ConcurrencyMetrics = {
