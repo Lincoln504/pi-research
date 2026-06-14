@@ -85,93 +85,91 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const anyKnowledgeStore = config.KNOWLEDGE_STORE_MODE !== 'none';
 
   const initialItems: SettingItem[] = [
-    // --- Project Settings ---
+    // Research complexity — most important setting, presented first.
+    {
+      id: 'DEFAULT_RESEARCH_DEPTH',
+      label: 'Research Depth',
+      description: 'Default complexity for /research (normal, deep, ultra). Set once per project.',
+      currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
+      values: ['normal', 'deep', 'ultra'],
+    },
     {
       id: 'KNOWLEDGE_STORE_MODE',
-      label: 'Knowledge mode [project]',
-      description: 'Set knowledge store isolation mode (none, project, global).',
+      label: 'Knowledge Mode',
+      description: 'Knowledge store scope — none (disabled), project (isolated per directory), or global (shared across all projects).',
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },
     {
-      id: 'DEFAULT_RESEARCH_DEPTH',
-      label: '/research depth [project]',
-      description: 'Default complexity (normal/deep/ultra) for /research command. Applies to this project.',
-      currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
-      values: ['normal', 'deep', 'ultra'],
-    },
-
-    // --- User Settings ---
-    {
       id: 'RESEARCHER_TIMEOUT_MS',
       label: 'Researcher Timeout',
-      description: 'Maximum time in minutes allowed for a single research track.',
+      description: 'Minutes before a stalled research track is forcefully cancelled.',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
     {
       id: 'MAX_CONCURRENT_RESEARCHERS',
       label: 'Max Concurrency',
-      description: 'Max parallel researcher threads. Configurable limit to avoid API rate limits.',
+      description: 'Parallel researcher threads. Reduce this if you hit API rate-limit errors.',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
     },
     {
       id: 'MAX_SCRAPE_BATCHES',
       label: 'Scrape Batches',
-      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited).',
+      description: 'Max URL batches a researcher can fetch (0 = unlimited). Lower values conserve API credit.',
       currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
       values: ['unlimited', '1', '2', '3', '5', '10', '15'],
     },
     {
       id: 'RESEARCH_REPORT_EXPORT_ENABLED',
-      label: 'Auto-export report',
-      description: 'Automatically save a markdown report when research completes.',
+      label: 'Auto-export Report',
+      description: 'Write a markdown report to disk when each research run completes.',
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
     {
       id: 'WORKER_THREADS',
-      label: 'Browser Worker Threads',
-      description: 'Browser processes for searching/scraping. Affects CPU/RAM usage.',
+      label: 'Browser Workers',
+      description: 'Parallel browser processes for search and scraping. Higher values use more CPU and RAM.',
       currentValue: String(config.WORKER_THREADS),
       values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'EMBEDDING_MODEL',
-        label: 'Embed model',
-        description: 'Vector model for store. Changing this renames current data to a backup and starts fresh.',
+        label: 'Embedding Model',
+        description: 'Vector model for semantic search. Changing this renames current data to a backup and starts fresh.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
       {
         id: 'EMBEDDING_DEVICE',
-        label: 'Embed device',
-        description: 'Hardware backend (WebGPU or CPU). CPU is safer for headless/server environments.',
+        label: 'Embedding Device',
+        description: 'Hardware backend for the embedding model. CPU is safer for headless or server environments.',
         currentValue: config.EMBEDDING_DEVICE,
         values: ['webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-        label: 'Cache retention',
-        description: 'Number of days to keep research findings before automated eviction.',
+        label: 'Cache Retention',
+        description: 'Days to retain findings before automated eviction. Longer = more disk, shorter = fresher data.',
         currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
         values: ['7', '14', '30', '60', '90', '180', '365'],
       },
     ] as SettingItem[] : []),
     {
       id: 'DEBUG',
-      label: 'Debug logs',
-      description: 'Enable verbose logging for troubleshooting. Writes to /tmp/pi-research.log.',
+      label: 'Debug Logging',
+      description: 'Write verbose diagnostics to /tmp/pi-research.log for troubleshooting.',
       currentValue: config.DEBUG ? 'true' : 'false',
       values: ['true', 'false'],
     },
 
-    // --- Actions ---
+    // ── Actions ──
     {
       id: 'ACTION_HEALTH',
-      label: 'Run diagnostics',
+      label: 'Run Diagnostics',
       description: 'Test browser pool, GPU, and database connectivity.',
       currentValue: 'run',
       values: ['run'],
@@ -179,8 +177,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(anyKnowledgeStore ? [
       {
         id: 'ACTION_KNOWLEDGE_STATUS',
-        label: 'Database status',
-        description: 'Show entry counts, disk usage, and model info for the knowledge store.',
+        label: 'Database Status',
+        description: 'Show entry counts, disk usage, and the active embedding model.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -188,8 +186,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
-        label: 'Clear project scope',
-        description: 'Permanently delete all store entries associated with this specific directory.',
+        label: 'Clear Project Store',
+        description: 'Permanently delete all entries tied to this project directory.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -197,31 +195,30 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ...(config.KNOWLEDGE_STORE_MODE === 'global' ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-        label: 'Clear user store',
+        label: 'Clear User Store',
         description: 'Permanently delete all globally shared store entries.',
         currentValue: 'run',
         values: ['run'],
       },
     ] as SettingItem[] : []),
-        {
-        id: 'ACTION_METRICS_VIEW',
-
+    {
+      id: 'ACTION_METRICS_VIEW',
       label: 'View Session Metrics',
-      description: 'Show token usage, costs, and success rates for this session.',
+      description: 'Show token usage, API cost estimates, and success rates for the current session.',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
       label: 'Reset Session Metrics',
-      description: 'Clear the current session performance counters.',
+      description: 'Clear all performance counters for the current session.',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_LOGS_CLEAR',
-      label: 'Clear debug logs',
-      description: 'Delete the main diagnostic log file and all archived rotation files.',
+      label: 'Clear Debug Logs',
+      description: 'Delete the diagnostic log file and all archived rotation files.',
       currentValue: 'run',
       values: ['run'],
     },

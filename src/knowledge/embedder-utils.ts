@@ -121,7 +121,15 @@ const beforeExitHandler = () => {
   }
 };
 
-shutdownManager.registerEventListener(process, 'beforeExit', beforeExitHandler);
+/**
+ * Register the beforeExit safety-net handler.
+ * Must be called during each extension activation because deactivate()
+ * strips all registered event listeners. Module-level registration is
+ * insufficient — after a Pi reload the handler would be missing.
+ */
+export function registerBeforeExitSafetyNet(): void {
+  shutdownManager.registerEventListener(process, 'beforeExit', beforeExitHandler);
+}
 
 /**
  * Initialize the ONNX environment

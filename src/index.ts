@@ -14,6 +14,7 @@ import { logger } from './logger.ts';
 import { randomUUID } from 'node:crypto';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
+import { registerBeforeExitSafetyNet } from './knowledge/embedder-utils.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
@@ -78,6 +79,10 @@ export default async function (pi: ExtensionAPI) {
       `Requires v${minMajor}.${minMinor}.${minPatch}+. Please update pi-coding-agent.`,
     );
   }
+
+  // Re-register the beforeExit safety net (deactivate() strips event listeners during reload).
+  // This ensures the ONNX pipeline is disposed even after extension reloads.
+  registerBeforeExitSafetyNet();
 
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
   // This ensures we capture steering even if initialization takes time.
