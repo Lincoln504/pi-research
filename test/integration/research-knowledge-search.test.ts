@@ -91,7 +91,7 @@ describe('research_knowledge_search — store interaction layer', () => {
       `pi-research-knowledge-it-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     );
     embedder = makeSyntheticEmbedder(64);
-    store = new KnowledgeStore({ dbDir: tmpDir, embedder, modelName: 'synthetic-64' });
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, embedder, modelName: 'synthetic-64' });
     await store.open();
   });
 
@@ -291,14 +291,12 @@ describe('research_knowledge_search — store interaction layer', () => {
     await store.close();
     vi.clearAllMocks();
 
-    const scopedStore = new KnowledgeStore({
-      dbDir: tmpDir,
+    const scopedStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir,
       embedder,
       modelName: 'synthetic-64',
       workspace: '/test/project-a',
       localEnabled: true,
-      globalEnabled: false,
-    });
+      globalEnabled: false, });
     await scopedStore.open();
 
     await seedStore(scopedStore, [
@@ -311,14 +309,12 @@ describe('research_knowledge_search — store interaction layer', () => {
     ]);
 
     // A store with a different workspace should not see this document
-    const otherStore = new KnowledgeStore({
-      dbDir: tmpDir,
+    const otherStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir,
       embedder,
       modelName: 'synthetic-64',
       workspace: '/test/project-b',
       localEnabled: true,
-      globalEnabled: false,
-    });
+      globalEnabled: false, });
     await otherStore.open();
 
     const results = await otherStore.findRelevantUrls('project A', { limit: 5 });

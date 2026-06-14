@@ -204,7 +204,7 @@ describe('Concurrent Operations', () => {
   describe('Concurrent Research Session Isolation', () => {
     it('should maintain isolation between concurrent knowledge store operations', async () => {
       const dbPath = path.join(testDbDir, `isolation-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Create sessions with different documents
@@ -241,7 +241,7 @@ describe('Concurrent Operations', () => {
 
     it('should handle concurrent searches without interference', async () => {
       const dbPath = path.join(testDbDir, `search-isolation-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
 
       await knowledgeStore.open();
 
@@ -283,7 +283,7 @@ describe('Concurrent Operations', () => {
 
     it('should handle concurrent document additions and deletions', async () => {
       const dbPath = path.join(testDbDir, `concurrent-crud-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
 
       await knowledgeStore.open();
 

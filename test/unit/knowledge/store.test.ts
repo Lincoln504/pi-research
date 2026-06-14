@@ -110,27 +110,7 @@ describe('KnowledgeStore', () => {
     expect(results.every(r => r.url === 'https://example.com/a')).toBe(true);
   });
 
-  it('should tag documents as global when globalEnabled is true', async () => {
-    const globalStore = new KnowledgeStore({
-      dbDir: testDbDir,
-      embedder: mockEmbedder,
-      modelName: 'Xenova/all-MiniLM-L6-v2',
-      knowledgeMode: 'global',
-      workspace: 'ANY'
-    });
-    await globalStore.open();
-    await globalStore.addDocuments([{
-      url: 'https://global.com',
-      text: 'Global content',
-      metadata: {},
-      timestamp: Date.now()
-    }]);
-
-    const rawDocs = await (globalStore as any).table.query().toArray();
-    const doc = rawDocs.find((r: any) => r.url === 'https://global.com');
-    expect(doc.is_global).toBe(true);
-    await globalStore.close();
-  });
+  // Test removed: 'global' knowledge mode is no longer supported
 
   it('findByUrl returns empty array for URL with no documents', async () => {
     await store.open();
@@ -357,11 +337,9 @@ describe('KnowledgeStore', () => {
     const modelA = 'Xenova/all-MiniLM-L6-v2';
     vi.mocked(mockEmbedder.getDimension).mockReturnValue(384);
     
-    const initialStore = new KnowledgeStore({
-      dbDir: testDbDir,
+    const initialStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: modelA,
-    });
+      modelName: modelA, });
     
     await initialStore.open();
     await initialStore.addDocuments([{

@@ -35,7 +35,7 @@ describe('KnowledgeStore Scoping', () => {
 
   async function createStore(options: { 
     workspace?: string, 
-    knowledgeMode: 'none' | 'global' | 'project'
+    knowledgeMode: 'none' | 'project'
   }) {
     const store = new KnowledgeStore({
       dbDir: testDbDir,
@@ -84,32 +84,20 @@ describe('KnowledgeStore Scoping', () => {
     await storeA2.close();
   });
 
-  it('should see global data when knowledgeMode is global', async () => {
-    // 1. Add global data
-    const globalStore = await createStore({ knowledgeMode: 'global' });
-    await globalStore.addDocuments([{
-      url: 'https://global.com',
-      text: 'Global Content',
+  it('should isolate data between different projects when knowledgeMode is project', async () => {
+    // 1. Add data to Project A
+    const storeA = await createStore({ workspace: workspaceA, knowledgeMode: 'project' });
+    await storeA.addDocuments([{
+      url: 'https://project-a.com',
+      text: 'Project A Content',
       metadata: { ingestionType: 'synthesis-description' },
       timestamp: Date.now()
     }]);
-    await globalStore.close();
-
-    // 2. Workspace A (project only) should NOT see global data
-    const storeA = await createStore({ workspace: workspaceA, knowledgeMode: 'project' });
-    expect(await storeA.count()).toBe(0);
     await storeA.close();
 
-    // 3. Workspace B (project + global would be nice, but enum supports one at a time right now?
-    // Wait, the enum is 'none' | 'global' | 'project'.
-    // The previous test logic for localEnabled=true + globalEnabled=true is not 
-    // directly supported by the new enum. 
-    // Let's assume the user meant to search global data here.
-    const storeB = await createStore({ workspace: workspaceB, knowledgeMode: 'global' });
-    expect(await storeB.count()).toBe(1);
-    const searchB = await storeB.search('Global');
-    expect(searchB).toHaveLength(1);
-    expect(searchB[0]!.url).toBe('https://global.com');
+    // 2. Project B (project scope) should NOT see Project A data
+    const storeB = await createStore({ workspace: workspaceB, knowledgeMode: 'project' });
+    expect(await storeB.count()).toBe(0);
     await storeB.close();
   });
 
@@ -123,25 +111,22 @@ describe('KnowledgeStore Scoping', () => {
       timestamp: Date.now()
     }]);
 
-    // 2. Add global data
-    const storeGlobal = await createStore({ knowledgeMode: 'global' });
-    await storeGlobal.addDocuments([{
-      url: 'https://global.com',
-      text: 'Global',
+    // 2. Add data to Workspace B
+    const storeB = await createStore({ workspace: workspaceB, knowledgeMode: 'project' });
+    await storeB.addDocuments([{
+      url: 'https://b.com',
+      text: 'Local B',
       metadata: { ingestionType: 'synthesis-description' },
       timestamp: Date.now()
     }]);
 
-    // 3. Check counts - the new API seems to rely on the mode set.
-    // The previous test for storeAView (localEnabled=true, globalEnabled=true)
-    // is tricky. For now, let's just count global from a global store.
-    const storeGlobalView = await createStore({ knowledgeMode: 'global' });
-    const countsGlobal = await storeGlobalView.countScoped();
-    expect(countsGlobal.global).toBe(1);
+    // 3. Check counts
+    const countsA = await storeA.countScoped(workspaceA);
+    expect(countsA.local).toBe(1);
+    expect(countsA.projects).toBe(2); // Workspace A and B
 
     await storeA.close();
-    await storeGlobal.close();
-    await storeGlobalView.close();
+    await storeB.close();
   });
 
   it('clear() should only remove documents within scope', async () => {

@@ -88,7 +88,7 @@ describe('Knowledge store workflow — sampled per dimension', () => {
       const modelDim = dimensions[modelId] || 384;
       
       const embedder = makeSyntheticEmbedder(modelDim);
-      const store = new KnowledgeStore({ dbDir, embedder, modelName: modelId });
+      const store = new KnowledgeStore({ knowledgeMode: "project", dbDir, embedder, modelName: modelId });
       await store.open();
 
       try {
@@ -120,13 +120,13 @@ describe('Knowledge store workflow — sampled per dimension', () => {
     const modelA = 'Xenova/multilingual-e5-base';
     
     // 1. Open with model A (768)
-    const store1 = new KnowledgeStore({ dbDir, embedder: makeSyntheticEmbedder(768), modelName: modelA });
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir, embedder: makeSyntheticEmbedder(768), modelName: modelA });
     await store1.open();
     await store1.addDocuments([{ url: 'https://mismatch.test', text: 'old content', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
     await store1.close();
 
     // 2. Re-open with model B (384)
-    const store2 = new KnowledgeStore({ dbDir, embedder: makeSyntheticEmbedder(384), modelName: modelId });
+    const store2 = new KnowledgeStore({ knowledgeMode: "project", dbDir, embedder: makeSyntheticEmbedder(384), modelName: modelId });
     await store2.open();
     try {
       const found = await store2.findByUrl('https://mismatch.test');
@@ -147,7 +147,7 @@ describe('Concurrent embedding — WriterQueue serialization', () => {
   beforeEach(async () => {
     tmpDir = path.join(os.tmpdir(), `pi-conc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     const embedder = makeSyntheticEmbedder(64);
-    store = new KnowledgeStore({ dbDir: tmpDir, embedder, modelName: 'synthetic-concurrent' });
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, embedder, modelName: 'synthetic-concurrent' });
     await store.open();
   });
 
@@ -267,7 +267,7 @@ describe('Real model inference — requires npm run models:download', () => {
       expect(vec.length).toBe(dim);
 
       const tmpDir = path.join(os.tmpdir(), `pi-realmodel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
-      const store = new KnowledgeStore({ dbDir: tmpDir, embedder, modelName: modelId });
+      const store = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, embedder, modelName: modelId });
       await store.open();
       try {
         const { chunkSize, overlapPct } = getModelChunkConfig(modelId);

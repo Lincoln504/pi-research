@@ -51,6 +51,7 @@ vi.mock('../../src/infrastructure/service-initialization.ts', () => ({
 vi.mock('../../src/utils/shutdown-manager.ts', () => ({
   shutdownManager: {
     runCleanup: vi.fn().mockResolvedValue(undefined),
+    registerEventListener: vi.fn(),
   },
 }));
 

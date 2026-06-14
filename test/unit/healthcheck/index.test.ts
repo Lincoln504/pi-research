@@ -8,7 +8,10 @@ import { ServiceNames } from '../../../src/core/service-interfaces.ts';
 
 // Mock dependencies
 vi.mock('../../../src/config.ts', () => ({
-  getConfig: () => ({ HEALTH_CHECK_TIMEOUT_MS: 25000 }),
+  getConfig: () => ({ 
+    HEALTH_CHECK_TIMEOUT_MS: 25000,
+    KNOWLEDGE_STORE_MODE: 'none' 
+  }),
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -43,7 +46,11 @@ vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
         getOriginalDevice: () => 'cpu',
       };
     },
-    async getStore() { return {}; },
+    async getStore() { 
+        return {
+            countScoped: async () => ({ local: 0, global: 0, projects: 0 })
+        }; 
+    },
   })),
 }));
 

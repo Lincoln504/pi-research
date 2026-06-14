@@ -98,7 +98,7 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   if (pluginConfig.reportExportEnabled !== undefined) globalConfig.RESEARCH_REPORT_EXPORT_ENABLED = pluginConfig.reportExportEnabled;
 
   if (pluginConfig.knowledgeEnabled !== undefined) {
-    globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'global' : 'none';
+    globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'project' : 'none';
   }
   
   if (pluginConfig.defaultDepth !== undefined) {

@@ -63,12 +63,12 @@ describe('config (refactored)', () => {
   });
 
   describe('saveConfig', () => {
-    it('should use atomic write via temp file for GLOBAL scope', () => {
+    it('should use atomic write via temp file for USER scope', () => {
       const config = { ...DEFAULTS };
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('OLD_KEY=old_val');
       
-      saveConfig(config, 'global');
+      saveConfig(config, 'user');
 
       expect(fs.writeFileSync).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), expect.any(String), 'utf-8');
       expect(fs.renameSync).toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe('config (refactored)', () => {
       const config = { ...DEFAULTS };
       const writeSpy = vi.spyOn(fs, 'writeFileSync');
       
-      saveConfig(config, 'global');
+      saveConfig(config, 'user');
 
       const writtenContent = writeSpy.mock.calls[0]![1] as string;
       expect(writtenContent).not.toContain('__proto__');
@@ -105,12 +105,12 @@ describe('config (refactored)', () => {
       expect(writtenContent).not.toContain('prototype');
     });
 
-    it('should preserve comments in GLOBAL env file', () => {
+    it('should preserve comments in USER env file', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('# This is a comment\nPI_RESEARCH_MODEL=old-model');
       
       const config = { ...DEFAULTS, RESEARCH_MODEL: 'new-model' };
-      saveConfig(config, 'global');
+      saveConfig(config, 'user');
 
       const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
       expect(writtenContent).toContain('# This is a comment');
@@ -162,11 +162,7 @@ describe('config (refactored)', () => {
         expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(15);
       });
 
-      it('should handle migration for legacy knowledge store flags', () => {
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_MODE).toBe('project');
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false', PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_MODE).toBe('global');
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false', PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_MODE).toBe('none');
-      });
+      // Migration logic removed
     });
   });
 

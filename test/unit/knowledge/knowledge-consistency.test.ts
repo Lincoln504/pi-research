@@ -55,14 +55,12 @@ describe('Knowledge Store & URL Consistency Integration', () => {
       isInitialized: () => true,
     };
 
-    const store = new KnowledgeStore({
-      dbDir: testDbDir,
+    const store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder as any,
       modelName: 'test-model',
       workspace: '/project/a',
       localEnabled: true,
-      globalEnabled: true
-    });
+      globalEnabled: true });
 
     await store.initialize();
 
@@ -83,14 +81,12 @@ describe('Knowledge Store & URL Consistency Integration', () => {
     // Actually KnowledgeStore's workspace is fixed at init. 
     // We can create a second store instance pointing to same DB but different workspace.
     
-    const storeB = new KnowledgeStore({
-      dbDir: testDbDir,
+    const storeB = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder as any,
       modelName: 'test-model',
       workspace: '/project/b',
       localEnabled: true,
-      globalEnabled: true
-    });
+      globalEnabled: true });
     await storeB.initialize();
     const writerB = new WriterQueue({ store: storeB, chunker: null });
     await writerB.initialize();

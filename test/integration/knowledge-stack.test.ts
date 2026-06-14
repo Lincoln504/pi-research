@@ -44,7 +44,7 @@ function makeSyntheticEmbedder(dim = 64): Embedder {
 // Helpers
 // ---------------------------------------------------------------------------
 async function makeStore(dir: string, embedder: Embedder, modelName = 'synthetic-64') {
-  const store = new KnowledgeStore({ dbDir: dir, embedder, modelName });
+  const store = new KnowledgeStore({ knowledgeMode: "project", dbDir: dir, embedder, modelName });
   await store.open();
   return store;
 }

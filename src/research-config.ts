@@ -91,7 +91,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       label: 'Knowledge mode [project]',
       description: 'Set knowledge store isolation mode (none, global, project).',
       currentValue: config.KNOWLEDGE_STORE_MODE,
-      values: ['none', 'global', 'project'],
+      values: ['none', 'project'],
     },
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
@@ -182,29 +182,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         label: 'Database status',
         description: 'Show entry counts, disk usage, and model info for the knowledge store.',
         currentValue: 'run',
-        values: ['run'],
-      },
-    ] as SettingItem[] : []),
-    ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
-      {
+        values: ['none', 'project'],
+        },
+        ] as SettingItem[] : []),
+        ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
+        {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
         label: 'Clear project scope',
         description: 'Permanently delete all store entries associated with this specific directory.',
         currentValue: 'run',
         values: ['run'],
-      },
-    ] as SettingItem[] : []),
-    ...(config.KNOWLEDGE_STORE_MODE === 'global' ? [
-      {
-        id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-        label: 'Clear user scope',
-        description: 'Permanently delete all entries that are not tied to a specific project.',
-        currentValue: 'run',
-        values: ['run'],
-      },
-    ] as SettingItem[] : []),
-    {
-      id: 'ACTION_METRICS_VIEW',
+        },
+        ] as SettingItem[] : []),
+        {
+        id: 'ACTION_METRICS_VIEW',
+
       label: 'View Session Metrics',
       description: 'Show token usage, costs, and success rates for this session.',
       currentValue: 'run',
@@ -266,7 +258,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           async (id, newValue) => {
             // 1. Handle Settings Changes (Auto-save)
             let changed = true;
-            let scope: 'local' | 'global' | 'user' = 'local';
+            let scope: 'local' | 'user' = 'local';
 
             if (id === 'DEFAULT_RESEARCH_DEPTH') {
               const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
@@ -291,7 +283,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
-              config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'global' | 'project';
+              config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project';
               scope = 'user';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;

@@ -26,6 +26,7 @@ describe('KnowledgeStore Error Recovery', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'project',
     });
     await store.initialize();
   });
@@ -52,18 +53,17 @@ describe('KnowledgeStore Error Recovery', () => {
     let callCount = 0;
     const reconnectFactory = vi.fn().mockResolvedValue(mockEmbedder);
     
-    const storeWithReconnect = new KnowledgeStore({
-      dbDir: testDbDir,
+    const storeWithReconnect = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: {
         ...mockEmbedder,
         embedMany: vi.fn().mockImplementation(() => {
           callCount++;
           if (callCount === 1) throw new Error('ECONNREFUSED');
-          return Promise.resolve([new Float32Array(384)]);
-        })
+          return Promise.resolve([new Float32Array(384)]); })
       } as any,
       modelName: 'Xenova/all-MiniLM-L6-v2',
-      reconnectFactory
+      reconnectFactory,
+      knowledgeMode: 'project',
     });
     await storeWithReconnect.initialize();
     await storeWithReconnect.addDocuments([{ url: 'https://retry.com', text: 'test', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);

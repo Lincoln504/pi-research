@@ -77,7 +77,7 @@ describe('Error Recovery and Resilience', () => {
   describe('Knowledge Store Recovery', () => {
     it('should recover from corrupted database file', async () => {
       const dbPath = path.join(testDbDir, `corrupt-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
 
       // Initialize store
       await knowledgeStore.open();
@@ -106,7 +106,7 @@ describe('Error Recovery and Resilience', () => {
       }
 
       // Should recover or create new store
-      const recoveredStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const recoveredStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       try {
         await recoveredStore.open();
 
@@ -118,7 +118,7 @@ describe('Error Recovery and Resilience', () => {
       } catch (error) {
         // If recovery fails, we should be able to create a new store
         const newStorePath = path.join(testDbDir, `recovered-${randomUUID()}`);
-        const newStore = new KnowledgeStore({ dbDir: newStorePath, embedder, modelName });
+        const newStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: newStorePath, embedder, modelName });
         await newStore.open();
 
         const countInNew = await newStore.count();
@@ -130,7 +130,7 @@ describe('Error Recovery and Resilience', () => {
 
     it('should handle concurrent database operations safely', async () => {
       const dbPath = path.join(testDbDir, `concurrent-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Add initial documents
@@ -165,7 +165,7 @@ describe('Error Recovery and Resilience', () => {
 
     it('should recover from write failures gracefully', async () => {
       const dbPath = path.join(testDbDir, `write-fail-${randomUUID()}`);
-      const knowledgeStore = new KnowledgeStore({ dbDir: dbPath, embedder, modelName });
+      const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();
 
       // Sanity check: store is queryable before the failure-inducing write.

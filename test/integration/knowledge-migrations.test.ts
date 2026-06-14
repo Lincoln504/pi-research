@@ -40,7 +40,7 @@ function makeSyntheticEmbedder(dim = 64) {
 // Helpers
 // ---------------------------------------------------------------------------
 async function makeStore(dir: string, embedder: any, modelName = 'synthetic-64') {
-  const store = new KnowledgeStore({ dbDir: dir, embedder, modelName });
+  const store = new KnowledgeStore({ knowledgeMode: "project", dbDir: dir, embedder, modelName });
   await store.open();
   return store;
 }
@@ -74,14 +74,12 @@ describe('Knowledge Store Persistence', () => {
   describe('Unified Scoping', () => {
     it('segregates local and global entries within the same database', async () => {
       // 1. Add project-local data
-      const localStore = new KnowledgeStore({ 
-        dbDir: tmpDir, 
+      const localStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
         embedder, 
         modelName: 'synthetic-64',
         workspace: '/project/a',
         localEnabled: true,
-        globalEnabled: false
-      });
+        globalEnabled: false });
       await localStore.open();
       await localStore.addDocuments([{
         url: 'https://local-a.com',
@@ -92,14 +90,12 @@ describe('Knowledge Store Persistence', () => {
       await localStore.close();
 
       // 2. Add global data
-      const globalStore = new KnowledgeStore({ 
-        dbDir: tmpDir, 
+      const globalStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
         embedder, 
         modelName: 'synthetic-64',
         workspace: '/project/b', // Different workspace
         localEnabled: false,
-        globalEnabled: true
-      });
+        globalEnabled: true });
       await globalStore.open();
       await globalStore.addDocuments([{
         url: 'https://global.com',
@@ -110,14 +106,12 @@ describe('Knowledge Store Persistence', () => {
       await globalStore.close();
 
       // 3. Verify project B only sees global data
-      const storeB = new KnowledgeStore({ 
-        dbDir: tmpDir, 
+      const storeB = new KnowledgeStore({ knowledgeMode: "project", dbDir: tmpDir, 
         embedder, 
         modelName: 'synthetic-64',
         workspace: '/project/b',
         localEnabled: true,
-        globalEnabled: true
-      });
+        globalEnabled: true });
       await storeB.open();
       
       const foundGlobal = await storeB.findByUrl('https://global.com');

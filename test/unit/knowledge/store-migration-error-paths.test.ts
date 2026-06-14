@@ -45,18 +45,14 @@ describe('KnowledgeStore Migration Error Paths', () => {
   });
 
   it('handleModelChange falls back to backup for unknown strategy', async () => {
-    store = new KnowledgeStore({
-      dbDir: testDbDir,
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'model-b',
-      migrationStrategy: 'unknown' as any
-    });
+      migrationStrategy: 'unknown' as any });
 
-    const store1 = new KnowledgeStore({
-      dbDir: testDbDir,
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'model-a'
-    });
+      modelName: 'model-a' });
     await store1.initialize();
     await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
     await store1.close();
@@ -66,18 +62,14 @@ describe('KnowledgeStore Migration Error Paths', () => {
   });
 
   it('migrationReEmbed handles directory rename failure by persisting temp table name', async () => {
-    store = new KnowledgeStore({
-      dbDir: testDbDir,
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'model-b',
-      migrationStrategy: 're-embed'
-    });
+      migrationStrategy: 're-embed' });
 
-    const store1 = new KnowledgeStore({
-      dbDir: testDbDir,
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'model-a'
-    });
+      modelName: 'model-a' });
     await store1.initialize();
     await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
     await store1.close();
@@ -95,18 +87,14 @@ describe('KnowledgeStore Migration Error Paths', () => {
   });
 
   it('migrationReEmbed failure falls back to drop strategy', async () => {
-    store = new KnowledgeStore({
-      dbDir: testDbDir,
+    store = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'model-b',
-      migrationStrategy: 're-embed'
-    });
+      migrationStrategy: 're-embed' });
 
-    const store1 = new KnowledgeStore({
-      dbDir: testDbDir,
+    const store1 = new KnowledgeStore({ knowledgeMode: "project", dbDir: testDbDir,
       embedder: mockEmbedder,
-      modelName: 'model-a'
-    });
+      modelName: 'model-a' });
     await store1.initialize();
     await store1.addDocuments([{ url: 'https://test.com', text: 'test', metadata: {}, timestamp: Date.now() }]);
     await store1.close();
