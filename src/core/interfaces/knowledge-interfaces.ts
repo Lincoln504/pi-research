@@ -91,6 +91,7 @@ export interface IEmbedder {
   getDevice(): string | null;
   getOriginalDevice(): string | null;
   getDimension(): number | null;
+  setDimension(dim: number): void;
   isInitialized(): boolean;
   embed(text: string): Promise<Float32Array | number[]>;
   embedMany(texts: string[]): Promise<(Float32Array | number[])[]>;

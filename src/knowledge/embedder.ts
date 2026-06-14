@@ -276,6 +276,15 @@ export class Embedder {
     return this.dimension;
   }
 
+  /**
+   * Set the embedding dimension explicitly.
+   * Used by KnowledgeStore when restoring dimension from an existing table schema
+   * before the embedder has been fully warmed up.
+   */
+  setDimension(dim: number): void {
+    this.dimension = dim;
+  }
+
   private pipelineOpts(): { pooling: 'mean' | 'cls' | 'last_token'; normalize: boolean; use_cache?: boolean } {
     return {
       pooling: this.poolingMode as 'mean' | 'cls' | 'last_token',

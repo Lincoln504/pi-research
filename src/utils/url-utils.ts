@@ -5,6 +5,8 @@
  * knowledge store, writer queue, and shared link registry.
  */
 
+import { logger } from '../logger.ts';
+
 /**
  * Normalizes a URL for consistent deduplication and storage.
  * 
@@ -67,12 +69,34 @@ export function normalizeUrl(url: string): string {
     
     return result;
   } catch (_err) {
-    // Fallback for invalid URLs: lowercase and basic cleanup
-    let cleaned = url.trim().split('#')[0]!;
-    if (cleaned.endsWith('/')) {
+    // Fallback for invalid URLs: aggressive best-effort normalization.
+    // LLM hallucinations often produce broken URLs — log a warning so we can
+    // trace them, then do our best to clean them for dedup purposes.
+    logger.debug(`[url-utils] normalizing unparseable URL (${url.slice(0, 200)}): ${_err instanceof Error ? _err.message : String(_err)}`);
+    
+    let cleaned = url.trim()
+      // Strip leading/trailing markdown and punctuation often added by LLMs
+      .replace(/^[*_~`"']+/, '')
+      .replace(/[*_~`"',.)}\]]+$/, '');
+    
+    // Strip hash fragment (best-effort)
+    const hashIdx = cleaned.indexOf('#');
+    if (hashIdx >= 0) cleaned = cleaned.substring(0, hashIdx);
+    
+    // Strip trailing slash
+    if (cleaned.endsWith('/') && cleaned.length > 8) {
       cleaned = cleaned.slice(0, -1);
     }
-    return cleaned.toLowerCase();
+    
+    // Lowercase everything
+    cleaned = cleaned.toLowerCase();
+    
+    // Try to force https:// prefix if it looks like a domain
+    if (!cleaned.startsWith('http') && cleaned.includes('.')) {
+      cleaned = 'https://' + cleaned.replace(/^\/{2,}/, '');
+    }
+    
+    return cleaned;
   }
 }
 

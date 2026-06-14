@@ -153,7 +153,8 @@ export class KnowledgeStore implements IKnowledgeStore {
           if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
             const dim = (vectorField.type as any).listSize;
             if (this.options.embedder.getDimension() === null) {
-              (this.options.embedder as any).dimension = dim;
+              // Set dimension from existing table schema before embedder is warmed up
+              this.options.embedder.setDimension(dim);
               logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
             }
           }
@@ -202,6 +203,10 @@ export class KnowledgeStore implements IKnowledgeStore {
       }
 
       await this.evictOldRecords();
+      
+      // Persist manifest after every successful open so that table name
+      // changes (from migration, re-embed rename, etc.) survive crashes.
+      await this.saveManifest();
     } catch (err) {
       logger.error('[store] Failed to open database:', err);
       throw err;
@@ -255,6 +260,8 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     // Create fresh table
     this.table = await this.createTable();
+    // Table name unchanged (still canonical 'knowledge'), but persist to be safe.
+    await this.saveManifest();
     logger.info(`[store] Migration complete: ${count} documents backed up, fresh table created with model ${newModel}`);
 
     return { strategy: 'backup', success: true, documentsProcessed: count };
@@ -272,6 +279,8 @@ export class KnowledgeStore implements IKnowledgeStore {
 
     await this.db.dropTable(this.tableName);
     this.table = await this.createTable();
+    // Table name unchanged (still canonical 'knowledge'), but persist to be safe.
+    await this.saveManifest();
 
     logger.info(`[store] Migration complete: ${count} documents removed, table recreated with model ${newModel}`);
 

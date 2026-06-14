@@ -10,7 +10,8 @@ import { logger } from '../../logger.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
 
 export class EmbeddingClient implements IEmbedder {
-  // Public so store.ts can set it via `(embedder as any).dimension = dim`
+  // Public so store.ts can set the dimension from existing table schema
+  // before the embedder has been fully warmed up (see Embedder.setDimension).
   dimension: number | null = null;
 
   constructor(
@@ -32,6 +33,10 @@ export class EmbeddingClient implements IEmbedder {
 
   getDimension(): number | null {
     return this.dimension;
+  }
+
+  setDimension(dim: number): void {
+    this.dimension = dim;
   }
 
   isInitialized(): boolean {

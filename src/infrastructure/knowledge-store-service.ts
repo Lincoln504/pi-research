@@ -50,8 +50,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
       return;
     }
 
-    // If CWD changed, we must dispose the old store and re-initialize
-    if (this.lifecycle === ServiceLifecycle.INITIALIZED && this._cwd !== newCwd) {
+    // If CWD changed, we must dispose the old store and re-initialize.
+    // This applies to both INITIALIZED and DISABLED states — if the service
+    // is disabled in one project but the new project has knowledge mode enabled,
+    // we need to re-initialize.
+    if ((this.lifecycle === ServiceLifecycle.INITIALIZED || this.lifecycle === ServiceLifecycle.DISABLED) && this._cwd !== newCwd) {
       logger.log(`[KnowledgeStoreService] CWD changed from ${this._cwd} to ${newCwd}. Re-initializing store...`);
       await this.dispose();
     }
@@ -293,14 +296,20 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   }
 
   /**
-   * Clear the knowledge store (all entries)
+   * Clear the knowledge store entries for the current scope.
+   *
+   * In 'global' mode, clears only global entries (is_global = true).
+   * In 'project' mode, clears only this workspace's entries.
+   * In 'none' mode, no-op (store is disabled).
    */
   async clear(): Promise<void> {
-    const store = await this.getStore();
-    // Clear everything by using a filter that matches everything
-    if (store) {
-      await store.clear('1 = 1');
+    const config = getConfig(this._cwd);
+    if (config.KNOWLEDGE_STORE_MODE === 'global') {
+      await this.clearGlobal();
+    } else if (config.KNOWLEDGE_STORE_MODE === 'project') {
+      await this.clearLocal();
     }
+    // 'none' mode: no-op (store is disabled, nothing to clear)
   }
 
   /**

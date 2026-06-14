@@ -69,7 +69,8 @@ export class EmbeddingServer implements IEmbedder {
   private isShuttingDown = false;
   private readonly queue = new SerialQueue();
 
-  // Public dimension field so store.ts can set it via `(embedder as any).dimension = dim`
+  // Dimension field — set by store.ts from table schema before embedder is warmed up,
+  // and updated after embedder gets its own dimension at initialization.
   dimension: number | null = null;
 
   constructor(
@@ -95,6 +96,10 @@ export class EmbeddingServer implements IEmbedder {
   getDimension(): number | null {
     if (this.dimension !== null) return this.dimension;
     return this.embedder.isInitialized() ? this.embedder.getDimension() : null;
+  }
+
+  setDimension(dim: number): void {
+    this.dimension = dim;
   }
 
   isInitialized(): boolean {

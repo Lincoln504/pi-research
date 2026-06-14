@@ -99,6 +99,59 @@ export type Config = Static<typeof ConfigSchema>;
 export const DEFAULTS: Config = Value.Create(ConfigSchema);
 
 // ============================================================================
+// Scope Definitions
+// ============================================================================
+
+/**
+ * Env var keys that are project-scoped (saved per-directory in the registry).
+ * All other keys are user-scoped (saved to ~/.pi/research/config.env).
+ *
+ * This is the SINGLE SOURCE OF TRUTH for scope assignments. The TUI scope
+ * assignments, migration key lists, and saveConfig filtering all derive from
+ * this set. If you change a key's scope in the TUI, update this set too.
+ */
+const LOCAL_SCOPE_KEYS = new Set([
+  'PI_RESEARCH_DEFAULT_RESEARCH_DEPTH',
+  'PI_RESEARCH_KNOWLEDGE_STORE_MODE',
+]);
+
+/**
+ * User-scoped keys for one-time migration from registry → config.env.
+ * Derived from ALL schema keys minus LOCAL_SCOPE_KEYS, plus a few extra keys
+ * not in the schema but present in the env.
+ */
+const USER_MIGRATION_KEYS = [
+  // Core user-scoped from schema
+  'PI_RESEARCH_TIMEOUT_MS',
+  'PI_RESEARCH_MAX_RESEARCHERS',
+  'PI_RESEARCH_MAX_RETRIES',
+  'PI_RESEARCH_RETRY_DELAY_MS',
+  'PI_RESEARCH_MAX_SCRAPE_BATCHES',
+  'PI_RESEARCH_WORKER_THREADS',
+  'PI_RESEARCH_WORKER_CONCURRENCY',
+  'PI_RESEARCH_EMBEDDING_MODEL',
+  'PI_RESEARCH_EMBEDDING_DEVICE',
+  'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS',
+  'PI_RESEARCH_SCRAPE_TIMEOUT_MS',
+  'PI_RESEARCH_CACHE_TTL_DAYS',
+  'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
+  'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE',
+  'PI_RESEARCH_MAX_CONCURRENT_SCRAPES',
+  'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS',
+  'PI_RESEARCH_SEARCH_TIMEOUT_MS',
+  'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS',
+  'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS',
+  'PI_RESEARCH_LLM_TIMEOUT_MS',
+  'PI_RESEARCH_MIGRATION_STRATEGY',
+  'PI_RESEARCH_THINKING_LEVEL',
+  'PI_RESEARCH_CONSOLE_LOG',
+  'PI_RESEARCH_MODEL',
+  'PI_RESEARCH_KNOWLEDGE_DIR',
+  'PI_RESEARCH_REPORT_EXPORT_ENABLED',
+  'PI_RESEARCH_DEBUG',
+];
+
+// ============================================================================
 // Centralized Project Settings Storage
 // ============================================================================
 
@@ -126,17 +179,27 @@ function loadProjectSettingsRegistry(): Record<string, Record<string, string>> {
 }
 
 /**
- * Internal helper for synchronous sleep without busy-waiting.
- * Uses Atomics.wait which is supported in Node.js main thread.
+ * Internal helper for synchronous sleep.
+ * Uses Atomics.wait (Node.js main thread) with a non-busy-wait fallback
+ * that blocks on a file descriptor (pipe) so the thread actually yields.
  */
 function sleepSync(ms: number): void {
   if (ms <= 0) return;
   try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   } catch (_err) {
-    // Fallback to busy-wait if SharedArrayBuffer is restricted (unlikely in Node.js)
-    const end = Date.now() + ms;
-    while (Date.now() < end) { /* spin */ }
+    // Fallback: block on a pipe fd instead of busy-waiting (won't peg CPU)
+    try {
+      const buf = Buffer.alloc(1);
+      const readFd = require('node:fs').openSync('/dev/null', 'r');
+      // fs.readSync blocks until signaled or timeout
+      require('node:fs').readSync(readFd, buf, 0, 0, ms);
+      require('node:fs').closeSync(readFd);
+    } catch {
+      // Ultimate fallback if even fd-based sleep fails
+      const end = Date.now() + ms;
+      while (Date.now() < end) { /* spin */ }
+    }
   }
 }
 
@@ -261,17 +324,8 @@ function loadEnvFiles(cwd: string): Record<string, string> {
   try {
     if (!fs.existsSync(globalPath) && homeRegistry && Object.keys(homeRegistry).length > 0) {
       logger.info('[config] config.env missing. Initializing from user settings in central registry...');
-      const userLevelKeys = [
-        'PI_RESEARCH_EMBEDDING_MODEL', 'PI_RESEARCH_EMBEDDING_DEVICE', 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS',
-        'PI_RESEARCH_KNOWLEDGE_STORE_MODE', 'PI_RESEARCH_CACHE_TTL_DAYS',
-        'PI_RESEARCH_WORKER_THREADS', 'PI_RESEARCH_WORKER_CONCURRENCY', 'PI_RESEARCH_DEBUG', 'PI_RESEARCH_MODEL',
-        'PI_RESEARCH_LLM_TIMEOUT_MS', 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', 'PI_RESEARCH_SCRAPE_TIMEOUT_MS',
-        'PI_RESEARCH_SEARCH_TIMEOUT_MS', 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', 'PI_RESEARCH_REPORT_EXPORT_ENABLED',
-        'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING',
-        'PI_RESEARCH_MIGRATION_STRATEGY'
-      ];
       const migrated: Record<string, string> = {};
-      for (const key of userLevelKeys) {
+      for (const key of USER_MIGRATION_KEYS) {
         if (homeRegistry[key] !== undefined) migrated[key] = homeRegistry[key];
       }
       if (Object.keys(migrated).length > 0) {
@@ -312,12 +366,19 @@ function loadEnvFiles(cwd: string): Record<string, string> {
     }
   }
 
-  // 4. Load Centralized project settings (REGISTRY WINS)
+  // 4. Load Centralized project settings (REGISTRY WINS for project-scoped keys)
   if (registry[normalizedCwd]) {
-    // Conflict detection
+    // Conflict detection: registry vs legacy .pi-research.env
     for (const [key, val] of Object.entries(registry[normalizedCwd])) {
-      if (legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
+      if (LOCAL_SCOPE_KEYS.has(key) && legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
         logger.warn(`[config] Config divergence for ${key} in ${cwd}: Registry="${val}" vs Legacy="${legacyEnv[key]}". Registry wins.`);
+      }
+    }
+    // Conflict detection: registry vs config.env (user settings)
+    // Only warn about keys that are user-scoped but have leaked into the registry
+    for (const [key, val] of Object.entries(registry[normalizedCwd])) {
+      if (!LOCAL_SCOPE_KEYS.has(key) && merged[key] !== undefined && merged[key] !== val) {
+        logger.warn(`[config] Registry override for user-scoped ${key}: Registry="${val}" overrides config.env="${merged[key]}". This indicates a stale snapshot in the registry. Registry wins — consider re-saving your user settings.`);
       }
     }
     Object.assign(merged, registry[normalizedCwd]);
@@ -333,7 +394,10 @@ function loadEnvFiles(cwd: string): Record<string, string> {
  * Write config back to env file.
  */
 export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cwd: string = process.cwd()): void {
-  const newValues: Record<string, string> = {
+  // ALL keys — canonical env var name → value
+  // Note: PI_RESEARCH_CACHE_TTL_DAYS is the canonical name (matches .env.example).
+  // PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS is accepted at read-time for backward compat.
+  const allValues: Record<string, string> = {
     PI_RESEARCH_TIMEOUT_MS: String(config.RESEARCHER_TIMEOUT_MS),
     PI_RESEARCH_MAX_RESEARCHERS: String(config.MAX_CONCURRENT_RESEARCHERS),
     PI_RESEARCH_MAX_RETRIES: String(config.RESEARCHER_MAX_RETRIES),
@@ -349,7 +413,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
-    PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    PI_RESEARCH_CACHE_TTL_DAYS: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS: String(config.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
@@ -364,6 +428,13 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
     PI_RESEARCH_DEBUG: String(config.DEBUG),
   };
+
+  // Scope-filter: only write the keys that belong to the target scope.
+  // This prevents cross-contamination (project-scoped keys leaking into config.env
+  // and user-scoped keys leaking into the project registry).
+  const newValues = scope === 'local'
+    ? Object.fromEntries(Object.entries(allValues).filter(([k]) => LOCAL_SCOPE_KEYS.has(k)))
+    : Object.fromEntries(Object.entries(allValues).filter(([k]) => !LOCAL_SCOPE_KEYS.has(k)));
 
   if (scope === 'local') {
     // CENTRALIZED PROJECT STORAGE
@@ -495,10 +566,10 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
 // ============================================================================
 
 /**
- * Global singleton for CLI mode. 
- * SDK and OpenClaw should avoid this and use createConfig() or getConfig(cwd).
+ * Config cache keyed by normalized CWD.
+ * Avoids stale cached config when the process CWD changes between sessions.
  */
-let globalConfig: Config | null = null;
+const configCache = new Map<string, Config>();
 
 /**
  * Internal factory for creating a configuration object from env.
@@ -519,7 +590,13 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
-    KNOWLEDGE_STORE_CACHE_TTL_DAYS: parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
+    // Accept both canonical name and legacy name for backward compatibility.
+    // saveConfig writes the canonical name (PI_RESEARCH_CACHE_TTL_DAYS) but
+    // older sessions may have written PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS.
+    KNOWLEDGE_STORE_CACHE_TTL_DAYS:
+      e['PI_RESEARCH_CACHE_TTL_DAYS'] !== undefined
+        ? parseEnvNumber(e, 'PI_RESEARCH_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS)
+        : parseEnvNumber(e, 'PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS', DEFAULTS.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
     EMBEDDING_MODEL_INIT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS', DEFAULTS.EMBEDDING_MODEL_INIT_TIMEOUT_MS),
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE),
@@ -557,36 +634,36 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
 
 /**
  * Robustly load configuration for a specific directory.
- * Resolution: Defaults < Global Config (~/.pi/research/config.env) < Local Config (CWD/.pi-research.env) < process.env.
+ * Resolution: Defaults < Global Config (~/.pi/research/config.env) < Legacy .pi-research.env < Centralized Registry < process.env.
+ *
+ * Results are cached by normalized CWD so repeated calls within the same project
+ * don't re-parse files. The cache is properly scoped — changing directories
+ * yields different cached entries.
  */
 export function getConfig(cwd: string = process.cwd()): Config {
-  // If we are in CLI mode (no explicit CWD passed), we can use the global singleton
-  // to avoid re-parsing files constantly.
-  if (cwd === process.cwd() && globalConfig) {
-    return globalConfig;
-  }
+  const cacheKey = normalizeWorkspacePath(cwd);
+  const cached = configCache.get(cacheKey);
+  if (cached) return cached;
 
   const e = loadEnvFiles(cwd);
   const config = createConfig(e, process.env);
-  
-  if (cwd === process.cwd()) {
-    globalConfig = config;
-  }
-  
+
+  configCache.set(cacheKey, config);
   return config;
 }
 
 /**
  * Manually override configuration.
- * Mutates the global singleton (for CLI/test compatibility).
+ * Uses the cache for the current CWD (for CLI/test compatibility).
  */
 export function setConfig(config: Partial<Config>): void {
   const current = getConfig();
-  globalConfig = { ...current, ...config };
+  const cacheKey = normalizeWorkspacePath(process.cwd());
+  configCache.set(cacheKey, { ...current, ...config });
 }
 
 export function resetConfig(): void {
-  globalConfig = null;
+  configCache.clear();
 }
 
 /**

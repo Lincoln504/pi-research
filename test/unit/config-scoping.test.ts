@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getConfig, DEFAULTS } from '../../src/config';
+import { getConfig, DEFAULTS, resetConfig } from '../../src/config';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -34,6 +34,7 @@ describe('Configuration Scoping', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetConfig();
   });
 
   it('should prioritize project settings over user defaults', () => {
