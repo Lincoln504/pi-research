@@ -5,13 +5,15 @@ import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
 import type { ISchedulerInternals } from '../../src/core/interfaces/scheduler-interfaces.ts';
 import { BrowserTaskScheduler } from '../../src/infrastructure/browser/browser-task-scheduler.ts';
 import { isBrowserAvailable } from '../../src/infrastructure/browser/config.ts';
+import { skipsLiveNetwork } from './helpers/setup.ts';
 
 describe('Shutdown Performance', () => {
-  it('should initialize, run healthcheck, and dispose within acceptable time', async () => {
-    if (!isBrowserAvailable()) {
-      console.log('[test] Skipping shutdown performance test - browser not available or FULL_MOCK_MODE active');
-      return;
-    }
+  it('should initialize, run healthcheck, and dispose within acceptable time', async (ctx) => {
+    // The healthcheck below runs a real browser search probe. In CI that hits
+    // live DuckDuckGo (blocked from datacenter IPs) and burns the full 105s
+    // health-check timeout, so skip it there (visible skip). Runs for real
+    // locally, where it measures the actual shutdown time.
+    if (!isBrowserAvailable() || skipsLiveNetwork()) return ctx.skip();
     // 1. Initialize
     await initResearchSDK({ model: {} as any });
     
