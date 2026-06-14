@@ -85,18 +85,18 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const anyKnowledgeStore = config.KNOWLEDGE_STORE_MODE !== 'none';
 
   const initialItems: SettingItem[] = [
-    // Research complexity — most important setting, presented first.
+    // ── Project-scoped settings (saved per-directory) ──
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: 'Research Depth',
-      description: 'Default complexity for /research (normal, deep, ultra). Set once per project.',
+      label: 'Research Depth  (project)',
+      description: 'Default complexity for /research (normal, deep, ultra). Saved per-directory so each project can pick its own default.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
       id: 'KNOWLEDGE_STORE_MODE',
-      label: 'Knowledge Mode',
-      description: 'Knowledge store scope — none (disabled), project (isolated per directory), or global (shared across all projects).',
+      label: 'Knowledge Mode  (project)',
+      description: 'Knowledge store isolation — none (disabled), project (entries confined to this directory), or global (shared across all projects). Saved per-directory.',
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },
@@ -269,7 +269,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             if (id === 'DEFAULT_RESEARCH_DEPTH') {
               const depthMap: Record<string, number> = { 'normal': 1, 'deep': 2, 'ultra': 3 };
               config.DEFAULT_RESEARCH_DEPTH = depthMap[newValue] || 1;
-              scope = 'user';
             } else if (id === 'MAX_CONCURRENT_RESEARCHERS') {
               config.MAX_CONCURRENT_RESEARCHERS = parseInt(newValue, 10);
               scope = 'user';
@@ -290,7 +289,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_MODE') {
               config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'project' | 'global';
-              scope = 'user';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             scope = 'user';

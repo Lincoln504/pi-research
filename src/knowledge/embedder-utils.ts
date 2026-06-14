@@ -65,16 +65,6 @@ export function markWebGpuFallback(): void {
   hasWebGpuFallbackOccurred = true;
 }
 
-// Module-level flags to track shutdown state
-let isProcessExiting = false;
-
-/**
- * Check if the process is in a fatal shutdown state (exiting)
- */
-export function isShuttingDown(): boolean {
-  return isProcessExiting || process.env['PI_PROCESS_EXITING'] === '1';
-}
-
 // Global embedder reference for process-exit cleanup.
 let globalEmbedderRef: { dispose: () => Promise<void> } | null = null;
 
@@ -86,8 +76,6 @@ export function registerGlobalEmbedder(e: { dispose: () => Promise<void> }): voi
   globalEmbedderRef = e;
   
   // Register with shutdown manager for graceful extension shutdown.
-  // Note: we DO NOT set isProcessExiting here because shutdownManager
-  // tasks run during reloads too, and we still want to dispose there.
   shutdownManager.register(async () => {
     if (globalEmbedderRef === e) {
       const ref = globalEmbedderRef;
@@ -110,7 +98,6 @@ export function unregisterGlobalEmbedder(): void {
 // the embedder; this only fires if somehow it didn't (e.g. a crash path).
 // We do NOT register on 'exit' — by then C++ statics may already be destroyed.
 const beforeExitHandler = () => {
-  isProcessExiting = true;
   if (globalEmbedderRef) {
     const ref = globalEmbedderRef;
     globalEmbedderRef = null;
