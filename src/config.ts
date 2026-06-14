@@ -81,12 +81,6 @@ export const ConfigSchema = Type.Object({
     Type.Literal('re-embed'),
     Type.Literal('backup'),
   ], { default: 'backup' }),
-  /** Reasoning/thinking level for researcher agents. (default: 'minimal') */
-  THINKING_LEVEL: Type.Union([
-    Type.Literal('off'),
-    Type.Literal('minimal'),
-    Type.Literal('high'),
-  ], { default: 'minimal' }),
   /** Whether to mirror logs to the console (stdout/stderr). (default: false) */
   CONSOLE_LOG: Type.Boolean({ default: false }),
   /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: true) */
@@ -143,7 +137,6 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS',
   'PI_RESEARCH_LLM_TIMEOUT_MS',
   'PI_RESEARCH_MIGRATION_STRATEGY',
-  'PI_RESEARCH_THINKING_LEVEL',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
@@ -414,7 +407,6 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
-    PI_RESEARCH_THINKING_LEVEL: config.THINKING_LEVEL,
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
@@ -600,7 +592,6 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS),
     LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS),
     MIGRATION_STRATEGY: parseEnvString(e, 'PI_RESEARCH_MIGRATION_STRATEGY', DEFAULTS.MIGRATION_STRATEGY) as 'drop' | 're-embed' | 'backup',
-    THINKING_LEVEL: parseEnvString(e, 'PI_RESEARCH_THINKING_LEVEL', DEFAULTS.THINKING_LEVEL) as 'off' | 'minimal' | 'high',
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),

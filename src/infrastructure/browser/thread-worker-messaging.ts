@@ -23,7 +23,7 @@ async function createPageSafe(context: any): Promise<any> {
   await currentLock;
   try {
     const pagePromise = context.newPage();
-    pagePromise.catch((err: Error) => console.debug(`[ThreadWorker] Background page creation rejection: ${err.message}`));
+    pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
     let timeoutId: NodeJS.Timeout | undefined;
     const result = await Promise.race([
       pagePromise,

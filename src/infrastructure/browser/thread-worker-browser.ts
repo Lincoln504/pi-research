@@ -3,9 +3,9 @@
  *
  * Handles browser initialization, context management, and cleanup.
  *
- * NOTE (#31): This file uses console.debug() instead of the logger because
- * worker threads run in separate processes without access to the full
- * logging infrastructure. This is intentional.
+ * NOTE: This file uses logToDebugFile() instead of the main-process logger because
+ * worker threads run in separate isolated processes. All diagnostic output is
+ * written to the file path in PI_RESEARCH_LOG_FILE (set by the worker pool manager).
  */
 
 import { setupMocking } from './thread-worker-messaging.ts';
@@ -29,14 +29,15 @@ const isBrowserConnected = () => {
   try {
     return browser && typeof browser.isConnected === 'function' && browser.isConnected();
   } catch {
-    // FIX (#22): Log unexpected errors instead of fully swallowing
-    console.debug('[ThreadWorker] browser.isConnected check threw, treating as disconnected');
+    logToDebugFile('DEBUG', '[ThreadWorker] browser.isConnected check threw, treating as disconnected');
     return false;
   }
 };
 
 /**
- * Log to debug file
+ * Log to the worker debug file (PI_RESEARCH_LOG_FILE).
+ * This is the only logging mechanism available to worker processes —
+ * the main-process logger is not accessible from isolated worker threads.
  */
 function logToDebugFile(level: string, ...args: any[]): void {
   const logFile = process.env['PI_RESEARCH_LOG_FILE'];
@@ -110,9 +111,10 @@ export async function initBrowser(): Promise<void> {
           },
         });
 
-        // Guard with a hard timeout. We catch the launchPromise so it doesn't cause
-        // an UnhandledPromiseRejection if it resolves or rejects AFTER the timeout.
-        launchPromise.catch((err: Error) => console.debug(`[ThreadWorker] Background browser launch rejection: ${err.message}`));
+        // Guard with a hard timeout. We catch the launchPromise rejection so it
+        // doesn't surface as an UnhandledPromiseRejection if it rejects after the
+        // timeout races ahead.
+        launchPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser launch rejection: ${err.message}`));
         let launchTimeoutId: NodeJS.Timeout | undefined;
         const launchedBrowser = await Promise.race([
           launchPromise,
@@ -126,7 +128,7 @@ export async function initBrowser(): Promise<void> {
         // newContext() can hang if the browser process becomes unresponsive immediately
         // after launch (e.g. OOM, GPU crash). Guard with a hard timeout.
         const contextPromise = browser.newContext();
-        contextPromise.catch((err: Error) => console.debug(`[ThreadWorker] Background browser context rejection: ${err.message}`));
+        contextPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser context rejection: ${err.message}`));
         let contextTimeoutId: NodeJS.Timeout | undefined;
         context = await Promise.race([
           contextPromise,
@@ -144,7 +146,7 @@ export async function initBrowser(): Promise<void> {
     } catch (e: unknown) {
       // Close any partially-launched browser to avoid orphaning the process.
       if (browser && typeof browser.close === 'function') {
-        browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
+        browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during failed init: ${err.message}`));
       }
       browser = null;
       context = null;
@@ -181,8 +183,8 @@ export function getContext(): any {
  * Reset browser and context (used after crashes)
  */
 export function resetBrowser(): void {
-  if (context) context.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
-  if (browser) browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
+  if (context) context.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during reset: ${err.message}`));
+  if (browser) browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during reset: ${err.message}`));
   context = null;
   browser = null;
 }
@@ -194,8 +196,8 @@ export async function cleanupBrowser(): Promise<void> {
   const timeoutMs = 2000;
   
   const cleanup = async () => {
-    if (context) await context.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
-    if (browser) await browser.close().catch((err: any) => console.debug('Swallowed browser close error:', err));
+    if (context) await context.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during cleanup: ${err.message}`));
+    if (browser) await browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during cleanup: ${err.message}`));
   };
 
   try {
@@ -204,7 +206,7 @@ export async function cleanupBrowser(): Promise<void> {
       new Promise((_, reject) => setTimeout(() => reject(new Error('Browser cleanup timed out')), timeoutMs))
     ]);
   } catch {
-    // Ignore timeout error, we just want to ensure it doesn't hang
+    // Ignore timeout — we just want to ensure cleanup doesn't hang indefinitely
   } finally {
     context = null;
     browser = null;

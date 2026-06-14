@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'node:fs';
+import { execSync } from 'node:child_process';
 
 export class DiskSpaceChecker {
   private readonly MIN_DISK_SPACE_BYTES = 1_048_576; // 1MB minimum
@@ -34,17 +35,20 @@ export class DiskSpaceChecker {
         
         if (availableBytes < this.MIN_DISK_SPACE_BYTES) {
           this.hasDiskSpace = false;
-          // Only log once (not via this.emit to avoid recursion)
-          console.error('[Logger] Insufficient disk space for logging:', 
-            `${Math.round(availableBytes / 1024 / 1024)}MB available, minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required`);
+          // Write directly to stderr — this check runs inside the logger itself,
+          // so using the logger here would create a circular dependency.
+          process.stderr.write(
+            `[pi-research] Insufficient disk space for logging: ` +
+            `${Math.round(availableBytes / 1024 / 1024)}MB available, ` +
+            `minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required\n`
+          );
         } else {
           this.hasDiskSpace = true;
         }
       } else {
-        // Non-POSIX (Windows): Use synchronous drive space check
-        // FIX (#38): Attempt Windows disk space check via execSync
+        // Non-POSIX (Windows): Use synchronous drive space check via execSync.
+        // execSync is a static import — no require() needed.
         try {
-          const { execSync } = require('node:child_process');
           const output = execSync('wmic logicaldisk get freespace /value', { encoding: 'utf-8', timeout: 5000 });
           const match = output.match(/FreeSpace=(\d+)/);
           const availableBytes = match ? parseInt(match[1]!, 10) : Infinity;

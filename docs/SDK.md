@@ -23,7 +23,6 @@ Settings are loaded with the following precedence:
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries (ms) |
-| `PI_RESEARCH_THINKING_LEVEL` | `minimal` | off, minimal, high | Reasoning depth for researcher agents |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | — | Auto-export a markdown report on completion |
 
 ### Timeouts

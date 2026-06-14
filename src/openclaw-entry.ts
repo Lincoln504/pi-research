@@ -54,7 +54,6 @@ const OpenClawConfigSchema = Type.Object({
   embeddingModel: Type.Optional(Type.String({ description: 'Embedding model (defaults to user config)' })),
   embeddingDevice: Type.Optional(Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' })),
   migrationStrategy: Type.Optional(Type.Union([Type.Literal('drop'), Type.Literal('re-embed'), Type.Literal('backup')], { default: 'backup' })),
-  thinkingLevel: Type.Optional(Type.Union([Type.Literal('off'), Type.Literal('minimal'), Type.Literal('high')], { default: 'minimal' })),
   cacheTtlDays: Type.Optional(Type.Number({ minimum: 1, maximum: 365, default: 30 })),
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),
   stackexchangeApiKey: Type.Optional(Type.String({ description: 'Stack Exchange API key for higher rate limits' })),
@@ -91,7 +90,6 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   if (pluginConfig.embeddingModel !== undefined) globalConfig.EMBEDDING_MODEL = pluginConfig.embeddingModel;
   if (pluginConfig.embeddingDevice !== undefined) globalConfig.EMBEDDING_DEVICE = pluginConfig.embeddingDevice;
   if (pluginConfig.migrationStrategy !== undefined) globalConfig.MIGRATION_STRATEGY = pluginConfig.migrationStrategy;
-  if (pluginConfig.thinkingLevel !== undefined) globalConfig.THINKING_LEVEL = pluginConfig.thinkingLevel;
   if (pluginConfig.cacheTtlDays !== undefined) globalConfig.KNOWLEDGE_STORE_CACHE_TTL_DAYS = pluginConfig.cacheTtlDays;
   if (pluginConfig.scrapeTimeoutMs !== undefined) globalConfig.SCRAPE_TIMEOUT_MS = pluginConfig.scrapeTimeoutMs;
   if (pluginConfig.model !== undefined) globalConfig.RESEARCH_MODEL = pluginConfig.model;

@@ -139,8 +139,10 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       model: modelToUse,
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
-      // Researchers do retrieval + synthesis from scraped pages — not deep reasoning.
-      thinkingLevel: (config?.THINKING_LEVEL === 'high' ? 'high' : config?.THINKING_LEVEL) || 'minimal',
+      // Thinking/reasoning is disabled for researcher agents: they do retrieval and
+      // synthesis from scraped pages, not open-ended reasoning. Keeping it off
+      // reduces latency and token cost with no quality benefit for this use case.
+      thinkingLevel: 'off',
     });
 
     // Customize thinking label for researchers to distinguish them in the TUI.
@@ -152,9 +154,7 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       );
     }
 
-    // Log to confirm thinking level was set
-    const resolvedThinkingLevel = (config?.THINKING_LEVEL === 'high' ? 'high' : config?.THINKING_LEVEL) || 'minimal';
-    logger.log(`[Researcher] Created session with thinkingLevel='${resolvedThinkingLevel}', model=${modelToUse?.id || 'unknown'}`);
+    logger.log(`[Researcher] Created session with model=${modelToUse?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');
