@@ -55,7 +55,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   registry.register('KnowledgeStore', async (options) => {
     const cwd = (container as any)._cwd || process.cwd();
     const config = getConfig(cwd);
-    if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
+    if (config.KNOWLEDGE_STORE_MODE === 'none') {
       return { healthy: true, diagnostic: { status: 'disabled in config' } };
     }
     try {

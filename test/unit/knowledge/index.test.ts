@@ -57,8 +57,7 @@ vi.mock('../../../src/knowledge/chunker.ts', () => ({
 
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn().mockReturnValue({
-    LOCAL_KNOWLEDGE_STORE_ENABLED: true,
-    GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    KNOWLEDGE_STORE_MODE: 'project',
     EMBEDDING_MODEL: 'Xenova/all-MiniLM-L6-v2',
     KNOWLEDGE_STORE_CACHE_TTL_DAYS: 30,
   }),
@@ -79,8 +78,7 @@ const ALL_MODEL_IDS = SUPPORTED_MODELS.map(m => m.id);
 describe('createKnowledgeStoreComponents', () => {
   it('returns null if both local and global stores are disabled', async () => {
     vi.mocked(getConfig).mockReturnValueOnce({
-      LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-      GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+      KNOWLEDGE_STORE_MODE: 'none',
     } as any);
 
     const components = await createKnowledgeStoreComponents(() => Promise.resolve({} as any));

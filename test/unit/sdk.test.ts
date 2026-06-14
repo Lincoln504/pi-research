@@ -104,8 +104,7 @@ vi.mock('../../src/logger.ts', () => ({
 vi.mock('../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({
     DEFAULT_RESEARCH_DEPTH: 1,
-    LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-    GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    KNOWLEDGE_STORE_MODE: 'none',
     MAX_CONCURRENT_RESEARCHERS: 3,
     RESEARCHER_TIMEOUT_MS: 120000,
   })),
@@ -158,8 +157,7 @@ describe('SDK Lifecycle', () => {
     vi.mocked(resetServiceContainer).mockClear().mockResolvedValue(undefined);
     vi.mocked(getConfig).mockClear().mockReturnValue({
         DEFAULT_RESEARCH_DEPTH: 1,
-        LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-        GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+        KNOWLEDGE_STORE_MODE: 'none',
         MAX_CONCURRENT_RESEARCHERS: 3,
         RESEARCHER_TIMEOUT_MS: 120000,
     } as any);

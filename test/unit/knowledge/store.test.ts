@@ -23,6 +23,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'project',
     });
   });
 
@@ -114,7 +115,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/all-MiniLM-L6-v2',
-      globalEnabled: true,
+      knowledgeMode: 'global',
       workspace: 'ANY'
     });
     await globalStore.open();
@@ -286,6 +287,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/all-MiniLM-L6-v2',
+      knowledgeMode: 'none',
       ttlDays: 30,
     });
     await newStore.open();
@@ -320,6 +322,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: 'Xenova/multilingual-e5-base',
+      knowledgeMode: 'project',
     });
     await newStore.open();
     try {
@@ -382,6 +385,7 @@ describe('KnowledgeStore', () => {
       dbDir: testDbDir,
       embedder: mockEmbedder,
       modelName: modelB,
+      knowledgeMode: 'project',
       migrationStrategy: 're-embed'
     });
     

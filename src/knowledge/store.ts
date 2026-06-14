@@ -33,10 +33,9 @@ export interface StoreOptions {
   /** Optional lock wrapper for multi-process safety during initialization and migration */
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
   
-  // Scoping options for unified database
+  /** Scoping options for unified database */
   workspace?: string;
-  localEnabled?: boolean;
-  globalEnabled?: boolean;
+  knowledgeMode: 'none' | 'global' | 'project';
   /** Cache TTL in days for automatic eviction */
   ttlDays?: number;
 }
@@ -67,27 +66,19 @@ export class KnowledgeStore implements IKnowledgeStore {
   constructor(options: StoreOptions) {
     this.options = options;
     this.manifestPath = path.join(this.options.dbDir, 'store-manifest.json');
-
-    // Defense-in-depth: warn if scope options are not explicitly set.
-    // Production code should always pass explicit localEnabled/globalEnabled.
-    if (options.localEnabled === undefined && options.globalEnabled === undefined) {
-      logger.log('[KnowledgeStore] Warning: localEnabled and globalEnabled not explicitly set. Defaulting to both enabled.');
-    }
   }
 
   private getScopeFilter(): string {
-    const local = this.options.localEnabled !== false; // Default to true if not specified
-    const global = this.options.globalEnabled !== false;
     const ws = this.getWorkspace().replace(/'/g, "''");
 
-    if (local && global) {
-      return `workspace = '${ws}' OR is_global = true`;
-    } else if (local) {
-      return `workspace = '${ws}'`;
-    } else if (global) {
-      return `is_global = true`;
+    switch (this.options.knowledgeMode) {
+      case 'project':
+        return `workspace = '${ws}'`;
+      case 'global':
+        return `is_global = true`;
+      default: // 'none'
+        return '1 = 0';
     }
-    return '1 = 0';
   }
 
   private getWorkspace(): string {
@@ -443,7 +434,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
       const table = await this.getFreshTable();
       const workspace = this.getWorkspace();
-      const isGlobal = !!this.options.globalEnabled;
+      const isGlobal = this.options.knowledgeMode === 'global';
 
       await this.withEmbedderReconnect(async (embedder) => {
         let retryCount = 0;

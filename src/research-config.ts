@@ -82,88 +82,79 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const container = tryGetServiceContainerFromCtx(ctx);
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
-  const anyKnowledgeStore = config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED;
+  const anyKnowledgeStore = config.KNOWLEDGE_STORE_MODE !== 'none';
 
   const initialItems: SettingItem[] = [
-    // --- Research (User-level) ---
+    // --- Project Settings ---
+    {
+      id: 'KNOWLEDGE_STORE_MODE',
+      label: 'Knowledge mode [project]',
+      description: 'Set knowledge store isolation mode (none, global, project).',
+      currentValue: config.KNOWLEDGE_STORE_MODE,
+      values: ['none', 'global', 'project'],
+    },
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: '/research depth [user]',
-      description: 'Default complexity (normal/deep/ultra) for /research command. Applies to all projects.',
+      label: '/research depth [project]',
+      description: 'Default complexity (normal/deep/ultra) for /research command. Applies to this project.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
+
+    // --- User Settings ---
     {
       id: 'RESEARCHER_TIMEOUT_MS',
-      label: 'Research timeout [user]',
-      description: 'Maximum time in minutes allowed for a single research track. Shared across all projects.',
+      label: 'Researcher Timeout',
+      description: 'Maximum time in minutes allowed for a single research track.',
       currentValue: String(Math.round(config.RESEARCHER_TIMEOUT_MS / 60000)),
       values: ['3', '5', '10', '15', '20', '30'],
     },
     {
       id: 'MAX_CONCURRENT_RESEARCHERS',
-      label: 'Concurrency [user]',
-      description: 'Max parallel researcher threads. Shared resource limit for all research sessions.',
+      label: 'Max Concurrency',
+      description: 'Max parallel researcher threads. Configurable limit to avoid API rate limits.',
       currentValue: String(config.MAX_CONCURRENT_RESEARCHERS),
       values: ['1', '2', '3', '4', '5'],
     },
     {
       id: 'MAX_SCRAPE_BATCHES',
-      label: 'Scrape batches [user]',
-      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited). Shared default.',
+      label: 'Scrape Batches',
+      description: 'Maximum batches of URLs a researcher can scrape (0=unlimited).',
       currentValue: config.MAX_SCRAPE_BATCHES === 0 ? 'unlimited' : String(config.MAX_SCRAPE_BATCHES),
       values: ['unlimited', '1', '2', '3', '5', '10', '15'],
     },
     {
       id: 'RESEARCH_REPORT_EXPORT_ENABLED',
-      label: 'Auto-export [user]',
-      description: 'Automatically save a markdown report when research completes. Shared default.',
+      label: 'Auto-export report',
+      description: 'Automatically save a markdown report when research completes.',
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
-
-    // --- Knowledge Store (User-level) ---
-    {
-      id: 'LOCAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Enable research memory [user]',
-      description: 'Save findings to your knowledge store for cross-project recall and future search.',
-      currentValue: config.LOCAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
-      values: ['true', 'false'],
-    },
-    {
-      id: 'GLOBAL_KNOWLEDGE_STORE_ENABLED',
-      label: 'Legacy user store [user]',
-      description: 'Shared user database for cross-project memory (deprecated in favor of unified store).',
-      currentValue: config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? 'true' : 'false',
-      values: ['true', 'false'],
-    },
-
-    // --- Infrastructure (User) ---
     {
       id: 'WORKER_THREADS',
-      label: 'Worker threads [user]',
-      description: 'Browser processes for searching/scraping. Affects CPU/RAM usage globally.',
+      label: 'Browser Worker Threads',
+      description: 'Browser processes for searching/scraping. Affects CPU/RAM usage.',
       currentValue: String(config.WORKER_THREADS),
       values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
     ...(anyKnowledgeStore ? [
       {
         id: 'EMBEDDING_MODEL',
-        label: 'Embed model [user]',
+        label: 'Embed model',
         description: 'Vector model for store. Changing this renames current data to a backup and starts fresh.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
       {
         id: 'EMBEDDING_DEVICE',
-        label: 'Embed device [user]',
+        label: 'Embed device',
         description: 'Hardware backend (WebGPU or CPU). CPU is safer for headless/server environments.',
         currentValue: config.EMBEDDING_DEVICE,
         values: ['webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
-        label: 'Cache retention [user]',
+        label: 'Cache retention',
         description: 'Number of days to keep research findings before automated eviction.',
         currentValue: String(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS),
         values: ['7', '14', '30', '60', '90', '180', '365'],
@@ -171,7 +162,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ] as SettingItem[] : []),
     {
       id: 'DEBUG',
-      label: 'Diagnostic logs [user]',
+      label: 'Debug logs',
       description: 'Enable verbose logging for troubleshooting. Writes to /tmp/pi-research.log.',
       currentValue: config.DEBUG ? 'true' : 'false',
       values: ['true', 'false'],
@@ -194,7 +185,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         values: ['run'],
       },
     ] as SettingItem[] : []),
-    ...(config.LOCAL_KNOWLEDGE_STORE_ENABLED ? [
+    ...(config.KNOWLEDGE_STORE_MODE === 'project' ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_LOCAL',
         label: 'Clear project scope',
@@ -203,10 +194,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
         values: ['run'],
       },
     ] as SettingItem[] : []),
-    ...(config.GLOBAL_KNOWLEDGE_STORE_ENABLED ? [
+    ...(config.KNOWLEDGE_STORE_MODE === 'global' ? [
       {
         id: 'ACTION_KNOWLEDGE_CLEAR_GLOBAL',
-        label: 'Clear global scope',
+        label: 'Clear user scope',
         description: 'Permanently delete all entries that are not tied to a specific project.',
         currentValue: 'run',
         values: ['run'],
@@ -214,21 +205,21 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     ] as SettingItem[] : []),
     {
       id: 'ACTION_METRICS_VIEW',
-      label: 'View performance',
+      label: 'View Session Metrics',
       description: 'Show token usage, costs, and success rates for this session.',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_METRICS_CLEAR',
-      label: 'Reset session',
+      label: 'Reset Session Metrics',
       description: 'Clear the current session performance counters.',
       currentValue: 'run',
       values: ['run'],
     },
     {
       id: 'ACTION_LOGS_CLEAR',
-      label: 'Clear diagnostic logs',
+      label: 'Clear debug logs',
       description: 'Delete the main diagnostic log file and all archived rotation files.',
       currentValue: 'run',
       values: ['run'],
@@ -243,9 +234,17 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
           description: (text: string) => {
-            // Apply warning color to the entire line if it contains destructive keywords.
-            // The SettingsList already passes text split into wrapped lines.
-            if (text.toLowerCase().includes('delete') || text.toLowerCase().includes('clear')) {
+            // Apply warning color to the line if the *original* description contained destructive keywords.
+            // Since wrapTextWithAnsi returns an array of strings, this function is called for each line.
+            // The previous logic was failing because it checked the individual line, not the full context.
+            // We need a way to know if the *original* description had the keyword.
+            
+            // Re-evaluating: SettingsList calls this for each wrapped line.
+            // If the original description had 'delete' or 'clear', all lines should be yellow.
+            // I need to check the selected item's description.
+            const selectedItem = initialItems[settingsList['selectedIndex']]; 
+            const desc = selectedItem?.description?.toLowerCase() || '';
+            if (desc.includes('delete') || desc.includes('clear')) {
               return theme.fg('warning', text);
             }
             return theme.fg('dim', text);
@@ -291,12 +290,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             } else if (id === 'RESEARCH_REPORT_EXPORT_ENABLED') {
             config.RESEARCH_REPORT_EXPORT_ENABLED = newValue === 'true';
             scope = 'user';
-            } else if (id === 'LOCAL_KNOWLEDGE_STORE_ENABLED') {
-            config.LOCAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-            scope = 'user';
-            } else if (id === 'GLOBAL_KNOWLEDGE_STORE_ENABLED') {
-            config.GLOBAL_KNOWLEDGE_STORE_ENABLED = newValue === 'true';
-            scope = 'user';
+            } else if (id === 'KNOWLEDGE_STORE_MODE') {
+              config.KNOWLEDGE_STORE_MODE = newValue as 'none' | 'global' | 'project';
+              scope = 'user';
             } else if (id === 'EMBEDDING_MODEL') {
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             scope = 'user';
@@ -363,13 +359,16 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             const border = theme.fg('muted', '─'.repeat(width));
             const listLines = settingsList.render(width);
             
+            // Header with title and search hint
+            const titleText = 'Research Configuration';
+            const hintText = 'Type to search';
+            const header = `${titleText} ${theme.fg('dim', `(${hintText})`)}`;
+            
+            // Project info to appear right above description
             const pathInfoText = `Project: ${path.basename(cwd)}`;
             const wrappedPathInfo = wrapText(pathInfoText, width - 2).map(line => theme.fg('dim', ` ${line}`));
             
-            const registryDesc = `Most settings now apply globally ([user]). The Centralized Registry (~/.pi/state/project-settings.json) can still hold directory-specific overrides if configured manually.`;
-            const wrappedRegistry = wrapText(registryDesc, width - 2).map(line => theme.fg('dim', ` ${line}`));
-            
-            const lines = [border, ...listLines, '', ...wrappedPathInfo, ...wrappedRegistry, border];
+            const lines = [border, header, border, ...listLines, '', ...wrappedPathInfo];
             return lines.map(line => {
               if (visibleWidth(line) > width) {
                 return truncateToWidth(line, width);

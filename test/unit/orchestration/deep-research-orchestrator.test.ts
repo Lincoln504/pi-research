@@ -31,14 +31,13 @@ vi.mock('../../../src/logger.ts', () => ({
 
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn(() => ({
-    LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    KNOWLEDGE_STORE_MODE: 'none',
     MAX_CONCURRENT_RESEARCHERS: 3,
     RESEARCHER_MAX_RETRIES: 2,
     RESEARCHER_MAX_RETRY_DELAY_MS: 5000,
     RESEARCHER_TIMEOUT_MS: 120000,
   })),
-  DEFAULTS: { LOCAL_KNOWLEDGE_STORE_ENABLED: false, GLOBAL_KNOWLEDGE_STORE_ENABLED: false },
+  DEFAULTS: { KNOWLEDGE_STORE_MODE: 'none' },
 }));
 
 // Mock session-state for steering functions

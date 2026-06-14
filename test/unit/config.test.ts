@@ -151,25 +151,21 @@ describe('config (refactored)', () => {
 
       it('should parse knowledge store configuration from env', () => {
         const env = {
-          PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false',
-          PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'false',
+          PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'project',
           PI_RESEARCH_EMBEDDING_MODEL: 'custom-model',
           PI_RESEARCH_CACHE_TTL_DAYS: '15',
         };
         const config = createConfig(env, {});
 
-        expect(config.LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(config.GLOBAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
+        expect(config.KNOWLEDGE_STORE_MODE).toBe('project');
         expect(config.EMBEDDING_MODEL).toBe('custom-model');
         expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(15);
       });
 
-      it('should handle boolean variations in env for LOCAL_KNOWLEDGE_STORE_ENABLED', () => {
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'true' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'TRUE' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(true);
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'FALSE' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false);
-        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: '' }, {}).LOCAL_KNOWLEDGE_STORE_ENABLED).toBe(false); // default is false for local
+      it('should handle migration for legacy knowledge store flags', () => {
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_MODE).toBe('project');
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false', PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'true' }, {}).KNOWLEDGE_STORE_MODE).toBe('global');
+        expect(createConfig({ PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: 'false', PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: 'false' }, {}).KNOWLEDGE_STORE_MODE).toBe('none');
       });
     });
   });

@@ -190,7 +190,7 @@ export function createScrapeTool(options: {
       const cachedResults: { url: string; markdown: string }[] = [];
 
       // Attempt to retrieve from knowledge-store cache if enabled
-      if (config.LOCAL_KNOWLEDGE_STORE_ENABLED || config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
+      if (config.KNOWLEDGE_STORE_MODE !== 'none') {
         try {
           const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container);
           const store = await ksService.getStore();

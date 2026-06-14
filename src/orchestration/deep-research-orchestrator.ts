@@ -322,7 +322,7 @@ export class DeepResearchOrchestrator {
               }
             })();
 
-        const storeTask = ((this.config.LOCAL_KNOWLEDGE_STORE_ENABLED || this.config.GLOBAL_KNOWLEDGE_STORE_ENABLED) && plan.researchers && plan.researchers.length > 0)
+        const storeTask = (this.config.KNOWLEDGE_STORE_MODE !== 'none' && plan.researchers && plan.researchers.length > 0)
           ? (async () => {
               try {
                 const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);

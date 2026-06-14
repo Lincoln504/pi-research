@@ -14,16 +14,14 @@ const mockConfig = {
   MAX_SCRAPE_BATCHES: 2,
   MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: 1.0,
   AVG_TOKENS_PER_SCRAPE: 10000,
-  LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-GLOBAL_KNOWLEDGE_STORE_ENABLED: false, // Default to disabled for most tests
+  KNOWLEDGE_STORE_MODE: 'none',
   MAX_CONCURRENT_SCRAPES: 3,
 };
 
 vi.mock('../../../src/config.ts', () => ({
   getConfig: vi.fn(() => mockConfig),
   DEFAULTS: {
-    LOCAL_KNOWLEDGE_STORE_ENABLED: false,
-GLOBAL_KNOWLEDGE_STORE_ENABLED: false,
+    KNOWLEDGE_STORE_MODE: 'none',
   },
 }));
 

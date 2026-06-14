@@ -194,7 +194,11 @@ export class EmbeddingServer implements IEmbedder {
     }
 
     await this.embedder.dispose().catch((err) => {
-      logger.warn('[EmbeddingServer] Error disposing embedder:', err);
+      if (this.isShuttingDown) {
+        logger.debug('[EmbeddingServer] Error disposing embedder during shutdown (expected):', err);
+      } else {
+        logger.warn('[EmbeddingServer] Error disposing embedder:', err);
+      }
     });
   }
 

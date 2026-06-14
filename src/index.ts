@@ -206,7 +206,7 @@ export default async function (pi: ExtensionAPI) {
 
   // Create and register the Research Knowledge Search tool
   const researchKnowledgeSearchTool: ToolDefinition | null =
-    (getConfig((pi as any).cwd).LOCAL_KNOWLEDGE_STORE_ENABLED || getConfig((pi as any).cwd).GLOBAL_KNOWLEDGE_STORE_ENABLED)
+    getConfig((pi as any).cwd).KNOWLEDGE_STORE_MODE !== 'none'
       ? createResearchKnowledgeSearchTool()
       : null;
   if (researchKnowledgeSearchTool) {

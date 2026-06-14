@@ -27,8 +27,7 @@ Settings are loaded with the following precedence:
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED` | `false` | — | Enable project-scoped knowledge store |
-| `PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED` | `true` | — | Enable shared (cross-project) knowledge store |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `none` | — | Knowledge store mode: 'none', 'global', or 'project' |
 | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |

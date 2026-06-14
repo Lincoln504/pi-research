@@ -280,7 +280,7 @@ describe('ResearchOrchestrationService', () => {
         return null;
       });
 
-      const config = { LOCAL_KNOWLEDGE_STORE_ENABLED: true };
+      const config = { KNOWLEDGE_STORE_MODE: 'project' };
       const reportContent = '### CITED LINKS\n[1] https://foo.com\nSource: X\nDescription: D';
       const reports = new Map([
         ['1.res1', reportContent],

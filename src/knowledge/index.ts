@@ -50,7 +50,7 @@ export async function createKnowledgeStoreComponents(
   config: Config = getConfig(),
   workspace: string = process.cwd()
 ): Promise<KnowledgeStoreComponents | null> {
-  if (!config.LOCAL_KNOWLEDGE_STORE_ENABLED && !config.GLOBAL_KNOWLEDGE_STORE_ENABLED) {
+  if (config.KNOWLEDGE_STORE_MODE === 'none') {
     logger.debug('[knowledge] Knowledge store is disabled in configuration');
     return null;
   }
@@ -71,8 +71,7 @@ export async function createKnowledgeStoreComponents(
         reconnectFactory,
         withLock,
         workspace,
-        localEnabled: config.LOCAL_KNOWLEDGE_STORE_ENABLED,
-        globalEnabled: config.GLOBAL_KNOWLEDGE_STORE_ENABLED,
+        knowledgeMode: config.KNOWLEDGE_STORE_MODE,
         ttlDays: config.KNOWLEDGE_STORE_CACHE_TTL_DAYS,
       });
 

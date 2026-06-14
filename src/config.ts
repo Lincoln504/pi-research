@@ -35,10 +35,8 @@ export const ConfigSchema = Type.Object({
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
   WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
-  /** Whether the local knowledge store is enabled (default: false) */
-  LOCAL_KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: false }),
-  /** Whether the global knowledge store is enabled (default: true) */
-  GLOBAL_KNOWLEDGE_STORE_ENABLED: Type.Boolean({ default: true }),
+  /** Knowledge store mode: 'none', 'global', or 'project' (default: 'none') */
+  KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal('none'), Type.Literal('global'), Type.Literal('project')], { default: 'none' }),
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: Type.String({ default: 'onnx-community/granite-embedding-small-english-r2-ONNX' }),
   /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
@@ -265,7 +263,7 @@ function loadEnvFiles(cwd: string): Record<string, string> {
       logger.info('[config] config.env missing. Initializing from user settings in central registry...');
       const userLevelKeys = [
         'PI_RESEARCH_EMBEDDING_MODEL', 'PI_RESEARCH_EMBEDDING_DEVICE', 'PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS',
-        'PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED', 'PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED', 'PI_RESEARCH_CACHE_TTL_DAYS',
+        'PI_RESEARCH_KNOWLEDGE_STORE_MODE', 'PI_RESEARCH_CACHE_TTL_DAYS',
         'PI_RESEARCH_WORKER_THREADS', 'PI_RESEARCH_WORKER_CONCURRENCY', 'PI_RESEARCH_DEBUG', 'PI_RESEARCH_MODEL',
         'PI_RESEARCH_LLM_TIMEOUT_MS', 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', 'PI_RESEARCH_SCRAPE_TIMEOUT_MS',
         'PI_RESEARCH_SEARCH_TIMEOUT_MS', 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', 'PI_RESEARCH_REPORT_EXPORT_ENABLED',
@@ -347,8 +345,7 @@ export function saveConfig(config: Config, scope: 'local' | 'global' | 'user' = 
     PI_RESEARCH_MAX_SCRAPE_BATCHES: String(config.MAX_SCRAPE_BATCHES),
     PI_RESEARCH_WORKER_THREADS: String(config.WORKER_THREADS),
     PI_RESEARCH_WORKER_CONCURRENCY: String(config.WORKER_CONCURRENCY),
-    PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED: String(config.LOCAL_KNOWLEDGE_STORE_ENABLED),
-    PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED: String(config.GLOBAL_KNOWLEDGE_STORE_ENABLED),
+    PI_RESEARCH_KNOWLEDGE_STORE_MODE: config.KNOWLEDGE_STORE_MODE,
     PI_RESEARCH_EMBEDDING_MODEL: config.EMBEDDING_MODEL,
     PI_RESEARCH_EMBEDDING_DEVICE: config.EMBEDDING_DEVICE,
     PI_RESEARCH_SCRAPE_TIMEOUT_MS: String(config.SCRAPE_TIMEOUT_MS),
@@ -518,8 +515,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY),
-    LOCAL_KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_LOCAL_KNOWLEDGE_ENABLED', DEFAULTS.LOCAL_KNOWLEDGE_STORE_ENABLED),
-    GLOBAL_KNOWLEDGE_STORE_ENABLED: parseEnvBool(e, 'PI_RESEARCH_GLOBAL_KNOWLEDGE_ENABLED', DEFAULTS.GLOBAL_KNOWLEDGE_STORE_ENABLED),
+    KNOWLEDGE_STORE_MODE: (parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', 'none') as 'none' | 'global' | 'project'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS),
