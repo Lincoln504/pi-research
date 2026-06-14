@@ -81,7 +81,7 @@
     "setup": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
     "deps:check": "depcruise --config config/.dependency-cruiser.cjs --output-type err-long src",
-    "deps:generate": "depcruise --config config/.dependency-cruiser.cjs --output-type dot src | dot -T svg -o docs/deps.svg",
+    "deps:generate": "madge --image docs/deps.svg src/index.ts",
     "analyze:dependencies": "ncu",
     "analyze:compatibility": "depngn"
   },
