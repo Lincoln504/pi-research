@@ -330,6 +330,13 @@ export class QuickResearchOrchestrator {
         }
     } finally {
         if (subscription) subscription();
+
+        // Restore the default thinking label now that the researcher is done.
+        // Otherwise "Researcher X" persists for all subsequent agent turns.
+        if (ctx.hasUI && typeof ctx.ui.setHiddenThinkingLabel === 'function') {
+          ctx.ui.setHiddenThinkingLabel();
+        }
+
         try {
           const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
           await orch.cleanupResearchServices(undefined, researchId);

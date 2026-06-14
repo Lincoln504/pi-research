@@ -143,10 +143,13 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       thinkingLevel: (config?.THINKING_LEVEL === 'high' ? 'high' : config?.THINKING_LEVEL) || 'minimal',
     });
 
-    // Customize thinking label for researchers to distinguish them in the TUI
+    // Customize thinking label for researchers to distinguish them in the TUI.
+    // Use the actual researcherId passed by the caller (not regex on the prompt,
+    // since the ID is never injected into the template).
     if (extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
-      const internalId = systemPrompt.match(/ID: ([^)]+)/)?.[1] || 'Unknown';
-      extensionCtx.ui.setHiddenThinkingLabel(`Researcher ${internalId}`);
+      extensionCtx.ui.setHiddenThinkingLabel(
+        researcherId ? `Researcher ${researcherId}` : undefined
+      );
     }
 
     // Log to confirm thinking level was set

@@ -282,6 +282,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
       });
       sessionService.unregisterSession(researchId, id);
+
+      // Restore the default thinking label now that the researcher is done.
+      // Otherwise "Researcher X" persists for all subsequent agent turns.
+      if (ctx.hasUI && typeof ctx.ui.setHiddenThinkingLabel === 'function') {
+        ctx.ui.setHiddenThinkingLabel();
+      }
     }
   }
 
