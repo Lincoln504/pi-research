@@ -7,14 +7,29 @@ const path = require('path');
 // __dirname is a built-in global in CommonJS (.cjs) modules
 const projectRoot = path.join(__dirname, '..');
 
+/**
+ * Resolve the camoufox-js binary path.
+ *
+ * See setup.cjs for rationale — dependencies are hoisted to root node_modules.
+ */
+function resolveCamoufoxBin() {
+  try {
+    const pkgDir = path.dirname(require.resolve('camoufox-js/package.json', { paths: [projectRoot] }));
+    const binDir = path.join(pkgDir, '..', '.bin');
+    const bin = path.join(binDir, 'camoufox-js');
+    if (existsSync(bin)) return bin;
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
 // Remove camoufox browser binaries — only when explicitly requested.
 // The shared cache (~/.cache/camoufox) may be used by other tools, so we do NOT
 // purge it by default. Set PI_RESEARCH_PURGE_BROWSERS=1 to opt in.
 if (process.env.PI_RESEARCH_PURGE_BROWSERS === '1') {
   if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD !== '1') {
     try {
-      const bin = path.join(projectRoot, 'node_modules', '.bin', 'camoufox-js');
-      const cmd = existsSync(bin) ? `"${bin}" remove` : 'npx camoufox-js remove';
+      const bin = resolveCamoufoxBin();
+      const cmd = bin ? `"${bin}" remove` : 'npx camoufox-js remove';
       execSync(cmd, { stdio: 'inherit' });
       console.log('pi-research: camoufox browser binaries removed.');
     } catch (error) {

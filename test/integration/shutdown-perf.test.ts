@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initResearchSDK, disposeResearchSDK, getSDKContainer } from '../../src/sdk.ts';
+import { initResearchSDK, shutdownResearchSDK, getSDKContainer } from '../../src/sdk.ts';
 import { getService } from '../../src/core/service-registry.ts';
 import { ServiceNames } from '../../src/core/interfaces/service-names.ts';
 import type { ISchedulerInternals } from '../../src/core/interfaces/scheduler-interfaces.ts';
@@ -31,7 +31,7 @@ describe('Shutdown Performance', () => {
     
     // 3. Measure shutdown time
     const startDispose = Date.now();
-    await disposeResearchSDK();
+    await shutdownResearchSDK();
     const disposeDurationMs = Date.now() - startDispose;
     
     // The shutdown should be fast now (usually ~600-1200ms). We assert it's under 5 seconds to avoid flakiness in CI.

@@ -43,7 +43,7 @@ export function getMaxScrapeBatches(config?: Config): number {
 }
 
 /** Maximum URLs to scrape per batch */
-export const MAX_SCRAPE_URLS = 5;
+export const MAX_SCRAPE_URLS = 6;
 
 /**
  * Get the units per researcher for the progress bar.
@@ -118,7 +118,7 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
-/** Default concurrency for batch 2 and beyond (higher than batch 1's 10) */
+/** Default concurrency for batch 2 and beyond (higher than the configurable Batch 1 concurrency, default 3) */
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
 
 // ==================== UI Constants ====================

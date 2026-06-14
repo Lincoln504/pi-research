@@ -30,7 +30,7 @@ export const ConfigSchema = Type.Object({
   /** Target depth for recursive research (default: 1, range: 1-3) */
   DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
   /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
-  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 3 }),
+  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
   /** Number of parallel browser pool workers (default: 4, range: 1-10) */
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
@@ -261,9 +261,10 @@ export function getGlobalEnvFilePath(): string {
 
 /**
  * Returns the local environment file path for a given directory.
- * NOTE: This is now deprecated in favor of centralized storage.
+ * @deprecated Legacy .pi-research.env files are auto-migrated to the centralized registry.
+ * @internal
  */
-export function getLocalEnvFilePath(cwd: string = process.cwd()): string {
+function getLocalEnvFilePath(cwd: string = process.cwd()): string {
   return path.resolve(cwd, '.pi-research.env');
 }
 
@@ -338,6 +339,7 @@ function loadEnvFiles(cwd: string): Record<string, string> {
   let legacyEnv: Record<string, string> = {};
   if (fs.existsSync(legacyPath)) {
     try {
+      logger.warn(`[config] ⚠ .pi-research.env files are deprecated. Settings will be auto-migrated to the centralized registry. Remove ${legacyPath} after migration.`);
       legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
       Object.assign(merged, legacyEnv);
       

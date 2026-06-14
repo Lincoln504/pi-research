@@ -45,7 +45,7 @@ Each researcher agent has access to a fixed tool set with shared budget (12 call
 | Tool | Quick | Deep | Source |
 |------|-------|------|--------|
 | `search` | ✓ | — | DuckDuckGo Lite via stealth browser |
-| `scrape` | ✓ | ✓ | URL batch scraping via stealth browser (up to 5 URLs each) |
+| `scrape` | ✓ | ✓ | URL batch scraping via stealth browser (up to 6 URLs each) |
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
 | `grep` | — | ✓ | Local ripgrep |

@@ -28,6 +28,23 @@ if (major < 22) {
   console.warn(`WARNING: Node.js ${process.version} is below the minimum (22). Upgrade to 22.13.0+.`);
 }
 
+/**
+ * Resolve the camoufox-js binary path.
+ *
+ * In a typical npm install, dependencies are hoisted to the root node_modules,
+ * so the package's own node_modules/ may be empty. We use require.resolve to
+ * find the real location of camoufox-js and derive the bin from there.
+ */
+function resolveCamoufoxBin() {
+  try {
+    const pkgDir = path.dirname(require.resolve('camoufox-js/package.json', { paths: [projectRoot] }));
+    const binDir = path.join(pkgDir, '..', '.bin');
+    const bin = path.join(binDir, 'camoufox-js');
+    if (existsSync(bin)) return bin;
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
 function camoufoxCachePath() {
   const customPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (customPath) return customPath;
@@ -74,8 +91,8 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
 
   if (!alreadyInstalled) {
     try {
-      const bin = path.join(projectRoot, 'node_modules', '.bin', 'camoufox-js');
-      const cmd = existsSync(bin) ? `"${bin}" fetch` : 'npx camoufox-js fetch';
+      const bin = resolveCamoufoxBin();
+      const cmd = bin ? `"${bin}" fetch` : 'npx camoufox-js fetch';
       execSync(cmd, { stdio: 'inherit', env });
       browsersInstalled = true;
     } catch (error) {

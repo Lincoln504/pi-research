@@ -1,5 +1,9 @@
 /**
- * Root vitest config — default test runner (unit tests).
+ * Root vitest config — delegates to the canonical unit test config.
+ *
+ * All test configs live under config/tooling/. This file exists so that
+ * bare `npx vitest` or IDE integrations resolve to the unit test suite
+ * without needing --config flags.
  *
  * For integration tests, use the dedicated configs:
  *   npm run test:integration:serial
@@ -8,56 +12,7 @@
  * To run all tests sequentially:
  *   npm run test:all
  */
-import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-import os from 'node:os';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import unitConfig from './config/tooling/vitest.config.unit.ts';
 
-const cpuCount = os.cpus().length;
-const maxForks = Math.max(2, Math.min(cpuCount, 8));
-
-export default defineConfig({
-  test: {
-    globals: true,
-    environment: 'node',
-    name: 'unit',
-    include: ['test/unit/**/*.test.ts'],
-    setupFiles: ['./test/setup/unit.ts'],
-    pool: 'forks' as const,
-    // @ts-expect-error Vitest 4.x runtime supports poolOptions.forks
-    poolOptions: {
-      forks: {
-        maxForks,
-        minForks: 2,
-      },
-    },
-    testTimeout: 30000,
-    hookTimeout: 15000,
-    teardownTimeout: 10000,
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html', 'lcov'],
-      exclude: [
-        'node_modules/',
-        'dist/',
-        '**/*.test.ts',
-        '**/*.spec.ts',
-        '**/types.ts',
-        '**/index.ts',
-        'test/',
-      ],
-      reportOnFailure: true,
-    },
-    reporters: process.env['GITHUB_ACTIONS']
-      ? ['verbose', 'github-actions']
-      : ['verbose'],
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src'),
-      '@test': path.resolve(__dirname, 'test'),
-    },
-  },
-});
+export default unitConfig;

@@ -34,6 +34,7 @@ jobs:
         run: |
           npm ci --legacy-peer-deps
           npm run build:worker
+          npm run build:openclaw
           npm pack
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV

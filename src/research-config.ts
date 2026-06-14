@@ -88,15 +88,15 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // ── Project-scoped settings (saved per-directory) ──
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: 'Research Depth  (project)',
-      description: 'Default complexity for /research (normal, deep, ultra). Saved per-directory so each project can pick its own default.',
+      label: 'Research Depth',
+      description: 'Default depth for the /research command (normal, deep, ultra).\n[project] means configured independently per directory.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
       id: 'KNOWLEDGE_STORE_MODE',
-      label: 'Knowledge Mode  (project)',
-      description: 'Knowledge store isolation — none (disabled), project (entries confined to this directory), or global (shared across all projects). Saved per-directory.',
+      label: 'Knowledge Mode',
+      description: 'Knowledge store isolation — none (disabled), project (entries confined to this directory), or global (shared across all projects).\n[project] means configured independently per directory.',
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },

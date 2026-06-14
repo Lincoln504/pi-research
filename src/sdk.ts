@@ -449,9 +449,6 @@ export async function shutdownResearchSDK(): Promise<void> {
   }
 }
 
-/** @deprecated Use shutdownResearchSDK */
-export const disposeResearchSDK = shutdownResearchSDK;
-
 // ---------------------------------------------------------------------------
 // Mock context (mirrors pi-coding-agent ExtensionContext)
 // ---------------------------------------------------------------------------
