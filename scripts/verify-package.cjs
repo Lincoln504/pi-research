@@ -97,7 +97,23 @@ function verifyManifest() {
     return;
   }
 
-  const files = JSON.parse(raw)[0].files.map((f) => f.path);
+  // npm pack --json prints a JSON array to stdout, but on some npm versions the
+  // `prepare` lifecycle still runs during `npm pack` even with --ignore-scripts,
+  // emitting build progress text BEFORE the JSON. Slice from the first '[' so we
+  // parse only the JSON array regardless of any leading chatter.
+  const jsonStart = raw.indexOf('[');
+  if (jsonStart < 0) {
+    fail(`npm pack produced no JSON output. Got: ${raw.slice(0, 200)}`);
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.slice(jsonStart));
+  } catch (e) {
+    fail(`could not parse npm pack JSON: ${e.message}`);
+    return;
+  }
+  const files = parsed[0].files.map((f) => f.path);
   const set = new Set(files);
 
   for (const req of REQUIRED) {
