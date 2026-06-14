@@ -153,7 +153,8 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
     }
 
     // Log to confirm thinking level was set
-    logger.log(`[Researcher] Created session with thinkingLevel='minimal', model=${modelToUse?.id || 'unknown'}`);
+    const resolvedThinkingLevel = (config?.THINKING_LEVEL === 'high' ? 'high' : config?.THINKING_LEVEL) || 'minimal';
+    logger.log(`[Researcher] Created session with thinkingLevel='${resolvedThinkingLevel}', model=${modelToUse?.id || 'unknown'}`);
 
     if (!result || !result.session) {
       throw new Error('Session creation returned invalid result');

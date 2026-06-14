@@ -188,18 +188,11 @@ function sleepSync(ms: number): void {
   try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   } catch (_err) {
-    // Fallback: block on a pipe fd instead of busy-waiting (won't peg CPU)
-    try {
-      const buf = Buffer.alloc(1);
-      const readFd = require('node:fs').openSync('/dev/null', 'r');
-      // fs.readSync blocks until signaled or timeout
-      require('node:fs').readSync(readFd, buf, 0, 0, ms);
-      require('node:fs').closeSync(readFd);
-    } catch {
-      // Ultimate fallback if even fd-based sleep fails
-      const end = Date.now() + ms;
-      while (Date.now() < end) { /* spin */ }
-    }
+    // SharedArrayBuffer is unavailable (extremely unlikely in Node.js, but possible
+    // in strict security contexts). Fall back to a spin-wait as a last resort.
+    // This code path is essentially dead in normal Node.js environments.
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* spin */ }
   }
 }
 

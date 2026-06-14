@@ -199,7 +199,7 @@
     },
     "thinkingLevel": {
       "label": "Thinking Level",
-      "help": "off=no reasoning, minimal=fast, full=deep reasoning",
+      "help": "off=no reasoning, minimal=fast, high=deep reasoning",
       "advanced": true
     },
     "scrapeTimeoutMs": {
