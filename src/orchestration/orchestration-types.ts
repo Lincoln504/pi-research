@@ -8,7 +8,7 @@ import type { ResearcherConfig } from '../core/service-interfaces.ts';
 import type { IPlanningService } from '../core/interfaces/planning-interfaces.ts';
 import type { StoreUrlEntry } from '../core/interfaces/knowledge-interfaces.ts';
 import type { Config } from '../config.ts';
-import type { ResearchObserver } from './research-observer.ts';
+import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 export type { RunResearchersOptions } from '../core/interfaces/orchestration-interfaces.ts';
 
 /**

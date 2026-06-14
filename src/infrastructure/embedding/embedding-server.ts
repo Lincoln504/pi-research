@@ -8,7 +8,7 @@
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { logger } from '../../logger.ts';
-import { captureStdio } from '../../utils/stdio-capture.ts';
+import { captureStdio } from '../../tui/utils/stdio-capture.ts';
 import { buildDefaultDebugLogPath } from '../../utils/log-utils.ts';
 import { DiskSpaceChecker } from '../../utils/disk-space-checker.ts';
 import type { IEmbedder } from '../../core/interfaces/knowledge-interfaces.ts';
@@ -198,14 +198,32 @@ export class EmbeddingServer implements IEmbedder {
     });
   }
 
+  private async getEmbeddingServerWithRetry(retries = 2, delay = 300): Promise<{ port: number; pid: number; serverId: string } | null> {
+    for (let i = 0; i <= retries; i++) {
+      const serverInfo = await this.stateManager.getEmbeddingServer();
+      if (serverInfo) return serverInfo;
+      if (i < retries) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    return null;
+  }
+
   // ---- Leadership check ----
 
   startLeadershipCheck(): void {
     const check = async () => {
       if (this.isShuttingDown) return;
       try {
-        const serverInfo = await this.stateManager.getEmbeddingServer();
-        if (serverInfo?.serverId !== this.serverId) {
+        const serverInfo = await this.getEmbeddingServerWithRetry();
+        
+        // Resilience: Skip check if server info is transiently unavailable after retries.
+        if (!serverInfo) {
+          logger.warn('[EmbeddingServer] Leadership check: no embedding server found in state after retries. Skipping check.');
+          return;
+        }
+
+        if (serverInfo.serverId !== this.serverId) {
           this.consecutiveLeadershipMisses++;
           logger.warn(
             `[EmbeddingServer] Leadership check failed (${this.consecutiveLeadershipMisses}/${this.LEADERSHIP_MISS_THRESHOLD}) — ` +

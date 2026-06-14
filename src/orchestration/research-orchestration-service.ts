@@ -11,7 +11,7 @@
  */
 
 import type { Model } from '@earendil-works/pi-ai';
-import { resolveResearchModel } from '../utils/research-model-resolver.ts';
+import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 import type { QueryResultWithError } from '../web-research/types.ts';
 import type { RunResearchersOptions } from './orchestration-types.ts';
 import { RESEARCHER_LAUNCH_DELAY_MS } from '../constants.ts';
@@ -37,7 +37,7 @@ import type { Config } from '../config.ts';
 import { getConfig } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
-import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from '../utils/session-state.ts';
+import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from './session/session-state.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';
@@ -145,8 +145,18 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (sessionService && targetId) {
         await sessionService.cleanup(targetId);
       }
+      
+      // Perform FTS index rebuild here after synthesis/completion
+      const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
+      if (ksService && ksService.isReady()) {
+        const store = await ksService.getStore();
+        if (store) {
+          logger.info('[ResearchOrchestrationService] Rebuilding FTS index after research run');
+          await store.rebuildFtsIndex();
+        }
+      }
     } catch (_err) {
-      logger.debug('[ResearchOrchestrationService] ResearchSessionService not available for cleanup');
+      logger.debug('[ResearchOrchestrationService] Service cleanup failed:', _err);
     }
     
     // Clear synthesis reports
@@ -406,14 +416,6 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       if (enqueued > 0) {
         logger.info(`[ResearchOrchestrationService] Enqueued ${enqueued} citations from ${researcherCount} researchers for round ${round}`);
         await writer.drain();
-        if (ksService.isReady()) {
-          const store = await ksService.getStore();
-          if (store) {
-            store.rebuildFtsIndex().catch(err => {
-              logger.warn('[ResearchOrchestrationService] FTS index rebuild failed (non-fatal):', err);
-            });
-          }
-        }
       } else if (researcherCount > 0) {
         logger.warn(`[ResearchOrchestrationService] No valid citations found among ${researcherCount} researchers in round ${round}`);
       }
@@ -422,14 +424,17 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     }
   }
 
+  // Tracks consecutive health check failures per researchId
+  private failureCounts: Map<string, number> = new Map();
+
   /**
    * Run health check and log status
    * @param round - Current round number
-   * @param _researchId - Research ID (optional)
+   * @param researchId - Research ID (optional)
    * @param ctx - Optional extension context for container isolation
    * @returns Promise<boolean> - True if healthy or degraded, false if unhealthy
    */
-  async checkHealth(round: number, _researchId?: string, ctx?: any): Promise<boolean> {
+  async checkHealth(round: number, researchId?: string, ctx?: any): Promise<boolean> {
     if (round <= 1) return true;
 
     try {
@@ -442,16 +447,36 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       const health = await registry.runAll();
-      if (health.status === 'healthy') {
-        logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
-        return true;
-      } else if (health.status === 'degraded') {
-        const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
-        logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Degraded (${degraded.join(', ')})`);
+      
+      const isHealthy = health.status === 'healthy';
+      const isDegraded = health.status === 'degraded';
+
+      if (isHealthy || isDegraded) {
+        if (researchId) {
+          this.failureCounts.set(researchId, 0);
+        }
+        if (isHealthy) {
+          logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
+        } else {
+          const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
+          logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Degraded (${degraded.join(', ')})`);
+        }
         return true;
       } else {
-        const failed = health.components.filter(c => !c.healthy).map(c => c.component);
-        logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: [ERROR] Unhealthy (${failed.join(', ')})`);
+        // Unhealthy: track failures
+        if (researchId) {
+          const failures = (this.failureCounts.get(researchId) || 0) + 1;
+          this.failureCounts.set(researchId, failures);
+          
+          if (failures > 3) {
+            const failed = health.components.filter(c => !c.healthy).map(c => c.component);
+            logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: [ERROR] Unhealthy after ${failures} attempts (${failed.join(', ')})`);
+            return false; // Hard failure
+          } else {
+            logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Unhealthy (${failures}/3). Continuing.`);
+            return true; // Treat as transient failure
+          }
+        }
         return false;
       }
     } catch (err) {

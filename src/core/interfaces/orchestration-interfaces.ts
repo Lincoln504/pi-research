@@ -10,8 +10,7 @@ import type { StoreUrlEntry } from './knowledge-interfaces.ts';
 
 import type { Model } from '@earendil-works/pi-ai';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
-import type { ResearchObserver } from './observer-interfaces.ts';
-import type { HeadlessObserverOptions } from '../../orchestration/headless-observer.ts';
+import type { ResearchObserver, HeadlessObserverOptions } from './observer-interfaces.ts';
 
 /**
  * Options for running a research task

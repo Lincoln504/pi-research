@@ -5,10 +5,10 @@
  * scoped by parent Pi session to prevent cross-context interference.
  */
 
-import { generateSessionId as generateUniqueSessionId, clearAllSharedLinks } from './shared-links.ts';
-import { logger } from '../logger.ts';
-import { getConfig } from '../config.ts';
-import type { ResearchPanelState } from '../types/research-panel-types.ts';
+import { generateSessionId as generateUniqueSessionId, clearAllSharedLinks } from '../../utils/shared-links.ts';
+import { logger } from '../../logger.ts';
+import { getConfig } from '../../config.ts';
+import type { ResearchPanelState } from '../../types/research-panel-types.ts';
 import { randomUUID } from 'node:crypto';
 
 /**

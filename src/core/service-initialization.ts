@@ -12,9 +12,6 @@ import type { IStateManager } from './interfaces/state-manager-interfaces.ts';
 import { SchedulerService } from './scheduler-service.ts';
 import { HealthCheckService } from './health-check-service.ts';
 import { PlanningService } from './planning-service.ts';
-import { ResearchOrchestrationService } from '../orchestration/research-orchestration-service.ts';
-import { HealthCheckRegistry } from '../healthcheck/registry.ts';
-import { registerHealthChecks } from '../healthcheck/index.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -53,35 +50,6 @@ export function registerCoreServices(container: ServiceContainer = getServiceCon
     () => new PlanningService(),
     {
       lazyInitialization: false, // Planning service needs to be available early
-      allowOverwrite: false,
-      enableLogging: true,
-    },
-    container
-  );
-
-  // Register Health Registry Service
-  registerService(
-    ServiceNames.HEALTH_REGISTRY,
-    async () => {
-      const registry = new HealthCheckRegistry();
-      await registry.initialize();
-      registerHealthChecks(registry, container);
-      return registry;
-    },
-    {
-      lazyInitialization: false, // Eagerly register checks
-      allowOverwrite: false,
-      enableLogging: true,
-    },
-    container
-  );
-
-  // Register Research Orchestration Service
-  registerService(
-    ServiceNames.RESEARCH_ORCHESTRATION,
-    () => new ResearchOrchestrationService(),
-    {
-      lazyInitialization: true,
       allowOverwrite: false,
       enableLogging: true,
     },

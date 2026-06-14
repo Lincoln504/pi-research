@@ -11,7 +11,9 @@ describe('Chunker', () => {
     const text = 'This is a long text that should be split into multiple chunks because it exceeds the target size set in the options.';
     const chunks = chunker.chunk(text);
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks[0].text.length).toBeLessThanOrEqual(120); // target + overlap
+    const chunk = chunks[0];
+    if (!chunk) throw new Error('Chunk not found');
+    expect(chunk.text.length).toBeLessThanOrEqual(120); // target + overlap
   });
 
   it('should split on headings — headings must appear in separate chunks', () => {

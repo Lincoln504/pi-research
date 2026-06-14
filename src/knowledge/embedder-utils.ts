@@ -72,7 +72,7 @@ let isProcessExiting = false;
  * Check if the process is in a fatal shutdown state (exiting)
  */
 export function isShuttingDown(): boolean {
-  return isProcessExiting;
+  return isProcessExiting || process.env['PI_PROCESS_EXITING'] === '1';
 }
 
 // Global embedder reference for process-exit cleanup.
@@ -105,22 +105,28 @@ export function unregisterGlobalEmbedder(): void {
   globalEmbedderRef = null;
 }
 
-// Exit handler for process-level teardown (SIGTERM, SIGINT, beforeExit).
+// Exit handler for process-level teardown (exit, beforeExit).
+// MUST be synchronous because async operations are ignored in the 'exit' phase.
 // During these events, the native ONNX environment is often in a race 
 // with the JS event loop. Calling dispose() here is risky and redundant.
-const exitHandler = async () => {
+const exitHandler = () => {
   isProcessExiting = true;
   if (globalEmbedderRef) {
     globalEmbedderRef = null; 
     // We intentionally DO NOT call dispose here during process exit 
     // to prevent the OnnxRuntimeException: DefaultLogger crash.
     // The OS will reclaim the memory.
-    logger.debug('[embedder] Process exiting, skipping native disposal to prevent crash');
+    try {
+      logger.debug('[embedder] Process exiting, skipping native disposal to prevent crash');
+    } catch {
+      // Ignore logger errors if stdout is already closed
+    }
   }
 };
 
 // Register via shutdownManager only — it internally calls process.on()
 shutdownManager.registerEventListener(process, 'beforeExit', exitHandler);
+shutdownManager.registerEventListener(process, 'exit', exitHandler);
 
 /**
  * Initialize the ONNX environment

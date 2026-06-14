@@ -5,8 +5,8 @@
  */
 
 import { type Model, type AssistantMessage, type SimpleStreamOptions } from '@earendil-works/pi-ai';
-import { extractText } from './text-utils.ts';
-import { logger } from '../logger.ts';
+import { extractText } from '../../utils/text-utils.ts';
+import { logger } from '../../logger.ts';
 
 /**
  * Standardize LLM request options for maximum compatibility and robustness.

@@ -15,9 +15,11 @@ export default defineConfig({
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
     pool: 'forks',
-    forks: {
-      maxForks,
-      minForks: 2,
+    poolOptions: {
+      forks: {
+        maxForks,
+        minForks: 2,
+      },
     },
     testTimeout: 30000,
     hookTimeout: 15000,

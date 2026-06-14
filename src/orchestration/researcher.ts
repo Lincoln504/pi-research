@@ -21,7 +21,7 @@ import type { SystemResearchState } from './deep-research-types.ts';
 import type { Config } from '../config.ts';
 import { logger } from '../logger.ts';
 
-import { resolveResearchModel } from '../utils/research-model-resolver.ts';
+import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 
 export interface CreateResearcherSessionOptions {
   cwd: string;

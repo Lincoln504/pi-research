@@ -28,9 +28,9 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { completeSimple, type Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
-import { buildSafeOptions, validateAndExtractText } from '../utils/llm-utils.ts';
+import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
-import { createTimeout } from '../utils/llm-timeout.ts';
+import { createTimeout } from '../core/llm/llm-timeout.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
@@ -41,8 +41,8 @@ import {
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { extractJson } from '../utils/json-utils.ts';
-import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
-import { loadPrompt } from '../utils/prompts.ts';
+import { repairJsonWithLlm } from '../core/llm/agentic-repair.ts';
+import { loadPrompt } from '../core/llm/prompts.ts';
 import { formatParentContext } from '../orchestration/session-context.ts';
 import { getConfig } from '../config.ts';
 import { createKnowledgeSearchPanel } from '../tui/knowledge-search-panel.ts';
@@ -218,7 +218,7 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
   }
 }
 
-import { resolveResearchModel } from '../utils/research-model-resolver.ts';
+import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
 
 // ---------------------------------------------------------------------------
 // Phase 4: Stateless Background Execution + Agentic Repair
@@ -277,7 +277,7 @@ async function runBackgroundExtraction(
   referenceDocuments: string,
   signal?: AbortSignal,
 ): Promise<ResearchKnowledgeSynthesisResponse> {
-  const promptTemplate = loadPrompt('research-knowledge-search-extractor', '..');
+  const promptTemplate = loadPrompt('research-knowledge-search-extractor');
   if (!promptTemplate) {
     throw new Error('research-knowledge-search prompt template not found');
   }

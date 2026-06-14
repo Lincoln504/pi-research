@@ -17,13 +17,13 @@ import type {
 } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
 import { completeSimple } from '@earendil-works/pi-ai';
-import { injectCurrentDate } from '../utils/inject-date.ts';
-import { loadPrompt } from '../utils/prompts.ts';
+import { injectCurrentDate } from './llm/inject-date.ts';
+import { loadPrompt } from './llm/prompts.ts';
 import { extractUsage } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
-import { repairJsonWithLlm } from '../utils/agentic-repair.ts';
-import { buildSafeOptions, validateAndExtractText } from '../utils/llm-utils.ts';
-import { createTimeout } from '../utils/llm-timeout.ts';
+import { repairJsonWithLlm } from './llm/agentic-repair.ts';
+import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
+import { createTimeout } from './llm/llm-timeout.ts';
 import { getConfig } from '../config.ts';
 import {
   PlanningResponseSchemaAsTSchema,
@@ -192,7 +192,7 @@ export class PlanningService implements IPlanningService {
     logger.log(`[PlanningService] Generating initial plan for: "${query}" (Complexity: ${complexity})`);
     
     const config = getConfig(options.cwd);
-    const promptTemplate = loadPrompt('system-coordinator', '..');
+    const promptTemplate = loadPrompt('system-coordinator');
     
     const maxTeamSize = this.getTeamSize(complexity);
     const queryBudget = this.getQueryBudget(complexity);
@@ -313,7 +313,7 @@ export class PlanningService implements IPlanningService {
     logger.log(`[PlanningService] Evaluating Round ${round} findings for: "${query}"`);
 
     const config = getConfig(options.cwd);
-    const promptTemplate = loadPrompt('system-lead-evaluator', '..');
+    const promptTemplate = loadPrompt('system-lead-evaluator');
     
     const maxTeamSize = this.getTeamSize(complexity);
     const queryBudget = this.getQueryBudget(complexity);

@@ -7,15 +7,10 @@
  */
 
 import { logger } from '../logger.ts';
-import type { ResearchObserver } from './research-observer.ts';
+import type { ResearchObserver, HeadlessObserverOptions } from '../core/interfaces/observer-interfaces.ts';
 import type { ResearchPlan } from '../core/interfaces/research-plan-types.ts';
 
-export interface HeadlessObserverOptions {
-  /** Callback for progress updates */
-  onProgress?: (event: string, data?: any) => void;
-  /** Whether to log events to the console/logger */
-  enableLogging?: boolean;
-}
+export type { HeadlessObserverOptions };
 
 export class HeadlessObserver implements ResearchObserver {
   constructor(private options: HeadlessObserverOptions = {}) {}

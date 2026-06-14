@@ -6,8 +6,8 @@
  */
 
 import type { Model, AssistantMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
-import { logger } from '../logger.ts';
-import { extractJson } from './json-utils.ts';
+import { logger } from '../../logger.ts';
+import { extractJson } from '../../utils/json-utils.ts';
 import { createTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
 // getLlmTimeoutMs is used below to bound each repair attempt.
 import { buildSafeOptions, validateAndExtractText } from './llm-utils.ts';

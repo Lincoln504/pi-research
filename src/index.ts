@@ -17,12 +17,13 @@ import { healthRegistry } from './healthcheck/index.ts';
 import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
-import { loadPrompt } from './utils/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './utils/session-state.ts';
+import { loadPrompt } from './core/llm/prompts.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
+import { registerOrchestrationServices } from './orchestration/service-initialization.ts';
 
 // Modular Orchestration Exports
 export { ServiceNames } from './core/interfaces/service-names.ts';
@@ -30,7 +31,7 @@ export type { IResearchOrchestration, ResearchOptions } from './core/interfaces/
 export { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 export { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
 export { shutdownManager } from './utils/shutdown-manager.ts';
-export type { ResearchObserver } from './orchestration/research-observer.ts';
+export type { ResearchObserver } from './core/interfaces/observer-interfaces.ts';
 export { normalizeUrl } from './utils/shared-links.ts';
 export { resetConfig, getConfig, setConfig, validateConfig } from './config.ts';
 
@@ -157,6 +158,7 @@ export default async function (pi: ExtensionAPI) {
     const container = getServiceContainer();
     registerCoreServices(container);
     registerInfrastructureServices(container);
+    registerOrchestrationServices(container);
     logger.log('[pi-research] Services registered');
     
     // Pass pi as context — includes cwd for proper config loading
@@ -184,6 +186,8 @@ export default async function (pi: ExtensionAPI) {
   // Primary cleanup path for pi -p (print mode) and normal session end.
   pi.on('session_shutdown', async () => {
     try {
+      // Mark that the process is going down so native addons know to skip risky teardowns
+      process.env['PI_PROCESS_EXITING'] = '1';
       // Add watchdog timer to prevent zombie processes if cleanup hangs (e.g. ONNX teardown)
       shutdownManager.forceExitAfter(8000);
       await shutdownManager.runCleanup('session_shutdown');

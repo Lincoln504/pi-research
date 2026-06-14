@@ -9,7 +9,7 @@
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { matchesKey } from '@earendil-works/pi-tui';
-import { getActiveSessionCount, abortAllSessions, refreshAllSessions } from '../utils/session-state.ts';
+import { getActiveSessionCount, abortAllSessions, refreshAllSessions } from '../orchestration/session/session-state.ts';
 import { logger } from '../logger.ts';
 
 /**

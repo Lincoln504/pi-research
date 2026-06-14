@@ -129,9 +129,12 @@ export function stripImageLinks(markdown: string): string {
  * Create native HTML to markdown converter
  */
 export function createNativeMarkdownConverter(
-  nativeModule: NativeHtmlToMarkdownModule,
+  nativeModule: NativeHtmlToMarkdownModule | undefined,
 ): (html: string) => Promise<string> {
   return async (html: string): Promise<string> => {
+    if (!nativeModule || !nativeModule.convert || !nativeModule.HeadingStyle || !nativeModule.CodeBlockStyle) {
+      throw new Error('Native markdown converter not properly initialized');
+    }
     const result = nativeModule.convert(html, {
       headingStyle: nativeModule.HeadingStyle.Atx,
       codeBlockStyle: nativeModule.CodeBlockStyle.Backticks,

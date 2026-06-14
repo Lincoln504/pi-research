@@ -14,7 +14,7 @@ import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
-import type { SteeringMessage } from '../utils/session-state.ts';
+import type { SteeringMessage } from './session/session-state.ts';
 
 /**
  * Research Synthesis Service

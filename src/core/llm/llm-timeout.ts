@@ -9,8 +9,8 @@
  * and handle this gracefully (e.g., fallback plan, synthesized answer, etc.).
  */
 
-import { getConfig } from '../config.ts';
-import type { Config } from '../config.ts';
+import { getConfig } from '../../config.ts';
+import type { Config } from '../../config.ts';
 
 /**
  * Create a timeout promise that rejects after the given duration.

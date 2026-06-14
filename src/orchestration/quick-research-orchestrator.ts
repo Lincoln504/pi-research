@@ -11,15 +11,15 @@ import {
     type AgentToolResult,
 } from '@earendil-works/pi-coding-agent';
 import { type Model } from '@earendil-works/pi-ai';
-import { injectCurrentDate } from '../utils/inject-date.ts';
-import { loadPrompt } from '../utils/prompts.ts';
+import { injectCurrentDate } from '../core/llm/inject-date.ts';
+import { loadPrompt } from '../core/llm/prompts.ts';
 import { extractUsage } from '../types/llm.ts';
 import { logger } from '../logger.ts';
 import { getConfig, type Config } from '../config.ts';
 import { createResearcherSession } from './researcher.ts';
 import { ensureAssistantResponse, parseCitations } from '../utils/text-utils.ts';
 import { getMaxScrapeBatches } from '../constants.ts';
-import type { ResearchObserver } from './research-observer.ts';
+import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 import { HeadlessObserver, type HeadlessObserverOptions } from './headless-observer.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
@@ -27,7 +27,7 @@ import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from '../utils/session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session/session-state.ts';
 import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 
@@ -101,7 +101,7 @@ export class QuickResearchOrchestrator {
           logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
         }
 
-        const researcherPromptTemplate = loadPrompt('researcher', '..');
+        const researcherPromptTemplate = loadPrompt('researcher');
         const maxScrapeBatches = getMaxScrapeBatches(this.config);
         const maxScrapeBatchesDisplay = maxScrapeBatches > 99 ? 'unlimited' : maxScrapeBatches.toString();
 
@@ -124,7 +124,7 @@ export class QuickResearchOrchestrator {
                 steeringMessages.map(m => `- ${m.text}`).join('\n');
         }
 
-        const evidenceLines = [];
+        const evidenceLines: string[] = [];
         if (this.options.initialLinks && this.options.initialLinks.length > 0) {
           evidenceLines.push('## Initial Links\nInvestigate these provided URLs first:\n' + this.options.initialLinks.map(l => `- ${l}`).join('\n'));
         }

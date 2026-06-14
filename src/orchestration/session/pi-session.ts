@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import type { ExtendedExtensionContext } from '../types/extension-context.ts';
+import type { ExtendedExtensionContext } from '../../types/extension-context.ts';
 
 export interface PiSessionMetadata {
   piSessionId: string;

@@ -109,6 +109,7 @@ export class ShutdownManager {
   forceExitAfter(timeoutMs: number, code = 0) {
     const timer = setTimeout(() => {
       logger.warn(`[ShutdownManager] Forcing exit after ${timeoutMs}ms timeout`);
+      process.env['PI_PROCESS_EXITING'] = '1';
       process.exit(code);
     }, timeoutMs);
     safeUnref(timer); // unref() allows Node.js to exit if this is the only timer

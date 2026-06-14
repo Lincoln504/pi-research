@@ -16,28 +16,6 @@ const config = [
   },
   // JavaScript recommended rules
   js.configs.recommended,
-  // JavaScript/MJS files (worker scripts, etc.)
-  {
-    files: ['**/*.mjs'],
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: 'module',
-      globals: {
-        process: 'readonly',
-        console: 'readonly',
-        Buffer: 'readonly',
-        require: 'readonly',
-        module: 'readonly',
-        exports: 'readonly',
-        AbortController: 'readonly',
-        AbortSignal: 'readonly',
-      },
-    },
-    rules: {
-      'no-console': 'off',
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
-    },
-  },
   // TypeScript recommended rules
   {
     files: ['**/*.ts'],
@@ -95,6 +73,33 @@ const config = [
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  // Node environment for scripts and mjs files
+  {
+    files: ['scripts/**/*.cjs', 'scripts/**/*.ts', '**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        require: 'readonly',
+        module: 'readonly',
+        exports: 'readonly',
+        setTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearTimeout: 'readonly',
+        clearInterval: 'readonly',
+        URL: 'readonly',
+        document: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+      'no-unused-vars': 'off',
     },
   },
 ];

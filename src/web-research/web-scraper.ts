@@ -43,8 +43,12 @@ async function getMarkdownConverter(): Promise<(html: string) => Promise<string>
   markdownConverterPromise = (async () => {
     try {
       const nativeModule = await import('@kreuzberg/html-to-markdown-node') as unknown as import('./scraper-types.ts').NativeHtmlToMarkdownModule;
-      logger.debug('[Scrapers] Using native HTML-to-Markdown converter');
-      return createNativeMarkdownConverter(nativeModule);
+      // Verify minimal required shape
+      if (nativeModule && typeof nativeModule.convert === 'function') {
+        logger.debug('[Scrapers] Using native HTML-to-Markdown converter');
+        return createNativeMarkdownConverter(nativeModule);
+      }
+      throw new Error('Native module exported invalid structure');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.warn(`[Scrapers] Native HTML-to-Markdown unavailable, falling back to pure JS converter: ${errorMessage}`);
@@ -181,7 +185,14 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
     
-    const markdown = await convertToMarkdown(html);
+    let markdown: string;
+    try {
+      markdown = await convertToMarkdown(html);
+    } catch (e) {
+      logger.error(`[Scrapers] Markdown conversion failed for ${url}: ${String(e)}`);
+      throw new Error(`Markdown conversion failed: ${String(e)}`, { cause: e });
+    }
+    
     validateContent(html, markdown, url);
     metrics.increment('scrape_operations_total', 1, { layer: 'fetch', content_type: 'html', status: 'success' });
     metrics.observe('scrape_latency_ms', fetchDuration, { layer: 'fetch', content_type: 'html', status: 'success' });
@@ -229,7 +240,13 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     }
 
     let html = result.html || '';
-    let markdown = await convertToMarkdown(html);
+    let markdown: string;
+    try {
+      markdown = await convertToMarkdown(html);
+    } catch (e) {
+      logger.error(`[Scrapers] Browser markdown conversion failed for ${_url}: ${String(e)}`);
+      throw new Error(`Browser markdown conversion failed: ${String(e)}`, { cause: e });
+    }
     
     validateContent(html, markdown, _url);
     metrics.increment('scrape_operations_total', 1, { layer: 'playwright', content_type: 'html', status: 'success' });

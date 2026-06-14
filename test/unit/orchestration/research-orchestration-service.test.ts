@@ -183,7 +183,7 @@ describe('ResearchOrchestrationService', () => {
       expect(result).toBe(true);
     });
 
-    it('round 2 with unhealthy status: returns false', async () => {
+    it('round 2 with unhealthy status: returns true (transient failureWindow)', async () => {
       mockRunAll.mockResolvedValue({
         status: 'unhealthy',
         components: [{ component: 'db', healthy: false }, { component: 'search', healthy: false }],
@@ -191,7 +191,23 @@ describe('ResearchOrchestrationService', () => {
 
       const result = await service.checkHealth(2, 'res-123');
 
-      expect(result).toBe(false);
+      expect(result).toBe(true);
+    });
+
+    it('multiple rounds with unhealthy status: tolerates up to 3 consecutive failures', async () => {
+      mockRunAll.mockResolvedValue({
+        status: 'unhealthy',
+        components: [{ component: 'db', healthy: false }],
+      });
+
+      // Round 2 (1st fail)
+      expect(await service.checkHealth(2, 'res-1')).toBe(true);
+      // Round 3 (2nd fail)
+      expect(await service.checkHealth(3, 'res-1')).toBe(true);
+      // Round 4 (3rd fail)
+      expect(await service.checkHealth(4, 'res-1')).toBe(true);
+      // Round 5 (4th fail - should stop)
+      expect(await service.checkHealth(5, 'res-1')).toBe(false);
     });
 
     it('healthRegistry.runAll() throws: returns true (non-fatal)', async () => {

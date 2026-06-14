@@ -46,7 +46,7 @@ vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock('poolifier', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   function FixedClusterPool(this: any, _size: number, _path: string, _opts?: unknown) {
     this.execute = vi.fn().mockResolvedValue({});
     this.destroy = vi.fn().mockResolvedValue(undefined);

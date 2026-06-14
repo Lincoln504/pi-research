@@ -14,7 +14,7 @@ import {
   endResearchSession,
   getPiActivePanels,
   refreshAllSessions,
-} from '../utils/session-state.ts';
+} from '../orchestration/session/session-state.ts';
 import { cleanupSharedLinks } from '../utils/shared-links.ts';
 import type { CleanupContext } from '../types/index.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';

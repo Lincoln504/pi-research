@@ -8,6 +8,12 @@
  */
 
 import type { ResearchPlan } from './research-plan-types.ts';
+export interface HeadlessObserverOptions {
+  /** Callback for progress updates */
+  onProgress?: (event: string, data?: any) => void;
+  /** Whether to log events to the console/logger */
+  enableLogging?: boolean;
+}
 
 export interface ResearchObserver {
   onStart?(query: string, complexity: number): void;

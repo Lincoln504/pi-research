@@ -7,8 +7,8 @@
 
 import { type Model } from '@earendil-works/pi-ai';
 import { type ModelRegistry } from '@earendil-works/pi-coding-agent';
-import { getConfig } from '../config.ts';
-import { logger } from '../logger.ts';
+import { getConfig } from '../../config.ts';
+import { logger } from '../../logger.ts';
 
 /**
  * Resolve the research model with standardized priority:
@@ -21,7 +21,7 @@ import { logger } from '../logger.ts';
  */
 export function resolveResearchModel(options: {
   modelRegistry: ModelRegistry;
-  config?: import('../config.ts').Config;
+  config?: import('../../config.ts').Config;
   modelId?: string;
   hostModel?: Model<any>;
   cwd?: string;

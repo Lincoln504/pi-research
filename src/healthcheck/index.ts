@@ -32,7 +32,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   // Register Browser Runtime Check
   registry.register('BrowserRuntime', async (options) => {
     try {
-      const scheduler = await getService<ISchedulerService>(ServiceNames.SCHEDULER, undefined, container);
+      const scheduler = await getService<ISchedulerService>(ServiceNames.SCHEDULER, { container }, container);
       
       // Check if initialized but idle (unless forced)
       if (!scheduler.isReady() && !options?.force) {
@@ -59,7 +59,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
       return { healthy: true, diagnostic: { status: 'disabled in config' } };
     }
     try {
-      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, undefined, container);
+      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, { container }, container);
       const store = await service.getStore();
       const counts = store ? await store.countScoped() : { local: 0, global: 0, projects: 0 };
       const embedder = await service.getEmbedder();
@@ -107,7 +107,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   // Register State Manager Check
   registry.register('StateManager', async () => {
     try {
-      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, undefined, container);
+      const stateManager = await getService<IStateManager>(ServiceNames.STATE_MANAGER, { container }, container);
       const stats = await stateManager.getMetrics();
       const gpuOwner = await stateManager.getGpuOwner();
       

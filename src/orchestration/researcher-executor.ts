@@ -18,9 +18,9 @@ import { ServiceNames,
 } from '../core/service-interfaces.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
-import { loadPrompt } from '../utils/prompts.ts';
-import { injectCurrentDate } from '../utils/inject-date.ts';
-import { recordResearcherFailure, getSteeringMessages } from '../utils/session-state.ts';
+import { loadPrompt } from '../core/llm/prompts.ts';
+import { injectCurrentDate } from '../core/llm/inject-date.ts';
+import { recordResearcherFailure, getSteeringMessages } from './session/session-state.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 
 /**
@@ -62,7 +62,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       historicalUrls.map(e => `- ${e.url}\n  Previous summary: ${e.description}`).join('\n');
   }
 
-  const researcherPromptTemplate = loadPrompt('researcher', '..');
+  const researcherPromptTemplate = loadPrompt('researcher');
   if (initialLinks.length === 0 && historicalUrls.length === 0) {
     logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
     recordResearcherFailure((ctx as ExtendedExtensionContext).sessionId, researchId, id);

@@ -623,7 +623,10 @@ export function isServiceInitialized(name: string, container: ServiceContainer =
  * Helper to extract a service container from a context object, if present.
  */
 export function tryGetServiceContainerFromCtx(ctx: any): ServiceContainer {
-  return (ctx?.container instanceof ServiceContainer) ? ctx.container : globalServiceContainer;
+  if (ctx?.container && typeof ctx.container.get === 'function' && typeof ctx.container.register === 'function') {
+    return ctx.container;
+  }
+  return globalServiceContainer;
 }
 
 /**

@@ -31,7 +31,11 @@
     "paths": {}
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "test/**/*",
+    "scripts/**/*",
+    "config/**/*",
+    "vitest.config.ts"
   ],
   "exclude": [
     "node_modules",

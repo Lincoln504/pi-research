@@ -14,8 +14,8 @@ import { createRequire } from 'node:module';
 import type * as FsType from 'node:fs';
 import type { Stats } from 'node:fs';
 import { TextDecoder } from 'node:util';
-import type { LogContext } from './log-utils.ts';
-import { getLogContext, formatArg, safeJsonStringify } from './log-utils.ts';
+import type { LogContext } from '../../utils/log-utils.ts';
+import { getLogContext, formatArg, safeJsonStringify } from '../../utils/log-utils.ts';
 
 const fs: typeof FsType = createRequire(import.meta.url)('node:fs');
 

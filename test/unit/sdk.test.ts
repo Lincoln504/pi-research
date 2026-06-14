@@ -33,6 +33,7 @@ const { mockModelRegistryInstance, STUB_MODEL } = vi.hoisted(() => {
 
 vi.mock('../../src/orchestration/service-initialization.ts', () => ({
   registerOrchestrationServices: vi.fn(),
+  initializeOrchestrationServices: vi.fn().mockResolvedValue({ success: true, initialized: [], failed: [] }),
 }));
 
 vi.mock('../../src/core/service-initialization.ts', () => ({

@@ -9,7 +9,7 @@
  * - Completion and errors
  */
 
-import type { ResearchObserver } from '../orchestration/research-observer.ts';
+import type { ResearchObserver } from '../core/interfaces/observer-interfaces.ts';
 
 import { getUnitsPerResearcher, LEAD_EVAL_UNITS } from '../constants.ts';
 import type { ResearchPanelState } from '../tui/research-panel.ts';

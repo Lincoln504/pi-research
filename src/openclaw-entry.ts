@@ -9,7 +9,7 @@
 
 import type { Model } from '@earendil-works/pi-ai';
 import { ModelRegistry } from '@earendil-works/pi-coding-agent';
-import { buildModelRegistry, resolveModel } from './utils/model-registry-factory.ts';
+import { buildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { Type } from 'typebox';
 import type { Static } from 'typebox';
 import { randomUUID } from 'node:crypto';
@@ -17,11 +17,13 @@ import { randomUUID } from 'node:crypto';
 // pi-research internals
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { registerInfrastructureServices, shutdownInfrastructureServices } from './infrastructure/service-initialization.ts';
-import { createServiceContainer, resetServiceContainer, getService } from './core/service-registry.ts';
+import { registerOrchestrationServices } from './orchestration/service-initialization.ts';
+import { resetServiceContainer, getService, getServiceContainer } from './core/service-registry.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
+import { exportResearchReport } from './utils/research-export.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { createResearchRunId, logger } from './logger.ts';
@@ -29,7 +31,7 @@ import { getConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
-import { clearAllSessionState } from './utils/session-state.ts';
+import { clearAllSessionState } from './orchestration/session/session-state.ts';
 
 import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 
@@ -114,9 +116,10 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   );
 
   // Create and initialize services
-  globalContainer = createServiceContainer();
+  globalContainer = getServiceContainer();
   registerInfrastructureServices(globalContainer);
   registerCoreServices(globalContainer);
+  registerOrchestrationServices(globalContainer);
 
   const mockCtx = createMockContext(globalModel!, globalRegistry!);
   await initializeCoreServices(mockCtx, globalContainer);
@@ -273,6 +276,12 @@ export default definePluginEntry({
             depth: String(depth), status: 'success', source: 'openclaw',
           });
           
+          if (config.reportExportEnabled) {
+            const exportPath = config.reportExportPath || process.cwd();
+            const filename = await exportResearchReport(result, query || (initialLinks?.[0] ?? 'Research'), exportPath);
+            result += `\n\nResearch report saved to ${filename}`;
+          }
+
           return { content: [{ type: 'text', text: result }], details: {} };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

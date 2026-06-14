@@ -21,8 +21,6 @@ import { StateBrowserManager } from './state/state-browser-manager.ts';
 import { StateMetricsCollector } from './state/state-metrics.ts';
 import { StateValidator } from './state/state-validator.ts';
 import { WorkerPoolManager } from './browser/worker-pool-manager.ts';
-import { ResearchSessionService } from '../orchestration/research-session-service.ts';
-import { ResearchSynthesisService } from '../orchestration/research-synthesis-service.ts';
 import { StatePathConfiguration } from './state/state-path-configuration.ts';
 import { FileLockService } from './file-lock-service.ts';
 import { StateBackupManager } from './state/state-backup-manager.ts';
@@ -238,30 +236,6 @@ export function registerInfrastructureServices(container: ServiceContainer = get
   registerService(
     ServiceNames.WORKER_POOL_MANAGER,
     () => new WorkerPoolManager(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    },
-    container
-  );
-
-  // Register Research Session Service
-  registerService(
-    ServiceNames.RESEARCH_SESSION_SERVICE,
-    () => new ResearchSessionService(),
-    {
-      lazyInitialization: true,
-      allowOverwrite: false,
-      enableLogging: true,
-    },
-    container
-  );
-
-  // Register Research Synthesis Service
-  registerService(
-    ServiceNames.RESEARCH_SYNTHESIS_SERVICE,
-    () => new ResearchSynthesisService(),
     {
       lazyInitialization: true,
       allowOverwrite: false,

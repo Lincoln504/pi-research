@@ -9,7 +9,7 @@
 import { type Component, visibleWidth, truncateToWidth, type TUI } from '@earendil-works/pi-tui';
 import { logger } from '../logger.ts';
 import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
-import { getSteeringMessages, getAllTrackedSessions } from '../utils/session-state.ts';
+import { getSteeringMessages, getAllTrackedSessions } from '../orchestration/session/session-state.ts';
 import {
   formatTokens,
   renderProgressPct,

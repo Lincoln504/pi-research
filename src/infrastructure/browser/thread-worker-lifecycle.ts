@@ -7,6 +7,7 @@
 
 import process from 'node:process';
 import cluster from 'node:cluster';
+import * as fs from 'node:fs/promises';
 
 let workerId: string = '';
 
@@ -114,6 +115,7 @@ export function setupOrphanProtection(): void {
       }
       // Clear the orphan check timer
       cleanupOrphanProtection();
+      process.env['PI_PROCESS_EXITING'] = '1';
       process.exit(1);
     }
   };
@@ -156,7 +158,7 @@ function logToDebugFile(level: string, ...args: any[]): void {
     };
     // FIX (#32): Use async fs.appendFile to avoid blocking the event loop.
     // Fire-and-forget is acceptable for debug logging in error handlers.
-    import('node:fs/promises').then(fs => fs.appendFile(logFile, `${JSON.stringify(entry)}\n`)).catch(() => {});
+    fs.appendFile(logFile, `${JSON.stringify(entry)}\n`).catch(() => {});
   } catch {
     // ignore
   }
@@ -185,6 +187,7 @@ export function createKillHandler(): () => Promise<void> {
     // the event loop alive indefinitely after the IPC channel is disconnected.
     setTimeout(() => {
       logToDebugFile('INFO', `[Worker-${workerId}] Forcing process exit (Cluster)`);
+      process.env['PI_PROCESS_EXITING'] = '1';
       process.exit(0);
     }, 100).unref();
   };
