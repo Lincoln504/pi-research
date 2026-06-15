@@ -64,6 +64,14 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    */
   async resolveResearchModel(options: ResearchOptions): Promise<Model<any>> {
     const { ctx, model, config } = options;
+    // If a fully-resolved model was already provided (carries both provider and
+    // id), use it verbatim. Re-resolving from its id alone can land on a
+    // different provider's entry that happens to share the same id — e.g. the
+    // host's authed `glm-coding/glm-4.7` vs pi's built-in unauthed `zai/glm-4.7`
+    // — silently dropping the provider that actually has an API key.
+    if (model && (model as any).provider && (model as any).id) {
+      return model as Model<any>;
+    }
     return resolveResearchModel({
       modelRegistry: ctx.modelRegistry,
       config: config || getConfig(ctx.cwd),

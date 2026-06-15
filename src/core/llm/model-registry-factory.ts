@@ -109,9 +109,14 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
       throw new Error(`Model "${modelSpec}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
     }
     
-    // Validate format: must contain a slash OR be found as a bare model ID
+    // Validate format: must contain a slash OR be found as a bare model ID.
+    // A bare id can exist under several providers (a user-configured authed one
+    // plus pi's built-in unauthed one); prefer an authed provider so we don't
+    // resolve to a keyless entry that fails at the first call.
     const allModels = registry.getAll();
-    const found = allModels.find(m => m.id === modelSpec);
+    const sameId = allModels.filter(m => m.id === modelSpec);
+    const authedKeys = new Set(registry.getAvailable().map(m => `${m.provider}/${m.id}`));
+    const found = sameId.find(m => authedKeys.has(`${m.provider}/${m.id}`)) ?? sameId[0];
     if (found) return found;
 
     throw new Error(`Invalid model string "${modelSpec}". Expected "provider/id" e.g. "openai/gpt-4o".`);

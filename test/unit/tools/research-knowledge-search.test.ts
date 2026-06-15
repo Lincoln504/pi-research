@@ -381,6 +381,43 @@ describe('resolveResearchModel — resolution priority chain', () => {
     const reg = mockRegistry([], []);
     expect(() => resolveResearchModel({ modelRegistry: reg, config: {} as any })).toThrow(/No LLM model available/);
   });
+
+  // Regression: the same model id registered under multiple providers — one
+  // authed (user config) and one keyless (pi built-in). A bare-id match must
+  // resolve to the authed provider, never the keyless one. Mirrors the real
+  // glm-coding/glm-4.7 (authed) vs zai/glm-4.7 (no key) failure on jdebian.
+  it('explicit bare modelId prefers an authed provider over a keyless same-id entry', () => {
+    const reg = mockRegistry(
+      [{ id: 'glm-4.7', provider: 'zai' }, { id: 'glm-4.7', provider: 'glm-coding' }],
+      [{ id: 'glm-4.7', provider: 'glm-coding' }], // only glm-coding has auth
+    );
+    const m = resolveResearchModel({ modelRegistry: reg, config: {} as any, modelId: 'glm-4.7' });
+    expect(m.provider).toBe('glm-coding');
+  });
+
+  it('RESEARCH_MODEL bare id prefers an authed provider over a keyless same-id entry', () => {
+    const reg = mockRegistry(
+      [{ id: 'glm-4.7', provider: 'zai' }, { id: 'glm-4.7', provider: 'glm-coding' }],
+      [{ id: 'glm-4.7', provider: 'glm-coding' }],
+    );
+    const m = resolveResearchModel({
+      modelRegistry: reg,
+      config: { RESEARCH_MODEL: 'glm-4.7' } as any,
+    });
+    expect(m.provider).toBe('glm-coding');
+  });
+
+  it('an explicit "provider/id" form is honored verbatim even if that provider is keyless', () => {
+    const reg = mockRegistry(
+      [{ id: 'glm-4.7', provider: 'zai' }, { id: 'glm-4.7', provider: 'glm-coding' }],
+      [{ id: 'glm-4.7', provider: 'glm-coding' }],
+    );
+    const m = resolveResearchModel({
+      modelRegistry: reg,
+      config: { RESEARCH_MODEL: 'zai/glm-4.7' } as any,
+    });
+    expect(m.provider).toBe('zai');
+  });
 });
 
 // ---------------------------------------------------------------------------

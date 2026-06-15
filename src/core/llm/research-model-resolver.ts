@@ -29,9 +29,25 @@ export function resolveResearchModel(options: {
   const { modelRegistry, config, modelId, hostModel, cwd } = options;
   const activeConfig = config || getConfig(cwd);
 
+  // The same model id can be registered under multiple providers — typically a
+  // user-configured authed provider plus pi's built-in unauthed one (e.g.
+  // `glm-coding/glm-4.7` vs `zai/glm-4.7`). When matching by bare id, prefer a
+  // provider that actually has auth so we never resolve to a keyless entry that
+  // throws "No API key for provider" at the first LLM call.
+  const authedKeys = new Set(
+    modelRegistry.getAvailable().map((m) => `${m.provider}/${m.id}`)
+  );
+  const matchById = (id: string): Model<any> | undefined => {
+    // Exact "provider/id" wins outright; otherwise prefer an authed same-id entry.
+    const exact = modelRegistry.getAll().find((m) => `${m.provider}/${m.id}` === id);
+    if (exact) return exact as Model<any>;
+    const sameId = modelRegistry.getAll().filter((m) => m.id === id) as Model<any>[];
+    return sameId.find((m) => authedKeys.has(`${m.provider}/${m.id}`)) ?? sameId[0];
+  };
+
   // 1. Explicit parameter (e.g. from tool call)
   if (modelId) {
-    const found = modelRegistry.getAll().find((m) => m.id === modelId);
+    const found = matchById(modelId);
     if (found) {
       return found as Model<any>;
     }
@@ -41,9 +57,7 @@ export function resolveResearchModel(options: {
   // 2. RESEARCH_MODEL override from configuration
   if (activeConfig.RESEARCH_MODEL) {
     const target = activeConfig.RESEARCH_MODEL;
-    const found = modelRegistry.getAll().find(
-      (m) => `${m.provider}/${m.id}` === target || m.id === target
-    );
+    const found = matchById(target);
     if (found) {
       return found as Model<any>;
     }
