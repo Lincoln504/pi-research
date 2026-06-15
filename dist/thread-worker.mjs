@@ -761,9 +761,9 @@ var init_logger = __esm({
         if (this.consoleLog) {
           const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
           const reset = "\x1B[0m";
+          const msg = neutralizeControlChars(message).replace(/[\r\n]/g, " ");
           const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
-          const line2 = `${color}${timestamp} ${level} ${prefix}${reset}${neutralizeControlChars(message)}`;
-          console.log(line2.replace(/[\r\n]/g, " "));
+          console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
         }
       }
       async runCapturingStderr(task) {
@@ -1661,6 +1661,97 @@ function shouldResetBrowser(errorMsg) {
 
 // src/infrastructure/browser/thread-worker-browser.ts
 init_log_utils();
+
+// src/infrastructure/browser/config.ts
+import { platform, homedir } from "node:os";
+
+// src/config.ts
+init_logger();
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+// src/utils/text-utils.ts
+init_logger();
+
+// src/config.ts
+var ConfigSchema = Type.Object({
+  /** Per-researcher timeout in milliseconds (default: 300000, range: 3-30 min) */
+  RESEARCHER_TIMEOUT_MS: Type.Number({ minimum: 18e4, maximum: 18e5, default: 3e5 }),
+  /** Maximum number of concurrent researcher processes (default: 3, range: 1-5) */
+  MAX_CONCURRENT_RESEARCHERS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
+  /** Maximum number of retries for a failed researcher (default: 2, range: 0-5) */
+  RESEARCHER_MAX_RETRIES: Type.Number({ minimum: 0, maximum: 5, default: 2 }),
+  /** Base delay between retries in milliseconds (default: 2000, range: 100-10000) */
+  RESEARCHER_MAX_RETRY_DELAY_MS: Type.Number({ minimum: 100, maximum: 1e4, default: 2e3 }),
+  /** Target depth for recursive research (default: 1, range: 1-3) */
+  DEFAULT_RESEARCH_DEPTH: Type.Number({ minimum: 1, maximum: 3, default: 1 }),
+  /** Number of batches to allow for a single scrape tool call (default: 2, 0=unlimited) */
+  MAX_SCRAPE_BATCHES: Type.Number({ minimum: 0, maximum: 99, default: 2 }),
+  /** Number of parallel browser pool workers (default: 4, range: 1-10) */
+  WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
+  /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
+  WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
+  /** Knowledge store isolation mode (default: 'none') */
+  KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal("none"), Type.Literal("project"), Type.Literal("global")], { default: "none" }),
+  /** Embedding model to use for the knowledge store */
+  EMBEDDING_MODEL: Type.String({ default: "onnx-community/granite-embedding-small-english-r2-ONNX" }),
+  /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
+  EMBEDDING_DEVICE: Type.Union([Type.Literal("webgpu"), Type.Literal("cpu")], { default: "webgpu" }),
+  /** Timeout for scraping operations in milliseconds (default: 15000, range: 5-120 seconds) */
+  SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5e3, maximum: 12e4, default: 15e3 }),
+  /** How long to keep documents in the knowledge store before eviction (default: 30 days) */
+  KNOWLEDGE_STORE_CACHE_TTL_DAYS: Type.Number({ minimum: 1, maximum: 365, default: 30 }),
+  /** Timeout for embedding model initialization (default: 300000ms) */
+  EMBEDDING_MODEL_INIT_TIMEOUT_MS: Type.Number({ minimum: 1e4, maximum: 6e5, default: 3e5 }),
+  /** Max fraction of context window to use for initial scrape context (default: 0.15) */
+  MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: Type.Number({ minimum: 0.05, maximum: 1, default: 0.15 }),
+  /** Estimated tokens per scrape result for planning (default: 2500) */
+  AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 500, maximum: 1e4, default: 2500 }),
+  /** Maximum number of concurrent scrapes (default: 3) */
+  MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
+  /** Health check timeout in milliseconds (default: 10000ms) */
+  HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2e3, maximum: 12e4, default: 1e4 }),
+  /** Default timeout for browser page operations like search (default: 45000ms) */
+  SEARCH_TIMEOUT_MS: Type.Number({ minimum: 5e3, maximum: 12e4, default: 45e3 }),
+  /** TUI refresh debounce in milliseconds (default: 100ms) */
+  TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1e3, default: 100 }),
+  /** Timeout for individual browser tasks (default: 10000ms) */
+  BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2e3, maximum: 12e4, default: 1e4 }),
+  /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-600s).
+   *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var. */
+  LLM_TIMEOUT_MS: Type.Number({ minimum: 6e4, maximum: 6e5, default: 3e5 }),
+  /** LLM Model override for researcher sub-agents and knowledge synthesis.
+   *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
+   *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
+   *  and the knowledge synthesis background LLM. The coordinator and evaluator always
+   *  use the caller's model (ctx.model).
+   */
+  RESEARCH_MODEL: Type.Optional(Type.String()),
+  /** Explicit directory for the knowledge store database (overrides default) */
+  KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
+  /** Whether to automatically export a markdown research report to disk at the end (default: false) */
+  RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
+  /** Strategy for database schema/model migrations: 'drop', 're-embed', or 'backup' (default: 'backup') */
+  MIGRATION_STRATEGY: Type.Union([
+    Type.Literal("drop"),
+    Type.Literal("re-embed"),
+    Type.Literal("backup")
+  ], { default: "backup" }),
+  /** Whether to mirror logs to the console (stdout/stderr). (default: false) */
+  CONSOLE_LOG: Type.Boolean({ default: false }),
+  /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: false) */
+  DEBUG: Type.Boolean({ default: false })
+});
+var DEFAULTS = Value.Create(ConfigSchema);
+
+// src/infrastructure/browser/config.ts
+init_logger();
+function resolveHeadlessMode() {
+  if (platform() !== "linux") return true;
+  return process.env["DISPLAY"] ? true : "virtual";
+}
+
+// src/infrastructure/browser/thread-worker-browser.ts
 var browser = null;
 var context = null;
 var initPromise = null;
@@ -1713,7 +1804,7 @@ async function initBrowser() {
         const { Camoufox } = CamoufoxModule;
         const launchTimeoutMs = 9e4;
         const launchPromise = Camoufox({
-          headless: true,
+          headless: resolveHeadlessMode(),
           humanize: true,
           locale: "en-US",
           screen: {
@@ -1755,6 +1846,13 @@ async function initBrowser() {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes("Camoufox is not installed") || msg.includes("Version information not found")) {
         throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them.`, { cause: e });
+      }
+      const errName = e instanceof Error ? e.constructor?.name ?? "" : "";
+      if (errName === "CannotFindXvfb" || errName === "CannotExecuteXvfb" || msg.includes("Xvfb") || msg.includes("virtual display")) {
+        throw new Error(
+          "[Worker] No display server found on Linux. Install Xvfb for headless use (TTY/Wayland): sudo apt install xvfb",
+          { cause: e }
+        );
       }
       throw e;
     } finally {

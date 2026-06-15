@@ -782,9 +782,9 @@ var Logger = class {
     if (this.consoleLog) {
       const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
       const reset = "\x1B[0m";
+      const msg = neutralizeControlChars(message).replace(/[\r\n]/g, " ");
       const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
-      const line2 = `${color}${timestamp} ${level} ${prefix}${reset}${neutralizeControlChars(message)}`;
-      console.log(line2.replace(/[\r\n]/g, " "));
+      console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
   }
   async runCapturingStderr(task) {
@@ -10863,6 +10863,9 @@ async function search(queries, config, signal, onProgress, container = getServic
   }
 }
 
+// src/healthcheck/index.ts
+import { execFileSync } from "node:child_process";
+
 // src/healthcheck/registry.ts
 var HealthCheckRegistry = class {
   name = ServiceNames.HEALTH_REGISTRY;
@@ -10946,6 +10949,16 @@ function registerHealthChecks(registry, container = getServiceContainer()) {
   registry.register("BrowserCapability", async () => {
     const mockMode = process.env["PI_RESEARCH_MOCK_SEARCH"] === "true" && process.env["PI_RESEARCH_MOCK_SCRAPE"] === "true";
     if (isBrowserAvailable() || mockMode) {
+      if (!mockMode && process.platform === "linux" && !process.env["DISPLAY"]) {
+        try {
+          execFileSync("which", ["Xvfb"], { stdio: "ignore" });
+        } catch {
+          return {
+            healthy: false,
+            error: "No display server found on Linux (DISPLAY not set) and Xvfb is not installed. Run: sudo apt install xvfb"
+          };
+        }
+      }
       return { healthy: true, diagnostic: { status: mockMode ? "mocked" : "available" } };
     } else {
       return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };

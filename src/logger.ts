@@ -137,14 +137,15 @@ export class Logger implements ILogger {
                     level === LogLevel.WARN ? '\x1b[33m' :
                     level === LogLevel.DEBUG ? '\x1b[90m' : '\x1b[36m';
       const reset = '\x1b[0m';
-      // Neutralize control characters (newlines, CR) so untrusted content
-      // cannot forge or corrupt a raw console log line (log-injection defense).
-      // The JSON file sink escapes these on its own; the console sink needs an
-      // explicit inline replacement applied to the final composed string so that
-      // CodeQL's taint-tracking recognises the sanitizer at the call site.
+      // Reuse the already-redacted message; additionally neutralize control
+      // characters (newlines, CR) so untrusted content cannot forge or corrupt
+      // a raw console log line (log-injection defense — the JSON file sink
+      // escapes these on its own).
+      // NOTE: CodeQL recognises the .replace() as a taint-barrier only when
+      // applied directly to the tainted value (msg), not on the composed line.
+      const msg = neutralizeControlChars(message).replace(/[\r\n]/g, ' ');
       const prefix = this.sessionId ? `[${this.sessionId}] ` : '';
-      const line = `${color}${timestamp} ${level} ${prefix}${reset}${neutralizeControlChars(message)}`;
-      console.log(line.replace(/[\r\n]/g, ' '));
+      console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
   }
 
