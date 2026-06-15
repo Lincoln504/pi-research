@@ -56,7 +56,9 @@ export async function ensureFunctionalHealth(
  * Format health check error into user-friendly message
  */
 function formatHealthError(raw: string): string {
-  if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
+  if (raw.includes('Xvfb') || raw.includes('xvfb') || raw.includes('virtual display') || raw.includes('display server') || raw.includes('DISPLAY not set')) {
+    return 'No display server found on Linux. Install Xvfb for TTY/Wayland use: sudo apt install xvfb';
+  } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
     return 'Browser engine not installed. Run `npm run setup` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
     return 'Unable to reach the web (connection timed out). Check your internet connection.';

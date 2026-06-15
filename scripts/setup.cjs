@@ -72,7 +72,7 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     try {
       execSync('npx playwright install-deps', { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
     } catch (e) {
-      console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y xvfb libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -119,4 +119,10 @@ if (existsSync(cachePath)) {
   }
 } else if (browsersInstalled) {
   console.warn(`pi-research: camoufox binary not found at expected path ${cachePath}`);
+}
+
+// On Linux without a display server, Xvfb is required for browser automation.
+// Print a one-time hint so new installs on TTY/Wayland machines know what to do.
+if (isLinux && !process.env.DISPLAY) {
+  console.log('pi-research: No display server detected (DISPLAY not set). For headless use on TTY or Wayland, install Xvfb: sudo apt install xvfb');
 }

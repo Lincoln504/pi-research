@@ -10,6 +10,7 @@
 
 import { setupMocking } from './thread-worker-messaging.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
+import { resolveHeadlessMode } from './config.ts';
 
 let browser: any = null;
 let context: any = null;
@@ -101,7 +102,7 @@ export async function initBrowser(): Promise<void> {
         // init failures under resource pressure.
         const launchTimeoutMs = 90000;
         const launchPromise = Camoufox({
-          headless: true,
+          headless: resolveHeadlessMode(),
           humanize: true,
           locale: 'en-US',
           screen: {
@@ -155,6 +156,16 @@ export async function initBrowser(): Promise<void> {
 
       if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
         throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them.`, { cause: e });
+      }
+
+      // camoufox headless: "virtual" spawns Xvfb on Linux when no DISPLAY is set.
+      // CannotFindXvfb is thrown when `which Xvfb` fails (xvfb not installed).
+      const errName = e instanceof Error ? (e as any).constructor?.name ?? '' : '';
+      if (errName === 'CannotFindXvfb' || errName === 'CannotExecuteXvfb' || msg.includes('Xvfb') || msg.includes('virtual display')) {
+        throw new Error(
+          '[Worker] No display server found on Linux. Install Xvfb for headless use (TTY/Wayland): sudo apt install xvfb',
+          { cause: e }
+        );
       }
 
       throw e;

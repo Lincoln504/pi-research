@@ -154,6 +154,23 @@ export function getSchedulerVersion(config?: Config): string {
 }
 
 // ============================================================================
+// Display Environment
+// ============================================================================
+
+/**
+ * Resolve the camoufox headless mode for the current platform.
+ *
+ * On Linux without a DISPLAY env var (TTY or Wayland without XWayland),
+ * camoufox's built-in Xvfb management spawns a virtual framebuffer.
+ * On Linux with DISPLAY set (X11, XWayland, or CI-injected Xvfb), or on
+ * any non-Linux platform, standard headless mode works natively.
+ */
+export function resolveHeadlessMode(): boolean | 'virtual' {
+  if (platform() !== 'linux') return true;
+  return process.env['DISPLAY'] ? true : 'virtual';
+}
+
+// ============================================================================
 // Browser Availability Check
 // ============================================================================
 

@@ -12,7 +12,7 @@ vi.mock('node:os', async (importOriginal) => {
     return { ...actual, platform: () => osMock.current };
 });
 
-import { getBrowserCacheDir, getBrowserEnv, getCamoufoxBinaryPath } from '../../../src/infrastructure/browser/config.ts';
+import { getBrowserCacheDir, getBrowserEnv, getCamoufoxBinaryPath, resolveHeadlessMode } from '../../../src/infrastructure/browser/config.ts';
 
 describe('browser-config', () => {
     const ENV_KEYS = ['PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'LOCALAPPDATA'] as const;
@@ -88,6 +88,45 @@ describe('browser-config', () => {
             const env = getBrowserEnv();
             expect(env['HOME']).toBe(process.env['HOME']);
             expect(env['USERPROFILE']).toBe(process.env['USERPROFILE']);
+        });
+    });
+
+    describe('resolveHeadlessMode', () => {
+        const savedDisplay = process.env['DISPLAY'];
+
+        afterEach(() => {
+            if (savedDisplay === undefined) delete process.env['DISPLAY'];
+            else process.env['DISPLAY'] = savedDisplay;
+        });
+
+        it('returns true on macOS regardless of DISPLAY', () => {
+            osMock.current = 'darwin';
+            delete process.env['DISPLAY'];
+            expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns true on Windows regardless of DISPLAY', () => {
+            osMock.current = 'win32';
+            delete process.env['DISPLAY'];
+            expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns true on Linux when DISPLAY is set (X11 or XWayland)', () => {
+            osMock.current = 'linux';
+            process.env['DISPLAY'] = ':0';
+            expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns "virtual" on Linux when DISPLAY is not set (TTY or Wayland without XWayland)', () => {
+            osMock.current = 'linux';
+            delete process.env['DISPLAY'];
+            expect(resolveHeadlessMode()).toBe('virtual');
+        });
+
+        it('returns true on Linux when DISPLAY is set to a CI-injected Xvfb value', () => {
+            osMock.current = 'linux';
+            process.env['DISPLAY'] = ':99';
+            expect(resolveHeadlessMode()).toBe(true);
         });
     });
 

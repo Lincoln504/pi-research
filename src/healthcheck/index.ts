@@ -5,6 +5,7 @@
  * This module is stateless and does not cache results.
  */
 
+import { execFileSync } from 'node:child_process';
 import { getConfig } from '../config.ts';
 import { isBrowserAvailable } from '../infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../infrastructure/browser/task-execution-service.ts';
@@ -26,6 +27,18 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
                      process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
     if (isBrowserAvailable() || mockMode) {
+      // On Linux without a display server, camoufox uses Xvfb for the virtual framebuffer.
+      // Fail early (before research starts) if Xvfb is missing in that scenario.
+      if (!mockMode && process.platform === 'linux' && !process.env['DISPLAY']) {
+        try {
+          execFileSync('which', ['Xvfb'], { stdio: 'ignore' });
+        } catch {
+          return {
+            healthy: false,
+            error: 'No display server found on Linux (DISPLAY not set) and Xvfb is not installed. Run: sudo apt install xvfb',
+          };
+        }
+      }
       return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
     } else {
       return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
