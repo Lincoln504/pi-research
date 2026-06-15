@@ -119,6 +119,10 @@ import {
   initResearchSDK,
   runDeepResearch,
   shutdownResearchSDK,
+  getLastRunMetrics,
+  getLastRunSummary,
+  getLastRunStats,
+  getSessionMetrics,
 } from '../../src/sdk.ts';
 import { 
   registerCoreServices, 
@@ -233,6 +237,21 @@ describe('SDK Lifecycle', () => {
       await runDeepResearch('q', { config: { MAX_SCRAPE_BATCHES: 1 } as any });
       const passed = mockDeepRun.mock.calls[0]![0] as any;
       expect(passed.config.MAX_SCRAPE_BATCHES).toBe(1);
+    });
+
+    it('captures a per-run metrics summary readable by audit consumers', async () => {
+      await initSDK();
+      await runDeepResearch('q');
+      const summary = getLastRunSummary();
+      expect(summary).not.toBeNull();
+      expect(summary!.status).toBe('success');
+      expect(summary!.runId).toMatch(/^sdk-/);
+      const snap = getLastRunMetrics();
+      expect(snap).not.toBeNull();
+      expect(snap).toHaveProperty('counters');
+      // getLastRunStats() and getSessionMetrics() must be callable without throwing.
+      expect(() => getLastRunStats()).not.toThrow();
+      expect(getSessionMetrics()).toHaveProperty('counters');
     });
   });
 });

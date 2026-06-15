@@ -40,6 +40,11 @@ export { resetConfig, getConfig, setConfig, validateConfig } from './config.ts';
 export * from './sdk.ts';
 export { HeadlessObserver, type HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 
+// Audit / metrics types for SDK consumers (getLastRunMetrics/getLastRunStats etc.)
+export type { IMetricsSnapshot, IMetricHistogram, RunSummary } from './utils/metrics.ts';
+export type { ResearchStats } from './utils/metrics-summary.ts';
+export { extractRunStats } from './utils/metrics-summary.ts';
+
 import {
   MAX_TEAM_SIZE_LEVEL_1,
   MAX_TEAM_SIZE_LEVEL_2,

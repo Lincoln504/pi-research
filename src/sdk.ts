@@ -31,7 +31,10 @@ import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
 import { getConfig, validateConfig, type Config } from './config.ts';
-import { metrics } from './utils/metrics.ts';
+import { metrics, MetricsRegistry, runWithRunRegistry } from './utils/metrics.ts';
+import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
+import { extractRunStats, type ResearchStats } from './utils/metrics-summary.ts';
+import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
@@ -49,6 +52,10 @@ let globalApiKey: string | undefined = undefined;
 let globalContainer: ServiceContainer | null = null;
 let globalConfig: Config | null = null;
 let _lastSessionId: string | null = null;
+// Per-run metrics summary captured by the most recent runDeepResearch call, so
+// consumers (e.g. audit harnesses) can read pi-research's internal telemetry —
+// latency, scrape/search counts, tokens, cost, tool usage — after each run.
+let _lastRunSummary: RunSummary | null = null;
 
 // Signal handler state — registered once, removed on clean shutdown.
 let _onSignal: ((signal: string) => void) | null = null;
@@ -336,8 +343,14 @@ export async function runDeepResearch(
   const depthLabel = depth === 0 ? 'quick' : `deep-${depth}`;
   const complexity = Math.max(1, Math.min(3, options.complexity ?? 1));
 
+  // Wrap the run in its own metrics registry so all counters/timings emitted
+  // during this call are isolated to a per-run snapshot (the SDK path does not
+  // go through the research tool's run-registry, so without this every run's
+  // metrics would only accumulate into the cumulative session registry).
+  const runRegistry = new MetricsRegistry();
+
   try {
-    let result = await orchestrator.runResearch({
+    let result = await runWithRunRegistry(runRegistry, () => orchestrator.runResearch({
       ...options,
       ctx: createMockContext(sessionId),
       query,
@@ -351,18 +364,74 @@ export async function runDeepResearch(
       // actually reach the orchestrator and every downstream service. A per-call
       // options.config (if provided) takes precedence over the SDK-global config.
       config: options.config ?? globalConfig ?? undefined,
-    }, signal ?? options.signal);
+    }, signal ?? options.signal));
 
     // Append research metadata (model used) at the very end
     const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
     result = synthesisService.appendMetadata(result, globalModel!.id);
 
     metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    _lastRunSummary = {
+      runId: researchId, startedAt: researchStart, completedAt: Date.now(),
+      durationMs: Date.now() - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
+    };
+    metrics.recordRunSummary(_lastRunSummary);
     return result;
   } catch (err) {
     metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
+    _lastRunSummary = {
+      runId: researchId, startedAt: researchStart, completedAt: Date.now(),
+      durationMs: Date.now() - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
+    };
+    metrics.recordRunSummary(_lastRunSummary);
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Audit / telemetry accessors
+// ---------------------------------------------------------------------------
+
+/**
+ * Raw metrics snapshot (counters/gauges/histograms) captured during the most
+ * recent runDeepResearch/runQuickResearch call. Null if no run has completed.
+ * Read this BEFORE calling shutdownResearchSDK() (shutdown clears all metrics).
+ */
+export function getLastRunMetrics(): IMetricsSnapshot | null {
+  return _lastRunSummary?.snapshot ?? null;
+}
+
+/**
+ * Full RunSummary (runId, status, durationMs, snapshot) for the most recent run.
+ */
+export function getLastRunSummary(): RunSummary | null {
+  return _lastRunSummary;
+}
+
+/**
+ * Distilled, human-relevant stats from the most recent run (researchers launched,
+ * searches, URLs analyzed/failed, tokens, cost, per-tool usage). Null if no run
+ * has completed or the snapshot has no recognizable research counters.
+ */
+export function getLastRunStats(): ResearchStats | null {
+  return _lastRunSummary ? extractRunStats(_lastRunSummary.snapshot) : null;
+}
+
+/**
+ * Cumulative session-level metrics snapshot across every run since init (or the
+ * last shutdown). Use getLastRunMetrics() for per-run deltas instead.
+ */
+export function getSessionMetrics(): IMetricsSnapshot {
+  return metrics.getSessionSnapshot();
+}
+
+/**
+ * Run the full system health check (browser pool, knowledge store, state manager,
+ * GPU lock). Useful for an audit harness reporting tool health before/after a run.
+ */
+export async function getResearchHealth(opts?: { force?: boolean }) {
+  if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+  return runHealthCheck({ force: opts?.force, ctx: { container: globalContainer } });
 }
 
 /**
@@ -388,6 +457,41 @@ export async function getResearchReports(sessionId?: string): Promise<Map<string
   if (!sid) return new Map();
   const synthesis = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
   return synthesis.getAllReports(sid);
+}
+
+/**
+ * The full result of a research run: the report plus everything an audit harness
+ * needs in one call — the session id, the per-run metrics snapshot and distilled
+ * stats, and the per-researcher reports.
+ */
+export interface ResearchRunResult {
+  report: string;
+  sessionId: string;
+  runId: string;
+  metrics: IMetricsSnapshot | null;
+  stats: ResearchStats | null;
+  reports: Map<string, string>;
+}
+
+/**
+ * Like runDeepResearch but returns a rich result object (report + sessionId +
+ * per-run metrics/stats + per-researcher reports) instead of just the report
+ * string. Ideal for programmatic/audit consumers.
+ */
+export async function runResearchDetailed(
+  query: string,
+  options: Omit<ResearchOptions, 'ctx' | 'query' | 'model' | 'sessionId' | 'researchId'> = {},
+  signal?: AbortSignal
+): Promise<ResearchRunResult> {
+  const report = await runDeepResearch(query, options, signal);
+  return {
+    report,
+    sessionId: _lastSessionId ?? '',
+    runId: _lastRunSummary?.runId ?? '',
+    metrics: _lastRunSummary?.snapshot ?? null,
+    stats: getLastRunStats(),
+    reports: await getResearchReports(),
+  };
 }
 
 import { clearAllSessionState } from './orchestration/session-state.ts';
@@ -455,6 +559,7 @@ export async function shutdownResearchSDK(): Promise<void> {
   globalContainer = null;
   globalConfig = null;
   _lastSessionId = null;
+  _lastRunSummary = null;
 
   // Remove signal handlers — caller is shutting down cooperatively.
   _removeSignalHandlers();
