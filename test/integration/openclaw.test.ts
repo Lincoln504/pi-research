@@ -49,7 +49,7 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
     AuthStorage: { inMemory: vi.fn().mockReturnValue({}), create: vi.fn().mockReturnValue({}) },
     SettingsManager: { inMemory: vi.fn().mockReturnValue({}), create: vi.fn().mockReturnValue({}) },
     SessionManager: { inMemory: vi.fn().mockReturnValue({}) },
-    createReadTool: vi.fn().mockReturnValue({ name: 'read' }),
+    createReadToolDefinition: vi.fn().mockReturnValue({ name: 'read' }),
     createGrepToolDefinition: vi.fn().mockReturnValue({ name: 'grep' }),
     createAgentSession: vi.fn().mockReturnValue({}),
   };

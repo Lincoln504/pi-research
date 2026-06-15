@@ -239,7 +239,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
   SessionManager: { inMemory: vi.fn(() => ({})) },
   SettingsManager: { inMemory: vi.fn(() => ({})) },
   createAgentSession: vi.fn(),
-  createReadTool: vi.fn(),
+  createReadToolDefinition: vi.fn(),
 }));
 
 // Import mocked modules

@@ -12,7 +12,7 @@
 import type { ToolDefinition, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
-import { createReadTool } from '@earendil-works/pi-coding-agent';
+import { createReadToolDefinition } from '@earendil-works/pi-coding-agent';
 import { createSearchTool } from './search.ts';
 import { createScrapeTool } from './scrape.ts';
 import { createSecuritySearchTool } from './security.ts';
@@ -68,7 +68,7 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
   };
 
   return [
-    createReadTool(options.cwd),
+    createReadToolDefinition(options.cwd) as ToolDefinition,
     createSearchTool({
       ...resolvedOptions,
       onProgress: options.onSearchProgress,
