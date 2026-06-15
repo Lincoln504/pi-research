@@ -15,7 +15,7 @@ import type * as FsType from 'node:fs';
 import type { Stats } from 'node:fs';
 import { TextDecoder } from 'node:util';
 import type { LogContext } from './log-utils.ts';
-import { getLogContext, formatArg, safeJsonStringify } from './log-utils.ts';
+import { getLogContext, formatArg, safeJsonStringify, redactSecrets } from './log-utils.ts';
 
 const fs: typeof FsType = createRequire(import.meta.url)('node:fs');
 
@@ -157,7 +157,9 @@ function createConsolePatch(level: string, logFile: string, hasSufficientDiskSpa
       timestamp,
       level: `CONSOLE_${level.toUpperCase()}`,
       ...getLogContext(),
-      message: args.map(formatArg).join(' '),
+      // Redact secrets + bound size, matching Logger.emit(); captured console
+      // output can echo auth headers / tokens from dependencies.
+      message: redactSecrets(args.map(formatArg).join(' ')),
     };
     try {
       fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
@@ -249,7 +251,7 @@ export async function captureStdio<T>(
       timestamp,
       level: 'STDERR',
       ...getLogContext(),
-      message: message.trim(),
+      message: redactSecrets(message.trim()),
     };
     try {
       fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
@@ -276,7 +278,7 @@ export async function captureStdio<T>(
         timestamp,
         level: 'STDOUT_NATIVE',
         ...getLogContext(),
-        message: message.trim(),
+        message: redactSecrets(message.trim()),
       };
       try {
         fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
@@ -305,7 +307,7 @@ export async function captureStdio<T>(
         timestamp,
         level: 'STDOUT_PLAIN',
         ...getLogContext(),
-        message: message.trim(),
+        message: redactSecrets(message.trim()),
       };
       try {
         fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);
@@ -347,7 +349,7 @@ export async function captureStdio<T>(
               timestamp,
               level: fd === 1 ? 'FS_WRITE_SYNC_STDOUT' : 'FS_WRITE_SYNC_STDERR',
               ...getLogContext(),
-              message: message.trim(),
+              message: redactSecrets(message.trim()),
             };
             try {
               fs.appendFileSync(logFile, `${safeJsonStringify(entry)}\n`);

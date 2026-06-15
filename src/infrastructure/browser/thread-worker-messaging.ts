@@ -7,6 +7,7 @@
 let workerId: string = '';
 
 import { appendFileSync } from 'node:fs';
+import { redactSecrets } from '../../utils/log-utils.ts';
 
 /**
  * Mutex lock to serialize page creation. Playwright/Firefox can deadlock if newPage()
@@ -58,11 +59,13 @@ function logToDebugFile(level: string, ...args: any[]): void {
       timestamp,
       level,
       workerId,
-      message: args.map(arg => {
+      // Redact secrets + bound size; worker logs include full scrape/search
+      // URLs, which can carry credentials in userinfo or query strings.
+      message: redactSecrets(args.map(arg => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(' ')
+      }).join(' '))
     };
     appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
   } catch {

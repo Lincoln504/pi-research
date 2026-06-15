@@ -8,6 +8,7 @@
 import process from 'node:process';
 import cluster from 'node:cluster';
 import * as fs from 'node:fs/promises';
+import { redactSecrets } from '../../utils/log-utils.ts';
 
 let workerId: string = '';
 
@@ -149,11 +150,11 @@ function logToDebugFile(level: string, ...args: any[]): void {
       timestamp,
       level,
       workerId,
-      message: args.map(arg => {
+      message: redactSecrets(args.map(arg => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(' ')
+      }).join(' '))
     };
     // FIX (#32): Use async fs.appendFile to avoid blocking the event loop.
     // Fire-and-forget is acceptable for debug logging in error handlers.

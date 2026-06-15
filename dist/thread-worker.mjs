@@ -13,13 +13,77 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// src/utils/error-tracker.ts
+// src/utils/log-utils.ts
 import { AsyncLocalStorage } from "node:async_hooks";
+import * as os from "node:os";
+import * as path from "node:path";
+function buildDefaultDebugLogPath(_researchRunId) {
+  const override = process.env["PI_RESEARCH_LOG_PATH"];
+  if (override) return override;
+  return path.join(os.tmpdir(), "pi-research.log");
+}
+function isVerboseFromEnv() {
+  return process.env["PI_RESEARCH_DEBUG"] === "true";
+}
+function getLogContext() {
+  return logContextStorage.getStore() ?? {};
+}
+function safeJsonStringify(value) {
+  try {
+    return JSON.stringify(value, null, 0);
+  } catch {
+    return "[unserializable]";
+  }
+}
+function formatArg(arg) {
+  if (arg instanceof Error) {
+    return arg.stack ?? arg.message;
+  }
+  if (typeof arg === "object" && arg !== null) {
+    return safeJsonStringify(arg);
+  }
+  return String(arg);
+}
+function redactSecrets(message) {
+  let out = message.length > MAX_LOG_MESSAGE_LENGTH ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}\u2026[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]` : message;
+  out = out.replace(ANSI_PATTERN, "");
+  out = out.replace(URL_CREDENTIALS_PATTERN, "$1[REDACTED]@");
+  out = out.replace(JWT_PATTERN, "[REDACTED]");
+  out = out.replace(BASIC_AUTH_PATTERN, "Basic [REDACTED]");
+  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key, sep) => `${key}${sep}[REDACTED]`);
+  out = out.replace(KNOWN_TOKEN_PATTERN, "[REDACTED]");
+  out = out.replace(PROVIDER_TOKEN_PATTERN, "[REDACTED]");
+  out = out.replace(LONG_HEX_SECRET_PATTERN, "[REDACTED]");
+  return out;
+}
+function neutralizeControlChars(message) {
+  return message.replace(/\r\n|\r|\n/g, " ").replace(CONTROL_CHARS_PATTERN, " ");
+}
+var logContextStorage, MAX_LOG_MESSAGE_LENGTH, ANSI_PATTERN, URL_CREDENTIALS_PATTERN, SENSITIVE_KV_PATTERN, KNOWN_TOKEN_PATTERN, JWT_PATTERN, BASIC_AUTH_PATTERN, PROVIDER_TOKEN_PATTERN, LONG_HEX_SECRET_PATTERN, CONTROL_CHARS_PATTERN;
+var init_log_utils = __esm({
+  "src/utils/log-utils.ts"() {
+    "use strict";
+    logContextStorage = new AsyncLocalStorage();
+    MAX_LOG_MESSAGE_LENGTH = 1e4;
+    ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
+    URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+    SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+    KNOWN_TOKEN_PATTERN = /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+    JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+    BASIC_AUTH_PATTERN = /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/gi;
+    PROVIDER_TOKEN_PATTERN = /\b(AIza[0-9A-Za-z_-]{35}|ya29\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
+    LONG_HEX_SECRET_PATTERN = /\b[0-9a-fA-F]{32,}\b/g;
+    CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
+  }
+});
+
+// src/utils/error-tracker.ts
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
 var trackerStorage, ErrorTracker, globalInstance, errorTracker;
 var init_error_tracker = __esm({
   "src/utils/error-tracker.ts"() {
     "use strict";
-    trackerStorage = new AsyncLocalStorage();
+    trackerStorage = new AsyncLocalStorage2();
     ErrorTracker = class {
       patterns = /* @__PURE__ */ new Map();
       MAX_CONTEXTS_PER_PATTERN = 10;
@@ -148,62 +212,6 @@ var init_error_tracker = __esm({
         return value;
       }
     });
-  }
-});
-
-// src/utils/log-utils.ts
-import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
-import * as os from "node:os";
-import * as path from "node:path";
-function buildDefaultDebugLogPath(_researchRunId) {
-  const override = process.env["PI_RESEARCH_LOG_PATH"];
-  if (override) return override;
-  return path.join(os.tmpdir(), "pi-research.log");
-}
-function isVerboseFromEnv() {
-  return process.env["PI_RESEARCH_DEBUG"] === "true";
-}
-function getLogContext() {
-  return logContextStorage.getStore() ?? {};
-}
-function safeJsonStringify(value) {
-  try {
-    return JSON.stringify(value, null, 0);
-  } catch {
-    return "[unserializable]";
-  }
-}
-function formatArg(arg) {
-  if (arg instanceof Error) {
-    return arg.stack ?? arg.message;
-  }
-  if (typeof arg === "object" && arg !== null) {
-    return safeJsonStringify(arg);
-  }
-  return String(arg);
-}
-function redactSecrets(message) {
-  let out = message.length > MAX_LOG_MESSAGE_LENGTH ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}\u2026[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]` : message;
-  out = out.replace(ANSI_PATTERN, "");
-  out = out.replace(URL_CREDENTIALS_PATTERN, "$1[REDACTED]@");
-  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key, sep) => `${key}${sep}[REDACTED]`);
-  out = out.replace(KNOWN_TOKEN_PATTERN, "[REDACTED]");
-  return out;
-}
-function neutralizeControlChars(message) {
-  return message.replace(CONTROL_CHARS_PATTERN, " ");
-}
-var logContextStorage, MAX_LOG_MESSAGE_LENGTH, ANSI_PATTERN, URL_CREDENTIALS_PATTERN, SENSITIVE_KV_PATTERN, KNOWN_TOKEN_PATTERN, CONTROL_CHARS_PATTERN;
-var init_log_utils = __esm({
-  "src/utils/log-utils.ts"() {
-    "use strict";
-    logContextStorage = new AsyncLocalStorage2();
-    MAX_LOG_MESSAGE_LENGTH = 1e4;
-    ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
-    URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
-    SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
-    KNOWN_TOKEN_PATTERN = /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
-    CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
   }
 });
 
@@ -409,7 +417,9 @@ function createConsolePatch(level, logFile, hasSufficientDiskSpace) {
       timestamp,
       level: `CONSOLE_${level.toUpperCase()}`,
       ...getLogContext(),
-      message: args.map(formatArg).join(" ")
+      // Redact secrets + bound size, matching Logger.emit(); captured console
+      // output can echo auth headers / tokens from dependencies.
+      message: redactSecrets(args.map(formatArg).join(" "))
     };
     try {
       fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -484,7 +494,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
       timestamp,
       level: "STDERR",
       ...getLogContext(),
-      message: message.trim()
+      message: redactSecrets(message.trim())
     };
     try {
       fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -506,7 +516,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
         timestamp,
         level: "STDOUT_NATIVE",
         ...getLogContext(),
-        message: message.trim()
+        message: redactSecrets(message.trim())
       };
       try {
         fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -531,7 +541,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
         timestamp,
         level: "STDOUT_PLAIN",
         ...getLogContext(),
-        message: message.trim()
+        message: redactSecrets(message.trim())
       };
       try {
         fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -564,7 +574,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
               timestamp,
               level: fd === 1 ? "FS_WRITE_SYNC_STDOUT" : "FS_WRITE_SYNC_STDERR",
               ...getLogContext(),
-              message: message.trim()
+              message: redactSecrets(message.trim())
             };
             try {
               fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -1256,6 +1266,7 @@ import crypto2 from "node:crypto";
 import process3 from "node:process";
 
 // src/infrastructure/browser/thread-worker-lifecycle.ts
+init_log_utils();
 import process2 from "node:process";
 import cluster from "node:cluster";
 import * as fs from "node:fs/promises";
@@ -1342,11 +1353,11 @@ function logToDebugFile(level, ...args) {
       timestamp,
       level,
       workerId,
-      message: args.map((arg) => {
+      message: redactSecrets(args.map((arg) => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === "object" && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(" ")
+      }).join(" "))
     };
     fs.appendFile(logFile, `${JSON.stringify(entry)}
 `).catch(() => {
@@ -1375,6 +1386,7 @@ function createKillHandler() {
 }
 
 // src/infrastructure/browser/thread-worker-messaging.ts
+init_log_utils();
 import { appendFileSync as appendFileSync2 } from "node:fs";
 var workerId2 = "";
 var pageCreationLock = Promise.resolve();
@@ -1414,11 +1426,13 @@ function logToDebugFile2(level, ...args) {
       timestamp,
       level,
       workerId: workerId2,
-      message: args.map((arg) => {
+      // Redact secrets + bound size; worker logs include full scrape/search
+      // URLs, which can carry credentials in userinfo or query strings.
+      message: redactSecrets(args.map((arg) => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === "object" && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(" ")
+      }).join(" "))
     };
     appendFileSync2(logFile, `${JSON.stringify(entry)}
 `);
@@ -1642,6 +1656,7 @@ function shouldResetBrowser(errorMsg) {
 }
 
 // src/infrastructure/browser/thread-worker-browser.ts
+init_log_utils();
 var browser = null;
 var context = null;
 var initPromise = null;
@@ -1666,11 +1681,11 @@ function logToDebugFile3(level, ...args) {
       timestamp,
       level,
       workerId: workerId3,
-      message: args.map((arg) => {
+      message: redactSecrets(args.map((arg) => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === "object" && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(" ")
+      }).join(" "))
     };
     import("node:fs/promises").then((fsp) => fsp.appendFile(logFile, `${JSON.stringify(entry)}
 `)).catch(() => {

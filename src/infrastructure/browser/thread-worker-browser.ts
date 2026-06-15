@@ -9,6 +9,7 @@
  */
 
 import { setupMocking } from './thread-worker-messaging.ts';
+import { redactSecrets } from '../../utils/log-utils.ts';
 
 let browser: any = null;
 let context: any = null;
@@ -49,11 +50,11 @@ function logToDebugFile(level: string, ...args: any[]): void {
       timestamp,
       level,
       workerId,
-      message: args.map(arg => {
+      message: redactSecrets(args.map(arg => {
         if (arg instanceof Error) return arg.stack || arg.message;
         if (typeof arg === 'object' && arg !== null) return JSON.stringify(arg);
         return String(arg);
-      }).join(' ')
+      }).join(' '))
     };
     // FIX (#32): Use async fs.appendFile to avoid blocking the event loop.
     import('node:fs/promises').then(fsp => fsp.appendFile(logFile, `${JSON.stringify(entry)}\n`)).catch(() => {});

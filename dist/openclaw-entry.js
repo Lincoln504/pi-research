@@ -268,19 +268,27 @@ function formatArg(arg) {
 var MAX_LOG_MESSAGE_LENGTH = 1e4;
 var ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
 var URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
-var SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+var SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
 var KNOWN_TOKEN_PATTERN = /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+var JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+var BASIC_AUTH_PATTERN = /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/gi;
+var PROVIDER_TOKEN_PATTERN = /\b(AIza[0-9A-Za-z_-]{35}|ya29\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
+var LONG_HEX_SECRET_PATTERN = /\b[0-9a-fA-F]{32,}\b/g;
 var CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
 function redactSecrets(message) {
   let out = message.length > MAX_LOG_MESSAGE_LENGTH ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}\u2026[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]` : message;
   out = out.replace(ANSI_PATTERN, "");
   out = out.replace(URL_CREDENTIALS_PATTERN, "$1[REDACTED]@");
+  out = out.replace(JWT_PATTERN, "[REDACTED]");
+  out = out.replace(BASIC_AUTH_PATTERN, "Basic [REDACTED]");
   out = out.replace(SENSITIVE_KV_PATTERN, (_m, key, sep3) => `${key}${sep3}[REDACTED]`);
   out = out.replace(KNOWN_TOKEN_PATTERN, "[REDACTED]");
+  out = out.replace(PROVIDER_TOKEN_PATTERN, "[REDACTED]");
+  out = out.replace(LONG_HEX_SECRET_PATTERN, "[REDACTED]");
   return out;
 }
 function neutralizeControlChars(message) {
-  return message.replace(CONTROL_CHARS_PATTERN, " ");
+  return message.replace(/\r\n|\r|\n/g, " ").replace(CONTROL_CHARS_PATTERN, " ");
 }
 
 // src/utils/log-rotation.ts
@@ -513,7 +521,9 @@ function createConsolePatch(level, logFile, hasSufficientDiskSpace) {
       timestamp,
       level: `CONSOLE_${level.toUpperCase()}`,
       ...getLogContext(),
-      message: args.map(formatArg).join(" ")
+      // Redact secrets + bound size, matching Logger.emit(); captured console
+      // output can echo auth headers / tokens from dependencies.
+      message: redactSecrets(args.map(formatArg).join(" "))
     };
     try {
       fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -588,7 +598,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
       timestamp,
       level: "STDERR",
       ...getLogContext(),
-      message: message.trim()
+      message: redactSecrets(message.trim())
     };
     try {
       fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -610,7 +620,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
         timestamp,
         level: "STDOUT_NATIVE",
         ...getLogContext(),
-        message: message.trim()
+        message: redactSecrets(message.trim())
       };
       try {
         fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -635,7 +645,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
         timestamp,
         level: "STDOUT_PLAIN",
         ...getLogContext(),
-        message: message.trim()
+        message: redactSecrets(message.trim())
       };
       try {
         fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}
@@ -668,7 +678,7 @@ async function captureStdio(logFile, hasSufficientDiskSpace, task, sessionId) {
               timestamp,
               level: fd === 1 ? "FS_WRITE_SYNC_STDOUT" : "FS_WRITE_SYNC_STDERR",
               ...getLogContext(),
-              message: message.trim()
+              message: redactSecrets(message.trim())
             };
             try {
               fs4.appendFileSync(logFile, `${safeJsonStringify(entry)}

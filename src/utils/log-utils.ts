@@ -90,10 +90,21 @@ const ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
 const URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
 // key=value / key: "value" pairs whose key names a secret.
 const SENSITIVE_KV_PATTERN =
-  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+  /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer|set[_-]?cookie|cookie|session[_-]?id|session|csrf[_-]?token|xsrf[_-]?token|private[_-]?key)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
 // Well-known opaque credential formats (OpenAI, GitHub, AWS, Slack, Anthropic).
 const KNOWN_TOKEN_PATTERN =
   /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+// JSON Web Tokens — header.payload.signature, each a base64url segment.
+const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+// HTTP Basic credentials: "Basic <base64>".
+const BASIC_AUTH_PATTERN = /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/gi;
+// Provider keys not covered by KNOWN_TOKEN_PATTERN: Google API/OAuth, Stripe.
+const PROVIDER_TOKEN_PATTERN =
+  /\b(AIza[0-9A-Za-z_-]{35}|ya29\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
+// Long opaque hex secrets (>=32 hex chars), e.g. the 64-hex browser auth secret
+// or MD5/SHA-style tokens. Diagnostic logs may over-redact content hashes of
+// this length; that trade-off favors not persisting credentials clear-text.
+const LONG_HEX_SECRET_PATTERN = /\b[0-9a-fA-F]{32,}\b/g;
 // All C0 control characters plus DEL — newlines/carriage returns are the log/
 // terminal-injection vector when written to a raw console line. Matching these
 // control bytes is exactly the intent.
@@ -114,8 +125,15 @@ export function redactSecrets(message: string): string {
     : message;
   out = out.replace(ANSI_PATTERN, '');
   out = out.replace(URL_CREDENTIALS_PATTERN, '$1[REDACTED]@');
+  // Redact whole-token formats BEFORE the key/value pass: the KV value class
+  // stops at whitespace, so "Authorization: Basic <b64>" would otherwise mask
+  // only the word "Basic" and leave the credential blob exposed.
+  out = out.replace(JWT_PATTERN, '[REDACTED]');
+  out = out.replace(BASIC_AUTH_PATTERN, 'Basic [REDACTED]');
   out = out.replace(SENSITIVE_KV_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
   out = out.replace(KNOWN_TOKEN_PATTERN, '[REDACTED]');
+  out = out.replace(PROVIDER_TOKEN_PATTERN, '[REDACTED]');
+  out = out.replace(LONG_HEX_SECRET_PATTERN, '[REDACTED]');
   return out;
 }
 
@@ -126,5 +144,9 @@ export function redactSecrets(message: string): string {
  * escaped — the JSON log file escapes control chars on its own.
  */
 export function neutralizeControlChars(message: string): string {
-  return message.replace(CONTROL_CHARS_PATTERN, ' ');
+  // Strip CR/LF explicitly first. These are the actual log-injection vector
+  // (forged/corrupted log lines) and an explicit line-break replacement is the
+  // form static analysis recognizes as a log-injection sanitizer. The second
+  // pass removes any remaining C0 control chars + DEL.
+  return message.replace(/\r\n|\r|\n/g, ' ').replace(CONTROL_CHARS_PATTERN, ' ');
 }
