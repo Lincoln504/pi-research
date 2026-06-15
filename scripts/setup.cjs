@@ -126,3 +126,56 @@ if (existsSync(cachePath)) {
 if (isLinux && !process.env.DISPLAY) {
   console.log('pi-research: No display server detected (DISPLAY not set). For headless use on TTY or Wayland, install Xvfb: sudo apt install xvfb');
 }
+
+// Repair pi settings.json if the extension path was disabled by a `-` prefix.
+//
+// pi uses a leading `-` on an extension path to mark it disabled. This can
+// happen automatically when the extension fails to load (e.g. after a broken
+// intermediate update) and pi auto-disables it to avoid crashing on every
+// startup. After a successful update + install the extension is healthy again,
+// so we strip the prefix here so pi re-enables it without user intervention.
+//
+// This runs as postinstall on every `npm install` / `pi update`, which is the
+// correct moment: the source is already at the new version and the build
+// artifacts are fresh, so re-enabling is safe.
+(function repairPiExtensionSettings() {
+  const settingsPath = path.join(homedir(), '.pi', 'agent', 'settings.json');
+  if (!existsSync(settingsPath)) return;
+
+  let settings;
+  try {
+    settings = JSON.parse(require('fs').readFileSync(settingsPath, 'utf8'));
+  } catch (_) { return; }
+  if (!Array.isArray(settings.packages)) return;
+
+  // The extension paths we own, normalised (strip leading `./`).
+  const ourPkg = require(path.join(projectRoot, 'package.json'));
+  const ourPaths = new Set(
+    (ourPkg.pi?.extensions || []).map(e => e.replace(/^\.\//, ''))
+  );
+  if (ourPaths.size === 0) return;
+
+  let repaired = false;
+  for (const pkg of settings.packages) {
+    if (!Array.isArray(pkg.extensions)) continue;
+    // Only touch entries that contain at least one of our paths (with or without `-`).
+    const ownsThisPkg = pkg.extensions.some(e => ourPaths.has(e.replace(/^-/, '')));
+    if (!ownsThisPkg) continue;
+
+    pkg.extensions = pkg.extensions.map(e => {
+      if (e.startsWith('-') && ourPaths.has(e.slice(1))) {
+        repaired = true;
+        return e.slice(1);
+      }
+      return e;
+    });
+  }
+
+  if (!repaired) return;
+  try {
+    require('fs').writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    console.log('pi-research: repaired pi settings — extension was disabled, re-enabled (pi auto-disables on load errors; this install fixed the underlying cause)');
+  } catch (e) {
+    console.warn(`pi-research: could not write repaired settings: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}());
