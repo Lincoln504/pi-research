@@ -65,7 +65,7 @@
     "lint": "npx eslint --config config/tooling/eslint.config.js src/",
     "lint:fix": "npx eslint --config config/tooling/eslint.config.js src/ --fix",
     "type-check": "tsc --noEmit",
-    "type-check:tests": "tsc --noEmit --project config/tsconfig.test.json",
+    "type-check:tests": "tsc --noEmit --project config/tooling/tsconfig.test.json",
     "build:worker": "esbuild src/infrastructure/browser/thread-worker.ts --bundle --platform=node --format=esm --packages=external --outfile=src/infrastructure/browser/thread-worker.mjs",
     "build:openclaw:resources": "node -e \"const fs=require('fs');const path=require('path');fs.mkdirSync('dist/prompts',{recursive:true});fs.readdirSync('src/prompts').forEach(f=>{fs.copyFileSync('src/prompts/'+f,'dist/prompts/'+f)});fs.copyFileSync('src/infrastructure/browser/thread-worker.mjs','dist/thread-worker.mjs');console.error('Openclaw resources copied to dist/')\"",
     "test": "npm run test:unit",
@@ -84,7 +84,7 @@
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",
     "install:system-deps": "node scripts/setup.cjs --system-deps",
-    "deps:check": "depcruise --config config/.dependency-cruiser.cjs --output-type err-long src",
+    "deps:check": "depcruise --config config/tooling/dependency-cruiser.cjs --output-type err-long src",
     "deps:generate": "npx --yes madge --image docs/deps.svg src/index.ts",
     "analyze:dependencies": "ncu",
     "analyze:compatibility": "depngn"
