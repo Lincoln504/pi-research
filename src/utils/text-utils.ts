@@ -174,7 +174,7 @@ export interface Citation {
  * Handles both single-line 'URL - description' and multi-line 'Source:'/'Description:' formats.
  */
 export function parseCitations(report: string): Citation[] {
-  const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
+  const sectionMatch = /CITED LINKS[\s\S]*$/i.exec(report);
   if (!sectionMatch) return [];
   const section = sectionMatch[0];
 

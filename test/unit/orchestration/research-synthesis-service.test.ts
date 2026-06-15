@@ -17,7 +17,7 @@ vi.mock('../../../src/logger.ts', () => ({
 // Helper: build a report string with a CITED LINKS section parseable by parseCitations
 function reportWithCitations(urls: { url: string; desc?: string }[]): string {
   const lines = urls.map((u, i) => `[${i + 1}] ${u.url}${u.desc ? ` - ${u.desc}` : ''}`).join('\n');
-  return `Some report content.\n\n### CITED LINKS\n${lines}`;
+  return `Some report content.\n\nCITED LINKS\n${lines}`;
 }
 
 describe('ResearchSynthesisService', () => {
@@ -150,12 +150,12 @@ describe('ResearchSynthesisService', () => {
   // ─── ensureCitedLinks ────────────────────────────────────────────────────────
 
   describe('ensureCitedLinks', () => {
-    it('returns the synthesis unchanged when it already contains ### CITED LINKS', () => {
-      const input = 'Some findings.\n\n### CITED LINKS\n[1] https://example.com - desc';
+    it('returns the synthesis unchanged when no reports are stored (no-op early return)', () => {
+      const input = 'Some findings.\n\nCITED LINKS\n[1] https://example.com - desc';
       expect(service.ensureCitedLinks('test-session', input)).toBe(input);
     });
 
-    it('appends a ### CITED LINKS section built from report URLs when missing', () => {
+    it('appends a CITED LINKS section built from report URLs when missing', () => {
       service.storeReport('test-session', 
         '1.A',
         reportWithCitations([
@@ -164,7 +164,8 @@ describe('ResearchSynthesisService', () => {
         ])
       );
       const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
-      expect(result).toContain('### CITED LINKS');
+      expect(result).toContain('CITED LINKS');
+      expect(result).not.toContain('###');
       expect(result).toContain('https://example.org/page');
       expect(result).toContain('https://another.org/page');
     });
@@ -195,10 +196,10 @@ describe('ResearchSynthesisService', () => {
       const result = service.appendSteeringGuidance(input, messages);
       
       expect(result).toContain('Final report content');
-      expect(result).toContain('---');
+      expect(result).not.toContain('---');
       expect(result).toContain('The following guidance was provided by the user during the research process and influenced these results:');
-      expect(result).toContain('- focus on modern times');
-      expect(result).toContain('- ignore historical data');
+      expect(result).toContain('focus on modern times');
+      expect(result).toContain('ignore historical data');
     });
 
     it('appends guidance from SteeringMessage objects — only active messages', () => {
@@ -211,7 +212,7 @@ describe('ResearchSynthesisService', () => {
       
       expect(result).toContain('Final report content');
       expect(result).toContain('The following guidance was provided by the user during the research process and influenced these results:');
-      expect(result).toContain('- focus on active');
+      expect(result).toContain('focus on active');
       // Queued messages should NOT be in the report
       expect(result).not.toContain('still queued');
     });

@@ -16,13 +16,8 @@ export default defineConfig({
     include: ['test/unit/**/*.test.ts'],
     setupFiles: ['./test/setup/unit.ts'],
     pool: 'forks' as const,
-    // @ts-expect-error Vitest 4.x runtime supports poolOptions.forks
-    poolOptions: {
-      forks: {
-        maxForks,
-        minForks: 2,
-      },
-    },
+    maxForks,
+    minForks: 2,
     testTimeout: 30000,
     hookTimeout: 15000,
     teardownTimeout: 10000,

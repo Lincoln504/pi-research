@@ -21,7 +21,7 @@ import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-
 vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
   const actual = await importOriginal() as any;
   const mockResponse = {
-    content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\n### CITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
+    content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\nCITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
     usage: { totalTokens: 100, cost: { total: 0.01 } },
   };
   return {

@@ -54,6 +54,38 @@ describe('Embedder Concurrency & Lifecycle', () => {
     expect((embedder as any).pipeline).toBeNull();
   });
 
+  it('activeEmbeddings counter increments during embed and decrements on completion', async () => {
+    const embedder = new Embedder({ model: 'test-model', device: 'cpu' });
+    await embedder.initialize();
+    expect((embedder as any).activeEmbeddings).toBe(0);
+
+    // Block the embed so we can inspect activeEmbeddings while it's in flight
+    let resolveEmbed!: (v: any) => void;
+    const blocked = new Promise(resolve => { resolveEmbed = resolve; });
+    const mockPipeline = (embedder as any).pipeline as ReturnType<typeof vi.fn>;
+    mockPipeline.mockImplementationOnce(async () => {
+      await blocked;
+      return { dims: [384], data: new Float32Array(384).fill(0.1) };
+    });
+
+    const embedPromise = embedder.embed('hello world');
+    // Yield to let the embed start processing
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // While blocked: counter must be at least 1 (FIX #17 guard)
+    expect((embedder as any).activeEmbeddings).toBeGreaterThanOrEqual(1);
+
+    // Complete the embed
+    resolveEmbed({ dims: [384], data: new Float32Array(384).fill(0.1) });
+    await embedPromise;
+
+    // After completion: counter must return to 0
+    expect((embedder as any).activeEmbeddings).toBe(0);
+
+    await embedder.dispose();
+  });
+
   it('collapses concurrent initialize() calls into a single pipeline construction', async () => {
     const embedder = new Embedder({
       model: 'test-model',

@@ -71,21 +71,17 @@ Write your report immediately after scraping is complete or if "Budget Reached".
 
 ## Report Format
 
-Use [N] inline citations throughout. The full CITED LINKS list goes at the very end.
+Use [N] inline citations throughout. Write in plain prose — no markdown headings, no bullet points, no bold or italic text. Use clear paragraphs separated by blank lines. The full CITED LINKS list goes at the very end.
 
-```markdown
-## [Topic Title]
+[Topic Title]
 
-### Executive Summary
-[Comprehensive overview of ALL key findings]
+[Comprehensive overview of ALL key findings, written as full paragraphs.]
 
-### Findings
+[Theme or area name]
 
-#### [Theme or Area]
-- **[Specific Finding]**: [Full detailed explanation with all specifics — dates, names, numbers, quotes, context] [N]
+[Specific finding with all specifics — dates, names, numbers, quotes, full context.] [N] Continue in prose. Additional facts and detail here. [N]
 
-### CITED LINKS
+CITED LINKS
 [1] https://example.com
 Source: Scrape
 Description: Covers the v4.2 release of LibX...
-```

@@ -49,10 +49,10 @@ export async function setupLifecycle(): Promise<TestContext> {
     return createUninitializedContext(logger);
   }
 
-  // ISOLATION: Create unique directories for this test file
-  const testId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const testStateDir = pathmod.join(os.tmpdir(), `pi-test-state-${testId}`);
-  const testKnowledgeDir = pathmod.join(os.tmpdir(), `pi-test-knowledge-${testId}`);
+  // ISOLATION: Create unique directories for this test file (mkdtempSync gives
+  // a cryptographically random suffix, avoiding predictable tmp-path attacks).
+  const testStateDir = fsmod.mkdtempSync(pathmod.join(os.tmpdir(), 'pi-test-state-'));
+  const testKnowledgeDir = fsmod.mkdtempSync(pathmod.join(os.tmpdir(), 'pi-test-knowledge-'));
 
   process.env['PI_RESEARCH_STATE_DIR'] = testStateDir;
   process.env['PI_RESEARCH_KNOWLEDGE_DIR'] = testKnowledgeDir;

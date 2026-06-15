@@ -67,6 +67,78 @@ describe('KnowledgeStore Error Recovery', () => {
     await storeWithReconnect.close();
   });
 
+  it('deleteByUrl retry loop retries on "Version mismatch" and succeeds', async () => {
+    await store.addDocuments([{ url: 'https://delete-retry.com', text: 'to be deleted', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+    const db = (store as any).db;
+    const originalOpenTable = db.openTable.bind(db);
+    let deleteCalls = 0;
+
+    vi.spyOn(db, 'openTable').mockImplementation(async (...args: unknown[]) => {
+      const table = await originalOpenTable(args[0] as string);
+      const originalDelete = table.delete.bind(table);
+      table.delete = vi.fn().mockImplementation(async (filter: string) => {
+        deleteCalls++;
+        if (deleteCalls === 1) throw new Error('Version mismatch: concurrent writer');
+        return originalDelete(filter);
+      });
+      return table;
+    });
+
+    await store.deleteByUrl('https://delete-retry.com');
+    expect(deleteCalls).toBe(2);
+    const remaining = await store.findByUrl('https://delete-retry.com');
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('deleteByUrl throws after exceeding MAX_RETRIES on persistent contention', async () => {
+    await store.addDocuments([{ url: 'https://always-fails.com', text: 'doc', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+    const db = (store as any).db;
+    const originalOpenTable = db.openTable.bind(db);
+
+    vi.spyOn(db, 'openTable').mockImplementation(async (...args: unknown[]) => {
+      const table = await originalOpenTable(args[0] as string);
+      table.delete = vi.fn().mockRejectedValue(new Error('Version mismatch: always'));
+      return table;
+    });
+
+    await expect(store.deleteByUrl('https://always-fails.com')).rejects.toThrow('Version mismatch: always');
+  });
+
+  it('countScoped isolates local vs global document counts', async () => {
+    // Two separate stores: one local, one global
+    const localDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-scope-local-'));
+    const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-scope-global-'));
+
+    const localStore = new KnowledgeStore({ knowledgeMode: 'project', dbDir: localDir, embedder: mockEmbedder, modelName: 'Xenova/all-MiniLM-L6-v2' });
+    const globalStore = new KnowledgeStore({ knowledgeMode: 'global', dbDir: globalDir, embedder: mockEmbedder, modelName: 'Xenova/all-MiniLM-L6-v2' });
+
+    try {
+      await localStore.initialize();
+      await globalStore.initialize();
+
+      await localStore.addDocuments([{ url: 'https://local.example.com/1', text: 'local doc', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+      await globalStore.addDocuments([{ url: 'https://global.example.com/1', text: 'global doc', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+      await globalStore.addDocuments([{ url: 'https://global.example.com/2', text: 'global doc 2', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);
+
+      const localCounts = await localStore.countScoped();
+      const globalCounts = await globalStore.countScoped();
+
+      // Local store: 1 local doc, no global docs (different DB dir)
+      expect(localCounts.local).toBe(1);
+      expect(localCounts.global).toBe(0);
+
+      // Global store: 0 local docs (global mode stores as global), 2 global docs
+      expect(globalCounts.global).toBe(2);
+    } finally {
+      await localStore.close();
+      await globalStore.close();
+      fs.rmSync(localDir, { recursive: true, force: true });
+      fs.rmSync(globalDir, { recursive: true, force: true });
+    }
+  });
+
   it('write contention retry loop retries on "Version mismatch"', async () => {
     // 1. First doc to create table
     await store.addDocuments([{ url: 'https://init.com', text: 'init', metadata: { ingestionType: 'synthesis-description' }, timestamp: Date.now() }]);

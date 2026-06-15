@@ -5,8 +5,8 @@ describe('citation-utils', () => {
   describe('normalizeCitations', () => {
     it('should normalize citations across multiple reports and deduplicate URLs', () => {
       const reports = new Map([
-        ['res1', 'Findings in report 1 [1].\n\n### CITED LINKS\n[1] https://example.com — Source A'],
-        ['res2', 'Findings in report 2 [1] and [2].\n\n### CITED LINKS\n[1] https://example.com — Source A\n[2] https://google.com — Search engine']
+        ['res1', 'Findings in report 1 [1].\n\nCITED LINKS\n[1] https://example.com — Source A'],
+        ['res2', 'Findings in report 2 [1] and [2].\n\nCITED LINKS\n[1] https://example.com — Source A\n[2] https://google.com — Search engine']
       ]);
 
       const { normalizedReports, globalCitations } = normalizeCitations(reports);
@@ -21,18 +21,18 @@ describe('citation-utils', () => {
       // Verify report 1 normalization
       const norm1 = normalizedReports.get('res1');
       expect(norm1).toContain('Findings in report 1 [1].');
-      expect(norm1).not.toContain('### CITED LINKS');
+      expect(norm1).not.toContain('CITED LINKS');
 
       // Verify report 2 normalization
       const norm2 = normalizedReports.get('res2');
       expect(norm2).toContain('Findings in report 2 [1] and [2].');
-      expect(norm2).not.toContain('### CITED LINKS');
+      expect(norm2).not.toContain('CITED LINKS');
     });
 
     it('should handle different local IDs for the same URL', () => {
       const reports = new Map([
-        ['res1', 'Info [1].\n\n### CITED LINKS\n[1] https://common.com — Common'],
-        ['res2', 'Info [2].\n\n### CITED LINKS\n[1] https://other.com — Other\n[2] https://common.com — Common']
+        ['res1', 'Info [1].\n\nCITED LINKS\n[1] https://common.com — Common'],
+        ['res2', 'Info [2].\n\nCITED LINKS\n[1] https://other.com — Other\n[2] https://common.com — Common']
       ]);
 
       const { normalizedReports, globalCitations } = normalizeCitations(reports);
@@ -58,7 +58,7 @@ describe('citation-utils', () => {
 
     it('should handle [N][M] combinations', () => {
       const reports = new Map([
-        ['res1', 'Multi-cite [1][2].\n\n### CITED LINKS\n[1] https://a.com\n[2] https://b.com']
+        ['res1', 'Multi-cite [1][2].\n\nCITED LINKS\n[1] https://a.com\n[2] https://b.com']
       ]);
 
       const { normalizedReports } = normalizeCitations(reports);
@@ -67,8 +67,8 @@ describe('citation-utils', () => {
 
     it('should handle URL normalization variations', () => {
       const reports = new Map([
-        ['res1', 'Link [1].\n\n### CITED LINKS\n[1] https://example.com/'],
-        ['res2', 'Link [1].\n\n### CITED LINKS\n[1] https://example.com']
+        ['res1', 'Link [1].\n\nCITED LINKS\n[1] https://example.com/'],
+        ['res2', 'Link [1].\n\nCITED LINKS\n[1] https://example.com']
       ]);
 
       const { globalCitations } = normalizeCitations(reports);
@@ -85,7 +85,8 @@ describe('citation-utils', () => {
       ];
 
       const formatted = formatCitedLinks(citations);
-      expect(formatted).toContain('### CITED LINKS');
+      expect(formatted).toContain('CITED LINKS');
+      expect(formatted).not.toContain('###');
       expect(formatted).toContain('[1] https://a.com [Source: Src A] — Desc A');
       expect(formatted).toContain('[2] https://b.com — Desc B');
     });

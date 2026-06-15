@@ -31,14 +31,14 @@ const STUB_MODEL: Model<any> = {
 vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
   const actual = await importOriginal() as any;
   const synthResponse = {
-    content: [{ type: 'text', text: 'Mock synthesis result.\n\n### CITED LINKS\n\n1. https://example.com/sdk-test' }],
+    content: [{ type: 'text', text: 'Mock synthesis result.\n\nCITED LINKS\n\n1. https://example.com/sdk-test' }],
     usage: { totalTokens: 50, cost: { total: 0.001 } },
     stopReason: 'stop',
   };
   const planResponse = {
     content: [{
       type: 'text',
-      text: '```json\n{"action":"synthesize","content":"Mock deep research result for sdk-lifecycle test.\\n\\n### CITED LINKS\\n\\n1. https://example.com/sdk-lifecycle","researchers":[],"allQueries":[]}\n```',
+      text: '```json\n{"action":"synthesize","content":"Mock deep research result for sdk-lifecycle test.\\n\\nCITED LINKS\\n\\n1. https://example.com/sdk-lifecycle","researchers":[],"allQueries":[]}\n```',
     }],
     usage: { totalTokens: 50, cost: { total: 0.001 } },
     stopReason: 'stop',

@@ -2059,7 +2059,7 @@ function normalizeWorkspacePath(wsPath) {
   return resolved.endsWith(path5.sep) && resolved.length > 1 ? resolved.slice(0, -1) : resolved;
 }
 function parseCitations(report) {
-  const sectionMatch = /###\s*CITED LINKS[\s\S]*$/i.exec(report);
+  const sectionMatch = /CITED LINKS[\s\S]*$/i.exec(report);
   if (!sectionMatch) return [];
   const section = sectionMatch[0];
   const citations = [];
@@ -16390,7 +16390,7 @@ function normalizeCitations(reports) {
         localToGlobal.set(index + 1, globalId);
       }
     });
-    const parts = report.split(/###\s*CITED LINKS/i);
+    const parts = report.split(/CITED LINKS\b/i);
     let content = parts[0] || "";
     content = content.replace(/\[(\d+)\]/g, (match, p1) => {
       const localId = parseInt(p1, 10);
@@ -16408,7 +16408,7 @@ function formatCitedLinks(citations) {
     const descPart = cit.description ? ` \u2014 ${cit.description}` : "";
     return `[${cit.id}] ${cit.url}${sourcePart}${descPart}`;
   });
-  return `### CITED LINKS
+  return `CITED LINKS
 ${links.join("\n")}`;
 }
 
@@ -16502,18 +16502,18 @@ var ResearchSynthesisService = class _ResearchSynthesisService {
     const reports = this.getSessionReports(sessionId);
     const reportCount = reports.size;
     const roundInfo = currentRound > 0 ? ` (up to Round ${currentRound})` : "";
-    let synthesis = `# Research Findings${roundInfo}
+    let synthesis = `Research Findings${roundInfo}
 
 `;
     if (reportCount === 0) {
-      synthesis += "_No researcher reports were generated before the process stopped._";
+      synthesis += "No researcher reports were generated before the process stopped.";
     } else {
-      synthesis += `*This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.*
+      synthesis += `This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.
 
 `;
-      synthesis += Array.from(reports.entries()).map(([id, report]) => `## Researcher ${id}
+      synthesis += Array.from(reports.entries()).map(([id, report]) => `Researcher ${id}
 
-${report}`).join("\n\n---\n\n");
+${report}`).join("\n\n");
     }
     return synthesis;
   }
@@ -16521,16 +16521,12 @@ ${report}`).join("\n\n---\n\n");
    * Append research metadata (model used) to the end of the synthesis
    */
   appendMetadata(synthesis, modelId) {
-    const metadataSection = [
-      "---",
-      `*Research performed using ${modelId}*`
-    ].join("\n");
     return `${synthesis.trim()}
 
-${metadataSection}`;
+Research performed using ${modelId}`;
   }
   /**
-   * Ensure the synthesis has an accurate and consistent ### CITED LINKS section.
+   * Ensure the synthesis has an accurate and consistent CITED LINKS section.
    * Rebuilds the section from all researcher reports to guarantee sequential numbering [1], [2], [3]...
    * and unique URLs, regardless of what the LLM produced.
    * 
@@ -16544,9 +16540,9 @@ ${metadataSection}`;
     const { globalCitations } = normalizeCitations(reports);
     if (globalCitations.length === 0) return synthesis;
     const verifiedLinksSection = formatCitedLinks(globalCitations);
-    if (/###\s*CITED LINKS/i.test(synthesis)) {
+    if (/CITED LINKS/i.test(synthesis)) {
       logger.debug("[ResearchSynthesisService] Replacing existing CITED LINKS with verified version");
-      return synthesis.replace(/###\s*CITED LINKS[\s\S]*$/i, verifiedLinksSection);
+      return synthesis.replace(/CITED LINKS[\s\S]*$/i, verifiedLinksSection);
     }
     logger.warn("[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version");
     return `${synthesis.trim()}
@@ -16580,9 +16576,9 @@ ${verifiedLinksSection}`;
       return synthesis;
     }
     const guidanceSection = [
-      "---",
       "The following guidance was provided by the user during the research process and influenced these results:",
-      ...texts.map((m) => `- ${m}`)
+      "",
+      ...texts
     ].join("\n");
     return `${synthesis.trim()}
 

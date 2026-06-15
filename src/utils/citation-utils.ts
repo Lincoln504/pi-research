@@ -56,7 +56,7 @@ export function normalizeCitations(reports: Map<string, string>): {
     });
 
     // Remove the CITED LINKS section
-    const parts = report.split(/###\s*CITED LINKS/i);
+    const parts = report.split(/CITED LINKS\b/i);
     let content = parts[0] || '';
 
     // Replace [N] with [GlobalID]
@@ -85,5 +85,5 @@ export function formatCitedLinks(citations: GlobalCitation[]): string {
     return `[${cit.id}] ${cit.url}${sourcePart}${descPart}`;
   });
 
-  return `### CITED LINKS\n${links.join('\n')}`;
+  return `CITED LINKS\n${links.join('\n')}`;
 }

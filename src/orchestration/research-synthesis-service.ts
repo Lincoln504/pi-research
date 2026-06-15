@@ -121,15 +121,15 @@ export class ResearchSynthesisService implements IService {
     const reports = this.getSessionReports(sessionId);
     const reportCount = reports.size;
     const roundInfo = currentRound > 0 ? ` (up to Round ${currentRound})` : '';
-    let synthesis = `# Research Findings${roundInfo}\n\n`;
+    let synthesis = `Research Findings${roundInfo}\n\n`;
 
     if (reportCount === 0) {
-      synthesis += '_No researcher reports were generated before the process stopped._';
+      synthesis += 'No researcher reports were generated before the process stopped.';
     } else {
-      synthesis += `*This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.*\n\n`;
+      synthesis += `This is an automated synthesis of ${reportCount} individual researcher report(s) gathered before the process was interrupted.\n\n`;
       synthesis += Array.from(reports.entries())
-        .map(([id, report]) => `## Researcher ${id}\n\n${report}`)
-        .join('\n\n---\n\n');
+        .map(([id, report]) => `Researcher ${id}\n\n${report}`)
+        .join('\n\n');
     }
 
     return synthesis;
@@ -139,16 +139,11 @@ export class ResearchSynthesisService implements IService {
    * Append research metadata (model used) to the end of the synthesis
    */
   appendMetadata(synthesis: string, modelId: string): string {
-    const metadataSection = [
-      '---',
-      `*Research performed using ${modelId}*`,
-    ].join('\n');
-
-    return `${synthesis.trim()}\n\n${metadataSection}`;
+    return `${synthesis.trim()}\n\nResearch performed using ${modelId}`;
   }
 
   /**
-   * Ensure the synthesis has an accurate and consistent ### CITED LINKS section.
+   * Ensure the synthesis has an accurate and consistent CITED LINKS section.
    * Rebuilds the section from all researcher reports to guarantee sequential numbering [1], [2], [3]...
    * and unique URLs, regardless of what the LLM produced.
    * 
@@ -166,10 +161,10 @@ export class ResearchSynthesisService implements IService {
 
     const verifiedLinksSection = formatCitedLinks(globalCitations);
 
-    // If the synthesis already has a CITED LINKS section, replace it
-    if (/###\s*CITED LINKS/i.test(synthesis)) {
+    // If the synthesis already has a CITED LINKS section, replace it with the verified version
+    if (/CITED LINKS/i.test(synthesis)) {
       logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
-      return synthesis.replace(/###\s*CITED LINKS[\s\S]*$/i, verifiedLinksSection);
+      return synthesis.replace(/CITED LINKS[\s\S]*$/i, verifiedLinksSection);
     }
 
     logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
@@ -210,9 +205,9 @@ export class ResearchSynthesisService implements IService {
     }
 
     const guidanceSection = [
-      '---',
       'The following guidance was provided by the user during the research process and influenced these results:',
-      ...texts.map(m => `- ${m}`),
+      '',
+      ...texts,
     ].join('\n');
 
     return `${synthesis.trim()}\n\n${guidanceSection}`;

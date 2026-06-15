@@ -172,7 +172,7 @@ describe('text-utils', () => {
     });
 
     it('parses inline format [N] URL — description', () => {
-      const report = `### CITED LINKS\n[1] https://example.com — A great source\n`;
+      const report = `CITED LINKS\n[1] https://example.com — A great source\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -180,7 +180,7 @@ describe('text-utils', () => {
     });
 
     it('parses multi-line Description: format', () => {
-      const report = `### CITED LINKS\n[1] https://example.com\nDescription: Detailed description here\n`;
+      const report = `CITED LINKS\n[1] https://example.com\nDescription: Detailed description here\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -188,7 +188,7 @@ describe('text-utils', () => {
     });
 
     it('parses URL with no description', () => {
-      const report = `### CITED LINKS\n[1] https://example.com\n`;
+      const report = `CITED LINKS\n[1] https://example.com\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -197,7 +197,7 @@ describe('text-utils', () => {
 
     it('parses multiple citations', () => {
       const report = [
-        '### CITED LINKS',
+        'CITED LINKS',
         '[1] https://example.com — First source',
         '[2] https://other.org — Second source',
       ].join('\n');
@@ -208,13 +208,13 @@ describe('text-utils', () => {
     });
 
     it('strips trailing punctuation from URL', () => {
-      const report = `### CITED LINKS\n[1] https://example.com.\n`;
+      const report = `CITED LINKS\n[1] https://example.com.\n`;
       const result = parseCitations(report);
       expect(result[0]!.url).toBe('https://example.com');
     });
 
     it('parses bold **[N]** format', () => {
-      const report = `### CITED LINKS\n**[1]** https://example.com — Bold citation\n`;
+      const report = `CITED LINKS\n**[1]** https://example.com — Bold citation\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -222,7 +222,7 @@ describe('text-utils', () => {
     });
 
     it('parses numbered list N. format', () => {
-      const report = `### CITED LINKS\n1. https://example.com — N. format citation\n`;
+      const report = `CITED LINKS\n1. https://example.com — N. format citation\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -230,7 +230,7 @@ describe('text-utils', () => {
     });
 
     it('parses numbered list **N.** format', () => {
-      const report = `### CITED LINKS\n**1.** https://example.com\nDescription: Bold N. format citation\n`;
+      const report = `CITED LINKS\n**1.** https://example.com\nDescription: Bold N. format citation\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://example.com');
@@ -238,14 +238,14 @@ describe('text-utils', () => {
     });
 
     it('skips entries without a valid http URL', () => {
-      const report = `### CITED LINKS\n[1] not-a-url\n[2] https://valid.com — Valid\n`;
+      const report = `CITED LINKS\n[1] not-a-url\n[2] https://valid.com — Valid\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
       expect(result[0]!.url).toBe('https://valid.com');
     });
 
     it('is case-insensitive for section header', () => {
-      const report = `### cited links\n[1] https://example.com — Found\n`;
+      const report = `cited links\n[1] https://example.com — Found\n`;
       const result = parseCitations(report);
       expect(result).toHaveLength(1);
     });

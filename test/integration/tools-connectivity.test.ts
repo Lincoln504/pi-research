@@ -111,16 +111,16 @@ describe('Search and Scrape Tools Connectivity', () => {
     });
   });
 
-  describe('Scrape Tool - Basic Functionality', () => {
-    const createScrapeToolInstance = (tracker: ToolUsageTracker) => {
-      return createScrapeTool({
-        ctx: mockExtensionCtx as any,
-        tracker,
-        getGlobalState: () => ({ researchId: 'test-research' } as any),
-        updateGlobalLinks: () => {}
-      });
-    };
+  const createScrapeToolInstance = (tracker: ToolUsageTracker) => {
+    return createScrapeTool({
+      ctx: mockExtensionCtx as any,
+      tracker,
+      getGlobalState: () => ({ researchId: 'test-research' } as any),
+      updateGlobalLinks: () => {}
+    });
+  };
 
+  describe('Scrape Tool - Basic Functionality', () => {
     it('should scrape Wikipedia successfully with substantial content', async (ctx) => {
       if (testContext.skipTests()) return ctx.skip();
       
@@ -150,6 +150,7 @@ describe('Search and Scrape Tools Connectivity', () => {
         expect(text).toMatch(/^#+\s/m);
       }
     });
+  });
 
   describe('Scrape Tool - Error Scenarios', () => {
     it('should handle invalid URL gracefully', async (ctx) => {
@@ -391,6 +392,5 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result2).toBeDefined();
       expect(result2.content).toBeDefined();
     });
-  });
   });
 });

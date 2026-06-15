@@ -44,7 +44,7 @@ Use unique, targeted queries for any new researchers.
 ```json
 { 
   "action": "synthesize", 
-  "content": "<Full Markdown Report body with [N] citations, followed by the mandatory ### CITED LINKS section>" 
+  "content": "<Plain prose report with [N] citations, organized by topic. No markdown headings, bullets, or bold text. Followed by the mandatory CITED LINKS section.>" 
 }
 ```
 
@@ -92,12 +92,12 @@ When delegating, ensure:
 5. **Strict Grounding**: Every sentence must come from a report. Use [N] inline citations. No prior knowledge.
 6. **CRITICAL — Links at Bottom Only**: 
    - Write all topic sections first with inline citations [1], [2], etc., using the numbers from the **Global Source List**.
-   - Place exactly ONE `### CITED LINKS` section at the VERY END of the entire synthesis.
+   - Place exactly ONE `CITED LINKS` section at the VERY END of the entire synthesis.
    - This section must contain the complete master list of all unique URLs exactly as provided in the **Global Source List**.
    - Do NOT include any links within topic sections or subsections.
    - Format: `[1] https://url.com [Source: ...] — brief description` on each line.
 
-> **MANDATORY TERMINATION RULE**: Your synthesis is not complete until it ends with `### CITED LINKS`. Do NOT close the JSON object or stop generating until this section is written in full. A synthesis without `### CITED LINKS` is a failed output.
+> **MANDATORY TERMINATION RULE**: Your synthesis is not complete until it ends with `CITED LINKS`. Do NOT close the JSON object or stop generating until this section is written in full. A synthesis without `CITED LINKS` is a failed output.
 
 ---
 
@@ -106,5 +106,5 @@ When delegating, ensure:
 - **Researcher IDs**: Use Round.Index format (e.g. **{{round_number}}.1**, **{{round_number}}.2**).
 - **Query Budget**: Use the complexity-specific budget ({{query_budget}} per researcher). Fill each researcher's query budget completely.
 - **Team Size**: Scale researcher count to match the gaps. Use up to {{max_team_size}} researchers when delegating, but a single well-targeted researcher is often sufficient for focused gaps. Don't pad the team when fewer researchers will cover the remaining gaps efficiently.
-- **Synthesis Quality**: Logical topic-based structure, maximal detail, NO mention of researchers.
+- **Synthesis Quality**: Logical topic-based structure in plain prose, maximal detail, NO mention of researchers, NO markdown headings or bullets.
 - **Format**: ONLY return valid JSON in a code block.

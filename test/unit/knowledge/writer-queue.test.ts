@@ -158,6 +158,74 @@ describe('WriterQueue', () => {
     expect(mockStore.addDocuments).toHaveBeenCalledTimes(2);
   });
 
+  it('drops item and logs error on ENOSPC without crashing the queue', async () => {
+    // ENOSPC must not propagate to the caller; remaining items must still process
+    mockStore.addDocuments
+      .mockRejectedValueOnce(Object.assign(new Error('No space left on device'), { code: 'ENOSPC' }))
+      .mockResolvedValue(undefined);
+
+    queue.enqueue({ url: 'https://test.com/full-disk', markdown: 'doc1', metadata: { ingestionType: 'synthesis-description' } });
+    queue.enqueue({ url: 'https://test.com/after', markdown: 'doc2', metadata: { ingestionType: 'synthesis-description' } });
+    await queue.drain();
+
+    // Second item must still be processed despite first failing with ENOSPC
+    expect(mockStore.addDocuments).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on ECONNREFUSED before dropping the item', async () => {
+    vi.useFakeTimers();
+
+    let callCount = 0;
+    mockStore.addDocuments.mockImplementation(async () => {
+      callCount++;
+      // First two calls (original + retry) throw ECONNREFUSED; third succeeds
+      if (callCount <= 2) throw new Error('ECONNREFUSED connect to 127.0.0.1:8080');
+    });
+
+    queue.enqueue({ url: 'https://test.com/retry', markdown: 'retried doc', metadata: { ingestionType: 'synthesis-description' } });
+
+    // Start processing
+    const drainP = queue.drain();
+    // Allow the first ECONNREFUSED to be thrown and the 2s retry timer to be registered
+    await vi.runAllTimersAsync();
+    await drainP;
+
+    // addDocuments called at least twice (original attempt + one retry)
+    expect(mockStore.addDocuments.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    vi.useRealTimers();
+  });
+
+  it('serializes concurrent ingests of the same URL via per-URL lock', async () => {
+    const order: string[] = [];
+    let unblockFirst: () => void;
+    const firstBlocked = new Promise<void>(resolve => { unblockFirst = resolve; });
+
+    mockStore.addDocuments.mockImplementationOnce(async () => {
+      order.push('first-start');
+      await firstBlocked;
+      order.push('first-end');
+    });
+    mockStore.addDocuments.mockImplementationOnce(async () => {
+      order.push('second-start');
+    });
+
+    // Queue both items for the same URL
+    queue.enqueue({ url: 'https://same.com/url', markdown: 'first version', metadata: { ingestionType: 'synthesis-description' } });
+    queue.enqueue({ url: 'https://same.com/url', markdown: 'second version', metadata: { ingestionType: 'synthesis-description' } });
+
+    // Let first item begin processing (it will block)
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Unblock the first item
+    unblockFirst!();
+    await queue.drain();
+
+    // Both ran; first must complete entirely before second starts
+    expect(order).toEqual(['first-start', 'first-end', 'second-start']);
+  });
+
   it('should delete same-type rows and re-add when hash differs', async () => {
     const differentHash = createHash('sha256').update('different').digest('hex');
     vi.mocked(mockStore.findByUrl).mockResolvedValueOnce([{

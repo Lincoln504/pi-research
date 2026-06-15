@@ -43,7 +43,8 @@ describe('Error Recovery and Resilience', () => {
 
   beforeAll(async () => {
     testContext = await setupLifecycle();
-    testDbDir = path.join(os.tmpdir(), `pi-error-recovery-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    const fsSync = await import('node:fs');
+    testDbDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'pi-error-recovery-'));
   }, 30000);
 
   beforeEach(() => {

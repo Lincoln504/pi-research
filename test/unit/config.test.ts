@@ -301,6 +301,31 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
+    it('should clamp SCRAPE_TIMEOUT_MS to maximum (120000) when above range', () => {
+      const config = createConfig({ PI_RESEARCH_SCRAPE_TIMEOUT_MS: '999999' }, {});
+      expect(config.SCRAPE_TIMEOUT_MS).toBe(120000);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('should clamp WORKER_CONCURRENCY to maximum (10) when above range', () => {
+      const config = createConfig({ PI_RESEARCH_WORKER_CONCURRENCY: '999' }, {});
+      expect(config.WORKER_CONCURRENCY).toBe(10);
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('throws on invalid KNOWLEDGE_STORE_MODE value (must be none|project|global)', () => {
+      const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'invalid-mode' }, {});
+      expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
+    });
+
+    it('should accept valid MIGRATION_STRATEGY values', () => {
+      for (const strategy of ['drop', 're-embed', 'backup'] as const) {
+        const config = createConfig({ PI_RESEARCH_MIGRATION_STRATEGY: strategy }, {});
+        expect(() => validateConfig(config)).not.toThrow();
+        expect(config.MIGRATION_STRATEGY).toBe(strategy);
+      }
+    });
+
     it('should clamp HEALTH_CHECK_TIMEOUT_MS to minimum (2000) when below range', () => {
       const config = createConfig({ PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS: '1000' }, {});
       expect(config.HEALTH_CHECK_TIMEOUT_MS).toBe(2000);
