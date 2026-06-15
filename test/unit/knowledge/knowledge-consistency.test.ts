@@ -7,12 +7,10 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 describe('Knowledge Store & URL Consistency Integration', () => {
-  const testDbDir = path.join(os.tmpdir(), `pi-test-db-${Date.now()}`);
-  
+  let testDbDir: string;
+
   beforeEach(() => {
-    if (fs.existsSync(testDbDir)) {
-      fs.rmSync(testDbDir, { recursive: true, force: true });
-    }
+    testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-test-db-'));
   });
 
   afterEach(() => {

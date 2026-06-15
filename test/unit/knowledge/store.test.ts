@@ -18,7 +18,7 @@ describe('KnowledgeStore', () => {
   let testDbDir: string;
 
   beforeEach(async () => {
-    testDbDir = path.join(os.tmpdir(), `pi-research-test-${Date.now()}`);
+    testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-test-'));
     store = new KnowledgeStore({
       dbDir: testDbDir,
       embedder: mockEmbedder,

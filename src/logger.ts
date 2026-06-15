@@ -141,7 +141,7 @@ export class Logger implements ILogger {
       // characters (newlines, CR) so untrusted content cannot forge or corrupt
       // a raw console log line (log-injection defense — the JSON file sink
       // escapes these on its own).
-      const msg = neutralizeControlChars(message);
+      const msg = neutralizeControlChars(message).replace(/[\r\n]/g, ' ');
       const prefix = this.sessionId ? `[${this.sessionId}] ` : '';
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }

@@ -171,9 +171,10 @@ describe('Research Tool - Report Summaries', () => {
     expect(text).not.toMatch(/\d+%/);
     // No table formatting
     expect(text).not.toContain('|');
-    // No scrape-internal breakdown
-    expect(text).not.toContain('via fetch');
-    expect(text).not.toContain('via browser');
+    // Scrape tier breakdown (fetch=1, browser=1 in mock)
+    expect(text).toContain('1 fetch');
+    expect(text).toContain('1 browser');
+    // Fallback count is not surfaced (internal detail)
     expect(text).not.toContain('fallback');
   });
 

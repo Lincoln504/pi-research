@@ -275,11 +275,21 @@ export function buildResearchSummary(stats: ResearchStats): string {
     workParts.push(`**${stats.searchQueries}** searches`);
   }
   if (stats.urlsAnalyzed > 0) {
+    let sourcesLabel: string;
     if (stats.urlsDiscovered > stats.urlsAnalyzed) {
-      workParts.push(`**${stats.urlsAnalyzed}** of **${stats.urlsDiscovered}** sources analyzed`);
+      sourcesLabel = `**${stats.urlsAnalyzed}** of **${stats.urlsDiscovered}** sources analyzed`;
     } else {
-      workParts.push(`**${stats.urlsAnalyzed}** sources analyzed`);
+      sourcesLabel = `**${stats.urlsAnalyzed}** sources analyzed`;
     }
+    // Show per-tier breakdown when browser fallback was used or some URLs failed
+    if (stats.browserSuccess > 0 || stats.urlsFailed > 0) {
+      const tierParts: string[] = [];
+      if (stats.fetchSuccess > 0) tierParts.push(`${stats.fetchSuccess} fetch`);
+      if (stats.browserSuccess > 0) tierParts.push(`${stats.browserSuccess} browser`);
+      if (stats.urlsFailed > 0) tierParts.push(`${stats.urlsFailed} not scraped`);
+      sourcesLabel += ` (${tierParts.join(', ')})`;
+    }
+    workParts.push(sourcesLabel);
   } else if (stats.urlsDiscovered > 0) {
     workParts.push(`**${stats.urlsDiscovered}** sources discovered`);
   }
@@ -304,9 +314,9 @@ export function buildResearchSummary(stats: ResearchStats): string {
     lines.push(resourceParts.join(' · '));
   }
 
-  // --- Errors: single sentence footnote ---
-  if (stats.urlsFailed > 0) {
-    lines.push(`*${stats.urlsFailed} source${stats.urlsFailed > 1 ? 's' : ''} couldn't be retrieved.*`);
+  // --- Footnote: errors encountered (urlsFailed already shown in tier breakdown above) ---
+  if (stats.errors > 0) {
+    lines.push(`*${stats.errors} error${stats.errors > 1 ? 's' : ''} encountered.*`);
   }
 
   return lines.join('\n');

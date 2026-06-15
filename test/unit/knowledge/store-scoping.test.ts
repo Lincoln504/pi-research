@@ -19,10 +19,7 @@ describe('KnowledgeStore Scoping', () => {
   const workspaceB = '/workspaces/project-b';
 
   beforeEach(() => {
-    testDbDir = path.join(os.tmpdir(), `pi-research-scoping-test-${Date.now()}`);
-    if (!fs.existsSync(testDbDir)) {
-      fs.mkdirSync(testDbDir, { recursive: true });
-    }
+    testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-research-scoping-test-'));
   });
 
   afterEach(async () => {

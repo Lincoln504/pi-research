@@ -10,10 +10,7 @@ describe('KnowledgeStore Error Recovery', () => {
   let mockEmbedder: any;
 
   beforeEach(async () => {
-    testDbDir = path.join(os.tmpdir(), `pi-recovery-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
-    if (!fs.existsSync(testDbDir)) {
-      fs.mkdirSync(testDbDir, { recursive: true });
-    }
+    testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-recovery-test-'));
     
     mockEmbedder = {
       getDimension: vi.fn().mockReturnValue(384),

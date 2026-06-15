@@ -28,10 +28,7 @@ describe('KnowledgeStore Migration Error Paths', () => {
   let store: KnowledgeStore;
 
   beforeEach(() => {
-    testDbDir = path.join(os.tmpdir(), `pi-migration-err-test-${Date.now()}`);
-    if (!fs.existsSync(testDbDir)) {
-      fs.mkdirSync(testDbDir, { recursive: true });
-    }
+    testDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-migration-err-test-'));
   });
 
   afterEach(async () => {
