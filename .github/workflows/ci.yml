@@ -147,6 +147,10 @@ jobs:
   unit-test:
     needs: [lint, type-check]
     runs-on: ubuntu-latest
+    # Bound the job: a synchronous infinite loop in a test blocks vitest's own
+    # testTimeout (the timer never fires), so without this a hang would run for
+    # the 6h GitHub default. The suite finishes in well under a minute.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

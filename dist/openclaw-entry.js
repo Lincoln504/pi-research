@@ -6830,7 +6830,9 @@ function normalizeUrl(url) {
     parsed.hash = "";
     parsed.searchParams.sort();
     while (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
-      parsed.pathname = parsed.pathname.slice(0, -1);
+      const trimmed = parsed.pathname.slice(0, -1);
+      parsed.pathname = trimmed;
+      if (parsed.pathname !== trimmed) break;
     }
     let result = parsed.toString();
     if (result.endsWith("/")) {

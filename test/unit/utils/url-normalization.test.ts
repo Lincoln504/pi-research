@@ -59,6 +59,24 @@ describe('shared-links normalization', () => {
         }
       }
     });
+
+    it('terminates on non-special-scheme URLs with an opaque trailing-slash path', () => {
+      // Regression: "www.x.org9f:" parses as a NON-special scheme, so both the
+      // protocol force (https) and the pathname assignment in normalizeUrl are
+      // silently ignored by the WHATWG URL setters. The trailing-slash strip
+      // loop used to spin forever on the opaque path, blocking the event loop
+      // (and even vitest's own test timeout). These must return promptly.
+      const opaquePathUrls = [
+        "www.site43.org9f:,'ip762*')-o1/?1f9)ueo]xr3bf0=@*a]?&6k+v).#",
+        'foo.bar:baz/',
+        'a.b.c:/x///',
+        'scheme.with.dots:opaque/path/',
+      ];
+      for (const u of opaquePathUrls) {
+        expect(() => normalizeUrl(u)).not.toThrow();
+        expect(typeof normalizeUrl(u)).toBe('string');
+      }
+    });
   });
 
   describe('deduplication with normalization', () => {

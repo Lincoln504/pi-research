@@ -54,7 +54,13 @@ export function normalizeUrl(url: string): string {
     
     // 7. Strip trailing slashes from pathname (URL forces / for root, so we keep length > 1)
     while (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
-      parsed.pathname = parsed.pathname.slice(0, -1);
+      const trimmed = parsed.pathname.slice(0, -1);
+      parsed.pathname = trimmed;
+      // Non-special-scheme URLs (e.g. "foo.bar:baz/") carry an opaque path whose
+      // setter silently ignores assignment. Without this guard the loop would
+      // spin forever on such input — a synchronous infinite loop that even
+      // blocks vitest's own test timeout. Bail the instant a write doesn't take.
+      if (parsed.pathname !== trimmed) break;
     }
     
     let result = parsed.toString();
