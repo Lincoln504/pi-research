@@ -94,12 +94,15 @@ describe('browser-config', () => {
     describe('resolveHeadlessMode', () => {
         const savedDisplay = process.env['DISPLAY'];
         const savedWayland = process.env['WAYLAND_DISPLAY'];
+        const savedUseXvfb = process.env['PI_RESEARCH_USE_XVFB'];
 
         afterEach(() => {
             if (savedDisplay === undefined) delete process.env['DISPLAY'];
             else process.env['DISPLAY'] = savedDisplay;
             if (savedWayland === undefined) delete process.env['WAYLAND_DISPLAY'];
             else process.env['WAYLAND_DISPLAY'] = savedWayland;
+            if (savedUseXvfb === undefined) delete process.env['PI_RESEARCH_USE_XVFB'];
+            else process.env['PI_RESEARCH_USE_XVFB'] = savedUseXvfb;
         });
 
         it('returns true on macOS — native headless works', () => {
@@ -135,10 +138,19 @@ describe('browser-config', () => {
             expect(resolveHeadlessMode()).toBe(true);
         });
 
-        it('returns "virtual" on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY)', () => {
+        it('returns true on Linux TTY by default (no DISPLAY/WAYLAND) — true headless needs no Xvfb', () => {
             osMock.current = 'linux';
             delete process.env['DISPLAY'];
             delete process.env['WAYLAND_DISPLAY'];
+            delete process.env['PI_RESEARCH_USE_XVFB'];
+            expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns "virtual" on Linux TTY only with the PI_RESEARCH_USE_XVFB=true opt-in', () => {
+            osMock.current = 'linux';
+            delete process.env['DISPLAY'];
+            delete process.env['WAYLAND_DISPLAY'];
+            process.env['PI_RESEARCH_USE_XVFB'] = 'true';
             expect(resolveHeadlessMode()).toBe('virtual');
         });
     });

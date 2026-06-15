@@ -171,7 +171,37 @@ export function createResearchTool(): ToolDefinition {
       let observer: any;
       let observerState: any;
       let panelState: any;
-      let cleanup: () => Promise<void>;
+      // Assigned only after the TUI panel and observers are wired up. A failure
+      // before that point (e.g. the pre-run health check) leaves it undefined,
+      // so teardownUi() guards before calling it.
+      let cleanup: (() => Promise<void>) | undefined;
+
+      // Single idempotent UI teardown. Runs on every exit path — including a
+      // failure that happens before the inner research loop begins (model
+      // resolution, health check, observer setup) — so the on-screen research
+      // panel is never orphaned empty. The inner finally and the outer finally
+      // both call this; the guard makes the second call a no-op.
+      let uiTornDown = false;
+      const teardownUi = async (): Promise<void> => {
+        if (uiTornDown) return;
+        uiTornDown = true;
+
+        if (healthMonitorInstance) {
+          try { healthMonitorInstance.stop(); } catch (e) { logger.error('[research] Health monitor stop failed:', e); }
+        }
+        if (observerState && panelState) {
+          try { stopObserverWaveAnimation(observerState, panelState); } catch (e) { logger.error('[research] Stop wave animation failed:', e); }
+        }
+        try { clearSteeringMessages(piSessionId); } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
+        if (cleanup) {
+          try { await cleanup(); } catch (cleanupError) { logger.error('[research] Cleanup failed:', cleanupError); }
+        }
+        // Disposes the master TUI widget — this is what removes the panel from
+        // the screen. Must always run or the empty panel leaks.
+        if (tuiManager) {
+          try { tuiManager.dispose(); } catch (disposeError) { logger.error('[research] TUI dispose failed:', disposeError); }
+        }
+      };
 
       if (!query && (!initialLinks || initialLinks.length === 0)) {
         return { content: [{ type: 'text', text: 'Error: Research query or initialLinks are required' }], details: {} };
@@ -321,31 +351,7 @@ export function createResearchTool(): ToolDefinition {
               }
               throw error;
             } finally {
-              if (healthMonitorInstance) {
-                healthMonitorInstance.stop();
-              }
-
-              // Stop wave animation unconditionally
-              if (observerState && panelState) stopObserverWaveAnimation(observerState, panelState);
-
-              // Clear steering messages when the research run ends
-              clearSteeringMessages(piSessionId);
-
-              // Run cleanup
-              try {
-                await cleanup();
-              } catch (cleanupError) {
-                logger.error('[research] Cleanup failed:', cleanupError);
-              }
-
-              // Dispose TUI manager
-              try {
-                if (tuiManager) {
-                  tuiManager.dispose();
-                }
-              } catch (disposeError) {
-                logger.error('[research] TUI dispose failed:', disposeError);
-              }
+              await teardownUi();
             }
           }));
           return researchRunResult;
@@ -403,6 +409,11 @@ export function createResearchTool(): ToolDefinition {
 
         logger.error('[research] run failed', error);
         return { content: [{ type: 'text', text: `Research failed: ${String(error)}` }], details: {} };
+      } finally {
+        // Guarantees panel teardown even when the run fails before the inner
+        // research loop is reached (e.g. health-check failure), where the inner
+        // finally never executes. Idempotent: a no-op if teardown already ran.
+        await teardownUi();
       }
     },
   };

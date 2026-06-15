@@ -23,10 +23,10 @@ export async function checkBrowserCapability(): Promise<{ healthy: boolean; erro
   const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
                    process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
   if (isBrowserAvailable() || mockMode) {
-    // When resolveHeadlessMode() selects 'virtual', camoufox will spawn Xvfb internally.
-    // Fail early (before research starts) if Xvfb is not installed in that scenario.
-    // This fires only on Linux TTY (no DISPLAY, no WAYLAND_DISPLAY); pure Wayland and
-    // all other platforms use headless:true or headless:false and need no Xvfb.
+    // resolveHeadlessMode() selects 'virtual' (Xvfb) only under the explicit
+    // PI_RESEARCH_USE_XVFB=true opt-in on a bare Linux TTY. In that case camoufox
+    // spawns Xvfb internally, so fail early (before research starts) if it is not
+    // installed. The default path is headless:true, which needs no Xvfb.
     if (!mockMode && resolveHeadlessMode() === 'virtual') {
       try {
         execFileSync('which', ['Xvfb'], { stdio: 'ignore' });

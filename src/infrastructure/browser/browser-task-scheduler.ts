@@ -327,12 +327,20 @@ export class BrowserTaskScheduler implements IScheduler {
             this.leadershipTimer = null;
         }
 
-        const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, this.container);
-        const currentScheduler = schedulerService.getSchedulerInstance();
-        if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
-            schedulerService.setSchedulerInstance(null);
-            schedulerService.setSchedulerVersion(null);
-            schedulerService.setSchedulerInitializationPromise(null);
+        // Clear our reference from the SchedulerService so a future run gets a
+        // fresh scheduler. Skip this entirely when the container is being
+        // disposed: getService() throws during disposal, and the SchedulerService
+        // (and the whole container) is being torn down anyway, so the cleared
+        // reference would be moot. Guarding here keeps shutdown from logging a
+        // spurious "Cannot get service 'scheduler' during container disposal".
+        if (!this.container.isDisposing) {
+            const schedulerService = await getService<ISchedulerInternals>(ServiceNames.SCHEDULER, undefined, this.container);
+            const currentScheduler = schedulerService.getSchedulerInstance();
+            if (currentScheduler && 'schedulerId' in currentScheduler && currentScheduler.schedulerId === this.schedulerId) {
+                schedulerService.setSchedulerInstance(null);
+                schedulerService.setSchedulerVersion(null);
+                schedulerService.setSchedulerInitializationPromise(null);
+            }
         }
 
         let serverInfo: { port: number; pid: number; schedulerId?: string } | null = null;

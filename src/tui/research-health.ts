@@ -61,9 +61,9 @@ export function formatHealthError(raw: string): string {
   } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
     return 'Browser engine not installed. Run `npm run setup` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
-    return 'Unable to reach the web (connection timed out). Check your internet connection.';
+    return 'The browser could not load a page in time (timed out). This is usually the search engine blocking automated traffic or a slow connection — not necessarily your internet. Retry; if it persists, check your connection.';
   } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {
-    return 'Unable to reach the web (network error). Check your internet connection.';
+    return 'The browser hit a network error reaching the web. Check your internet connection.';
   } else {
     return `Browser readiness check failed. Enable debug logging (PI_RESEARCH_DEBUG=true) for details. (${raw || 'unknown error'})`;
   }

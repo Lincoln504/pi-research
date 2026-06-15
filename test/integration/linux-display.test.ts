@@ -86,6 +86,7 @@ rather than rejecting it as a bot-challenge interstitial or empty stub.</p>
 describe('Linux display-mode integration tests', () => {
   const originalDisplay = process.env['DISPLAY'];
   const originalWaylandDisplay = process.env['WAYLAND_DISPLAY'];
+  const originalUseXvfb = process.env['PI_RESEARCH_USE_XVFB'];
 
   afterEach(() => {
     // Restore display env after every test so tests don't cross-contaminate.
@@ -98,6 +99,12 @@ describe('Linux display-mode integration tests', () => {
       delete process.env['WAYLAND_DISPLAY'];
     } else {
       process.env['WAYLAND_DISPLAY'] = originalWaylandDisplay;
+    }
+    // 'virtual' (Xvfb) is now an explicit opt-in; tests that exercise it set this.
+    if (originalUseXvfb === undefined) {
+      delete process.env['PI_RESEARCH_USE_XVFB'];
+    } else {
+      process.env['PI_RESEARCH_USE_XVFB'] = originalUseXvfb;
     }
     vi.mocked(execFileSync).mockClear();
   });
@@ -112,11 +119,21 @@ describe('Linux display-mode integration tests', () => {
   // =========================================================================
 
   describe('resolveHeadlessMode() runtime transitions', () => {
-    it('returns "virtual" on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY)', (ctx) => {
+    it('returns true on Linux TTY by default (no DISPLAY/WAYLAND, no Xvfb opt-in)', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
       delete process.env['DISPLAY'];
       delete process.env['WAYLAND_DISPLAY'];
+      delete process.env['PI_RESEARCH_USE_XVFB'];
+      expect(resolveHeadlessMode()).toBe(true);
+    });
+
+    it('returns "virtual" on Linux TTY with the PI_RESEARCH_USE_XVFB=true opt-in', (ctx) => {
+      if (process.platform !== 'linux') return ctx.skip();
+
+      delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       expect(resolveHeadlessMode()).toBe('virtual');
     });
 
@@ -127,11 +144,12 @@ describe('Linux display-mode integration tests', () => {
       expect(resolveHeadlessMode()).toBe(true);
     });
 
-    it('transitions from true to "virtual" when DISPLAY is removed (TTY scenario)', (ctx) => {
+    it('transitions from true to "virtual" when DISPLAY is removed under the Xvfb opt-in', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
       // Ensure no WAYLAND_DISPLAY so the second call lands in the true TTY case.
       delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       process.env['DISPLAY'] = ':99';
       expect(resolveHeadlessMode()).toBe(true);
 
@@ -180,10 +198,12 @@ describe('Linux display-mode integration tests', () => {
       if (!xvfbInstalled()) return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
-      // Simulate a TTY: remove both DISPLAY and WAYLAND_DISPLAY so resolveHeadlessMode()
-      // returns 'virtual' (pure Wayland would return true and skip the virtual-mode path).
+      // Simulate a TTY with the Xvfb opt-in: remove both DISPLAY and WAYLAND_DISPLAY
+      // and set PI_RESEARCH_USE_XVFB so resolveHeadlessMode() returns 'virtual'
+      // (the default would be true; pure Wayland would also return true).
       delete process.env['DISPLAY'];
       delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
 
       // Confirm the resolved mode — this is what the browser worker would pass.
       expect(resolveHeadlessMode()).toBe('virtual');
@@ -228,6 +248,7 @@ describe('Linux display-mode integration tests', () => {
 
       delete process.env['DISPLAY'];
       delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       expect(resolveHeadlessMode()).toBe('virtual');
 
       const { Camoufox } = await import('camoufox-js');
@@ -293,10 +314,12 @@ describe('Linux display-mode integration tests', () => {
       if (!xvfbInstalled()) return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
-      // Simulate TTY: delete both DISPLAY and WAYLAND_DISPLAY so resolveHeadlessMode()
-      // returns 'virtual' and the healthcheck calls which-Xvfb.
+      // Simulate TTY with the Xvfb opt-in: delete both display vars and set
+      // PI_RESEARCH_USE_XVFB so resolveHeadlessMode() returns 'virtual' and the
+      // healthcheck calls which-Xvfb.
       delete process.env['DISPLAY'];
       delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       // Clear MOCK flags so isBrowserAvailable() path is taken, not the mockMode shortcut.
       const savedMockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'];
       const savedMockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'];
@@ -322,9 +345,11 @@ describe('Linux display-mode integration tests', () => {
       if (process.platform !== 'linux') return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
-      // Simulate TTY: both display vars absent so resolveHeadlessMode() returns 'virtual'.
+      // Simulate TTY with the Xvfb opt-in: both display vars absent and
+      // PI_RESEARCH_USE_XVFB set so resolveHeadlessMode() returns 'virtual'.
       delete process.env['DISPLAY'];
       delete process.env['WAYLAND_DISPLAY'];
+      process.env['PI_RESEARCH_USE_XVFB'] = 'true';
       const savedMockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'];
       const savedMockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'];
       delete process.env['PI_RESEARCH_MOCK_SEARCH'];

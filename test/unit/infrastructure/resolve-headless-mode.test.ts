@@ -12,7 +12,8 @@
  *   linux + DISPLAY    → true   (X11 or XWayland present)
  *   linux + WAYLAND_DISPLAY only → true  (pure Wayland; JS port doesn't strip WAYLAND_DISPLAY)
  *   linux + DISPLAY + WAYLAND_DISPLAY → true  (XWayland active)
- *   linux + nothing    → 'virtual'  (TTY: spawn Xvfb)
+ *   linux + nothing    → true  (TTY: true headless, renders offscreen, no Xvfb)
+ *   linux + nothing + PI_RESEARCH_USE_XVFB=true → 'virtual'  (explicit Xvfb opt-in)
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -33,6 +34,7 @@ const platformSpy = vi.mocked(nodeOs.platform);
 describe('resolveHeadlessMode() — platform and display-environment branching', () => {
   const savedDisplay = process.env['DISPLAY'];
   const savedWayland = process.env['WAYLAND_DISPLAY'];
+  const savedUseXvfb = process.env['PI_RESEARCH_USE_XVFB'];
 
   afterEach(() => {
     platformSpy.mockClear();
@@ -40,6 +42,8 @@ describe('resolveHeadlessMode() — platform and display-environment branching',
     else delete process.env['DISPLAY'];
     if (savedWayland !== undefined) process.env['WAYLAND_DISPLAY'] = savedWayland;
     else delete process.env['WAYLAND_DISPLAY'];
+    if (savedUseXvfb !== undefined) process.env['PI_RESEARCH_USE_XVFB'] = savedUseXvfb;
+    else delete process.env['PI_RESEARCH_USE_XVFB'];
   });
 
   it('returns false on Windows — headless:true crashes Firefox (camoufox-js issue #614)', () => {
@@ -76,21 +80,42 @@ describe('resolveHeadlessMode() — platform and display-environment branching',
     expect(resolveHeadlessMode()).toBe(true);
   });
 
-  it('returns "virtual" on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY)', () => {
+  it('returns true on Linux TTY by default (no DISPLAY/WAYLAND, no Xvfb opt-in) — true headless needs no Xvfb', () => {
     platformSpy.mockReturnValueOnce('linux');
     delete process.env['DISPLAY'];
     delete process.env['WAYLAND_DISPLAY'];
+    delete process.env['PI_RESEARCH_USE_XVFB'];
+    expect(resolveHeadlessMode()).toBe(true);
+  });
+
+  it('returns "virtual" on Linux TTY only when PI_RESEARCH_USE_XVFB=true (explicit Xvfb opt-in)', () => {
+    platformSpy.mockReturnValueOnce('linux');
+    delete process.env['DISPLAY'];
+    delete process.env['WAYLAND_DISPLAY'];
+    process.env['PI_RESEARCH_USE_XVFB'] = 'true';
     expect(resolveHeadlessMode()).toBe('virtual');
+  });
+
+  it('Xvfb opt-in is ignored when a real display is present (DISPLAY wins → true)', () => {
+    platformSpy.mockReturnValueOnce('linux');
+    process.env['DISPLAY'] = ':0';
+    delete process.env['WAYLAND_DISPLAY'];
+    process.env['PI_RESEARCH_USE_XVFB'] = 'true';
+    expect(resolveHeadlessMode()).toBe(true);
   });
 
   it('is not cached — reads process.env on every call', () => {
     platformSpy.mockReturnValue('linux');
+    delete process.env['PI_RESEARCH_USE_XVFB'];
 
     process.env['DISPLAY'] = ':99';
     delete process.env['WAYLAND_DISPLAY'];
     expect(resolveHeadlessMode()).toBe(true);
 
     delete process.env['DISPLAY'];
+    expect(resolveHeadlessMode()).toBe(true);
+
+    process.env['PI_RESEARCH_USE_XVFB'] = 'true';
     expect(resolveHeadlessMode()).toBe('virtual');
 
     process.env['WAYLAND_DISPLAY'] = 'wayland-0';

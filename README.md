@@ -114,7 +114,7 @@ Full variable reference: [docs/SDK.md](docs/SDK.md).
 
 ```bash
 npm run test:unit         # 1200 unit tests, no browser required
-npm run test:integration  # requires camoufox + Xvfb on Linux
+npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
 npm run type-check        # TypeScript strict mode
 npm run lint              # ESLint
 npm run deps:check        # architectural rule enforcement

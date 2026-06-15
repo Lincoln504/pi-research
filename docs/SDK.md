@@ -56,6 +56,7 @@ Settings are loaded with the following precedence:
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | 0–1000 | TUI refresh debounce interval |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max context fraction for initial scrape |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape (for planning) |
+| `PI_RESEARCH_USE_XVFB` | _(unset)_ | `true` | Linux only. On a bare TTY (no DISPLAY/Wayland) the browser runs true-headless and needs no Xvfb. Set `true` to opt into Xvfb (`headless:'virtual'`) for a real virtual framebuffer — requires `sudo apt install xvfb`. |
 
 ### API Keys
 

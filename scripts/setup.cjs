@@ -121,8 +121,9 @@ if (existsSync(cachePath)) {
   console.warn(`pi-research: camoufox binary not found at expected path ${cachePath}`);
 }
 
-// On Linux without a display server, Xvfb is required for browser automation.
-// Print a one-time hint so new installs on TTY/Wayland machines know what to do.
-if (isLinux && !process.env.DISPLAY) {
-  console.log('pi-research: No display server detected (DISPLAY not set). For headless use on TTY or Wayland, install Xvfb: sudo apt install xvfb');
+// On Linux without a display server the browser runs true-headless (renders
+// offscreen, no Xvfb required) — nothing to install. Xvfb is only needed if you
+// opt into the virtual-framebuffer mode with PI_RESEARCH_USE_XVFB=true.
+if (isLinux && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+  console.log('pi-research: No display server detected — the browser will run headless (no Xvfb needed). To opt into Xvfb virtual-display mode, set PI_RESEARCH_USE_XVFB=true and install it: sudo apt install xvfb');
 }
