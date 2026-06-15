@@ -39,6 +39,7 @@ import {
 } from './utils/metrics-summary.ts';
 import { logger } from './logger.ts';
 import { formatTimeAgo, formatDuration } from './utils/text-utils.ts';
+import { buildDefaultDebugLogPath } from './utils/log-utils.ts';
 import * as path from 'node:path';
 
 // ============================================================================
@@ -161,7 +162,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     {
       id: 'DEBUG',
       label: 'Debug Logging',
-      description: 'Write verbose diagnostics to /tmp/pi-research.log for troubleshooting.',
+      description: `Write verbose diagnostics to ${buildDefaultDebugLogPath()} for troubleshooting.`,
       currentValue: config.DEBUG ? 'true' : 'false',
       values: ['true', 'false'],
     },

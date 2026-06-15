@@ -146,11 +146,23 @@ jobs:
 
   unit-test:
     needs: [lint, type-check]
-    runs-on: ubuntu-latest
+    # Cross-platform matrix: the unit suite must pass on the three OSes the tool
+    # supports. fail-fast:false keeps each leg independent so a regression on one
+    # platform never masks the others' results.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Skip the browser download during `npm ci` postinstall — unit tests mock the
+    # browser layer and never launch Camoufox.
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     # Bound the job: a synchronous infinite loop in a test blocks vitest's own
     # testTimeout (the timer never fires), so without this a hang would run for
-    # the 6h GitHub default. The suite finishes in well under a minute.
-    timeout-minutes: 10
+    # the 6h GitHub default. Windows/macOS runners are slower than Linux, so the
+    # bound is generous relative to the sub-minute Linux runtime.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -160,11 +172,20 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
+          # runner.os is part of the key: node_modules holds platform-specific
+          # native binaries, so each OS gets its own cache entry.
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
-      - name: Install ripgrep
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get install -y ripgrep
+      - name: Install ripgrep (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ripgrep
+      - name: Install ripgrep (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y
       - run: npm run test:unit
 
   integration-test:

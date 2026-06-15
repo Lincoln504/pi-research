@@ -1,0 +1,24 @@
+# Normalize line endings to LF in the repository and working tree on all
+# platforms. Without this, a Windows checkout (core.autocrlf=true) rewrites
+# text files to CRLF, which corrupts exact-string test fixtures and makes the
+# dist freshness/`git diff --exit-code` checks fail on Windows runners.
+* text=auto eol=lf
+
+# Explicit text types (defensive; covered by the wildcard above).
+*.ts   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.svg  text eol=lf
+
+# Binary assets — never normalize or diff as text.
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.ico  binary
+*.gif  binary
+*.woff binary
+*.woff2 binary
