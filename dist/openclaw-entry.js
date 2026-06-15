@@ -265,6 +265,23 @@ function formatArg(arg) {
   }
   return String(arg);
 }
+var MAX_LOG_MESSAGE_LENGTH = 1e4;
+var ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
+var URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+var SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+var KNOWN_TOKEN_PATTERN = /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+var CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
+function redactSecrets(message) {
+  let out = message.length > MAX_LOG_MESSAGE_LENGTH ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}\u2026[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]` : message;
+  out = out.replace(ANSI_PATTERN, "");
+  out = out.replace(URL_CREDENTIALS_PATTERN, "$1[REDACTED]@");
+  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key, sep3) => `${key}${sep3}[REDACTED]`);
+  out = out.replace(KNOWN_TOKEN_PATTERN, "[REDACTED]");
+  return out;
+}
+function neutralizeControlChars(message) {
+  return message.replace(CONTROL_CHARS_PATTERN, " ");
+}
 
 // src/utils/log-rotation.ts
 import * as fs2 from "node:fs";
@@ -738,12 +755,13 @@ var Logger = class {
     this.rotation.checkAndRotate(this.logFile, this.logDir, force);
     const timestamp = (/* @__PURE__ */ new Date()).toISOString();
     const firstError = args.find((arg) => arg instanceof Error);
+    const message = redactSecrets(args.map(formatArg).join(" "));
     const entry = {
       timestamp,
       level,
       ...getLogContext(),
-      message: args.map(formatArg).join(" "),
-      ...firstError ? { errorMessage: firstError.message, errorStack: firstError.stack } : {}
+      message,
+      ...firstError ? { errorMessage: redactSecrets(firstError.message), errorStack: redactSecrets(firstError.stack ?? "") } : {}
     };
     const line = `${safeJsonStringify(entry)}
 `;
@@ -754,7 +772,7 @@ var Logger = class {
     if (this.consoleLog) {
       const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
       const reset = "\x1B[0m";
-      const msg = args.map(formatArg).join(" ");
+      const msg = neutralizeControlChars(message);
       const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
@@ -6824,7 +6842,7 @@ function normalizeUrl(url) {
     return result;
   } catch (_err) {
     logger.debug(`[url-utils] normalizing unparseable URL (${url.slice(0, 200)}): ${_err instanceof Error ? _err.message : String(_err)}`);
-    let cleaned = url.trim().replace(/^[*_~`"']+/, "").replace(/[*_~`"',.)}\]]+$/, "");
+    let cleaned = url.trim().replace(/^[*_~`"']{1,20}/, "").replace(/[*_~`"',.)}\]]{1,20}$/, "");
     const hashIdx = cleaned.indexOf("#");
     if (hashIdx >= 0) cleaned = cleaned.substring(0, hashIdx);
     if (cleaned.endsWith("/") && cleaned.length > 8) {
@@ -10408,10 +10426,6 @@ function registerInfrastructureServices(container = getServiceContainer()) {
     container
   );
   logger.debug("[InfrastructureServiceInit] Infrastructure services registered");
-}
-async function shutdownInfrastructureServices(container = getServiceContainer()) {
-  logger.log("[InfrastructureServiceInit] Shutting down infrastructure services...");
-  await disposeAllServices(container);
 }
 
 // src/core/llm/research-model-resolver.ts
@@ -17283,7 +17297,6 @@ async function shutdown() {
   if (!isInitialized) return;
   try {
     await shutdownManager.runCleanup("OpenClaw shutdown");
-    await shutdownInfrastructureServices(globalContainer);
     await disposeCoreServices(globalContainer);
     await resetServiceContainer(globalContainer);
     clearAllSessionState();

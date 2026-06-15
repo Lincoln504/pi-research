@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 
 // pi-research internals
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
-import { registerInfrastructureServices, shutdownInfrastructureServices } from './infrastructure/service-initialization.ts';
+import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 import { registerOrchestrationServices } from './orchestration/service-initialization.ts';
 import { resetServiceContainer, getService, getServiceContainer } from './core/service-registry.ts';
 import type { ServiceContainer } from './core/service-registry.ts';
@@ -135,7 +135,12 @@ async function shutdown() {
   
   try {
     await shutdownManager.runCleanup('OpenClaw shutdown');
-    await shutdownInfrastructureServices(globalContainer!);
+    // disposeCoreServices clears the embedding-server state while the StateManager
+    // is still alive, then disposes EVERY registered service (infra → core →
+    // orchestration) in DAG-dependency order. Calling shutdownInfrastructureServices
+    // first would dispose the StateManager prematurely and resurrect it just to clear
+    // the embedding server, so it is intentionally omitted (both delegate to the same
+    // global disposeAllServices). resetServiceContainer then clears registrations.
     await disposeCoreServices(globalContainer!);
     await resetServiceContainer(globalContainer!);
     clearAllSessionState();

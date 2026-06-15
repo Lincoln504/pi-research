@@ -75,9 +75,12 @@ export function normalizeUrl(url: string): string {
     logger.debug(`[url-utils] normalizing unparseable URL (${url.slice(0, 200)}): ${_err instanceof Error ? _err.message : String(_err)}`);
     
     let cleaned = url.trim()
-      // Strip leading/trailing markdown and punctuation often added by LLMs
-      .replace(/^[*_~`"']+/, '')
-      .replace(/[*_~`"',.)}\]]+$/, '');
+      // Strip leading/trailing markdown and punctuation often added by LLMs.
+      // Quantifiers are bounded ({1,20}) rather than unbounded (+) to avoid a
+      // polynomial-backtracking (ReDoS) regex on unsanitized URL input; no
+      // legitimate URL carries 20+ leading/trailing punctuation characters.
+      .replace(/^[*_~`"']{1,20}/, '')
+      .replace(/[*_~`"',.)}\]]{1,20}$/, '');
     
     // Strip hash fragment (best-effort)
     const hashIdx = cleaned.indexOf('#');

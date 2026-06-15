@@ -4,7 +4,6 @@ import { Embedder } from '../../../src/knowledge/embedder.ts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
-import { logger } from '../../../src/logger.ts';
 
 // Mock Embedder
 const mockEmbedder = {

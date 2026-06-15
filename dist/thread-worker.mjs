@@ -182,11 +182,28 @@ function formatArg(arg) {
   }
   return String(arg);
 }
-var logContextStorage;
+function redactSecrets(message) {
+  let out = message.length > MAX_LOG_MESSAGE_LENGTH ? `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}\u2026[truncated ${message.length - MAX_LOG_MESSAGE_LENGTH} chars]` : message;
+  out = out.replace(ANSI_PATTERN, "");
+  out = out.replace(URL_CREDENTIALS_PATTERN, "$1[REDACTED]@");
+  out = out.replace(SENSITIVE_KV_PATTERN, (_m, key, sep) => `${key}${sep}[REDACTED]`);
+  out = out.replace(KNOWN_TOKEN_PATTERN, "[REDACTED]");
+  return out;
+}
+function neutralizeControlChars(message) {
+  return message.replace(CONTROL_CHARS_PATTERN, " ");
+}
+var logContextStorage, MAX_LOG_MESSAGE_LENGTH, ANSI_PATTERN, URL_CREDENTIALS_PATTERN, SENSITIVE_KV_PATTERN, KNOWN_TOKEN_PATTERN, CONTROL_CHARS_PATTERN;
 var init_log_utils = __esm({
   "src/utils/log-utils.ts"() {
     "use strict";
     logContextStorage = new AsyncLocalStorage2();
+    MAX_LOG_MESSAGE_LENGTH = 1e4;
+    ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]/g;
+    URL_CREDENTIALS_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s:@]+@/gi;
+    SENSITIVE_KV_PATTERN = /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|passwd|pwd|authorization|bearer)\b(["']?\s*[:=]\s*["']?)([^\s"',&)]+)/gi;
+    KNOWN_TOKEN_PATTERN = /\b(sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g;
+    CONTROL_CHARS_PATTERN = /[\x00-\x1f\x7f]/g;
   }
 });
 
@@ -717,12 +734,13 @@ var init_logger = __esm({
         this.rotation.checkAndRotate(this.logFile, this.logDir, force);
         const timestamp = (/* @__PURE__ */ new Date()).toISOString();
         const firstError = args.find((arg) => arg instanceof Error);
+        const message = redactSecrets(args.map(formatArg).join(" "));
         const entry = {
           timestamp,
           level,
           ...getLogContext(),
-          message: args.map(formatArg).join(" "),
-          ...firstError ? { errorMessage: firstError.message, errorStack: firstError.stack } : {}
+          message,
+          ...firstError ? { errorMessage: redactSecrets(firstError.message), errorStack: redactSecrets(firstError.stack ?? "") } : {}
         };
         const line = `${safeJsonStringify(entry)}
 `;
@@ -733,7 +751,7 @@ var init_logger = __esm({
         if (this.consoleLog) {
           const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
           const reset = "\x1B[0m";
-          const msg = args.map(formatArg).join(" ");
+          const msg = neutralizeControlChars(message);
           const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
           console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
         }

@@ -44,6 +44,8 @@ jobs:
           # security-and-quality includes all security-extended checks plus
           # code quality rules (dead code, common bugs, maintainability).
           queries: security-and-quality
+          # Scope analysis to source; exclude generated dist/ bundles & docs.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

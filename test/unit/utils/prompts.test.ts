@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 
 vi.mock('../../../src/logger.ts', () => ({
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
@@ -33,20 +33,6 @@ describe('utils/prompts', () => {
   });
 
   describe('loadPrompt - happy path', () => {
-    it('loads an existing prompt file successfully', async () => {
-      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-
-      // Create a test prompt file
-      const testContent = '# Test Prompt\n\nThis is a test prompt with some content.';
-      const testFile = path.join(testPromptsDir, 'test-prompt.md');
-      writeFileSync(testFile, testContent, 'utf-8');
-
-      // Temporarily override the prompts directory for this test
-      const originalLoadPrompt = await import('../../../src/core/llm/prompts.ts');
-      // Note: We can't easily override the internal path, so test with real prompts
-      // or ensure test file is in the right location
-    });
-
     it('loads the real researcher prompt file', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const content = loadPrompt('researcher');

@@ -19,6 +19,8 @@ import {
   getLogContext,
   safeJsonStringify,
   formatArg,
+  redactSecrets,
+  neutralizeControlChars,
   type LogContext,
 } from './utils/log-utils.ts';
 import { LogRotation } from './utils/log-rotation.ts';
@@ -107,13 +109,17 @@ export class Logger implements ILogger {
 
     const timestamp = new Date().toISOString();
     const firstError = args.find((arg): arg is Error => arg instanceof Error);
+    // Redact credentials and bound size before the message reaches ANY sink, so
+    // neither the log file nor the console persists clear-text secrets or
+    // unbounded network/scraped payloads.
+    const message = redactSecrets(args.map(formatArg).join(' '));
     const entry = {
       timestamp,
       level,
       ...getLogContext(),
-      message: args.map(formatArg).join(' '),
+      message,
       ...(firstError
-        ? { errorMessage: firstError.message, errorStack: firstError.stack }
+        ? { errorMessage: redactSecrets(firstError.message), errorStack: redactSecrets(firstError.stack ?? '') }
         : {}),
     };
     const line = `${safeJsonStringify(entry)}\n`;
@@ -127,11 +133,15 @@ export class Logger implements ILogger {
 
     // Optional console output
     if (this.consoleLog) {
-      const color = level === LogLevel.ERROR ? '\x1b[31m' : 
-                    level === LogLevel.WARN ? '\x1b[33m' : 
+      const color = level === LogLevel.ERROR ? '\x1b[31m' :
+                    level === LogLevel.WARN ? '\x1b[33m' :
                     level === LogLevel.DEBUG ? '\x1b[90m' : '\x1b[36m';
       const reset = '\x1b[0m';
-      const msg = args.map(formatArg).join(' ');
+      // Reuse the already-redacted message; additionally neutralize control
+      // characters (newlines, CR) so untrusted content cannot forge or corrupt
+      // a raw console log line (log-injection defense — the JSON file sink
+      // escapes these on its own).
+      const msg = neutralizeControlChars(message);
       const prefix = this.sessionId ? `[${this.sessionId}] ` : '';
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }

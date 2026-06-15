@@ -10,10 +10,9 @@ import {
   initializeCoreServices, 
   disposeCoreServices 
 } from './core/service-initialization.ts';
-import { 
-  registerInfrastructureServices, 
-  initializeInfrastructureServices,
-  shutdownInfrastructureServices
+import {
+  registerInfrastructureServices,
+  initializeInfrastructureServices
 } from './infrastructure/service-initialization.ts';
 import { 
   registerOrchestrationServices, 
@@ -417,23 +416,22 @@ export async function shutdownResearchSDK(): Promise<void> {
   }
 
   if (globalContainer) {
-    // Shutdown infra first (browser pool, embedding server, etc.)
-    try {
-      await shutdownInfrastructureServices(globalContainer);
-    } catch (err) {
-      logger.error('[SDK] Error shutting down infrastructure services:', err);
-      errors.push(err instanceof Error ? err : new Error(String(err)));
-    }
-
-    // Dispose core services (orchestrators, planning, synthesis, etc.)
+    // Dispose all services in one DAG-ordered teardown. disposeCoreServices first
+    // clears the embedding-server state while the StateManager is still alive, then
+    // disposes EVERY registered service (infra → core → orchestration) in dependency
+    // order. (shutdownInfrastructureServices and disposeCoreServices both delegate to
+    // the same global disposeAllServices, so calling infra first would dispose the
+    // StateManager prematurely and force it to be resurrected just to clear the
+    // embedding server — wasteful churn that re-creates state during teardown.)
     try {
       await disposeCoreServices(globalContainer);
     } catch (err) {
-      logger.error('[SDK] Error disposing core services:', err);
+      logger.error('[SDK] Error disposing services:', err);
       errors.push(err instanceof Error ? err : new Error(String(err)));
     }
 
-    // Reset the container (clears registrations, resets lifecycle)
+    // Reset the container (clears registrations; the internal disposeAll is a no-op
+    // here because every service was already disposed above).
     try {
       await resetServiceContainer(globalContainer);
     } catch (err) {

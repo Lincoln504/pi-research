@@ -1,0 +1,11 @@
+name: "pi-research CodeQL config"
+
+# Analyze source only. The dist/ bundles are generated build artifacts (esbuild
+# output that mirrors src/), so scanning them produces duplicate security
+# findings and spurious "syntax error" notes on minified/transpiled constructs.
+# docs/ and generated dependency graphs carry no application logic.
+paths-ignore:
+  - dist
+  - docs
+  - "**/*.min.js"
+  - "**/*.bundle.js"
