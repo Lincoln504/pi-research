@@ -2,7 +2,7 @@
 /**
  * AGGRESSIVE STRESS TEST @ 1000ms Throttle
  * 
- * Location: /home/ldeen/Documents/pi-research/testing/aggressive-stress-1000ms.mjs
+ * Location: test/stress/aggressive-stress-1000ms.mjs
  * 
  * Purpose: Push DuckDuckGo Lite to ABSOLUTE LIMIT as fast as possible
  * 
