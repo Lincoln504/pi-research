@@ -190,12 +190,24 @@ jobs:
 
   integration-test:
     needs: [lint, type-check]
-    runs-on: ubuntu-latest
+    # Cross-platform matrix: the full integration suite (including REAL Camoufox
+    # browser launches) runs on all three supported OSes. fail-fast:false keeps
+    # each leg independent. On macOS/Windows no Xvfb is needed (native display);
+    # Camoufox ships per-OS binaries that setup.cjs fetches during npm ci, and
+    # getCamoufoxBinaryPath() resolves the per-OS install dir so the browser
+    # tests actually execute there. If a binary is ever missing on a platform,
+    # isBrowserAvailable() returns false and the browser tests skip gracefully
+    # (the non-browser knowledge/state/config suites still run for real).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     # Runs the parallel and serial groups sequentially in one job to ensure
     # completeness while keeping the workflow clean.
     # 60 min: Integration tests involve real browser launches (Camoufox) and
     # complex orchestrator runs. 60 min provides plenty of headroom for
-    # sequential execution and retries.
+    # sequential execution and retries across the slower macOS/Windows runners.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -209,21 +221,33 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
-      - name: Install Firefox system dependencies
+      - name: Install Firefox system dependencies (Linux)
+        # apt-based; only needed/available on Linux. macOS/Windows ship the
+        # libraries Camoufox needs.
+        if: runner.os == 'Linux'
         run: npx playwright install-deps firefox
+      # Cache the Camoufox binary on Linux only: its install dir is well-known
+      # there (~/.cache/camoufox). On macOS/Windows the binary lives under
+      # ~/Library/Caches and %LOCALAPPDATA% respectively and is fetched fresh
+      # (setup.cjs during npm ci, plus the prefetch step below).
       - uses: actions/cache@v4
         id: cache-camoufox
+        if: runner.os == 'Linux'
         with:
           path: ~/.cache/camoufox
           key: camoufox-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Pre-fetch Camoufox binary
-        if: steps.cache-camoufox.outputs.cache-hit != 'true'
+        # Always fetch on macOS/Windows (not Linux-cached); on Linux only on a
+        # cache miss. Idempotent — skips if the binary is already present.
+        if: runner.os != 'Linux' || steps.cache-camoufox.outputs.cache-hit != 'true'
         run: npx camoufox-js fetch
-      # Firefox (even with headless:true) initialises GTK on startup, which
-      # requires a valid X11 display. Without one the browser process hangs
-      # waiting for a connection and every worker times out after 45 s.
-      # Xvfb is pre-installed on ubuntu-latest; we just need to start it.
-      - name: Start Xvfb virtual display
+      # Firefox (even with headless:true) initialises GTK on startup, which on
+      # Linux requires a valid X11 display. Without one the browser process
+      # hangs waiting for a connection and every worker times out after 45 s.
+      # Xvfb is pre-installed on ubuntu-latest. macOS/Windows runners have a
+      # native display, so this step is Linux-only.
+      - name: Start Xvfb virtual display (Linux)
+        if: runner.os == 'Linux'
         run: |
           Xvfb :99 -screen 0 1920x1080x24 -ac &
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
@@ -231,6 +255,10 @@ jobs:
           sleep 1
       - name: Verify camoufox launches
         timeout-minutes: 2
+        # shell: bash so the heredoc works on Windows (Git Bash) as well as
+        # Linux/macOS. A failure here on any OS is a real cross-platform browser
+        # regression worth surfacing (fail-fast:false isolates the leg).
+        shell: bash
         run: |
           node --input-type=module <<'NODE_EOF'
           import { Camoufox } from 'camoufox-js';
@@ -249,7 +277,9 @@ jobs:
       - name: Integration Tests (Serial Group)
         run: npm run test:integration:serial
         env:
-          PI_RESEARCH_LOG_FILE: /tmp/pi-workers-serial.log
+          # runner.temp is the portable per-OS temp dir (/tmp on Linux/macOS,
+          # a Windows path on windows-latest) — '/tmp' does not exist on Windows.
+          PI_RESEARCH_LOG_FILE: ${{ runner.temp }}/pi-workers-serial.log
           # No MOCK_SEARCH/MOCK_SCRAPE here: camoufox + Xvfb are installed above,
           # so isBrowserAvailable() returns true and browser tests actually execute.
           # Setting both mock vars triggers isFullMockMode() which causes all serial
@@ -267,8 +297,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: worker-logs-${{ github.run_id }}
-          path: /tmp/pi-workers-serial.log
+          name: worker-logs-${{ github.run_id }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/pi-workers-serial.log
           if-no-files-found: ignore
 
   dep-graph:
