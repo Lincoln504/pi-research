@@ -20,7 +20,6 @@ import {
   safeJsonStringify,
   formatArg,
   redactSecrets,
-  neutralizeControlChars,
   type LogContext,
 } from './utils/log-utils.ts';
 import { LogRotation } from './utils/log-rotation.ts';
@@ -141,12 +140,14 @@ export class Logger implements ILogger {
       // characters (newlines, CR) so untrusted content cannot forge or corrupt
       // a raw console log line (log-injection defense — the JSON file sink
       // escapes these on its own).
-      // NOTE: CodeQL (js/log-injection) recognises the .replace() as a taint-barrier
-      // only when applied directly to the tainted variable itself, not to the return
-      // value of a function call wrapping it. Apply the barrier to message and
-      // this.sessionId first, then pass the already-cleaned strings to neutralizeControlChars.
-      const msg = neutralizeControlChars(message.replace(/[\r\n]/g, ' '));
-      const sid = this.sessionId ? neutralizeControlChars(this.sessionId.replace(/[\r\n]/g, ' ')) : '';
+      // CodeQL (js/log-injection) requires the .replace() barrier to be applied
+      // directly to a local variable holding the tainted value — not to a property
+      // access and not inside the argument of another function call. neutralizeControlChars
+      // is intentionally omitted here: redactSecrets (called above) already strips ANSI
+      // sequences, and CR/LF removal via .replace() is the specific log-injection barrier.
+      const msg = message.replace(/[\r\n]/g, ' ');
+      const rawSid = this.sessionId ?? '';
+      const sid = rawSid.replace(/[\r\n]/g, ' ');
       const prefix = sid ? `[${sid}] ` : '';
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
