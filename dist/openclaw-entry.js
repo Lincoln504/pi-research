@@ -783,7 +783,8 @@ var Logger = class {
       const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
       const reset = "\x1B[0m";
       const msg = neutralizeControlChars(message).replace(/[\r\n]/g, " ");
-      const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
+      const sid = this.sessionId ? neutralizeControlChars(this.sessionId).replace(/[\r\n]/g, " ") : "";
+      const prefix = sid ? `[${sid}] ` : "";
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
   }

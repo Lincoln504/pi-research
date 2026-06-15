@@ -144,7 +144,8 @@ export class Logger implements ILogger {
       // NOTE: CodeQL recognises the .replace() as a taint-barrier only when
       // applied directly to the tainted value (msg), not on the composed line.
       const msg = neutralizeControlChars(message).replace(/[\r\n]/g, ' ');
-      const prefix = this.sessionId ? `[${this.sessionId}] ` : '';
+      const sid = this.sessionId ? neutralizeControlChars(this.sessionId).replace(/[\r\n]/g, ' ') : '';
+      const prefix = sid ? `[${sid}] ` : '';
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
   }
