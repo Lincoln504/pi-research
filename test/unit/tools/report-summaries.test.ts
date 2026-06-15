@@ -105,7 +105,7 @@ vi.mock('../../../src/utils/input-validation.ts', () => ({
   validateAndSanitizeQuery: vi.fn((q) => q),
 }));
 
-vi.mock('../../../src/orchestration/session/session-state.ts', () => ({
+vi.mock('../../../src/orchestration/session-state.ts', () => ({
   startResearchSession: vi.fn(() => 'session-123'),
   registerSessionAbort: vi.fn(),
   clearSteeringMessages: vi.fn(),

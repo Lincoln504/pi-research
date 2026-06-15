@@ -26,7 +26,7 @@ import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.t
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
-import { startResearchSession, registerSessionAbort, clearSteeringMessages } from '../orchestration/session/session-state.ts';
+import { startResearchSession, registerSessionAbort, clearSteeringMessages } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';

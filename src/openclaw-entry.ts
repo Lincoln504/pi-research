@@ -31,7 +31,7 @@ import { getConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
-import { clearAllSessionState } from './orchestration/session/session-state.ts';
+import { clearAllSessionState } from './orchestration/session-state.ts';
 
 import { definePluginEntry, buildJsonPluginConfigSchema } from 'openclaw/plugin-sdk/plugin-entry';
 

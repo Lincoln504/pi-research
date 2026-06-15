@@ -52,7 +52,7 @@ vi.mock('../../../src/orchestration/researcher-executor.ts', () => ({
   runResearcher: vi.fn(),
 }));
 
-vi.mock('../../../src/orchestration/session/session-state.ts', () => ({
+vi.mock('../../../src/orchestration/session-state.ts', () => ({
   recordResearcherFailure: vi.fn(),
   shouldStopResearch: vi.fn(() => false),
   getResearchStopMessage: vi.fn(() => 'Research stopped: 0 researcher(s) failed: '),

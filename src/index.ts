@@ -19,7 +19,7 @@ import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './core/llm/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer } from './core/service-registry.ts';

@@ -37,7 +37,7 @@ import type { Config } from '../config.ts';
 import { getConfig } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
-import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from './session/session-state.ts';
+import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from './session-state.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { QuickResearchOrchestrator } from './quick-research-orchestrator.ts';
 import { DeepResearchOrchestrator } from './deep-research-orchestrator.ts';

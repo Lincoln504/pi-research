@@ -24,7 +24,7 @@ import {
   onSessionOrderChange,
   getPiActivePanels,
   normalizeSessionId,
-} from '../orchestration/session/session-state.ts';
+} from '../orchestration/session-state.ts';
 import { initGlobalTuiController, isInteractiveTuiActive } from './tui-controller.ts';
 import type { ResearchPanelState } from './research-panel.ts';
 

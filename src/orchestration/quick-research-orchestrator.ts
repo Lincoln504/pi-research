@@ -27,7 +27,7 @@ import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
 import { runHealthCheck } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session/session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session-state.ts';
 import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
 

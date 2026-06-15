@@ -13,7 +13,7 @@ import {
   refreshAllSessions,
   getPiActivePanels,
   resetAllPiSessions
-} from '../../../src/orchestration/session/session-state.ts';
+} from '../../../src/orchestration/session-state.ts';
 import { createInitialPanelState } from '../../../src/tui/research-panel.ts';
 
 describe('Multi-Session TUI Coordination', () => {

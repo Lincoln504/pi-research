@@ -20,7 +20,7 @@ vi.mock('@earendil-works/pi-tui', () => ({
 }));
 
 // Mock session-state to return SteeringMessage objects
-vi.mock('../../../src/orchestration/session/session-state.ts', () => ({
+vi.mock('../../../src/orchestration/session-state.ts', () => ({
   getSteeringMessages: vi.fn().mockReturnValue([]),
   getAllTrackedSessions: vi.fn().mockReturnValue([]),
 }));
@@ -162,7 +162,7 @@ describe('TUI Research Panel', () => {
 
   describe('steering message rendering', () => {
     it('should render queued steering messages with QUEUED prefix', async () => {
-      const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
+      const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
       ]);
@@ -185,7 +185,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should render active steering messages with RESEARCH STEERING prefix', async () => {
-      const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
+      const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on Y', status: 'active', addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
       ]);
@@ -209,7 +209,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should show basic esc hint when no steering messages', async () => {
-      const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
+      const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([]);
 
       const state = createInitialPanelState('pi-session', 'research-id', 'query', 'model');
@@ -223,7 +223,7 @@ describe('TUI Research Panel', () => {
     });
 
     it('should not duplicate steering messages across multiple panels', async () => {
-      const { getSteeringMessages } = await import('../../../src/orchestration/session/session-state.ts');
+      const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
       vi.mocked(getSteeringMessages).mockReturnValue([
         { id: '1', text: 'Focus on X', status: 'queued', addedAt: Date.now(), consumedAt: null, poppedAt: null },
       ]);

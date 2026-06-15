@@ -385,7 +385,7 @@ export async function getResearchReports(sessionId?: string): Promise<Map<string
   return synthesis.getAllReports(sid);
 }
 
-import { clearAllSessionState } from './orchestration/session/session-state.ts';
+import { clearAllSessionState } from './orchestration/session-state.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
 
 /**

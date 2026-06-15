@@ -9,7 +9,7 @@ import { type Model } from '@earendil-works/pi-ai';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { metrics } from '../utils/metrics.ts';
-import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session/session-state.ts';
+import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session-state.ts';
 import { MAX_EXTRA_ROUNDS_WITH_STEERING } from '../constants.ts';
 import {
   getMaxRounds,

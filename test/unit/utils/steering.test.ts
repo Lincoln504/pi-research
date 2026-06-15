@@ -16,8 +16,8 @@ import {
   popQueuedMessages,
   hasQueuedSteeringMessages,
   normalizeSessionId,
-} from '../../../src/orchestration/session/session-state.ts';
-import { resetAllPiSessions } from '../../../src/orchestration/session/session-state.ts';
+} from '../../../src/orchestration/session-state.ts';
+import { resetAllPiSessions } from '../../../src/orchestration/session-state.ts';
 
 describe('Steering Messages', () => {
   const testSessionId = 'test-session-steering';

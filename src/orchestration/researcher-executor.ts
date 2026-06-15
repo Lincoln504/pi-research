@@ -20,7 +20,7 @@ import { getService, tryGetServiceContainerFromCtx } from '../core/service-regis
 import type { ResearchSessionService } from './research-session-service.ts';
 import { loadPrompt } from '../core/llm/prompts.ts';
 import { injectCurrentDate } from '../core/llm/inject-date.ts';
-import { recordResearcherFailure, getSteeringMessages } from './session/session-state.ts';
+import { recordResearcherFailure, getSteeringMessages } from './session-state.ts';
 import type { RunResearcherOptions } from './orchestration-types.ts';
 
 /**
