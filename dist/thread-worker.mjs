@@ -1141,6 +1141,10 @@ async function validateUrlForSSRF(url) {
     metrics.increment("scrape_ssrf_blocks_total", 1, { block_type: "invalid_protocol" });
     throw new Error("Only HTTP/HTTPS protocols are allowed");
   }
+  if (process.env["PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE"] === "true") {
+    const isLoopback = hostname === "localhost" || hostname.endsWith(".localhost") || /^127\./.test(hostname) || hostname === "::1" || hostname === "[::1]";
+    if (isLoopback) return;
+  }
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     metrics.increment("scrape_ssrf_blocks_total", 1, { block_type: "localhost" });
     throw new Error("Access to localhost is not allowed");

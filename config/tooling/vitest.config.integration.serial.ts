@@ -16,6 +16,7 @@ export default defineConfig({
     include: [
       'test/integration/concurrent-operations.test.ts',
       'test/integration/error-recovery.test.ts',
+      'test/integration/local-scrape.test.ts',
       'test/integration/research-workflow.test.ts',
       'test/integration/sdk-lifecycle.test.ts',
       'test/integration/shutdown-perf.test.ts',

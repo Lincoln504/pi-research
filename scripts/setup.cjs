@@ -50,8 +50,9 @@ function camoufoxCachePath() {
   if (customPath) return customPath;
 
   if (isWindows) {
-    const localAppData = process.env.LOCALAPPDATA || path.join(homedir(), 'AppData', 'Local');
-    return path.join(localAppData, 'camoufox', 'Cache');
+    // Mirror camoufox-js userCacheDir("camoufox") exactly: homedir-based with a
+    // DOUBLED "camoufox" segment. Must match src getWindowsCamoufoxDir().
+    return path.join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
   }
   if (isDarwin) return path.join(homedir(), 'Library', 'Caches', 'camoufox');
   

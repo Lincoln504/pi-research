@@ -64,6 +64,20 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
     throw new Error('Only HTTP/HTTPS protocols are allowed');
   }
 
+  // Test-only affordance: when PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE=true, permit
+  // LOOPBACK targets (127.0.0.0/8, ::1, *.localhost) so integration tests can
+  // drive the real browser + scrape pipeline against a local HTTP server with
+  // no external network dependency. Default off; never enabled in production.
+  // Deliberately scoped to loopback ONLY — link-local 169.254.0.0/16 (cloud
+  // metadata) and RFC1918 LAN ranges stay blocked even when this flag is set,
+  // so the dangerous SSRF targets remain protected.
+  if (process.env['PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE'] === 'true') {
+    const isLoopback =
+      hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      /^127\./.test(hostname) || hostname === '::1' || hostname === '[::1]';
+    if (isLoopback) return;
+  }
+
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
     metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'localhost' });
     throw new Error('Access to localhost is not allowed');

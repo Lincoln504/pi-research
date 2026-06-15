@@ -54,16 +54,21 @@ describe('browser-config', () => {
             expect(getBrowserCacheDir()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: uses LOCALAPPDATA/camoufox/Cache when set', () => {
+        it('Windows: mirrors camoufox-js userCacheDir (doubled camoufox segment, homedir-based)', () => {
             osMock.current = 'win32';
-            process.env['LOCALAPPDATA'] = join('C:', 'Users', 'test', 'AppData', 'Local');
-            expect(getBrowserCacheDir()).toBe(join(process.env['LOCALAPPDATA']!, 'camoufox', 'Cache'));
+            // camoufox-js installs to homedir()/AppData/Local/camoufox/camoufox/Cache
+            // and ignores %LOCALAPPDATA%, so detection must do the same.
+            expect(getBrowserCacheDir()).toBe(
+                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+            );
         });
 
-        it('Windows: falls back to homedir AppData when LOCALAPPDATA is unset', () => {
+        it('Windows: ignores LOCALAPPDATA (camoufox-js uses homedir, not %LOCALAPPDATA%)', () => {
             osMock.current = 'win32';
-            delete process.env['LOCALAPPDATA'];
-            expect(getBrowserCacheDir()).toBe(join(homedir(), 'AppData', 'Local', 'camoufox', 'Cache'));
+            process.env['LOCALAPPDATA'] = join('D:', 'Other', 'AppData', 'Local');
+            expect(getBrowserCacheDir()).toBe(
+                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+            );
         });
     });
 
@@ -108,16 +113,19 @@ describe('browser-config', () => {
             expect(getCamoufoxBinaryPath()).toBe(join(homedir(), 'Library', 'Caches', 'camoufox'));
         });
 
-        it('Windows: uses LOCALAPPDATA/camoufox/Cache when set', () => {
+        it('Windows: mirrors camoufox-js userCacheDir (doubled camoufox segment, homedir-based)', () => {
             osMock.current = 'win32';
-            process.env['LOCALAPPDATA'] = join('C:', 'Users', 'test', 'AppData', 'Local');
-            expect(getCamoufoxBinaryPath()).toBe(join(process.env['LOCALAPPDATA']!, 'camoufox', 'Cache'));
+            expect(getCamoufoxBinaryPath()).toBe(
+                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+            );
         });
 
-        it('Windows: falls back to homedir AppData when LOCALAPPDATA is unset', () => {
+        it('Windows: ignores LOCALAPPDATA (camoufox-js uses homedir, not %LOCALAPPDATA%)', () => {
             osMock.current = 'win32';
-            delete process.env['LOCALAPPDATA'];
-            expect(getCamoufoxBinaryPath()).toBe(join(homedir(), 'AppData', 'Local', 'camoufox', 'Cache'));
+            process.env['LOCALAPPDATA'] = join('D:', 'Other', 'AppData', 'Local');
+            expect(getCamoufoxBinaryPath()).toBe(
+                join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache')
+            );
         });
 
         it('macOS and Windows resolve to distinct paths (branch divergence)', () => {

@@ -163,7 +163,11 @@ describe('Error Recovery and Resilience', () => {
       await knowledgeStore.close();
     }, 60000);
 
-    it('should recover from write failures gracefully', async () => {
+    // chmod(0o444) only induces a write failure on POSIX — on Windows the
+    // read-only directory bit does not block writes by the DB engine, so the
+    // "failure" never occurs and the contract cannot be exercised. The recovery
+    // path is covered on Linux/macOS; skip on Windows rather than assert falsely.
+    it.skipIf(process.platform === 'win32')('should recover from write failures gracefully', async () => {
       const dbPath = path.join(testDbDir, `write-fail-${randomUUID()}`);
       const knowledgeStore = new KnowledgeStore({ knowledgeMode: "project", dbDir: dbPath, embedder, modelName });
       await knowledgeStore.open();

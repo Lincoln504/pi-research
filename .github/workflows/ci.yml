@@ -221,15 +221,21 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+        # camoufox-js's postinstall fetch queries the GitHub releases API; the
+        # token lifts the 60/hr unauthenticated limit that rate-limits shared
+        # macOS/Windows runner IPs.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Firefox system dependencies (Linux)
         # apt-based; only needed/available on Linux. macOS/Windows ship the
         # libraries Camoufox needs.
         if: runner.os == 'Linux'
         run: npx playwright install-deps firefox
       # Cache the Camoufox binary on Linux only: its install dir is well-known
-      # there (~/.cache/camoufox). On macOS/Windows the binary lives under
-      # ~/Library/Caches and %LOCALAPPDATA% respectively and is fetched fresh
-      # (setup.cjs during npm ci, plus the prefetch step below).
+      # there (~/.cache/camoufox). On macOS the binary lives under
+      # ~/Library/Caches/camoufox and on Windows under
+      # %USERPROFILE%/AppData/Local/camoufox/camoufox/Cache; both are fetched
+      # fresh (setup.cjs during npm ci, plus the prefetch step below).
       - uses: actions/cache@v4
         id: cache-camoufox
         if: runner.os == 'Linux'
@@ -241,6 +247,8 @@ jobs:
         # cache miss. Idempotent — skips if the binary is already present.
         if: runner.os != 'Linux' || steps.cache-camoufox.outputs.cache-hit != 'true'
         run: npx camoufox-js fetch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Firefox (even with headless:true) initialises GTK on startup, which on
       # Linux requires a valid X11 display. Without one the browser process
       # hangs waiting for a connection and every worker times out after 45 s.
@@ -280,6 +288,11 @@ jobs:
           # runner.temp is the portable per-OS temp dir (/tmp on Linux/macOS,
           # a Windows path on windows-latest) — '/tmp' does not exist on Windows.
           PI_RESEARCH_LOG_FILE: ${{ runner.temp }}/pi-workers-serial.log
+          # Allow the local-scrape.test.ts loopback server to be scraped by the
+          # real browser. Loopback-only; set at job scope so the worker threads
+          # (where validateUrlForSSRF runs) inherit it regardless of when the
+          # browser pool is first spawned.
+          PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE: "true"
           # No MOCK_SEARCH/MOCK_SCRAPE here: camoufox + Xvfb are installed above,
           # so isBrowserAvailable() returns true and browser tests actually execute.
           # Setting both mock vars triggers isFullMockMode() which causes all serial

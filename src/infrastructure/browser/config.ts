@@ -18,6 +18,20 @@ import { getLogger } from '../../logger.ts';
 // ============================================================================
 
 /**
+ * The directory where camoufox-js installs the browser on Windows.
+ *
+ * camoufox-js's userCacheDir("camoufox") resolves to
+ *   os.homedir()/AppData/Local/camoufox/camoufox/Cache
+ * — note the DOUBLED "camoufox" segment, and that it uses os.homedir() rather
+ * than %LOCALAPPDATA%. We must mirror it exactly, otherwise isBrowserAvailable()
+ * looks in the wrong place and every browser test silently skips on Windows
+ * even though the binary downloaded and launches fine.
+ */
+function getWindowsCamoufoxDir(): string {
+    return join(homedir(), 'AppData', 'Local', 'camoufox', 'camoufox', 'Cache');
+}
+
+/**
  * Get the camoufox binary cache directory.
  * Uses PLAYWRIGHT_BROWSERS_PATH if set, otherwise the standard user cache location
  * that camoufox uses by default (~/.cache/camoufox on Linux).
@@ -30,8 +44,7 @@ export function getBrowserCacheDir(): string {
     // Mirror getCamoufoxBinaryPath() so both functions agree on the cache location
     const osPlatform = platform();
     if (osPlatform === 'win32') {
-        const localAppData = process.env['LOCALAPPDATA'] || join(homedir(), 'AppData', 'Local');
-        return join(localAppData, 'camoufox', 'Cache');
+        return getWindowsCamoufoxDir();
     } else if (osPlatform === 'darwin') {
         return join(homedir(), 'Library', 'Caches', 'camoufox');
     } else {
@@ -100,9 +113,7 @@ export function getCamoufoxBinaryPath(): string {
     const osPlatform = platform();
 
     if (osPlatform === 'win32') {
-        const localAppData = process.env['LOCALAPPDATA'] || join(homedir(), 'AppData', 'Local');
-        // env-paths with name 'camoufox' and suffix '' produces LOCALAPPDATA/camoufox/Cache
-        return join(localAppData, 'camoufox', 'Cache');
+        return getWindowsCamoufoxDir();
     } else if (osPlatform === 'darwin') {
         return join(homedir(), 'Library', 'Caches', 'camoufox');
     } else {

@@ -3877,14 +3877,16 @@ import * as crypto2 from "node:crypto";
 import { join as join6 } from "node:path";
 import { existsSync as existsSync5, mkdirSync as mkdirSync3 } from "node:fs";
 import { platform, homedir as homedir3 } from "node:os";
+function getWindowsCamoufoxDir() {
+  return join6(homedir3(), "AppData", "Local", "camoufox", "camoufox", "Cache");
+}
 function getBrowserCacheDir() {
   if (process.env["PLAYWRIGHT_BROWSERS_PATH"]) {
     return process.env["PLAYWRIGHT_BROWSERS_PATH"];
   }
   const osPlatform = platform();
   if (osPlatform === "win32") {
-    const localAppData = process.env["LOCALAPPDATA"] || join6(homedir3(), "AppData", "Local");
-    return join6(localAppData, "camoufox", "Cache");
+    return getWindowsCamoufoxDir();
   } else if (osPlatform === "darwin") {
     return join6(homedir3(), "Library", "Caches", "camoufox");
   } else {
@@ -3927,8 +3929,7 @@ function getCamoufoxBinaryPath() {
   }
   const osPlatform = platform();
   if (osPlatform === "win32") {
-    const localAppData = process.env["LOCALAPPDATA"] || join6(homedir3(), "AppData", "Local");
-    return join6(localAppData, "camoufox", "Cache");
+    return getWindowsCamoufoxDir();
   } else if (osPlatform === "darwin") {
     return join6(homedir3(), "Library", "Caches", "camoufox");
   } else {
@@ -11420,6 +11421,10 @@ async function validateUrlForSSRF(url) {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     metrics.increment("scrape_ssrf_blocks_total", 1, { block_type: "invalid_protocol" });
     throw new Error("Only HTTP/HTTPS protocols are allowed");
+  }
+  if (process.env["PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE"] === "true") {
+    const isLoopback = hostname === "localhost" || hostname.endsWith(".localhost") || /^127\./.test(hostname) || hostname === "::1" || hostname === "[::1]";
+    if (isLoopback) return;
   }
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     metrics.increment("scrape_ssrf_blocks_total", 1, { block_type: "localhost" });
