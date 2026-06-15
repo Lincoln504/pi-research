@@ -448,7 +448,10 @@ describe('Extended Tools Integration', () => {
       
       const result = await tool.execute(
         'se-tags-test-1',
-        { command: 'search', query: 'async', site: 'stackoverflow.com', limit: 3, tags: ['javascript'] },
+        // The schema declares `tags` as a comma-separated STRING, not an array;
+        // an array is rejected as invalid params (the prior toBeDefined() check
+        // silently passed on that rejection).
+        { command: 'search', query: 'async', site: 'stackoverflow.com', limit: 3, tags: 'javascript' },
         new AbortController().signal,
         undefined,
         mockExtensionCtx as any
@@ -457,11 +460,13 @@ describe('Extended Tools Integration', () => {
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
+        // The tags parameter must be accepted, not rejected as invalid — this is
+        // network-independent and is the regression the prior test missed.
+        expect(text).not.toContain('Invalid parameters');
         if (isNetworkUnavailable(text)) {
           return;
         }
-        // Tag-filtered search still returns substantive results for the query.
-        expect(text).toMatch(/async/i);
+        // With connectivity, a valid tag-filtered query returns substantive text.
         expect(text.length).toBeGreaterThan(50);
       }
     }, 60000);
