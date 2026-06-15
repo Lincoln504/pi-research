@@ -16,6 +16,32 @@ import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISc
 import { healthRegistry as globalHealthRegistry } from './registry.ts';
 
 /**
+ * Standalone BrowserCapability check, exported so tests can call it directly
+ * without going through the full registry.
+ */
+export async function checkBrowserCapability(): Promise<{ healthy: boolean; error?: string; diagnostic?: Record<string, any> }> {
+  const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
+                   process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
+  if (isBrowserAvailable() || mockMode) {
+    // On Linux without a display server, camoufox uses Xvfb for the virtual framebuffer.
+    // Fail early (before research starts) if Xvfb is missing in that scenario.
+    if (!mockMode && process.platform === 'linux' && !process.env['DISPLAY']) {
+      try {
+        execFileSync('which', ['Xvfb'], { stdio: 'ignore' });
+      } catch {
+        return {
+          healthy: false,
+          error: 'No display server found on Linux (DISPLAY not set) and Xvfb is not installed. Run: sudo apt install xvfb',
+        };
+      }
+    }
+    return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
+  } else {
+    return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
+  }
+}
+
+/**
  * Register all health checks with a registry
  */
 export function registerHealthChecks(registry: IHealthRegistryService, container: ServiceContainer = getServiceContainer()): void {
@@ -23,27 +49,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   const healthTimeoutMs = config.HEALTH_CHECK_TIMEOUT_MS;
 
   // Register Browser Capability Check
-  registry.register('BrowserCapability', async () => {
-    const mockMode = process.env['PI_RESEARCH_MOCK_SEARCH'] === 'true' &&
-                     process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-    if (isBrowserAvailable() || mockMode) {
-      // On Linux without a display server, camoufox uses Xvfb for the virtual framebuffer.
-      // Fail early (before research starts) if Xvfb is missing in that scenario.
-      if (!mockMode && process.platform === 'linux' && !process.env['DISPLAY']) {
-        try {
-          execFileSync('which', ['Xvfb'], { stdio: 'ignore' });
-        } catch {
-          return {
-            healthy: false,
-            error: 'No display server found on Linux (DISPLAY not set) and Xvfb is not installed. Run: sudo apt install xvfb',
-          };
-        }
-      }
-      return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
-    } else {
-      return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
-    }
-  }, { timeoutMs: healthTimeoutMs, critical: true });
+  registry.register('BrowserCapability', checkBrowserCapability, { timeoutMs: healthTimeoutMs, critical: true });
 
   // Register Browser Runtime Check
   registry.register('BrowserRuntime', async (options) => {

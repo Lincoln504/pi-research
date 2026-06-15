@@ -55,7 +55,7 @@ export async function ensureFunctionalHealth(
 /**
  * Format health check error into user-friendly message
  */
-function formatHealthError(raw: string): string {
+export function formatHealthError(raw: string): string {
   if (raw.includes('Xvfb') || raw.includes('xvfb') || raw.includes('virtual display') || raw.includes('display server') || raw.includes('DISPLAY not set')) {
     return 'No display server found on Linux. Install Xvfb for TTY/Wayland use: sudo apt install xvfb';
   } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {

@@ -270,7 +270,7 @@ jobs:
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
           # Give Xvfb a moment to be ready before the browser workers start
           sleep 1
-      - name: Verify camoufox launches
+      - name: Verify camoufox launches (headless:true)
         timeout-minutes: 2
         # shell: bash so the heredoc works on Windows (Git Bash) as well as
         # Linux/macOS. A failure here on any OS is a real cross-platform browser
@@ -281,7 +281,25 @@ jobs:
           import { Camoufox } from 'camoufox-js';
           const b = await Camoufox({ headless: true });
           await b.close();
-          console.log('camoufox launch OK');
+          console.log('camoufox headless:true OK');
+          NODE_EOF
+      - name: Verify camoufox launches (headless:virtual — no DISPLAY, Linux only)
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        # Exercises the headless:'virtual' code path that the regular integration
+        # tests always bypass because DISPLAY=:99 is set earlier in this job.
+        # Here we explicitly unset DISPLAY before launching so camoufox spawns
+        # its own Xvfb. If camoufox-js or Xvfb regressions break this path,
+        # this step catches it before the integration suite even runs.
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE_EOF'
+          import { Camoufox } from 'camoufox-js';
+          delete process.env['DISPLAY'];
+          const b = await Camoufox({ headless: 'virtual' });
+          // headless:'virtual' browser.close() is synchronous (returns void).
+          b.close();
+          console.log('camoufox headless:virtual OK');
           NODE_EOF
       - name: Build worker bundle
         run: npm run build:worker

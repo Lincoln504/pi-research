@@ -147,8 +147,10 @@ export async function initBrowser(): Promise<void> {
       }
     } catch (e: unknown) {
       // Close any partially-launched browser to avoid orphaning the process.
+      // Promise.resolve() wraps the call safely: in headless:'virtual' mode,
+      // camoufox-js browser.close() is synchronous (returns void), not a Promise.
       if (browser && typeof browser.close === 'function') {
-        browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during failed init: ${err.message}`));
+        Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during failed init: ${err.message}`));
       }
       browser = null;
       context = null;
@@ -195,8 +197,8 @@ export function getContext(): any {
  * Reset browser and context (used after crashes)
  */
 export function resetBrowser(): void {
-  if (context) context.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during reset: ${err.message}`));
-  if (browser) browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during reset: ${err.message}`));
+  if (context) Promise.resolve(context.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during reset: ${err.message}`));
+  if (browser) Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during reset: ${err.message}`));
   context = null;
   browser = null;
 }
@@ -208,8 +210,8 @@ export async function cleanupBrowser(): Promise<void> {
   const timeoutMs = 2000;
   
   const cleanup = async () => {
-    if (context) await context.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during cleanup: ${err.message}`));
-    if (browser) await browser.close().catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during cleanup: ${err.message}`));
+    if (context) await Promise.resolve(context.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed context close error during cleanup: ${err.message}`));
+    if (browser) await Promise.resolve(browser.close()).catch((err: Error) => logToDebugFile('DEBUG', `[Worker-${workerId}] Swallowed browser close error during cleanup: ${err.message}`));
   };
 
   try {
