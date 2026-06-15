@@ -782,9 +782,9 @@ var Logger = class {
     if (this.consoleLog) {
       const color = level === "ERROR" /* ERROR */ ? "\x1B[31m" : level === "WARN" /* WARN */ ? "\x1B[33m" : level === "DEBUG" /* DEBUG */ ? "\x1B[90m" : "\x1B[36m";
       const reset = "\x1B[0m";
-      const msg = neutralizeControlChars(message).replace(/[\r\n]/g, " ");
       const prefix = this.sessionId ? `[${this.sessionId}] ` : "";
-      console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
+      const line2 = `${color}${timestamp} ${level} ${prefix}${reset}${neutralizeControlChars(message)}`;
+      console.log(line2.replace(/[\r\n]/g, " "));
     }
   }
   async runCapturingStderr(task) {
