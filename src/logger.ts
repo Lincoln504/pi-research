@@ -136,18 +136,14 @@ export class Logger implements ILogger {
                     level === LogLevel.WARN ? '\x1b[33m' :
                     level === LogLevel.DEBUG ? '\x1b[90m' : '\x1b[36m';
       const reset = '\x1b[0m';
-      // Reuse the already-redacted message; additionally neutralize control
-      // characters (newlines, CR) so untrusted content cannot forge or corrupt
-      // a raw console log line (log-injection defense — the JSON file sink
-      // escapes these on its own).
-      // CodeQL (js/log-injection) requires the .replace() barrier to be applied
-      // directly to a local variable holding the tainted value — not to a property
-      // access and not inside the argument of another function call. neutralizeControlChars
-      // is intentionally omitted here: redactSecrets (called above) already strips ANSI
-      // sequences, and CR/LF removal via .replace() is the specific log-injection barrier.
-      const msg = message.replace(/[\r\n]/g, ' ');
+      // Reuse the already-redacted message; additionally strip CR/LF so untrusted
+      // content cannot forge log lines (log-injection defense). The JSON file sink
+      // escapes control chars on its own. CodeQL (js/log-injection) StringReplaceSanitizer
+      // requires the replacement to be "" (empty string) — not ' ' — per its QL definition:
+      //   replaces(s, "") and s.regexpMatch("\\n")
+      const msg = message.replace(/[\r\n]/g, '');
       const rawSid = this.sessionId ?? '';
-      const sid = rawSid.replace(/[\r\n]/g, ' ');
+      const sid = rawSid.replace(/[\r\n]/g, '');
       const prefix = sid ? `[${sid}] ` : '';
       console.log(`${color}${timestamp} ${level} ${prefix}${reset}${msg}`);
     }
