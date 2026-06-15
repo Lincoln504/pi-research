@@ -68,18 +68,18 @@ describe('utils/prompts', () => {
       expect(content).toBe('');
     });
 
-    it('handles empty prompt name', async () => {
+    it('returns empty string for an empty prompt name', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      const content = loadPrompt('');
-      expect(typeof content).toBe('string');
-      // Empty string should result in empty content or error
+      // No "<dir>/.md" file exists, so every candidate misses and we get ''.
+      expect(loadPrompt('')).toBe('');
     });
 
-    it('handles special characters in prompt name', async () => {
+    it('returns empty string for a path-traversal prompt name (no file escape)', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      const content = loadPrompt('../etc/passwd');
-      // Should handle path traversal attempts safely
-      expect(typeof content).toBe('string');
+      // '../etc/passwd' resolves outside the prompts dir; with the appended
+      // .md suffix it matches nothing, so loadPrompt must yield '' rather than
+      // leaking any file contents.
+      expect(loadPrompt('../etc/passwd')).toBe('');
     });
 
     it('handles null/undefined prompt name gracefully', async () => {

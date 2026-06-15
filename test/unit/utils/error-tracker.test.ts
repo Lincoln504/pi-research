@@ -19,22 +19,18 @@ describe('ErrorTracker', () => {
     expect(report.byType.get('HTTP 403')).toBe(1);
   });
 
-  it('should REPRODUCE: errors by domain should not exceed total errors', () => {
-    // Track one specific error signature multiple times
-    // This signature will have multiple contexts (last 10)
+  it('counts per-domain errors without exceeding the total', () => {
     const errorMessage = 'Fetch blocked: Cloudflare challenge';
-    
-    // Simulate 5 errors for the same domain
+
+    // Five errors for the same domain and error signature.
     for (let i = 0; i < 5; i++) {
       tracker.trackError(errorMessage, { domain: 'example.com' });
     }
 
     const report = tracker.getReport();
     expect(report.totalErrors).toBe(5);
-    
-    const domainCount = report.byDomain.get('example.com');
-    // If fixed, it should be 5.
-    expect(domainCount).toBe(5);
+    // The per-domain tally must equal the total, not the capped context list.
+    expect(report.byDomain.get('example.com')).toBe(5);
   });
 
   it('should handle multiple domains for the same error pattern', () => {
