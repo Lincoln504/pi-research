@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Embedder } from '../../../src/knowledge/embedder.ts';
+import { pipeline } from '@huggingface/transformers';
 
 // Mock dependencies
 vi.mock('@huggingface/transformers', () => {
@@ -53,19 +54,28 @@ describe('Embedder Concurrency & Lifecycle', () => {
     expect((embedder as any).pipeline).toBeNull();
   });
 
-  it('should prevent concurrent initialize calls from creating multiple pipelines', async () => {
+  it('collapses concurrent initialize() calls into a single pipeline construction', async () => {
     const embedder = new Embedder({
       model: 'test-model',
       device: 'cpu'
     });
+    vi.mocked(pipeline).mockClear();
 
-    const init1 = embedder.initialize();
-    const init2 = embedder.initialize();
-
-    await Promise.all([init1, init2]);
+    await Promise.all([
+      embedder.initialize(),
+      embedder.initialize(),
+      embedder.initialize(),
+    ]);
 
     expect((embedder as any).state).toBe('ready');
-    // We mock pipeline in vitest setup usually, but we verified the logic
-    // through code inspection that initializingPromise is shared.
+    // The shared initializingPromise must collapse N concurrent calls into one
+    // underlying pipeline construction — this is the property the test asserts.
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+
+    // Re-initializing an already-ready embedder must not rebuild the pipeline.
+    await embedder.initialize();
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(1);
+
+    await embedder.dispose();
   });
 });

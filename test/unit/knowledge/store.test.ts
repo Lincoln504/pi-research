@@ -98,6 +98,39 @@ describe('KnowledgeStore', () => {
     expect(mockEmbedder.embedMany).toHaveBeenCalledOnce();
   });
 
+  it('exportForWeb writes only synthesis-description rows in the compact web format', async () => {
+    await store.open();
+    await store.addDocuments([
+      {
+        url: 'https://example.com/summary',
+        text: 'A concise synthesis of the page',
+        metadata: { ingestionType: 'synthesis-description', description: 'short summary' },
+        timestamp: 1700000000000,
+      },
+      {
+        url: 'https://example.com/raw',
+        text: 'raw scraped chunk',
+        content: 'full page body',
+        metadata: { ingestionType: 'scraped-verified' },
+        timestamp: 1700000001000,
+      },
+    ]);
+
+    const outPath = path.join(testDbDir, 'export', 'web.json');
+    await store.exportForWeb(outPath);
+
+    const exported = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as Array<Record<string, any>>;
+    // The non-synthesis (scraped) row is excluded; only the description is exported.
+    expect(exported).toHaveLength(1);
+    const entry = exported[0]!;
+    expect(entry['url']).toBe('https://example.com/summary');
+    expect(entry['text']).toBe('A concise synthesis of the page');
+    expect(Array.isArray(entry['v'])).toBe(true);
+    expect(entry['v']).toHaveLength(384);
+    expect(entry['m'].d).toBe('short summary');
+    expect(entry['m'].t).toBe(1700000000000);
+  });
+
   it('findByUrl returns only documents for the exact URL', async () => {
     await store.open();
     await store.addDocuments([

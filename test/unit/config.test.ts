@@ -119,6 +119,64 @@ describe('config (refactored)', () => {
   });
 
   describe('createConfig', () => {
+    describe('environment precedence and side-effects', () => {
+      it('lets processEnv override the .env-file layer (the two-arg contract)', () => {
+        // 200000 and 400000 are both within the [180000, 1800000] clamp range,
+        // so this isolates precedence, not clamping.
+        const config = createConfig(
+          { PI_RESEARCH_TIMEOUT_MS: '200000' },
+          { PI_RESEARCH_TIMEOUT_MS: '400000' },
+        );
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(400000);
+      });
+
+      it('uses the .env-file value when processEnv does not set the key', () => {
+        const config = createConfig({ PI_RESEARCH_TIMEOUT_MS: '200000' }, {});
+        expect(config.RESEARCHER_TIMEOUT_MS).toBe(200000);
+      });
+
+      it('syncs processEnv.PI_RESEARCH_DEBUG from config.DEBUG when it is unset', () => {
+        const processEnv: Record<string, string | undefined> = {};
+        const config = createConfig({ PI_RESEARCH_DEBUG: 'true' }, processEnv);
+        expect(config.DEBUG).toBe(true);
+        // The side-effect lets isVerboseFromEnv() (which reads the env var) see
+        // a TUI-configured debug flag without a circular import.
+        expect(processEnv['PI_RESEARCH_DEBUG']).toBe('true');
+      });
+
+      it('does not overwrite an already-set processEnv.PI_RESEARCH_DEBUG', () => {
+        const processEnv: Record<string, string | undefined> = { PI_RESEARCH_DEBUG: 'TRUE' };
+        const config = createConfig({}, processEnv);
+        expect(config.DEBUG).toBe(true);
+        // Already present → left byte-for-byte untouched (not normalized to 'true').
+        expect(processEnv['PI_RESEARCH_DEBUG']).toBe('TRUE');
+      });
+
+      it('coerces booleans: only "true" (any case) is true', () => {
+        expect(createConfig({}, { PI_RESEARCH_DEBUG: 'TRUE' }).DEBUG).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_DEBUG: 'True' }).DEBUG).toBe(true);
+        expect(createConfig({}, { PI_RESEARCH_DEBUG: '1' }).DEBUG).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_DEBUG: 'yes' }).DEBUG).toBe(false);
+        expect(createConfig({}, { PI_RESEARCH_DEBUG: '' }).DEBUG).toBe(DEFAULTS.DEBUG);
+      });
+
+      it('honors the legacy CACHE_TTL_DAYS env name when the canonical one is absent', () => {
+        const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '30' }, {});
+        expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(30);
+      });
+
+      it('prefers the canonical CACHE_TTL_DAYS name when both are present', () => {
+        const config = createConfig(
+          {
+            PI_RESEARCH_CACHE_TTL_DAYS: '10',
+            PI_RESEARCH_KNOWLEDGE_STORE_CACHE_TTL_DAYS: '30',
+          },
+          {},
+        );
+        expect(config.KNOWLEDGE_STORE_CACHE_TTL_DAYS).toBe(10);
+      });
+    });
+
     describe('positive cases', () => {
       it('should use defaults when no environment vars', () => {
         const env = {} as Record<string, string | undefined>;
