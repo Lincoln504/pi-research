@@ -15,10 +15,12 @@
  *   2. A complete scrape pipeline (local HTTP server → camoufox → markdown
  *      extraction) using the virtual display, with DISPLAY absent throughout.
  *
- *   3. BrowserCapability health check when DISPLAY is absent:
- *        (a) Xvfb present  → healthy:true  (real which Xvfb call)
- *        (b) Xvfb absent   → healthy:false with actionable install hint (mocked)
- *        (c) DISPLAY set   → which Xvfb is NOT called at all
+ *   3. BrowserCapability health check scenarios:
+ *        (A) TTY + Xvfb present → healthy:true  (real which Xvfb call)
+ *        (B) TTY + Xvfb absent  → healthy:false with actionable install hint (mocked)
+ *        (C) DISPLAY set        → which Xvfb is NOT called at all
+ *        (C2) pure Wayland      → which Xvfb is NOT called (headless:true used instead)
+ *        (D) binary absent      → healthy:false with npm run setup hint
  *
  * Skip semantics: every test uses ctx.skip() — never a silent pass-green.
  * Platform guard:  Linux-only tests are skipped via ctx.skip() on non-Linux,
@@ -110,10 +112,11 @@ describe('Linux display-mode integration tests', () => {
   // =========================================================================
 
   describe('resolveHeadlessMode() runtime transitions', () => {
-    it('returns "virtual" on Linux when DISPLAY is deleted at runtime', (ctx) => {
+    it('returns "virtual" on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY)', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
       delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
       expect(resolveHeadlessMode()).toBe('virtual');
     });
 
@@ -124,9 +127,11 @@ describe('Linux display-mode integration tests', () => {
       expect(resolveHeadlessMode()).toBe(true);
     });
 
-    it('transitions from true to "virtual" when DISPLAY is removed between calls', (ctx) => {
+    it('transitions from true to "virtual" when DISPLAY is removed (TTY scenario)', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
+      // Ensure no WAYLAND_DISPLAY so the second call lands in the true TTY case.
+      delete process.env['WAYLAND_DISPLAY'];
       process.env['DISPLAY'] = ':99';
       expect(resolveHeadlessMode()).toBe(true);
 
@@ -134,14 +139,15 @@ describe('Linux display-mode integration tests', () => {
       expect(resolveHeadlessMode()).toBe('virtual');
     });
 
-    it('returns "virtual" when WAYLAND_DISPLAY is set but DISPLAY is absent (Wayland-without-XWayland)', (ctx) => {
+    it('returns true when WAYLAND_DISPLAY is set but DISPLAY is absent (pure Wayland)', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
       delete process.env['DISPLAY'];
       process.env['WAYLAND_DISPLAY'] = 'wayland-0';
-      // No XWayland: camoufox cannot use a Wayland socket directly, so it
-      // needs its own Xvfb virtual framebuffer.
-      expect(resolveHeadlessMode()).toBe('virtual');
+      // headless:true works natively on Wayland. headless:'virtual' is avoided here because
+      // the JS camoufox port does not strip WAYLAND_DISPLAY / GDK_BACKEND / MOZ_ENABLE_WAYLAND
+      // before spawning Xvfb, so Firefox may connect to the Wayland compositor instead of Xvfb.
+      expect(resolveHeadlessMode()).toBe(true);
     });
 
     it('returns true when both DISPLAY and WAYLAND_DISPLAY are set (XWayland active)', (ctx) => {
@@ -174,7 +180,10 @@ describe('Linux display-mode integration tests', () => {
       if (!xvfbInstalled()) return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
+      // Simulate a TTY: remove both DISPLAY and WAYLAND_DISPLAY so resolveHeadlessMode()
+      // returns 'virtual' (pure Wayland would return true and skip the virtual-mode path).
       delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
 
       // Confirm the resolved mode — this is what the browser worker would pass.
       expect(resolveHeadlessMode()).toBe('virtual');
@@ -218,6 +227,7 @@ describe('Linux display-mode integration tests', () => {
       const url = `http://127.0.0.1:${port}/`;
 
       delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
       expect(resolveHeadlessMode()).toBe('virtual');
 
       const { Camoufox } = await import('camoufox-js');
@@ -255,12 +265,14 @@ describe('Linux display-mode integration tests', () => {
   });
 
   // =========================================================================
-  // Group 3: BrowserCapability health-check (Linux no-display scenarios)
+  // Group 3: BrowserCapability health-check scenarios
   //
-  // These tests verify the three conditional branches inside checkBrowserCapability:
-  //   A. Linux + no DISPLAY + Xvfb present → healthy (real `which Xvfb` call)
-  //   B. Linux + no DISPLAY + Xvfb absent  → unhealthy with apt-install hint
-  //   C. Linux + DISPLAY set               → Xvfb check is skipped entirely
+  // Verifies all five branches of checkBrowserCapability():
+  //   A. TTY (no DISPLAY, no WAYLAND_DISPLAY) + Xvfb installed  → healthy
+  //   B. TTY + Xvfb absent (mocked)                             → unhealthy + apt hint
+  //   C. DISPLAY set (X11/XWayland)                             → Xvfb check skipped
+  //   C2. pure Wayland (WAYLAND_DISPLAY only, no DISPLAY)       → Xvfb check skipped
+  //   D. browser binary absent                                   → unhealthy + setup hint
   //
   // Test B uses mockImplementationOnce to simulate a missing Xvfb binary
   // without actually uninstalling it. Every other call to execFileSync in this
@@ -276,12 +288,15 @@ describe('Linux display-mode integration tests', () => {
       vi.mocked(execFileSync).mockClear();
     });
 
-    it('(A) passes when DISPLAY is absent but Xvfb is installed', async (ctx) => {
+    it('(A) passes when DISPLAY is absent (TTY) but Xvfb is installed', async (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
       if (!xvfbInstalled()) return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
+      // Simulate TTY: delete both DISPLAY and WAYLAND_DISPLAY so resolveHeadlessMode()
+      // returns 'virtual' and the healthcheck calls which-Xvfb.
       delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
       // Clear MOCK flags so isBrowserAvailable() path is taken, not the mockMode shortcut.
       const savedMockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'];
       const savedMockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'];
@@ -303,11 +318,13 @@ describe('Linux display-mode integration tests', () => {
       expect(vi.mocked(execFileSync)).toHaveBeenCalledWith('which', ['Xvfb'], { stdio: 'ignore' });
     });
 
-    it('(B) fails with apt-install hint when DISPLAY is absent and Xvfb is missing', async (ctx) => {
+    it('(B) fails with apt-install hint when DISPLAY is absent (TTY) and Xvfb is missing', async (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
       if (!isBrowserAvailable()) return ctx.skip();
 
+      // Simulate TTY: both display vars absent so resolveHeadlessMode() returns 'virtual'.
       delete process.env['DISPLAY'];
+      delete process.env['WAYLAND_DISPLAY'];
       const savedMockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'];
       const savedMockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'];
       delete process.env['PI_RESEARCH_MOCK_SEARCH'];
@@ -359,8 +376,35 @@ describe('Linux display-mode integration tests', () => {
         else delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
       }
 
-      // With DISPLAY set, the `!process.env['DISPLAY']` guard short-circuits:
-      // `which Xvfb` must NOT have been called.
+      // With DISPLAY set, resolveHeadlessMode() returns true (not 'virtual'):
+      // the Xvfb gate does not fire and `which Xvfb` must NOT have been called.
+      expect(vi.mocked(execFileSync)).not.toHaveBeenCalledWith('which', ['Xvfb'], expect.anything());
+      expect(result.healthy).toBe(true);
+    });
+
+    it('(C2) does NOT call which-Xvfb on pure Wayland (WAYLAND_DISPLAY set, no DISPLAY)', async (ctx) => {
+      if (process.platform !== 'linux') return ctx.skip();
+      if (!isBrowserAvailable()) return ctx.skip();
+
+      // Pure Wayland: resolveHeadlessMode() returns true (not 'virtual'), so Xvfb is not needed.
+      delete process.env['DISPLAY'];
+      process.env['WAYLAND_DISPLAY'] = 'wayland-0';
+      const savedMockSearch = process.env['PI_RESEARCH_MOCK_SEARCH'];
+      const savedMockScrape = process.env['PI_RESEARCH_MOCK_SCRAPE'];
+      delete process.env['PI_RESEARCH_MOCK_SEARCH'];
+      delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
+
+      let result: Awaited<ReturnType<typeof checkBrowserCapability>>;
+      try {
+        result = await checkBrowserCapability();
+      } finally {
+        if (savedMockSearch !== undefined) process.env['PI_RESEARCH_MOCK_SEARCH'] = savedMockSearch;
+        else delete process.env['PI_RESEARCH_MOCK_SEARCH'];
+        if (savedMockScrape !== undefined) process.env['PI_RESEARCH_MOCK_SCRAPE'] = savedMockScrape;
+        else delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
+      }
+
+      // headless:true on Wayland needs no Xvfb — the check must be skipped entirely.
       expect(vi.mocked(execFileSync)).not.toHaveBeenCalledWith('which', ['Xvfb'], expect.anything());
       expect(result.healthy).toBe(true);
     });
@@ -391,22 +435,26 @@ describe('Linux display-mode integration tests', () => {
   // Group 4: Wayland-specific scenario validation
   //
   // On a Wayland-native desktop (no XWayland), DISPLAY is absent but
-  // WAYLAND_DISPLAY is set. The system must correctly select 'virtual' in
-  // this case — NOT 'true' (which would cause camoufox to fail trying to
-  // connect to a non-existent X11 socket).
+  // WAYLAND_DISPLAY is set. headless:true works natively — Firefox can use
+  // the Wayland display protocol directly without any X11 socket.
+  //
+  // headless:'virtual' is NOT used on pure Wayland. The JS camoufox port
+  // injects DISPLAY (the Xvfb display) but does NOT strip WAYLAND_DISPLAY,
+  // GDK_BACKEND, or MOZ_ENABLE_WAYLAND (unlike the Python port). Firefox may
+  // therefore ignore the injected DISPLAY and connect to the Wayland compositor
+  // instead of Xvfb, making the mode unreliable.
   // =========================================================================
 
   describe('Wayland-without-XWayland scenario', () => {
-    it('resolveHeadlessMode returns "virtual" when only WAYLAND_DISPLAY is set', (ctx) => {
+    it('resolveHeadlessMode returns true when only WAYLAND_DISPLAY is set (pure Wayland)', (ctx) => {
       if (process.platform !== 'linux') return ctx.skip();
 
       delete process.env['DISPLAY'];
       process.env['WAYLAND_DISPLAY'] = 'wayland-1';
 
-      // camoufox cannot use a Wayland socket directly — it needs its own Xvfb.
-      // If this returned `true`, camoufox would try headless mode and connect
-      // to a DISPLAY that doesn't exist, causing a 90s browser launch timeout.
-      expect(resolveHeadlessMode()).toBe('virtual');
+      // headless:true works natively on Wayland; headless:'virtual' is avoided because
+      // the JS camoufox port does not strip WAYLAND_DISPLAY before spawning Xvfb.
+      expect(resolveHeadlessMode()).toBe(true);
     });
 
     it('resolveHeadlessMode returns true when XWayland bridges Wayland to X11', (ctx) => {

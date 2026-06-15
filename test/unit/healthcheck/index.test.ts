@@ -26,6 +26,10 @@ vi.mock('../../../src/logger.ts', () => ({
 
 vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   isBrowserAvailable: vi.fn(),
+  // resolveHeadlessMode is called inside checkBrowserCapability() to decide whether
+  // to gate on Xvfb. Default to returning true (non-virtual) so existing tests that
+  // don't care about Xvfb checking are not affected.
+  resolveHeadlessMode: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock('../../../src/infrastructure/browser/task-execution-service.ts', () => ({

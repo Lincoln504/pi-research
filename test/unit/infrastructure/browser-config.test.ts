@@ -93,22 +93,25 @@ describe('browser-config', () => {
 
     describe('resolveHeadlessMode', () => {
         const savedDisplay = process.env['DISPLAY'];
+        const savedWayland = process.env['WAYLAND_DISPLAY'];
 
         afterEach(() => {
             if (savedDisplay === undefined) delete process.env['DISPLAY'];
             else process.env['DISPLAY'] = savedDisplay;
+            if (savedWayland === undefined) delete process.env['WAYLAND_DISPLAY'];
+            else process.env['WAYLAND_DISPLAY'] = savedWayland;
         });
 
-        it('returns true on macOS regardless of DISPLAY', () => {
+        it('returns true on macOS — native headless works', () => {
             osMock.current = 'darwin';
             delete process.env['DISPLAY'];
             expect(resolveHeadlessMode()).toBe(true);
         });
 
-        it('returns true on Windows regardless of DISPLAY', () => {
+        it('returns false on Windows — headless:true crashes Firefox (camoufox-js issue #614)', () => {
             osMock.current = 'win32';
             delete process.env['DISPLAY'];
-            expect(resolveHeadlessMode()).toBe(true);
+            expect(resolveHeadlessMode()).toBe(false);
         });
 
         it('returns true on Linux when DISPLAY is set (X11 or XWayland)', () => {
@@ -117,16 +120,26 @@ describe('browser-config', () => {
             expect(resolveHeadlessMode()).toBe(true);
         });
 
-        it('returns "virtual" on Linux when DISPLAY is not set (TTY or Wayland without XWayland)', () => {
-            osMock.current = 'linux';
-            delete process.env['DISPLAY'];
-            expect(resolveHeadlessMode()).toBe('virtual');
-        });
-
         it('returns true on Linux when DISPLAY is set to a CI-injected Xvfb value', () => {
             osMock.current = 'linux';
             process.env['DISPLAY'] = ':99';
             expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns true on Linux with only WAYLAND_DISPLAY set (pure Wayland)', () => {
+            // JS camoufox-js does not strip WAYLAND_DISPLAY before spawning Xvfb, so
+            // headless:'virtual' is unreliable on pure Wayland. headless:true works natively.
+            osMock.current = 'linux';
+            delete process.env['DISPLAY'];
+            process.env['WAYLAND_DISPLAY'] = 'wayland-0';
+            expect(resolveHeadlessMode()).toBe(true);
+        });
+
+        it('returns "virtual" on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY)', () => {
+            osMock.current = 'linux';
+            delete process.env['DISPLAY'];
+            delete process.env['WAYLAND_DISPLAY'];
+            expect(resolveHeadlessMode()).toBe('virtual');
         });
     });
 

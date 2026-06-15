@@ -160,14 +160,27 @@ export function getSchedulerVersion(config?: Config): string {
 /**
  * Resolve the camoufox headless mode for the current platform.
  *
- * On Linux without a DISPLAY env var (TTY or Wayland without XWayland),
- * camoufox's built-in Xvfb management spawns a virtual framebuffer.
- * On Linux with DISPLAY set (X11, XWayland, or CI-injected Xvfb), or on
- * any non-Linux platform, standard headless mode works natively.
+ * Returns false on Windows (headless:true crashes Firefox, exit code 0x80000003,
+ * camoufox-js issue #614 — headless:false uses a visible window which works fine
+ * on Windows CI runners and local dev).
+ *
+ * Returns 'virtual' only on Linux TTY (no DISPLAY and no WAYLAND_DISPLAY), where
+ * camoufox spawns Xvfb internally to provide a virtual framebuffer.
+ *
+ * Returns true in all other cases (macOS, Linux+X11, Linux+Wayland).
+ * Note: pure Wayland (WAYLAND_DISPLAY set, no DISPLAY) gets true, not 'virtual'.
+ * The JS camoufox port does not strip WAYLAND_DISPLAY / GDK_BACKEND / MOZ_ENABLE_WAYLAND
+ * before spawning Xvfb (unlike the Python port), so headless:'virtual' can still
+ * connect to the Wayland compositor instead of the spawned Xvfb. headless:true
+ * works natively on Wayland and avoids the Xvfb dependency entirely.
  */
 export function resolveHeadlessMode(): boolean | 'virtual' {
-  if (platform() !== 'linux') return true;
-  return process.env['DISPLAY'] ? true : 'virtual';
+  const osPlatform = platform();
+  if (osPlatform === 'win32') return false;
+  if (osPlatform !== 'linux') return true;
+  if (process.env['DISPLAY']) return true;
+  if (process.env['WAYLAND_DISPLAY']) return true;
+  return 'virtual';
 }
 
 // ============================================================================
