@@ -35,7 +35,7 @@ describe('tools/search', () => {
     expect(tool.promptGuidelines![0]).toContain('5-30 queries');
   });
 
-  it('should cap queries at 40 if too many are provided', async () => {
+  it('should cap queries at 30 if too many are provided', async () => {
     const { search } = await import('../../../src/web-research/search.ts');
     const tool = createSearchTool(mockOptions);
     const manyQueries = Array(50).fill('q');
@@ -43,13 +43,13 @@ describe('tools/search', () => {
     await tool.execute('id', { queries: manyQueries }, undefined, undefined, {} as any);
 
     expect(search).toHaveBeenCalledWith(
-      expect.arrayContaining(Array(40).fill('q')),
+      expect.arrayContaining(Array(30).fill('q')),
       undefined, // options.config
       undefined, // signal
       expect.any(Function), // implementation wraps onProgress in a lambda
       expect.any(Object) // container
     );
-    expect(vi.mocked(search).mock.calls[0][0].length).toBe(40);
+    expect(vi.mocked(search).mock.calls[0][0].length).toBe(30);
   });
 
   it('should report progress during execution', async () => {

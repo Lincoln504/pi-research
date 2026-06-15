@@ -64,11 +64,11 @@ export function createSearchTool(options: {
         throw new Error(`Insufficient queries: ${queries.length}. Provide at least 1 highly specific queries.`);
       }
 
-      // Hard cap for safety
-      if (queries.length > 40) {
-          logger.warn(`[search tool] Capping tool call queries: ${queries.length} → 40`);
-          metrics.increment('tool_search_capped_queries_total', queries.length - 40);
-          queries = queries.slice(0, 40);
+      // Hard cap at the documented 30-query maximum
+      if (queries.length > 30) {
+          logger.warn(`[search tool] Capping tool call queries: ${queries.length} → 30`);
+          metrics.increment('tool_search_capped_queries_total', queries.length - 30);
+          queries = queries.slice(0, 30);
       }
 
       const allowed = options.tracker.recordCall('search');
