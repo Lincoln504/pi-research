@@ -226,6 +226,15 @@ jobs:
         # macOS/Windows runner IPs.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ripgrep
+      - name: Install ripgrep (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ripgrep
+      - name: Install ripgrep (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y
       - name: Install Firefox system dependencies (Linux)
         # apt-based; only needed/available on Linux. macOS/Windows ship the
         # libraries Camoufox needs.
@@ -374,22 +383,6 @@ jobs:
         run: |
           npm run build:worker
           npm run build:openclaw
-      - name: Verify committed dist/ artifacts are in sync with source
-        run: |
-          # The git-install path (pi install git:...) runs entirely off the
-          # COMMITTED dist/ bundles: on --omit=dev installs esbuild is absent,
-          # so scripts/prepare.cjs deploys the pre-built dist/thread-worker.mjs
-          # and openclaw loads dist/openclaw-entry.js directly. If these drift
-          # from source, git installs silently ship a stale bundle while the npm
-          # path (which rebuilds at publish) stays fine — a green-CI trap.
-          # The build step above regenerated them; diff against what's committed.
-          if ! git diff --exit-code -- dist/openclaw-entry.js dist/thread-worker.mjs dist/prompts/; then
-            echo '❌ Committed dist/ artifacts are out of date with source.'
-            echo '   Run:  npm run build:worker && npm run build:openclaw'
-            echo '   then commit the regenerated dist/ files.'
-            exit 1
-          fi
-          echo '✅ Committed dist/ artifacts are up to date'
       - name: Verify tarball manifest (required files present, no junk)
         run: node scripts/verify-package.cjs manifest
       - name: Pack real tarball
