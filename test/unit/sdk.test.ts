@@ -218,5 +218,21 @@ describe('SDK Lifecycle', () => {
       const result = await runDeepResearch('q');
       expect(result).toBe('deep result');
     });
+
+    it('forwards the SDK-global config (from initResearchSDK) into runResearch', async () => {
+      await initSDK({ config: { KNOWLEDGE_STORE_MODE: 'none', MAX_SCRAPE_BATCHES: 7 } });
+      await runDeepResearch('q');
+      const passed = mockDeepRun.mock.calls[0]![0] as any;
+      expect(passed.config).toBeDefined();
+      expect(passed.config.MAX_SCRAPE_BATCHES).toBe(7);
+      expect(passed.config.KNOWLEDGE_STORE_MODE).toBe('none');
+    });
+
+    it('lets a per-call options.config override the SDK-global config', async () => {
+      await initSDK({ config: { MAX_SCRAPE_BATCHES: 7 } });
+      await runDeepResearch('q', { config: { MAX_SCRAPE_BATCHES: 1 } as any });
+      const passed = mockDeepRun.mock.calls[0]![0] as any;
+      expect(passed.config.MAX_SCRAPE_BATCHES).toBe(1);
+    });
   });
 });

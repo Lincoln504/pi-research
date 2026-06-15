@@ -315,8 +315,9 @@ export async function verifyUrl(url: string, signal?: AbortSignal): Promise<bool
  * @param query - The research objective
  * @param options - Research configuration (depth, complexity, observer)
  * @param signal - Optional abort signal
- * @returns The final synthesized research report (Markdown) and the sessionId
- *          needed to retrieve per-researcher reports via getResearchReports().
+ * @returns The final synthesized research report (Markdown). The session used is
+ *          tracked internally; call getResearchReports() (no args) afterwards to
+ *          retrieve the per-researcher reports from this run.
  */
 export async function runDeepResearch(
   query: string,
@@ -346,6 +347,10 @@ export async function runDeepResearch(
       depth: depth as ResearchDepth,
       complexity: complexity as 1 | 2 | 3,
       initialLinks: options.initialLinks,
+      // Forward the SDK's resolved config so initResearchSDK({ config }) overrides
+      // actually reach the orchestrator and every downstream service. A per-call
+      // options.config (if provided) takes precedence over the SDK-global config.
+      config: options.config ?? globalConfig ?? undefined,
     }, signal ?? options.signal);
 
     // Append research metadata (model used) at the very end
