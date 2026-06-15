@@ -67,19 +67,27 @@ describe('TUI Research Panel', () => {
   });
 
   describe('wave animation', () => {
-    it('should render wave when isSearching is true', () => {
+    const renderHeader = (isSearching: boolean): string => {
       const state = createInitialPanelState('test-session-id', 'test-research-id', 'test-query', 'test-model');
-      state.isSearching = true;
+      state.isSearching = isSearching;
       state.waveFrame = 0;
-
       const getActivePanelsMock = vi.fn().mockReturnValue([state]);
-      const componentCreator = createMasterResearchPanel('pi-session', getActivePanelsMock);
-      const component = componentCreator({} as any, mockTheme);
-      const lines = component.render(80);
+      const component = createMasterResearchPanel('pi-session', getActivePanelsMock)({} as any, mockTheme);
+      // Width 120 leaves room for the wave fill (mocked visibleWidth = 80).
+      return component.render(120)[0] as string;
+    };
 
-      const headerLine = lines[0];
-      // Check for Research in the header
-      expect(headerLine).toContain('Research');
+    it('replaces the idle corner with a wave fill when isSearching is true', () => {
+      const searchingHeader = renderHeader(true);
+      const idleHeader = renderHeader(false);
+
+      expect(searchingHeader).toContain('Research');
+      expect(idleHeader).toContain('Research');
+      // The idle header is capped with the "╶╮" corner; while searching, that
+      // corner is replaced by the animated wave fill (── / ╼ glyphs, never ╮).
+      expect(idleHeader).toContain('╮');
+      expect(searchingHeader).not.toContain('╮');
+      expect(searchingHeader).not.toBe(idleHeader);
     });
   });
 

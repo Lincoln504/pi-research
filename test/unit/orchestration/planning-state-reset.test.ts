@@ -199,17 +199,6 @@ describe('Planning Service State Reset', () => {
       }).not.toThrow();
     });
 
-    it('should include wait in the canonical ResearchPlan type', () => {
-      // This test verifies the type system - if it compiles, the types are correct
-      const plan1: any = { action: 'synthesize' };
-      const plan2: any = { action: 'delegate' };
-      const plan3: any = { action: 'wait' };
-      
-      expect(['synthesize', 'delegate', 'wait']).toContain(plan1.action);
-      expect(['synthesize', 'delegate', 'wait']).toContain(plan2.action);
-      expect(['synthesize', 'delegate', 'wait']).toContain(plan3.action);
-    });
-
     it('should not require duplicate schema definitions', async () => {
       const planningService = await getService<IPlanningService>(ServiceNames.PLANNING);
       

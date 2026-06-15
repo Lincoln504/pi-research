@@ -44,14 +44,9 @@ describe('Embedder WebGPU Fallback', () => {
 
   it('should skip WebGPU if fallback flag is set', async () => {
     const { pipeline } = await import('@huggingface/transformers');
-    
-    // Set the fallback flag
-    await import('../../../src/knowledge/embedder.ts').then(m => {
-      // This is a bit of a hack - we need to simulate the flag being set
-      // by triggering a WebGPU error first
-    });
 
-    // Create an embedder with WebGPU device
+    // The fallback flag is process-global; it gets set as a side effect of
+    // embedder1's WebGPU failure below, then exercised by embedder2.
     const embedder1 = new Embedder({ model: 'test-model', device: 'webgpu' });
     
     // Simulate WebGPU error during pipeline load

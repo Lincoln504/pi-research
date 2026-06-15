@@ -241,7 +241,11 @@ describe('Extended Tools Integration', () => {
 
       expect(result).toBeDefined();
       if (result.content[0]?.type === 'text') {
-        expect(result.content[0]!.text as string).toBeDefined();
+        const text = result.content[0]!.text as string;
+        if (isNetworkUnavailable(text)) return;
+        // The "++" characters must not break the query — a real, non-empty
+        // response body is returned rather than an empty/error result.
+        expect(text.length).toBeGreaterThan(50);
       }
     }, 60000);
   });
@@ -456,7 +460,9 @@ describe('Extended Tools Integration', () => {
         if (isNetworkUnavailable(text)) {
           return;
         }
-        expect(text).toBeDefined();
+        // Tag-filtered search still returns substantive results for the query.
+        expect(text).toMatch(/async/i);
+        expect(text.length).toBeGreaterThan(50);
       }
     }, 60000);
 

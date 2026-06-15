@@ -464,12 +464,19 @@ describe('GPU lock behavior', () => {
     expect(sm.releaseGpuLock).toHaveBeenCalledTimes(1);
   });
 
-  it('no GPU lock calls when stateManager is not provided', async () => {
+  it('initializes and embeds correctly without a stateManager (no GPU-lock path)', async () => {
     const e = new Embedder({ model: 'test-model', device: 'webgpu' });
     await e.initialize();
-    // No stateManager — no lock calls, no crash
-    await e.embed('hello');
-    await e.embedMany(['a', 'b']);
+    expect(e.isInitialized()).toBe(true);
+
+    const single = await e.embed('hello');
+    expect(single).toBeInstanceOf(Float32Array);
+    expect(single.length).toBe(384);
+
+    const many = await e.embedMany(['a', 'b']);
+    expect(many).toHaveLength(2);
+    expect(many[0]).toBeInstanceOf(Float32Array);
+    expect(many[0]!.length).toBe(384);
   });
 });
 

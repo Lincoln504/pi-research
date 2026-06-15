@@ -170,11 +170,16 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result).toBeDefined();
       expect(result.content).toBeDefined();
       
+      // An unparseable URL is never a success: it is reported as a failure with
+      // a "Failed to Scrape" section, not silently dropped.
+      const details = result.details as { successful: number; failed: number };
+      expect(details.successful).toBe(0);
+      expect(details.failed).toBeGreaterThanOrEqual(1);
+
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
-        // Should have error information
-        expect(text).toBeDefined();
-        expect(typeof text).toBe('string');
+        expect(text).toContain('**Successful:** 0');
+        expect(text).toContain('Failed to Scrape');
       }
     });
 
@@ -196,11 +201,15 @@ describe('Search and Scrape Tools Connectivity', () => {
       expect(result).toBeDefined();
       expect(result.content).toBeDefined();
       
+      // A DNS-unresolvable host resolves to a failed scrape regardless of
+      // network state (offline → also failed), so this is deterministic.
+      const details = result.details as { successful: number; failed: number };
+      expect(details.successful).toBe(0);
+      expect(details.failed).toBeGreaterThanOrEqual(1);
+
       if (result.content[0]?.type === 'text') {
         const text = result.content[0]!.text as string;
-        // Should report failure
-        expect(text).toBeDefined();
-        expect(typeof text).toBe('string');
+        expect(text).toContain('Failed to Scrape');
       }
     });
 
@@ -231,9 +240,12 @@ describe('Search and Scrape Tools Connectivity', () => {
         if (isNetworkUnavailable(text)) {
           return;
         }
-        // Should have partial success
-        expect(text).toBeDefined();
-        expect(typeof text).toBe('string');
+        // One invalid + two reachable Wikipedia URLs → genuine partial success:
+        // at least one succeeds and the invalid one is reported as failed.
+        const details = result.details as { successful: number; failed: number };
+        expect(details.successful).toBeGreaterThanOrEqual(1);
+        expect(details.failed).toBeGreaterThanOrEqual(1);
+        expect(text).toContain('Failed to Scrape');
       }
     });
 

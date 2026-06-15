@@ -66,11 +66,13 @@ type ResearchKnowledgeSearchParams = Static<typeof ResearchKnowledgeSearchParams
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Hard limit on total reference text size (chars) to prevent token overflow */
-const MAX_REFERENCE_CHARS = 120_000;
+/** Hard limit on total reference text size (chars) to prevent token overflow.
+ *  Exported for unit tests (bundle-neutral: internal symbol, tree-shaken). */
+export const MAX_REFERENCE_CHARS = 120_000;
 
-/** Maximum number of unique URLs to rebuild documents for */
-const MAX_DOCUMENTS = 10;
+/** Maximum number of unique URLs to rebuild documents for.
+ *  Exported for unit tests (bundle-neutral: internal symbol, tree-shaken). */
+export const MAX_DOCUMENTS = 10;
 
 /** Widget ID for the knowledge search TUI panel */
 const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
@@ -80,7 +82,7 @@ const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
  * knowledge database. The exact phrasing is critical — the main pi agent
  * reads this as a signal to pivot to live web research.
  */
-const RESEARCH_KNOWLEDGE_MISS_STRING =
+export const RESEARCH_KNOWLEDGE_MISS_STRING =
   'No results found. Live research can get the info.';
 
 /**
@@ -88,7 +90,7 @@ const RESEARCH_KNOWLEDGE_MISS_STRING =
  * The host agent gets a synthesis of what was found but is also told to
  * continue with live research for a more complete answer.
  */
-const RESEARCH_KNOWLEDGE_MAYBE_STRING =
+export const RESEARCH_KNOWLEDGE_MAYBE_STRING =
   'Partial results found in knowledge store. Live research can fill gaps.';
 
 // ---------------------------------------------------------------------------
@@ -134,7 +136,7 @@ function hideKnowledgeSearchWidget(ctx: ExtensionContext): void {
  * The deduplication logic uses a Map to track first-appearance order, so
  * the earliest (most relevant) query result for each URL is retained.
  */
-async function assembleReferenceDocuments(
+export async function assembleReferenceDocuments(
   queries: string[],
   store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
 ): Promise<{ text: string; urls: string[] }> {
@@ -372,7 +374,7 @@ async function runBackgroundExtraction(
  *   telling the host agent to also do live research to fill gaps.
  * - "no": Return the miss string, authorizing live research.
  */
-function buildSteeringResult(
+export function buildSteeringResult(
   result: ResearchKnowledgeSynthesisResponse,
   urls: string[],
 ): AgentToolResult<unknown> {
