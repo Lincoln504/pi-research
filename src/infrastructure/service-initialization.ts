@@ -12,7 +12,6 @@ import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import { SchedulerFactoryService } from './scheduler-factory-service.ts';
 import { StateManagerService } from './state/state-manager-service.ts';
-import { KnowledgeStoreService } from './knowledge-store-service.ts';
 import { MetricsService } from './metrics-service.ts';
 import { ProcessLifecycleService } from './process-lifecycle-service.ts';
 import { GPUResourceService } from './gpu-resource-service.ts';
@@ -120,10 +119,17 @@ export function registerInfrastructureServices(container: ServiceContainer = get
     container
   );
 
-  // Register Knowledge Store Service
+  // Register Knowledge Store Service.
+  // Loaded via dynamic import so the native ML/vector stack
+  // (@huggingface/transformers / onnxruntime-node, @lancedb/lancedb) is only
+  // pulled in when the store is actually requested — never at extension load.
+  // When KNOWLEDGE_STORE_MODE is 'none' (the default) this factory never runs.
   registerService(
     ServiceNames.KNOWLEDGE_STORE,
-    () => new KnowledgeStoreService(),
+    async () => {
+      const { KnowledgeStoreService } = await import('./knowledge-store-service.ts');
+      return new KnowledgeStoreService();
+    },
     {
       lazyInitialization: true,
       allowOverwrite: false,

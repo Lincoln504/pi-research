@@ -4,11 +4,9 @@
  * Utility functions for the embedder module
  */
 
-import { env as hfEnv } from '@huggingface/transformers';
 import path from 'node:path';
 import * as os from 'node:os';
 
-import { HFEnv } from '../core/interfaces/knowledge-interfaces.ts';
 import { logger } from '../logger.ts';
 import { withTimeout as retryWithTimeout } from '../web-research/retry-utils.ts';
 
@@ -21,13 +19,6 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMess
   // Normalize via Promise.resolve() to handle HuggingFace pipeline thenables
   // that are not standard Promises (retry-utils calls .then() directly).
   return retryWithTimeout(Promise.resolve(promise), timeoutMs, errorMessage, undefined);
-}
-
-/**
- * Get the HuggingFace env object
- */
-export function getHFEnv() {
-  return hfEnv;
 }
 
 /**
@@ -118,33 +109,9 @@ export function registerBeforeExitSafetyNet(): void {
   shutdownManager.registerEventListener(process, 'beforeExit', beforeExitHandler);
 }
 
-/**
- * Initialize the ONNX environment
- */
-let onnxInitialized = false;
-export function initializeONNXEnv(): void {
-  if (onnxInitialized) return;
-  
-  hfEnv.cacheDir = getModelCacheDir();
-
-  try {
-    const envObj = hfEnv as unknown as HFEnv;
-    if (envObj.backends?.onnx) {
-      envObj.backends.onnx.logLevel = 'error';
-    }
-    // Fallback for older transformers.js versions if any
-    if ((envObj as any).onnx) {
-      (envObj as any).onnx.logLevel = 'error';
-    }
-  } catch (e) {
-    logger.debug('[embedder] Failed to set ONNX logLevel:', e);
-  }
-  
-  onnxInitialized = true;
-}
-
-// REMOVED: initializeONNXEnv() is now called lazily inside Embedder.initialize()
-// to prevent issues during module load / extension reload.
+// ONNX / transformers.js env setup (getHFEnv, initializeONNXEnv) lives in
+// ./onnx-env.ts so that this utility module stays free of the native
+// @huggingface/transformers import — keeping it safe to load from src/index.ts.
 
 let dawnInitialized = false;
 

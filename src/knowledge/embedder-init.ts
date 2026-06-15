@@ -8,7 +8,8 @@ import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transform
 import { logger } from '../logger.ts';
 import type { IStateManager } from '../core/service-interfaces.ts';
 import { DisposablePipeline } from '../core/interfaces/knowledge-interfaces.ts';
-import { withTimeout, getHFEnv, markWebGpuFallback } from './embedder-utils.ts';
+import { withTimeout, markWebGpuFallback } from './embedder-utils.ts';
+import { getHFEnv } from './onnx-env.ts';
 
 /**
  * Load pipeline with timeout

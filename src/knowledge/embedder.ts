@@ -22,12 +22,11 @@ import {
   hasWebGpuFallback,
   markWebGpuFallback,
   getModelCacheDir,
-  getHFEnv,
   registerGlobalEmbedder,
   unregisterGlobalEmbedder,
   initializeDawnWebGPU,
-  initializeONNXEnv,
 } from './embedder-utils.ts';
+import { getHFEnv, initializeONNXEnv } from './onnx-env.ts';
 import {
   isWebGpuDeviceError,
   isModelCached,

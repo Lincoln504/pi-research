@@ -26,10 +26,14 @@ import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService, tryGetServiceContainerFromCtx } from './core/service-registry.ts';
 import { ServiceNames, IKnowledgeStoreService } from './core/service-interfaces.ts';
-import { KnowledgeStoreService } from './infrastructure/knowledge-store-service.ts';
-import { clearEmbeddingInstance } from './infrastructure/embedding/embedding-factory.ts';
+// Type-only: avoids statically loading the native ML/vector stack into the
+// extension load path. The value (clearEmbeddingInstance) is dynamically
+// imported at its call sites, only when a knowledge command actually runs.
+import type { KnowledgeStoreService } from './infrastructure/knowledge-store-service.ts';
 import type { Theme } from './types/research-panel-types.ts';
-import { SUPPORTED_MODELS } from './knowledge/index.ts';
+// Import the constant directly from its source module rather than the knowledge
+// barrel (./knowledge/index.ts), which would transitively load lancedb.
+import { SUPPORTED_MODELS } from './knowledge/model-config.ts';
 import { metrics } from './utils/metrics.ts';
 import {
   extractRunStats,
@@ -387,6 +391,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           const service = await getService<KnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
           await service.clear();
           await clearService(ServiceNames.KNOWLEDGE_STORE, container);
+          const { clearEmbeddingInstance } = await import('./infrastructure/embedding/embedding-factory.ts');
           clearEmbeddingInstance();
           ctx.ui.notify('Model updated. Store cleared.', 'info');
           } catch (e: unknown) {
@@ -396,6 +401,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           logger.info('[research-config] Device changed. Resetting service.');
           try {
           await clearService(ServiceNames.KNOWLEDGE_STORE, container);
+          const { clearEmbeddingInstance } = await import('./infrastructure/embedding/embedding-factory.ts');
           clearEmbeddingInstance();
           ctx.ui.notify('Device updated. Service refreshed.', 'info');
 
