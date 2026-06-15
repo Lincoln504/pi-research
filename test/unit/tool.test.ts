@@ -185,7 +185,7 @@ vi.mock('../../src/tui/research-health.ts', () => ({
 vi.mock('../../src/tui/research-tui-manager.ts', () => ({
   createResearchTuiManager: vi.fn((tuiCtx: any, deps: any) => {
     panel.createInitialPanelState(tuiCtx.piSessionId, tuiCtx.researchId, tuiCtx.query, tuiCtx.modelId);
-    const unsubInput = deps.ctx.ui.onTerminalInput(expect.any(Function));
+    const unsubInput = deps.ctx.ui.onTerminalInput(vi.fn());
     return {
       panelState: { totalTokens: 0, slices: new Map() },
       masterWidgetId: `pi-research-master-${tuiCtx.piSessionId}`,
@@ -209,7 +209,6 @@ vi.mock('../../src/cleanup/research-cleanup.ts', () => ({
   createCleanupFunction: vi.fn(() => vi.fn()),
   updateWaveTimer: vi.fn(),
   updateUnsubOrder: vi.fn(),
-  updateUnsubInput: vi.fn(),
   stopWaveAnimation: vi.fn(),
 }));
 

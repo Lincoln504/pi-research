@@ -1,7 +1,7 @@
 /**
  * search Tool
  *
- * Perform comprehensive browser-based searches (10-50 queries).
+ * Perform comprehensive browser-based searches (5-30 queries).
  */
 
 import type { ToolDefinition, AgentToolResult, ExtensionContext } from '@earendil-works/pi-coding-agent';

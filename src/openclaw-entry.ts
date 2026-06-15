@@ -110,7 +110,7 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
   }
 
   // Resolve model registry & model
-  globalRegistry = await buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
+  globalRegistry = buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
   globalModel = resolveModel(
     globalRegistry,
     pluginConfig.model,
