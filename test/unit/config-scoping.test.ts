@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getConfig, DEFAULTS, resetConfig } from '../../src/config';
+import { normalizeWorkspacePath } from '../../src/utils/text-utils';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -42,8 +43,12 @@ describe('Configuration Scoping', () => {
     vi.mocked(fs.existsSync).mockImplementation((p: any) => p === projectSettingsPath);
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
       if (p === projectSettingsPath) {
-        return JSON.stringify({ 
-          [mockCwd]: { PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '3' } 
+        // The source keys the registry by normalizeWorkspacePath(cwd) (i.e.
+        // path.resolve), so the fixture must use the same resolved key —
+        // otherwise on Windows path.resolve('/home/user/project') becomes
+        // 'C:\\home\\user\\project' and never matches a raw forward-slash key.
+        return JSON.stringify({
+          [normalizeWorkspacePath(mockCwd)]: { PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '3' }
         });
       }
       return '';

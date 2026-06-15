@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
@@ -14,6 +15,14 @@ import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 vi.mock('../../../src/logger.ts', () => ({
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
+
+// Partial-mock fs/promises so individual tests can force fs.rm to reject
+// deterministically on every platform. By default rm delegates to the real
+// implementation, so the success-path tests still perform genuine removals.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, default: actual, rm: vi.fn(actual.rm) };
+});
 
 describe('cleanup-utils', () => {
   let testBaseDir: string;
@@ -35,7 +44,9 @@ describe('cleanup-utils', () => {
     if (fs.existsSync(testBaseDir)) {
       rmSync(testBaseDir, { recursive: true, force: true });
     }
-    vi.restoreAllMocks();
+    // clearAllMocks (not restoreAllMocks) so the fs.rm partial mock keeps its
+    // real-delegating implementation across tests; only call history is reset.
+    vi.clearAllMocks();
   });
 
   /**
@@ -176,28 +187,23 @@ describe('cleanup-utils', () => {
     it('counts errors when removal fails', async () => {
       const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
-      // Create a stale profile
-      const staleProfile = createProfile('stale-readonly', STALE_AGE_MS);
+      // Create a stale profile eligible for removal.
+      createProfile('stale-readonly', STALE_AGE_MS);
 
-      // Make the directory read-only (simulate permission error)
-      try {
-        fs.chmodSync(staleProfile, 0o444);
-      } catch {
-        // If chmod fails, skip this test
-        return;
-      }
+      // Force the removal to fail deterministically on every platform. A real
+      // chmod(0o444)-based permission error is POSIX-only (Windows clears the
+      // read-only bit under force:true, and even on POSIX it is a no-op for
+      // root), so inject the failure at the fs.rm boundary the source uses.
+      vi.mocked(fsp.rm).mockRejectedValueOnce(
+        Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+      );
 
       const result = await cleanupStaleProfiles(testCacheDir);
 
-      // Should count the error
+      // The source must catch the rm rejection and count it, not propagate.
+      expect(vi.mocked(fsp.rm)).toHaveBeenCalled();
       expect(result.errors).toBeGreaterThan(0);
-
-      // Restore permissions for cleanup
-      try {
-        fs.chmodSync(staleProfile, 0o755);
-      } catch {
-        // Ignore
-      }
+      expect(result.removed).toBe(0);
     });
 
     it('handles profiles at the threshold boundary', async () => {
