@@ -97,31 +97,49 @@ jobs:
       - run: npm run lint
       - name: Audit Dependencies
         run: |
-          # Run once, capture JSON for the summary step, exit with audit's code.
-          npm audit --audit-level=high --json > /tmp/audit-results.json 2>&1 || AUDIT_FAILED=$?
+          # The release gate audits the PRODUCTION dependency tree only (`--omit=dev`)
+          # at the `moderate` threshold. That is the surface consumers actually
+          # install — the only thing a published-package security gate should block on.
+          #
+          # devDependencies are deliberately excluded from the gate: the host
+          # framework (@earendil-works/pi-coding-agent, provided by pi at runtime)
+          # and the optional `openclaw` SDK integration each ship their own
+          # npm-shrinkwrap.json, which freezes their nested transitive tree. By npm
+          # design a shrinkwrap is authoritative, so downstream `overrides` cannot
+          # remediate their pinned-vulnerable deps (e.g. tar@7.5.15, protobufjs@8.4.0).
+          # Those advisories are upstream-only and never ship in this package, so
+          # they must not block a release. They are still surfaced (informational)
+          # in the job summary below so upstream regressions stay visible.
+          npm audit --omit=dev --audit-level=moderate --json > /tmp/audit-prod.json 2>&1 || AUDIT_FAILED=$?
+          npm audit --json > /tmp/audit-full.json 2>&1 || true
           {
             echo "## Dependency Security Audit"
             echo ""
             node -e "
-              const raw = require('fs').readFileSync('/tmp/audit-results.json', 'utf8');
-              const d = JSON.parse(raw);
-              const v = d.metadata?.vulnerabilities || {};
-              const total = v.total || 0;
-              if (total === 0) {
+              const read = f => { try { return JSON.parse(require('fs').readFileSync(f, 'utf8')); } catch { return null; } };
+              const prod = read('/tmp/audit-prod.json');
+              const full = read('/tmp/audit-full.json');
+              const pv = prod?.metadata?.vulnerabilities || {};
+              const fv = full?.metadata?.vulnerabilities || {};
+              const sev = ['critical','high','moderate','low'];
+              console.log('### Production (shipped) — release gate @ moderate');
+              if ((pv.total || 0) === 0) {
+                console.log('✅ No vulnerabilities in production dependencies.');
+              } else {
+                console.log('❌ Production vulnerabilities found — build blocked:');
+                console.log('');
+                console.log('| Severity | Count |'); console.log('|---|---|');
+                sev.forEach(k => { if (pv[k] > 0) console.log('| \`' + k + '\` | ' + pv[k] + ' |'); });
+              }
+              console.log('');
+              console.log('### Full tree (incl. devDependencies) — informational, non-blocking');
+              if ((fv.total || 0) === 0) {
                 console.log('✅ No vulnerabilities found.');
               } else {
-                console.log('| Severity | Count |');
-                console.log('|---|---|');
-                ['critical','high','moderate','low','info'].forEach(k => {
-                  if (v[k] > 0) console.log('| \`' + k + '\` | ' + v[k] + ' |');
-                });
-                const blocking = (v.high || 0) + (v.critical || 0);
+                console.log('| Severity | Count |'); console.log('|---|---|');
+                sev.forEach(k => { if (fv[k] > 0) console.log('| \`' + k + '\` | ' + fv[k] + ' |'); });
                 console.log('');
-                if (blocking > 0) {
-                  console.log('❌ High or critical vulnerabilities found — build blocked.');
-                } else {
-                  console.log('⚠️ Low/moderate vulnerabilities only (below --audit-level=high threshold).');
-                }
+                console.log('_Dev-only advisories are frozen in upstream shrinkwraps (pi-coding-agent / openclaw) and not shipped; they do not block the gate._');
               }
             " 2>/dev/null || echo "_Audit summary unavailable — see job log._"
           } >> "$GITHUB_STEP_SUMMARY"
