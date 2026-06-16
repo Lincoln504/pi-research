@@ -183,14 +183,6 @@ async function cleanupOrphanedProcessesWindows(): Promise<void> {
   }
 }
 
-/**
- * Get the temp directory where Camoufox stores profiles
- */
-export async function getCamoufoxTempDir(): Promise<string> {
-  const tmpdir = os.tmpdir();
-  // Camoufox uses playwright_firefoxdev_profile- prefix for profile directories
-  return tmpdir;
-}
 
 // ============================================================================
 // Browser Manager Cleanup Functions

@@ -12,7 +12,8 @@ import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
-import { ensureBrowserCacheDir, getBrowserEnv, getMaxWorkers } from './config.ts';
+import { ensureBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getMaxWorkers } from './config.ts';
+import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
@@ -96,6 +97,19 @@ export class WorkerPoolManager implements IService {
 
                 ensureBrowserCacheDir();
                 const browserEnv = getBrowserEnv(config);
+
+                // Reclaim browser profiles leaked by a previously crashed run
+                // (Playwright self-cleans on a normal browser.close(); only an
+                // abnormal exit leaves them behind — and on a tmpfs /tmp that is
+                // leaked RAM). Lock-aware, so profiles in use by this or a
+                // concurrent instance are spared. Fire-and-forget: never block
+                // or fail pool startup. Sweeps the dedicated profile dir plus
+                // the legacy os.tmpdir() location for pre-upgrade leftovers.
+                const STALE_PROFILE_MS = 60 * 60 * 1000; // 1 hour
+                void cleanupStaleProfiles(getBrowserProfileDir(config), STALE_PROFILE_MS)
+                    .catch((e) => logger.debug('[WorkerPoolManager] Profile sweep (profile dir) failed:', e));
+                void cleanupStaleProfiles(undefined, STALE_PROFILE_MS)
+                    .catch((e) => logger.debug('[WorkerPoolManager] Profile sweep (legacy tmp) failed:', e));
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 

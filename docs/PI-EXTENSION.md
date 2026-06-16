@@ -41,7 +41,7 @@ Key categories:
 | Category | Settings |
 |----------|----------|
 | **Research** | Timeout, max researchers, default depth, scrape batches, model override |
-| **Browser** | Worker thread count and concurrency are environment-only (`PI_RESEARCH_WORKER_THREADS`, default 4; `PI_RESEARCH_WORKER_CONCURRENCY`) |
+| **Browser** | Worker thread count and concurrency are environment-only (`PI_RESEARCH_WORKER_THREADS`, default 4; `PI_RESEARCH_WORKER_CONCURRENCY`). Transient browser profiles default to disk (`~/.cache/pi-research/profiles`) rather than the system temp dir, so a RAM-backed `/tmp` (tmpfs) is not consumed; override with `PI_RESEARCH_TMP_DIR` |
 | **Knowledge Store** | Store mode (none/project/global), embedding model, device |
 | **Reporting** | Export enable, debug logging |
 | **Actions** | Clear store scopes, view database/memory status, view metrics |

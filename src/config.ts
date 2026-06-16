@@ -73,6 +73,11 @@ export const ConfigSchema = Type.Object({
   RESEARCH_MODEL: Type.Optional(Type.String()),
   /** Explicit directory for the knowledge store database (overrides default) */
   KNOWLEDGE_STORE_DIR: Type.Optional(Type.String()),
+  /** Directory for transient browser profile data. Defaults to a disk-backed
+   *  dir (~/.cache/pi-research/profiles) rather than the system temp dir, so a
+   *  RAM-backed /tmp (tmpfs) is not consumed by per-worker browser profiles.
+   *  Set to a path under the system temp dir to opt back into tmpfs/RAM. */
+  TMP_DIR: Type.Optional(Type.String()),
   /** Whether to automatically export a markdown research report to disk at the end (default: false) */
   RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
   /** Strategy for database schema/model migrations: 'drop', 're-embed', or 'backup' (default: 'backup') */
@@ -140,6 +145,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
   'PI_RESEARCH_KNOWLEDGE_DIR',
+  'PI_RESEARCH_TMP_DIR',
   'PI_RESEARCH_REPORT_EXPORT_ENABLED',
   'PI_RESEARCH_DEBUG',
 ];
@@ -415,6 +421,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
+    ...(config.TMP_DIR ? { PI_RESEARCH_TMP_DIR: config.TMP_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
     PI_RESEARCH_DEBUG: String(config.DEBUG),
   };
@@ -600,6 +607,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
+    TMP_DIR: parseEnvString(e, 'PI_RESEARCH_TMP_DIR', DEFAULTS.TMP_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
     DEBUG: parseEnvBool(e, 'PI_RESEARCH_DEBUG', DEFAULTS.DEBUG),
   };

@@ -33,11 +33,18 @@ vi.mock('../../../src/infrastructure/browser/config.ts', () => ({
   ensureBrowserCacheDir: vi.fn(),
   getBrowserEnv: vi.fn(() => ({})),
   getBrowserCacheDir: vi.fn(() => '/tmp/test-browser-cache'),
+  getBrowserProfileDir: vi.fn(() => '/tmp/test-browser-profiles'),
   getCamoufoxBinaryPath: vi.fn(() => '/tmp/test-browser-cache/camoufox'),
   getMaxWorkers: vi.fn(() => 2),
   generateSchedulerVersion: vi.fn(() => 'v1'),
   getSchedulerVersion: vi.fn(() => 'v1'),
   isBrowserAvailable: vi.fn(() => true),
+}));
+
+// Profile cleanup is fire-and-forget at pool init; stub it so the test never
+// touches the real filesystem.
+vi.mock('../../../src/infrastructure/browser/cleanup-utils.ts', () => ({
+  cleanupStaleProfiles: vi.fn(async () => ({ removed: 0, errors: 0 })),
 }));
 
 // ---------------------------------------------------------------------------

@@ -103,6 +103,7 @@ Configure settings via the `/research-config` TUI dashboard. This manages global
 | `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–10) |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
 | `PI_RESEARCH_MODEL` | _(session model)_ | Optional model override for researchers |
+| `PI_RESEARCH_TMP_DIR` | `~/.cache/pi-research/profiles` | Directory for transient browser profiles. Defaults to disk; set under the system temp dir to use tmpfs/RAM |
 | `PI_RESEARCH_DEBUG` | `false` | Enable verbose diagnostic logging |
 | `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key for higher rate limits |
 

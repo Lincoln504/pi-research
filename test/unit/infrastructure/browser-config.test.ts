@@ -12,7 +12,7 @@ vi.mock('node:os', async (importOriginal) => {
     return { ...actual, platform: () => osMock.current };
 });
 
-import { getBrowserCacheDir, getBrowserEnv, getCamoufoxBinaryPath, resolveHeadlessMode } from '../../../src/infrastructure/browser/config.ts';
+import { getBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getCamoufoxBinaryPath, resolveHeadlessMode } from '../../../src/infrastructure/browser/config.ts';
 
 describe('browser-config', () => {
     const ENV_KEYS = ['PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'LOCALAPPDATA'] as const;
@@ -88,6 +88,25 @@ describe('browser-config', () => {
             const env = getBrowserEnv();
             expect(env['HOME']).toBe(process.env['HOME']);
             expect(env['USERPROFILE']).toBe(process.env['USERPROFILE']);
+        });
+
+        it('redirects worker TMPDIR/TMP/TEMP to the dedicated browser profile dir (off a tmpfs /tmp)', () => {
+            const env = getBrowserEnv();
+            const profileDir = getBrowserProfileDir();
+            expect(env['TMPDIR']).toBe(profileDir);
+            expect(env['TMP']).toBe(profileDir);
+            expect(env['TEMP']).toBe(profileDir);
+        });
+    });
+
+    describe('getBrowserProfileDir', () => {
+        it('defaults to a dedicated <cacheHome>/pi-research/profiles path (not the system temp dir)', () => {
+            expect(getBrowserProfileDir()).toContain(join('pi-research', 'profiles'));
+        });
+
+        it('honours the config.TMP_DIR (PI_RESEARCH_TMP_DIR) override', () => {
+            const custom = join(homedir(), '.cache', 'pi-research', 'profiles-test-override');
+            expect(getBrowserProfileDir({ TMP_DIR: custom } as any)).toBe(custom);
         });
     });
 

@@ -54,6 +54,40 @@ export function getBrowserCacheDir(): string {
 }
 
 /**
+ * Directory for transient per-worker browser profiles (Playwright/Camoufox
+ * create one isolated profile per browser instance).
+ *
+ * Defaults to a DISK-backed location (~/.cache/pi-research/profiles) rather than
+ * os.tmpdir(): on systems where /tmp is tmpfs (RAM-backed), placing several
+ * browser profiles there consumes RAM and, with an OOM killer like earlyoom
+ * active, can contribute to the whole session being killed. Override with
+ * PI_RESEARCH_TMP_DIR (config.TMP_DIR) — e.g. point it back at the system temp
+ * dir to deliberately use tmpfs/RAM when there is memory headroom.
+ *
+ * The directory is created if missing, because Playwright requires the parent
+ * of its mkdtemp profile dir to already exist.
+ */
+export function getBrowserProfileDir(config?: Config): string {
+    const configured = (config || getConfig()).TMP_DIR;
+    let dir: string;
+    if (configured && configured.trim().length > 0) {
+        dir = configured;
+    } else {
+        const cacheHome = process.env['XDG_CACHE_HOME'] || join(homedir(), '.cache');
+        dir = join(cacheHome, 'pi-research', 'profiles');
+    }
+    if (!existsSync(dir)) {
+        try {
+            mkdirSync(dir, { recursive: true });
+        } catch (_e) {
+            // Ignore race / permission errors; Playwright will surface a clear
+            // error if the directory is genuinely unusable.
+        }
+    }
+    return dir;
+}
+
+/**
  * Get environment for spawning browser worker processes.
  * Does not override HOME so camoufox uses its natural install location.
  *
@@ -76,6 +110,15 @@ export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     if (logFilePath) {
         env['PI_RESEARCH_LOG_FILE'] = logFilePath;
     }
+    // Redirect the worker's temp dir to a disk-backed profile directory so
+    // Playwright/Camoufox per-instance profiles do not land on a tmpfs (RAM)
+    // /tmp. The worker's own logging is unaffected: it writes to
+    // PI_RESEARCH_LOG_FILE (set above), not os.tmpdir(). TMP/TEMP are set too
+    // for Windows. os.tmpdir() in the worker honours these.
+    const profileDir = getBrowserProfileDir(config);
+    env['TMPDIR'] = profileDir;
+    env['TMP'] = profileDir;
+    env['TEMP'] = profileDir;
     // Inject config values that browser workers read from process.env.
     // Without this, workers only see shell-set values — .env file values would be lost.
     const c = config || getConfig();
