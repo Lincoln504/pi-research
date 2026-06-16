@@ -36,6 +36,8 @@ import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
 import { extractRunStats, type ResearchStats } from './utils/metrics-summary.ts';
 import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
+import { scrapeSingle } from './web-research/web-scraper.ts';
+import type { ScrapeResult } from './core/interfaces/scheduler-interfaces.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
 
@@ -314,6 +316,18 @@ export async function verifyUrl(url: string, signal?: AbortSignal): Promise<bool
     logger.debug(`[SDK] URL verification failed for ${url}:`, err);
     return false;
   }
+}
+
+/**
+ * Scrape a single URL with the SAME two-layer scraper the research pipeline uses:
+ * a fast HTTP fetch first, then a stealth-browser (playwright/camoufox) fallback for
+ * JS-heavy or bot-protected pages, with SSRF validation up front. Requires
+ * initResearchSDK() to have been called. Never throws on a failed scrape — inspect
+ * `result.success`; the page content is returned as `result.markdown`.
+ */
+export async function scrapeUrl(url: string, signal?: AbortSignal): Promise<ScrapeResult> {
+  if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
+  return scrapeSingle(url, signal, globalConfig ?? undefined, undefined, globalContainer);
 }
 
 /**
