@@ -7,9 +7,22 @@
  * INFO and DEBUG levels are only logged when PI_RESEARCH_DEBUG=true (or config.DEBUG=true).
  *
  * This module never patches process-global console.* methods.
+ *
+ * Write durability / performance contract (see LogWriter):
+ *  - WARN/ERROR are written SYNCHRONOUSLY. They are the primary forensic signal
+ *    and must survive an immediate crash, so they are never buffered.
+ *  - INFO/DEBUG (only emitted when verbose) are buffered and flushed off the
+ *    event loop via fs.promises.appendFile, so high-frequency debug logging
+ *    never blocks the event loop or the TUI render path — regardless of whether
+ *    the log file lives on a fast (tmpfs/RAM) or slow (disk) filesystem. The
+ *    buffer is drained synchronously before every WARN/ERROR write (preserving
+ *    order) and on process 'exit', so graceful shutdowns lose nothing. Only a
+ *    hard SIGKILL can drop the sub-millisecond tail of buffered INFO/DEBUG,
+ *    which is acceptable for non-critical diagnostics.
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
 import { errorTracker, type ErrorContext } from './utils/error-tracker.ts';
@@ -40,6 +53,7 @@ export interface ILogger {
   warn(...args: unknown[]): void;
   debug(...args: unknown[]): void;
   clear(): void;
+  flushSync(): void;
   runCapturingStderr<T>(task: () => Promise<T>): Promise<T>;
 }
 
@@ -52,6 +66,127 @@ export interface LoggerOptions {
 
 export function getDefaultDebugLogPathTemplate(): string {
   return buildDefaultDebugLogPath('{researchRunId}');
+}
+
+/**
+ * Per-file log writer, shared across every Logger instance that targets the
+ * same path (logging is consolidated to one file, so a single shared buffer is
+ * required to preserve global write order).
+ *
+ * INFO/DEBUG go through enqueue() — buffered, flushed asynchronously off the
+ * event loop. WARN/ERROR go through writeSync() — which first drains the buffer
+ * (keeping order) and then writes synchronously, so critical lines are durable.
+ */
+class LogWriter {
+  private buffer: string[] = [];
+  private bufferBytes = 0;
+  private flushScheduled = false;
+  private flushing = false;
+  // Flush eagerly once buffered output gets large, to bound memory and latency
+  // during sustained bursts instead of waiting for the scheduled tick.
+  private static readonly MAX_BUFFER_BYTES = 256 * 1024;
+
+  constructor(private readonly filePath: string) {}
+
+  /** Queue a line for asynchronous, non-blocking write (INFO/DEBUG path). */
+  enqueue(line: string): void {
+    this.buffer.push(line);
+    this.bufferBytes += line.length;
+    if (this.bufferBytes >= LogWriter.MAX_BUFFER_BYTES) {
+      void this.flush();
+      return;
+    }
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushScheduled || this.flushing) return;
+    this.flushScheduled = true;
+    // setTimeout(0) runs the flush on the next event-loop turn — off the
+    // synchronous caller path — and coalesces a burst of lines into one write.
+    setTimeout(() => { void this.flush(); }, 0);
+  }
+
+  /** Asynchronously write buffered lines. Never blocks the event loop. */
+  private async flush(): Promise<void> {
+    this.flushScheduled = false;
+    if (this.flushing || this.buffer.length === 0) return;
+    this.flushing = true;
+    try {
+      while (this.buffer.length > 0) {
+        const batch = this.buffer.join('');
+        this.buffer.length = 0;
+        this.bufferBytes = 0;
+        try {
+          await appendFile(this.filePath, batch);
+        } catch {
+          // Silently ignore file write errors (matches the synchronous path).
+        }
+      }
+    } finally {
+      this.flushing = false;
+      // A line enqueued after the loop drained but before this point would
+      // otherwise linger with no scheduled flush — reschedule defensively.
+      if (this.buffer.length > 0) this.scheduleFlush();
+    }
+  }
+
+  /**
+   * Drain buffered lines, then write `line`, all synchronously and in order.
+   * Used for WARN/ERROR so the critical line (and everything queued before it)
+   * is on disk before this call returns.
+   */
+  writeSync(line: string): void {
+    this.drainSync();
+    try {
+      appendFileSync(this.filePath, line);
+    } catch {
+      // Silently ignore file write errors.
+    }
+  }
+
+  /** Synchronously flush all buffered lines (graceful exit / tests / pre-sync-write). */
+  drainSync(): void {
+    if (this.buffer.length === 0) return;
+    const batch = this.buffer.join('');
+    this.buffer.length = 0;
+    this.bufferBytes = 0;
+    try {
+      appendFileSync(this.filePath, batch);
+    } catch {
+      // Silently ignore file write errors.
+    }
+  }
+}
+
+// One writer per target path → shared, ordered buffer for consolidated logging.
+const logWriters = new Map<string, LogWriter>();
+
+// Drain every writer synchronously on graceful process exit so no buffered
+// INFO/DEBUG line is lost. Registered exactly once, on first writer creation.
+let exitDrainRegistered = false;
+function getLogWriter(filePath: string): LogWriter {
+  let writer = logWriters.get(filePath);
+  if (!writer) {
+    writer = new LogWriter(filePath);
+    logWriters.set(filePath, writer);
+  }
+  if (!exitDrainRegistered) {
+    exitDrainRegistered = true;
+    process.on('exit', () => {
+      for (const w of logWriters.values()) {
+        try { w.drainSync(); } catch { /* best-effort on exit */ }
+      }
+    });
+  }
+  return writer;
+}
+
+/** Synchronously flush all buffered log output (e.g. before reading a log file in tests). */
+export function flushAllLogsSync(): void {
+  for (const w of logWriters.values()) {
+    try { w.drainSync(); } catch { /* best-effort */ }
+  }
 }
 
 /**
@@ -123,11 +258,14 @@ export class Logger implements ILogger {
     };
     const line = `${safeJsonStringify(entry)}\n`;
 
-    // Write to file
-    try {
-      appendFileSync(this.logFile, line);
-    } catch {
-      // Silently ignore file write errors
+    // Write to file. WARN/ERROR are written synchronously for crash-durability;
+    // INFO/DEBUG are buffered and flushed off the event loop so high-frequency
+    // logging never blocks the loop or the TUI render path (see LogWriter).
+    const writer = getLogWriter(this.logFile);
+    if (level === LogLevel.ERROR || level === LogLevel.WARN) {
+      writer.writeSync(line);
+    } else {
+      writer.enqueue(line);
     }
 
     // Optional console output
@@ -184,7 +322,16 @@ export class Logger implements ILogger {
   }
 
   clear(): void {
+    this.flushSync();
     this.rotation.clearLogs(this.logFile, this.logDir);
+  }
+
+  /**
+   * Synchronously flush this logger's buffered INFO/DEBUG output to disk.
+   * Use before reading the log file directly (tests) or during shutdown.
+   */
+  flushSync(): void {
+    getLogWriter(this.logFile).drainSync();
   }
 
   getLogFilePath(): string | null {
@@ -278,6 +425,7 @@ export const logger: ILogger = {
   warn:  (...args: unknown[]) => getLogger().warn(...args),
   debug: (...args: unknown[]) => getLogger().debug(...args),
   clear: () => getLogger().clear(),
+  flushSync: () => getLogger().flushSync(),
   runCapturingStderr: <T>(task: () => Promise<T>) => getLogger().runCapturingStderr(task),
 };
 

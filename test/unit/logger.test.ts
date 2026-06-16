@@ -98,6 +98,40 @@ describe('logger', () => {
       expect(console.debug).toBe(originalConsole.debug);
     });
 
+    it('buffers INFO/DEBUG (no synchronous disk write) until flushed', () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      logger.info('buffered-info');
+      // Still in the in-memory buffer — setImmediate has not fired in synchronous code.
+      const beforeFlush = existsSync(TEST_LOG_PATH) ? readFileSync(TEST_LOG_PATH, 'utf-8') : '';
+      expect(beforeFlush).not.toContain('buffered-info');
+      logger.flushSync();
+      expect(readFileSync(TEST_LOG_PATH, 'utf-8')).toContain('buffered-info');
+    });
+
+    it('asynchronously flushes buffered INFO without an explicit flush', async () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      logger.info('auto-flushed');
+      await new Promise((resolve) => setTimeout(resolve, 50)); // setImmediate → flush → appendFile
+      expect(readFileSync(TEST_LOG_PATH, 'utf-8')).toContain('auto-flushed');
+    });
+
+    it('writes WARN/ERROR synchronously — durable with no flush', () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      logger.error('sync-error');
+      expect(readFileSync(TEST_LOG_PATH, 'utf-8')).toContain('sync-error');
+    });
+
+    it('drains buffered INFO before a synchronous WARN so order is preserved', () => {
+      const logger = new Logger({ verbose: true, logFilePath: TEST_LOG_PATH });
+      logger.info('first-info');
+      logger.warn('then-warn'); // forces a synchronous drain of the buffer, then a sync write
+      const lines = readFileSync(TEST_LOG_PATH, 'utf-8').trim().split('\n');
+      const infoIdx = lines.findIndex((l) => l.includes('first-info'));
+      const warnIdx = lines.findIndex((l) => l.includes('then-warn'));
+      expect(infoIdx).toBeGreaterThanOrEqual(0);
+      expect(warnIdx).toBeGreaterThan(infoIdx);
+    });
+
     it('should have default log file path', () => {
       const logger = new Logger({ verbose: true });
       const logPath = logger.getLogFilePath();
@@ -192,7 +226,8 @@ describe('logger', () => {
       runWithLogContext({ researchRunId: runId, toolName: 'test' }, () => {
         logger.info('test message for consolidated log');
       });
-      
+      logger.flushSync(); // INFO is buffered/async — drain before reading the file
+
       const content = readFileSync(logger.getLogFilePath()!, 'utf-8');
       expect(content).toContain('test message for consolidated log');
       expect(content).toContain(`"researchRunId":"${runId}"`);
