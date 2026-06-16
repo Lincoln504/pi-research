@@ -40,8 +40,8 @@ Key categories:
 
 | Category | Settings |
 |----------|----------|
-| **Research** | Timeout, max researchers, default depth, model override |
-| **Browser** | Thread count, concurrency, scrape batches, timeout |
+| **Research** | Timeout, max researchers, default depth, scrape batches, model override |
+| **Browser** | Worker thread count and concurrency are environment-only (`PI_RESEARCH_WORKER_THREADS`, default 4; `PI_RESEARCH_WORKER_CONCURRENCY`) |
 | **Knowledge Store** | Store mode (none/project/global), embedding model, device |
 | **Reporting** | Export enable, debug logging |
 | **Actions** | Clear store scopes, view database/memory status, view metrics |

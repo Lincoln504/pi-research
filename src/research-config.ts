@@ -93,15 +93,15 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
     // ── Project-scoped settings (saved per-directory) ──
     {
       id: 'DEFAULT_RESEARCH_DEPTH',
-      label: 'Research Depth',
+      label: '/research depth [project]',
       description: 'Default depth for the /research command (normal, deep, ultra).\n[project] means configured independently per directory.',
       currentValue: depthLabels[config.DEFAULT_RESEARCH_DEPTH] || String(config.DEFAULT_RESEARCH_DEPTH),
       values: ['normal', 'deep', 'ultra'],
     },
     {
       id: 'KNOWLEDGE_STORE_MODE',
-      label: 'Knowledge Mode',
-      description: 'Knowledge store isolation — none (disabled), project (entries confined to this directory), or global (shared across all projects).\n[project] means configured independently per directory.',
+      label: 'Knowledge Mode [project]',
+      description: 'Knowledge store scope — none (disabled), project (scope knowledge per this directory), or global (scope knowledge globally, shared across all projects).\n[project] means configured independently per directory.',
       currentValue: config.KNOWLEDGE_STORE_MODE,
       values: ['none', 'project', 'global'],
     },
@@ -133,13 +133,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: config.RESEARCH_REPORT_EXPORT_ENABLED ? 'true' : 'false',
       values: ['true', 'false'],
     },
-    {
-      id: 'WORKER_THREADS',
-      label: 'Browser Workers',
-      description: 'Parallel browser processes for search and scraping. Higher values use more CPU and RAM.',
-      currentValue: String(config.WORKER_THREADS),
-      values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-    },
+    // Browser Workers is intentionally NOT exposed here. It is an
+    // environment-only setting (PI_RESEARCH_WORKER_THREADS, default 4) so that
+    // CPU/RAM-sensitive concurrency is not casually changed from the menu.
     ...(anyKnowledgeStore ? [
       {
         id: 'EMBEDDING_MODEL',
@@ -233,19 +229,39 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   try {
     await ctx.ui.custom(
       (_tui: TUI, theme: Theme, _kb: any, done: (val: any) => void) => {
+        // The "[project]" tag marks settings that are saved independently per
+        // directory. It is rendered in the warning (yellow) color so it stands
+        // out, while the rest of the label keeps its normal/accent color. The
+        // tag is embedded in the label text (SettingsList pads it for alignment),
+        // so we split on it here rather than recoloring the whole padded string.
+        const PROJECT_TAG = '[project]';
+        const colorizeLabel = (text: string, selected: boolean): string => {
+          const idx = text.indexOf(PROJECT_TAG);
+          if (idx === -1) {
+            return selected ? theme.fg('accent', text) : text;
+          }
+          const before = text.slice(0, idx);
+          const after = text.slice(idx + PROJECT_TAG.length); // trailing alignment padding
+          const beforeColored = before ? (selected ? theme.fg('accent', before) : before) : '';
+          return `${beforeColored}${theme.fg('warning', PROJECT_TAG)}${after}`;
+        };
+
         const listTheme = {
-          label: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : text,
+          label: colorizeLabel,
           value: (text: string, selected: boolean) => selected ? theme.fg('accent', text) : theme.fg('muted', text),
           description: (text: string) => {
-            // Apply warning color to the line if the *original* description contained destructive keywords.
-            // Since wrapTextWithAnsi returns an array of strings, this function is called for each line.
-            // The previous logic was failing because it checked the individual line, not the full context.
-            // We need a way to know if the *original* description had the keyword.
-            
-            // Re-evaluating: SettingsList calls this for each wrapped line.
-            // If the original description had 'delete' or 'clear', all lines should be yellow.
-            // I need to check the selected item's description.
-            const selectedItem = initialItems[settingsList['selectedIndex']]; 
+            // SettingsList calls this once per wrapped description line, so we
+            // can't inspect the line alone — we look up the currently selected
+            // item (respecting the active search filter) and color the whole
+            // description yellow when it describes a destructive action.
+            const list = settingsList as unknown as {
+              searchEnabled?: boolean;
+              filteredItems?: SettingItem[];
+              items?: SettingItem[];
+              selectedIndex: number;
+            };
+            const displayItems = list.searchEnabled ? list.filteredItems : list.items;
+            const selectedItem = displayItems?.[list.selectedIndex];
             const desc = selectedItem?.description?.toLowerCase() || '';
             if (desc.includes('delete') || desc.includes('clear')) {
               return theme.fg('warning', text);
@@ -280,9 +296,6 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             } else if (id === 'MAX_SCRAPE_BATCHES') {
               config.MAX_SCRAPE_BATCHES = newValue === 'unlimited' ? 0 : parseInt(newValue, 10);
               scope = 'user';
-            } else if (id === 'WORKER_THREADS') {
-            config.WORKER_THREADS = parseInt(newValue, 10);
-            scope = 'user';
             } else if (id === 'RESEARCHER_TIMEOUT_MS') {
             config.RESEARCHER_TIMEOUT_MS = parseInt(newValue, 10) * 60000;
             scope = 'user';
@@ -338,38 +351,25 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           { enableSearch: true }
         );
 
-        const wrapText = (text: string, width: number): string[] => {
-          const words = text.split(' ');
-          const lines: string[] = [];
-          let currentLine = '';
-          for (const word of words) {
-            if ((currentLine.length + word.length + 1) > width) {
-              if (currentLine) lines.push(currentLine);
-              currentLine = word;
-            } else {
-              currentLine = currentLine ? `${currentLine} ${word}` : word;
-            }
-          }
-          if (currentLine) lines.push(currentLine);
-          return lines;
-        };
-
         return {
           render: (width: number) => {
             if (width < 4) return [];
             const border = theme.fg('muted', '─'.repeat(width));
             const listLines = settingsList.render(width);
-            
+
             // Header with title and search hint
             const titleText = 'Research Configuration';
             const hintText = 'Type to search';
             const header = `${titleText} ${theme.fg('dim', `(${hintText})`)}`;
-            
-            // Project info to appear right above description
-            const pathInfoText = `Project: ${path.basename(cwd)}`;
-            const wrappedPathInfo = wrapText(pathInfoText, width - 2).map(line => theme.fg('dim', ` ${line}`));
-            
-            const lines = [border, header, border, ...listLines, '', ...wrappedPathInfo];
+
+            // Footer: which directory the [project]-scoped settings apply to.
+            // "[project]" is yellow (matching the per-row tag); the rest is dim.
+            // Kept on a single line so the outer truncate clips it cleanly when
+            // the terminal is narrow.
+            const dirName = path.basename(cwd);
+            const pathInfoLine = ` ${theme.fg('warning', '[project]')}${theme.fg('dim', ` directory: ${dirName}`)}`;
+
+            const lines = [border, header, border, ...listLines, '', pathInfoLine];
             return lines.map(line => {
               if (visibleWidth(line) > width) {
                 return truncateToWidth(line, width);
@@ -381,6 +381,11 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           invalidate: () => settingsList.invalidate(),
         };
       }
+      // Rendered inline (default): the menu replaces the editor and takes
+      // keyboard focus. While a research run is active, the live research panel
+      // is removed from the screen for the duration of the menu (see
+      // setInteractiveTuiActive → hideMasterWidget), so the inline menu gets the
+      // full screen and leaves no ghost rows on close — without an overlay popup.
     )
 .then(async (result: any) => {
       // 1. Handle Critical Config Changes (Model/Device)

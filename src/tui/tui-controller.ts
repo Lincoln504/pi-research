@@ -9,7 +9,7 @@
 
 import type { ExtensionUIContext } from '@earendil-works/pi-coding-agent';
 import { matchesKey } from '@earendil-works/pi-tui';
-import { getActiveSessionCount, abortAllSessions, refreshAllSessions } from '../orchestration/session-state.ts';
+import { getActiveSessionCount, abortAllSessions, refreshAllSessions, hideMasterWidget } from '../orchestration/session-state.ts';
 import { logger } from '../logger.ts';
 
 /**
@@ -97,10 +97,19 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
 export function setInteractiveTuiActive(active: boolean): void {
   state.isInteractiveTuiActive = active;
   logger.debug(`[TUI] Interactive TUI state changed: ${active}`);
-  
+
+  if (active && state.piSessionId !== undefined) {
+    // When a foreground menu opens, fully remove the live research panel from
+    // the screen. Freezing its updates (the isInteractiveTuiActive gate) is not
+    // enough: a tall, still-present panel above the editor crowds the inline
+    // menu and leaves ghost rows behind. Removing it gives the menu the full
+    // screen, identical to opening the menu with no run active.
+    hideMasterWidget(state.piSessionId);
+  }
+
   if (!active && state.piSessionId !== undefined) {
     // When the menu closes, immediately refresh the background research widgets
-    // because they were paused while the menu was open to prevent TUI fighting.
+    // because they were paused/removed while the menu was open.
     refreshAllSessions(state.piSessionId);
   }
 }

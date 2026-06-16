@@ -20,6 +20,7 @@ import {
 import {
   registerSessionPanel,
   registerMasterUpdate,
+  registerMasterRemove,
   refreshAllSessions,
   onSessionOrderChange,
   getPiActivePanels,
@@ -139,6 +140,15 @@ export function createResearchTuiManager(
       return getActivePanelsForSession(piSessionId);
     });
     ctx.ui.setWidget(masterWidgetId, (tui: TUI, theme: Theme) => masterPanelCreator(tui, theme), { placement: 'aboveEditor' });
+  });
+
+  // Register the remover so a foreground menu can fully hide the live panel.
+  // setWidget(key, undefined) removes the widget and forces a clean re-layout
+  // (renderWidgets()), which both frees the screen for the menu and clears any
+  // rows the panel occupied — preventing ghost/stacked panels on close.
+  registerMasterRemove(piSessionId, () => {
+    if (ctx.mode !== 'tui' || !ctx.hasUI) return;
+    (ctx.ui as unknown as { setWidget: (k: string, c?: unknown) => void }).setWidget(masterWidgetId, undefined);
   });
 
   // Subscribe to session order changes

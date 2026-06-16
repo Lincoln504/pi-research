@@ -56,6 +56,8 @@ interface PiSessionState {
   refreshTimeout: NodeJS.Timeout | null;
   /** Single update function for the Master Widget of this Pi session */
   masterUpdate: (() => void) | null;
+  /** Removes the Master Widget from the screen (used while a foreground menu is open) */
+  masterRemove: (() => void) | null;
   /** Steering messages captured for this Pi session */
   steeringMessages: SteeringMessage[];
   /** Timestamp of the last global abort for this Pi session */
@@ -92,6 +94,7 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
       subscribers: [],
       refreshTimeout: null,
       masterUpdate: null,
+      masterRemove: null,
       steeringMessages: [],
       lastAbortAt: 0,
     };
@@ -327,6 +330,41 @@ export function registerMasterUpdate(piSessionId: string | undefined, update: ()
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
   state.masterUpdate = update;
+}
+
+/**
+ * Register the function that removes the Master Widget from the screen.
+ * Used to fully hide the live research panel while a foreground interactive
+ * menu (e.g. /research-config) is open, so the menu is not rendered cramped
+ * beneath a tall, frozen research panel and leaves no ghost rows on close.
+ */
+export function registerMasterRemove(piSessionId: string | undefined, remove: () => void): void {
+  const sid = normalizeSessionId(piSessionId);
+  const state = getPiState(sid);
+  state.masterRemove = remove;
+}
+
+/**
+ * Immediately remove the Master Widget for a Pi session from the screen.
+ * Cancels any pending debounced refresh so it cannot re-add the widget while
+ * the menu is open. The widget is recreated from the preserved panel state via
+ * refreshAllSessions() once the menu closes.
+ */
+export function hideMasterWidget(piSessionId: string | undefined): void {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return;
+  if (state.refreshTimeout) {
+    clearTimeout(state.refreshTimeout);
+    state.refreshTimeout = null;
+  }
+  if (state.masterRemove) {
+    try {
+      state.masterRemove();
+    } catch (error) {
+      logger.error(`[session-state] Error removing Master Widget for ${sid}:`, error);
+    }
+  }
 }
 
 /**
