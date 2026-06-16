@@ -7,9 +7,8 @@
  */
 
 import { type Component, visibleWidth, truncateToWidth, type TUI } from '@earendil-works/pi-tui';
-import { logger } from '../logger.ts';
 import type { Theme, ResearchPanelState } from '../types/research-panel-types.ts';
-import { getSteeringMessages, getAllTrackedSessions } from '../orchestration/session-state.ts';
+import { getSteeringMessages } from '../orchestration/session-state.ts';
 import {
   formatTokens,
   renderProgressPct,
@@ -315,17 +314,13 @@ export function createMasterResearchPanel(
         if (width < 4) return [];
 
         const panels: ResearchPanelState[] = getPanels ? getPanels(piSessionId) : [];
-        const steeringMessages = getSteeringMessages(piSessionId);
-        const trackedSessions = getAllTrackedSessions();
-        
-        if (panels.length > 0) {
-          logger.debug(`[research-panel] Rendering master panel for ${piSessionId}. Panels: ${panels.length}, Steering: ${steeringMessages.length}, All tracked: [${trackedSessions.join(', ')}]`);
-          const panelSessionId = panels[0]?.sessionId;
-          if (piSessionId !== panelSessionId) {
-             logger.warn(`[research-panel] Session ID mismatch! Master ID: ${piSessionId}, Panel ID: ${panelSessionId}`);
-          }
-        }
 
+        // NOTE: render() runs on every frame (30 FPS during the wave animation).
+        // It must stay pure and allocation-light — NO logging here. A previous
+        // logger.debug() on this path issued a synchronous appendFileSync per
+        // frame, which (with DEBUG enabled) blocked the event loop and made the
+        // wave animation slow and jumpy. Diagnostics belong on state-change
+        // paths, not the render hot path.
         if (panels.length === 0) return [];
 
         const allLines: string[] = [];

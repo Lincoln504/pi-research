@@ -142,8 +142,21 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       },
     });
 
-    const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
-    sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
+    // Hand the freshly-created AgentSession to the cleanup machinery before any
+    // other work. createResearcherSession() above already allocated a live
+    // session; if resolving/registering the session service throws (container
+    // disposed mid-run, race), the session is not yet owned by
+    // cleanupResearchServices and would leak unaborted. Abort it directly on any
+    // failure in this window, then rethrow. (Same acquire-before-teardown-wired
+    // class as the ghost-panel fix.)
+    let sessionService: ResearchSessionService;
+    try {
+      sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
+      sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
+    } catch (registrationError) {
+      await session.abort().catch(() => { /* best-effort: session is being discarded */ });
+      throw registrationError;
+    }
 
     let lastSteeringCheck = Date.now();
 

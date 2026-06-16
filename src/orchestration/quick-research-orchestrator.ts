@@ -175,8 +175,20 @@ export class QuickResearchOrchestrator {
           },
         });
 
-        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
-        sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
+        // Hand the freshly-created AgentSession to the cleanup machinery before
+        // any other work. If resolving/registering the session service throws
+        // (container disposed mid-run, race), the session is created but not yet
+        // owned by cleanupResearchServices and would leak unaborted. Abort it
+        // directly on any failure in this window, then rethrow. (Same
+        // acquire-before-teardown-wired class as the ghost-panel fix.)
+        let sessionService: ResearchSessionService;
+        try {
+          sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
+          sessionService.registerSession(this.options.researchId, 'quick', session, () => session.abort().catch((err) => logger.warn('[QuickOrchestrator] Session abort failed:', err)));
+        } catch (registrationError) {
+          await session.abort().catch(() => { /* best-effort: session is being discarded */ });
+          throw registrationError;
+        }
 
         let lastSteeringCheck = Date.now();
         subscription = session.subscribe((event: AgentSessionEvent) => {

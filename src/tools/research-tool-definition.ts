@@ -175,6 +175,10 @@ export function createResearchTool(): ToolDefinition {
       // before that point (e.g. the pre-run health check) leaves it undefined,
       // so teardownUi() guards before calling it.
       let cleanup: (() => Promise<void>) | undefined;
+      // Removes the listener attached to the parent abort signal (below), so a
+      // normally-completing run does not leave a handler (closing over
+      // internalAbort) attached to a parent signal that may outlive this call.
+      let detachAbortListener: (() => void) | undefined;
 
       // Single idempotent UI teardown. Runs on every exit path — including a
       // failure that happens before the inner research loop begins (model
@@ -193,6 +197,9 @@ export function createResearchTool(): ToolDefinition {
           try { stopObserverWaveAnimation(observerState, panelState); } catch (e) { logger.error('[research] Stop wave animation failed:', e); }
         }
         try { clearSteeringMessages(piSessionId); } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
+        if (detachAbortListener) {
+          try { detachAbortListener(); } catch { /* best-effort */ } finally { detachAbortListener = undefined; }
+        }
         if (cleanup) {
           try { await cleanup(); } catch (cleanupError) { logger.error('[research] Cleanup failed:', cleanupError); }
         }
@@ -248,7 +255,30 @@ export function createResearchTool(): ToolDefinition {
             tuiManager.initializePanel();
             panelState = tuiManager.panelState;
 
-            // Perform health check
+            // Setup cleanup BEFORE the functional health check. The panel is
+            // already registered in session state (createResearchTuiManager →
+            // registerSessionPanel above), so if the health check throws — e.g.
+            // "the browser could not load a page in time" on a flaky connection —
+            // teardownUi() must have a cleanup function to call. Otherwise the
+            // panel is never removed from session state and leaks as a permanent
+            // "ghost" panel that stacks higher with every retry. (Root cause of
+            // observed multi-panel ghost stacking on repeated health-check failures.)
+            const cleanupCtx: CleanupContext = {
+              researchId: startResearchSession(piSessionId, researchId),
+              piSessionId,
+              masterWidgetId: tuiManager.masterWidgetId,
+              panelState,
+              waveTimer: null,
+              unsubOrder: null,
+            };
+            registerSessionAbort(piSessionId, cleanupCtx.researchId, internalAbort);
+
+            cleanup = createCleanupFunction(cleanupCtx, { ctx });
+            const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
+            updateUnsubOrder(cleanupCtx, tuiManager.unsubOrder);
+
+            // Perform health check — cleanup is now wired, so a failure here is
+            // torn down cleanly (panel removed) instead of leaking a ghost panel.
             await ensureFunctionalHealth({
               panelState,
               onUpdate: () => tuiManager?.debouncedRefresh(),
@@ -264,21 +294,6 @@ export function createResearchTool(): ToolDefinition {
               { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 1 },
               observerState
             );
-
-            // Setup cleanup
-            const cleanupCtx: CleanupContext = {
-              researchId: startResearchSession(piSessionId, researchId),
-              piSessionId,
-              masterWidgetId: tuiManager.masterWidgetId,
-              panelState,
-              waveTimer: null,
-              unsubOrder: null,
-            };
-            registerSessionAbort(piSessionId, cleanupCtx.researchId, internalAbort);
-            
-            cleanup = createCleanupFunction(cleanupCtx, { ctx });
-            const { updateUnsubOrder } = await import('../cleanup/research-cleanup.ts');
-            updateUnsubOrder(cleanupCtx, tuiManager.unsubOrder);
           } else {
             // Headless mode (CLI / SDK / OpenClaw)
             observer = new HeadlessObserver({ enableLogging: true });
@@ -295,9 +310,12 @@ export function createResearchTool(): ToolDefinition {
             observerState = {};
           }
 
-          // Handle abort signal
+          // Handle abort signal. Track the handler so teardownUi() can detach it
+          // on normal completion (the parent signal may outlive this tool call).
           if (aborted) {
-            aborted.addEventListener('abort', () => internalAbort.abort(), { once: true });
+            const onParentAbort = () => internalAbort.abort();
+            aborted.addEventListener('abort', onParentAbort, { once: true });
+            detachAbortListener = () => aborted.removeEventListener('abort', onParentAbort);
           }
 
           // Setup scoped logging — use AsyncLocalStorage so concurrent runs don't bleed
