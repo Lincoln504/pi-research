@@ -11,7 +11,7 @@ import type { StoreUrlEntry } from './knowledge-interfaces.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import type { ResearchObserver, HeadlessObserverOptions } from './observer-interfaces.ts';
-import type { SteeringMessage } from '../../orchestration/session-state.ts';
+import type { SteeringMessage } from './steering-interfaces.ts';
 
 /**
  * Options for running a research task

@@ -9,31 +9,10 @@ import { generateSessionId as generateUniqueSessionId, clearAllSharedLinks } fro
 import { logger } from '../logger.ts';
 import { getConfig } from '../config.ts';
 import type { ResearchPanelState } from '../types/research-panel-types.ts';
+import type { SteeringMessage } from '../core/interfaces/steering-interfaces.ts';
 import { randomUUID } from 'node:crypto';
 
-/**
- * Steering message status lifecycle:
- * queued → active (consumed by orchestrator) or queued → popped (removed by user via Alt+P)
- */
-export type SteeringMessageStatus = 'queued' | 'active' | 'popped';
-
-/**
- * A steering message captured during active research.
- */
-export interface SteeringMessage {
-  /** Unique identifier */
-  id: string;
-  /** The message text */
-  text: string;
-  /** Current lifecycle status */
-  status: SteeringMessageStatus;
-  /** Timestamp when the message was added */
-  addedAt: number;
-  /** Timestamp when the message was consumed (marked active) by the orchestrator */
-  consumedAt: number | null;
-  /** Timestamp when the message was popped by the user */
-  poppedAt: number | null;
-}
+export type { SteeringMessage, SteeringMessageStatus } from '../core/interfaces/steering-interfaces.ts';
 
 /** Maximum number of steering messages per Pi session */
 const MAX_STEERING_MESSAGES = 20;
