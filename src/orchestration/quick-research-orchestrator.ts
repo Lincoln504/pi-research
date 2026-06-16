@@ -79,8 +79,12 @@ export class QuickResearchOrchestrator {
           throw new Error(`Research cannot start: ${error}`);
         }
 
-        // Knowledge Store Context Injection
+        // Knowledge Store Context Injection — skipped entirely when the store is
+        // disabled (KNOWLEDGE_STORE_MODE='none'), so we never touch LanceDB. Without
+        // this gate, concurrent quick runs sharing one DB corrupt it ("Bad file
+        // descriptor"). Matches the gates in scrape.ts and the deep orchestrator.
         let storeSection = '';
+        if (this.config.KNOWLEDGE_STORE_MODE !== 'none') {
         try {
           const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
           if (ksService.isReady()) {
@@ -99,6 +103,7 @@ export class QuickResearchOrchestrator {
           }
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to fetch historical URLs (non-fatal):', err);
+        }
         }
 
         const researcherPromptTemplate = loadPrompt('researcher');
@@ -283,6 +288,7 @@ export class QuickResearchOrchestrator {
           // Extract citations and store agent-synthesized descriptions for vector/semantic search
           // Quick research is single-pass, so this is the final synthesis point
           try {
+            if (this.config.KNOWLEDGE_STORE_MODE !== 'none') {
             const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
             if (ksService.isReady()) {
               const writer = await getService<IWriterQueue>(ServiceNames.WRITER_QUEUE, ctx, container);
@@ -313,6 +319,7 @@ export class QuickResearchOrchestrator {
               // Drain so concurrent or subsequent sessions see these entries immediately
               // rather than relying solely on shutdownKnowledgeStore's drain.
               if (enqueued > 0) await writer.drain();
+            }
             }
           } catch (err) {
             logger.warn('[QuickOrchestrator] Failed to store link descriptions (non-fatal):', err);
