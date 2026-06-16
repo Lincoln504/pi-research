@@ -191,8 +191,9 @@ export function createScrapeTool(options: {
 
       // Attempt to retrieve from knowledge-store cache if enabled
       if (config.KNOWLEDGE_STORE_MODE !== 'none') {
+        let ksService: IKnowledgeStoreService | null = null;
         try {
-          const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container);
+          ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container);
           const store = await ksService.getStore();
 
           if (store) {
@@ -216,8 +217,7 @@ export function createScrapeTool(options: {
             logger.log(`[scrape] Cache: ${cachedResults.length} full-text hit(s) out of ${finalUrls.length} URL(s)`);
           }
         } catch (err) {
-          const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, options.ctx, container).catch(() => null);
-          if (!service?.isReady()) {
+          if (!ksService?.isReady()) {
             metrics.increment('tool_scrape_cache_errors_total', 1, { reason: 'store_not_ready' });
             logger.warn(`[scrape] Knowledge store not initialized — all ${finalUrls.length} URL(s) will be scraped fresh`);
           } else {

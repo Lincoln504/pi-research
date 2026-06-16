@@ -203,16 +203,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       },
     ] as SettingItem[] : []),
     {
-      id: 'ACTION_METRICS_VIEW',
-      label: 'View Session Metrics',
-      description: 'Show token usage, API cost estimates, and success rates for the current session.',
-      currentValue: 'run',
-      values: ['run'],
-    },
-    {
-      id: 'ACTION_METRICS_CLEAR',
-      label: 'Reset Session Metrics',
-      description: 'Clear all performance counters for the current session.',
+      id: 'ACTION_METRICS',
+      label: 'Session Metrics',
+      description: 'Show token usage, API cost estimates, and success rates. You will be offered the option to reset counters after viewing.',
       currentValue: 'run',
       values: ['run'],
     },
@@ -338,10 +331,8 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               wrappedDone({ type: 'action', action: 'knowledge_clear_global' });
             } else if (id === 'ACTION_KNOWLEDGE_CLEAR_LOCAL') {
               wrappedDone({ type: 'action', action: 'knowledge_clear_local' });
-            } else if (id === 'ACTION_METRICS_VIEW') {
-              wrappedDone({ type: 'action', action: 'metrics_view' });
-            } else if (id === 'ACTION_METRICS_CLEAR') {
-              wrappedDone({ type: 'action', action: 'metrics_clear' });
+            } else if (id === 'ACTION_METRICS') {
+              wrappedDone({ type: 'action', action: 'metrics' });
             } else if (id === 'ACTION_LOGS_CLEAR') {
               wrappedDone({ type: 'action', action: 'logs_clear' });
             }
@@ -450,12 +441,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             }
             break;
           }
-          case 'metrics_view':
+          case 'metrics':
             await showMetricsAction(ctx, pi);
-            break;
-          case 'metrics_clear':
-            metrics.clearSession();
-            ctx.ui.notify('Metrics reset.', 'info');
+            if (await ctx.ui.confirm('Session Metrics', 'Reset all session counters?')) {
+              metrics.clearSession();
+              ctx.ui.notify('Session metrics reset.', 'info');
+            }
             break;
           case 'logs_clear': {
             const confirmed = await ctx.ui.confirm('Clear Logs', 'Delete the main diagnostic log file and all archived rotation files?');

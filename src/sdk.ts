@@ -339,6 +339,12 @@ export async function scrapeUrl(url: string, signal?: AbortSignal): Promise<Scra
  * @returns The final synthesized research report (Markdown). The session used is
  *          tracked internally; call getResearchReports() (no args) afterwards to
  *          retrieve the per-researcher reports from this run.
+ *
+ * Note: `_lastSessionId` and `_lastRunSummary` are module-level singletons with
+ * last-writer-wins semantics. Overlapping concurrent calls will overwrite each
+ * other's session/metrics state. Use `runResearchDetailed()` — which captures
+ * both atomically before returning — or pass an explicit sessionId to
+ * `getResearchReports()` when running concurrent sessions.
  */
 export async function runDeepResearch(
   query: string,

@@ -216,6 +216,9 @@ export class WorkerPoolManager implements IService {
         // Destroy the old pool asynchronously after the event handler returns.
         const t = setTimeout(async () => {
             try {
+                // If shutdown() ran while this timer was pending it already destroyed
+                // the pool, so skip the second destroy to avoid a spurious error.
+                if (this.isShuttingDown) return;
                 if (deadPool) await deadPool.destroy();
                 logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
             } catch (err) {

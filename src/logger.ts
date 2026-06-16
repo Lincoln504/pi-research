@@ -133,8 +133,14 @@ class LogWriter {
 
   /**
    * Drain buffered lines, then write `line`, all synchronously and in order.
-   * Used for WARN/ERROR so the critical line (and everything queued before it)
-   * is on disk before this call returns.
+   * Used for WARN/ERROR so the critical line (and all lines queued in the buffer
+   * before it) are on disk before this call returns.
+   *
+   * Ordering caveat: if a large INFO/DEBUG burst already cleared the buffer into
+   * an in-flight async appendFile, drainSync() will find the buffer empty and
+   * the WARN line will be appended before that in-flight batch completes. In
+   * practice this means WARN/ERROR lines may appear slightly before the last
+   * flush of the preceding INFO/DEBUG burst. Acceptable for a diagnostic log.
    */
   writeSync(line: string): void {
     this.drainSync();
