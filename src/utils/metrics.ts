@@ -258,15 +258,6 @@ class SessionMetrics {
     return this._session.getSnapshot();
   }
 
-  /**
-   * Backwards-compatible alias for getSessionSnapshot().
-   * Callers that previously used metrics.getSnapshot() now receive the
-   * session-level data rather than an undefined blend of run + session.
-   */
-  public getSnapshot(): IMetricsSnapshot {
-    return this._session.getSnapshot();
-  }
-
   /** Millisecond timestamp when this session started or was last reset. */
   public getSessionStartedAt(): number {
     return this._sessionStartedAt;
@@ -304,11 +295,6 @@ class SessionMetrics {
     this._session.clear();
     this._runHistory = [];
     this._sessionStartedAt = Date.now();
-  }
-
-  /** Backwards-compatible alias for clearSession(). */
-  public clear(): void {
-    this.clearSession();
   }
 }
 

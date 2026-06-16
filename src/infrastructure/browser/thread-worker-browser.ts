@@ -180,13 +180,6 @@ export async function initBrowser(): Promise<void> {
 }
 
 /**
- * Get the current browser instance
- */
-export function getBrowser(): any {
-  return browser;
-}
-
-/**
  * Get the current browser context
  */
 export function getContext(): any {

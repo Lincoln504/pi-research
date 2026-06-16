@@ -26,23 +26,3 @@ export const USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0',
 ];
-
-/**
- * Get a random realistic User-Agent string
- */
-export function getRandomRealisticUA(): string {
-    return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]!;
-}
-
-/**
- * Get a realistic User-Agent for a specific platform
- */
-export function getRealisticUA(platform: 'windows' | 'mac' | 'linux' | string): string {
-    const filtered = USER_AGENTS.filter(ua => {
-        if (platform === 'windows') return ua.includes('Windows');
-        if (platform === 'mac') return ua.includes('Macintosh');
-        if (platform === 'linux') return ua.includes('Linux');
-        return true;
-    });
-    return filtered[Math.floor(Math.random() * filtered.length)]!;
-}

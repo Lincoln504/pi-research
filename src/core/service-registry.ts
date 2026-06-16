@@ -548,13 +548,6 @@ export function createServiceContainer(options: ServiceContainerOptions = {}): S
 }
 
 /**
- * Set the global service container instance
- */
-export function setServiceContainer(container: ServiceContainer): void {
-  globalServiceContainer = container;
-}
-
-/**
  * Convenience function to register a service
  */
 export function registerService<T extends IService>(
@@ -600,13 +593,6 @@ export function clearService(name: string, container: ServiceContainer = globalS
 }
 
 /**
- * Convenience function to replace a service instance
- */
-export function replaceServiceInstance<T extends IService>(name: string, instance: T, container: ServiceContainer = globalServiceContainer): Promise<void> {
-  return container.replace(name, instance);
-}
-
-/**
  * Convenience function to check if a service is registered
  */
 export function hasService(name: string, container: ServiceContainer = globalServiceContainer): boolean {
@@ -642,11 +628,4 @@ export function disposeAllServices(container: ServiceContainer = globalServiceCo
  */
 export function resetServiceContainer(container: ServiceContainer = globalServiceContainer): Promise<void> {
   return container.reset();
-}
-
-/**
- * Check if the service container is currently being disposed
- */
-export function isContainerDisposing(container: ServiceContainer = globalServiceContainer): boolean {
-  return container.isDisposing;
 }

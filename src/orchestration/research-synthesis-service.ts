@@ -172,33 +172,18 @@ export class ResearchSynthesisService implements IService {
   }
 
   /**
-   * Append steering guidance to the end of the synthesis
-   * 
-   * Accepts either string[] (backward compat) or SteeringMessage[] (new).
-   * When SteeringMessage[] is passed, only active (consumed) messages are included.
-   * When string[] is passed, all are included (legacy behavior for SDK).
-   * 
+   * Append steering guidance to the end of the synthesis.
+   * Only active (consumed-by-orchestrator) steering messages are included;
+   * queued and popped messages are excluded.
+   *
    * @param synthesis - The synthesis text
-   * @param steeringMessages - Array of steering messages (strings or SteeringMessage objects)
+   * @param steeringMessages - Steering messages captured for the session
    * @returns Synthesis with steering guidance appended
    */
-  appendSteeringGuidance(synthesis: string, steeringMessages: string[] | SteeringMessage[]): string {
-    // Extract text from SteeringMessage[] or use string[] directly
-    let texts: string[];
-    if (steeringMessages && steeringMessages.length > 0) {
-      const first = steeringMessages[0];
-      if (typeof first === 'object' && 'text' in first && 'status' in first) {
-        // SteeringMessage[] — only include active (consumed by orchestrator) messages
-        texts = (steeringMessages as SteeringMessage[])
-          .filter(m => m.status === 'active')
-          .map(m => m.text);
-      } else {
-        // string[] — legacy/SDK path, include all
-        texts = steeringMessages as string[];
-      }
-    } else {
-      texts = [];
-    }
+  appendSteeringGuidance(synthesis: string, steeringMessages: SteeringMessage[]): string {
+    const texts = (steeringMessages ?? [])
+      .filter(m => m.status === 'active')
+      .map(m => m.text);
 
     if (texts.length === 0) {
       return synthesis;

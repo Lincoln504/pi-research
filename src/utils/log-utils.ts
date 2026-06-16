@@ -28,10 +28,6 @@ export function buildDefaultDebugLogPath(_researchRunId?: string): string {
   return path.join(os.tmpdir(), 'pi-research.log');
 }
 
-export function getConsolidatedLogPath(): string {
-  return buildDefaultDebugLogPath();
-}
-
 export function getDefaultDebugLogPathTemplate(): string {
   return buildDefaultDebugLogPath('{researchRunId}');
 }

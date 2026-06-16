@@ -20,13 +20,6 @@ export function setWorkerId(id: string): void {
 }
 
 /**
- * Get the worker ID
- */
-export function getWorkerId(): string {
-  return workerId;
-}
-
-/**
  * Handle ERR_IPC_CHANNEL_CLOSED when poolifier tries to send messages during shutdown
  */
 export function setupIpcErrorHandler(): void {

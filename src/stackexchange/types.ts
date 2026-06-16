@@ -51,10 +51,6 @@ export interface Question {
   body_markdown?: string;
 }
 
-export interface QuestionWithAnswers extends Question {
-  answers?: Answer[];
-}
-
 export interface Answer {
   owner?: {
     account_id: number;

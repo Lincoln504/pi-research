@@ -315,15 +315,6 @@ export function registerSessionPanel(piSessionId: string | undefined, researchId
 }
 
 /**
- * Unregister a panel state
- */
-export function unregisterSessionPanel(piSessionId: string | undefined, researchId: string): void {
-  const sid = normalizeSessionId(piSessionId);
-  const state = getPiState(sid);
-  state.panels.delete(researchId);
-}
-
-/**
  * Register the update function for a Pi session's Master Widget
  */
 export function registerMasterUpdate(piSessionId: string | undefined, update: () => void): void {
@@ -451,14 +442,6 @@ export function abortAllSessions(piSessionId: string | undefined): void {
   for (const controller of state.aborts.values()) {
     controller.abort();
   }
-}
-
-/**
- * Get the timestamp of the last global abort for a Pi session.
- */
-export function getLastAbortAt(piSessionId: string | undefined): number {
-  const sid = normalizeSessionId(piSessionId);
-  return piSessions.get(sid)?.lastAbortAt ?? 0;
 }
 
 /**

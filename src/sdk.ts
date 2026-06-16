@@ -532,7 +532,7 @@ export async function shutdownResearchSDK(): Promise<void> {
 
   try {
     clearAllSessionState();
-    metrics.clear();
+    metrics.clearSession();
   } catch (err) {
     logger.error('[SDK] Error clearing session state:', err);
     errors.push(err instanceof Error ? err : new Error(String(err)));

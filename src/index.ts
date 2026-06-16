@@ -155,7 +155,7 @@ export default async function (pi: ExtensionAPI) {
       // Clear in-memory state after disposal.
       disposeGlobalTuiController();
       clearAllSessionState();
-      metrics.clear();
+      metrics.clearSession();
       logger.info('[pi-research] All session state cleared');
     } catch (err) {
       logger.error('[pi-research] Shutdown task failed:', err);

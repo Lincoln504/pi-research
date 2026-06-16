@@ -29,8 +29,6 @@ export const SessionInfoSchema = Type.Object({
   connectedAt: Type.Number(),
 });
 
-export type SessionInfo = Static<typeof SessionInfoSchema>;
-
 /**
  * Main state structure interface
  */

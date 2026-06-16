@@ -190,11 +190,14 @@ describe('ResearchSynthesisService', () => {
       expect(service.appendSteeringGuidance(input, undefined as any)).toBe(input);
     });
 
-    it('appends a formatted steering guidance section when string messages are provided', () => {
+    it('appends a formatted steering guidance section for active messages', () => {
       const input = 'Final report content';
-      const messages = ['focus on modern times', 'ignore historical data'];
+      const messages = [
+        { id: '1', text: 'focus on modern times', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+        { id: '2', text: 'ignore historical data', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+      ];
       const result = service.appendSteeringGuidance(input, messages);
-      
+
       expect(result).toContain('Final report content');
       expect(result).not.toContain('---');
       expect(result).toContain('The following guidance was provided by the user during the research process and influenced these results:');
@@ -230,7 +233,9 @@ describe('ResearchSynthesisService', () => {
 
     it('trims the synthesis before appending', () => {
       const input = '  Final report content  ';
-      const messages = ['steer'];
+      const messages = [
+        { id: '1', text: 'steer', status: 'active' as const, addedAt: Date.now(), consumedAt: Date.now(), poppedAt: null },
+      ];
       const result = service.appendSteeringGuidance(input, messages);
       expect(result.startsWith('Final report content')).toBe(true);
     });

@@ -156,13 +156,3 @@ export const Filters = {
   // Get answers with body
   ANSWERS_WITH_BODY: '!9_bDE(fI5',
 };
-
-/**
- * Parse IDs from query string (handle both single IDs and comma/semicolon separated)
- */
-export function parseIds(ids: string | number | (string | number)[]): string {
-  if (Array.isArray(ids)) {
-    return ids.join(';');
-  }
-  return String(ids);
-}

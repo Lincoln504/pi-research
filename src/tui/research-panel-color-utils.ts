@@ -257,13 +257,6 @@ export function hslToRgb(h: number, s: number, l: number): { r: number; g: numbe
 }
 
 /**
- * Apply easing curve to a value (0-1)
- */
-export function applyCurve(t: number, curve: number): number {
-  return curve === 1 ? t : Math.pow(t, curve);
-}
-
-/**
  * Cycle HSL saturation and lightness for gradient generation.
  *
  * Sawtooth wave: stepIndex=0 → full brightness/saturation → dark, desaturated end.
@@ -293,24 +286,6 @@ export function cycleHslSaturationLightness(
   const newS = hsl.s * (0.30 + 0.70 * curvedFactor);
 
   return hslToRgb(hsl.h, newS, newL);
-}
-
-/**
- * Smooth exponential falloff for gradient generation.
- *
- * t = 0 → 1.0 (bright, at head)
- * t = 1 → 0.0 (dark, far from head)
- * power = 0.7 → stays bright longer before falling off
- */
-export function smoothFalloff(t: number, power: number = 0.7): number {
-  return Math.pow(1 - t, power);
-}
-
-/**
- * Add variation to a value for gradient generation
- */
-export function addVariation(index: number, maxVariation: number = 1): number {
-  return index + Math.sin(index * 0.5) * maxVariation;
 }
 
 /**

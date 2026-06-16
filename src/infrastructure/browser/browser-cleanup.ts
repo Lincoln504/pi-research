@@ -6,8 +6,6 @@
 
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
 import { logger } from '../../logger.ts';
 
@@ -192,34 +190,6 @@ export async function getCamoufoxTempDir(): Promise<string> {
   const tmpdir = os.tmpdir();
   // Camoufox uses playwright_firefoxdev_profile- prefix for profile directories
   return tmpdir;
-}
-
-/**
- * Get list of active Camoufox profile directories
- */
-export async function getActiveCamoufoxProfiles(): Promise<string[]> {
-  const tmpdir = await getCamoufoxTempDir();
-  const profiles: string[] = [];
-  
-  try {
-    const entries = await fs.readdir(tmpdir);
-    const prefix = 'playwright_firefoxdev_profile-';
-    
-    for (const entry of entries) {
-      if (entry.startsWith(prefix)) {
-        const fullPath = path.join(tmpdir, entry);
-        const stats = await fs.stat(fullPath);
-        if (stats.isDirectory()) {
-          profiles.push(fullPath);
-        }
-      }
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    logger.warn(`[BrowserCleanup] Failed to list Camoufox profiles: ${msg}`);
-  }
-  
-  return profiles;
 }
 
 // ============================================================================

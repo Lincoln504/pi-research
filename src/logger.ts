@@ -261,10 +261,6 @@ export function resetLogger(sessionId?: string): void {
   }
 }
 
-export function hasSessionLogger(sessionId: string): boolean {
-  return sessionLoggers.has(sessionId);
-}
-
 export function createLogger(options: Partial<LoggerOptions> = {}): Logger {
   if (options.consoleLog === undefined) {
     options.consoleLog = process.env['PI_RESEARCH_CONSOLE_LOG'] === 'true';

@@ -24,8 +24,6 @@ export const AnswerStatusEnum = Type.Union([
   Type.Literal('no'),
 ]);
 
-export type AnswerStatus = Static<typeof AnswerStatusEnum>;
-
 /**
  * The internal schema the background LLM MUST output.
  *

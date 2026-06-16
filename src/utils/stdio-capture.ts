@@ -50,14 +50,6 @@ export function setSessionCapturing(sessionId: string, capturing: boolean): void
 }
 
 /**
- * Clear a session's capture state
- */
-export function clearSessionCapture(sessionId: string): void {
-  sessionCaptureStates.delete(sessionId);
-  isAnyLoggerCapturingOutput = Array.from(sessionCaptureStates.values()).some(v => v);
-}
-
-/**
  * Native log patterns that should be captured
  */
 const NATIVE_LOG_PATTERNS = [

@@ -206,4 +206,4 @@ src/
 
 **Pure ESM** — the entire codebase uses ES Modules (`"type": "module"`). Worker bundles are built with esbuild (`npm run build:worker`) before integration tests or publishing.
 
-**Dependency graph** — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/.dependency-cruiser.cjs`).
+**Dependency graph** — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).

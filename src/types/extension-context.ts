@@ -25,17 +25,5 @@ export interface ExtendedExtensionContext extends ExtensionContext {
    /** Current tool exclusion list */
    excludeTools?: string[];
  }
-/**
- * Model with ID property and optional cost information
- */
-export interface ModelWithId {
-  id: string;
-  cost?: {
-    input: number;
-    output: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-  };
-}
 
 

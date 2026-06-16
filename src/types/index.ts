@@ -9,24 +9,6 @@
 export type ResearchDepth = 0 | 1 | 2 | 3;
 
 /**
- * LLM response metadata including usage and stop reasons
- */
-export interface LLMResponseMetadata {
-  stopReason?: string;
-  errorMessage?: string;
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-    cost?: {
-      prompt?: number;
-      completion?: number;
-      total?: number;
-    };
-  };
-}
-
-/**
  * Research result details
  */
 export interface ResearchResultDetails {
@@ -77,25 +59,3 @@ export interface NodeError extends Error {
   [key: string]: unknown;
 }
 
-/**
- * Global state getter function
- */
-export type GlobalStateGetter = () => Record<string, unknown>;
-
-/**
- * Abort cleanup function
- */
-export type AbortCleanup = () => void;
-
-/**
- * Stored model from knowledge store
- */
-export interface StoredModel {
-  data?: Uint8Array;
-  [key: string]: unknown;
-}
-
-/**
- * Configuration section types
- */
-export type ConfigSection = 'health' | 'knowledge' | 'settings' | 'metrics';

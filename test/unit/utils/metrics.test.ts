@@ -367,10 +367,10 @@ describe('metrics singleton — clearSession()', () => {
     expect(metrics.getSessionStartedAt()).toBeGreaterThanOrEqual(before);
   });
 
-  it('clear() is a backwards-compatible alias for clearSession()', () => {
+  it('clearSession() resets session counters and run history', () => {
     metrics.increment('x');
-    metrics.clear();
-    expect(isEmptySnapshot(metrics.getSnapshot())).toBe(true);
+    metrics.clearSession();
+    expect(isEmptySnapshot(metrics.getSessionSnapshot())).toBe(true);
     expect(metrics.getRunHistory()).toHaveLength(0);
   });
 
@@ -391,22 +391,11 @@ describe('metrics singleton — clearSession()', () => {
   });
 });
 
-// ── Backwards compatibility ────────────────────────────────────────────────
+// ── Session vs run scoping ─────────────────────────────────────────────────
 
-describe('metrics singleton — backwards compatibility', () => {
+describe('metrics singleton — session vs run scoping', () => {
   beforeEach(() => { metrics.clearSession(); });
   afterEach(()  => { metrics.clearSession(); });
-
-  it('getSnapshot() returns session snapshot (legacy callers)', () => {
-    metrics.increment('session_counter');
-    expect(metrics.getSnapshot().counters['session_counter']).toBe(1);
-  });
-
-  it('getSessionSnapshot() and getSnapshot() return equivalent data', () => {
-    metrics.increment('x', 3);
-    metrics.observe('y', 99);
-    expect(metrics.getSnapshot()).toEqual(metrics.getSessionSnapshot());
-  });
 
   it('session counter set before any run remains in session after a run completes', async () => {
     metrics.increment('startup_event', 4);

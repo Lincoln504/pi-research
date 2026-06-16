@@ -15,16 +15,12 @@ export const ResearchStatusSchema = Type.Union([
   Type.Literal('failed')
 ]);
 
-export type ResearchStatus = Static<typeof ResearchStatusSchema>;
-
 export const SiblingStatusSchema = Type.Union([
   Type.Literal('pending'),
   Type.Literal('running'),
   Type.Literal('completed'),
   Type.Literal('failed')
 ]);
-
-export type SiblingStatus = Static<typeof SiblingStatusSchema>;
 
 /**
  * Individual research researcher (sibling) schema
@@ -38,8 +34,6 @@ export const ResearchSiblingSchema = Type.Object({
   tokens: Type.Optional(Type.Number()),
   cost: Type.Optional(Type.Number()),
 });
-
-export type ResearchSibling = Static<typeof ResearchSiblingSchema>;
 
 /**
  * Main deep research state schema
@@ -70,15 +64,3 @@ export const SystemResearchStateSchema = Type.Object({
 });
 
 export type SystemResearchState = Static<typeof SystemResearchStateSchema>;
-
-/**
- * Deep research events for orchestration
- */
-export type DeepResearchEvent =
-  | { type: 'PLANNING_COMPLETE'; agenda: string[]; initialCount: number }
-  | { type: 'SIBLING_STARTED'; id: string }
-  | { type: 'SIBLING_COMPLETED'; id: string; report: string }
-  | { type: 'SIBLING_FAILED'; id: string; error: string }
-  | { type: 'PROMOTION_STARTED'; id: string }
-  | { type: 'PROMOTION_DECISION'; nextQueries: string[]; finalSynthesis?: string; maxRounds: number }
-  | { type: 'SIBLING_TOKENS'; id: string; tokens: number; cost: number };

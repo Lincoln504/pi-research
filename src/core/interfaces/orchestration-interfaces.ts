@@ -11,6 +11,7 @@ import type { StoreUrlEntry } from './knowledge-interfaces.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
 import type { ResearchObserver, HeadlessObserverOptions } from './observer-interfaces.ts';
+import type { SteeringMessage } from '../../orchestration/session-state.ts';
 
 /**
  * Options for running a research task
@@ -65,7 +66,7 @@ export interface IResearchSynthesisService extends IService {
   clearReports(researchId?: string): void;
   buildFallbackSynthesis(researchId: string, currentRound?: number): string;
   ensureCitedLinks(researchId: string, result: string): string;
-  appendSteeringGuidance(result: string, steeringMessages: any[]): string;
+  appendSteeringGuidance(result: string, steeringMessages: SteeringMessage[]): string;
   appendMetadata(result: string, modelId: string): string;
 }
 

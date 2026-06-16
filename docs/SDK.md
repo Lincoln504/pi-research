@@ -138,9 +138,10 @@ The `health` tool (registered in pi) runs all registered health checks and retur
 The same checks are available via the SDK helper:
 
 ```typescript
-import { runHealthCheck } from '@lincoln504/pi-research/sdk';
+import { initResearchSDK, getResearchHealth } from '@lincoln504/pi-research/sdk';
 
-const result = await runHealthCheck();
+await initResearchSDK();           // required first — getResearchHealth throws if the SDK is not initialized
+const result = await getResearchHealth();
 // result: { success: boolean, status: 'healthy' | 'degraded' | 'unhealthy', components: [...] }
 ```
 

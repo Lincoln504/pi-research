@@ -81,9 +81,6 @@ export const MAX_ROUNDS_LEVEL_3 = 3;
  */
 export const MAX_EXTRA_ROUNDS_WITH_STEERING = 2;
 
-/** Hard cap on cumulative researchers across all rounds to prevent runaway costs */
-export const MAX_TOTAL_RESEARCHERS = 25;
-
 
 // ==================== Timeout Constants ====================
 
