@@ -34,6 +34,7 @@ import { getConfig, validateConfig, type Config } from './config.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from './utils/metrics.ts';
 import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
 import { extractRunStats, type ResearchStats } from './utils/metrics-summary.ts';
+import { ErrorTracker, runWithTracker, type ErrorReport } from './utils/error-tracker.ts';
 import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { scrapeSingle } from './web-research/web-scraper.ts';
@@ -58,6 +59,12 @@ let _lastSessionId: string | null = null;
 // consumers (e.g. audit harnesses) can read pi-research's internal telemetry —
 // latency, scrape/search counts, tokens, cost, tool usage — after each run.
 let _lastRunSummary: RunSummary | null = null;
+// Per-run error report captured by the most recent runDeepResearch call. Without
+// this, the SDK path never bound an ErrorTracker, so every tracked error (healthcheck
+// timeouts, provider failures, scrape errors) was written to the global tracker and
+// discarded unread. Now each run gets its own tracker, a concise summary is logged at
+// run end when errors occurred, and consumers can read the full report after the run.
+let _lastErrorReport: ErrorReport | null = null;
 
 // Signal handler state — registered once, removed on clean shutdown.
 let _onSignal: ((signal: string) => void) | null = null;
@@ -368,9 +375,13 @@ export async function runDeepResearch(
   // go through the research tool's run-registry, so without this every run's
   // metrics would only accumulate into the cumulative session registry).
   const runRegistry = new MetricsRegistry();
+  // Per-run error tracker bound to this call's async context, so every errorTracker
+  // .trackError() emitted by the browser pool / orchestrator during the run is captured
+  // here instead of vanishing into the never-read global tracker.
+  const runTracker = new ErrorTracker();
 
   try {
-    let result = await runWithRunRegistry(runRegistry, () => orchestrator.runResearch({
+    let result = await runWithRunRegistry(runRegistry, () => runWithTracker(runTracker, () => orchestrator.runResearch({
       ...options,
       ctx: createMockContext(sessionId),
       query,
@@ -384,7 +395,7 @@ export async function runDeepResearch(
       // actually reach the orchestrator and every downstream service. A per-call
       // options.config (if provided) takes precedence over the SDK-global config.
       config: options.config ?? globalConfig ?? undefined,
-    }, signal ?? options.signal));
+    }, signal ?? options.signal)));
 
     // Append research metadata (model used) at the very end
     const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
@@ -396,6 +407,8 @@ export async function runDeepResearch(
       durationMs: Date.now() - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
     };
     metrics.recordRunSummary(_lastRunSummary);
+    _lastErrorReport = runTracker.getReport();
+    logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
     return result;
   } catch (err) {
     metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
@@ -404,6 +417,8 @@ export async function runDeepResearch(
       durationMs: Date.now() - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
     };
     metrics.recordRunSummary(_lastRunSummary);
+    _lastErrorReport = runTracker.getReport();
+    logRunErrorSummary(_lastErrorReport, depthLabel, 'error');
     throw err;
   }
 }
@@ -426,6 +441,27 @@ export function getLastRunMetrics(): IMetricsSnapshot | null {
  */
 export function getLastRunSummary(): RunSummary | null {
   return _lastRunSummary;
+}
+
+/**
+ * Aggregated error report (counts, patterns, by-domain, by-type) for the most recent
+ * run. Lets an unattended operator read exactly which errors occurred without scraping
+ * logs. Null until the first run completes; cleared on shutdown.
+ */
+export function getLastErrorReport(): ErrorReport | null {
+  return _lastErrorReport;
+}
+
+/**
+ * Emit a single compact line summarizing a run's tracked errors, so they are visible in
+ * the operator's log instead of silently accumulating. No-op when the run was clean.
+ */
+function logRunErrorSummary(report: ErrorReport | null, depthLabel: string, status: 'success' | 'error'): void {
+  if (!report || report.totalErrors === 0) return;
+  const top = report.patterns.slice(0, 3)
+    .map(p => `"${String(p.message ?? p.signature ?? 'error').slice(0, 48)}" ×${p.count}`)
+    .join(', ');
+  logger.warn(`[SDK] run ${status} with ${report.totalErrors} tracked error(s) across ${report.uniquePatterns} pattern(s) [${depthLabel}]${top ? ` — top: ${top}` : ''}`);
 }
 
 /**
@@ -580,6 +616,7 @@ export async function shutdownResearchSDK(): Promise<void> {
   globalConfig = null;
   _lastSessionId = null;
   _lastRunSummary = null;
+  _lastErrorReport = null;
 
   // Remove signal handlers — caller is shutting down cooperatively.
   _removeSignalHandlers();

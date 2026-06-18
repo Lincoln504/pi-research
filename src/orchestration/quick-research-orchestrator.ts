@@ -25,7 +25,7 @@ import { getService, tryGetServiceContainerFromCtx } from '../core/service-regis
 import { ServiceNames, type IWriterQueue, type IKnowledgeStoreService, type IResearchSynthesisService, type IResearchOrchestration } from '../core/service-interfaces.ts';
 import type { ResearchSessionService } from './research-session-service.ts';
 import { normalizeUrl, registerScrapedLinks, getCachedScrapedContent } from '../utils/shared-links.ts';
-import { runHealthCheck } from '../healthcheck/index.ts';
+import { runHealthCheck, isBusyPoolHealthFailure } from '../healthcheck/index.ts';
 import { metrics } from '../utils/metrics.ts';
 import { getSteeringMessages, consumeQueuedMessages, getActiveSteeringMessages } from './session-state.ts';
 import type { ResearchMessage } from '../types/index.ts';
@@ -70,13 +70,22 @@ export class QuickResearchOrchestrator {
     let subscription: (() => void) | undefined;
 
     try {
-        // Pre-flight health check to ensure browser pool is operational
+        // Pre-flight health check to ensure browser pool is operational.
         const health = await runHealthCheck({ ctx });
         if (!health.success) {
-          const error = health.error || 'Unknown health check failure';
-          logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
-          metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_failed' });
-          throw new Error(`Research cannot start: ${error}`);
+          // Distinguish a DEAD/uninitialized pool (must abort) from one that is merely BUSY —
+          // under sustained concurrent load the BrowserRuntime probe queues behind in-flight
+          // scrapes and times out even though the pool is operational. This discrimination
+          // (the dominant 0-result cause under load) is a pure function so it is unit-tested.
+          if (isBusyPoolHealthFailure(health)) {
+            logger.warn(`[QuickOrchestrator] Browser pool busy — healthcheck probe queued out under load, but the pool is operational. Proceeding; per-task timeouts bound the work.`);
+            metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_busy_proceed' });
+          } else {
+            const error = health.error || 'Unknown health check failure';
+            logger.error(`[QuickOrchestrator] Health check failed: ${error}`);
+            metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'health_check_failed' });
+            throw new Error(`Research cannot start: ${error}`);
+          }
         }
 
         // Knowledge Store Context Injection — skipped entirely when the store is

@@ -154,6 +154,30 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
 registerHealthChecks(globalHealthRegistry);
 
 /**
+ * Decide whether a FAILED health check is a transient "pool busy" condition (research
+ * should proceed) rather than a genuine failure (research must abort).
+ *
+ * Returns true ONLY when the browser is installed/constructible — BrowserCapability is
+ * healthy (it never touches the worker pool) — AND the sole unhealthy critical component
+ * is BrowserRuntime reporting a TIMEOUT, i.e. the runtime probe queued out behind in-flight
+ * scrapes on the shared fixed-size worker pool under load. The pool is operational; the
+ * per-task search/scrape timeouts already bound the real work, so aborting the whole
+ * session on this signal needlessly discards a research category. Any other unhealthy
+ * component (browser not installed, a non-timeout runtime error, a different critical
+ * check) returns false → caller must abort.
+ */
+export function isBusyPoolHealthFailure(
+  health: { components?: Array<{ component?: string; healthy?: boolean; error?: string }> },
+): boolean {
+  const components = health.components || [];
+  const capability = components.find(c => c.component === 'BrowserCapability');
+  const capabilityOk = !capability || capability.healthy !== false;
+  const unhealthy = components.filter(c => c.healthy === false);
+  return capabilityOk && unhealthy.length > 0 && unhealthy.every(c =>
+    c.component === 'BrowserRuntime' && /tim(e|ed)\s*out|timeout/i.test(String(c.error || '')));
+}
+
+/**
  * Perform a full system health check
  */
 export async function runHealthCheck(options?: { force?: boolean; ctx?: any }) {

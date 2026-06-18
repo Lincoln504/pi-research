@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { runHealthCheck, registerHealthChecks } from '../../../src/healthcheck/index.ts';
+import { runHealthCheck, registerHealthChecks, isBusyPoolHealthFailure } from '../../../src/healthcheck/index.ts';
 import { HealthCheckRegistry } from '../../../src/healthcheck/registry.ts';
 import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.ts';
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
@@ -217,5 +217,49 @@ describe('healthcheck', () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe('unhealthy');
     expect(result.error).toContain('connection refused');
+  });
+});
+
+describe('isBusyPoolHealthFailure', () => {
+  const busyRuntime = { component: 'BrowserRuntime', healthy: false, error: 'Browser healthcheck failed: Health check timed out after 105000ms (including queue wait)' };
+  const okCapability = { component: 'BrowserCapability', healthy: true };
+
+  it('returns true when capability is healthy and only BrowserRuntime timed out (pool busy)', () => {
+    expect(isBusyPoolHealthFailure({ components: [okCapability, busyRuntime] })).toBe(true);
+  });
+
+  it('returns true when capability entry is absent but the only failure is a runtime timeout', () => {
+    expect(isBusyPoolHealthFailure({ components: [busyRuntime] })).toBe(true);
+  });
+
+  it('returns false when BrowserCapability itself is unhealthy (browser not installed)', () => {
+    expect(isBusyPoolHealthFailure({ components: [
+      { component: 'BrowserCapability', healthy: false, error: 'Camoufox not found' },
+      busyRuntime,
+    ] })).toBe(false);
+  });
+
+  it('returns false when BrowserRuntime failed for a non-timeout reason (real failure)', () => {
+    expect(isBusyPoolHealthFailure({ components: [
+      okCapability,
+      { component: 'BrowserRuntime', healthy: false, error: 'worker reported failure or page failed to load' },
+    ] })).toBe(false);
+  });
+
+  it('returns false when another critical component is also unhealthy', () => {
+    expect(isBusyPoolHealthFailure({ components: [
+      okCapability,
+      busyRuntime,
+      { component: 'KnowledgeStore', healthy: false, error: 'Embedder service not available' },
+    ] })).toBe(false);
+  });
+
+  it('returns false when there are no unhealthy components', () => {
+    expect(isBusyPoolHealthFailure({ components: [okCapability, { component: 'BrowserRuntime', healthy: true }] })).toBe(false);
+  });
+
+  it('returns false on an empty/missing components list', () => {
+    expect(isBusyPoolHealthFailure({})).toBe(false);
+    expect(isBusyPoolHealthFailure({ components: [] })).toBe(false);
   });
 });
