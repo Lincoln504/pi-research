@@ -42,7 +42,9 @@ async function getMarkdownConverter(): Promise<(html: string) => Promise<string>
 
   markdownConverterPromise = (async () => {
     try {
-      const nativeModule = await import('@kreuzberg/html-to-markdown-node') as unknown as import('./scraper-types.ts').NativeHtmlToMarkdownModule;
+      const raw = await import('@kreuzberg/html-to-markdown-node') as unknown as import('./scraper-types.ts').NativeHtmlToMarkdownModule;
+      // ESM wrapper may place the real exports on .default (CJS-in-ESM interop).
+      const nativeModule = ((raw as unknown as { default?: import('./scraper-types.ts').NativeHtmlToMarkdownModule }).default ?? raw) as import('./scraper-types.ts').NativeHtmlToMarkdownModule;
       // Verify minimal required shape
       if (nativeModule && typeof nativeModule.convert === 'function') {
         logger.debug('[Scrapers] Using native HTML-to-Markdown converter');
