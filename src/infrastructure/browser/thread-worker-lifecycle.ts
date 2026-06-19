@@ -59,7 +59,20 @@ export function setupUncaughtExceptionHandler(): void {
     // Log but do NOT exit — a stray Playwright background rejection (e.g. cancelled
     // navigation) would kill an otherwise healthy worker and cause pool churn.
     // Poolifier's own health-check will replace the worker if it becomes truly broken.
-    logToDebugFile('WARN', `[Worker-${workerId}] Unhandled Rejection (non-fatal): ${errMsg}`);
+    //
+    // Known-benign Playwright-internal rejection: dispatching a scraped page's own
+    // uncaught JS error throws inside coreBundle.js when Firefox reports a `pageError`
+    // with no `location` (`reading 'url'`) or a torn-down frame (`reading 'frames'`).
+    // It originates in Playwright's dispatcher before any of our listeners, so it
+    // cannot be prevented at the source — and it has zero effect on the scrape result.
+    // Downgrade to DEBUG so it doesn't masquerade as an actionable WARN in the logs.
+    const benignPlaywright = reason instanceof Error
+      && /reading '(url|frames)'/.test(reason.message || '')
+      && /coreBundle\.js/.test(reason.stack || '');
+    logToDebugFile(
+      benignPlaywright ? 'DEBUG' : 'WARN',
+      `[Worker-${workerId}] Unhandled Rejection (non-fatal): ${errMsg}`,
+    );
   });
 }
 
