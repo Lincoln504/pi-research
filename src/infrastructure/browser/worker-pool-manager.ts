@@ -14,6 +14,7 @@ import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { ensureBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getMaxWorkers } from './config.ts';
 import { cleanupStaleProfiles } from './cleanup-utils.ts';
+import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
@@ -110,6 +111,15 @@ export class WorkerPoolManager implements IService {
                     .catch((e) => logger.debug('[WorkerPoolManager] Profile sweep (profile dir) failed:', e));
                 void cleanupStaleProfiles(undefined, STALE_PROFILE_MS)
                     .catch((e) => logger.debug('[WorkerPoolManager] Profile sweep (legacy tmp) failed:', e));
+
+                // SIGKILL backstop: reap Camoufox processes orphaned by a PRIOR run that
+                // died abruptly (kill -9, crash) before its graceful shutdown could fire.
+                // The sweep is pi-research-specific (matches our camoufox-bin / profile
+                // marker, never the user's system Firefox) and orphan-aware (only kills
+                // processes whose parent is dead), so camoufox owned by THIS or a concurrent
+                // live instance is spared. Fire-and-forget; never block pool startup.
+                void cleanupOrphanedCamoufoxProcesses()
+                    .catch((e) => logger.debug('[WorkerPoolManager] Startup orphan sweep failed:', e));
 
                 const workerConcurrency = (config || getConfig()).WORKER_CONCURRENCY;
 

@@ -39,28 +39,44 @@ export async function cleanupOrphanedCamoufoxProcesses(): Promise<void> {
 }
 
 /**
+ * Marker that identifies a browser process as one WE launched (Camoufox via
+ * Playwright), never the user's own system Firefox. Camoufox always runs from a
+ * `…/camoufox/camoufox-bin` executable and under a `…/pi-research/profiles/…`
+ * Playwright profile; the system browser (`/usr/lib/firefox/firefox-bin`) matches
+ * neither. Matching on the full command line (not the bare comm "firefox") is what
+ * makes the orphan sweep safe to run on a desktop with a personal browser open.
+ */
+export const PI_BROWSER_MARKER = /camoufox|[/\\]pi-research[/\\]profiles[/\\]/i;
+
+/**
  * Cleanup orphaned processes on Unix-like systems (macOS, Linux)
  */
 async function cleanupOrphanedProcessesUnix(): Promise<void> {
   try {
-    // Find Camoufox/firefox processes and their parent PIDs
-    // Simplified regex to just match PID and PPID reliably
+    // Scan by FULL command line (args), not comm, so we can positively identify our
+    // own Camoufox processes and never touch the user's system Firefox.
     const { stdout } = await execAsync(
-      'ps -eo pid,ppid,comm | grep -E "(firefox|camoufox)" | grep -v grep',
+      'ps -eo pid,ppid,args 2>/dev/null',
     );
-    
+
     const lines = stdout.trim().split('\n');
     const cleanupTasks: Promise<void>[] = [];
-    
+
     for (const line of lines) {
-      // Capture PID and PPID from the start of the line
-      const match = line.trim().match(/^\s*(\d+)\s+(\d+)/);
+      // Capture PID, PPID, and the remaining args from each line.
+      const match = line.trim().match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
       if (!match || !match[1] || !match[2]) continue;
-      
+
+      const args = match[3] || '';
+      // Only ever consider OUR Camoufox processes — never the user's Firefox.
+      if (!PI_BROWSER_MARKER.test(args)) continue;
+
       const pid = parseInt(match[1], 10);
       const ppid = parseInt(match[2], 10);
-      const comm = line.trim().split(/\s+/)[2] || 'unknown';
-      
+      const comm = 'camoufox';
+      // Never target ourselves.
+      if (pid === process.pid) continue;
+
       // Determine if orphan:
       // 1. PPID is 1 (adopted by init)
       // 2. Parent PID is dead (process.kill(ppid, 0) throws)
