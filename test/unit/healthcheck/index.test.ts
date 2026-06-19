@@ -246,7 +246,17 @@ describe('isBusyPoolHealthFailure', () => {
     ] })).toBe(false);
   });
 
-  it('returns false when another critical component is also unhealthy', () => {
+  it('returns true when runtime AND state-manager both time out under load (capability healthy)', () => {
+    // The dominant real-world pattern: sustained pool/GPU contention queues out the
+    // runtime probe and a second probe together. Both are timeouts → still "busy".
+    expect(isBusyPoolHealthFailure({ components: [
+      okCapability,
+      busyRuntime,
+      { component: 'StateManager', healthy: false, error: 'Health check timed out after 25000ms' },
+    ] })).toBe(true);
+  });
+
+  it('returns false when a co-failing component has a NON-timeout error (real fault)', () => {
     expect(isBusyPoolHealthFailure({ components: [
       okCapability,
       busyRuntime,

@@ -71,7 +71,19 @@ export class QuickResearchOrchestrator {
 
     try {
         // Pre-flight health check to ensure browser pool is operational.
-        const health = await runHealthCheck({ ctx });
+        // Consumers running sustained batch load (where the probe both costs up to a
+        // full queue-wait of latency AND competes for a pool slot with real work) can
+        // opt out with PI_RESEARCH_SKIP_HEALTHCHECK=1/true and rely on the per-task
+        // search/scrape timeouts as the safety net. Honoring this flag also keeps the
+        // SDK consistent with callers that already set it expecting a skip.
+        const skipHealthcheck = process.env['PI_RESEARCH_SKIP_HEALTHCHECK'] === '1' ||
+          process.env['PI_RESEARCH_SKIP_HEALTHCHECK'] === 'true';
+        const health = skipHealthcheck
+          ? { success: true as boolean, error: undefined as string | undefined, components: [] as Array<{ component?: string; healthy?: boolean; error?: string }> }
+          : await runHealthCheck({ ctx });
+        if (skipHealthcheck) {
+          logger.debug('[QuickOrchestrator] Pre-flight healthcheck skipped (PI_RESEARCH_SKIP_HEALTHCHECK); relying on per-task timeouts.');
+        }
         if (!health.success) {
           // Distinguish a DEAD/uninitialized pool (must abort) from one that is merely BUSY —
           // under sustained concurrent load the BrowserRuntime probe queues behind in-flight

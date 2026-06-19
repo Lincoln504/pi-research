@@ -157,24 +157,35 @@ registerHealthChecks(globalHealthRegistry);
  * Decide whether a FAILED health check is a transient "pool busy" condition (research
  * should proceed) rather than a genuine failure (research must abort).
  *
- * Returns true ONLY when the browser is installed/constructible — BrowserCapability is
- * healthy (it never touches the worker pool) — AND the sole unhealthy critical component
- * is BrowserRuntime reporting a TIMEOUT, i.e. the runtime probe queued out behind in-flight
- * scrapes on the shared fixed-size worker pool under load. The pool is operational; the
- * per-task search/scrape timeouts already bound the real work, so aborting the whole
- * session on this signal needlessly discards a research category. Any other unhealthy
- * component (browser not installed, a non-timeout runtime error, a different critical
- * check) returns false → caller must abort.
+ * Returns true when the browser is installed/constructible — BrowserCapability is healthy
+ * (it never touches the worker pool) — AND every unhealthy component failed with a TIMEOUT,
+ * i.e. its probe queued out behind in-flight scrapes on the shared fixed-size worker pool
+ * under load. Under sustained concurrency the runtime probe and the StateManager/KnowledgeStore
+ * probes (which share the same congested pool/GPU) frequently time out together, so any
+ * combination of timed-out probes is treated as "busy", not "dead". The pool is operational
+ * and the per-task search/scrape timeouts already bound the real work, so aborting the whole
+ * session on this signal needlessly discards a research category. A non-timeout failure
+ * (browser not installed, "connection refused", embedder missing) returns false → caller
+ * must abort.
  */
 export function isBusyPoolHealthFailure(
   health: { components?: Array<{ component?: string; healthy?: boolean; error?: string }> },
 ): boolean {
   const components = health.components || [];
   const capability = components.find(c => c.component === 'BrowserCapability');
+  // BrowserCapability is the liveness signal: it only checks the browser is installed
+  // and constructible, never touching the worker pool. If it is healthy (or absent),
+  // the browser CAN run — so any failures elsewhere are about throughput, not death.
   const capabilityOk = !capability || capability.healthy !== false;
   const unhealthy = components.filter(c => c.healthy === false);
-  return capabilityOk && unhealthy.length > 0 && unhealthy.every(c =>
-    c.component === 'BrowserRuntime' && /tim(e|ed)\s*out|timeout/i.test(String(c.error || '')));
+  // Proceed only when EVERY unhealthy component failed with a TIMEOUT. Under sustained
+  // concurrent load the BrowserRuntime probe — and often the StateManager/KnowledgeStore
+  // probes sharing the same congested pool/GPU — all queue out together; requiring the
+  // runtime probe to be the SOLE failure was too strict and let a second co-timed-out
+  // probe abort an otherwise-operational session. A non-timeout error (browser not
+  // installed, "connection refused", embedder missing) is a real fault → returns false.
+  const isTimeout = (c: { error?: string }) => /tim(e|ed)\s*out|timeout/i.test(String(c.error || ''));
+  return capabilityOk && unhealthy.length > 0 && unhealthy.every(isTimeout);
 }
 
 /**
