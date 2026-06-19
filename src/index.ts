@@ -104,6 +104,13 @@ export default async function (pi: ExtensionAPI) {
 
         logger.debug(`[pi-research] Captured steering input. sessionId=${eCtx.sessionId}`);
 
+        // Best-effort UI feedback. Without it, a steering message that is forwarded to
+        // pi's follow-up queue (because the current research step can't be interrupted)
+        // is delivered but invisible — it looks like nothing happened.
+        const notify = (msg: string, level: 'info' | 'warning' = 'info') => {
+          try { if (ctx.hasUI) ctx.ui.notify(msg, level); } catch { /* notify is best-effort */ }
+        };
+
         let sessionIds: string[] = [];
         if (eCtx.sessionId) {
           sessionIds = [eCtx.sessionId];
@@ -111,31 +118,60 @@ export default async function (pi: ExtensionAPI) {
           const activeSessions = getAllTrackedSessions().filter(sid => getPiActiveSessionOrder(sid).length > 0);
           if (activeSessions.length === 1) {
             sessionIds = [activeSessions[0]!];
+          } else if (activeSessions.length > 1) {
+            // Ambiguous — we cannot attribute the message to one research session.
+            // Do NOT swallow it: fall through so pi applies its own native steering.
+            notify('Multiple active research sessions — steering left to pi.', 'warning');
+            return undefined;
           }
         }
 
+        if (sessionIds.length === 0) {
+          // No research session we can route to — let pi handle the input natively
+          // rather than silently dropping it (returning 'handled' would eat it).
+          return undefined;
+        }
+
+        let queued = 0;
+        let forwarded = 0;
         for (const sid of sessionIds) {
           // Check if any active research panel in this session can accept steering.
-          // During eval/coordinator LLM calls, steering is popped to follow-up instead
-          // of being queued, since the running LLM call cannot be interrupted and the
-          // message might not be consumed before the research ends.
+          // During eval/coordinator LLM calls, steering is forwarded to follow-up
+          // instead of being queued, since the running LLM call cannot be interrupted
+          // and the message might not be consumed before the research ends.
           const activePanels = getPiActivePanels(sid);
           const steeringAcceptable = activePanels.some(p => p.steeringAcceptable === true);
 
           if (steeringAcceptable) {
             addSteeringMessage(sid, sanitized);
+            queued++;
           } else {
-            // Steering not acceptable — immediately pop to pi's follow-up queue
-            logger.debug(`[pi-research] Steering not acceptable for session ${sid}, popping to follow-up: ${sanitized}`);
+            // Steering not acceptable right now — forward to pi's follow-up queue so it
+            // is applied at the next turn instead of being lost.
+            logger.debug(`[pi-research] Steering not acceptable for session ${sid}, forwarding to follow-up: ${sanitized}`);
             try {
               pi.sendUserMessage(sanitized, { deliverAs: 'followUp' });
+              forwarded++;
             } catch (err) {
-              logger.warn('[pi-research] Failed to send popped steering to follow-up:', err);
+              logger.warn('[pi-research] Failed to forward steering to follow-up:', err);
             }
           }
         }
-        
-        // Return handled to indicate we have fully processed this input 
+
+        // Surface the outcome so the action is never invisible.
+        if (queued > 0 && forwarded === 0) {
+          notify('Queued for research steering.', 'info');
+        } else if (forwarded > 0 && queued === 0) {
+          notify('Research busy — steering will apply at the next step.', 'info');
+        } else if (queued > 0 && forwarded > 0) {
+          notify('Steering received (queued + forwarded to next step).', 'info');
+        } else {
+          // Nothing was delivered (e.g. the follow-up send threw) — let pi handle it
+          // natively rather than eating the message.
+          return undefined;
+        }
+
+        // Return handled to indicate we have fully processed this input
         // and Pi should not echo it into the main chat log.
         return { action: 'handled' };
       } catch (err) {
