@@ -44,6 +44,11 @@ const isBrowserConnected = () => {
 function logToDebugFile(level: string, ...args: any[]): void {
   const logFile = process.env['PI_RESEARCH_LOG_FILE'];
   if (!logFile) return;
+  // Match the main-process logger: WARN/ERROR are always recorded (crash diagnostics);
+  // INFO/DEBUG only when verbose. Without this gate a non-verbose scaling run still
+  // streamed thousands of worker DEBUG lines to PI_RESEARCH_LOG_FILE — often a tmpfs
+  // (RAM) path — adding memory and I/O pressure for no benefit during sustained loops.
+  if ((level === 'INFO' || level === 'DEBUG') && process.env['PI_RESEARCH_DEBUG'] !== 'true') return;
 
   try {
     const timestamp = new Date().toISOString();
