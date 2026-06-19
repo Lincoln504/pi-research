@@ -35,6 +35,22 @@ export async function cleanupStaleProfiles(
       try {
         const stats = await fs.stat(fullPath);
         if (!stats.isDirectory()) continue;
+
+        // Reclaim leftover EMPTY profile/artifact dirs regardless of age. Playwright
+        // removes a context's artifact CONTENTS when it closes but can leave the empty
+        // directory behind (e.g. `playwright-artifacts-*`); without this, those empties
+        // linger until the 30-day threshold. An empty dir cannot be a locked/active
+        // profile, and this runs at pool startup before any new profile is created, so
+        // it is always safe.
+        if (entry.startsWith(prefix) || entry.startsWith('playwright-artifacts-')) {
+          const inner = await fs.readdir(fullPath);
+          if (inner.length === 0) {
+            await fs.rmdir(fullPath);
+            removed++;
+            continue;
+          }
+        }
+
         if (now - stats.mtimeMs > staleMs) {
           // Check if profile is locked (Camoufox may leave .lock files for active profiles)
           const lockFile = path.join(fullPath, '.lock');

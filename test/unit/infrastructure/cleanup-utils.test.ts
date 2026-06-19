@@ -147,6 +147,35 @@ describe('cleanup-utils', () => {
       expect(result.errors).toBe(0);
     });
 
+    it('reclaims leftover EMPTY profile/artifact dirs regardless of age, sparing others', async () => {
+      const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
+
+      // Empty leftovers Playwright leaves behind, both YOUNG (well under threshold).
+      const emptyArtifacts = path.join(testCacheDir, 'playwright-artifacts-abc123');
+      const emptyProfile = path.join(testCacheDir, 'playwright_firefoxdev_profile-def456');
+      mkdirSync(emptyArtifacts, { recursive: true });
+      mkdirSync(emptyProfile, { recursive: true });
+      const young = new Date(Date.now() - ACTIVE_AGE_MS);
+      utimesSync(emptyArtifacts, young, young);
+      utimesSync(emptyProfile, young, young);
+
+      // A young, NON-empty active profile must be preserved.
+      const active = createProfile('playwright_firefoxdev_profile-active', ACTIVE_AGE_MS);
+      // A young, empty, NON-matching dir (e.g. the tsx compile cache) must be left alone.
+      const otherEmpty = path.join(testCacheDir, 'tsx-1000');
+      mkdirSync(otherEmpty, { recursive: true });
+      utimesSync(otherEmpty, young, young);
+
+      const result = await cleanupStaleProfiles(testCacheDir);
+
+      expect(directoryFullyRemoved(emptyArtifacts)).toBe(true);
+      expect(directoryFullyRemoved(emptyProfile)).toBe(true);
+      expect(directoryExists(active)).toBe(true);
+      expect(directoryExists(otherEmpty)).toBe(true);
+      expect(result.removed).toBe(2);
+      expect(result.errors).toBe(0);
+    });
+
     it('handles empty cache directory', async () => {
       const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
