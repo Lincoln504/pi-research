@@ -106,10 +106,12 @@ describe('WriterQueue', () => {
     expect(mockStore.addDocuments).toHaveBeenCalled();
   });
 
-  it('drain() returns immediately when queue is empty and not processing', async () => {
-    const start = Date.now();
-    await queue.drain();
-    expect(Date.now() - start).toBeLessThan(100);
+  it('drain() resolves without touching the store when the queue is empty', async () => {
+    // An empty, idle queue must resolve drain() without doing any ingest work —
+    // assert observable behaviour (no store interaction) rather than wall-clock.
+    await expect(queue.drain()).resolves.toBeUndefined();
+    expect(mockStore.addDocuments).not.toHaveBeenCalled();
+    expect(mockStore.findByUrl).not.toHaveBeenCalled();
   });
 
   it('drain() called multiple times while processing all resolve when queue empties', async () => {

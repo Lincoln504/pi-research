@@ -209,7 +209,6 @@ describe('logger', () => {
       const logger = createLogger({ verbose: true, researchRunId: runId });
 
       const logPath = logger.getLogFilePath();
-      expect(logPath).toBeTruthy();
       expect(logPath).toMatch(/pi-research\.log$/);
       // The run ID must NOT appear in the path — consolidated file, not per-run
       expect(logPath).not.toContain(runId);
@@ -219,7 +218,6 @@ describe('logger', () => {
       const logger = createLogger({ verbose: true });
 
       const logPath = logger.getLogFilePath();
-      expect(logPath).toBeTruthy();
       expect(logPath).toMatch(/pi-research\.log$/);
     });
 

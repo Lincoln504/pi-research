@@ -23,7 +23,7 @@ import { extractUsage } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
-import { createTimeout } from './llm/llm-timeout.ts';
+import { withTimeout } from './llm/llm-timeout.ts';
 import { getConfig } from '../config.ts';
 import {
   PlanningResponseSchemaAsTSchema,
@@ -230,19 +230,19 @@ export class PlanningService implements IPlanningService {
 
       const llmTimeout = config.LLM_TIMEOUT_MS;
 
-      const response = await Promise.race([
+      const response = await withTimeout(
         completeSimple(model, {
           systemPrompt: populatedPrompt,
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, buildSafeOptions(model, { 
-          apiKey: authResult.apiKey || '', 
-          headers: authResult.headers, 
+        }, buildSafeOptions(model, {
+          apiKey: authResult.apiKey || '',
+          headers: authResult.headers,
           signal
         }, 4096)),
-        createTimeout(llmTimeout, 'coordinator-generatePlan'),
-      ]);
+        llmTimeout, 'coordinator-generatePlan',
+      );
 
       // Track usage
       const rawUsage = (response as any).usage;
@@ -374,19 +374,19 @@ export class PlanningService implements IPlanningService {
 
       const llmTimeout = config.LLM_TIMEOUT_MS;
 
-      const response = await Promise.race([
+      const response = await withTimeout(
         completeSimple(model, {
           systemPrompt: populatedPrompt,
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
-        }, buildSafeOptions(model, { 
-          apiKey: authResult.apiKey || '', 
-          headers: authResult.headers, 
+        }, buildSafeOptions(model, {
+          apiKey: authResult.apiKey || '',
+          headers: authResult.headers,
           signal
         }, 4096)),
-        createTimeout(llmTimeout, 'evaluator-updatePlanForRound'),
-      ]);
+        llmTimeout, 'evaluator-updatePlanForRound',
+      );
 
       // Track usage
       const rawUsage = (response as any).usage;

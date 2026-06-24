@@ -74,12 +74,34 @@ describe('utils/prompts', () => {
       expect(loadPrompt('')).toBe('');
     });
 
-    it('returns empty string for a path-traversal prompt name (no file escape)', async () => {
+    it('rejects path-traversal prompt names via the allowlist guard (not an incidental file-miss)', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      // '../etc/passwd' resolves outside the prompts dir; with the appended
-      // .md suffix it matches nothing, so loadPrompt must yield '' rather than
-      // leaking any file contents.
-      expect(loadPrompt('../etc/passwd')).toBe('');
+      const { logger } = await import('../../../src/logger.ts');
+      // For unsafe names the guard fires and logs a DISTINCT "Rejected unsafe
+      // prompt name" message — different from the "Failed to load" message used
+      // when a safe name simply isn't found. Asserting that distinct message
+      // proves the protection executed, not that the .md suffix happened to miss.
+      for (const unsafe of [
+        '../etc/passwd',
+        '../researcher',
+        '../..//etc/hosts',
+        '/etc/passwd',
+        'sub/dir/name',
+        'name .md',
+        '..',
+      ]) {
+        vi.mocked(logger.error).mockClear();
+        expect(loadPrompt(unsafe)).toBe('');
+        expect(logger.error).toHaveBeenCalledWith(
+          expect.stringContaining('Rejected unsafe prompt name'),
+        );
+      }
+    });
+
+    it('still reads files for safe identifier names (guard is not over-broad)', async () => {
+      const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
+      // A normal prompt name passes the guard and loads real content.
+      expect(loadPrompt('researcher').length).toBeGreaterThan(0);
     });
 
     it('handles null/undefined prompt name gracefully', async () => {

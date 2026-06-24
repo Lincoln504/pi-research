@@ -70,7 +70,7 @@ describe('tools/search', () => {
     expect(result.details).toMatchObject({ error: 'API Down' });
   });
 
-  it('should throw error on second call', async () => {
+  it('blocks the second call with reason limit_reached (one search per researcher)', async () => {
     const tool = createSearchTool(mockOptions);
     await tool.execute('id1', { queries: ['q1'] }, undefined, undefined, {} as any);
 

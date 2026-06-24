@@ -71,6 +71,8 @@ vi.mock('../../../src/logger.ts', () => ({
 
 import { getModelEmbedderConfig, getModelChunkConfig, SUPPORTED_MODELS, createKnowledgeStoreComponents, forceDeleteKnowledgeStore } from '../../../src/knowledge/index.ts';
 import { getConfig } from '../../../src/config.ts';
+import { KnowledgeStore } from '../../../src/knowledge/store.ts';
+import { WriterQueue } from '../../../src/knowledge/writer-queue.ts';
 
 // Derived from SUPPORTED_MODELS — never a hardcoded duplicate.
 const ALL_MODEL_IDS = SUPPORTED_MODELS.map(m => m.id);
@@ -85,16 +87,28 @@ describe('createKnowledgeStoreComponents', () => {
     expect(components).toBeNull();
   });
 
-  it('initializes and returns components successfully', async () => {
+  it('wires the embedder, store and writer-queue together', async () => {
     const mockEmbedder = { initialize: vi.fn(), getDimension: () => 384 };
     const embedderFactory = vi.fn().mockResolvedValue(mockEmbedder);
 
     const components = await createKnowledgeStoreComponents(embedderFactory);
 
-    expect(components!.embedder).toBe(mockEmbedder);
-    expect(components!.store).toBeDefined();
-    expect(components!.writerQueue).toBeDefined();
+    // The embedder comes from the supplied factory, not constructed internally.
     expect(embedderFactory).toHaveBeenCalled();
+    expect(components!.embedder).toBe(mockEmbedder);
+
+    // The store is constructed with that exact embedder (verifies real wiring,
+    // not merely that a mock returned an object).
+    expect(KnowledgeStore).toHaveBeenCalledTimes(1);
+    const storeOpts = vi.mocked(KnowledgeStore).mock.calls[0]![0] as any;
+    expect(storeOpts.embedder).toBe(mockEmbedder);
+    expect(components!.store).toBe(vi.mocked(KnowledgeStore).mock.results[0]!.value);
+
+    // The writer-queue is constructed against that same store instance.
+    expect(WriterQueue).toHaveBeenCalledTimes(1);
+    const wqOpts = vi.mocked(WriterQueue).mock.calls[0]![0] as any;
+    expect(wqOpts.store).toBe(components!.store);
+    expect(components!.writerQueue).toBe(vi.mocked(WriterQueue).mock.results[0]!.value);
   });
 });
 

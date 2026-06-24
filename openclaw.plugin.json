@@ -214,7 +214,7 @@
       "description": "Multi-agent web research with search, scraping, security databases, and Stack Exchange."
     },
     "health": {
-      "description": "System health checks across browser pool, knowledge store, and GPU lock."
+      "description": "System health checks across browser capability, browser runtime, knowledge store, and state manager."
     },
     "research_knowledge_search": {
       "description": "Satellite tool for the main pi agent. Search the research knowledge database for previously researched information before live research."

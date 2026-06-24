@@ -171,6 +171,21 @@ function verifyInstalled(pkgDir) {
     if (!fs.existsSync(path.join(pkgDir, t))) fail(`Installed exports target missing: ${t}`);
   }
 
+  // Executable scripts MUST start with a shebang. npm relies on it (not the exec
+  // bit) to run a `bin` on Linux/macOS; an esbuild bundle has none unless the
+  // build adds a --banner. Without it `pi-research` fails with an exec-format
+  // error on Unix, while Windows' generated shims hide the breakage — so assert
+  // it here where the file content is on disk.
+  const SHEBANG = '#!/usr/bin/env node';
+  for (const rel of ['dist/cli.mjs', 'skills/research/scripts/run.mjs']) {
+    const full = path.join(pkgDir, rel);
+    if (!fs.existsSync(full)) continue; // already reported missing above
+    const firstLine = fs.readFileSync(full, 'utf8').split('\n', 1)[0];
+    if (firstLine !== SHEBANG) {
+      fail(`Executable ${rel} is missing the '${SHEBANG}' shebang (first line: ${JSON.stringify(firstLine)}). It will not run as a bin on Linux/macOS.`);
+    }
+  }
+
   if (process.exitCode) {
     console.error('\nInstalled-package verification FAILED.');
   } else {

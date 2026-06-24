@@ -32,6 +32,21 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 **stdout** = Markdown report. Read it and cite it in your response.
 **stderr** = progress lines and errors. Relay errors to the user; suppress routine progress.
 
+## Reporting results back to the user (always)
+
+When you summarize or explain the findings, you MUST:
+
+1. **Cite the sources from the report.** The report grounds its claims in specific
+   URLs / citations (inline links, a "Sources" section, or `[n]` references). Carry
+   those same sources into your answer — attribute each non-trivial claim to the
+   source the report used, and include the links. Do not present researched facts as
+   unsourced. Never invent or substitute sources the report did not contain.
+2. **Surface the saved report file, if any.** When report export is enabled, the
+   report (and the run's stderr) ends with a line like
+   `Research report saved to: <path>`. If that line is present, tell the user the
+   exact file path so they can open the full report. If no such line appears, no
+   file was written — say nothing about a file.
+
 ---
 
 ## Foreground vs background
@@ -101,7 +116,7 @@ is broad — depth 1 handles broad topics by decomposing them internally.
 
 | Exit | Meaning | Action |
 |------|---------|--------|
-| `0` | Success | Read stdout; cite the report. |
+| `0` | Success | Read stdout; cite the report's sources in your answer, and relay the "Research report saved to: <path>" line if present. |
 | `78` on `knowledge` | Store disabled or not configured | Silent. Proceed to live `research`. |
 | `78` on `research` | Engine missing or no model/key | **Stop. Relay the full stderr to the user.** It shows exactly where to configure. Do not retry until the user fixes the setup. |
 | `70` | Runtime error | Relay the error from stderr. Suggest retrying once for transient failures (network, rate limit). |

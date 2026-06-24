@@ -111,6 +111,15 @@ vi.mock('../../src/config.ts', () => ({
     MAX_CONCURRENT_RESEARCHERS: 3,
     RESEARCHER_TIMEOUT_MS: 120000,
   })),
+  // createConfig is used by the SDK only on the ignoreGlobalConfig path; return a
+  // distinct sentinel so a test can prove the global file was NOT read.
+  createConfig: vi.fn(() => ({
+    DEFAULT_RESEARCH_DEPTH: 1,
+    KNOWLEDGE_STORE_MODE: 'none',
+    MAX_CONCURRENT_RESEARCHERS: 3,
+    RESEARCHER_TIMEOUT_MS: 120000,
+    __hermetic: true,
+  })),
   setConfig: vi.fn(),
   validateConfig: vi.fn(),
 }));
@@ -190,9 +199,20 @@ describe('SDK Lifecycle', () => {
       expect(ctx).toHaveProperty('cwd');
     });
 
-    it('loads config for the correct directory', async () => {
+    it('loads the BASE config for the directory (no per-interface overlay — the SDK is code-configured)', async () => {
       await initSDK({ cwd: '/custom/path' });
-      expect(getConfig).toHaveBeenCalledWith('/custom/path', 'sdk');
+      // The SDK reads base config only; it must NOT pass an interface tag (no sdk.env).
+      expect(getConfig).toHaveBeenCalledWith('/custom/path');
+    });
+
+    it('ignoreGlobalConfig skips the global file entirely (hermetic, code-only config)', async () => {
+      const { createConfig } = await import('../../src/config.ts');
+      vi.mocked(getConfig).mockClear();
+      await initSDK({ ignoreGlobalConfig: true });
+      // getConfig (the global-file reader) must NOT be called; createConfig builds
+      // a config from defaults + process.env only.
+      expect(getConfig).not.toHaveBeenCalled();
+      expect(createConfig).toHaveBeenCalled();
     });
 
     it('warns and returns early when called a second time without disposing', async () => {
@@ -229,7 +249,6 @@ describe('SDK Lifecycle', () => {
       await initSDK({ config: { KNOWLEDGE_STORE_MODE: 'none', MAX_SCRAPE_BATCHES: 7 } });
       await runDeepResearch('q');
       const passed = mockDeepRun.mock.calls[0]![0] as any;
-      expect(passed.config).toBeDefined();
       expect(passed.config.MAX_SCRAPE_BATCHES).toBe(7);
       expect(passed.config.KNOWLEDGE_STORE_MODE).toBe('none');
     });

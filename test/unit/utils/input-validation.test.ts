@@ -9,6 +9,7 @@ import {
   validateAndSanitizeQuery,
   validateComplexity,
 } from '../../../src/utils/input-validation';
+import { MIN_QUERY_LENGTH, MAX_QUERY_LENGTH } from '../../../src/constants';
 
 describe('validateQuery', () => {
   it('should accept valid queries', () => {
@@ -121,20 +122,40 @@ describe('validateQuery — Property-based tests', () => {
       return result;
     };
 
-    for (let i = 0; i < 100; i++) {
-      const len = Math.floor(Math.random() * 1000);
+    // Span the real boundary on BOTH sides: from below MIN_QUERY_LENGTH up to
+    // just past it, plus a few explicit cases at the upper bound, so the
+    // length-limit assertions are actually reachable (the old test capped at
+    // 1000 chars and asserted an unreachable 12000 limit that could never fail).
+    const lengths = [
+      ...Array.from({ length: 50 }, (_, k) => k), // 0..49 around MIN
+      MAX_QUERY_LENGTH - 1,
+      MAX_QUERY_LENGTH,
+      MAX_QUERY_LENGTH + 1,
+    ];
+
+    for (const len of lengths) {
       const query = generateRandomString(len);
+      const trimmed = query.trim();
       const result = validateQuery(query);
-      
+
       if (result.isValid) {
-        expect(query.length).toBeGreaterThanOrEqual(3);
-        expect(query.length).toBeLessThanOrEqual(12000);
+        // Validity is decided on the TRIMMED length, against the real constants.
+        expect(trimmed.length).toBeGreaterThanOrEqual(MIN_QUERY_LENGTH);
+        expect(trimmed.length).toBeLessThanOrEqual(MAX_QUERY_LENGTH);
         expect(query).not.toMatch(/<script/i);
         expect(query).not.toMatch(/javascript:/i);
         expect(query).not.toMatch(/onclick/i);
+        // Validation must be stable/idempotent.
+        expect(validateQuery(query).isValid).toBe(true);
       } else {
-        // If invalid, there must be a reason
-        expect(result.error).toBeDefined();
+        // Every rejection carries a non-empty reason that matches its cause.
+        expect(typeof result.error).toBe('string');
+        expect(result.error!.length).toBeGreaterThan(0);
+        const tooShort = trimmed.length < MIN_QUERY_LENGTH;
+        const tooLong = trimmed.length > MAX_QUERY_LENGTH;
+        // Mirror validateQuery's dangerous-pattern set exactly (tested on trimmed).
+        const dangerous = /<script|javascript:|on\w+\s*=|<iframe|<object|<embed/i.test(trimmed);
+        expect(tooShort || tooLong || dangerous).toBe(true);
       }
     }
   });

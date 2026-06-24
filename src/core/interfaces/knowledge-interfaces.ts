@@ -132,6 +132,8 @@ export interface IKnowledgeStore extends IService {
  */
 export interface IKnowledgeStoreService extends IService {
   isReady(): boolean;
+  /** The working directory this service initialized against (from ctx.cwd). */
+  getCwd(): string;
   getDevice(): string | null;
   getStore(): Promise<IKnowledgeStore | null>;
   getEmbedder(): Promise<IEmbedder | null>;

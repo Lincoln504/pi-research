@@ -193,10 +193,11 @@ describe('Planning Service State Reset', () => {
         content: 'Waiting for more information'
       };
       
-      // The planning service should handle this plan
-      expect(() => {
-        planningService.parseJsonPlan(JSON.stringify(planWithWait));
-      }).not.toThrow();
+      // The planning service must parse it AND preserve the 'wait' action +
+      // content (a parser that silently dropped them would still not throw).
+      const parsed = planningService.parseJsonPlan(JSON.stringify(planWithWait));
+      expect(parsed.action).toBe('wait');
+      expect(parsed.content).toBe('Waiting for more information');
     });
 
     it('should not require duplicate schema definitions', async () => {
@@ -217,9 +218,11 @@ describe('Planning Service State Reset', () => {
         content: 'Test content'
       };
       
-      expect(() => {
-        planningService.parseJsonPlan(JSON.stringify(canonicalPlan));
-      }).not.toThrow();
+      const parsed = planningService.parseJsonPlan(JSON.stringify(canonicalPlan));
+      expect(parsed.action).toBe('wait');
+      expect(parsed.researchers).toHaveLength(1);
+      expect(parsed.researchers![0]!.name).toBe('Test Researcher');
+      expect(parsed.allQueries).toEqual(['query1', 'query2']);
     });
   });
 });

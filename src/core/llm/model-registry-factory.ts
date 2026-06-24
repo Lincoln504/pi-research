@@ -140,18 +140,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   //    order first to respect the user's explicit configuration.
   const available = registry.getAvailable();
   if (available.length > 0) {
-    const modelsJsonPath = path.join(getAgentDir(), 'models.json');
-    if (fs.existsSync(modelsJsonPath)) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf-8'));
-        const userProviderOrder: string[] = Object.keys(raw?.providers ?? {});
-        for (const prov of userProviderOrder) {
-          const match = available.find(m => m.provider === prov);
-          if (match) return match;
-        }
-      } catch { /* fall through to built-in ordering */ }
-    }
-    return available[0]!;
+    return pickPreferredAvailable(available, readModelsJsonProviderOrder())!;
   }
 
   // 4. Any model at all
@@ -176,4 +165,39 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   throw new Error(
     `No LLM model available. Please configure your model registry (${path.join(getAgentDir(), 'models.json')}) or provide an explicit apiKey.`,
   );
+}
+
+/**
+ * Read the user's provider order from ~/.pi/agent/models.json.
+ * Returns provider keys in document (insertion) order, or [] when the file is
+ * absent or malformed. Kept separate from {@link pickPreferredAvailable} so the
+ * selection logic stays pure and unit-testable without touching the filesystem.
+ */
+export function readModelsJsonProviderOrder(): string[] {
+  const modelsJsonPath = path.join(getAgentDir(), 'models.json');
+  if (!fs.existsSync(modelsJsonPath)) return [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf-8'));
+    return Object.keys(raw?.providers ?? {});
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Pick the first available model whose provider appears earliest in the user's
+ * configured provider order; fall back to the first available model when no
+ * provider in `providerOrder` is available. Pure — no filesystem access — so it
+ * is the single source of truth for "first available" fallback ordering shared
+ * by both {@link resolveModel} and the research-model resolver.
+ */
+export function pickPreferredAvailable<T extends { provider: string }>(
+  available: T[],
+  providerOrder: string[],
+): T | undefined {
+  for (const prov of providerOrder) {
+    const match = available.find(m => m.provider === prov);
+    if (match) return match;
+  }
+  return available[0];
 }

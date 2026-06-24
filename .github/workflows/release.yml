@@ -31,10 +31,17 @@ jobs:
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
 
       - name: Build and pack
+        # Skip the camoufox/native downloads during install — the release jobs
+        # never launch a browser, so a live fetch only adds latency and flake.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
         run: |
           npm ci --legacy-peer-deps
           npm run build:worker
           npm run build:openclaw
+          npm run build:cli
+          npm run build:skill
           npm pack
           TAR_FILE="$(ls *.tgz)"
           echo "TAR_FILE=$TAR_FILE" >> $GITHUB_ENV
@@ -77,9 +84,13 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
 
-      - run: npm ci --legacy-peer-deps
+      - env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          ONNXRUNTIME_NODE_SKIP_BINARIES: '1'
+        run: npm ci --legacy-peer-deps
       - run: npm run lint
       - run: npm run type-check
+      - run: npm run type-check:tests
       - run: npm run test:unit
       - run: npm pack --dry-run 2>&1 | grep -q index.ts
 

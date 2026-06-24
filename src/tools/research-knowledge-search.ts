@@ -31,7 +31,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
 import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
-import { createTimeout } from '../core/llm/llm-timeout.ts';
+import { withTimeout } from '../core/llm/llm-timeout.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
@@ -45,7 +45,7 @@ import { extractJson } from '../utils/json-utils.ts';
 import { repairJsonWithLlm } from '../core/llm/agentic-repair.ts';
 import { loadPrompt } from '../core/llm/prompts.ts';
 import { formatParentContext } from '../orchestration/session-context.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, type ConfigInterface, type Config } from '../config.ts';
 import { createKnowledgeSearchPanel } from '../tui/knowledge-search-panel.ts';
 
 // ---------------------------------------------------------------------------
@@ -231,12 +231,13 @@ import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
  * Resolve the model to use for the background synthesis LLM.
  * Priority: RESEARCH_MODEL → ctx.model
  */
-function resolveSynthesisModel(ctx: ExtensionContext): { model?: Model<any>; error?: string } {
+function resolveSynthesisModel(ctx: ExtensionContext, config: Config): { model?: Model<any>; error?: string } {
   try {
     const model = resolveResearchModel({
       modelRegistry: ctx.modelRegistry,
       hostModel: ctx.model as Model<any>,
       cwd: ctx.cwd,
+      config,
     });
     return { model };
   } catch (err) {
@@ -278,6 +279,7 @@ async function runBackgroundExtraction(
   auth: { apiKey: string; headers?: Record<string, string> },
   conversationHistory: string,
   referenceDocuments: string,
+  llmTimeout: number,
   signal?: AbortSignal,
 ): Promise<ResearchKnowledgeSynthesisResponse> {
   const promptTemplate = loadPrompt('research-knowledge-search-extractor');
@@ -292,21 +294,23 @@ async function runBackgroundExtraction(
   const userMessage =
     'Analyze the reference documents above and extract the answer using the required JSON format.';
 
-  // Phase 4a: Stateless LLM call — no AgentSession, no side-effects
-  const llmTimeout = getConfig().LLM_TIMEOUT_MS;
-  const response = await Promise.race([
+  // Phase 4a: Stateless LLM call — no AgentSession, no side-effects.
+  // llmTimeout is resolved by the caller from the iface-aware Config so a
+  // per-interface overlay (sdk.env / openclaw.env / pi.env) is honored here.
+  const response = await withTimeout(
     completeSimple(model, {
       systemPrompt,
       messages: [
         { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
       ],
-    }, buildSafeOptions(model, { 
-      apiKey: auth.apiKey, 
-      headers: auth.headers, 
+    }, buildSafeOptions(model, {
+      apiKey: auth.apiKey,
+      headers: auth.headers,
       signal
     }, 4096)),
-    createTimeout(llmTimeout, 'knowledge-search-extraction'),
-  ]);
+    llmTimeout,
+    'knowledge-search-extraction',
+  );
 
   // Track token and cost metrics for the background synthesis call
   const rawUsage = (response as any).usage;
@@ -481,7 +485,7 @@ function missResult(reason: string): AgentToolResult<unknown> {
  * This tool is a top-level satellite of the main `research` tool, registered
  * via pi.registerTool() in src/index.ts — NOT in createResearchTools().
  */
-export function createResearchKnowledgeSearchTool(): ToolDefinition {
+export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): ToolDefinition {
   return {
     name: 'research_knowledge_search',
     label: 'Research Knowledge Search',
@@ -508,6 +512,12 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
       const startTime = Date.now();
       const p = params as ResearchKnowledgeSearchParams;
       const container = tryGetServiceContainerFromCtx(ctx);
+      // Prefer a config the caller already resolved and placed on the context
+      // (the SDK/CLI seed ctx.config with their hermetic/overlay-resolved Config),
+      // falling back to reading the per-interface overlay (pi.env / openclaw.env /
+      // cli.env) from disk. This keeps RESEARCH_MODEL + LLM_TIMEOUT_MS for synthesis
+      // consistent with the run path and honors ignoreGlobalConfig.
+      const config = (ctx as { config?: Config }).config ?? getConfig(ctx.cwd, iface);
 
       // Show the TUI widget immediately
       showKnowledgeSearchWidget(ctx);
@@ -555,7 +565,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
         // ----------------------------------------------------------
         // Phase 4: Model routing → stateless LLM → agentic repair
         // ----------------------------------------------------------
-        const { model, error: modelError } = resolveSynthesisModel(ctx);
+        const { model, error: modelError } = resolveSynthesisModel(ctx, config);
         if (modelError || !model) {
           return missResult(modelError || 'no_model');
         }
@@ -571,6 +581,7 @@ export function createResearchKnowledgeSearchTool(): ToolDefinition {
           { apiKey: authResult.apiKey || '', headers: authResult.headers },
           conversationHistory,
           referenceText,
+          config.LLM_TIMEOUT_MS,
           signal,
         );
 

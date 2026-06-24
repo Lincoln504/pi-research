@@ -17,7 +17,7 @@ import type {
 import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import type { ResearchDepth, CleanupContext } from '../types/index.ts';
 import { Type, type Static } from 'typebox';
-import { validateConfig, getConfig } from '../config.ts';
+import { validateConfig, getConfig, type ConfigInterface } from '../config.ts';
 import { tryGetServiceContainerFromCtx, getService } from '../core/service-registry.ts';
 
 import { ServiceNames } from '../core/service-interfaces.ts';
@@ -75,7 +75,7 @@ function appendResearchSummary(
 /**
  * Create the research tool definition
  */
-export function createResearchTool(): ToolDefinition {
+export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
   const parameters = Type.Object({
     query: Type.String({
       description: 'The research topic or query to investigate.',
@@ -156,7 +156,7 @@ export function createResearchTool(): ToolDefinition {
       }
 
       const { query, depth: rawDepth, model: modelId, excludeTools: paramExcludeTools, initialLinks } = params as ResearchParams;
-      const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
+      const depth = rawDepth ?? Math.max(1, getConfig(ctx.cwd, iface).DEFAULT_RESEARCH_DEPTH) as 1 | 2 | 3;
       const eCtx = ctx as ExtendedExtensionContext;
       const parentExcludeTools = eCtx.excludeTools || [];
       const excludeTools = [...new Set([...(paramExcludeTools || []), ...parentExcludeTools])];
@@ -223,7 +223,7 @@ export function createResearchTool(): ToolDefinition {
       try {
         const researchRunResult = await runWithRunRegistry<{ result: string; tokens: number; researchId: string }>(runRegistry, () =>
           logger.runCapturingStderr(async () => {
-          const config = getConfig(ctx.cwd);
+          const config = getConfig(ctx.cwd, iface);
           validateConfig(config);
 
           const sanitizedQuery = validateAndSanitizeQuery(query);
@@ -351,7 +351,7 @@ export function createResearchTool(): ToolDefinition {
               const resultWithSummaries = appendResearchSummary(result, runRegistry.getSnapshot(), errorReport);
 
               let finalResult = resultWithSummaries;
-              if (getConfig(ctx.cwd).RESEARCH_REPORT_EXPORT_ENABLED) {
+              if (getConfig(ctx.cwd, iface).RESEARCH_REPORT_EXPORT_ENABLED) {
                 const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd);
                 if (exportPath) {
                   finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState?.totalCost ?? 0);

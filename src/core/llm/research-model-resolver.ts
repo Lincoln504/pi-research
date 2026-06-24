@@ -9,6 +9,7 @@ import { type Model } from '@earendil-works/pi-ai';
 import { type ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { getConfig } from '../../config.ts';
 import { logger } from '../../logger.ts';
+import { pickPreferredAvailable, readModelsJsonProviderOrder } from './model-registry-factory.ts';
 
 /**
  * Resolve the research model with standardized priority:
@@ -69,9 +70,14 @@ export function resolveResearchModel(options: {
     return hostModel;
   }
 
-  // 4. Absolute fallback: pick first available model with auth
+  // 4. Absolute fallback: pick first available model with auth, honoring the
+  //    user's models.json provider order (consistent with resolveModel step 3 —
+  //    otherwise the host model and the research fallback could disagree on which
+  //    of several authed providers to prefer).
   const available = modelRegistry.getAvailable();
-  if (available.length > 0) return available[0] as Model<any>;
+  if (available.length > 0) {
+    return pickPreferredAvailable(available, readModelsJsonProviderOrder()) as Model<any>;
+  }
 
   throw new Error('No LLM model available for research. Please configure your model registry (~/.pi/agent/models.json).');
 }

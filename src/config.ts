@@ -276,11 +276,19 @@ export function getGlobalEnvFilePath(): string {
  * Keys in the overlay win over the base file but lose to process.env and
  * the centralized project registry.
  *
- * - 'sdk'       → src/sdk.ts (programmatic API)
- * - 'openclaw'  → src/openclaw-entry.ts (pi extension plugin)
- * - 'pi'        → src/index.ts TUI and src/cli.ts CLI
+ * - 'pi'        → src/index.ts (the pi extension: /research + /research-config)
+ * - 'openclaw'  → src/openclaw-entry.ts (openclaw plugin)
+ * - 'cli'       → src/cli.ts (the standalone `pi-research` CLI / agent skill)
+ *
+ * Each front-end reads ONLY its own overlay, so the standalone CLI / agent skill
+ * (cli.env) can be configured independently of the openclaw plugin (openclaw.env)
+ * and the pi extension (pi.env).
+ *
+ * NOTE: the programmatic SDK (src/sdk.ts) is deliberately NOT an interface here —
+ * it is a library configured from code via ResearchSDKOptions, not from a global
+ * overlay file. See `ignoreGlobalConfig` in the SDK options for hermetic usage.
  */
-export type ConfigInterface = 'sdk' | 'openclaw' | 'pi';
+export type ConfigInterface = 'openclaw' | 'pi' | 'cli';
 
 /**
  * Returns the per-interface overlay file path (~/.pi/research/{iface}.env).
@@ -672,8 +680,9 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
  *
  * The optional `iface` parameter selects a per-interface overlay file
  * (~/.pi/research/{iface}.env) that layers over the base config.env.
- * This lets SDK, OpenClaw, and pi CLI carry independent model/config
- * settings while all falling back to the shared base when not set.
+ * This lets the pi, openclaw, and cli front-ends carry independent
+ * model/config settings while all falling back to the shared base when
+ * not set. (The SDK is code-configured and has no overlay file.)
  *
  * Results are cached by (cwd, iface) pair.
  */

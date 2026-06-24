@@ -6,8 +6,9 @@
  * paths that can run without a live model (help, version, bad args).
  */
 
-import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { spawnSync, execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,19 @@ import { parseArgs, UsageError, EXIT } from '../../src/cli.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
+const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'research', 'scripts', 'run.mjs');
+
+// The subprocess suites below spawn the BUILT artifacts (dist/cli.mjs and the
+// skill launcher run.mjs). These are produced by `npm run prepare` on install,
+// but a CI job that restores a node_modules cache HIT skips `npm ci` (and thus
+// `prepare`), leaving dist/ absent. Build on demand if missing so the suite is
+// self-sufficient regardless of cache state — locally and in CI — instead of
+// failing with an opaque "module not found" from the spawned node process.
+beforeAll(() => {
+  if (!existsSync(CLI) || !existsSync(SKILL_LAUNCHER)) {
+    execSync('npm run build:cli && npm run build:skill', { cwd: ROOT, stdio: 'inherit' });
+  }
+}, 120_000);
 
 // ---------------------------------------------------------------------------
 // parseArgs — no-arg / help variants
@@ -254,7 +268,7 @@ function runCli(args: string[], env?: Record<string, string>) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf-8',
     env: { ...process.env, ...env },
-    timeout: 10_000,
+    timeout: 20_000,
   });
 }
 
@@ -329,12 +343,10 @@ describe('CLI subprocess — status', () => {
 // Subprocess — skill launcher (run.mjs)
 // ---------------------------------------------------------------------------
 
-const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'research', 'scripts', 'run.mjs');
-
 function runSkill(args: string[]) {
   return spawnSync(process.execPath, [SKILL_LAUNCHER, ...args], {
     encoding: 'utf-8',
-    timeout: 10_000,
+    timeout: 20_000,
   });
 }
 

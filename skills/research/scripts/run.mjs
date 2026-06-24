@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 // skills/research/scripts/run.ts
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

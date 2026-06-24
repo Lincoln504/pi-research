@@ -236,7 +236,8 @@ describe('extractJson', () => {
     const result = extractJson('no json anywhere', 'any');
     expect(result.success).toBe(false);
     expect(result.value).toBeUndefined();
-    expect(result.error).toBeTruthy();
+    expect(typeof result.error).toBe('string');
+    expect(result.error!.length).toBeGreaterThan(0);
   });
 
   it('handles the coordinator plan shape end-to-end', () => {

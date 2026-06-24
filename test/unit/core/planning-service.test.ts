@@ -335,7 +335,18 @@ describe('PlanningService', () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(longFallbackText));
       const plan = await service.updatePlanForRound(BASE_OPTIONS);
       expect(plan.action).toBe('synthesize');
-      expect(plan.content).toBeTruthy();
+      // The contract is that the unparseable raw text is PRESERVED in content
+      // (not replaced by a placeholder), so the synthesis step still has it.
+      expect(plan.content).toBe(longFallbackText);
+    });
+
+    it('drops too-short unparseable text rather than wrapping noise into content', async () => {
+      // Below the 50-char floor the raw text is discarded (empty content), so a
+      // stray token never becomes the synthesis basis.
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('nope'));
+      const plan = await service.updatePlanForRound(BASE_OPTIONS);
+      expect(plan.action).toBe('synthesize');
+      expect(plan.content).toBe('');
     });
 
     it('updates currentPlan after a successful call', async () => {

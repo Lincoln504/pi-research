@@ -150,7 +150,7 @@ export class BrowserClient implements IScheduler {
                     errorMsg = `Browser pool socket ${path} closed (pool likely busy or restarting) - ${err.message}`;
                     errorType = 'connection_reset';
                 } else if (nodeErr.code === 'ECONNREFUSED') {
-                    errorMsg = `Browser pool ${path} unreachable (server may have crashed) - ${err.message}`;
+                    errorMsg = `Browser pool ${path} unreachable (server restarting or torn down) - ${err.message}`;
                     errorType = 'connection_refused';
                 } else if (nodeErr.code === 'ETIMEDOUT') {
                     errorMsg = `Browser pool ${path} timed out (slow browser response) - ${err.message}`;

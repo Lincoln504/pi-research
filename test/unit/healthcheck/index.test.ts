@@ -5,13 +5,15 @@ import { isBrowserAvailable } from '../../../src/infrastructure/browser/config.t
 import { runBrowserHealthCheck } from '../../../src/infrastructure/browser/task-execution-service.ts';
 import { registerService, resetServiceContainer, ServiceLifecycle } from '../../../src/core/service-registry.ts';
 import { ServiceNames } from '../../../src/core/service-interfaces.ts';
+import { getConfig } from '../../../src/config.ts';
 
-// Mock dependencies
+// Mock dependencies. getConfig is a vi.fn so individual tests can override the
+// KNOWLEDGE_STORE_MODE to exercise the non-disabled health path.
 vi.mock('../../../src/config.ts', () => ({
-  getConfig: () => ({ 
+  getConfig: vi.fn(() => ({
     HEALTH_CHECK_TIMEOUT_MS: 25000,
-    KNOWLEDGE_STORE_MODE: 'none' 
-  }),
+    KNOWLEDGE_STORE_MODE: 'none'
+  })),
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -41,6 +43,7 @@ vi.mock('../../../src/infrastructure/knowledge-store-service.ts', () => ({
     name: 'knowledge-store',
     lifecycle: ServiceLifecycle.INITIALIZED,
     isReady: () => true,
+    getCwd: () => process.cwd(),
     async initialize() {},
     async dispose() {},
     async getEmbedder() {
@@ -76,7 +79,13 @@ vi.mock('../../../src/infrastructure/state/state-manager.ts', () => ({
 describe('healthcheck', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    
+    // clearAllMocks clears call history but not implementations set via
+    // mockReturnValue, so restore the default 'none' config each test.
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'none',
+    } as any);
+
     // Register mock services
     registerService(
       ServiceNames.SCHEDULER,
@@ -120,6 +129,7 @@ describe('healthcheck', () => {
         name: 'knowledge-store',
         lifecycle: ServiceLifecycle.INITIALIZED,
         isReady: () => true,
+        getCwd: () => process.cwd(),
         async initialize() {},
         async dispose() {},
         async getEmbedder() {
@@ -195,6 +205,49 @@ describe('healthcheck', () => {
       delete process.env['PI_RESEARCH_MOCK_SEARCH'];
       delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
     }
+  });
+
+  it('reports the knowledge store UNHEALTHY when the embedding server is unreachable', async () => {
+    // A remote embedding-server client reports isInitialized()===true even when the
+    // server is dead. With the store enabled, the health check must probe the
+    // server's liveness (fetchHealth) and surface a failure rather than a false ready.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'project',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => ({
+        name: 'knowledge-store',
+        lifecycle: ServiceLifecycle.INITIALIZED,
+        isReady: () => true,
+        getCwd: () => process.cwd(),
+        async initialize() {},
+        async dispose() {},
+        async getEmbedder() {
+          return {
+            isInitialized: () => true, // client always claims ready...
+            getDevice: () => 'cpu',
+            getOriginalDevice: () => 'cpu',
+            // ...but the liveness probe fails because the server is down.
+            fetchHealth: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:7070'); },
+          };
+        },
+        async getStore() {
+          return { countScoped: async () => ({ local: 0, global: 0, projects: 0 }) };
+        },
+      }),
+      { lazyInitialization: false, allowOverwrite: true, enableLogging: false }
+    );
+
+    const result = await runHealthCheck();
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(false);
+    expect(ks?.error).toMatch(/unreachable|ECONNREFUSED/i);
   });
 
   it('should fail when browser pool health check fails', async () => {

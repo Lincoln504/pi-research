@@ -176,7 +176,13 @@ export async function searchCisaKev(
       signal: createTimeoutSignal(30000), // 30s timeout
     });
 
-    const data: unknown = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      metrics.increment('cisa_kev_errors_total', 1, { error_type: 'malformed_json' });
+      throw new Error('CISA KEV feed returned a malformed JSON response.');
+    }
 
     // CISA KEV format is an array of vulnerability objects or nested in a response object
     const cisaData = extractCisaKevItems(data);

@@ -15,7 +15,14 @@ export default defineConfig({
     pool: 'forks' as const,
     maxForks,
     minForks: 2,
-    hookTimeout: 15000,
+    // A handful of cli.test.ts cases spawn the built `dist/cli.mjs`, which loads
+    // the whole bundled engine (lancedb/transformers) on startup. spawnSync is
+    // synchronous, so a test's wall-clock equals the subprocess's — under a fully
+    // saturated fork pool that can run several seconds. The ceiling sits above the
+    // per-spawn cap (20s) so a killed subprocess fails on a clean assertion, not a
+    // vitest timeout. Pure-function tests are unaffected (they finish in ms).
+    testTimeout: 30000,
+    hookTimeout: 120000,
     teardownTimeout: 10000,
   },
 });

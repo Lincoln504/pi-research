@@ -30,7 +30,7 @@ import type {
 import type { Model } from '@earendil-works/pi-ai';
 import { type ExtensionContext, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { logger, createLogger, setLogger } from './logger.ts';
-import { getConfig, validateConfig, type Config } from './config.ts';
+import { getConfig, createConfig, validateConfig, type Config } from './config.ts';
 import { metrics, MetricsRegistry, runWithRunRegistry } from './utils/metrics.ts';
 import type { IMetricsSnapshot, RunSummary } from './utils/metrics.ts';
 import { extractRunStats, type ResearchStats } from './utils/metrics-summary.ts';
@@ -143,9 +143,19 @@ export interface ResearchSDKOptions {
   provider?: string;
 
   /**
-   * Override default configuration values.
+   * Override configuration values directly in code. These win over any values
+   * read from the global config file, so the SDK can be driven entirely from
+   * code (see `ignoreGlobalConfig` for fully hermetic usage).
    */
   config?: Partial<Config>;
+
+  /**
+   * When true, the SDK does NOT read the global `~/.pi/research/config.env` file
+   * at all — configuration comes only from built-in defaults, `process.env`, and
+   * `options.config`. Use this to run the SDK as a self-contained library with no
+   * dependency on a machine's global pi-research configuration.
+   */
+  ignoreGlobalConfig?: boolean;
 
   /**
    * Working directory for research logs and database. 
@@ -190,8 +200,15 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     setLogger(createLogger({ verbose: true }));
   }
 
-  // Seed configuration
-  globalConfig = { ...getConfig(globalCwd, 'sdk') };
+  // Seed configuration. The SDK is a library: it reads the base global config
+  // file for convenience, but NEVER a per-interface overlay (those belong to the
+  // pi/openclaw/cli front-ends). `ignoreGlobalConfig` drops the file entirely so
+  // the SDK runs purely from defaults + process.env + options.config — fully
+  // self-contained and reproducible from code.
+  const baseConfig = options.ignoreGlobalConfig
+    ? createConfig({}, process.env)
+    : getConfig(globalCwd);
+  globalConfig = { ...baseConfig };
   if (options.config) {
     globalConfig = { ...globalConfig, ...options.config };
     validateConfig(globalConfig);
@@ -597,6 +614,8 @@ export async function searchKnowledge(
 
   // Lazily import the tool factory so the SDK bundle stays lean when unused.
   const { createResearchKnowledgeSearchTool } = await import('./tools/research-knowledge-search.ts');
+  // No per-interface overlay for the SDK — base config only (options.config has
+  // already been merged into globalConfig used by the run path).
   const tool = createResearchKnowledgeSearchTool();
 
   const result = await tool.execute(

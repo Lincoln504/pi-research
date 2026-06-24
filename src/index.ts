@@ -256,7 +256,7 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // Create and register the research tool
-  const researchTool: ToolDefinition = createResearchTool();
+  const researchTool: ToolDefinition = createResearchTool('pi');
   pi.registerTool(researchTool);
 
   // Create and register the health check tool
@@ -266,7 +266,7 @@ export default async function (pi: ExtensionAPI) {
   // Create and register the Research Knowledge Search tool
   const researchKnowledgeSearchTool: ToolDefinition | null =
     getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none'
-      ? createResearchKnowledgeSearchTool()
+      ? createResearchKnowledgeSearchTool('pi')
       : null;
   if (researchKnowledgeSearchTool) {
     pi.registerTool(researchKnowledgeSearchTool);

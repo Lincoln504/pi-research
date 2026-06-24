@@ -34,6 +34,7 @@ import {
   type KnowledgeSearchResult,
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
+import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, getGlobalEnvFilePath, getInterfaceEnvFilePath } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
@@ -146,30 +147,37 @@ function parseDotEnv(content: string): Record<string, string> {
 }
 
 /**
- * Bridge `~/.pi/research/config.env` (and a `--config <path>` override) into
- * process.env for keys not already set in the real environment.
+ * Bridge the CLI's config files into process.env for keys not already set in the
+ * real environment. Layers the base `~/.pi/research/config.env` then the CLI's
+ * own `~/.pi/research/cli.env` overlay (overlay wins), or a `--config <path>`
+ * override in place of the base.
  *
- * Why: the SDK reads the typed Config from this file (timeouts, depth, …) via
- * getConfig(), but auth values (PI_RESEARCH_API_KEY / _PROVIDER) are read
- * directly from process.env by initResearchSDK() and are NOT part of the typed
- * Config. Without this bridge, a key placed in config.env would be silently
- * ignored. We bridge only when absent so real shell exports always win.
+ * Why: auth values (PI_RESEARCH_API_KEY / _PROVIDER) are read directly from
+ * process.env, NOT from the typed Config, so a key placed only in a config file
+ * would otherwise be silently ignored. We bridge only when a key is absent from
+ * the real environment, so real shell exports always win.
  */
 function bridgeConfigEnv(explicitConfigPath?: string): { path: string; loaded: boolean } {
-  const filePath = explicitConfigPath ?? getGlobalEnvFilePath();
-  try {
-    if (!fs.existsSync(filePath)) return { path: filePath, loaded: false };
-    const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
-    for (const [k, v] of Object.entries(parsed)) {
-      // Only research/auth-relevant keys, and never clobber a real env value.
-      if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY')) {
-        process.env[k] = v;
+  const basePath = explicitConfigPath ?? getGlobalEnvFilePath();
+  const cliOverlayPath = getInterfaceEnvFilePath('cli');
+  let loaded = false;
+  // Base first, then the cli overlay so overlay keys win — but neither clobbers a
+  // real environment value.
+  for (const filePath of [basePath, cliOverlayPath]) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const parsed = parseDotEnv(fs.readFileSync(filePath, 'utf-8'));
+      for (const [k, v] of Object.entries(parsed)) {
+        if (process.env[k] === undefined && (k.startsWith('PI_RESEARCH_') || k === 'STACKEXCHANGE_API_KEY' || k === 'GITHUB_TOKEN' || k === 'NVD_API_KEY')) {
+          process.env[k] = v;
+        }
       }
+      loaded = true;
+    } catch {
+      // ignore unreadable file; fall through to the next
     }
-    return { path: filePath, loaded: true };
-  } catch {
-    return { path: filePath, loaded: false };
   }
+  return { path: basePath, loaded };
 }
 
 // ---------------------------------------------------------------------------
@@ -181,10 +189,10 @@ export interface ResolvedConfigPaths {
   configEnv: string;
   /** Global config dir (~/.pi/research). */
   configDir: string;
-  /** Per-interface overlay for the pi CLI/TUI (~/.pi/research/pi.env). */
+  /** Per-interface overlay for THIS standalone CLI / agent skill (~/.pi/research/cli.env). */
+  cliIfaceEnv: string;
+  /** Per-interface overlay for the pi extension (~/.pi/research/pi.env). */
   piIfaceEnv: string;
-  /** Per-interface overlay for the SDK (~/.pi/research/sdk.env). */
-  sdkIfaceEnv: string;
   /** Per-interface overlay for the OpenClaw plugin (~/.pi/research/openclaw.env). */
   oclIfaceEnv: string;
   /** pi auth storage (~/.pi/agent/auth.json). */
@@ -201,8 +209,8 @@ function resolvedConfigPaths(): ResolvedConfigPaths {
   return {
     configEnv: getGlobalEnvFilePath(),
     configDir,
+    cliIfaceEnv: getInterfaceEnvFilePath('cli'),
     piIfaceEnv: getInterfaceEnvFilePath('pi'),
-    sdkIfaceEnv: getInterfaceEnvFilePath('sdk'),
     oclIfaceEnv: getInterfaceEnvFilePath('openclaw'),
     piAuth: path.join(agentDir, 'auth.json'),
     piModels: path.join(agentDir, 'models.json'),
@@ -243,7 +251,7 @@ function detectCredentials(): CredentialDetection {
   const apiKey = process.env['PI_RESEARCH_API_KEY'];
   const providerEnv = process.env['PI_RESEARCH_PROVIDER'];
   const modelEnv = process.env['PI_RESEARCH_MODEL'];
-  const modelConfig = getConfig(process.cwd(), 'pi').RESEARCH_MODEL;
+  const modelConfig = getConfig(process.cwd(), 'cli').RESEARCH_MODEL;
 
   const model = modelEnv ?? modelConfig;
   const modelFrom = modelEnv ? 'PI_RESEARCH_MODEL' : modelConfig ? 'config.env' : 'unset';
@@ -332,7 +340,7 @@ function configBlock(det: CredentialDetection, extraNote?: string): string {
   const lines: string[] = [];
   lines.push('Configuration locations:');
   lines.push(`  • base config file:   ${paths.configEnv}`);
-  lines.push(`  • pi CLI overlay:     ${paths.piIfaceEnv}  (optional; overrides base for CLI/TUI)`);
+  lines.push(`  • cli overlay:        ${paths.cliIfaceEnv}  (optional; overrides base for this CLI / agent skill)`);
   lines.push(`  • env vars:           PI_RESEARCH_API_KEY / PI_RESEARCH_PROVIDER / PI_RESEARCH_MODEL`);
   lines.push(`  • pi auth storage:    ${paths.piAuth}`);
   lines.push(`  • pi models:          ${paths.piModels}`);
@@ -373,7 +381,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
   }
 
   const depth: 0 | 1 | 2 | 3 =
-    (args.depth ?? getConfig(process.cwd(), 'pi').DEFAULT_RESEARCH_DEPTH) as 0 | 1 | 2 | 3;
+    (args.depth ?? getConfig(process.cwd(), 'cli').DEFAULT_RESEARCH_DEPTH) as 0 | 1 | 2 | 3;
   // An explicit --model wins over configured/PI_RESEARCH_MODEL for this run.
   const runModel = args.model ?? det.model;
   toStderr(`[pi-research] starting research (depth ${depth})${runModel ? ` with ${runModel}` : ''}…\n`);
@@ -389,17 +397,35 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
       // Provider/key are read from process.env by the SDK; pass-through for clarity.
       apiKey: process.env['PI_RESEARCH_API_KEY'],
       provider: process.env['PI_RESEARCH_PROVIDER'],
+      // Drive the SDK with the CLI's own resolved config (base config.env +
+      // cli.env overlay), not the SDK's default base read.
+      config: getConfig(process.cwd(), 'cli'),
+      ignoreGlobalConfig: true,
     });
 
-    const report = await runDeepResearch(args.query, {
+    let report = await runDeepResearch(args.query, {
       depth,
       observer,
       ...(args.excludeTools ? { excludeTools: args.excludeTools } : {}),
       ...(args.initialLinks ? { initialLinks: args.initialLinks } : {}),
     });
 
+    // Optionally persist the report to a file (opt-in via
+    // PI_RESEARCH_REPORT_EXPORT_ENABLED). The SDK is a pure library and does not
+    // write files; the CLI front-end does, mirroring the pi/openclaw tool path.
+    // The saved path is surfaced in BOTH the report text and the JSON output so
+    // the calling agent can tell the user where the file is.
+    let reportPath: string | null = null;
+    if (getConfig(process.cwd(), 'cli').RESEARCH_REPORT_EXPORT_ENABLED) {
+      reportPath = await exportResearchReport(args.query, report, depth <= 1 ? 'quick' : 'deep', process.cwd());
+      if (reportPath) {
+        report = appendExportMessage(report, reportPath);
+        toStderr(`[pi-research] report saved to: ${reportPath}\n`);
+      }
+    }
+
     if (args.json) {
-      toStdout(pretty({ ok: true, depth, report }));
+      toStdout(pretty({ ok: true, depth, report, ...(reportPath ? { reportPath } : {}) }));
     } else {
       toStdout(report.endsWith('\n') ? report : report + '\n');
     }
@@ -423,13 +449,13 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
     return EXIT.CONFIG;
   }
 
-  const mode = getConfig(process.cwd(), 'pi').KNOWLEDGE_STORE_MODE;
+  const mode = getConfig(process.cwd(), 'cli').KNOWLEDGE_STORE_MODE;
   if (mode === 'none') {
     const paths = resolvedConfigPaths();
     const msg =
       'Knowledge store is disabled (PI_RESEARCH_KNOWLEDGE_STORE_MODE=none). ' +
       "Set it to 'project' or 'global' to enable local knowledge search.\n\n" +
-      `Configure in:\n  ${paths.configEnv}\n  ${paths.piIfaceEnv}  (pi CLI/TUI override)\n  or via PI_RESEARCH_KNOWLEDGE_STORE_MODE env var`;
+      `Configure in:\n  ${paths.configEnv}\n  ${paths.cliIfaceEnv}  (cli overlay)\n  or via PI_RESEARCH_KNOWLEDGE_STORE_MODE env var`;
     if (json) toStdout(pretty({ found: 'no', text: msg, configured: false }));
     else toStderr(`\n[pi-research] ${msg}\n`);
     return EXIT.CONFIG;
@@ -442,6 +468,8 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
       model: det.model,
       apiKey: process.env['PI_RESEARCH_API_KEY'],
       provider: process.env['PI_RESEARCH_PROVIDER'],
+      config: getConfig(process.cwd(), 'cli'),
+      ignoreGlobalConfig: true,
     });
     toStderr(`[pi-research] searching knowledge store (${queries.length} query/${queries.length === 1 ? '' : 's'})…\n`);
     result = await searchKnowledge(queries);
@@ -466,7 +494,7 @@ async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> 
 async function cmdStatus(json?: boolean): Promise<number> {
   const det = detectCredentials();
   const paths = resolvedConfigPaths();
-  const cfg = getConfig(process.cwd(), 'pi');
+  const cfg = getConfig(process.cwd(), 'cli');
   const summary = {
     package: '@lincoln504/pi-research',
     version: PKG_VERSION,
@@ -601,13 +629,13 @@ CONFIGURE
   Credentials are read in this order (later entries win):
 
     base config:  ${p.configEnv}
-    pi CLI only:  ${p.piIfaceEnv}   (optional per-interface override)
+    cli overlay:  ${p.cliIfaceEnv}   (optional; this CLI / agent skill only)
     env vars:     PI_RESEARCH_API_KEY  PI_RESEARCH_PROVIDER  PI_RESEARCH_MODEL
     pi auth:      ${p.piAuth}
     pi models:    ${p.piModels}
 
-  Other interfaces have their own optional overlay files:
-    SDK:          ${p.sdkIfaceEnv}
+  Other front-ends have their own optional overlay files:
+    pi extension: ${p.piIfaceEnv}
     OpenClaw:     ${p.oclIfaceEnv}
 
   Knowledge store (disabled by default):

@@ -77,32 +77,57 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
 
   // Register Knowledge Store Check
   registry.register('KnowledgeStore', async (options) => {
-    const cwd = (container as any)._cwd || process.cwd();
+    // Resolve cwd from the live service (it captured ctx.cwd at init) so the
+    // health check reads the SAME config the store actually uses. Reading
+    // process.cwd() here silently ignored SDK/openclaw cwd overrides.
+    let service: IKnowledgeStoreService | null = null;
+    try {
+      service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, { container }, container);
+    } catch {
+      // service stays null; the guard below reports it unavailable.
+    }
+    const cwd = service?.getCwd() ?? process.cwd();
     const config = getConfig(cwd);
     if (config.KNOWLEDGE_STORE_MODE === 'none') {
       return { healthy: true, diagnostic: { status: 'disabled in config' } };
     }
     try {
-      const service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, { container }, container);
+      if (!service) {
+        return { healthy: false, error: 'Knowledge store service not available' };
+      }
       const store = await service.getStore();
       const counts = store ? await store.countScoped() : { local: 0, global: 0, projects: 0 };
       const embedder = await service.getEmbedder();
-      
+
       if (!embedder) {
         return { healthy: false, error: 'Embedder service not available' };
+      }
+
+      // A remote embedding-server client reports isInitialized()===true
+      // unconditionally (the server, not the client, owns the model), so trusting
+      // it would mask a dead server. When the embedder exposes a liveness probe
+      // (fetchHealth on the HTTP client), ping it so a down server is reported
+      // unhealthy instead of a false "ready". This does NOT warm a local GPU model.
+      const probe = (embedder as { fetchHealth?: () => Promise<void> }).fetchHealth;
+      if (typeof probe === 'function') {
+        try {
+          await probe.call(embedder);
+        } catch (e) {
+          return { healthy: false, error: `Embedding server unreachable: ${e instanceof Error ? e.message : String(e)}` };
+        }
       }
 
       // Lazy-aware health check: if not initialized, we check if the store is open
       // but don't force a model load to GPU just for the health check (unless forced).
       if (!embedder.isInitialized() && !options?.force) {
-          return { 
-              healthy: true, 
-              diagnostic: { 
+          return {
+              healthy: true,
+              diagnostic: {
                   status: 'ready (idle)',
                   device: embedder.getOriginalDevice(),
                   localEntries: counts.local,
                   globalEntries: counts.global
-              } 
+              }
           };
       }
 

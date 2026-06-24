@@ -8,7 +8,7 @@
 import type { Model, AssistantMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { logger } from '../../logger.ts';
 import { extractJson } from '../../utils/json-utils.ts';
-import { createTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
+import { withTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
 // getLlmTimeoutMs is used below to bound each repair attempt.
 import { buildSafeOptions, validateAndExtractText } from './llm-utils.ts';
 import type { TSchema } from 'typebox';
@@ -87,18 +87,18 @@ Return ONLY the valid JSON object. No prose before or after.`;
       if (attempt > 1) {
         logger.debug(`[${serviceName}] Salvage attempt ${attempt}/${maxAttempts}...`);
       }
-      const response = await Promise.race([
+      const response = await withTimeout(
         completer(model, {
           systemPrompt,
           messages: [
             { role: 'user', content: [{ type: 'text', text: repairPrompt }], timestamp: Date.now() },
           ],
-        }, buildSafeOptions(model, { 
-          ...auth, 
+        }, buildSafeOptions(model, {
+          ...auth,
           signal
         }, 4096)),
-        createTimeout(llmTimeout, `agentic-repair-${serviceName}`),
-      ]);
+        llmTimeout, `agentic-repair-${serviceName}`,
+      );
 
       let responseText: string;
       try {

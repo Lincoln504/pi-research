@@ -208,6 +208,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     return this._embedder !== null && this._store !== null && this._writerQueue !== null;
   }
 
+  /** The working directory this service initialized against (from ctx.cwd). */
+  getCwd(): string {
+    return this._cwd;
+  }
+
   /**
    * Check if the embedder is initialized
    */

@@ -28,6 +28,14 @@ const PROMPT_CANDIDATES = [
  * @returns The prompt content as a string
  */
 export function loadPrompt(name: string): string {
+  // Prompt names are internal identifiers (e.g. 'researcher', 'evaluator').
+  // Reject anything that could escape the prompts directory — path separators,
+  // parent-dir segments, or absolute/drive-letter prefixes — so a name can never
+  // resolve to a file outside PROMPT_CANDIDATES even if it matches a real .md.
+  if (typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..')) {
+    logger.error(`[prompts] Rejected unsafe prompt name: ${JSON.stringify(name)}`);
+    return '';
+  }
   for (const dir of PROMPT_CANDIDATES) {
     try {
       return readFileSync(join(dir, `${name}.md`), 'utf-8');

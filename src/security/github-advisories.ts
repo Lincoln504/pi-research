@@ -40,6 +40,20 @@ const githubCircuitBreaker = new CircuitBreaker({
 const GITHUB_API_BASE = 'https://api.github.com';
 const DEFAULT_MAX_RESULTS = 20;
 
+/**
+ * Build GitHub API request headers, attaching a bearer token when GITHUB_TOKEN
+ * is set. Authentication raises the rate limit from 60/hr to 5000/hr — without
+ * it the unauthenticated ceiling is hit almost immediately under real use.
+ */
+function githubHeaders(): Record<string, string> {
+  const token = process.env['GITHUB_TOKEN'];
+  return {
+    'User-Agent': 'pi-research/2.0',
+    Accept: 'application/vnd.github.v3+json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 // ============================================================================
 // Main API Functions
 // ============================================================================
@@ -81,10 +95,7 @@ export async function searchGitHubAdvisories(
 
       const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
         const resp = await fetch(url, {
-          headers: {
-            'User-Agent': 'pi-research/2.0',
-            'Accept': 'application/vnd.github.v3+json',
-          },
+          headers: githubHeaders(),
           signal: createTimeoutSignal(10000),
         });
 
@@ -120,7 +131,13 @@ export async function searchGitHubAdvisories(
         maxDelay: 5000,
       }));
 
-      const data = await response.json();
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        metrics.increment('github_search_errors_total', 1, { error_type: 'malformed_json' });
+        throw new Error('GitHub API returned a malformed JSON response (repo advisories).');
+      }
       let repoAdvisories: readonly GitHubAdvisoryRaw[] = [];
 
       if (isGitHubAdvisoryArray(data)) {
@@ -133,10 +150,11 @@ export async function searchGitHubAdvisories(
 
       allAdvisories = repoAdvisories.map(mapGitHubAdvisory);
     } else {
-      // Search global advisories
-      const termResults: Advisory[] = [];
-
-      for (const term of terms) {
+      // Search global advisories. Each term is fetched independently through the
+      // circuit breaker and settled in isolation (Promise.allSettled) so one bad
+      // term — a transient 5xx, a malformed body, an exhausted retry — never
+      // discards the advisories already gathered for the others.
+      const fetchTerm = async (term: string): Promise<Advisory[]> => {
         const termUpper = term.toUpperCase();
         let apiUrl: string;
         let endpointType: string;
@@ -148,16 +166,19 @@ export async function searchGitHubAdvisories(
           apiUrl = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(term)}`;
           endpointType = 'ghsa_lookup';
         } else {
-          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc`;
+          // Server-side ecosystem narrowing when available, so the term can match
+          // beyond just the newest `maxResults` global advisories.
+          const ecosystemParam =
+            options?.ecosystem !== undefined && options.ecosystem !== ''
+              ? `&ecosystem=${encodeURIComponent(options.ecosystem)}`
+              : '';
+          apiUrl = `${GITHUB_API_BASE}/advisories?per_page=${maxResults}&state=published&direction=desc${ecosystemParam}`;
           endpointType = 'search';
         }
 
-        const response = await retryWithBackoff(async () => {
+        const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
           const resp = await fetch(apiUrl, {
-            headers: {
-              'User-Agent': 'pi-research/2.0',
-              'Accept': 'application/vnd.github.v3+json',
-            },
+            headers: githubHeaders(),
             signal: createTimeoutSignal(10000),
           });
 
@@ -182,16 +203,23 @@ export async function searchGitHubAdvisories(
           }
           if (rateLimitLimit !== null) {
             metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: endpointType });
-          }          
+          }
           metrics.increment('github_requests_total', 1, { endpoint: endpointType, status: 'success' });
           return resp;
         }, {
           maxRetries: 2,
           initialDelay: 1000,
           maxDelay: 5000,
-        });
+        }));
 
-        const data = await response.json();
+        // A 404 on a direct GHSA/CVE lookup means "no such advisory", not failure.
+        let data: unknown;
+        try {
+          data = await response.json();
+        } catch {
+          metrics.increment('github_search_errors_total', 1, { error_type: 'malformed_json', endpoint: endpointType });
+          throw new Error(`GitHub API returned a malformed JSON response for term "${term}".`);
+        }
         let items: readonly GitHubAdvisoryRaw[] = [];
 
         if (isGitHubAdvisoryArray(data)) {
@@ -201,10 +229,29 @@ export async function searchGitHubAdvisories(
         } else if (isGitHubAdvisoryListResponse(data) && isArray(data.items)) {
           items = data.items.filter(isGitHubAdvisoryRaw);
         }
-        
+
         metrics.increment(items.length > 0 ? 'github_cache_hits_total' : 'github_cache_misses_total', 1, { term, endpoint: endpointType });
 
-        termResults.push(...items.map(mapGitHubAdvisory));
+        return items.map(mapGitHubAdvisory);
+      };
+
+      const settled = await Promise.allSettled(terms.map(fetchTerm));
+      const termResults: Advisory[] = [];
+      const failures: string[] = [];
+      settled.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          termResults.push(...result.value);
+        } else {
+          const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          // A direct-lookup 404 is an expected "not found", not a real failure.
+          if (!reason.includes('HTTP 404')) failures.push(`${terms[i]} (${reason})`);
+        }
+      });
+      if (failures.length > 0 && failures.length === terms.length) {
+        // Every term failed — surface it; partial failures are tolerated silently.
+        throw new Error(`All GitHub advisory lookups failed: ${failures.join('; ')}`);
+      } else if (failures.length > 0) {
+        error = `Some GitHub advisory lookups failed: ${failures.join('; ')}`;
       }
 
       // Deduplicate by GHSA ID
@@ -288,10 +335,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
 
     const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
       const resp = await fetch(url, {
-        headers: {
-          'User-Agent': 'pi-research/2.0',
-          'Accept': 'application/vnd.github.v3+json',
-        },
+        headers: githubHeaders(),
         signal: createTimeoutSignal(10000),
       });
 
@@ -326,7 +370,14 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
       maxDelay: 5000,
     }));
 
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      metrics.increment('github_advisory_fetch_errors_total', 1);
+      logger.warn(`[GitHub Advisories] Malformed JSON for advisory ${id}`);
+      return null;
+    }
 
     if (isGitHubAdvisoryRaw(data)) {
       const duration = Date.now() - startTime;

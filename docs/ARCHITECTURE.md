@@ -7,7 +7,7 @@ pi-research is a pi CLI extension that provides multi-agent web research. It run
 ```
 pi CLI
 └── pi-research extension (src/index.ts)
-    ├── Tools         research, health
+    ├── Tools         research, health, research_knowledge_search (when store enabled)
     ├── Commands      /research, /research-config
     ├── Event hooks   before_agent_start, after_provider_response
     └── Layers
@@ -31,7 +31,7 @@ Two orchestrators handle research sessions:
 
 **DeepResearchOrchestrator** (`src/orchestration/deep-research-orchestrator.ts`)
 - Coordinator → N parallel researchers → evaluator → synthesis
-- Depths 1–3 map to 2/3/5 researchers and 2/3/5 rounds
+- Depths 1–3 map to 2/3/5 researchers and 2/3/3 rounds
 - Coordinator plans research tracks; evaluator decides whether to go deeper
 
 `runResearch` in `IResearchOrchestration` is the single internal entry point, implemented in `src/orchestration/research-orchestration-service.ts`.

@@ -1,5 +1,6 @@
 import { normalizeUrl, validateUrl } from '../utils/url-utils.ts';
 import { logger } from '../logger.ts';
+import { metrics } from '../utils/metrics.ts';
 import type { Chunker } from './chunker.ts';
 import { createHash } from 'node:crypto';
 import { ServiceLifecycle } from '../core/service-registry.ts';
@@ -92,11 +93,14 @@ export class WriterQueue implements IWriterQueue {
             await this.ingest(item);
           } catch (retryErr) {
             logger.error(`[writer-queue] Retry failed for ${item.url}, dropping:`, retryErr);
+            metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'embedder_unreachable' });
           }
         } else if (isNoSpace(err)) {
           logger.error(`[writer-queue] ENOSPC: disk full — dropping ${item.url}. Free up disk space to resume knowledge ingestion.`);
+          metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'enospc' });
         } else {
           logger.error(`[writer-queue] Failed to ingest ${item.url}:`, err);
+          metrics.increment('knowledge_ingest_dropped_total', 1, { reason: 'ingest_error' });
         }
       }
     }

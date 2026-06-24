@@ -71,3 +71,49 @@ describe('Configuration Scoping', () => {
     expect(config.DEFAULT_RESEARCH_DEPTH).toBe(DEFAULTS.DEFAULT_RESEARCH_DEPTH);
   });
 });
+
+describe('Per-interface config overlay', () => {
+  const mockCwd = '/home/user/project';
+  const researchDir = path.join('/home/user', CONFIG_DIR_NAME, 'research');
+  const globalEnvPath = path.join(researchDir, 'config.env');
+  const piEnvPath = path.join(researchDir, 'pi.env');
+  const cliEnvPath = path.join(researchDir, 'cli.env');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetConfig();
+    delete process.env['PI_RESEARCH_MODEL'];
+    // Only the base config.env and the pi.env overlay exist on disk.
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => p === globalEnvPath || p === piEnvPath);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+      if (p === globalEnvPath) return 'PI_RESEARCH_MODEL=base/model\n';
+      if (p === piEnvPath) return 'PI_RESEARCH_MODEL=overlay/model\n';
+      return '';
+    });
+  });
+
+  it('overlay file wins over base config.env for its interface', () => {
+    expect(getConfig(mockCwd, 'pi').RESEARCH_MODEL).toBe('overlay/model');
+  });
+
+  it('base config.env is used when no overlay exists for the interface', () => {
+    // cli.env does not exist → falls back to base.
+    expect(getConfig(mockCwd, 'cli').RESEARCH_MODEL).toBe('base/model');
+    expect(fs.existsSync(cliEnvPath)).toBe(false);
+  });
+
+  it('no-interface lookup never reads an overlay (distinct cache namespace)', () => {
+    expect(getConfig(mockCwd).RESEARCH_MODEL).toBe('base/model');
+    // …and the interface lookup is a separate cached entry, not the same object.
+    expect(getConfig(mockCwd)).not.toBe(getConfig(mockCwd, 'pi'));
+  });
+
+  it('process.env still wins over the overlay', () => {
+    process.env['PI_RESEARCH_MODEL'] = 'env/model';
+    try {
+      expect(getConfig(mockCwd, 'pi').RESEARCH_MODEL).toBe('env/model');
+    } finally {
+      delete process.env['PI_RESEARCH_MODEL'];
+    }
+  });
+});

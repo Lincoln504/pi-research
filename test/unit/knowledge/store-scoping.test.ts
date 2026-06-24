@@ -5,11 +5,26 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import os from 'node:os';
 
+// Deterministic, text-dependent embedding so the vector-similarity path is
+// actually exercised (a constant zero-vector would make `search()` rely solely
+// on full-text matching and silently pass even if vector retrieval were broken).
+function vecFromText(text: string): Float32Array {
+  const v = new Float32Array(384);
+  for (let i = 0; i < text.length; i++) {
+    v[i % 384] += text.charCodeAt(i) / 128;
+  }
+  let norm = 0;
+  for (let i = 0; i < 384; i++) norm += v[i] * v[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < 384; i++) v[i] /= norm;
+  return v;
+}
+
 // Mock Embedder
 const mockEmbedder = {
   getDimension: vi.fn().mockReturnValue(384),
-  embed: vi.fn().mockResolvedValue(new Float32Array(384)),
-  embedMany: vi.fn().mockImplementation(async (texts: string[]) => texts.map(() => new Float32Array(384))),
+  embed: vi.fn().mockImplementation(async (query: string) => vecFromText(query)),
+  embedMany: vi.fn().mockImplementation(async (texts: string[]) => texts.map(vecFromText)),
   isInitialized: vi.fn().mockReturnValue(true),
 } as unknown as Embedder;
 

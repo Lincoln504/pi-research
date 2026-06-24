@@ -2,123 +2,92 @@
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
-Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a high-fidelity stealth browser system to search the web, scrape pages, check security databases, and shows everything in real-time.
+Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). A coordinator
+breaks a question into parallel research tracks, each researcher searches and scrapes
+the live web through a stealth browser, and an evaluator decides whether the answer is
+complete or another round is needed. The result is a single cited Markdown report.
 
 ---
 
-## Why This Extension
+## Why
 
-**High-Fidelity Stealth Research** — Uses `camoufox` (stealth Firefox) to bypass bot detection. No search API keys or external infrastructure required.
+- **Reads the open web directly.** Search runs through `camoufox` (a stealth Firefox)
+  rather than a paid search API, so there is no search key to manage, no per-query rate
+  limit, and no infrastructure to stand up. You still bring your own LLM key.
+- **Parallel by default.** A question is decomposed into independent researcher sessions
+  that run at the same time, so a broad topic is covered in breadth without you having to
+  split it up yourself.
+- **Safe to hand to an agent.** Researchers can search and scrape, but they cannot write
+  files, edit files, or run shell commands. The web tools are isolated and rate-limited,
+  which keeps an autonomous agent on task and contained.
+- **One engine, several front-ends.** The same core backs the pi extension, a standalone
+  CLI / agent skill, the OpenClaw plugin, and a programmatic SDK — so it fits wherever you
+  already work, and a fix in the engine reaches all of them at once.
 
-**Multi-agent Orchestration** — AI coordinator breaks your question into parallel research tracks. Each track runs in a separate researcher session. An AI evaluator combines results or launches deeper rounds.
+## What it does
 
-**Safe by design** — Researcher agents cannot write files, edit files, or run shell commands. Web tools are isolated and rate-limited to keep agents focused.
-
-**Minimal setup** — Just install. A system prompt guides pi on when and how to use the tool. No advanced prompting required. Works alongside other tools without conflicts.
-
----
-
-## What It Does
-
-- **Web Search** — Multi-threaded, parallel search bursts using DuckDuckGo Lite.
-- **URL Scraping** — Configurable batch scraping protocol with PDF support and global deduplication.
-- **Security Databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
-- **Stack Exchange** — Full network search and filtering.
-- **Real-time TUI** — Live progress tracking with token and cost monitoring.
-- **Local Context** — Integrated `ripgrep` for searching local codebases.
+- **Web search** — parallel search bursts over DuckDuckGo Lite.
+- **Scraping** — batched, deduplicated page scraping with PDF support.
+- **Security databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
+- **Stack Exchange** — full network search and filtering.
+- **Local knowledge store** — an opt-in vector database of past findings, searched
+  before going live so a repeat question can be answered from local results without a
+  new web run.
+- **Real-time TUI** — live progress, so a long multi-agent run is observable: which
+  researcher is active, what it is scraping, and the running token and cost totals,
+  rather than waiting blind.
 
 ---
 
 ## Requirements
 
 - Node.js >= 22.19.0
-- pi CLI installed and configured
+- An LLM with a 100k+ context window
 - Internet access
-- LLM in pi with 100k+ context window
-
----
 
 ## Install
 
 ```bash
-pi install npm:@lincoln504/pi-research
+pi install npm:@lincoln504/pi-research        # pi extension
+openclaw plugins install npm:@lincoln504/pi-research   # OpenClaw plugin
+npm install -g @lincoln504/pi-research        # standalone CLI / agent skill
+pi install .                                  # local, from a clone
 ```
 
-This installs dependencies and the stealth browser engine. Takes a few minutes on first install.
-
-### OpenClaw Plugin
-
-`pi-research` is a native OpenClaw plugin. To use it in [OpenClaw](https://openclaw.ai):
-
-```bash
-openclaw plugins install npm:@lincoln504/pi-research
-```
-
-**Local install** (from repo):
-
-```bash
-pi install .
-```
-
----
+The first install pulls the stealth browser engine, which takes a few minutes.
 
 ## Usage
 
-Just talk to pi — the `research` tool registers automatically, no special slash command needed.
-
-```
-research the latest developments in WebAssembly
-deep research AI inference hardware landscape
-deep research CVE-2024-3094 at depth 3
-```
-
-Say **research** for a quick lookup. Say **deep research** for thorough investigation — pi selects depth 1–3 based on your query's scope and complexity, or pin it with **at depth N**.
-
-**Tool Exclusion**: Disable specific internal tools using the `--exclude-tools` flag.
+In pi, just ask — the model invokes the research tool from natural language and
+chooses the depth itself:
 
 ```bash
-pi "research AI" --exclude-tools security,stackexchange
+pi -p "research the latest developments in WebAssembly"
 ```
-
-A `/research <query>` slash command is also available as a shortcut — it runs at the configured default depth (1 by default, see `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`).
-
-**Depth levels**:
-
-| Depth | Mode   | Researchers | Rounds |
-|-------|--------|-------------|--------|
-| 1     | Normal | 2           | 2      |
-| 2     | Deep   | 3           | 3      |
-| 3     | Ultra  | 5           | 5      |
 
 ---
 
-## Configuration
+## Documentation
 
-Configure settings via the `/research-config` TUI dashboard. This manages global settings in `~/.pi/research/config.env` and project-specific settings in the Centralized Registry (`~/.pi/state/project-settings.json`).
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher execution timeout (3–30 min) |
-| `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5) |
-| `PI_RESEARCH_WORKER_THREADS` | `4` | Browser worker processes (1–10) |
-| `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Inference backend: `webgpu` or `cpu` |
-| `PI_RESEARCH_MODEL` | _(session model)_ | Optional model override for researchers |
-| `PI_RESEARCH_TMP_DIR` | `~/.cache/pi-research/profiles` | Directory for transient browser profiles. Defaults to disk; set under the system temp dir to use tmpfs/RAM |
-| `PI_RESEARCH_DEBUG` | `false` | Enable verbose diagnostic logging |
-| `STACKEXCHANGE_API_KEY` | — | Stack Exchange API key for higher rate limits |
-
-Full variable reference: [docs/SDK.md](docs/SDK.md).
+- [Pi extension](docs/PI-EXTENSION.md) — commands, the live TUI, and the extension lifecycle.
+- [Agent skill](skills/research/README.md) — the portable skill that gives any coding agent research via the CLI.
+- [OpenClaw plugin](docs/OPENCLAW.md) — install and use pi-research inside OpenClaw.
+- [SDK & configuration](docs/SDK.md) — the programmatic library, plus the full configuration model and every environment variable.
+- [Architecture](docs/ARCHITECTURE.md) — how the engine is built: layers, services, and the research pipeline.
 
 ---
 
 ## Development
 
 ```bash
-npm run test:unit         # ~1300 unit tests, no browser required
+npm run test:unit         # unit tests, no browser required
 npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
-npm run type-check        # TypeScript strict mode
+npm run type-check        # TypeScript strict mode (src)
+npm run type-check:tests  # TypeScript strict mode (tests)
 npm run lint              # ESLint
 npm run deps:check        # architectural rule enforcement
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design and service patterns.
+## License
+
+MIT

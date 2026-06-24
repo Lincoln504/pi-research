@@ -92,14 +92,17 @@ export async function searchOSV(
   let error: string | undefined = undefined;
 
   try {
-    const allVulns: Vulnerability[] = [];
-    let skippedNoEcosystem = 0;
-
-    for (const term of terms) {
+    // Each term is fetched and settled independently so one failed term (a
+    // transient 5xx, a malformed body, an exhausted retry) never discards the
+    // vulnerabilities already gathered for the others. `skipped` flags a package
+    // term that needs the ecosystem parameter.
+    const fetchTerm = async (term: string): Promise<{ vulns: Vulnerability[]; skipped: boolean }> => {
+      const termUpper: string = term.toUpperCase();
+      const isIdLookup =
+        termUpper.startsWith('CVE-') || termUpper.startsWith('GHSA-') || termUpper.startsWith('OSV-');
       let response: Response;
 
-      const termUpper: string = term.toUpperCase();
-      if (termUpper.startsWith('CVE-') || termUpper.startsWith('GHSA-') || termUpper.startsWith('OSV-')) {
+      if (isIdLookup) {
         const normalizedId: string = termUpper.startsWith('GHSA-')
           ? `GHSA-${term.slice(term.indexOf('-') + 1).toLowerCase()}`
           : termUpper;
@@ -110,8 +113,7 @@ export async function searchOSV(
         });
       } else {
         if (options?.ecosystem === undefined || options.ecosystem === '') {
-          skippedNoEcosystem++;
-          continue;
+          return { vulns: [], skipped: true };
         }
         const body: OsvQueryRequest = { package: { name: term, ecosystem: options.ecosystem } };
         response = await fetchWithRetry(`${OSV_BASE_URL}/query`, {
@@ -126,40 +128,52 @@ export async function searchOSV(
         });
       }
 
-      if (!response.ok) {
-        logger.warn(`OSV query failed for "${term}": ${response.status}`);
-        continue;
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        metrics.increment('osv_search_errors_total', 1, { error_type: 'malformed_json' });
+        throw new Error(`OSV returned a malformed JSON response for "${term}".`);
       }
 
-      const data: unknown = await response.json();
-
       let items: OsvVulnerability[];
-
       if (isOsvVulnerability(data)) {
         items = [data];
       } else if (isOsvQueryResponse(data)) {
         items = data.vulns ?? [];
       } else {
         logger.warn(`OSV returned unexpected format for "${term}"`);
-        continue;
+        return { vulns: [], skipped: false };
       }
-      
-      const endpoint = termUpper.startsWith('CVE-') || termUpper.startsWith('GHSA-') || termUpper.startsWith('OSV-') ? 'vulns_by_id' : 'query';
+
+      const endpoint = isIdLookup ? 'vulns_by_id' : 'query';
       metrics.increment(items.length > 0 ? 'osv_cache_hits_total' : 'osv_cache_misses_total', 1, { term, endpoint });
 
+      const vulns: Vulnerability[] = [];
       for (const item of items) {
         const vuln: Vulnerability = mapOsvItemToVulnerability(item);
-
         if (options?.severity !== undefined && options.severity !== '') {
-          const severity: string = options.severity.toUpperCase();
-          if (vuln.severity !== severity) {
-            continue;
-          }
+          if (vuln.severity !== options.severity.toUpperCase()) continue;
         }
-
-        allVulns.push(vuln);
+        vulns.push(vuln);
       }
-    }
+      return { vulns, skipped: false };
+    };
+
+    const settled = await Promise.allSettled(terms.map(fetchTerm));
+    const allVulns: Vulnerability[] = [];
+    let skippedNoEcosystem = 0;
+    const failures: string[] = [];
+    settled.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        allVulns.push(...result.value.vulns);
+        if (result.value.skipped) skippedNoEcosystem++;
+      } else {
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        // A 404 on an ID lookup means "no such vuln", not a real failure.
+        if (!reason.includes('HTTP 404')) failures.push(`${terms[i]} (${reason})`);
+      }
+    });
 
     const uniqueVulns = new Map<string, Vulnerability>();
     for (const vuln of allVulns) {
@@ -170,9 +184,15 @@ export async function searchOSV(
 
     vulnerabilities.push(...Array.from(uniqueVulns.values()));
 
-    if (skippedNoEcosystem > 0) {
-      error = `${skippedNoEcosystem} term(s) require the ecosystem parameter for OSV package search (e.g., ecosystem: "npm"). CVE/GHSA/OSV IDs work without it.`;
+    if (failures.length > 0 && failures.length === terms.length) {
+      throw new Error(`All OSV lookups failed: ${failures.join('; ')}`);
     }
+    const notes: string[] = [];
+    if (failures.length > 0) notes.push(`Some OSV lookups failed: ${failures.join('; ')}`);
+    if (skippedNoEcosystem > 0) {
+      notes.push(`${skippedNoEcosystem} term(s) require the ecosystem parameter for OSV package search (e.g., ecosystem: "npm"). CVE/GHSA/OSV IDs work without it.`);
+    }
+    if (notes.length > 0) error = notes.join(' ');
 
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : String(err);
@@ -207,7 +227,16 @@ export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
       signal: createTimeoutSignal(OSV_TIMEOUT_MS),
     });
 
-    const data: unknown = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      const duration = Date.now() - startTime;
+      metrics.observe('osv_vuln_fetch_duration_ms', duration, { found: 'false', error: 'true' });
+      metrics.increment('osv_vuln_fetch_errors_total', 1);
+      logger.error(`OSV ${osvId} returned malformed JSON`);
+      return null;
+    }
 
     if (!isOsvVulnerability(data)) {
       const duration = Date.now() - startTime;

@@ -70,6 +70,19 @@ describe('KnowledgeStore', () => {
     expect(rawDocs[0]!.is_global).toBe(false);
   });
 
+  it('rejects a broken embedder that returns ragged vectors instead of writing corrupt data', async () => {
+    await store.open();
+    // Embedder returns one wrong-width vector — must be caught before it lands in
+    // the FixedSizeList column as a silent corruption.
+    vi.mocked(mockEmbedder.embedMany).mockResolvedValueOnce([new Float32Array(7)]);
+    await expect(store.addDocuments([{
+      url: 'https://ragged.com',
+      text: 'ragged',
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }])).rejects.toThrow(/ragged|width|vector/i);
+  });
+
   it('should throw when addDocuments is called before open()', async () => {
     await expect(store.addDocuments([{
       url: 'https://example.com',

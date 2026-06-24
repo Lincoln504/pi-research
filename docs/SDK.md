@@ -1,12 +1,118 @@
 # SDK & Configuration Reference
 
-## Environment Variables
+The programmatic SDK, plus the complete configuration model and environment-variable
+reference that every front-end shares.
 
-Settings are loaded with the following precedence:
-1.  **Defaults**: Built-in fallback values.
-2.  **Global Config**: `~/.pi/research/config.env`.
-3.  **Project Registry**: `~/.pi/state/project-settings.json` (per-directory).
-4.  **Shell Environment**: Variables set in your shell (e.g., `export PI_RESEARCH_TIMEOUT_MS=600000`).
+- [Programmatic SDK](#programmatic-sdk)
+- [Configuration model](#configuration-model)
+- [Environment variables](#environment-variables)
+- [Health & knowledge-store APIs](#health--knowledge-store-apis)
+
+---
+
+## Programmatic SDK
+
+`src/sdk.ts` is a library for scripts, CI, and custom tooling. **It is configured
+from code, not from a global overlay file** — there is no `sdk.env`. It reads the
+base `~/.pi/research/config.env` as a convenience baseline, and everything is
+overridable via `options.config`. Pass `ignoreGlobalConfig: true` to ignore the
+global file entirely and run purely from defaults + `process.env` + `options.config`
+— fully self-contained and reproducible from code.
+
+```typescript
+import {
+  initResearchSDK,
+  runDeepResearch,
+  runQuickResearch,
+  getResearchReports,
+  shutdownResearchSDK,
+} from '@lincoln504/pi-research';
+
+// 1. Initialize (configured entirely in code; no global config needed)
+await initResearchSDK({
+  model: 'openrouter/deepseek/deepseek-v4-flash', // string "provider/id" or a Model object
+  ignoreGlobalConfig: true,                       // hermetic: ignore ~/.pi/research/config.env
+  config: { MAX_SCRAPE_BATCHES: 4 },              // typed Config overrides
+});
+
+// 2. Deep research (depth 1–3)
+const markdown = await runDeepResearch('solid-state battery technology', { depth: 2 });
+
+// 3. Quick research (depth 0)
+const quick = await runQuickResearch('what is the capital of France');
+
+// 4. Retrieve per-researcher reports from the last run
+const reports = await getResearchReports();
+
+// 5. Cleanup — REQUIRED: drains the writer queue, closes LanceDB, kills workers
+await shutdownResearchSDK();
+```
+
+`initResearchSDK` must run before any research call. Auth resolves from
+`options.apiKey` + `options.provider`, else `process.env.PI_RESEARCH_API_KEY` /
+`PI_RESEARCH_PROVIDER`, else pi's `~/.pi/agent/auth.json`. Other exports include
+`runResearchDetailed`, `searchKnowledge`, `scrapeUrl`, `getResearchHealth`,
+`getLastRunStats`, and `getSessionMetrics`. Both `@lincoln504/pi-research` and
+`@lincoln504/pi-research/sdk` export these symbols.
+
+The SDK never writes report files (a library should not have surprising side
+effects). Report export is a front-end concern — the pi extension, OpenClaw
+plugin, and CLI do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
+
+### Init options
+
+| Option | Description |
+|--------|-------------|
+| `model` | `"provider/id"` string or a `Model` object. Omit to use the first available pi model. |
+| `apiKey` / `provider` | Explicit credentials (provider required with apiKey). |
+| `config` | `Partial<Config>` overrides, applied over the base/defaults. |
+| `ignoreGlobalConfig` | Skip `config.env` entirely — defaults + `process.env` + `config` only. |
+| `cwd` | Working directory for logs and the knowledge store. |
+| `verbose` | Mirror logs to the console. |
+
+---
+
+## Configuration model
+
+Configuration is layered. From lowest to highest precedence (**later wins**):
+
+```
+built-in defaults
+  < ~/.pi/research/config.env                 (base, shared; edited by /research-config)
+  < ~/.pi/research/{pi,openclaw,cli}.env       (optional per-front-end overlay)
+  < legacy .pi-research.env (deprecated; auto-migrated to the registry)
+  < project registry (~/.pi/state/project-settings.json, per-directory)
+  < process.env                                (real shell env always wins)
+```
+
+**Per-front-end overlays** let each front-end be configured independently over the
+shared base. Exactly three overlay interfaces exist — `pi.env`, `openclaw.env`,
+`cli.env` — one per front-end. There is intentionally **no `sdk.env`**: the SDK is
+a library configured from code (above). The overlay files do not exist by default;
+create the one you need by hand. `/research-config` edits only the base
+`config.env` (editing the merged view would bake overlay values into the base).
+
+Example — give the standalone CLI / agent skill its own model without touching the
+pi extension or OpenClaw:
+
+```sh
+# ~/.pi/research/config.env   (shared baseline)
+PI_RESEARCH_KNOWLEDGE_STORE_MODE=project
+
+# ~/.pi/research/cli.env       (standalone CLI / agent skill only)
+PI_RESEARCH_MODEL=openrouter/anthropic/claude-sonnet-4-6
+PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=2
+```
+
+For a one-off override, just export the variable for that process — `process.env`
+beats every file.
+
+---
+
+## Environment variables
+
+The repo's `.env.example` is the canonical, exhaustive list with ranges
+and defaults. The most-used variables:
 
 ### Research
 
@@ -14,141 +120,81 @@ Settings are loaded with the following precedence:
 |----------|---------|-------|-------------|
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | 180000–1800000 | Per-researcher timeout (3–30 min) |
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | 1–5 | Parallel researchers |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` ¹ | `1` | 1–3 | Default depth for `/research` command |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` ¹ | `1` | 1–3 | Depth for `/research` and CLI when `--depth` is omitted |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | 0–99 | Scrape batches per researcher (0 = unlimited) |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs per batch |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process |
-| `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents |
-| `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
+| `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for research sub-agents |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries (ms) |
-| `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | — | Auto-export a markdown report on completion |
+| `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | — | Front-ends write a Markdown report file and surface its path |
 
 ### Timeouts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–600000 | Coordinator/evaluator LLM call timeout |
+| `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–600000 | Coordinator/evaluator/repair LLM call timeout |
+| `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
 | `PI_RESEARCH_SEARCH_TIMEOUT_MS` | `45000` | 5000–120000 | Browser search page timeout |
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Individual browser task timeout |
-| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Health check timeout |
+| `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Health-check timeout |
 
-### Knowledge Store
+### Knowledge store
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` ¹ | `none` | — | Knowledge store mode: 'none', 'project', or 'global' |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` ¹ | `none` | none, project, global | Knowledge store mode |
 | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |
-| `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` | drop, backup, re-embed | What to do when embedding model changes |
-| `PI_RESEARCH_KNOWLEDGE_DIR` | _(auto)_ | — | Override the knowledge store database directory |
-| `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding model init timeout |
+| `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` | drop, backup, re-embed | What to do when the embedding model changes |
+| `PI_RESEARCH_KNOWLEDGE_DIR` | _(auto)_ | — | Override the knowledge-store database directory |
+| `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model init timeout |
 
-> ¹ Project-scoped: saved per-directory in `~/.pi/state/project-settings.json` via `/research-config`.
-> All other variables are user-scoped: saved to `~/.pi/research/config.env`.
+> ¹ Project-scoped: saved per-directory in `~/.pi/state/project-settings.json` via
+> `/research-config`. All other variables are user-scoped (base `config.env` or a
+> front-end overlay).
 
-### Advanced
-
-| Variable | Default | Range | Description |
-|----------|---------|-------|-------------|
-| `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | 0–1000 | TUI refresh debounce interval |
-| `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max context fraction for initial scrape |
-| `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape (for planning) |
-| `PI_RESEARCH_USE_XVFB` | _(unset)_ | `true` | Linux only. On a bare TTY (no DISPLAY/Wayland) the browser runs true-headless and needs no Xvfb. Set `true` to opt into Xvfb (`headless:'virtual'`) for a real virtual framebuffer — requires `sudo apt install xvfb`. |
-
-### API Keys
+### API keys (all optional)
 
 | Variable | Description |
 |----------|-------------|
-| `STACKEXCHANGE_API_KEY` | Stack Exchange API key — raises rate limits from 300/day to 10,000/day |
+| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI / OpenClaw mode (not needed when using pi's own auth). |
+| `STACKEXCHANGE_API_KEY` | Raises the Stack Exchange tool's limit from 300/day to 10,000/day. |
+| `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
+| `NVD_API_KEY` | Raises the security tool's NVD limit ~10× (and tightens request spacing). |
 
-### Diagnostics
+### Advanced & diagnostics
 
-| Variable | Description |
-|----------|-------------|
-| `PI_RESEARCH_DEBUG` | Set to `true` to enable verbose diagnostic logs to OS temp dir |
-| `PI_RESEARCH_CONSOLE_LOG` | Set to `true` to mirror logs to stdout/stderr |
-| `PI_RESEARCH_LOG_PATH` | Override path for the verbose diagnostic log file |
-| `PI_RESEARCH_STATE_DIR` | Override the state directory (default: `~/.pi/state`) |
-
----
-
-## Configuration TUI
-
-Run `/research-config` inside pi to manage settings. The TUI handles two levels of configuration:
-
-1.  **Global Settings**: Stored in `~/.pi/research/config.env`. These apply across all your projects.
-2.  **Project Settings**: Stored in the Centralized Registry (`~/.pi/state/project-settings.json`). These are scoped to your current working directory and automatically applied when you run research in that folder.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_RESEARCH_TMP_DIR` | `~/.cache/pi-research/profiles` | Transient browser-profile dir. Defaults to disk; point under the system temp dir to use tmpfs/RAM. |
+| `PI_RESEARCH_USE_XVFB` | _(unset)_ | Linux only. Bare-TTY runs are true-headless and need no Xvfb; set `true` to opt into a virtual framebuffer (`sudo apt install xvfb`). |
+| `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | TUI refresh debounce (0–1000 ms). |
+| `PI_RESEARCH_DEBUG` | `false` | Verbose diagnostic logging to the OS temp dir. |
+| `PI_RESEARCH_CONSOLE_LOG` | `false` | Mirror logs to stdout/stderr (useful in CI / headless). |
+| `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path. |
+| `PI_RESEARCH_STATE_DIR` | `~/.pi/state` | Override the state directory. |
 
 ---
 
-## Programmatic SDK
+## Health & knowledge-store APIs
 
-`src/sdk.ts` provides a standalone API for use outside the pi CLI — scripts, CI, custom tooling. It initializes the service registry and manages lifecycle internally.
-
-```typescript
-import { 
-  initResearchSDK, 
-  runDeepResearch, 
-  runQuickResearch,
-  getResearchReports,
-  shutdownResearchSDK
-} from '@lincoln504/pi-research';
-
-// 1. Initialize
-await initResearchSDK({
-  model: 'openrouter/deepseek/deepseek-v4-flash', // or a Model object
-  verbose: false,
-  config: {
-    MAX_SCRAPE_BATCHES: 4,
-  }
-});
-
-// 2. Run Research
-const markdown = await runDeepResearch('solid-state battery technology', {
-  depth: 2, // 1-3
-});
-
-// 3. Quick research (depth 0)
-const quickResult = await runQuickResearch('what is the capital of France');
-
-// 4. Retrieve previous reports
-const reports = await getResearchReports('my-research-id');
-
-// 5. Cleanup
-await shutdownResearchSDK();
-```
-
-Initialization is required before calling research methods. `shutdownResearchSDK()` is critical — it drains the writer queue, closes LanceDB, and terminates worker processes.
-
----
-
-## Extension API (internal)
-
-`runResearch` is the internal entry point used by pi extension tools. It is wired up automatically via `src/index.ts` when the extension activates — it requires a pi `ExtensionContext` and is not intended for external callers. Use the SDK instead.
-
----
-
-## Health Check API
-
-The `health` tool (registered in pi) runs all registered health checks and returns a structured status report. Checks cover: browser pool, knowledge store, embedding model, network connectivity, and environment configuration.
-
-The same checks are available via the SDK helper:
+The `health` tool (and the SDK's `getResearchHealth()`) runs every registered
+health check — browser capability, browser runtime, knowledge store, and state
+manager — and returns a structured report:
 
 ```typescript
 import { initResearchSDK, getResearchHealth } from '@lincoln504/pi-research/sdk';
 
-await initResearchSDK();           // required first — getResearchHealth throws if the SDK is not initialized
+await initResearchSDK();                 // required first — throws if not initialized
 const result = await getResearchHealth();
-// result: { success: boolean, status: 'healthy' | 'degraded' | 'unhealthy', components: [...] }
+// { success: boolean, status: 'healthy' | 'degraded' | 'unhealthy', components: [...] }
 ```
 
----
-
-## Knowledge Store API
-
-The knowledge store is an internal service not exposed as a public SDK export. Access it through `runDeepResearch` / `runQuickResearch`, which populate it automatically during research runs. Use the `research_knowledge_search` pi tool to query stored findings across sessions.
-
-Vector dimension is model-dependent (auto-detected at runtime). Stored fields: `text`, `vector`, `url`, `metadata`, `timestamp`.
+The knowledge store is an internal service, not a public export. It is populated
+automatically during research runs; query stored findings with the SDK's
+`searchKnowledge()` or the `research_knowledge_search` tool. The vector dimension
+is model-dependent (auto-detected); stored fields are `text`, `vector`, `url`,
+`metadata`, `timestamp`.

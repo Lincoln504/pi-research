@@ -23,7 +23,7 @@ import type { ServiceContainer } from './core/service-registry.ts';
 import { ServiceNames } from './core/service-interfaces.ts';
 import { DeepResearchOrchestrator, type DeepResearchOrchestratorOptions } from './orchestration/deep-research-orchestrator.ts';
 import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from './orchestration/quick-research-orchestrator.ts';
-import { exportResearchReport } from './utils/research-export.ts';
+import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
 import { createResearchRunId, logger } from './logger.ts';
@@ -144,6 +144,9 @@ async function shutdown() {
     await disposeCoreServices(globalContainer!);
     await resetServiceContainer(globalContainer!);
     clearAllSessionState();
+    // Match the pi-extension and SDK teardown: drop per-session metrics so a
+    // plugin reload does not leak counters across init cycles.
+    metrics.clearSession();
   } catch (err) {
     logger.error('[OpenClaw] Shutdown error:', err);
   } finally {
@@ -164,6 +167,10 @@ function createMockContext(model: Model<any>, registry: ModelRegistry) {
     model,
     modelRegistry: registry,
     sessionId,
+    // Carry the openclaw-interface-resolved config so services that read
+    // ctx.config (e.g. the knowledge store) honor the openclaw.env overlay
+    // instead of silently falling back to base config.env (matches sdk.ts).
+    config: globalConfig,
     container: globalContainer,
     getContextUsage: () => undefined,
     getSystemPrompt: () => '',
@@ -307,9 +314,16 @@ export default definePluginEntry({
           });
           
           if (config.reportExportEnabled) {
-            const exportPath = config.reportExportPath || process.cwd();
-            const filename = await exportResearchReport(result, query || (initialLinks?.[0] ?? 'Research'), exportPath);
-            result += `\n\nResearch report saved to ${filename}`;
+            const exportQuery = query || (initialLinks?.[0] ?? 'Research');
+            const savedPath = await exportResearchReport(
+              exportQuery,
+              result,
+              depth <= 1 ? 'quick' : 'deep',
+              config.reportExportPath || process.cwd(),
+            );
+            if (savedPath) {
+              result = appendExportMessage(result, savedPath);
+            }
           }
 
           return { content: [{ type: 'text', text: result }], details: {} };
@@ -352,7 +366,7 @@ export default definePluginEntry({
           throw new Error('Knowledge store is disabled (knowledgeEnabled: false). Enable it in plugin settings to use this tool.');
         }
         const mockCtx = createMockContext(globalModel!, globalRegistry!);
-        const tool = createResearchKnowledgeSearchTool();
+        const tool = createResearchKnowledgeSearchTool('openclaw');
         const result = await tool.execute(toolCallId, params, signal, undefined, mockCtx);
         return { ...result, details: {} };
       }

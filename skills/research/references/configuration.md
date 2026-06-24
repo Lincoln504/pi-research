@@ -39,7 +39,12 @@ The engine resolves a model + key in this order:
    `~/.pi/agent/models.json` (model definitions). No extra setup if `pi` is
    already configured.
 
-> Real environment variables always win over the config file.
+> Real environment variables always win over the config files.
+
+**CLI-only overlay (optional).** To configure this CLI / skill independently of
+the pi extension and the OpenClaw plugin, put overrides in
+`~/.pi/research/cli.env` (same `KEY=VALUE` format). It layers over `config.env`
+for the CLI only. Precedence: `defaults < config.env < cli.env < project registry < real env`.
 
 ## Common settings
 
@@ -54,9 +59,14 @@ All are optional; all live in `~/.pi/research/config.env` or the environment.
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | Scrape batches per researcher (0 = unlimited). |
 | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `none` | Knowledge DB: `none`, `project`, or `global`. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Embedding backend: `webgpu` or `cpu`. |
+| `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | Write the report to a `.md` file and print its path. |
 | `STACKEXCHANGE_API_KEY` | — | Raises Stack Exchange rate limits (optional). |
+| `GITHUB_TOKEN` | — | Raises the security tool's GitHub Advisory limit (optional). |
+| `NVD_API_KEY` | — | Raises the security tool's NVD limit (optional). |
 
 The `knowledge` subcommand requires a knowledge-store mode other than `none`.
+When `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`, the report ends with a
+`Research report saved to: <path>` line — surface that path to the user.
 
 ## Exit codes
 
@@ -78,5 +88,5 @@ The `knowledge` subcommand requires a knowledge-store mode other than `none`.
 - **GPU/embedding errors:** set `PI_RESEARCH_EMBEDDING_DEVICE=cpu` (headless
   servers without a GPU).
 
-See the pi-research SDK reference (`docs/SDK.md` in the pi-research repo) for the
-full variable list.
+See the SDK & configuration reference (`docs/SDK.md` in the pi-research repo) for
+the full variable list and the complete config-precedence model.

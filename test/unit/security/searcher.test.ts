@@ -214,32 +214,13 @@ describe('SecuritySearcher', () => {
   });
 
   describe('constructor', () => {
-    it('should create searcher with default config', () => {
+    it('produces a searcher exposing a usable search() method', () => {
+      // Smoke test that the factory wires a working searcher. The custom-client
+      // and per-database wiring is proven by the functional search tests below
+      // (which inject mock clients and assert each database's results), so we do
+      // not duplicate weak "isDefined" checks for those inputs here.
       const searcher = createFastSearcher();
-
-      expect(searcher).toBeDefined();
-    });
-
-    it('should create searcher with custom clients', () => {
-      const mockNVD = new MockNVDClient();
-      const mockCisa = new MockCisaKevClient();
-      const mockGitHub = new MockGitHubClient();
-      const mockOSV = new MockOSVClient();
-
-      const searcher = createFastSearcher({
-        nvdClient: mockNVD,
-        cisaKevClient: mockCisa,
-        githubAdvisoriesClient: mockGitHub,
-        osvClient: mockOSV,
-      });
-
-      expect(searcher).toBeDefined();
-    });
-
-    it('should create searcher with custom request delay', () => {
-      const searcher = createFastSearcher({ requestDelay: 1000 });
-
-      expect(searcher).toBeDefined();
+      expect(typeof searcher.search).toBe('function');
     });
   });
 

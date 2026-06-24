@@ -167,7 +167,10 @@ describe('OSV Client', () => {
     it('should handle non-Error exceptions in searchOSV', async () => {
       vi.mocked(fetch).mockImplementationOnce(() => { throw 'string error'; });
       const result = await searchOSV(['CVE-123']);
-      expect(result.error).toBe('string error');
+      // Per-term failures are aggregated with the offending term for context; a
+      // thrown non-Error string is still coerced and surfaced.
+      expect(result.error).toContain('string error');
+      expect(result.vulnerabilities).toHaveLength(0);
     });
   });
 

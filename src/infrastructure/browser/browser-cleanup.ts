@@ -131,64 +131,93 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
   }
 }
 
+interface WinProc { pid: number; ppid: number; name: string; commandLine: string; }
+
+/**
+ * Snapshot all Windows processes with their parent PID and FULL command line.
+ *
+ * Uses PowerShell/CIM rather than `wmic` (removed by default in Windows 11 24H2
+ * and Server 2025). A single call returns the whole process table, which lets us
+ * (a) positively identify OUR Camoufox via {@link PI_BROWSER_MARKER} on the
+ * command line — never the user's own firefox.exe — and (b) detect dead parents
+ * from the same snapshot without a per-PID query.
+ */
+async function queryWindowsProcesses(): Promise<WinProc[]> {
+  const cmd =
+    'powershell -NoProfile -NonInteractive -Command ' +
+    '"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"';
+  const { stdout } = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 16 }).catch(() => ({ stdout: '' }));
+  if (!stdout.trim()) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  // ConvertTo-Json emits a bare object for a single result, an array otherwise.
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+  const procs: WinProc[] = [];
+  for (const p of arr) {
+    if (!p || typeof p !== 'object') continue;
+    const rec = p as Record<string, unknown>;
+    const pid = Number(rec['ProcessId']);
+    if (!Number.isFinite(pid)) continue;
+    const ppid = Number(rec['ParentProcessId']);
+    const name = rec['Name'];
+    const commandLine = rec['CommandLine'];
+    procs.push({
+      pid,
+      // 0 is an "unknown parent" sentinel (unparseable/missing ParentProcessId).
+      // It must NEVER be treated as orphaned — see cleanupOrphanedProcessesWindows.
+      ppid: Number.isFinite(ppid) && ppid > 0 ? ppid : 0,
+      name: typeof name === 'string' ? name : '',
+      commandLine: typeof commandLine === 'string' ? commandLine : '',
+    });
+  }
+  return procs;
+}
+
 /**
  * Cleanup orphaned processes on Windows
  */
 async function cleanupOrphanedProcessesWindows(): Promise<void> {
   try {
-    // Use tasklist to find firefox processes
-    const { stdout } = await execAsync(
-      'tasklist /FI "IMAGENAME eq firefox.exe" /FO CSV /NH',
-    );
-    
-    const lines = stdout.trim().split('\n');
+    const procs = await queryWindowsProcesses();
+    if (procs.length === 0) return;
+
+    // Live-PID set from the same snapshot. A process whose ParentProcessId is
+    // absent from this set has a dead parent — the Windows analogue of the Unix
+    // path's `process.kill(ppid, 0)` liveness probe. (Windows does NOT reparent
+    // to PID 1, and never resets a dead parent's PID to 0, so absence-from-table
+    // is the correct signal.)
+    const alivePids = new Set(procs.map((p) => p.pid));
     const cleanupTasks: Promise<void>[] = [];
-    
-    for (const line of lines) {
-      if (!line.includes('firefox.exe')) continue;
-      
-      const match = line.match(/"(\d+)"/);
-      if (!match || !match[1]) continue;
-      
-      const pid = parseInt(match[1], 10);
-      
+
+    for (const proc of procs) {
+      // ONLY ever consider our own Camoufox — match the full command line so the
+      // user's personal firefox.exe is never a candidate. This is the safety
+      // guarantee the old image-name-only match lacked.
+      if (!PI_BROWSER_MARKER.test(proc.commandLine)) continue;
+      if (proc.pid === process.pid) continue;
+      // Unknown parent (sentinel 0): we cannot prove it is orphaned, so we must
+      // NOT kill it — a live pool browser must never be force-killed on a guess.
+      if (proc.ppid <= 0) continue;
+      // Orphaned iff the parent is gone from the live process table.
+      if (alivePids.has(proc.ppid)) continue;
+
       cleanupTasks.push((async () => {
-        // Check if parent process is still alive
+        logger.log(`[BrowserCleanup] Found orphaned Camoufox process: PID ${proc.pid}, dead parent PID ${proc.ppid}`);
         try {
-          // On Windows, we need to use wmic to get parent PID
-          const { stdout: parentInfo } = await execAsync(
-            `wmic process where ProcessId=${pid} get ParentProcessId /VALUE`,
-          );
-          const parentMatch = parentInfo.match(/ParentProcessId=(\d+)/);
-          if (!parentMatch || !parentMatch[1]) return;
-          
-          const ppid = parseInt(parentMatch[1], 10);
-          
-          // Check if parent is alive by checking if process exists
-          try {
-            await execAsync(`tasklist /FI "PID eq ${ppid}" /NH`);
-            // Parent is alive, not an orphan
-            return;
-          } catch {
-            // Parent is dead - orphan
-            logger.log(`[BrowserCleanup] Found orphaned firefox.exe process: PID ${pid}, dead parent PID ${ppid}`);
-          }
-        } catch {
-          // Couldn't determine parent, assume it might be orphaned
-          logger.log(`[BrowserCleanup] Potentially orphaned firefox.exe process: PID ${pid}`);
-        }
-        
-        try {
-          // Kill the process
-          await execAsync(`taskkill /PID ${pid} /F`);
-          logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${pid}`);
+          await execAsync(`taskkill /PID ${proc.pid} /F /T`);
+          logger.log(`[BrowserCleanup] Terminated orphaned process: PID ${proc.pid}`);
         } catch (killError) {
           const msg = killError instanceof Error ? killError.message : String(killError);
-          logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${pid}: ${msg}`);
+          logger.warn(`[BrowserCleanup] Failed to kill orphaned process PID ${proc.pid}: ${msg}`);
         }
       })());
     }
-    
+
     if (cleanupTasks.length > 0) {
       await Promise.all(cleanupTasks);
       logger.log(`[BrowserCleanup] Cleaned up ${cleanupTasks.length} orphaned browser process(es)`);
@@ -225,23 +254,12 @@ export async function getBrowserPidsForWorkers(workerPids: number[]): Promise<nu
         }
       }
     } else if (platform === 'win32') {
-      const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq firefox.exe" /FO CSV /NH').catch(() => ({ stdout: '' }));
-      const lines = stdout.trim().split('\n');
-      for (const line of lines) {
-        if (!line.includes('firefox.exe')) continue;
-        const match = line.match(/"(\d+)"/);
-        if (!match || !match[1]) continue;
-        const pid = parseInt(match[1], 10);
-        try {
-          const { stdout: parentInfo } = await execAsync(`wmic process where ProcessId=${pid} get ParentProcessId /VALUE`);
-          const parentMatch = parentInfo.match(/ParentProcessId=(\d+)/);
-          if (parentMatch && parentMatch[1]) {
-            const ppid = parseInt(parentMatch[1], 10);
-            if (workerPids.includes(ppid)) pids.push(pid);
-          }
-        } catch {
-          // Ignore errors for individual process lookups
-        }
+      // wmic-free: one CIM snapshot, matched on the full command line so only
+      // OUR Camoufox children of the given workers are returned.
+      const procs = await queryWindowsProcesses();
+      for (const proc of procs) {
+        if (!PI_BROWSER_MARKER.test(proc.commandLine)) continue;
+        if (workerPids.includes(proc.ppid)) pids.push(proc.pid);
       }
     }
   } catch (err) {

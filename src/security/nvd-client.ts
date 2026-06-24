@@ -54,7 +54,14 @@ const MAX_RESULTS_PER_PAGE = 2000;
 
 class NVDRateLimiter {
   private lastRequest: number = 0;
-  private readonly minInterval: number = 6000; // 6 seconds between requests
+  // Without an API key NVD allows ~5 requests per 30s (→ 6s spacing). With a key
+  // the ceiling rises ~10x, so the spacing can safely drop to ~0.6s. Read as a
+  // getter (not a frozen field initializer) so a key set after module import is
+  // still honored — and stays consistent with the per-request header in
+  // createFetchOptions, which also reads the env each call.
+  private get minInterval(): number {
+    return process.env['NVD_API_KEY'] ? 600 : 6000;
+  }
 
   async acquire(): Promise<void> {
     const now = Date.now();
@@ -236,10 +243,14 @@ function buildURL(term: string, options: SearchOptions | undefined, maxResults: 
 }
 
 function createFetchOptions(): RequestInit {
+  // An NVD API key raises the public rate limit from ~5 to ~50 requests per
+  // 30s rolling window (and is sent as the `apiKey` header, not a bearer token).
+  const apiKey = process.env['NVD_API_KEY'];
   return {
     headers: {
       'User-Agent': 'pi-research/2.0',
       'Accept': 'application/json',
+      ...(apiKey ? { apiKey } : {}),
     },
     signal: createTimeoutSignal(30000),
   };
@@ -312,7 +323,15 @@ async function searchSingleTerm(
     await nvdRateLimiter.acquire();
 
     const response = await fetchWithRetry(url);
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      // A 200 with a truncated/HTML body (proxy or CDN error page) would otherwise
+      // throw and discard this whole term. Stop paginating this term instead.
+      metrics.increment('nvd_search_errors_total', 1, { error_type: 'malformed_json' });
+      break;
+    }
 
     const vulnerabilities = parseNVDResponse(data, options);
     
@@ -379,7 +398,24 @@ export async function searchNVD(
       (term: string) => searchSingleTerm(term, options, maxResults),
     );
 
-    const allResults = await Promise.all(searchPromises);
+    // allSettled (not all): a single failing term must not discard every other
+    // term's successfully-fetched results.
+    const settled = await Promise.allSettled(searchPromises);
+    const allResults: Vulnerability[][] = [];
+    const failures: string[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        allResults.push(r.value);
+      } else {
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        failures.push(`${terms[i] ?? `term#${i}`} (${reason})`);
+        metrics.increment('nvd_search_errors_total', 1, { error_type: 'term_failed' });
+      }
+    });
+    if (failures.length > 0) {
+      error = `NVD lookup failed for ${failures.length}/${terms.length} term(s): ${failures.join('; ')}`;
+    }
+
     const uniqueVulns = deduplicateVulnerabilities(allResults);
 
     totalResults = uniqueVulns.length;

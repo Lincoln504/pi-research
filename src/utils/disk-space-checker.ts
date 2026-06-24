@@ -5,7 +5,6 @@
  */
 
 import * as fs from 'node:fs';
-import { execSync } from 'node:child_process';
 
 export class DiskSpaceChecker {
   private readonly MIN_DISK_SPACE_BYTES = 1_048_576; // 1MB minimum
@@ -28,35 +27,23 @@ export class DiskSpaceChecker {
     this.lastDiskSpaceCheck = now;
     
     try {
-      // POSIX: use statfs for accurate disk space information
-      if (typeof fs.statfs !== 'undefined') {
-        const stats = fs.statfsSync(logDir);
-        const availableBytes = stats.bavail * stats.bsize;
-        
-        if (availableBytes < this.MIN_DISK_SPACE_BYTES) {
-          this.hasDiskSpace = false;
-          // Write directly to stderr — this check runs inside the logger itself,
-          // so using the logger here would create a circular dependency.
-          process.stderr.write(
-            `[pi-research] Insufficient disk space for logging: ` +
-            `${Math.round(availableBytes / 1024 / 1024)}MB available, ` +
-            `minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required\n`
-          );
-        } else {
-          this.hasDiskSpace = true;
-        }
+      // fs.statfsSync is cross-platform on Node >=18.15 (incl. Windows), and the
+      // package floor is Node >=22.19, so it is always available — no wmic/exec
+      // fallback is needed (wmic is removed on Windows 11 24H2 anyway).
+      const stats = fs.statfsSync(logDir);
+      const availableBytes = stats.bavail * stats.bsize;
+
+      if (availableBytes < this.MIN_DISK_SPACE_BYTES) {
+        this.hasDiskSpace = false;
+        // Write directly to stderr — this check runs inside the logger itself,
+        // so using the logger here would create a circular dependency.
+        process.stderr.write(
+          `[pi-research] Insufficient disk space for logging: ` +
+          `${Math.round(availableBytes / 1024 / 1024)}MB available, ` +
+          `minimum ${this.MIN_DISK_SPACE_BYTES / 1024 / 1024}MB required\n`
+        );
       } else {
-        // Non-POSIX (Windows): Use synchronous drive space check via execSync.
-        // execSync is a static import — no require() needed.
-        try {
-          const output = execSync('wmic logicaldisk get freespace /value', { encoding: 'utf-8', timeout: 5000 });
-          const match = output.match(/FreeSpace=(\d+)/);
-          const availableBytes = match ? parseInt(match[1]!, 10) : Infinity;
-          this.hasDiskSpace = availableBytes >= this.MIN_DISK_SPACE_BYTES;
-        } catch {
-          // wmic not available (e.g., newer Windows 11) — assume OK
-          this.hasDiskSpace = true;
-        }
+        this.hasDiskSpace = true;
       }
     } catch (_error) {
       // On error, assume OK to avoid blocking logging

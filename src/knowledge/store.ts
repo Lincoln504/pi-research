@@ -425,8 +425,18 @@ export class KnowledgeStore implements IKnowledgeStore {
     try {
       this.table = await this.db.openTable(this.tableName);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // If the table genuinely no longer exists (dropped/renamed by another
+      // process's migration), do NOT serve a stale handle that points at a gone
+      // table — invalidate and surface the error so callers fail clearly.
+      if (/not found|does not exist|no such table/i.test(msg)) {
+        this.table = null;
+        throw err;
+      }
       if (!this.table) throw err;
-      logger.debug(`[store] Failed to refresh table handle, using existing: ${err}`);
+      // Transient (lock/IO) refresh failure: keep using the existing handle, but
+      // log at WARN so the degraded path is visible rather than silent.
+      logger.warn(`[store] Failed to refresh table handle, using existing: ${msg}`);
     }
     return this.table!;
   }
@@ -732,16 +742,50 @@ export class KnowledgeStore implements IKnowledgeStore {
   }
 
   private async pruneOrphanedMigrationDirs(): Promise<void> {
+    // Only prune once the canonical table is confirmed open. If it failed to
+    // open, the real data may still live in a `_migration_`/`_backup_` dir that
+    // the manifest points at — never reap dirs when we can't positively
+    // establish which one is live.
+    if (!this.table) return;
     try {
-      const canonicalDir = `${this.tableName}.lance`;
+      // The dir the manifest currently points at is the live table — NEVER
+      // delete it, even if its name contains `_migration_`/`_backup_` (a
+      // persisted re-embed rename-failure leaves the live data in a temp dir).
+      const activeDir = `${this.tableName}.lance`;
       const entries = await fsPromises.readdir(this.options.dbDir, { withFileTypes: true });
+
+      const migrationDirs: string[] = [];
+      const backupDirs: string[] = [];
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const name = entry.name;
-        if (name !== canonicalDir && name.endsWith('.lance') &&
-            (name.includes('_backup_') || name.includes('_migration_'))) {
+        if (name === activeDir || !name.endsWith('.lance')) continue;
+        // Check `_backup_` FIRST: a re-embed rename-failure can leave the table
+        // named `..._migration_<ts>`, and a later backup of it produces
+        // `..._migration_<ts>_backup_<ts2>` — an intentional, recoverable backup
+        // that must NOT be misclassified as a reapable migration temp.
+        if (name.includes('_backup_')) backupDirs.push(name);
+        else if (name.includes('_migration_')) migrationDirs.push(name);
+      }
+
+      // `_migration_` dirs are transient temp tables from an interrupted
+      // re-embed; the live one is excluded above, so the rest are safe garbage.
+      for (const name of migrationDirs) {
+        const fullPath = path.join(this.options.dbDir, name);
+        logger.info(`[store] Removing orphaned migration temp directory: ${name}`);
+        await fsPromises.rm(fullPath, { recursive: true, force: true });
+      }
+
+      // `_backup_` dirs are intentional, user-recoverable snapshots from the
+      // 'backup' migration strategy. RETAIN the most recent one (deleting it
+      // would make 'backup' silently equivalent to 'drop'); prune only older,
+      // superseded backups so they don't accumulate. ISO-timestamp names sort
+      // chronologically, so the last entry is newest.
+      if (backupDirs.length > 1) {
+        backupDirs.sort();
+        for (const name of backupDirs.slice(0, -1)) {
           const fullPath = path.join(this.options.dbDir, name);
-          logger.info(`[store] Removing orphaned migration/backup directory: ${name}`);
+          logger.info(`[store] Removing superseded backup directory: ${name}`);
           await fsPromises.rm(fullPath, { recursive: true, force: true });
         }
       }

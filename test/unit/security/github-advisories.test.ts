@@ -128,6 +128,34 @@ describe('GitHub Advisories Client', () => {
       const result = await searchGitHubAdvisories(['GHSA-DUP', 'Duplicate']);
       expect(result.count).toBe(1);
     });
+
+    it('keeps a healthy term\'s results when another term hard-fails', async () => {
+      // GHSA-OK resolves; GHSA-BAD throws a non-retryable error. Per-term
+      // isolation must preserve GHSA-OK rather than discarding everything.
+      vi.mocked(fetch).mockImplementation(async (url: any) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('GHSA-BAD')) {
+          return { ok: false, status: 422, statusText: 'Unprocessable' } as Response;
+        }
+        return { ok: true, json: async () => ({ ghsa_id: 'GHSA-OK', summary: 'Healthy' }) } as Response;
+      });
+
+      const result = await searchGitHubAdvisories(['GHSA-OK', 'GHSA-BAD']);
+      expect(result.advisories.some((a) => a.id === 'GHSA-OK')).toBe(true);
+      // The failure is surfaced as a partial-failure note, not swallowed.
+      expect(result.error).toContain('GHSA-BAD');
+    });
+
+    it('treats a malformed JSON body as a per-term failure, not a crash', async () => {
+      vi.mocked(fetch).mockImplementation(async () => ({
+        ok: true,
+        json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+      } as unknown as Response));
+
+      const result = await searchGitHubAdvisories(['GHSA-1234']);
+      expect(result.count).toBe(0);
+      expect(result.error).toMatch(/malformed|failed/i);
+    });
   });
 
   describe('getAdvisoryById', () => {
