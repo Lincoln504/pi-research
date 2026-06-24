@@ -81,7 +81,7 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
 
   const cwd = process.cwd();
   // Clone so we don't mutate the shared configCache reference.
-  globalConfig = { ...getConfig(cwd) };
+  globalConfig = { ...getConfig(cwd, 'openclaw') };
 
   // Map OpenClaw config to pi-research Config
   if (pluginConfig.timeoutMs !== undefined) globalConfig.RESEARCHER_TIMEOUT_MS = pluginConfig.timeoutMs;

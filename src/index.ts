@@ -3,7 +3,7 @@
 // Level 3 = Error, 4 = Fatal.
 process.env['ORT_LOGGING_LEVEL'] = '3';
 
-import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext, SessionShutdownEvent } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ToolDefinition, AgentToolResult, ExtensionContext, SessionShutdownEvent, SessionBeforeCompactEvent, SessionCompactEvent } from '@earendil-works/pi-coding-agent';
 import type { ExtendedExtensionContext } from './types/extension-context.ts';
 import { VERSION as PI_VERSION } from '@earendil-works/pi-coding-agent';
 import { Key } from '@earendil-works/pi-tui';
@@ -63,7 +63,7 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match peerDependencies minimum (>=0.78.1)
+  // Runtime version check — must match peerDependencies minimum (>=0.80.0)
   const versionParts = PI_VERSION.split('.').map(Number);
   const major = versionParts[0] ?? 0;
   const minor = versionParts[1] ?? 0;
@@ -74,7 +74,7 @@ export default async function (pi: ExtensionAPI) {
       `Please ensure pi-coding-agent is installed correctly.`,
     );
   }
-  const minMajor = 0, minMinor = 78, minPatch = 1;
+  const minMajor = 0, minMinor = 80, minPatch = 0;
   const tooOld = major < minMajor
     || (major === minMajor && minor < minMinor)
     || (major === minMajor && minor === minMinor && patch < minPatch);
@@ -224,7 +224,7 @@ export default async function (pi: ExtensionAPI) {
 
   // Validate config at startup (using pi.cwd)
   try {
-    const config = getConfig((pi as any).cwd);
+    const config = getConfig((pi as any).cwd, 'pi');
     validateConfig(config);
     logger.debug('[pi-research] Config validated');
   } catch (err) {
@@ -247,6 +247,14 @@ export default async function (pi: ExtensionAPI) {
     }
   });
 
+  pi.on('session_before_compact', (event: SessionBeforeCompactEvent) => {
+    logger.debug(`[pi-research] compaction starting: reason=${event.reason} willRetry=${event.willRetry}`);
+  });
+
+  pi.on('session_compact', (event: SessionCompactEvent) => {
+    logger.debug(`[pi-research] compaction complete: reason=${event.reason} willRetry=${event.willRetry}`);
+  });
+
   // Create and register the research tool
   const researchTool: ToolDefinition = createResearchTool();
   pi.registerTool(researchTool);
@@ -257,7 +265,7 @@ export default async function (pi: ExtensionAPI) {
 
   // Create and register the Research Knowledge Search tool
   const researchKnowledgeSearchTool: ToolDefinition | null =
-    getConfig((pi as any).cwd).KNOWLEDGE_STORE_MODE !== 'none'
+    getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none'
       ? createResearchKnowledgeSearchTool()
       : null;
   if (researchKnowledgeSearchTool) {
@@ -313,7 +321,7 @@ export default async function (pi: ExtensionAPI) {
       if (!text) return;
 
       try {
-        const config = getConfig(ctx.cwd);
+        const config = getConfig(ctx.cwd, 'pi');
         
         const result = await researchTool.execute(
           randomUUID(),

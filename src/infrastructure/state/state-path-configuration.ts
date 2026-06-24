@@ -8,6 +8,7 @@
 
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
@@ -38,7 +39,7 @@ export class StatePathConfiguration implements IService {
   private readonly projectSettingsPath: string;
 
   constructor(stateDir?: string) {
-    const resolvedStateDir = stateDir || path.join(os.homedir(), '.pi', 'state');
+    const resolvedStateDir = stateDir || path.join(os.homedir(), CONFIG_DIR_NAME, 'state');
     this.stateDir = resolvedStateDir;
     this.stateFilePath = path.join(resolvedStateDir, 'research-state.json');
     this.lockDirPath = path.join(resolvedStateDir, '.locks');

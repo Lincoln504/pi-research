@@ -31,7 +31,7 @@ Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). Uses a h
 
 ## Requirements
 
-- Node.js >= 22.13.0
+- Node.js >= 22.19.0
 - pi CLI installed and configured
 - Internet access
 - LLM in pi with 100k+ context window
@@ -74,7 +74,7 @@ deep research CVE-2024-3094 at depth 3
 
 Say **research** for a quick lookup. Say **deep research** for thorough investigation — pi selects depth 1–3 based on your query's scope and complexity, or pin it with **at depth N**.
 
-**Tool Exclusion**: Disable specific internal tools using the `--exclude-tools` flag (requires pi v0.77.0+).
+**Tool Exclusion**: Disable specific internal tools using the `--exclude-tools` flag.
 
 ```bash
 pi "research AI" --exclude-tools security,stackexchange
@@ -114,7 +114,7 @@ Full variable reference: [docs/SDK.md](docs/SDK.md).
 ## Development
 
 ```bash
-npm run test:unit         # 1200 unit tests, no browser required
+npm run test:unit         # ~1300 unit tests, no browser required
 npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
 npm run type-check        # TypeScript strict mode
 npm run lint              # ESLint

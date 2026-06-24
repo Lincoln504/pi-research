@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getConfig, DEFAULTS, resetConfig } from '../../src/config';
 import { normalizeWorkspacePath } from '../../src/utils/text-utils';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -31,7 +32,7 @@ vi.mock('node:os', async (importOriginal) => ({
 
 describe('Configuration Scoping', () => {
   const mockCwd = '/home/user/project';
-  const projectSettingsPath = path.join(os.homedir(), '.pi', 'state', 'project-settings.json');
+  const projectSettingsPath = path.join(os.homedir(), CONFIG_DIR_NAME, 'state', 'project-settings.json');
 
   beforeEach(() => {
     vi.clearAllMocks();

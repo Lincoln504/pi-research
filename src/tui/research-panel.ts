@@ -178,8 +178,8 @@ function renderPanelBlock(
         const innerWidth = Math.max(0, w - 2);
         // Prioritize status if it exists, otherwise use 'eval'
         const evalLabel = slice?.status || 'eval';
-        const labelDisplay = evalLabel.length > innerWidth ? evalLabel.slice(0, innerWidth) : evalLabel;
-        const padding = innerWidth - labelDisplay.length;
+        const labelDisplay = truncateToWidth(evalLabel, innerWidth);
+        const padding = innerWidth - visibleWidth(labelDisplay);
         const leftPad = Math.floor(padding / 2);
         const rightPad = padding - leftPad;
         tokenStr = '╷' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╷';
@@ -197,8 +197,8 @@ function renderPanelBlock(
             raw = formatTokens(tokens);
         }
 
-        const display = raw.length > w ? raw.slice(0, w) : raw;
-        tokenStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
+        const display = truncateToWidth(raw, w);
+        tokenStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
       }
 
       const rightWall12 = isEval ? '┊' : (nextIsEval ? '┊' : '│');
@@ -213,20 +213,20 @@ function renderPanelBlock(
         const innerWidth = Math.max(0, w - 2);
         const cost = slice?.cost || 0;
         const raw = cost === 0 ? '' : formatCost(cost);
-        const labelDisplay = raw.length > innerWidth ? raw.slice(0, innerWidth) : raw;
-        const padding = innerWidth - labelDisplay.length;
+        const labelDisplay = truncateToWidth(raw, innerWidth);
+        const padding = innerWidth - visibleWidth(labelDisplay);
         const leftPad = Math.floor(padding / 2);
         const rightPad = padding - leftPad;
         costStr = '╵' + ' '.repeat(leftPad) + labelDisplay + ' '.repeat(rightPad) + '╵';
       } else if (isIndicator) {
-        const display = '...'.length > w ? '...'.slice(0, w) : '...';
-        costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
+        const display = truncateToWidth('...', w);
+        costStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
       } else {
         const isPlanning = labelStr.includes('planning') || labelStr.includes('complexity');
         const cost = slice?.cost || 0;
         const raw = (isPlanning || cost === 0) ? '' : formatCost(cost);
-        const display = raw.length > w ? raw.slice(0, w) : raw;
-        costStr = display.padStart(Math.floor((w + display.length) / 2)).padEnd(w);
+        const display = truncateToWidth(raw, w);
+        costStr = display.padStart(Math.floor((w + visibleWidth(display)) / 2)).padEnd(w);
       }
       rightRawRows[2]!.push(costStr + rightWall12);
       const f2 = slice?.flash === 'green' ? 'success' : slice?.flash === 'red' ? 'error' : null;

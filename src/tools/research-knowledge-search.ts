@@ -26,7 +26,8 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { completeSimple, type Model } from '@earendil-works/pi-ai';
+import { completeSimple } from '@earendil-works/pi-ai/compat';
+import type { Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
 import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';

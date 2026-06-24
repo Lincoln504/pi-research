@@ -8,10 +8,9 @@
  * Previously this logic was duplicated (#29) — any bug fix now updates both paths.
  */
 
-import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { AuthStorage, ModelRegistry, getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import * as fs from 'node:fs';
 
 /**
@@ -30,7 +29,7 @@ function buildHeaders(provider?: string): Record<string, string> {
  * @returns A configured ModelRegistry
  */
 export function buildModelRegistry(apiKey?: string, provider?: string): ModelRegistry {
-  const agentDir = path.join(os.homedir(), '.pi', 'agent');
+  const agentDir = getAgentDir();
   const modelsJsonPath = path.join(agentDir, 'models.json');
   const authPath = path.join(agentDir, 'auth.json');
 
@@ -45,7 +44,11 @@ export function buildModelRegistry(apiKey?: string, provider?: string): ModelReg
     );
   }
 
-  // No explicit key: use the user's pi auth storage and model list if available
+  // No explicit key: use the user's pi auth storage and model list if available.
+  // ModelRegistry.create() reads embedded apiKeys from models.json providers
+  // directly (via providerRequestConfigs), so glm-coding and other custom
+  // providers with embedded keys are visible to hasConfiguredAuth() without
+  // needing to duplicate them into AuthStorage.
   if (fs.existsSync(authPath)) {
     const authStorage = AuthStorage.create(authPath);
     return ModelRegistry.create(
@@ -106,7 +109,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
         return constructMinimalModel(prov, modelId, apiKey);
       }
       
-      throw new Error(`Model "${modelSpec}" not found in pi's configured model registry. Check ~/.pi/agent/models.json.`);
+      throw new Error(`Model "${modelSpec}" not found in pi's configured model registry. Check ${path.join(getAgentDir(), 'models.json')}.`);
     }
     
     // Validate format: must contain a slash OR be found as a bare model ID.
@@ -129,9 +132,27 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
     if (found) return found;
   }
 
-  // 3. First available model with auth
+  // 3. First available model — prefer providers in the user's models.json order.
+  //    pi-ai loads built-in providers in a fixed catalog order (openrouter is 26th).
+  //    User-configured providers in models.json (e.g. glm-coding) are appended after
+  //    the built-ins, so getAvailable()[0] would otherwise always pick a built-in
+  //    provider even when the user has a preferred custom one. Walk models.json provider
+  //    order first to respect the user's explicit configuration.
   const available = registry.getAvailable();
-  if (available.length > 0) return available[0]!;
+  if (available.length > 0) {
+    const modelsJsonPath = path.join(getAgentDir(), 'models.json');
+    if (fs.existsSync(modelsJsonPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf-8'));
+        const userProviderOrder: string[] = Object.keys(raw?.providers ?? {});
+        for (const prov of userProviderOrder) {
+          const match = available.find(m => m.provider === prov);
+          if (match) return match;
+        }
+      } catch { /* fall through to built-in ordering */ }
+    }
+    return available[0]!;
+  }
 
   // 4. Any model at all
   const all = registry.getAll();
@@ -153,6 +174,6 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   }
 
   throw new Error(
-    'No LLM model available. Please configure your model registry (~/.pi/agent/models.json) or provide an explicit apiKey.',
+    `No LLM model available. Please configure your model registry (${path.join(getAgentDir(), 'models.json')}) or provide an explicit apiKey.`,
   );
 }

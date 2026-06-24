@@ -45,6 +45,11 @@ const REQUIRED = [
   'src/infrastructure/browser/thread-worker.mjs',
   'dist/openclaw-entry.js',
   'dist/thread-worker.mjs',
+  // CLI binary (the `pi-research` bin in package.json)
+  'dist/cli.mjs',
+  // Agent skill — the launcher + definition that coding agents load
+  'skills/research/SKILL.md',
+  'skills/research/scripts/run.mjs',
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',

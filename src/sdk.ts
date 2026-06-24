@@ -191,7 +191,7 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   }
 
   // Seed configuration
-  globalConfig = { ...getConfig(globalCwd) };
+  globalConfig = { ...getConfig(globalCwd, 'sdk') };
   if (options.config) {
     globalConfig = { ...globalConfig, ...options.config };
     validateConfig(globalConfig);
@@ -547,6 +547,81 @@ export async function runResearchDetailed(
     metrics: _lastRunSummary?.snapshot ?? null,
     stats: getLastRunStats(),
     reports: await getResearchReports(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge Search
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a knowledge-store search: a human-readable synthesis/report string
+ * plus a coarse status the caller can branch on (mirrors the pi tool's tri-state).
+ *
+ * - `found: 'yes'`   — the knowledge store had a complete, cited answer.
+ * - `found: 'maybe'` — partial answer; the caller should also do live research.
+ * - `found: 'no'`    — nothing useful; the caller should do live research. `text`
+ *                     explains why (store empty, disabled, initializing, no match, …).
+ */
+export interface KnowledgeSearchResult {
+  text: string;
+  found: 'yes' | 'maybe' | 'no';
+  documentsSearched: number;
+  citations: string[];
+}
+
+/**
+ * Search the research knowledge database for previously investigated information.
+ *
+ * This is the SDK equivalent of the `research_knowledge_search` pi tool. It runs
+ * the same pipeline (vector search → document rebuild → background-LLM synthesis)
+ * against the initialized knowledge store and returns a tri-state result that a
+ * caller (e.g. a CLI, an MCP server, or another agent host) can use to decide
+ * whether live research is still needed.
+ *
+ * Requires `initResearchSDK()` first, and a knowledge store mode other than
+ * `none` (set `PI_RESEARCH_KNOWLEDGE_STORE_MODE=project|global`). When the store
+ * is disabled/empty/unavailable this resolves to a `found: 'no'` result instead
+ * of throwing, so callers can treat it uniformly.
+ */
+export async function searchKnowledge(
+  queries: string[],
+  signal?: AbortSignal,
+): Promise<KnowledgeSearchResult> {
+  if (!isInitialized || !globalContainer) {
+    throw new Error('SDK not initialized. Call initResearchSDK() first.');
+  }
+  if (!Array.isArray(queries) || queries.length === 0) {
+    throw new Error('searchKnowledge requires a non-empty array of queries.');
+  }
+
+  // Lazily import the tool factory so the SDK bundle stays lean when unused.
+  const { createResearchKnowledgeSearchTool } = await import('./tools/research-knowledge-search.ts');
+  const tool = createResearchKnowledgeSearchTool();
+
+  const result = await tool.execute(
+    randomUUID(),
+    { queries: queries.slice(0, 5) },
+    signal,
+    undefined,
+    createMockContext(`knowledge-${randomUUID()}`),
+  );
+
+  const textBlock = result.content?.find((c): c is { type: 'text'; text: string } => c.type === 'text');
+  const details = (result.details ?? {}) as {
+    found?: boolean;
+    answerStatus?: 'yes' | 'maybe' | 'no';
+    citations?: string[];
+    documentsSearched?: number;
+    reason?: string;
+  };
+
+  const status: 'yes' | 'maybe' | 'no' = details.answerStatus ?? (details.found ? 'yes' : 'no');
+  return {
+    text: textBlock?.text ?? 'No results found.',
+    found: status,
+    documentsSearched: details.documentsSearched ?? 0,
+    citations: details.citations ?? [],
   };
 }
 

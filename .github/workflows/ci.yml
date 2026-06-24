@@ -276,11 +276,10 @@ jobs:
         run: npx camoufox-js fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Firefox (even with headless:true) initialises GTK on startup, which on
-      # Linux requires a valid X11 display. Without one the browser process
-      # hangs waiting for a connection and every worker times out after 45 s.
-      # Xvfb is pre-installed on ubuntu-latest. macOS/Windows runners have a
-      # native display, so this step is Linux-only.
+      # headless:'virtual' (opt-in Xvfb path) requires an X11 display.
+      # The default Linux code path uses boolean headless:true (no X11 needed),
+      # but the headless:'virtual' smoke-test below exercises the Xvfb path.
+      # Xvfb is pre-installed on ubuntu-latest.
       - name: Start Xvfb virtual display (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -419,6 +418,8 @@ jobs:
         run: |
           npm run build:worker
           npm run build:openclaw
+          npm run build:cli
+          npm run build:skill
       - name: Verify tarball manifest (required files present, no junk)
         run: node scripts/verify-package.cjs manifest
       - name: Pack real tarball

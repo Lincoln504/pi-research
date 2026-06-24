@@ -32,7 +32,8 @@
   },
   "include": [
     "src/**/*",
-    "scripts/**/*"
+    "scripts/**/*",
+    "skills/**/*"
   ],
   "exclude": [
     "node_modules",

@@ -86,6 +86,8 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
     create: vi.fn().mockReturnValue({}),
     inMemory: vi.fn().mockReturnValue({}),
   },
+  getAgentDir: vi.fn().mockReturnValue('/home/user/.pi/agent'),
+  CONFIG_DIR_NAME: '.pi',
 }));
 
 vi.mock('../../src/logger.ts', () => ({
@@ -190,7 +192,7 @@ describe('SDK Lifecycle', () => {
 
     it('loads config for the correct directory', async () => {
       await initSDK({ cwd: '/custom/path' });
-      expect(getConfig).toHaveBeenCalledWith('/custom/path');
+      expect(getConfig).toHaveBeenCalledWith('/custom/path', 'sdk');
     });
 
     it('warns and returns early when called a second time without disposing', async () => {

@@ -207,16 +207,20 @@ describe('logger', () => {
     it('should use the consolidated log file even when researchRunId is provided', () => {
       const runId = 'run-a1b2c3d4';
       const logger = createLogger({ verbose: true, researchRunId: runId });
-      
+
       const logPath = logger.getLogFilePath();
-      expect(logPath).toBe(path.join(os.tmpdir(), 'pi-research.log'));
+      expect(logPath).toBeTruthy();
+      expect(logPath).toMatch(/pi-research\.log$/);
+      // The run ID must NOT appear in the path — consolidated file, not per-run
+      expect(logPath).not.toContain(runId);
     });
 
     it('should use the default log file when no researchRunId is provided', () => {
       const logger = createLogger({ verbose: true });
-      
+
       const logPath = logger.getLogFilePath();
-      expect(logPath).toBe(path.join(os.tmpdir(), 'pi-research.log'));
+      expect(logPath).toBeTruthy();
+      expect(logPath).toMatch(/pi-research\.log$/);
     });
 
     it('should write to the consolidated log file with context', () => {

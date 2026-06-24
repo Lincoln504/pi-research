@@ -12,8 +12,11 @@ import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 vi.mock('@earendil-works/pi-ai', () => ({
-  completeSimple: vi.fn(),
   calculateCost: vi.fn(() => ({ total: 0 })),
+}));
+
+vi.mock('@earendil-works/pi-ai/compat', () => ({
+  completeSimple: vi.fn(),
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -34,7 +37,7 @@ vi.mock('../../../src/core/llm/inject-date.ts', () => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-import { completeSimple } from '@earendil-works/pi-ai';
+import { completeSimple } from '@earendil-works/pi-ai/compat';
 import type { StopReason } from '@earendil-works/pi-ai';
 
 const STUB_MODEL = { id: 'test-model' } as any;

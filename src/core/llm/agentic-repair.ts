@@ -31,7 +31,7 @@ export interface JsonRepairOptions {
 }
 
 /**
- * LLM completion function signature matching pi-ai's completeSimple
+ * LLM completion function compatible with completeSimple from @earendil-works/pi-ai/compat
  */
 export type LlmCompleter = (
   model: Model<any>,

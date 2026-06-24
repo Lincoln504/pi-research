@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { logger } from './logger.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
@@ -159,7 +160,7 @@ const USER_MIGRATION_KEYS = [
  */
 export function getProjectSettingsRegistryPath(): string {
   const stateDir = process.env['PI_RESEARCH_STATE_DIR']
-    ?? path.join(os.homedir(), '.pi', 'state');
+    ?? path.join(os.homedir(), CONFIG_DIR_NAME, 'state');
   return path.join(stateDir, 'project-settings.json');
 }
 
@@ -257,7 +258,7 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
  * Returns the global configuration directory (~/.pi/research).
  */
 export function getGlobalConfigDir(): string {
-  return path.join(os.homedir(), '.pi', 'research');
+  return path.join(os.homedir(), CONFIG_DIR_NAME, 'research');
 }
 
 /**
@@ -265,6 +266,28 @@ export function getGlobalConfigDir(): string {
  */
 export function getGlobalEnvFilePath(): string {
   return path.join(getGlobalConfigDir(), 'config.env');
+}
+
+/**
+ * The interface (consumer) through which pi-research is being used.
+ *
+ * Each interface can have an optional per-interface config overlay file at
+ * ~/.pi/research/{interface}.env that layers over the base config.env.
+ * Keys in the overlay win over the base file but lose to process.env and
+ * the centralized project registry.
+ *
+ * - 'sdk'       → src/sdk.ts (programmatic API)
+ * - 'openclaw'  → src/openclaw-entry.ts (pi extension plugin)
+ * - 'pi'        → src/index.ts TUI and src/cli.ts CLI
+ */
+export type ConfigInterface = 'sdk' | 'openclaw' | 'pi';
+
+/**
+ * Returns the per-interface overlay file path (~/.pi/research/{iface}.env).
+ * The file is optional — only read if it exists.
+ */
+export function getInterfaceEnvFilePath(iface: ConfigInterface): string {
+  return path.join(getGlobalConfigDir(), `${iface}.env`);
 }
 
 /**
@@ -307,9 +330,9 @@ function parseDotEnv(content: string): Record<string, string> {
 
 /**
  * Load environment variables from global and local files.
- * Order: Global File < Legacy .env < Centralized Registry (WINS)
+ * Order: Global File < Interface overlay < Legacy .env < Centralized Registry (WINS)
  */
-function loadEnvFiles(cwd: string): Record<string, string> {
+function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, string> {
   const merged: Record<string, string> = {};
   const globalPath = getGlobalEnvFilePath();
   const registry = loadProjectSettingsRegistry();
@@ -341,6 +364,18 @@ function loadEnvFiles(cwd: string): Record<string, string> {
     }
   } catch (err) {
     logger.warn('[config] Failed to read global env file:', err);
+  }
+
+  // 2b. Per-interface overlay (~/.pi/research/{iface}.env) — optional, wins over base.
+  if (iface) {
+    const ifacePath = getInterfaceEnvFilePath(iface);
+    try {
+      if (fs.existsSync(ifacePath)) {
+        Object.assign(merged, parseDotEnv(fs.readFileSync(ifacePath, 'utf-8')));
+      }
+    } catch (err) {
+      logger.warn(`[config] Failed to read interface config ${ifacePath}:`, err);
+    }
   }
 
   // 3. Load Legacy .pi-research.env in CWD
@@ -630,19 +665,24 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
 }
 
 /**
- * Robustly load configuration for a specific directory.
- * Resolution: Defaults < Global Config (~/.pi/research/config.env) < Legacy .pi-research.env < Centralized Registry < process.env.
+ * Robustly load configuration for a specific directory and optional interface.
  *
- * Results are cached by normalized CWD so repeated calls within the same project
- * don't re-parse files. The cache is properly scoped — changing directories
- * yields different cached entries.
+ * Resolution order (later wins):
+ *   Defaults < config.env < {iface}.env (optional) < legacy .pi-research.env < project registry < process.env
+ *
+ * The optional `iface` parameter selects a per-interface overlay file
+ * (~/.pi/research/{iface}.env) that layers over the base config.env.
+ * This lets SDK, OpenClaw, and pi CLI carry independent model/config
+ * settings while all falling back to the shared base when not set.
+ *
+ * Results are cached by (cwd, iface) pair.
  */
-export function getConfig(cwd: string = process.cwd()): Config {
-  const cacheKey = normalizeWorkspacePath(cwd);
+export function getConfig(cwd: string = process.cwd(), iface?: ConfigInterface): Config {
+  const cacheKey = `${normalizeWorkspacePath(cwd)}:${iface ?? ''}`;
   const cached = configCache.get(cacheKey);
   if (cached) return cached;
 
-  const e = loadEnvFiles(cwd);
+  const e = loadEnvFiles(cwd, iface);
   const config = createConfig(e, process.env);
 
   configCache.set(cacheKey, config);
@@ -653,9 +693,9 @@ export function getConfig(cwd: string = process.cwd()): Config {
  * Manually override configuration.
  * Uses the cache for the current CWD (for CLI/test compatibility).
  */
-export function setConfig(config: Partial<Config>): void {
-  const current = getConfig();
-  const cacheKey = normalizeWorkspacePath(process.cwd());
+export function setConfig(config: Partial<Config>, iface?: ConfigInterface): void {
+  const current = getConfig(process.cwd(), iface);
+  const cacheKey = `${normalizeWorkspacePath(process.cwd())}:${iface ?? ''}`;
   configCache.set(cacheKey, { ...current, ...config });
 }
 

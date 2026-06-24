@@ -18,17 +18,23 @@ import { ServiceNames } from '../../src/core/service-interfaces.ts';
 import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-service.ts';
 
 // Mock pi-ai and pi-coding-agent
-vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
+const _mockLlmResponse = {
+  content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\nCITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
+  usage: { totalTokens: 100, cost: { total: 0.01 } },
+};
+
+vi.mock('@earendil-works/pi-ai/compat', async (importOriginal) => {
   const actual = await importOriginal() as any;
-  const mockResponse = {
-    content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\nCITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
-    usage: { totalTokens: 100, cost: { total: 0.01 } },
-  };
   return {
     ...actual,
-    completeSimple: vi.fn().mockResolvedValue(mockResponse),
-    complete: vi.fn().mockResolvedValue(mockResponse),
+    completeSimple: vi.fn().mockResolvedValue(_mockLlmResponse),
+    complete: vi.fn().mockResolvedValue(_mockLlmResponse),
   };
+});
+
+vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return { ...actual };
 });
 
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
@@ -239,7 +245,7 @@ describe('End-to-End Research Workflows', () => {
       if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       // Update pi-ai mock for this specific test to return a valid JSON plan
-      const { completeSimple, complete } = await import('@earendil-works/pi-ai');
+      const { completeSimple, complete } = await import('@earendil-works/pi-ai/compat');
       (completeSimple as any).mockResolvedValue({
         content: [{ type: 'text', text: 'Mock research synthesis: This is a longer response intended to satisfy the length requirements of the integration test suite. It covers the evolution and impact of AI on modern development workflows.' }],
         usage: { totalTokens: 50, cost: { total: 0.005 } },
@@ -307,7 +313,7 @@ describe('End-to-End Research Workflows', () => {
       if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       // Update pi-ai mock for this specific test
-      const { complete } = await import('@earendil-works/pi-ai');
+      const { complete } = await import('@earendil-works/pi-ai/compat');
       (complete as any).mockImplementation(async (_model: any, options: any) => {
         if (options.systemPrompt.includes('Coordinator')) {
           return {
