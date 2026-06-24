@@ -22,10 +22,7 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 
 try {
-  execSync(
-    'npm run build:worker && npm run build:openclaw && npm run build:cli && npm run build:skill',
-    { stdio: 'inherit', cwd: ROOT },
-  );
+  execSync('node scripts/build.cjs all', { stdio: 'inherit', cwd: ROOT });
 } catch (err) {
   console.error('[prepare] Build failed:', err.message);
   process.exit(1);
