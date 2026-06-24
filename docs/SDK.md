@@ -137,8 +137,16 @@ and defaults. The most-used variables:
 | `PI_RESEARCH_LLM_TIMEOUT_MS` | `300000` | 60000–600000 | Coordinator/evaluator/repair LLM call timeout |
 | `PI_RESEARCH_SCRAPE_TIMEOUT_MS` | `15000` | 5000–120000 | Per-page scrape timeout |
 | `PI_RESEARCH_SEARCH_TIMEOUT_MS` | `45000` | 5000–120000 | Browser search page timeout |
-| `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Individual browser task timeout |
+| `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait margin added to each op's own timeout (search = SEARCH_TIMEOUT_MS + this; scrape = SCRAPE_TIMEOUT_MS + this) |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Health-check timeout |
+
+### LLM output & reasoning
+
+| Variable | Default | Range | Description |
+|----------|---------|-------|-------------|
+| `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for all engine LLM work (coordinator, evaluator, synthesis, repair, knowledge, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so thinking only consumes the output budget. Clamped per model by pi. |
+| `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision (clamped to the model ceiling) |
+| `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report (clamped to the model ceiling) |
 
 ### Knowledge store
 
@@ -174,8 +182,9 @@ and defaults. The most-used variables:
 | `PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS` | `100` | TUI refresh debounce (0–1000 ms). |
 | `PI_RESEARCH_DEBUG` | `false` | Verbose diagnostic logging to the OS temp dir. |
 | `PI_RESEARCH_CONSOLE_LOG` | `false` | Mirror logs to stdout/stderr (useful in CI / headless). |
-| `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path. |
+| `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path (browser workers inherit it automatically). |
 | `PI_RESEARCH_STATE_DIR` | `~/.pi/state` | Override the state directory. |
+| `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. |
 
 ---
 

@@ -271,16 +271,20 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeLessThanOrEqual(maxSize);
     });
 
-    it('populates prompts correctly with query and uses maxTokens', async () => {
+    it('populates prompts correctly with query, uses the planning token budget, and disables thinking', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
       await service.generatePlan(BASE_OPTIONS);
-      
+
       const lastCall = vi.mocked(completeSimple).mock.calls[0];
       const callContext = lastCall![1] as { systemPrompt: string };
-      const callOptions = lastCall![2] as { maxTokens: number };
-      
+      const callOptions = lastCall![2] as { maxTokens: number; reasoning?: string };
+
       expect(callContext.systemPrompt).toContain('test query');
-      expect(callOptions.maxTokens).toBe(4096);
+      // Coordinator uses PLANNING_MAX_TOKENS (default 16384), clamped to the model ceiling
+      // (STUB_MODEL has no maxTokens so the default is the binding cap) — no longer the old 4096.
+      expect(callOptions.maxTokens).toBe(16384);
+      // Thinking is off by default for the engine's structured-JSON calls.
+      expect(callOptions.reasoning).toBe('off');
     });
   });
 
@@ -347,6 +351,20 @@ describe('PlanningService', () => {
       const plan = await service.updatePlanForRound(BASE_OPTIONS);
       expect(plan.action).toBe('synthesize');
       expect(plan.content).toBe('');
+    });
+
+    it('continues the prior agenda (delegate) instead of synthesizing early when a mid-round evaluation is unparseable and rounds remain', async () => {
+      // A transient/garbled evaluator response mid-research must NOT prematurely end the run.
+      // With a non-empty prior agenda and mustSynthesize unset, it re-delegates that agenda.
+      const priorResearchers = [{ id: '1', name: 'R1', goal: 'cover topic A', queries: ['qa'] }];
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('garbled non-json'));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        mustSynthesize: false,
+        previousPlan: { action: 'delegate' as const, researchers: priorResearchers, allQueries: ['qa'] },
+      });
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.map((r) => r.name)).toContain('R1');
     });
 
     it('updates currentPlan after a successful call', async () => {

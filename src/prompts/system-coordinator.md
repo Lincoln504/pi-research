@@ -18,7 +18,7 @@ You are being provided with the conversation history for context only.
 
 ## Complexity Level: {{complexity_label}}
 
-**Team size**: Plan between **1 and {{max_team_size}} researchers**.
+**Team size**: Plan between **1 and {{max_team_size}} researchers**. A **single researcher is a complete, valid plan** — when the topic is focused or singular, assign just one. Add more only for genuinely distinct, non-overlapping angles; never split a narrow topic just to fill the team. (See the complexity guidance below for the default at this level.)
 **Query budget**: Each researcher may submit up to **{{query_budget}} queries**. Maximize coverage of each angle with targeted, specific queries.
 
 {{complexity_guidance}}

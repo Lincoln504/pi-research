@@ -121,6 +121,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       extensionCtx: ctx,
       excludeTools: mergedExclude,
       researcherId: id,
+      config,
       getGlobalState: (): SystemResearchState => ({
         version: 1,
         researchId,

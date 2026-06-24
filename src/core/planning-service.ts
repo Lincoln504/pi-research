@@ -191,7 +191,7 @@ export class PlanningService implements IPlanningService {
     
     logger.log(`[PlanningService] Generating initial plan for: "${query}" (Complexity: ${complexity})`);
     
-    const config = getConfig(options.cwd);
+    const config = options.config ?? getConfig(options.cwd);
     const promptTemplate = loadPrompt('system-coordinator');
     
     const maxTeamSize = this.getTeamSize(complexity);
@@ -240,7 +240,7 @@ export class PlanningService implements IPlanningService {
           apiKey: authResult.apiKey || '',
           headers: authResult.headers,
           signal
-        }, 4096)),
+        }, config.PLANNING_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
         llmTimeout, 'coordinator-generatePlan',
       );
 
@@ -273,6 +273,8 @@ export class PlanningService implements IPlanningService {
                 context: `Research planning for: ${query}`,
                 serviceName: 'PlanningService',
                 signal,
+                maxTokens: config.PLANNING_MAX_TOKENS,
+                thinkingLevel: config.LLM_THINKING_LEVEL,
             }
         );
         if (repaired) {
@@ -312,7 +314,7 @@ export class PlanningService implements IPlanningService {
     
     logger.log(`[PlanningService] Evaluating Round ${round} findings for: "${query}"`);
 
-    const config = getConfig(options.cwd);
+    const config = options.config ?? getConfig(options.cwd);
     const promptTemplate = loadPrompt('system-lead-evaluator');
     
     const maxTeamSize = this.getTeamSize(complexity);
@@ -380,11 +382,15 @@ export class PlanningService implements IPlanningService {
           messages: [
             { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
           ],
+          // The evaluator's response carries the final report whenever it synthesizes —
+          // which it may choose to do on ANY round (voluntary early finish), not just the
+          // forced final round. So every evaluator call gets the full synthesis budget; a
+          // small decision response simply uses a fraction of it. Clamped to the model.
         }, buildSafeOptions(model, {
           apiKey: authResult.apiKey || '',
           headers: authResult.headers,
           signal
-        }, 4096)),
+        }, config.SYNTHESIS_MAX_TOKENS, config.LLM_THINKING_LEVEL)),
         llmTimeout, 'evaluator-updatePlanForRound',
       );
 
@@ -417,6 +423,8 @@ export class PlanningService implements IPlanningService {
                 context: `Research evaluation for: ${query} (Round ${round})`,
                 serviceName: 'PlanningService',
                 signal,
+                maxTokens: config.SYNTHESIS_MAX_TOKENS,
+                thinkingLevel: config.LLM_THINKING_LEVEL,
             }
         );
         if (repaired) {
@@ -430,9 +438,24 @@ export class PlanningService implements IPlanningService {
       }
 
       if (!plan) {
-        logger.warn('[PlanningService] Failed to generate valid evaluation, falling back to synthesize');
-        const safeContent = responseText.length > 50 ? responseText : '';
-        plan = { action: 'synthesize', content: safeContent, researchers: [] };
+        // A parse failure here used to ALWAYS default to synthesize, which prematurely
+        // ended a run on a single transient/garbled evaluator response (with rounds still
+        // remaining) — and put the raw, often-truncated text into the report body.
+        // Only finalize early when synthesis was already mandatory (final round); otherwise,
+        // if there is a prior agenda to continue, delegate another round rather than giving up.
+        // Round budget (maxRounds) still bounds this, so it cannot loop indefinitely.
+        if (mustSynthesize) {
+          logger.warn('[PlanningService] Failed to generate valid evaluation on the final round; synthesizing from raw text');
+          const safeContent = responseText.length > 50 ? responseText : '';
+          plan = { action: 'synthesize', content: safeContent, researchers: [] };
+        } else if (previousPlan?.researchers && previousPlan.researchers.length > 0) {
+          logger.warn('[PlanningService] Evaluation unparseable mid-research; continuing the prior agenda rather than synthesizing early');
+          plan = { action: 'delegate', content: '', researchers: previousPlan.researchers };
+        } else {
+          logger.warn('[PlanningService] Evaluation unparseable and no prior agenda to continue; falling back to synthesize');
+          const safeContent = responseText.length > 50 ? responseText : '';
+          plan = { action: 'synthesize', content: safeContent, researchers: [] };
+        }
       }
 
       const finalPlan = plan as ResearchPlan;

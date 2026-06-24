@@ -97,6 +97,17 @@ describe('browser-config', () => {
             expect(env['TMP']).toBe(profileDir);
             expect(env['TEMP']).toBe(profileDir);
         });
+
+        it('respects a user-set PI_RESEARCH_LOG_FILE instead of clobbering it with the main log path', () => {
+            const saved = process.env['PI_RESEARCH_LOG_FILE'];
+            process.env['PI_RESEARCH_LOG_FILE'] = '/custom/worker.log';
+            try {
+                expect(getBrowserEnv()['PI_RESEARCH_LOG_FILE']).toBe('/custom/worker.log');
+            } finally {
+                if (saved === undefined) delete process.env['PI_RESEARCH_LOG_FILE'];
+                else process.env['PI_RESEARCH_LOG_FILE'] = saved;
+            }
+        });
     });
 
     describe('getBrowserProfileDir', () => {

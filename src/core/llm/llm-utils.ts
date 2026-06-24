@@ -4,34 +4,44 @@
  * Shared logic for safe and robust LLM interactions.
  */
 
-import { type Model, type AssistantMessage, type SimpleStreamOptions } from '@earendil-works/pi-ai';
+import { type Model, type AssistantMessage, type SimpleStreamOptions, type ModelThinkingLevel } from '@earendil-works/pi-ai';
 import { extractText } from '../../utils/text-utils.ts';
 import { logger } from '../../logger.ts';
 
 /**
  * Standardize LLM request options for maximum compatibility and robustness.
- * 
- * - Ensures maxTokens is always set (satisfies GLM/BigModel and O1 requirements).
- * - Defaults to 'minimal' reasoning if supported by the model.
- * - Caps maxTokens to a safe default if not explicitly provided.
- * 
+ *
+ * - Ensures maxTokens is always set (satisfies providers that reject a null cap),
+ *   clamped to the model's own ceiling so a large requested cap is never invalid.
+ * - Sets the chain-of-thought "thinking" level, defaulting to 'off'. This is passed
+ *   straight to pi-ai, which clamps it to whatever the specific model/provider
+ *   supports (disabling thinking where an off state exists, omitting the parameter
+ *   where it does not). The fix is therefore model-agnostic — pi-ai owns the
+ *   per-provider translation; this code never hardcodes a provider-specific payload.
+ *   'off' is deliberate: these engine calls emit structured JSON / cited reports, so a
+ *   thinking block only consumes the output-token budget (often truncating before the
+ *   text block is emitted) for at most a marginal quality gain that does not justify the cost.
+ *
  * @param model - The model being called
- * @param options - User-provided options
- * @param defaultCap - Default maxTokens cap (default 4096)
+ * @param options - Caller-provided options (an explicit `reasoning` here wins)
+ * @param defaultCap - Default maxTokens cap (clamped to model.maxTokens)
+ * @param thinkingLevel - Thinking level to request when the caller did not set one (default 'off')
  * @returns Fully populated SimpleStreamOptions
  */
 export function buildSafeOptions(
   model: Model<any>,
   options: SimpleStreamOptions,
-  defaultCap: number = 4096
+  defaultCap: number = 4096,
+  thinkingLevel: ModelThinkingLevel = 'off'
 ): SimpleStreamOptions {
+  const effective: ModelThinkingLevel = (options.reasoning as ModelThinkingLevel | undefined) ?? thinkingLevel;
   return {
     ...options,
     // Ensure maxTokens is never null/None to avoid provider-side crashes
     maxTokens: options.maxTokens ?? Math.min(defaultCap, model.maxTokens || defaultCap),
-    // Default to 'minimal' reasoning for better planning/logic if supported,
-    // but allow the caller to explicitly override it.
-    reasoning: options.reasoning ?? ('minimal' as any),
+    // 'off' is a valid ModelThinkingLevel that pi-ai accepts at runtime even though the
+    // public SimpleStreamOptions.reasoning type narrows to the non-off ThinkingLevel.
+    reasoning: effective as unknown as SimpleStreamOptions['reasoning'],
   };
 }
 

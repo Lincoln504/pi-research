@@ -17,18 +17,25 @@ import { getService } from '../../src/core/service-registry.ts';
 import { ServiceNames } from '../../src/core/service-interfaces.ts';
 import { KnowledgeStoreService } from '../../src/infrastructure/knowledge-store-service.ts';
 
-// Mock pi-ai and pi-coding-agent
-const _mockLlmResponse = {
-  content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\nCITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
-  usage: { totalTokens: 100, cost: { total: 0.01 } },
-};
+// Mock pi-ai and pi-coding-agent.
+// The response object is created via vi.hoisted() so it is initialized BEFORE the
+// hoisted vi.mock() factories run — referencing a plain top-level const here throws
+// "error when mocking a module ... no top level variables inside" because vi.mock is
+// hoisted above the const declaration.
+const { mockLlmResponse } = vi.hoisted(() => ({
+  mockLlmResponse: {
+    content: [{ type: 'text', text: 'Mock research synthesis: This is a comprehensive summary of the research findings. It covers multiple aspects and provides deep insights into the topic.\n\nCITED LINKS\n\n1. https://example.com/result1 [Source: Scrape] — Mock content for result 1. This text should be long enough to be indexed correctly and searched for.' }],
+    usage: { totalTokens: 100, cost: { total: 0.01 } },
+    stopReason: 'stop' as const,
+  },
+}));
 
 vi.mock('@earendil-works/pi-ai/compat', async (importOriginal) => {
   const actual = await importOriginal() as any;
   return {
     ...actual,
-    completeSimple: vi.fn().mockResolvedValue(_mockLlmResponse),
-    complete: vi.fn().mockResolvedValue(_mockLlmResponse),
+    completeSimple: vi.fn().mockResolvedValue(mockLlmResponse),
+    complete: vi.fn().mockResolvedValue(mockLlmResponse),
   };
 });
 
@@ -106,6 +113,15 @@ describe('End-to-End Research Workflows', () => {
   let testContext: TestContext;
   let testDbDir: string;
   beforeAll(async () => {
+    // These workflow tests exercise knowledge-store persistence through the
+    // KnowledgeStoreService, which reads its mode from config at init time. Enable
+    // 'project' mode BEFORE setupLifecycle()/first service init so the store is live
+    // (otherwise the service initializes DISABLED and getStore() returns null).
+    process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = 'project';
+    // Clear any config cached at module-load (before this env was set) so the store
+    // service reads the project mode on first init.
+    const { resetConfig } = await import('../../src/config.ts');
+    resetConfig();
     testContext = await setupLifecycle();
 
     // Use the state dir set by setupLifecycle (PI_RESEARCH_STATE_DIR) as
@@ -152,6 +168,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -187,6 +204,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -228,6 +246,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -290,6 +309,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -354,6 +374,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -389,6 +410,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -430,6 +452,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},
@@ -450,6 +473,7 @@ describe('End-to-End Research Workflows', () => {
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'test', headers: {} }),
             hasConfiguredAuth: () => true,
             getAll: () => [{ id: 'test-model', provider: 'test' }],
+            getAvailable: () => [{ id: 'test-model', provider: 'test' }],
           },
         } as any,
         observer: {},

@@ -280,6 +280,8 @@ async function runBackgroundExtraction(
   conversationHistory: string,
   referenceDocuments: string,
   llmTimeout: number,
+  maxTokens: number,
+  thinkingLevel: Config['LLM_THINKING_LEVEL'],
   signal?: AbortSignal,
 ): Promise<ResearchKnowledgeSynthesisResponse> {
   const promptTemplate = loadPrompt('research-knowledge-search-extractor');
@@ -307,7 +309,7 @@ async function runBackgroundExtraction(
       apiKey: auth.apiKey,
       headers: auth.headers,
       signal
-    }, 4096)),
+    }, maxTokens, thinkingLevel)),
     llmTimeout,
     'knowledge-search-extraction',
   );
@@ -582,6 +584,8 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           conversationHistory,
           referenceText,
           config.LLM_TIMEOUT_MS,
+          config.PLANNING_MAX_TOKENS,
+          config.LLM_THINKING_LEVEL,
           signal,
         );
 

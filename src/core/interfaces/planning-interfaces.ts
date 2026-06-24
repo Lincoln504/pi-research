@@ -7,6 +7,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { ResearchObserver } from './observer-interfaces.ts';
 import type { ResearchPlan, ResearcherConfig } from './research-plan-types.ts';
+import type { Config } from '../../config.ts';
 
 export type { ResearchPlan, ResearcherConfig };
 export { ResearcherConfigSchema, ResearchPlanSchema } from './research-plan-types.ts';
@@ -33,6 +34,9 @@ export interface GeneratePlanOptions {
   observer?: ResearchObserver;
   excludeTools?: string[];
   steeringMessages?: string[];
+  /** Resolved config from the caller (SDK/orchestrator). Preferred over getConfig(cwd)
+   *  so SDK code-config and ignoreGlobalConfig hermeticity reach the coordinator call. */
+  config?: Config;
 }
 
 /**
@@ -65,6 +69,9 @@ export interface UpdatePlanOptions {
   observer?: ResearchObserver;
   excludeTools?: string[];
   steeringMessages?: string[];
+  /** Resolved config from the caller (SDK/orchestrator). Preferred over getConfig(cwd)
+   *  so SDK code-config and ignoreGlobalConfig hermeticity reach the evaluator/synthesis call. */
+  config?: Config;
 }
 
 /**

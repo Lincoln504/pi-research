@@ -142,8 +142,12 @@ export class BrowserTaskScheduler implements IScheduler {
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
 
-        const baseTimeoutMs = (config || getConfig()).BROWSER_TASK_TIMEOUT_MS;
-        const timeoutMs = baseTimeoutMs + 10000;
+        // Task timeout = the search nav budget (SEARCH_TIMEOUT_MS) + a queue-wait/overhead
+        // margin (BROWSER_TASK_TIMEOUT_MS). Deriving from SEARCH_TIMEOUT_MS keeps the task
+        // ceiling coherent with the worker's own nav timeout — using a flat base here would
+        // kill a search before it had used its full nav budget.
+        const cfg = config || getConfig();
+        const timeoutMs = cfg.SEARCH_TIMEOUT_MS + cfg.BROWSER_TASK_TIMEOUT_MS;
 
         let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -204,9 +208,11 @@ export class BrowserTaskScheduler implements IScheduler {
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
-        const baseTimeoutMs = (config || getConfig()).SCRAPE_TIMEOUT_MS;
+        // Task timeout = the scrape nav budget (SCRAPE_TIMEOUT_MS) + the queue-wait/overhead
+        // margin (BROWSER_TASK_TIMEOUT_MS), mirroring the search path so both stay coherent.
+        const cfg = config || getConfig();
         const isMocking = process.env['PI_RESEARCH_MOCK_SCRAPE'] === 'true';
-        const timeoutMs = baseTimeoutMs + (isMocking ? 5000 : 10000);
+        const timeoutMs = cfg.SCRAPE_TIMEOUT_MS + (isMocking ? 5000 : cfg.BROWSER_TASK_TIMEOUT_MS);
 
         let timeoutId: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {

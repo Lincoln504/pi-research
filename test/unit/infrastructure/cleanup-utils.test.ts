@@ -147,20 +147,31 @@ describe('cleanup-utils', () => {
       expect(result.errors).toBe(0);
     });
 
-    it('reclaims leftover EMPTY profile/artifact dirs regardless of age, sparing others', async () => {
+    it('reclaims empty + orphaned profile dirs regardless of age, sparing live ones and non-matching dirs', async () => {
       const { cleanupStaleProfiles } = await import('../../../src/infrastructure/browser/cleanup-utils.ts');
 
-      // Empty leftovers Playwright leaves behind, both YOUNG (well under threshold).
+      const young = new Date(Date.now() - ACTIVE_AGE_MS);
+
+      // Empty leftovers Playwright leaves behind, both YOUNG — reclaimed (can't be active).
       const emptyArtifacts = path.join(testCacheDir, 'playwright-artifacts-abc123');
       const emptyProfile = path.join(testCacheDir, 'playwright_firefoxdev_profile-def456');
       mkdirSync(emptyArtifacts, { recursive: true });
       mkdirSync(emptyProfile, { recursive: true });
-      const young = new Date(Date.now() - ACTIVE_AGE_MS);
       utimesSync(emptyArtifacts, young, young);
       utimesSync(emptyProfile, young, young);
 
-      // A young, NON-empty active profile must be preserved.
-      const active = createProfile('playwright_firefoxdev_profile-active', ACTIVE_AGE_MS);
+      // A YOUNG, non-empty profile left by a CRASHED run (no live owner — its `lockfile` is
+      // not a real Firefox lock). The bug fix reclaims this regardless of age, instead of
+      // letting it linger until a 30-day/1-hour threshold.
+      const orphaned = createProfile('playwright_firefoxdev_profile-orphan', ACTIVE_AGE_MS);
+
+      // A profile genuinely IN USE: a real, FRESH `.parentlock` marks a live owner — spared.
+      const live = path.join(testCacheDir, 'playwright_firefoxdev_profile-live');
+      mkdirSync(live, { recursive: true });
+      writeFileSync(path.join(live, 'preferences.json'), '{}');
+      writeFileSync(path.join(live, '.parentlock'), ''); // fresh mtime ≈ now → treated as live
+      utimesSync(live, young, young); // dir is old, but the lock file is fresh
+
       // A young, empty, NON-matching dir (e.g. the tsx compile cache) must be left alone.
       const otherEmpty = path.join(testCacheDir, 'tsx-1000');
       mkdirSync(otherEmpty, { recursive: true });
@@ -170,9 +181,10 @@ describe('cleanup-utils', () => {
 
       expect(directoryFullyRemoved(emptyArtifacts)).toBe(true);
       expect(directoryFullyRemoved(emptyProfile)).toBe(true);
-      expect(directoryExists(active)).toBe(true);
+      expect(directoryFullyRemoved(orphaned)).toBe(true);
+      expect(directoryExists(live)).toBe(true);
       expect(directoryExists(otherEmpty)).toBe(true);
-      expect(result.removed).toBe(2);
+      expect(result.removed).toBe(3);
       expect(result.errors).toBe(0);
     });
 

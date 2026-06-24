@@ -36,6 +36,11 @@ Two orchestrators handle research sessions:
 
 `runResearch` in `IResearchOrchestration` is the single internal entry point, implemented in `src/orchestration/research-orchestration-service.ts`.
 
+**LLM-call conventions.** The coordinator, evaluator, final synthesis, JSON-repair, and knowledge-extraction calls all go through `completeSimple` + `buildSafeOptions` (`src/core/llm/llm-utils.ts`), and the researcher sub-agents through `createAgentSession`. Two conventions apply uniformly:
+
+- **Thinking is off by default.** These calls emit structured JSON or cited reports, not open-ended reasoning, so a chain-of-thought block only consumes the output-token budget (and can truncate the answer before any text is produced) for at most a marginal quality gain that does not justify the latency and token cost. The level is the single `PI_RESEARCH_LLM_THINKING_LEVEL` knob (default `off`), passed through pi's model-agnostic reasoning option — pi clamps it to whatever each provider supports.
+- **Output budgets are sized per role**, clamped to the model's real ceiling: a generous budget for the plan/decision (`PLANNING_MAX_TOKENS`) and a larger one for the final report (`SYNTHESIS_MAX_TOKENS`). The final report *is* the evaluator's `synthesize` response, so that call carries the report budget. A mid-round evaluation that cannot be parsed continues the existing agenda rather than finalizing early, so a transient model hiccup never truncates a run.
+
 ---
 
 ### Research Tools

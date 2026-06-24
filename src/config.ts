@@ -60,11 +60,42 @@ export const ConfigSchema = Type.Object({
   SEARCH_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 45000 }),
   /** TUI refresh debounce in milliseconds (default: 100ms) */
   TUI_REFRESH_DEBOUNCE_MS: Type.Number({ minimum: 0, maximum: 1000, default: 100 }),
-  /** Timeout for individual browser tasks (default: 10000ms) */
+  /** Queue-wait / overhead margin (ms) added on top of each browser operation's own nav
+   *  timeout to form its scheduler task-timeout ceiling: a search task times out after
+   *  SEARCH_TIMEOUT_MS + this, a scrape after SCRAPE_TIMEOUT_MS + this. Sized so a task is
+   *  never killed before it has used its full nav budget plus time waiting in the queue.
+   *  (default: 10000) */
   BROWSER_TASK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Timeout for coordinator/evaluator/repair/knowledge LLM calls in ms (default: 300000 = 5 min, range: 60s-600s).
    *  Not exposed in TUI — controlled via PI_RESEARCH_LLM_TIMEOUT_MS env var. */
   LLM_TIMEOUT_MS: Type.Number({ minimum: 60000, maximum: 600000, default: 300000 }),
+  /** Chain-of-thought "thinking" level for the engine's own LLM calls (coordinator,
+   *  evaluator, synthesis, JSON-repair, knowledge extraction) AND the researcher
+   *  sub-agents. Default 'off': these calls emit structured JSON / cited reports, not
+   *  open-ended reasoning, so thinking only burns the output-token budget (often
+   *  truncating before the JSON/report block) and adds latency for at most a marginal
+   *  quality gain that does not justify the cost on these structured calls.
+   *  Deliberately NOT exposed in the /research-config TUI — an advanced knob set only
+   *  via the PI_RESEARCH_LLM_THINKING_LEVEL env var. 'off' maps to the provider's
+   *  thinking-disabled request (e.g. z.ai thinking:{type:'disabled'}). */
+  LLM_THINKING_LEVEL: Type.Union([
+    Type.Literal('off'),
+    Type.Literal('minimal'),
+    Type.Literal('low'),
+    Type.Literal('medium'),
+    Type.Literal('high'),
+  ], { default: 'off' }),
+  /** Max output tokens for the coordinator plan + mid-round evaluator decision (and,
+   *  when the evaluator synthesizes mid-round, the report). Default 16384. The blanket
+   *  4096 cap previously throttled every call and could be exhausted by a thinking block
+   *  before any text was emitted. Capped at the model's real ceiling at call time.
+   *  Not exposed in TUI — controlled via PI_RESEARCH_PLANNING_MAX_TOKENS env var. */
+  PLANNING_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 16384 }),
+  /** Max output tokens for the final synthesized research report (the forced-synthesis
+   *  evaluator call). Default 32768 so a full cited report is never truncated. Capped at
+   *  the model's real maxTokens at call time.
+   *  Not exposed in TUI — controlled via PI_RESEARCH_SYNTHESIS_MAX_TOKENS env var. */
+  SYNTHESIS_MAX_TOKENS: Type.Number({ minimum: 1024, maximum: 131072, default: 32768 }),
   /** LLM Model override for researcher sub-agents and knowledge synthesis.
    *  Format: provider/model-id (e.g. google/gemini-2.0-flash-001) or just model-id.
    *  When set, this overrides ctx.model for researcher sub-agents (both deep and quick)
@@ -142,6 +173,9 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS',
   'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS',
   'PI_RESEARCH_LLM_TIMEOUT_MS',
+  'PI_RESEARCH_LLM_THINKING_LEVEL',
+  'PI_RESEARCH_PLANNING_MAX_TOKENS',
+  'PI_RESEARCH_SYNTHESIS_MAX_TOKENS',
   'PI_RESEARCH_MIGRATION_STRATEGY',
   'PI_RESEARCH_CONSOLE_LOG',
   'PI_RESEARCH_MODEL',
@@ -460,6 +494,9 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
+    PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
+    PI_RESEARCH_PLANNING_MAX_TOKENS: String(config.PLANNING_MAX_TOKENS),
+    PI_RESEARCH_SYNTHESIS_MAX_TOKENS: String(config.SYNTHESIS_MAX_TOKENS),
     PI_RESEARCH_MIGRATION_STRATEGY: config.MIGRATION_STRATEGY,
     PI_RESEARCH_CONSOLE_LOG: String(config.CONSOLE_LOG),
     ...(config.RESEARCH_MODEL ? { PI_RESEARCH_MODEL: config.RESEARCH_MODEL } : {}),
@@ -646,6 +683,9 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS, 2000, 120000),
     LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS, 60000, 600000),
+    LLM_THINKING_LEVEL: parseEnvString(e, 'PI_RESEARCH_LLM_THINKING_LEVEL', DEFAULTS.LLM_THINKING_LEVEL) as 'off' | 'minimal' | 'low' | 'medium' | 'high',
+    PLANNING_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_PLANNING_MAX_TOKENS', DEFAULTS.PLANNING_MAX_TOKENS, 1024, 131072),
+    SYNTHESIS_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_SYNTHESIS_MAX_TOKENS', DEFAULTS.SYNTHESIS_MAX_TOKENS, 1024, 131072),
     MIGRATION_STRATEGY: parseEnvString(e, 'PI_RESEARCH_MIGRATION_STRATEGY', DEFAULTS.MIGRATION_STRATEGY) as 'drop' | 're-embed' | 'backup',
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),

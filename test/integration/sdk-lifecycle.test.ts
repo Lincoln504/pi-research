@@ -28,8 +28,12 @@ const STUB_MODEL: Model<any> = {
 
 // ─── LLM + agent mocks ──────────────────────────────────────────────────────
 
-vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+// Shared mock responses + router, created via vi.hoisted() so they exist before the
+// hoisted vi.mock() factories execute. `completeSimple` is imported by the engine from
+// '@earendil-works/pi-ai/compat' (not the base package), so BOTH specifiers must be
+// mocked — otherwise the deep-research coordinator/evaluator/synthesis calls hit the
+// real network/model and the test runs live.
+const { pickResponse, planResponse } = vi.hoisted(() => {
   const synthResponse = {
     content: [{ type: 'text', text: 'Mock synthesis result.\n\nCITED LINKS\n\n1. https://example.com/sdk-test' }],
     usage: { totalTokens: 50, cost: { total: 0.001 } },
@@ -43,9 +47,7 @@ vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
     usage: { totalTokens: 50, cost: { total: 0.001 } },
     stopReason: 'stop',
   };
-
-  // Smart mock: return plan JSON for coordinator/evaluator calls, synthesis text otherwise.
-  // Detects coordinator calls by looking for 'coordinator' in the systemPrompt.
+  // Return plan JSON for coordinator/evaluator/knowledge calls, synthesis text otherwise.
   function pickResponse(args: any[]) {
     const callContext = args[1] as { systemPrompt?: string } | undefined;
     const systemPrompt = callContext?.systemPrompt ?? '';
@@ -54,7 +56,20 @@ vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
     }
     return synthResponse;
   }
+  return { pickResponse, planResponse };
+});
 
+vi.mock('@earendil-works/pi-ai', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return {
+    ...actual,
+    completeSimple: vi.fn().mockImplementation((...args: any[]) => Promise.resolve(pickResponse(args))),
+    complete: vi.fn().mockResolvedValue(planResponse),
+  };
+});
+
+vi.mock('@earendil-works/pi-ai/compat', async (importOriginal) => {
+  const actual = await importOriginal() as any;
   return {
     ...actual,
     completeSimple: vi.fn().mockImplementation((...args: any[]) => Promise.resolve(pickResponse(args))),

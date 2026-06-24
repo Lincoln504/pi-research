@@ -140,9 +140,11 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       modelRegistry,
       resourceLoader: makeResourceLoader(systemPrompt),
       // Thinking/reasoning is disabled for researcher agents: they do retrieval and
-      // synthesis from scraped pages, not open-ended reasoning. Keeping it off
-      // reduces latency and token cost with no quality benefit for this use case.
-      thinkingLevel: 'off',
+      // synthesis from scraped pages, not open-ended reasoning. Keeping it off reduces
+      // latency and token cost for at most a marginal quality gain in this use case.
+      // Honors the system-wide PI_RESEARCH_LLM_THINKING_LEVEL override (default 'off').
+      // pi-coding-agent clamps the level to whatever the chosen model supports.
+      thinkingLevel: config?.LLM_THINKING_LEVEL ?? 'off',
     });
 
     // Customize thinking label for researchers to distinguish them in the TUI.

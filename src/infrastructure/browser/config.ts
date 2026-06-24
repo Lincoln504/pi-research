@@ -104,11 +104,16 @@ export function getBrowserEnv(config?: Config): NodeJS.ProcessEnv {
     } else {
         delete env['PLAYWRIGHT_BROWSERS_PATH'];
     }
-    // Pass the session log file path so thread-workers can write lifecycle and
-    // error events to the same log. Falls back to the global log if not set.
-    const logFilePath = getLogger().getLogFilePath();
-    if (logFilePath) {
-        env['PI_RESEARCH_LOG_FILE'] = logFilePath;
+    // Tell thread-workers where to write their lifecycle/error log. Precedence:
+    //   1. A user-set PI_RESEARCH_LOG_FILE (already copied from process.env above) wins —
+    //      never clobber an explicit override.
+    //   2. Otherwise propagate the resolved main-process log path so workers log to the
+    //      same file. That path already honors the user's PI_RESEARCH_LOG_PATH.
+    if (!env['PI_RESEARCH_LOG_FILE']) {
+        const logFilePath = getLogger().getLogFilePath();
+        if (logFilePath) {
+            env['PI_RESEARCH_LOG_FILE'] = logFilePath;
+        }
     }
     // Redirect the worker's temp dir to a disk-backed profile directory so
     // Playwright/Camoufox per-instance profiles do not land on a tmpfs (RAM)

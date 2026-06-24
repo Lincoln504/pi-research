@@ -126,9 +126,17 @@ is broad — depth 1 handles broad topics by decomposing them internally.
 
 ## When not to use this
 
-- Reading files in this project → Read/Grep
+**This is WEB / internet research ONLY.** Never use it to investigate *this* project — its
+source, configuration, architecture, tests, logs, or anything answerable on this machine.
+For project/codebase research, use your own file and shell tools:
+
+- Reading or searching files in this project → Read/Grep
+- Investigating this repo's code, bugs, config, or architecture → Read/Grep/Bash
 - Running commands or tests → Bash directly
 - Anything answerable from the local codebase or session → your own tools
+
+Reach for `research` only when the answer lives on the public internet (or in the
+previously-researched knowledge store).
 
 ---
 

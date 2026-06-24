@@ -5,7 +5,7 @@
  * using an LLM-based correction pass.
  */
 
-import type { Model, AssistantMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
+import type { Model, AssistantMessage, SimpleStreamOptions, ModelThinkingLevel } from '@earendil-works/pi-ai';
 import { logger } from '../../logger.ts';
 import { extractJson } from '../../utils/json-utils.ts';
 import { withTimeout, getLlmTimeoutMs } from './llm-timeout.ts';
@@ -28,6 +28,12 @@ export interface JsonRepairOptions {
   serviceName?: string;
   /** Abort signal */
   signal?: AbortSignal;
+  /** Max output tokens for the repair pass. Should match the budget of the call being
+   *  repaired so a large payload (e.g. a full synthesized report) is not re-truncated.
+   *  Defaults to a generous cap; always clamped to the model's own ceiling. */
+  maxTokens?: number;
+  /** Thinking level for the repair pass (default 'off' — repair emits JSON, not reasoning). */
+  thinkingLevel?: ModelThinkingLevel;
 }
 
 /**
@@ -54,7 +60,7 @@ export async function repairJsonWithLlm<T = any>(
   auth: { apiKey: string; headers?: Record<string, string> },
   options: JsonRepairOptions
 ): Promise<T | null> {
-  const { model, context, schema, serviceName = 'RepairService', signal } = options;
+  const { model, context, schema, serviceName = 'RepairService', signal, maxTokens = 16384, thinkingLevel = 'off' } = options;
   
   logger.warn(`[${serviceName}] JSON parse failed; attempting agentic salvage`);
 
@@ -96,7 +102,7 @@ Return ONLY the valid JSON object. No prose before or after.`;
         }, buildSafeOptions(model, {
           ...auth,
           signal
-        }, 4096)),
+        }, maxTokens, thinkingLevel)),
         llmTimeout, `agentic-repair-${serviceName}`,
       );
 
