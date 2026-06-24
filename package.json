@@ -34,7 +34,7 @@
     "scripts/setup.cjs",
     "scripts/cleanup.cjs",
     "LICENSE",
-    "THIRD-PARTY-NOTICES.md",
+    "docs/THIRD-PARTY-NOTICES.md",
     "README.md"
   ],
   "repository": {
