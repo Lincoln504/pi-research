@@ -22,7 +22,7 @@ export default defineConfig({
       'test/integration/research-knowledge-search.test.ts',
       'test/integration/setup.test.ts',
       'test/integration/shutdown.test.ts',
-      'test/integration/skill-install-cli.test.ts',
+      'test/integration/skill-preuninstall.test.ts',
     ],
     exclude: ['node_modules', 'dist', '.tmp'],
     setupFiles: ['./test/setup/integration.ts'],

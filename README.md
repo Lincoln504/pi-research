@@ -58,23 +58,27 @@ The first install pulls the stealth browser engine, which takes a few minutes.
 
 ### Install the skill into your coding agents
 
-After the global CLI is installed, link the `research` skill into the coding
-agents on your machine so any of them can call it:
+Installation is driven from the pi extension's config menu. Run `/research-config`
+and choose:
+
+- **Install Skill in Coding Agents** — symlinks the `pi-research` skill into Claude
+  and Codex (whichever are installed on your machine).
+- **Uninstall Skill from Coding Agents** — removes the symlinks it created.
+
+The installer detects which agents are present, symlinks the skill into each
+(`~/.claude/skills`, `~/.codex/skills`), never overwrites an unrelated skill
+already occupying that slot, and records everything it creates so uninstall
+removes exactly that — also automatically on `npm uninstall`.
+
+Cursor is not auto-installed: it has no global skills directory and only reads
+project-level `.cursor/skills/`. To use the skill in Cursor, symlink it into a
+project: `ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" .cursor/skills/pi-research`.
+
+Prefer to do Claude/Codex by hand too? It is just a symlink, e.g.:
 
 ```bash
-pi-research skills                 # detect installed harnesses + show install state
-pi-research install-skill --all    # symlink the skill into all detected, confirmed targets
-pi-research install-skill cursor   # opt into a specific (path-unverified) target by name
-pi-research uninstall-skill --all  # remove every install pi-research created
+ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" ~/.claude/skills/pi-research
 ```
-
-`--all` covers the confirmed targets (Claude Code at `~/.claude/skills`, pi at
-`~/.pi/skills`). Other targets — Cursor, Codex, and the cross-tool
-`~/.agents/skills` convention — are opt-in by name because their skill paths are
-community-reported rather than officially documented. The installer never
-overwrites a non-pi-research `research` skill, records everything it creates, and
-removes exactly that on `uninstall-skill` (and automatically on `npm uninstall`).
-Use `--copy` instead of a symlink, or `--dry-run` to preview.
 
 ## Usage
 
@@ -90,7 +94,7 @@ pi -p "research the latest developments in WebAssembly"
 ## Documentation
 
 - [Pi extension](docs/PI-EXTENSION.md) — commands, the live TUI, and the extension lifecycle.
-- [Agent skill](skills/research/README.md) — the portable skill that gives any coding agent research via the CLI.
+- [Agent skill](skills/pi-research/README.md) — the portable skill that gives any coding agent research via the CLI.
 - [OpenClaw plugin](docs/OPENCLAW.md) — install and use pi-research inside OpenClaw.
 - [SDK & configuration](docs/SDK.md) — the programmatic library, plus the full configuration model and every environment variable.
 - [Architecture](docs/ARCHITECTURE.md) — how the engine is built: layers, services, and the research pipeline.

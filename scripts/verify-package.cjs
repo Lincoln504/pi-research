@@ -48,8 +48,8 @@ const REQUIRED = [
   // CLI binary (the `pi-research` bin in package.json)
   'dist/cli.mjs',
   // Agent skill — the launcher + definition that coding agents load
-  'skills/research/SKILL.md',
-  'skills/research/scripts/run.mjs',
+  'skills/pi-research/SKILL.md',
+  'skills/pi-research/scripts/run.mjs',
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',
@@ -177,7 +177,7 @@ function verifyInstalled(pkgDir) {
   // error on Unix, while Windows' generated shims hide the breakage — so assert
   // it here where the file content is on disk.
   const SHEBANG = '#!/usr/bin/env node';
-  for (const rel of ['dist/cli.mjs', 'skills/research/scripts/run.mjs']) {
+  for (const rel of ['dist/cli.mjs', 'skills/pi-research/scripts/run.mjs']) {
     const full = path.join(pkgDir, rel);
     if (!fs.existsSync(full)) continue; // already reported missing above
     const firstLine = fs.readFileSync(full, 'utf8').split('\n', 1)[0];

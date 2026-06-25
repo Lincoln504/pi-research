@@ -13,7 +13,7 @@
  *   worker   -> src/infrastructure/browser/thread-worker.mjs  (browser worker)
  *   openclaw -> dist/openclaw-entry.js (+ dist/prompts, dist/thread-worker.mjs)
  *   cli      -> dist/cli.mjs                 (pi-research CLI binary, shebang)
- *   skill    -> skills/research/scripts/run.mjs  (skill launcher, shebang)
+ *   skill    -> skills/pi-research/scripts/run.mjs  (skill launcher, shebang)
  *
  * Note: `packages: 'external'` already externalizes every bare/`node:` import,
  * so the old `--external:node:*` flag was redundant — output is identical.
@@ -75,8 +75,8 @@ const TARGETS = {
   skill: () =>
     esbuild.build({
       ...COMMON,
-      entryPoints: [p('skills', 'research', 'scripts', 'run.ts')],
-      outfile: p('skills', 'research', 'scripts', 'run.mjs'),
+      entryPoints: [p('skills', 'pi-research', 'scripts', 'run.ts')],
+      outfile: p('skills', 'pi-research', 'scripts', 'run.mjs'),
       banner: { js: SHEBANG },
     }),
 };

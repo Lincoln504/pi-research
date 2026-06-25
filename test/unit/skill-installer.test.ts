@@ -2,7 +2,7 @@
  * Skill installer unit tests.
  *
  * Hermetic: every test runs against a throwaway HOME (opts.home) and points at
- * the real bundled skills/research as the source, so nothing touches the
+ * the real bundled skills/pi-research as the source, so nothing touches the
  * developer's actual ~/.claude etc. The suite asserts the safety-critical
  * invariants — never clobber a foreign skill, never delete what we don't own,
  * symmetric install→uninstall, and an accurate manifest — not just happy paths.
@@ -21,10 +21,13 @@ import {
   readManifest,
   getManifestPath,
   resolveSkillSourceDir,
+  skillInstallCandidates,
+  skillUninstallCandidates,
+  SKILL_AGENT_TARGETS,
 } from '../../src/skill-install/skill-installer.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const SKILL_SRC = path.join(ROOT, 'skills', 'research');
+const SKILL_SRC = path.join(ROOT, 'skills', 'pi-research');
 
 let HOME: string;
 const opts = () => ({ home: HOME, skillSourceDir: SKILL_SRC });
@@ -43,8 +46,55 @@ function mkHarnessBase(id: string) {
 }
 function skillPathFor(id: string): string {
   const def = HARNESSES.find(h => h.id === id)!;
-  return path.join(HOME, def.skillsDir, 'research');
+  return path.join(HOME, def.skillsDir, 'pi-research');
 }
+
+describe('SKILL_AGENT_TARGETS (in-app installer scope)', () => {
+  it('targets exactly Claude and Codex — never Cursor (project-only, no global dir), pi, or ~/.agents', () => {
+    expect([...SKILL_AGENT_TARGETS]).toEqual(['claude-code', 'codex']);
+    expect(SKILL_AGENT_TARGETS).not.toContain('cursor');
+    expect(SKILL_AGENT_TARGETS).not.toContain('pi');
+    expect(SKILL_AGENT_TARGETS).not.toContain('agents');
+  });
+  it('every target is a real harness id', () => {
+    for (const id of SKILL_AGENT_TARGETS) {
+      expect(HARNESSES.some(h => h.id === id)).toBe(true);
+    }
+  });
+});
+
+describe('install/uninstall gating candidates', () => {
+  it('install candidates require the agent ROOT dir to exist (never creates it)', () => {
+    // No agent dirs yet → no install candidates.
+    expect(skillInstallCandidates({ home: HOME }).map(d => d.id)).toEqual([]);
+
+    // Create only ~/.claude → only Claude becomes a candidate; Codex still absent.
+    fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
+    expect(skillInstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude-code']);
+
+    // Add ~/.codex → both are candidates.
+    fs.mkdirSync(path.join(HOME, '.codex'), { recursive: true });
+    expect(skillInstallCandidates({ home: HOME }).map(d => d.id).sort()).toEqual(['claude-code', 'codex']);
+  });
+
+  it('uninstall candidates require the skill to be actually installed (owned)', () => {
+    fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(HOME, '.codex'), { recursive: true });
+    // Root dirs exist but nothing installed yet → no uninstall candidates.
+    expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual([]);
+
+    // Install into Claude only → it (and only it) becomes an uninstall candidate.
+    installSkill(['claude-code'], { home: HOME });
+    expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude-code']);
+  });
+
+  it('a foreign skill occupying the slot is NOT an uninstall candidate', () => {
+    const sp = path.join(HOME, '.claude', 'skills', 'pi-research');
+    fs.mkdirSync(sp, { recursive: true });
+    fs.writeFileSync(path.join(sp, 'SKILL.md'), 'name: pi-research\n# someone elses skill', 'utf-8');
+    expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual([]);
+  });
+});
 
 describe('resolveSkillSourceDir', () => {
   it('locates the real bundled skill (SKILL.md present)', () => {

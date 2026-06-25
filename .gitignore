@@ -104,4 +104,4 @@ VERIFICATION_REPORT.md
 
 
 # Generated skill launcher (built by scripts/build.cjs skill on prepare)
-skills/research/scripts/run.mjs
+skills/pi-research/scripts/run.mjs

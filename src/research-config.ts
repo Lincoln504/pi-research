@@ -44,6 +44,14 @@ import {
 import { logger } from './logger.ts';
 import { formatTimeAgo, formatDuration } from './utils/text-utils.ts';
 import { buildDefaultDebugLogPath } from './utils/log-utils.ts';
+import {
+  HARNESSES,
+  installSkill,
+  uninstallSkill,
+  skillInstallCandidates,
+  skillUninstallCandidates,
+  SKILL_AGENT_TARGETS,
+} from './skill-install/skill-installer.ts';
 import * as path from 'node:path';
 
 // ============================================================================
@@ -88,6 +96,14 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
   const depthLabels: Record<number, string> = { 1: 'normal', 2: 'deep', 3: 'ultra' };
 
   const anyKnowledgeStore = config.KNOWLEDGE_STORE_MODE !== 'none';
+
+  // Coding-agent skill install/uninstall gating, computed once from disk:
+  //  • Install is offered only when a target agent's ROOT config folder already
+  //    exists (~/.claude or ~/.codex) — we never create an agent's home dir.
+  //  • Uninstall is offered only when the skill is actually installed (an owned
+  //    symlink/copy at ~/.<agent>/skills/pi-research) — a deeper-level check.
+  const anyAgentRootPresent = skillInstallCandidates().length > 0;
+  const skillInstalledAnywhere = skillUninstallCandidates().length > 0;
 
   const initialItems: SettingItem[] = [
     // ── Project-scoped settings (saved per-directory) ──
@@ -140,7 +156,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'EMBEDDING_MODEL',
         label: 'Embedding Model',
-        description: 'Vector model for semantic search. Changing this renames current data to a backup and starts fresh.',
+        description: 'Vector model for semantic search. Changing it clears the current knowledge store and starts fresh.',
         currentValue: config.EMBEDDING_MODEL.split('/').pop()!,
         values: SUPPORTED_MODELS.map(m => m.id.split('/').pop()!),
       },
@@ -216,6 +232,28 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       currentValue: 'run',
       values: ['run'],
     },
+
+    // ── Coding-agent skill ──
+    // Install only shows when a target agent's root config dir exists; uninstall
+    // only shows when the skill is actually installed somewhere.
+    ...(anyAgentRootPresent ? [
+      {
+        id: 'ACTION_SKILL_INSTALL',
+        label: 'Install in External Agents',
+        description: 'Symlink the pi-research skill into your other coding agents (Claude, Codex) so they can run web research too. Only agents already set up on this machine are touched.',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
+    ...(skillInstalledAnywhere ? [
+      {
+        id: 'ACTION_SKILL_UNINSTALL',
+        label: 'Remove from External Agents',
+        description: 'Remove the pi-research skill from your other coding agents (Claude, Codex). Only the symlinks this extension created are removed; unrelated skills are left untouched.',
+        currentValue: 'run',
+        values: ['run'],
+      },
+    ] as SettingItem[] : []),
   ];
 
   setInteractiveTuiActive(true);
@@ -335,6 +373,10 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               wrappedDone({ type: 'action', action: 'metrics' });
             } else if (id === 'ACTION_LOGS_CLEAR') {
               wrappedDone({ type: 'action', action: 'logs_clear' });
+            } else if (id === 'ACTION_SKILL_INSTALL') {
+              wrappedDone({ type: 'action', action: 'skill_install' });
+            } else if (id === 'ACTION_SKILL_UNINSTALL') {
+              wrappedDone({ type: 'action', action: 'skill_uninstall' });
             }
 
           },
@@ -456,6 +498,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             }
             break;
           }
+          case 'skill_install':
+            await installSkillAction(ctx, pi);
+            break;
+          case 'skill_uninstall':
+            await uninstallSkillAction(ctx, pi);
+            break;
         }
       }
     });
@@ -469,6 +517,130 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
 // ============================================================================
 // Action Handlers (Internal)
 // ============================================================================
+
+/** id → human label for the coding agents the installer targets. */
+const HARNESS_LABEL: Record<string, string> = Object.fromEntries(
+  HARNESSES.map(h => [h.id, h.label]),
+);
+
+/**
+ * Symlink the pi-research skill into each target coding agent (Claude, Codex)
+ * whose ROOT config folder already exists. Agents without a config folder are
+ * skipped — we never create an agent's home dir. An agent slot already occupied
+ * by an unrelated skill is left untouched.
+ */
+async function installSkillAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
+  try {
+    const presentById = new Map(skillInstallCandidates().map(d => [d.id, true] as const));
+    const targets = SKILL_AGENT_TARGETS.filter(id => presentById.get(id));
+
+    // resolveSkillSourceDir (inside installSkill) throws if the bundled SKILL.md
+    // cannot be located — caught below and surfaced to the user.
+    const results = targets.length ? installSkill([...targets]) : [];
+    const resById = new Map(results.map(r => [r.tool, r]));
+
+    const lines: string[] = ['## pi-research skill — install', ''];
+    let ok = 0;
+    for (const id of SKILL_AGENT_TARGETS) {
+      const label = HARNESS_LABEL[id] ?? id;
+      if (!presentById.get(id)) {
+        lines.push(`- **${label}** — not detected on this machine; skipped.`);
+        continue;
+      }
+      const r = resById.get(id);
+      switch (r?.status) {
+        case 'installed':
+          ok++;
+          lines.push(`- **${label}** — ${r.type === 'copy' ? 'copied (symlink unavailable)' : 'symlinked'} → \`${r.path}\``);
+          break;
+        case 'already-installed':
+          ok++;
+          lines.push(`- **${label}** — already installed → \`${r.path}\``);
+          break;
+        case 'skipped-foreign':
+          lines.push(`- **${label}** — a different skill already occupies this slot; left untouched.`);
+          break;
+        case 'error':
+          lines.push(`- **${label}** — failed: ${r.message ?? 'unknown error'}`);
+          break;
+        default:
+          lines.push(`- **${label}** — ${r?.status ?? 'no result'}`);
+      }
+    }
+    lines.push('', 'The skill activates automatically — just ask the agent to pi-research something.');
+
+    pi.sendMessage({ customType: 'skill-install-result', content: lines.join('\n'), display: true });
+    if (ctx.hasUI) {
+      if (ok > 0) ctx.ui.notify(`Skill installed for ${ok} coding agent${ok === 1 ? '' : 's'}.`, 'info');
+      else if (targets.length === 0) ctx.ui.notify('No coding agents detected (Claude, Codex).', 'warning');
+      else ctx.ui.notify('No agents installed — see the message for details.', 'warning');
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error(`[research-config] Skill install failed: ${msg}`);
+    if (ctx.hasUI) ctx.ui.notify(`Skill install failed: ${msg}`, 'error');
+  }
+}
+
+/**
+ * Remove the pi-research skill symlinks this extension created from Claude and
+ * Codex. Only installs we own are removed; foreign skills are kept.
+ */
+async function uninstallSkillAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
+  // Deeper-level gate than install: only act on agents where the skill is
+  // actually installed (an owned symlink/copy present on disk).
+  const installedTargets = skillUninstallCandidates();
+  if (installedTargets.length === 0) {
+    if (ctx.hasUI) ctx.ui.notify('The skill is not installed in any coding agent.', 'info');
+    return;
+  }
+
+  const names = installedTargets.map(d => HARNESS_LABEL[d.id] ?? d.id).join(' and ');
+  const confirmed = await ctx.ui.confirm(
+    'Uninstall Skill',
+    `Remove the pi-research skill from ${names}? (Only symlinks this extension created are removed.)`,
+  );
+  if (!confirmed) return;
+  try {
+    const results = uninstallSkill(installedTargets.map(d => d.id));
+
+    const lines: string[] = ['## pi-research skill — uninstall', ''];
+    let removed = 0;
+    if (results.length === 0) {
+      lines.push('- Nothing to remove — the skill was not installed in any coding agent.');
+    } else {
+      for (const r of results) {
+        const label = HARNESS_LABEL[r.tool] ?? r.tool;
+        switch (r.status) {
+          case 'removed':
+            removed++;
+            lines.push(`- **${label}** — removed → \`${r.path}\``);
+            break;
+          case 'not-present':
+            lines.push(`- **${label}** — was not installed.`);
+            break;
+          case 'skipped-foreign':
+            lines.push(`- **${label}** — not ours; left untouched.`);
+            break;
+          case 'error':
+            lines.push(`- **${label}** — failed: ${r.message ?? 'unknown error'}`);
+            break;
+          default:
+            lines.push(`- **${label}** — ${r.status}`);
+        }
+      }
+    }
+
+    pi.sendMessage({ customType: 'skill-uninstall-result', content: lines.join('\n'), display: true });
+    if (ctx.hasUI) {
+      ctx.ui.notify(removed > 0 ? `Skill removed from ${removed} coding agent${removed === 1 ? '' : 's'}.` : 'No installs were removed.', 'info');
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error(`[research-config] Skill uninstall failed: ${msg}`);
+    if (ctx.hasUI) ctx.ui.notify(`Skill uninstall failed: ${msg}`, 'error');
+  }
+}
 
 async function runHealthCheckAction(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
   if (ctx.hasUI) {

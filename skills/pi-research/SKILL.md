@@ -1,5 +1,5 @@
 ---
-name: research
+name: pi-research
 description: >-
   Multi-agent web research for any coding agent. Use for anything requiring
   current information from the internet — news, trends, product/service/company
@@ -18,7 +18,7 @@ metadata:
 allowed-tools: Bash(node:*)
 ---
 
-# research — pi-research skill
+# pi-research — pi-research skill
 
 Run research by invoking the launcher with your **Bash** tool. Replace
 `<SKILL_DIR>` with this file's parent directory.
@@ -135,7 +135,7 @@ For project/codebase research, use your own file and shell tools:
 - Running commands or tests → Bash directly
 - Anything answerable from the local codebase or session → your own tools
 
-Reach for `research` only when the answer lives on the public internet (or in the
+Reach for `pi-research` only when the answer lives on the public internet (or in the
 previously-researched knowledge store).
 
 ---

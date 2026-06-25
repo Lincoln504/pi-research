@@ -3,7 +3,7 @@
 A portable [Agent Skill](https://agentskills.io/specification) that gives any
 coding agent **multi-agent web research** by driving the
 [pi-research](https://github.com/Lincoln504/pi-research) engine. It is the same
-engine the `pi` extension uses, packaged as a skill so Claude Code, Cursor,
+engine the `pi` extension uses, packaged as a skill so Claude, Cursor,
 Codex, Gemini CLI, and other Agent-Skills-compatible tools can use it.
 
 ## What it exposes
@@ -46,28 +46,25 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 
 ## Install the skill
 
-**Automated (recommended).** With the global CLI installed
-(`npm install -g @lincoln504/pi-research`), let the CLI detect your harnesses and
-symlink the skill in:
+**Recommended.** From the pi extension, run `/research-config` and choose
+**Install Skill in Coding Agents**. It detects Claude and Codex and symlinks this
+skill into each one that is installed. **Uninstall Skill from Coding Agents**
+removes those symlinks (cleanup also runs automatically on `npm uninstall`).
 
-```bash
-pi-research skills                 # show detected harnesses + install state
-pi-research install-skill --all    # symlink into all detected, confirmed targets
-pi-research uninstall-skill --all  # remove (also runs on npm uninstall)
-```
+Cursor is not auto-installed — it has no global skills directory and only reads
+project-level `.cursor/skills/`. Symlink it per-project instead (see the table).
 
-**Manual.** Or copy/symlink this `research/` directory into your agent's skills folder:
+**Manual.** Or symlink this `pi-research/` directory into your agent's skills folder:
 
-| Agent | Location | Auto-installer id |
-|-------|----------|-------------------|
-| Claude Code (personal) | `~/.claude/skills/research/` | `claude-code` |
-| Claude Code (project)  | `<project>/.claude/skills/research/` | — |
-| pi                     | `~/.pi/skills/research/` | `pi` |
-| Cursor                 | `~/.cursor/skills/research/` | `cursor` (opt-in) |
-| Codex CLI              | `~/.codex/skills/research/` | `codex` (opt-in) |
-| Cross-client default   | `~/.agents/skills/research/` | `agents` (opt-in) |
+| Agent | Location |
+|-------|----------|
+| Claude (personal) | `~/.claude/skills/pi-research/` |
+| Claude (project)   | `<project>/.claude/skills/pi-research/` |
+| Codex CLI (personal) | `~/.codex/skills/pi-research/` |
+| Codex CLI (project)  | `<project>/.codex/skills/pi-research/` |
+| Cursor (project-only) | `<project>/.cursor/skills/pi-research/` |
 
-Then just ask your agent to research something — its skill system matches the
+Then just ask your agent to pi-research something — its skill system matches the
 `description` in `SKILL.md` and activates this skill automatically.
 
 ## Usage from an agent

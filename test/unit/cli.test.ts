@@ -23,7 +23,7 @@ import { parseArgs, UsageError, EXIT } from '../../src/cli.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CLI = path.join(ROOT, 'dist', 'cli.mjs');
-const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'research', 'scripts', 'run.mjs');
+const SKILL_LAUNCHER = path.join(ROOT, 'skills', 'pi-research', 'scripts', 'run.mjs');
 
 // The subprocess suites below spawn the BUILT artifacts (dist/cli.mjs and the
 // skill launcher run.mjs). These are produced by `npm run prepare` on install,

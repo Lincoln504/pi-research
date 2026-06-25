@@ -46,19 +46,31 @@ export interface HarnessDef {
  * can override $HOME.
  */
 export const HARNESSES: readonly HarnessDef[] = [
-  { id: 'claude-code', label: 'Claude Code', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
+  { id: 'claude-code', label: 'Claude', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
   { id: 'pi', label: 'pi', baseDir: '.pi', skillsDir: path.join('.pi', 'skills'), confidence: 'confirmed' },
   { id: 'cursor', label: 'Cursor', baseDir: '.cursor', skillsDir: path.join('.cursor', 'skills'), confidence: 'partial', note: 'Cursor project-level skills are documented; the global ~/.cursor/skills path is community-reported.' },
   { id: 'codex', label: 'OpenAI Codex CLI', baseDir: '.codex', skillsDir: path.join('.codex', 'skills'), confidence: 'unverified', note: 'Codex skills support is emerging; path not confirmed by official docs.' },
   { id: 'agents', label: 'Cross-tool (~/.agents/skills)', baseDir: '.agents', skillsDir: path.join('.agents', 'skills'), confidence: 'unverified', note: 'Proposed Universal Agents convention; not yet a ratified standard.' },
 ] as const;
 
-const SKILL_NAME = 'research';
+const SKILL_NAME = 'pi-research';
 const PACKAGE_NAME = '@lincoln504/pi-research';
+
+/**
+ * The coding agents the in-app installer (the /research-config TUI) targets:
+ * Claude and Codex. Both load personal skills from a home-directory
+ * `~/.<agent>/skills/` path, so a single global symlink works.
+ *
+ * Cursor is deliberately excluded: it has no personal/global skills directory —
+ * Cursor only loads skills from a project-level `.cursor/skills/`, so a global
+ * `~/.cursor/skills` symlink would never be read. `pi` (the host itself) and the
+ * speculative `~/.agents` convention are likewise excluded from the one-click flow.
+ */
+export const SKILL_AGENT_TARGETS = ['claude-code', 'codex'] as const;
 
 export interface ManifestEntry {
   tool: string;
-  /** Absolute path of the installed skill directory (…/skills/research). */
+  /** Absolute path of the installed skill directory (…/skills/pi-research). */
   path: string;
   type: 'symlink' | 'copy';
   /** Absolute path of the skill source this was linked/copied from. */
@@ -114,7 +126,7 @@ function homeDir(opts?: { home?: string }): string {
  * Locate the bundled skill source directory (the one containing SKILL.md).
  * Robust across both the bundled CLI (dist/cli.mjs) and unbundled test runs:
  * honors PI_RESEARCH_SKILL_DIR, then walks up from this module and from cwd
- * looking for `skills/research/SKILL.md`.
+ * looking for `skills/pi-research/SKILL.md`.
  */
 export function resolveSkillSourceDir(explicit?: string): string {
   const candidates: string[] = [];
@@ -141,7 +153,7 @@ export function resolveSkillSourceDir(explicit?: string): string {
       if (fs.existsSync(path.join(c, 'SKILL.md'))) return path.resolve(c);
     } catch { /* next */ }
   }
-  throw new Error('Could not locate the bundled research skill (skills/research/SKILL.md). Set PI_RESEARCH_SKILL_DIR to its path.');
+  throw new Error('Could not locate the bundled research skill (skills/pi-research/SKILL.md). Set PI_RESEARCH_SKILL_DIR to its path.');
 }
 
 export function getManifestPath(opts?: { home?: string }): string {
@@ -183,7 +195,7 @@ function upsertEntry(manifest: Manifest, entry: ManifestEntry): void {
 // Ownership checks (never delete what isn't ours)
 // ---------------------------------------------------------------------------
 
-/** A symlink we own points at the skill source (our package's skills/research). */
+/** A symlink we own points at the skill source (our package's skills/pi-research). */
 function isOwnedSymlink(targetPath: string, expectedSource?: string): boolean {
   try {
     const st = fs.lstatSync(targetPath);
@@ -191,11 +203,11 @@ function isOwnedSymlink(targetPath: string, expectedSource?: string): boolean {
     const dest = path.resolve(path.dirname(targetPath), fs.readlinkSync(targetPath));
     if (expectedSource && path.resolve(expectedSource) === dest) return true;
     // Fallback: own it only if it points at OUR package layout, i.e. the dest
-    // ends in `pi-research/skills/research`. Requiring `pi-research` to be the
-    // immediate parent segment of `skills/research` avoids the substring false
-    // positive where a foreign path like `/home/pi-researcher/.../skills/research`
+    // ends in `pi-research/skills/pi-research`. Requiring `pi-research` to be the
+    // immediate parent segment of `skills/pi-research` avoids the substring false
+    // positive where a foreign path like `/home/pi-researcher/.../skills/pi-research`
     // (note: pi-researcher) would otherwise be misclassified as owned and deleted.
-    return /[/\\]pi-research[/\\]skills[/\\]research$/.test(dest);
+    return /[/\\]pi-research[/\\]skills[/\\]pi-research$/.test(dest);
   } catch { return false; }
 }
 
@@ -215,7 +227,7 @@ export interface DetectedHarness extends HarnessDef {
   present: boolean;
   /** Absolute skills dir. */
   absSkillsDir: string;
-  /** Absolute …/skills/research path. */
+  /** Absolute …/skills/pi-research path. */
   absSkillPath: string;
   /** Current install state of THIS skill at that path. */
   installed: 'none' | 'owned-symlink' | 'owned-copy' | 'foreign';
@@ -242,6 +254,28 @@ export function detectHarnesses(opts?: { home?: string }): DetectedHarness[] {
 
 function isSymlinkPresent(p: string): boolean {
   try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+const isTarget = (id: string): boolean =>
+  (SKILL_AGENT_TARGETS as readonly string[]).includes(id);
+
+/**
+ * Install candidates: target agents (Claude, Codex) whose ROOT config folder
+ * already exists. Gate for the in-app installer — we never create an agent's
+ * home dir, so an agent that isn't set up is simply not offered.
+ */
+export function skillInstallCandidates(opts?: { home?: string }): DetectedHarness[] {
+  return detectHarnesses(opts).filter(d => isTarget(d.id) && d.present);
+}
+
+/**
+ * Uninstall candidates: target agents where the skill is actually installed
+ * (an owned symlink/copy on disk) — a deeper-level gate than install. Foreign
+ * skills and not-installed agents are excluded.
+ */
+export function skillUninstallCandidates(opts?: { home?: string }): DetectedHarness[] {
+  return detectHarnesses(opts).filter(d =>
+    isTarget(d.id) && (d.installed === 'owned-symlink' || d.installed === 'owned-copy'));
 }
 
 // ---------------------------------------------------------------------------

@@ -90,7 +90,7 @@
     "build": "node scripts/build.cjs all",
     "prepublishOnly": "node scripts/build.cjs all",
     "prepare": "node scripts/prepare.cjs",
-    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const o=require('./openclaw.plugin.json');o.version=p.version;fs.writeFileSync('./openclaw.plugin.json',JSON.stringify(o,null,2)+'\\n');const sp='./skills/research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/version: \\\"[^\\\"]*\\\"/,'version: \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced openclaw.plugin.json + SKILL.md to v'+p.version)\" && git add openclaw.plugin.json skills/research/SKILL.md",
+    "version": "node -e \"const fs=require('fs');const p=require('./package.json');const o=require('./openclaw.plugin.json');o.version=p.version;fs.writeFileSync('./openclaw.plugin.json',JSON.stringify(o,null,2)+'\\n');const sp='./skills/pi-research/SKILL.md';let s=fs.readFileSync(sp,'utf8');s=s.replace(/version: \\\"[^\\\"]*\\\"/,'version: \\\"'+p.version+'\\\"');fs.writeFileSync(sp,s);console.log('✔ synced openclaw.plugin.json + SKILL.md to v'+p.version)\" && git add openclaw.plugin.json skills/pi-research/SKILL.md",
     "postinstall": "node scripts/setup.cjs",
     "preuninstall": "node scripts/cleanup.cjs",
     "setup": "node scripts/setup.cjs",

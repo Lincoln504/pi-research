@@ -11,7 +11,7 @@
  *   - dist/thread-worker.mjs       (browser worker, via build:worker)
  *   - dist/openclaw-entry.js       (openclaw plugin, via build:openclaw)
  *   - dist/cli.mjs                 (pi-research CLI binary)
- *   - skills/research/scripts/run.mjs  (skill launcher)
+ *   - skills/pi-research/scripts/run.mjs  (skill launcher)
  */
 
 'use strict';

@@ -10,7 +10,8 @@ const projectRoot = path.join(__dirname, '..');
 
 /**
  * Remove research-skill installs (symlinks/copies) this package created in the
- * coding-agent harnesses, so `npm uninstall` is symmetric with `install-skill`.
+ * coding-agent harnesses, so `npm uninstall` is symmetric with the in-app
+ * installer (the /research-config "Install Skill in Coding Agents" action).
  * Reads the manifest written by the installer and removes ONLY entries we still
  * own (a symlink pointing into a pi-research skills dir, or a copy carrying our
  * package marker). Foreign directories are never touched. Best-effort; never
@@ -40,7 +41,7 @@ function removeInstalledSkills() {
     try {
       if (lst.isSymbolicLink()) {
         const dest = path.resolve(path.dirname(p), readlinkSync(p));
-        owned = /[/\\]pi-research[/\\]skills[/\\]research$/.test(dest);
+        owned = /[/\\]pi-research[/\\]skills[/\\]pi-research$/.test(dest);
       } else {
         const md = readFileSync(path.join(p, 'SKILL.md'), 'utf-8');
         owned = md.includes('@lincoln504/pi-research');
