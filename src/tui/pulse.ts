@@ -7,12 +7,15 @@
 
 import { logger } from '../logger.ts';
 
-// ~60 FPS. This matches pi-tui's own render cap (MIN_RENDER_INTERVAL_MS = 16),
-// so every pulse can produce a rendered frame — pi-tui coalesces/throttles and
-// only diffs the changed line, so the cost is one short line write per frame.
-// The wave-geometry constants in research-panel-wave.ts are scaled to this
-// interval to keep the on-screen animation speed unchanged.
-const FRAME_INTERVAL_MS = 16;
+// ~30 FPS. Deliberately kept ABOVE pi-tui's render cap
+// (MIN_RENDER_INTERVAL_MS = 16). Matching the cap (16ms) makes the pulse and
+// the renderer beat against each other — render delay is max(0, 16 - elapsed),
+// so two timers of the same period produce irregular spacing (visible jitter)
+// for no gain: the wave head is one discrete cell wide, so it only steps a cell
+// roughly every other 60fps frame anyway. 33ms gives a steady, even cadence
+// where every pulse renders once. The real smoothness fix is renderImmediate()
+// in the observer (bypassing the 100ms state-refresh debounce), not raw FPS.
+const FRAME_INTERVAL_MS = 33;
 
 interface PulseSubscriber {
   (frame: number): void;
