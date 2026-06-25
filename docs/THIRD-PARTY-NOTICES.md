@@ -27,6 +27,17 @@ package free of AGPL-licensed code in its dependency tree, `package.json`
 (`camoufox-js`) uses, and the pin is behavior-neutral for this package's usage
 (no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
 
+### youtubei.js / bgutils-js / jsdom (YouTube transcripts)
+
+The `youtube_transcript` tool depends on `youtubei.js` (MIT), `bgutils-js` (MIT),
+and `jsdom` (MIT). All three are standard MIT and are resolved at install time,
+not bundled. `youtubei.js` and `bgutils-js` interact with YouTube's **unofficial**
+InnerTube API and BotGuard attestation to fetch publicly available captions
+without an API key; no credentials are used and only caption text is read.
+Operators are responsible for ensuring their use complies with YouTube's Terms of
+Service. `jsdom` provides the DOM environment the BotGuard VM requires; it is
+loaded lazily (only when the tool runs) and never at startup.
+
 ## Verifying the dependency tree
 
 ```

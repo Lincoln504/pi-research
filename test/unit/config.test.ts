@@ -108,13 +108,51 @@ describe('config (refactored)', () => {
     it('should preserve comments in USER env file', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('# This is a comment\nPI_RESEARCH_MODEL=old-model');
-      
+
       const config = { ...DEFAULTS, RESEARCH_MODEL: 'new-model' };
       saveConfig(config, 'user');
 
       const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
       expect(writtenContent).toContain('# This is a comment');
       expect(writtenContent).toContain('PI_RESEARCH_MODEL=new-model');
+    });
+
+    it('persists the YouTube knobs so they round-trip (regression: saveConfig allowlist)', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      const config = {
+        ...DEFAULTS,
+        YOUTUBE_TRANSCRIPT_MAX_VIDEOS: 4,
+        YOUTUBE_TRANSCRIPT_TIMEOUT_MS: 33000,
+        YOUTUBE_TRANSCRIPT_LANG: 'de',
+        YOUTUBE_QUERY_EVERY_N: 7,
+      };
+      saveConfig(config, 'user');
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string;
+      expect(written).toContain('PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS=4');
+      expect(written).toContain('PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS=33000');
+      expect(written).toContain('PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG=de');
+      expect(written).toContain('PI_RESEARCH_YOUTUBE_QUERY_EVERY_N=7');
+    });
+
+    it('reads the YouTube knobs back from env (defaults + overrides)', () => {
+      const defaults = createConfig({}, {});
+      expect(defaults.YOUTUBE_TRANSCRIPT_MAX_VIDEOS).toBe(3);
+      expect(defaults.YOUTUBE_QUERY_EVERY_N).toBe(5);
+      expect(defaults.YOUTUBE_TRANSCRIPT_LANG).toBe('en');
+
+      const overridden = createConfig({
+        PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS: '5',
+        PI_RESEARCH_YOUTUBE_QUERY_EVERY_N: '10',
+        PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG: 'es',
+      }, {});
+      expect(overridden.YOUTUBE_TRANSCRIPT_MAX_VIDEOS).toBe(5);
+      expect(overridden.YOUTUBE_QUERY_EVERY_N).toBe(10);
+      expect(overridden.YOUTUBE_TRANSCRIPT_LANG).toBe('es');
+
+      // out-of-range values clamp
+      const clamped = createConfig({ PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS: '99' }, {});
+      expect(clamped.YOUTUBE_TRANSCRIPT_MAX_VIDEOS).toBe(5);
     });
   });
 
@@ -323,9 +361,15 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('coerces an invalid KNOWLEDGE_STORE_MODE env value to "none"', () => {
+    it('coerces an invalid KNOWLEDGE_STORE_MODE env value to the default ("global")', () => {
       const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'invalid-mode' }, {});
-      expect(config.KNOWLEDGE_STORE_MODE).toBe('none');
+      expect(config.KNOWLEDGE_STORE_MODE).toBe('global');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('defaults KNOWLEDGE_STORE_MODE to "global" when unset', () => {
+      const config = createConfig({}, {});
+      expect(config.KNOWLEDGE_STORE_MODE).toBe('global');
       expect(() => validateConfig(config)).not.toThrow();
     });
 

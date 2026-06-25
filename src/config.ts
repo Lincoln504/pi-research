@@ -36,8 +36,8 @@ export const ConfigSchema = Type.Object({
   WORKER_THREADS: Type.Number({ minimum: 1, maximum: 10, default: 4 }),
   /** Number of concurrent tasks per pool worker process (default: 2, range: 1-10) */
   WORKER_CONCURRENCY: Type.Number({ minimum: 1, maximum: 10, default: 2 }),
-  /** Knowledge store isolation mode (default: 'none') */
-  KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal('none'), Type.Literal('project'), Type.Literal('global')], { default: 'none' }),
+  /** Knowledge store isolation mode (default: 'global' — one shared store across every directory) */
+  KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal('none'), Type.Literal('project'), Type.Literal('global')], { default: 'global' }),
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: Type.String({ default: 'onnx-community/granite-embedding-small-english-r2-ONNX' }),
   /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
@@ -54,6 +54,16 @@ export const ConfigSchema = Type.Object({
   AVG_TOKENS_PER_SCRAPE: Type.Number({ minimum: 500, maximum: 10000, default: 2500 }),
   /** Maximum number of concurrent scrapes (default: 3) */
   MAX_CONCURRENT_SCRAPES: Type.Number({ minimum: 1, maximum: 20, default: 3 }),
+  /** Max YouTube videos transcribed per youtube_transcript call (default: 3, range 1-5) */
+  YOUTUBE_TRANSCRIPT_MAX_VIDEOS: Type.Number({ minimum: 1, maximum: 5, default: 3 }),
+  /** Per-video timeout for the youtube_transcript tool in ms (default: 20000, range 5-120s) */
+  YOUTUBE_TRANSCRIPT_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 20000 }),
+  /** Preferred caption language (BCP-47 prefix) for transcripts (default: 'en') */
+  YOUTUBE_TRANSCRIPT_LANG: Type.String({ default: 'en' }),
+  /** Append 'youtube' to roughly one-in-N search queries for video discovery
+   *  (default: 5; 1 = every query). Configured via env/config file; not surfaced
+   *  in the config TUI. */
+  YOUTUBE_QUERY_EVERY_N: Type.Number({ minimum: 1, maximum: 100, default: 5 }),
   /** Health check timeout in milliseconds (default: 10000ms) */
   HEALTH_CHECK_TIMEOUT_MS: Type.Number({ minimum: 2000, maximum: 120000, default: 10000 }),
   /** Default timeout for browser page operations like search (default: 45000ms) */
@@ -495,6 +505,10 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: String(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING),
     PI_RESEARCH_AVG_TOKENS_PER_SCRAPE: String(config.AVG_TOKENS_PER_SCRAPE),
     PI_RESEARCH_MAX_CONCURRENT_SCRAPES: String(config.MAX_CONCURRENT_SCRAPES),
+    PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS: String(config.YOUTUBE_TRANSCRIPT_MAX_VIDEOS),
+    PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS: String(config.YOUTUBE_TRANSCRIPT_TIMEOUT_MS),
+    PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG: config.YOUTUBE_TRANSCRIPT_LANG,
+    PI_RESEARCH_YOUTUBE_QUERY_EVERY_N: String(config.YOUTUBE_QUERY_EVERY_N),
     PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS: String(config.BROWSER_TASK_TIMEOUT_MS),
     PI_RESEARCH_LLM_TIMEOUT_MS: String(config.LLM_TIMEOUT_MS),
     PI_RESEARCH_LLM_THINKING_LEVEL: config.LLM_THINKING_LEVEL,
@@ -666,7 +680,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10),
-    KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'none'),
+    KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'global'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
     EMBEDDING_DEVICE: parseEnvEnum(e, 'PI_RESEARCH_EMBEDDING_DEVICE', ['webgpu', 'cpu'] as const, DEFAULTS.EMBEDDING_DEVICE),
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS, 5000, 120000),
@@ -681,6 +695,10 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING', DEFAULTS.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING, 0.05, 1.0),
     AVG_TOKENS_PER_SCRAPE: parseEnvNumber(e, 'PI_RESEARCH_AVG_TOKENS_PER_SCRAPE', DEFAULTS.AVG_TOKENS_PER_SCRAPE, 500, 10000),
     MAX_CONCURRENT_SCRAPES: parseEnvNumber(e, 'PI_RESEARCH_MAX_CONCURRENT_SCRAPES', DEFAULTS.MAX_CONCURRENT_SCRAPES, 1, 20),
+    YOUTUBE_TRANSCRIPT_MAX_VIDEOS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS', DEFAULTS.YOUTUBE_TRANSCRIPT_MAX_VIDEOS, 1, 5),
+    YOUTUBE_TRANSCRIPT_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS', DEFAULTS.YOUTUBE_TRANSCRIPT_TIMEOUT_MS, 5000, 120000),
+    YOUTUBE_TRANSCRIPT_LANG: parseEnvString(e, 'PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG', DEFAULTS.YOUTUBE_TRANSCRIPT_LANG)!,
+    YOUTUBE_QUERY_EVERY_N: parseEnvNumber(e, 'PI_RESEARCH_YOUTUBE_QUERY_EVERY_N', DEFAULTS.YOUTUBE_QUERY_EVERY_N, 1, 100),
     HEALTH_CHECK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS', DEFAULTS.HEALTH_CHECK_TIMEOUT_MS, 2000, 120000),
     SEARCH_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SEARCH_TIMEOUT_MS', DEFAULTS.SEARCH_TIMEOUT_MS, 5000, 120000),
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),

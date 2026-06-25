@@ -29,7 +29,8 @@ You are being provided with the conversation history for context only.
 2. **Assign Goals**: Each researcher gets a focused goal covering a specific angle or time period.
 3. **Temporal Awareness**: Use the provided current date to generate time-sensitive queries (e.g., "latest", "2026", "current status"). Research MUST be grounded in the present.
 4. **Query Planning**: For EACH researcher, generate targeted, specific queries within the budget. Fill the budget when the topic is broad enough to warrant it, but don't pad queries for a narrow topic. Each round is planned independently — make Round 1 count.
-5. **Seed Search Burst**: All queries across all researchers are combined into a single pre-search pass that seeds the global link pool.
+5. **YouTube Discovery**: For roughly **one in {{youtube_query_every_n}}** of each researcher's queries, append the word `youtube` to the query text (e.g. `"<topic> explained youtube"`). DuckDuckGo rarely surfaces YouTube on its own, and YouTube links let researchers read video transcripts. Skip this only when the topic is clearly unsuited to video (e.g. a single numeric lookup).
+6. **Seed Search Burst**: All queries across all researchers are combined into a single pre-search pass that seeds the global link pool.
 
 ## Output Format
 

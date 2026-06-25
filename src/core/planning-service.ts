@@ -218,6 +218,7 @@ export class PlanningService implements IPlanningService {
       query_budget: queryBudget,
       complexity_guidance: complexityGuidance,
       disabled_tools_section: disabledToolsSection,
+      youtube_query_every_n: config.YOUTUBE_QUERY_EVERY_N,
     });
 
     const userMessage = `Generate the initial research plan for: "${query}"`;
@@ -358,6 +359,7 @@ export class PlanningService implements IPlanningService {
       round_phase_guidance: roundPhaseGuidance,
       max_team_size: maxTeamSize,
       query_budget: queryBudget,
+      youtube_query_every_n: config.YOUTUBE_QUERY_EVERY_N,
     });
 
     const findings = Array.from(reports.entries())

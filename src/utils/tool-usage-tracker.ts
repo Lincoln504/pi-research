@@ -11,12 +11,14 @@ import { MAX_GATHERING_CALLS, getMaxScrapeBatches } from '../constants.ts';
 import type { Config } from '../config.ts';
 
 export interface ToolLimits {
-  // Combined gathering limit (search, security_search, stackexchange, grep)
+  // Combined gathering limit (search, security_search, stackexchange, grep, youtube_transcript)
   gathering?: number;
   // Scrape limit
   scrape?: number;
   // Specific tool limits (overrides category limit if stricter)
   search?: number;
+  // youtube_transcript is capped at one call per researcher
+  youtube_transcript?: number;
   // read tool (default pi file read) has no limit
   read?: number;
 }
@@ -40,7 +42,7 @@ export class ToolUsageTracker {
    * Get category for a tool
    */
   private getCategory(toolName: string): string {
-    const gatheringTools = ['search', 'security_search', 'stackexchange', 'grep'];
+    const gatheringTools = ['search', 'security_search', 'stackexchange', 'grep', 'youtube_transcript'];
     if (gatheringTools.includes(toolName)) {
       return 'gathering';
     }
@@ -125,6 +127,11 @@ export class ToolUsageTracker {
             `Proceed to scraping: use the scrape tool for full deep-dives into your best search results.`;
     }
 
+    if (toolName === 'youtube_transcript' && toolLimit === 1) {
+        return `YOUTUBE TRANSCRIPT LIMIT REACHED: You have already used your one youtube_transcript call. ` +
+            `Continue with your other gathering tools (search, scrape) and proceed to synthesis.`;
+    }
+
     if (category === 'scrape') {
       const limit = catLimit ?? getMaxScrapeBatches();
       const effectiveText = limit > 99 ? 'unlimited' : `${limit} batch${limit === 1 ? '' : 'es'}`;
@@ -179,6 +186,7 @@ export function createDefaultToolLimits(config?: Config): ToolLimits {
     gathering: MAX_GATHERING_CALLS,
     scrape: getMaxScrapeBatches(config),
     search: 1,
+    youtube_transcript: 1,
     read: undefined,
   };
 }

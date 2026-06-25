@@ -123,6 +123,11 @@ and defaults. The most-used variables:
 | `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` ¹ | `1` | 1–3 | Depth for `/research` and CLI when `--depth` is omitted |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | 0–99 | Scrape batches per researcher (0 = unlimited) |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs per batch |
+| `PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS` | `3` | 1–5 | Videos transcribed per `youtube_transcript` call |
+| `PI_RESEARCH_YOUTUBE_TRANSCRIPT_TIMEOUT_MS` | `20000` | 5000–120000 | Per-video transcript timeout |
+| `PI_RESEARCH_YOUTUBE_TRANSCRIPT_LANG` | `en` | — | Preferred caption language (BCP-47 prefix) |
+| `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | 1–100 | Append `youtube` to ~one-in-N search queries (1 = every query) |
+| `PI_RESEARCH_YOUTUBE_POTOKEN_REQUEST_KEY` | _(built-in)_ | — | Advanced: override the BotGuard PoToken web request key |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process |
 | `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for research sub-agents |
@@ -152,7 +157,7 @@ and defaults. The most-used variables:
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` ¹ | `none` | none, project, global | Knowledge store mode |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` ¹ | `global` | none, project, global | Knowledge store mode |
 | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | webgpu, cpu | Inference backend |
 | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` | 1–365 | How long to keep cached scrapes |

@@ -638,8 +638,9 @@ CONFIGURE
     pi extension: ${p.piIfaceEnv}
     OpenClaw:     ${p.oclIfaceEnv}
 
-  Knowledge store (disabled by default):
-    PI_RESEARCH_KNOWLEDGE_STORE_MODE=project  (or global)
+  Knowledge store (global by default; set to 'project' to scope per-directory,
+  or 'none' to disable):
+    PI_RESEARCH_KNOWLEDGE_STORE_MODE=none  (or project)
     in ${p.configEnv}
 
   Run \`${BINARY_NAME} status\` to see exactly what is detected.

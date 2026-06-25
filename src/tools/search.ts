@@ -10,7 +10,7 @@ import { Value } from 'typebox/value';
 import { search } from '../web-research/search.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
 import { logger } from '../logger.ts';
-import type { Config } from '../config.ts';
+import { type Config, getConfig } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
 import { tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 
@@ -20,6 +20,7 @@ export function createSearchTool(options: {
   onProgress?: (links: number) => void;
   config?: Config;
 }): ToolDefinition {
+  const youtubeEveryN = (options.config ?? getConfig(options.ctx.cwd)).YOUTUBE_QUERY_EVERY_N;
 
   const SearchParamsSchema = Type.Object({
     queries: Type.Array(Type.String(), {
@@ -42,6 +43,7 @@ export function createSearchTool(options: {
       'EFFICIENT: The system processes all queries in one call — maximize each call.',
       'Agents are limited to EXACTLY ONE search call. Make it count by covering everything remaining.',
       'Return results are high-fidelity snippets. Use the scrape tool for full deep-dives.',
+      `YOUTUBE: For roughly one in ${youtubeEveryN} of your queries, append the word 'youtube' (e.g. "<topic> explained youtube"). DuckDuckGo rarely surfaces YouTube otherwise, and YouTube links let you read video transcripts.`,
     ],
     parameters: SearchParamsSchema,
     async execute(_callId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {

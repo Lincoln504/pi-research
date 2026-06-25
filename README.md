@@ -28,11 +28,12 @@ complete or another round is needed. The result is a single cited Markdown repor
 
 - **Web search** — parallel search bursts over DuckDuckGo Lite.
 - **Scraping** — batched, deduplicated page scraping with PDF support.
+- **YouTube transcripts** — read the captions of relevant videos (BotGuard PoToken handled), so video sources count too.
 - **Security databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
 - **Stack Exchange** — full network search and filtering.
-- **Local knowledge store** — an opt-in vector database of past findings, searched
-  before going live so a repeat question can be answered from local results without a
-  new web run.
+- **Local knowledge store** — a vector database of past findings (global by default,
+  shared across every directory; configurable to per-project or off), searched before
+  going live so a repeat question can be answered from local results without a new web run.
 - **Real-time TUI** — live progress, so a long multi-agent run is observable: which
   researcher is active, what it is scraping, and the running token and cost totals,
   rather than waiting blind.

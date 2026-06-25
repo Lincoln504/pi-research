@@ -115,7 +115,9 @@ async function _doInitialize(pluginConfig: OpenClawPluginConfig) {
   }
 
   if (pluginConfig.knowledgeEnabled !== undefined) {
-    globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'project' : 'none';
+    // 'global' matches the project-wide default: one shared knowledge store
+    // across every directory rather than a per-project one.
+    globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'global' : 'none';
   }
   
   if (pluginConfig.defaultDepth !== undefined) {

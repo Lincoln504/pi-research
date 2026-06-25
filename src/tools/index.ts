@@ -18,6 +18,7 @@ import { createScrapeTool } from './scrape.ts';
 import { createSecuritySearchTool } from './security.ts';
 import { createStackexchangeTool } from './stackexchange.ts';
 import { createGrepTool } from './grep.ts';
+import { createYoutubeTranscriptTool } from './youtube-transcript.ts';
 import type { Config } from '../config.ts';
 
 interface CreateToolsOptions {
@@ -82,6 +83,12 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
     createSecuritySearchTool(resolvedOptions),
     createStackexchangeTool(resolvedOptions),
     createGrepTool({ tracker: resolvedOptions.tracker, cwd: resolvedOptions.cwd }),
+    createYoutubeTranscriptTool({
+      ctx: resolvedOptions.ctx,
+      tracker: resolvedOptions.tracker,
+      onUrlScrapeResult: options.onUrlScrapeResult,
+      config: resolvedOptions.config,
+    }),
   ];
 }
 
@@ -93,3 +100,4 @@ export { createScrapeTool } from './scrape.ts';
 export { createSecuritySearchTool } from './security.ts';
 export { createStackexchangeTool } from './stackexchange.ts';
 export { createGrepTool } from './grep.ts';
+export { createYoutubeTranscriptTool } from './youtube-transcript.ts';

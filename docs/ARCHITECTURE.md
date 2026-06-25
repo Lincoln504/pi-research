@@ -12,7 +12,7 @@ pi CLI
     ├── Event hooks   before_agent_start, after_provider_response
     └── Layers
         ├── Orchestration   quick/deep research coordination
-        ├── Tools           search, scrape, security, stackexchange, grep
+        ├── Tools           search, scrape, youtube_transcript, security, stackexchange, grep
         ├── Infrastructure  browser pool, knowledge store, state manager
         └── Core            service registry, scheduler, health checks
 ```
@@ -51,6 +51,7 @@ Each researcher agent has access to a fixed tool set with shared budget (12 call
 |------|-------|------|--------|
 | `search` | ✓ | — | DuckDuckGo Lite via stealth browser |
 | `scrape` | ✓ | ✓ | URL batch scraping via stealth browser (up to 6 URLs each) |
+| `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos, one call/researcher) |
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
 | `grep` | — | ✓ | Local ripgrep |
@@ -183,7 +184,7 @@ src/
 │   ├── researcher.ts
 │   └── service-initialization.ts
 ├── prompts/              Markdown prompt templates for all agents
-├── tools/                search, scrape, security, stackexchange, grep, read, knowledge-search
+├── tools/                search, scrape, youtube_transcript, security, stackexchange, grep, read, knowledge-search
 ├── skill-install/        research-skill installer for coding-agent harnesses
 ├── web-research/         DuckDuckGo search, scraper, retry logic
 ├── knowledge/            embedder, store, writer queue, chunker, migration

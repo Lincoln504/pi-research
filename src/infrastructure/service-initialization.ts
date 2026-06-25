@@ -123,7 +123,10 @@ export function registerInfrastructureServices(container: ServiceContainer = get
   // Loaded via dynamic import so the native ML/vector stack
   // (@huggingface/transformers / onnxruntime-node, @lancedb/lancedb) is only
   // pulled in when the store is actually requested — never at extension load.
-  // When KNOWLEDGE_STORE_MODE is 'none' (the default) this factory never runs.
+  // The default mode is 'global', but this factory is still fully lazy: it only
+  // runs the first time the store is actually accessed (a scrape cache-check or
+  // write), so startup stays native-free. When KNOWLEDGE_STORE_MODE is 'none'
+  // this factory never runs at all.
   registerService(
     ServiceNames.KNOWLEDGE_STORE,
     async () => {

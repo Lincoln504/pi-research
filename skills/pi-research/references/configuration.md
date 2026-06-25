@@ -57,7 +57,9 @@ All are optional; all live in `~/.pi/research/config.env` or the environment.
 | `PI_RESEARCH_MAX_RESEARCHERS` | `3` | Parallel researchers (1–5). |
 | `PI_RESEARCH_TIMEOUT_MS` | `300000` | Per-researcher timeout (180000–1800000 ms). |
 | `PI_RESEARCH_MAX_SCRAPE_BATCHES` | `2` | Scrape batches per researcher (0 = unlimited). |
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `none` | Knowledge DB: `none`, `project`, or `global`. |
+| `PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS` | `3` | Videos per `youtube_transcript` call (1–5). |
+| `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | Append `youtube` to ~one-in-N search queries (1 = every query). |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` | Knowledge DB: `none`, `project`, or `global`. |
 | `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Embedding backend: `webgpu` or `cpu`. |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | Write the report to a `.md` file and print its path. |
 | `STACKEXCHANGE_API_KEY` | — | Raises Stack Exchange rate limits (optional). |
