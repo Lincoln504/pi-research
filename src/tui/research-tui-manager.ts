@@ -22,6 +22,7 @@ import {
   registerMasterUpdate,
   registerMasterRemove,
   refreshAllSessions,
+  flushMasterNow,
   onSessionOrderChange,
   getPiActivePanels,
   normalizeSessionId,
@@ -45,6 +46,12 @@ export interface TuiManager {
   masterWidgetId: string;
   unsubOrder: (() => void) | null;
   debouncedRefresh: () => void;
+  /**
+   * Render the panel immediately, bypassing the debounce. Used by the wave
+   * animation pulse so frames are not swallowed by the 100ms state-refresh
+   * debounce; pi-tui's own 16ms throttle + diff caps and smooths the output.
+   */
+  renderImmediate: () => void;
   initializePanel: () => void;
   dispose: () => void;
 }
@@ -102,7 +109,10 @@ export function createResearchTuiManager(
     refreshTimeout = setTimeout(() => {
       refreshScheduled = false;
       refreshAllSessions(piSessionId);
-    }, 16); // 16ms debounce — must stay below wave timer interval (33ms) to not eat frames
+    }, 16); // 16ms coalescing window for low-frequency state changes (tokens,
+            // status, slices). Animation frames do NOT use this path — they go
+            // through renderImmediate() so they are never swallowed by the
+            // downstream 100ms refreshAllSessions debounce.
   };
 
   /**
@@ -171,11 +181,22 @@ export function createResearchTuiManager(
     }
   };
 
+  /**
+   * Immediate (non-debounced) render for animation frames.
+   * Honors the same TUI-mode guard as debouncedRefresh; the foreground-menu
+   * guard lives inside masterUpdate (flushMasterNow → masterUpdate).
+   */
+  const renderImmediate = () => {
+    if (ctx.mode !== 'tui') return;
+    flushMasterNow(piSessionId);
+  };
+
   return {
     panelState,
     masterWidgetId,
     unsubOrder,
     debouncedRefresh,
+    renderImmediate,
     initializePanel,
     dispose,
   };

@@ -33,8 +33,12 @@ import {
   hslToRgb,
 } from './research-panel-color-utils.ts';
 
-const DWELL_FRAMES = 10; // pause duration at each edge (~330ms at 33ms/frame)
-const PERIOD_FRAMES = 98; // total frames for one full back-and-forth cycle (~30 FPS: same visual speed as 40@80ms)
+// Geometry is expressed in pulse frames. The pulse runs at ~60 FPS
+// (16ms/frame, see pulse.ts), so these are 2× the old 30 FPS values to keep
+// the same wall-clock animation speed (~3.1s per full back-and-forth cycle,
+// ~320ms dwell at each edge).
+const DWELL_FRAMES = 20; // pause duration at each edge (~320ms at 16ms/frame)
+const PERIOD_FRAMES = 196; // total frames for one full back-and-forth cycle (~3.1s at 16ms/frame)
 
 // Scaling constants for "static-ish" tail distance
 const REFERENCE_WIDTH = 80;

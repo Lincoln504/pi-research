@@ -291,7 +291,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
             // Setup TUI observer
             observerState = createObserverState();
             observer = createResearchObserver(
-              { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), researchComplexity: depth ?? 1 },
+              { panelState, debouncedRefresh: () => tuiManager?.debouncedRefresh(), renderImmediate: () => tuiManager?.renderImmediate(), researchComplexity: depth ?? 1 },
               observerState
             );
           } else {

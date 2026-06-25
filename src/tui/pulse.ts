@@ -7,7 +7,12 @@
 
 import { logger } from '../logger.ts';
 
-const FRAME_INTERVAL_MS = 33; // ~30 FPS
+// ~60 FPS. This matches pi-tui's own render cap (MIN_RENDER_INTERVAL_MS = 16),
+// so every pulse can produce a rendered frame — pi-tui coalesces/throttles and
+// only diffs the changed line, so the cost is one short line write per frame.
+// The wave-geometry constants in research-panel-wave.ts are scaled to this
+// interval to keep the on-screen animation speed unchanged.
+const FRAME_INTERVAL_MS = 16;
 
 interface PulseSubscriber {
   (frame: number): void;

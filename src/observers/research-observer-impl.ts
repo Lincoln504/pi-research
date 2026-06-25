@@ -29,6 +29,11 @@ import {
 export interface ObserverContext {
   panelState: ResearchPanelState;
   debouncedRefresh: () => void;
+  /**
+   * Immediate (non-debounced) render for animation frames. Optional so
+   * headless/test contexts can omit it; falls back to debouncedRefresh.
+   */
+  renderImmediate?: () => void;
   researchComplexity: number;
 }
 
@@ -37,6 +42,10 @@ export interface ObserverState {
   quickSliceLabel: string;
   idToNumberMap: Map<string, string>;
   unsubPulse: (() => void) | null;
+  /** Global pulse frame captured when the current search began, so each
+   *  search's wave starts at the left edge (frame 0) regardless of the
+   *  never-reset global pulse counter. */
+  waveBaseFrame: number;
 }
 
 /**
@@ -50,6 +59,11 @@ export function createResearchObserver(
     panelState,
     debouncedRefresh,
   } = ctx;
+
+  // Drive animation frames through the immediate render path so they are not
+  // swallowed by the state-refresh debounce. Falls back to debouncedRefresh
+  // when no immediate path is wired (headless/tests).
+  const renderFrame = ctx.renderImmediate ?? debouncedRefresh;
   
   const {
     progressCredits,
@@ -157,10 +171,14 @@ export function createResearchObserver(
       // Search phase — steering is acceptable (will be consumed at next round boundary)
       panelState.steeringAcceptable = true;
 
-      // Start wave animation via global pulse subscription
-      // Using the global frame directly ensures synchronization across all panels
-      panelState.waveFrame = tuiPulse.getFrame();
-      
+      // Start wave animation via global pulse subscription.
+      // Capture the current global frame as the baseline so this search's wave
+      // starts at frame 0 (left edge). Position is frame % PERIOD_FRAMES, and
+      // the global counter is never reset, so without this each search would
+      // begin at an arbitrary point in the cycle.
+      state.waveBaseFrame = tuiPulse.getFrame();
+      panelState.waveFrame = 0;
+
       if (state.unsubPulse) state.unsubPulse();
       state.unsubPulse = tuiPulse.subscribe((globalFrame) => {
         if (!panelState.isSearching) {
@@ -170,8 +188,12 @@ export function createResearchObserver(
           }
           return;
         }
-        panelState.waveFrame = globalFrame;
-        debouncedRefresh();
+        panelState.waveFrame = globalFrame - state.waveBaseFrame;
+        // Animation frame: render immediately. pi-tui's render scheduler
+        // (16ms throttle + line-level diff) coalesces and caps these, so the
+        // wave updates every frame without the 100ms state-refresh debounce
+        // dropping frames.
+        renderFrame();
       });
 
       debouncedRefresh();
@@ -413,6 +435,7 @@ export function createObserverState(): ObserverState {
     quickSliceLabel: '',
     idToNumberMap: new Map<string, string>(),
     unsubPulse: null,
+    waveBaseFrame: 0,
   };
 }
 

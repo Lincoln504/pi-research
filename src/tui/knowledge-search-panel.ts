@@ -8,7 +8,7 @@
  * Visual layout (width = terminal width):
  *
  * ┌──────────────────────────────────────────┐
- * │ searching knowledge store                │
+ * │         searching knowledge store        │
  * └──────────────────────────────────────────┘
  *
  * Design principles:
@@ -17,10 +17,14 @@
  * - No header line above the box (unlike the research panel)
  * - 3 rows total (top border + content + bottom border) vs research panel's 4+
  * - Static text, no wave animation or progress tracking
+ * - Message is horizontally centered within the box
+ * - Narrow terminals are handled the same way as the rest of the project:
+ *   the message is fit with truncateToWidth (ellipsis) and measured with
+ *   visibleWidth, so multibyte/zero-width content can never overflow the border
  * - Safe rendering: never crashes, graceful fallback on error
  */
 
-import type { Component } from '@earendil-works/pi-tui';
+import { type Component, visibleWidth, truncateToWidth } from '@earendil-works/pi-tui';
 import type { Theme } from '../types/research-panel-types.ts';
 
 /**
@@ -42,12 +46,18 @@ export function createKnowledgeSearchPanel(): (tui: unknown, theme: Theme) => Co
 
         const innerWidth = Math.max(0, width - 2); // subtract left + right border
 
-        // Content line: "searching knowledge store" left-aligned with padding
-        const contentText = SEARCHING_MESSAGE;
-        const displayText = contentText.length > innerWidth
-          ? contentText.slice(0, Math.max(0, innerWidth))
-          : contentText;
-        const paddedContent = displayText.padEnd(innerWidth);
+        // Fit the message to the inner width, adding an ellipsis when too
+        // narrow — the same truncation helper the research panel uses. Measure
+        // with visibleWidth so the padding maths is correct even if the message
+        // ever contains wide/zero-width characters.
+        const displayText = truncateToWidth(SEARCHING_MESSAGE, innerWidth);
+        const textWidth = visibleWidth(displayText);
+
+        // Center horizontally within the box.
+        const totalPad = Math.max(0, innerWidth - textWidth);
+        const leftPad = Math.floor(totalPad / 2);
+        const rightPad = totalPad - leftPad;
+        const paddedContent = ' '.repeat(leftPad) + displayText + ' '.repeat(rightPad);
 
         // Row 0: top border ┌───...───┐
         const topBorder = theme.fg('accent', '┌' + '─'.repeat(innerWidth) + '┐');

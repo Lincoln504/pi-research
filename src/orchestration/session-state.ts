@@ -378,6 +378,40 @@ export function refreshAllSessions(piSessionId: string | undefined): void {
 }
 
 /**
+ * Render the Master Widget for a Pi session *immediately*, bypassing the
+ * debounce in refreshAllSessions().
+ *
+ * This is the animation path. The 100ms trailing debounce in
+ * refreshAllSessions() is correct for low-frequency state changes (tokens,
+ * status, slices) but starves the ~30 FPS wave pulse: each pulse resets the
+ * timer before it can fire, so the wave never renders during continuous
+ * animation. Animation frames must instead drive masterUpdate() directly and
+ * rely on pi-tui's own render scheduler (MIN_RENDER_INTERVAL_MS=16ms throttle
+ * + line-level differential rendering) to coalesce and cap the frame rate.
+ *
+ * Any pending debounced refresh is cancelled first so it cannot fire a
+ * redundant render immediately after this one.
+ */
+export function flushMasterNow(piSessionId: string | undefined): void {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return;
+
+  if (state.refreshTimeout) {
+    clearTimeout(state.refreshTimeout);
+    state.refreshTimeout = null;
+  }
+
+  if (state.masterUpdate) {
+    try {
+      state.masterUpdate();
+    } catch (error) {
+      logger.error(`[session-state] Error flushing Master Widget for ${sid}:`, error);
+    }
+  }
+}
+
+/**
  * Start a new research run within a Pi session
  */
 export function startResearchSession(piSessionId: string | undefined, customResearchId?: string): string {

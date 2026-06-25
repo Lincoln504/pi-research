@@ -490,6 +490,23 @@ describe('Knowledge Search TUI Panel', () => {
     expect(lines[2]).toBe('└' + '─'.repeat(38) + '┘');
   });
 
+  it('centers the message within the box', async () => {
+    const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
+    const mockTheme = { fg: (_color: any, text: string) => text };
+    const factory = createKnowledgeSearchPanel();
+    const component = factory({}, mockTheme as any);
+    const lines = component.render(40);
+
+    const inner = lines[1]!.slice(1, -1); // strip the │ borders
+    expect(inner.length).toBe(38); // full inner width preserved
+    const leftPad = inner.length - inner.trimStart().length;
+    const rightPad = inner.length - inner.trimEnd().length;
+    // Balanced to within one space (odd leftover padding goes to the right)
+    expect(Math.abs(leftPad - rightPad)).toBeLessThanOrEqual(1);
+    expect(leftPad).toBeGreaterThan(0);
+    expect(inner.trim()).toBe('searching knowledge store');
+  });
+
   it('returns empty for very narrow terminals', async () => {
     const { createKnowledgeSearchPanel } = await import('../../../src/tui/knowledge-search-panel.ts');
     const mockTheme = { fg: (_color: any, text: string) => text };
@@ -506,6 +523,13 @@ describe('Knowledge Search TUI Panel', () => {
     const lines = component.render(10);
     expect(lines).toHaveLength(3);
     const innerContent = lines[1]!.slice(1, -1);
-    expect(innerContent.length).toBe(8);
+    // truncateToWidth embeds ANSI resets around its ellipsis, so the raw string
+    // length can exceed the column count — assert the *visible* width fills the
+    // box (innerWidth = 10 - 2 borders = 8) and stays within it.
+    const visible = innerContent.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(visible.length).toBe(8);
+    // Top/bottom borders must match the same inner width so the box is square.
+    expect(lines[0]).toBe('┌' + '─'.repeat(8) + '┐');
+    expect(lines[2]).toBe('└' + '─'.repeat(8) + '┘');
   });
 });
