@@ -62,19 +62,19 @@ describe('utils/prompts', () => {
   });
 
   describe('loadPrompt - error handling', () => {
-    it('returns empty string for non-existent prompt', async () => {
+    it('throws for a non-existent prompt (fail-loud, never a blank prompt to the LLM)', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      const content = loadPrompt('does-not-exist-xyz-12345');
-      expect(content).toBe('');
+      // A missing prompt is a packaging bug. Returning '' here used to feed a
+      // blank system prompt into the LLM call silently; now it throws.
+      expect(() => loadPrompt('does-not-exist-xyz-12345')).toThrow(/Failed to load prompt/);
     });
 
-    it('returns empty string for an empty prompt name', async () => {
+    it('throws for an empty prompt name', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      // No "<dir>/.md" file exists, so every candidate misses and we get ''.
-      expect(loadPrompt('')).toBe('');
+      expect(() => loadPrompt('')).toThrow(/Rejected unsafe prompt name/);
     });
 
-    it('rejects path-traversal prompt names via the allowlist guard (not an incidental file-miss)', async () => {
+    it('rejects (throws on) path-traversal prompt names via the allowlist guard', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const { logger } = await import('../../../src/logger.ts');
       // For unsafe names the guard fires and logs a DISTINCT "Rejected unsafe
@@ -91,7 +91,7 @@ describe('utils/prompts', () => {
         '..',
       ]) {
         vi.mocked(logger.error).mockClear();
-        expect(loadPrompt(unsafe)).toBe('');
+        expect(() => loadPrompt(unsafe)).toThrow(/Rejected unsafe prompt name/);
         expect(logger.error).toHaveBeenCalledWith(
           expect.stringContaining('Rejected unsafe prompt name'),
         );
@@ -104,10 +104,10 @@ describe('utils/prompts', () => {
       expect(loadPrompt('researcher').length).toBeGreaterThan(0);
     });
 
-    it('handles null/undefined prompt name gracefully', async () => {
+    it('throws (does not silently pass) for null/undefined prompt name', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-      expect(() => loadPrompt(null as any)).not.toThrow();
-      expect(() => loadPrompt(undefined as any)).not.toThrow();
+      expect(() => loadPrompt(null as any)).toThrow(/Rejected unsafe prompt name/);
+      expect(() => loadPrompt(undefined as any)).toThrow(/Rejected unsafe prompt name/);
     });
   });
 
@@ -161,26 +161,19 @@ describe('utils/prompts', () => {
       expect(content2).toBe(content3);
     });
 
-    it('handles prompts with different cases', async () => {
+    it('loads the canonical lowercase name (the only guaranteed-present file)', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-
-      // On case-sensitive filesystems (Linux) only the exact name matches;
-      // on case-insensitive filesystems all three return the same content.
-      // Either way the function must not throw and must return a string.
+      // The shipped file is researcher.md (lowercase). Case variants are
+      // filesystem-dependent (miss → throw on Linux, hit on case-insensitive FS),
+      // so we only assert the canonical name, which exists everywhere.
       expect(typeof loadPrompt('researcher')).toBe('string');
-      expect(typeof loadPrompt('RESEARCHER')).toBe('string');
-      expect(typeof loadPrompt('Researcher')).toBe('string');
     });
 
-    it('handles prompts with file extension', async () => {
+    it('throws when the name already includes the .md extension (looks for researcher.md.md)', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
-
-      const withExtension = loadPrompt('researcher.md');
-      const withoutExtension = loadPrompt('researcher');
-
-      // Should handle both cases gracefully
-      expect(typeof withExtension).toBe('string');
-      expect(typeof withoutExtension).toBe('string');
+      // '.md' passes the allowlist, so this becomes a plain file-miss → fail-loud.
+      expect(() => loadPrompt('researcher.md')).toThrow(/Failed to load prompt/);
+      expect(loadPrompt('researcher').length).toBeGreaterThan(0);
     });
   });
 
@@ -222,18 +215,16 @@ describe('utils/prompts', () => {
       ];
 
       for (const name of maliciousNames) {
-        const content = loadPrompt(name);
-        // Should not return sensitive system files
-        expect(content).not.toContain('root:');
-        expect(content).not.toContain('[extensions]');
+        // The allowlist guard rejects every traversal attempt by throwing — so a
+        // sensitive system file is never read (and never returned).
+        expect(() => loadPrompt(name)).toThrow(/Rejected unsafe prompt name/);
       }
     });
 
-    it('handles very long prompt names', async () => {
+    it('throws on a very long (but valid-charset) name — file-miss, not silent ""', async () => {
       const { loadPrompt } = await import('../../../src/core/llm/prompts.ts');
       const longName = 'a'.repeat(10000);
-
-      expect(() => loadPrompt(longName)).not.toThrow();
+      expect(() => loadPrompt(longName)).toThrow(/Failed to load prompt/);
     });
   });
 });

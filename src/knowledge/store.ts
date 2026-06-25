@@ -145,6 +145,12 @@ export class KnowledgeStore implements IKnowledgeStore {
       if (tableNames.includes(this.tableName)) {
         this.table = await this.db.openTable(this.tableName);
 
+        // Tracks whether we've moved past schema-reading into migration. A failure
+        // while merely reading the schema is non-fatal (warn + skip). A failure
+        // DURING migration is fatal and must escape — without this flag the outer
+        // catch below mislabels it "Failed to read table schema" and the store
+        // opens on a mismatched table instead of surfacing the corruption.
+        let migrationInProgress = false;
         try {
           const schema = await this.table.schema();
 
@@ -178,6 +184,7 @@ export class KnowledgeStore implements IKnowledgeStore {
             logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
             const strategy = this.options.migrationStrategy || 'backup';
 
+            migrationInProgress = true;
             try {
               await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
             } catch (err) {
@@ -196,6 +203,10 @@ export class KnowledgeStore implements IKnowledgeStore {
             }
           }
         } catch (schemaErr) {
+          // A migration failure is fatal — re-throw so the caller learns the store
+          // could not be brought to a consistent state. Only a pure schema-read
+          // failure (before migration began) is downgraded to a warning.
+          if (migrationInProgress) throw schemaErr;
           logger.warn('[store] Failed to read table schema:', schemaErr);
         }
       } else {

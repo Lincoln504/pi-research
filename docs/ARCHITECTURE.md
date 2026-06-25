@@ -54,7 +54,6 @@ Each researcher agent has access to a fixed tool set with shared budget (12 call
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
 | `grep` | — | ✓ | Local ripgrep |
-| `links` | ✓ | ✓ | Shared discovered-links pool (list/search) |
 | `read` | ✓ | ✓ | Local file reads (from pi-coding-agent) |
 
 In deep research, `search` is excluded from researchers — the orchestrator runs the search burst and distributes result URLs directly. In quick research, `grep` is excluded — the single researcher session is not expected to do local codebase traversal.
@@ -184,7 +183,8 @@ src/
 │   ├── researcher.ts
 │   └── service-initialization.ts
 ├── prompts/              Markdown prompt templates for all agents
-├── tools/                search, scrape, security, stackexchange, grep, links, read
+├── tools/                search, scrape, security, stackexchange, grep, read, knowledge-search
+├── skill-install/        research-skill installer for coding-agent harnesses
 ├── web-research/         DuckDuckGo search, scraper, retry logic
 ├── knowledge/            embedder, store, writer queue, chunker, migration
 ├── tui/

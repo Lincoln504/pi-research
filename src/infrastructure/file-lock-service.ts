@@ -248,24 +248,24 @@ export class FileLockService implements IService {
                 // Reclaim immediately if the owner process is dead (PID-liveness check).
                 // Fall through to mtime-staleness only for processes that appear alive.
                 const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
+                // Reclaim when the owner is dead OR the lock has aged past the
+                // staleness threshold. (If the owner is alive AND the lock is
+                // fresh we never enter this branch — that's genuine contention,
+                // handled by the surrounding retry loop.)
                 if (!ownerAlive || lockAge > this.lockStaleThreshold) {
-                  if (ownerAlive && lockAge <= this.lockStaleThreshold) {
-                    // Alive but not stale — genuine contention, keep waiting
-                  } else {
-                    const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
-                    try {
-                      await fs.rename(this.lockFilePath, trashPath);
-                      const trashContent = await fs.readFile(trashPath, 'utf-8');
-                      const trashParsed = this._parseLockContent(trashContent);
-                      if ((trashParsed?.uuid ?? '') !== lockUuid) {
-                        try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
-                        await fs.unlink(trashPath);
-                        continue;
-                      }
+                  const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
+                  try {
+                    await fs.rename(this.lockFilePath, trashPath);
+                    const trashContent = await fs.readFile(trashPath, 'utf-8');
+                    const trashParsed = this._parseLockContent(trashContent);
+                    if ((trashParsed?.uuid ?? '') !== lockUuid) {
+                      try { await fs.link(trashPath, this.lockFilePath); } catch { /* ignore */ }
                       await fs.unlink(trashPath);
-                    } catch { /* ignore */ }
-                    continue;
-                  }
+                      continue;
+                    }
+                    await fs.unlink(trashPath);
+                  } catch { /* ignore */ }
+                  continue;
                 }
               } catch (_statError) {
                 const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;

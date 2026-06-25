@@ -379,7 +379,11 @@ export class QuickResearchOrchestrator {
 
         try {
           const orch = await getService<IResearchOrchestration>(ServiceNames.RESEARCH_ORCHESTRATION, ctx, container);
-          await orch.cleanupResearchServices(undefined, researchId);
+          // Pass ctx so cleanup resolves the SAME container-scoped services (synthesis,
+          // session) the run used — without it the container-local instances never get
+          // cleared and reports accumulate toward MAX_SESSIONS eviction (matches the
+          // DeepResearchOrchestrator cleanup call).
+          await orch.cleanupResearchServices(undefined, researchId, ctx);
         } catch (err) {
           logger.warn('[QuickOrchestrator] Failed to cleanup research services:', err);
         }

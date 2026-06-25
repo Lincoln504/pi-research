@@ -9,7 +9,7 @@ import { type Model } from '@earendil-works/pi-ai';
 import { type ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { getConfig } from '../../config.ts';
 import { logger } from '../../logger.ts';
-import { pickPreferredAvailable, readModelsJsonProviderOrder } from './model-registry-factory.ts';
+import { pickPreferredAvailable, readModelsJsonProviderOrder, safeGetAll, safeGetAvailable } from './model-registry-factory.ts';
 
 /**
  * Resolve the research model with standardized priority:
@@ -36,13 +36,14 @@ export function resolveResearchModel(options: {
   // provider that actually has auth so we never resolve to a keyless entry that
   // throws "No API key for provider" at the first LLM call.
   const authedKeys = new Set(
-    modelRegistry.getAvailable().map((m) => `${m.provider}/${m.id}`)
+    safeGetAvailable(modelRegistry).map((m) => `${m.provider}/${m.id}`)
   );
   const matchById = (id: string): Model<any> | undefined => {
     // Exact "provider/id" wins outright; otherwise prefer an authed same-id entry.
-    const exact = modelRegistry.getAll().find((m) => `${m.provider}/${m.id}` === id);
+    const allModels = safeGetAll(modelRegistry);
+    const exact = allModels.find((m) => `${m.provider}/${m.id}` === id);
     if (exact) return exact as Model<any>;
-    const sameId = modelRegistry.getAll().filter((m) => m.id === id) as Model<any>[];
+    const sameId = allModels.filter((m) => m.id === id) as Model<any>[];
     return sameId.find((m) => authedKeys.has(`${m.provider}/${m.id}`)) ?? sameId[0];
   };
 
@@ -74,9 +75,16 @@ export function resolveResearchModel(options: {
   //    user's models.json provider order (consistent with resolveModel step 3 —
   //    otherwise the host model and the research fallback could disagree on which
   //    of several authed providers to prefer).
-  const available = modelRegistry.getAvailable();
+  const available = safeGetAvailable(modelRegistry);
   if (available.length > 0) {
     return pickPreferredAvailable(available, readModelsJsonProviderOrder()) as Model<any>;
+  }
+
+  // 5. Last resort before failing: any known model at all (host may not expose
+  //    getAvailable(), so an empty "available" set is not proof of "no models").
+  const anyModel = safeGetAll(modelRegistry);
+  if (anyModel.length > 0) {
+    return pickPreferredAvailable(anyModel, readModelsJsonProviderOrder()) as Model<any>;
   }
 
   throw new Error('No LLM model available for research. Please configure your model registry (~/.pi/agent/models.json).');

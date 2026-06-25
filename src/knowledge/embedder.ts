@@ -299,18 +299,23 @@ export class Embedder {
 
   async embed(text: string): Promise<Float32Array> {
     await this.initialize();
+    // Compute the input BEFORE the active-count increment: truncateText is a pure
+    // string op, and keeping it (and nothing else) ahead of the try/finally means
+    // every path that can throw or await is inside the finally that decrements the
+    // counter. Otherwise a throw here (or in acquireGpuLock) would leak the count,
+    // permanently wedging recoverToCpu (15s spin) and dispose (5s hang).
+    const input = this.truncateText(this.queryPrefix ? this.queryPrefix + text : text);
     this.stopIdleTimer();
     this.activeEmbeddings++;
 
-    const input = this.truncateText(this.queryPrefix ? this.queryPrefix + text : text);
     let lockAcquired = false;
-    if (this.device === 'webgpu' && this.stateManager) {
-      lockAcquired = await this.stateManager.acquireGpuLock(undefined, 15_000);
-      if (!lockAcquired) {
-        logger.warn('[embedder] GPU per-call lock timeout after 15s — proceeding without lock');
-      }
-    }
     try {
+      if (this.device === 'webgpu' && this.stateManager) {
+        lockAcquired = await this.stateManager.acquireGpuLock(undefined, 15_000);
+        if (!lockAcquired) {
+          logger.warn('[embedder] GPU per-call lock timeout after 15s — proceeding without lock');
+        }
+      }
       const output = await logger.runCapturingStderr(async () => {
         return await this.pipeline!(input, this.pipelineOpts());
       });
@@ -342,22 +347,26 @@ export class Embedder {
   async embedMany(texts: string[]): Promise<Float32Array[]> {
     await this.initialize();
     this.stopIdleTimer();
-    this.activeEmbeddings++;
 
     return metrics.measure('embedMany_latency', async () => {
-      const dim = this.getDimension();
-      if (dim === null) throw new Error('Embedder not initialized (dimension unknown)');
-      const results: Float32Array[] = [];
-
+      // Increment INSIDE the measured closure and inside the try/finally below, so
+      // the dimension-null throw and acquireGpuLock can't leak the active count
+      // (the increment used to sit outside this closure while the decrement was in
+      // the finally — a throw before the try wedged the counter permanently).
+      this.activeEmbeddings++;
       let lockAcquired = false;
-      if (this.device === 'webgpu' && this.stateManager) {
-        lockAcquired = await this.stateManager.acquireGpuLock(undefined, 45_000);
-        if (!lockAcquired) {
-          logger.warn('[embedder] GPU batch lock timeout after 45s — proceeding without lock');
-        }
-      }
-
       try {
+        const dim = this.getDimension();
+        if (dim === null) throw new Error('Embedder not initialized (dimension unknown)');
+        const results: Float32Array[] = [];
+
+        if (this.device === 'webgpu' && this.stateManager) {
+          lockAcquired = await this.stateManager.acquireGpuLock(undefined, 45_000);
+          if (!lockAcquired) {
+            logger.warn('[embedder] GPU batch lock timeout after 45s — proceeding without lock');
+          }
+        }
+
         for (let i = 0; i < texts.length; i += this.batchSize) {
           const batch = texts.slice(i, i + this.batchSize).map(t => {
             const truncated = this.truncateText(t);
@@ -390,6 +399,7 @@ export class Embedder {
             results.push(output.data.slice(j * dim, (j + 1) * dim) as Float32Array);
           }
         }
+        return results;
       } finally {
         if (lockAcquired && this.stateManager) {
           await this.stateManager.releaseGpuLock().catch(err => {
@@ -399,8 +409,6 @@ export class Embedder {
         this.activeEmbeddings--;
         this.resetIdleTimer();
       }
-
-      return results;
     });
   }
 

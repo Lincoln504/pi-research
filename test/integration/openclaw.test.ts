@@ -69,6 +69,63 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
+// Extract the allowed-value set from a JSON-schema property regardless of whether
+// it is expressed as `enum: [...]` or `anyOf: [{const: ...}]` — the runtime schema
+// and the manifest use different-but-equivalent encodings for the same constraint.
+function allowedValues(prop: any): unknown[] | null {
+  if (!prop) return null;
+  if (Array.isArray(prop.enum)) return [...prop.enum].sort();
+  if (Array.isArray(prop.anyOf)) {
+    const consts = prop.anyOf.map((s: any) => s?.const).filter((c: any) => c !== undefined);
+    return consts.length ? consts.sort() : null;
+  }
+  return null;
+}
+
+describe('OpenClaw config schema parity', () => {
+  // The plugin is loaded by the OpenClaw host two ways at once: dist/openclaw-entry.js
+  // supplies the runtime configSchema used to validate (safeParse) plugin settings,
+  // while openclaw.plugin.json is the manifest the host reads for the config UI and
+  // setup. If they drift, a setting accepted by one is rejected/hidden by the other.
+  // This test fails loudly on any divergence so the two can never silently separate.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../../openclaw.plugin.json'), 'utf-8'),
+  );
+  const runtime = (plugin as any).configSchema?.jsonSchema;
+  const manifestProps = manifest.configSchema.properties as Record<string, any>;
+  const runtimeProps = runtime?.properties as Record<string, any>;
+
+  it('exposes a runtime JSON schema with properties', () => {
+    expect(runtimeProps).toBeTruthy();
+  });
+
+  it('has identical property names in runtime schema and manifest', () => {
+    expect(Object.keys(runtimeProps).sort()).toEqual(Object.keys(manifestProps).sort());
+  });
+
+  it('agrees on type, default, bounds, and allowed values for every property', () => {
+    for (const key of Object.keys(manifestProps)) {
+      const m = manifestProps[key];
+      const r = runtimeProps[key];
+      expect(r, `runtime schema missing property ${key}`).toBeTruthy();
+      expect(r.default, `default mismatch for ${key}`).toEqual(m.default);
+      expect(r.minimum, `minimum mismatch for ${key}`).toEqual(m.minimum);
+      expect(r.maximum, `maximum mismatch for ${key}`).toEqual(m.maximum);
+      expect(allowedValues(r), `allowed-value mismatch for ${key}`).toEqual(allowedValues(m));
+    }
+  });
+
+  it('declares every manifest contract tool in the registered plugin', async () => {
+    const registered: string[] = [];
+    await plugin.register({
+      registerTool: (t: any) => registered.push(t.name),
+      lifecycle: { registerRuntimeLifecycle: () => {} },
+      pluginConfig: {},
+    } as any);
+    expect(registered.sort()).toEqual([...manifest.contracts.tools].sort());
+  });
+});
+
 describe('OpenClaw Plugin Integration', () => {
   let tmpDir: string;
   let registeredTools: any[] = [];
@@ -151,5 +208,26 @@ describe('OpenClaw Plugin Integration', () => {
     const healthTool = registeredTools.find(t => t.name === 'health')!;
     const result = await healthTool.execute('call-id', {});
     expect(result.content[0]!.text).toContain('status');
+  });
+
+  it('initializes services exactly once under concurrent tool calls', async () => {
+    // Regression for the init race: research + health firing together (or two
+    // researches) must not each run full service registration/startup. The
+    // in-flight _initPromise guard coalesces them onto a single init.
+    const { initializeCoreServices } = await import('../../src/core/service-initialization.ts');
+    vi.mocked(initializeCoreServices).mockClear();
+
+    await plugin.register(mockApi as any);
+    mockApi.pluginConfig = { apiKey: 'test', provider: 'mock', model: 'mock-model' };
+    const research = registeredTools.find(t => t.name === 'research')!;
+    const health = registeredTools.find(t => t.name === 'health')!;
+
+    await Promise.all([
+      research.execute('c1', { query: 'a', depth: 0 }),
+      health.execute('c2', {}),
+      research.execute('c3', { query: 'b', depth: 0 }),
+    ]);
+
+    expect(initializeCoreServices).toHaveBeenCalledTimes(1);
   });
 });

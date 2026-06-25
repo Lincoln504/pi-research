@@ -83,6 +83,22 @@ describe('KnowledgeStore', () => {
     }])).rejects.toThrow(/ragged|width|vector/i);
   });
 
+  it('rejects a correct-width vector poisoned with NaN/Inf before it corrupts the index', async () => {
+    await store.open();
+    // Right length (384) but a non-finite entry — the kind a WebGPU device-lost
+    // mid-inference produces. It passes the width check but must be rejected
+    // before NaN distances silently break ANN ordering.
+    const poisoned = new Float32Array(384).fill(0.1);
+    poisoned[42] = NaN;
+    vi.mocked(mockEmbedder.embedMany).mockResolvedValueOnce([poisoned]);
+    await expect(store.addDocuments([{
+      url: 'https://nan.com',
+      text: 'poisoned',
+      metadata: { ingestionType: 'synthesis-description' },
+      timestamp: Date.now(),
+    }])).rejects.toThrow(/non-finite/i);
+  });
+
   it('should throw when addDocuments is called before open()', async () => {
     await expect(store.addDocuments([{
       url: 'https://example.com',

@@ -150,7 +150,9 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     // cleanupResearchServices and would leak unaborted. Abort it directly on any
     // failure in this window, then rethrow. (Same acquire-before-teardown-wired
     // class as the ghost-panel fix.)
-    let sessionService: ResearchSessionService;
+    // Undefined until the registration below succeeds: if getService throws, the
+    // finally must NOT dereference it (that TypeError would mask the real error).
+    let sessionService: ResearchSessionService | undefined;
     try {
       sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
       sessionService.registerSession(researchId, id, session, () => session.abort().catch((err) => logger.warn('[ResearcherExecutor] Session abort failed:', err)));
@@ -295,7 +297,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       await session.abort().catch((err) => {
         logger.warn(`[ResearcherExecutor] Failed to abort researcher session ${id}:`, err);
       });
-      sessionService.unregisterSession(researchId, id);
+      sessionService?.unregisterSession(researchId, id);
 
       // Restore the default thinking label now that the researcher is done.
       // Otherwise "Researcher X" persists for all subsequent agent turns.

@@ -185,7 +185,14 @@ export function createScrapeTool(options: {
 
       const finalUrls = dedupedUrls.slice(0, MAX_SCRAPE_URLS);
 
-      const defaultConcurrency = callCount >= 1 ? BATCH_2_DEFAULT_CONCURRENCY : config.MAX_CONCURRENT_SCRAPES;
+      // Batch 1 uses the configured scrape concurrency; batch 2+ may go wider
+      // once the context budget allows — but never wider than the real browser
+      // pool (WORKER_THREADS × WORKER_CONCURRENCY), or the extra requests just
+      // queue head-of-line behind search tasks sharing the same pool.
+      const poolCapacity = Math.max(1, config.WORKER_THREADS * config.WORKER_CONCURRENCY);
+      const defaultConcurrency = callCount >= 1
+        ? Math.min(BATCH_2_DEFAULT_CONCURRENCY, poolCapacity)
+        : config.MAX_CONCURRENT_SCRAPES;
       const urlsToFetch = [...finalUrls];
       const cachedResults: { url: string; markdown: string }[] = [];
 

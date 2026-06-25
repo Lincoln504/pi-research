@@ -37,6 +37,13 @@ import type { HeadlessObserverOptions } from './orchestration/headless-observer.
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { getConfig, getGlobalEnvFilePath, getInterfaceEnvFilePath } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import {
+  HARNESSES,
+  detectHarnesses,
+  installSkill,
+  uninstallSkill,
+  type DetectedHarness,
+} from './skill-install/skill-installer.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -526,6 +533,91 @@ async function cmdStatus(json?: boolean): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// Skill install / uninstall
+// ---------------------------------------------------------------------------
+
+/** Resolve the set of target tool ids from CLI args. */
+function resolveSkillTargets(args: { tools: string[]; all?: boolean }, detected: DetectedHarness[]): { tools: string[]; error?: string } {
+  if (args.all) {
+    // --all = every CONFIRMED target whose harness is present. Non-confirmed
+    // targets (cursor/codex/agents) are opt-in by explicit name only, so we never
+    // symlink into a guessed directory automatically.
+    return { tools: detected.filter(d => d.present && d.confidence === 'confirmed').map(d => d.id) };
+  }
+  if (args.tools.length === 0) {
+    return { tools: [], error: 'specify one or more targets (or --all). Run `pi-research skills` to see detected harnesses.' };
+  }
+  const unknown = args.tools.filter(t => !HARNESSES.some(h => h.id === t));
+  if (unknown.length) return { tools: [], error: `unknown target(s): ${unknown.join(', ')}. Valid: ${HARNESSES.map(h => h.id).join(', ')}.` };
+  return { tools: args.tools };
+}
+
+/** `skills` — list detected harnesses and current install state. */
+function cmdSkills(json?: boolean): number {
+  const detected = detectHarnesses();
+  if (json) {
+    toStdout(pretty(detected.map(d => ({ id: d.id, label: d.label, present: d.present, confidence: d.confidence, skillPath: d.absSkillPath, installed: d.installed }))));
+    return EXIT.OK;
+  }
+  toStdout(`pi-research — research skill installer\n\nDetected coding-agent harnesses:\n`);
+  for (const d of detected) {
+    const mark = d.present ? '●' : '○';
+    const state = d.installed === 'none' ? 'not installed'
+      : d.installed === 'foreign' ? 'occupied by another skill (will not touch)'
+      : `installed (${d.installed === 'owned-symlink' ? 'symlink' : 'copy'})`;
+    const conf = d.confidence === 'confirmed' ? '' : `  [${d.confidence}${d.note ? `: ${d.note}` : ''}]`;
+    toStdout(`  ${mark} ${d.id.padEnd(12)} ${state}\n      ${d.absSkillPath}${conf}\n`);
+  }
+  toStdout(`\n● present   ○ not detected\n\nInstall:   pi-research install-skill --all          (all present, confirmed targets)\n           pi-research install-skill claude-code     (a specific target)\nUninstall: pi-research uninstall-skill --all\n`);
+  return EXIT.OK;
+}
+
+/** `install-skill` — symlink (or copy) the skill into target harnesses. */
+function cmdInstallSkill(args: { tools: string[]; all?: boolean; copy?: boolean; dryRun?: boolean; json?: boolean }): number {
+  const detected = detectHarnesses();
+  const { tools, error } = resolveSkillTargets(args, detected);
+  if (error) { toStderr(`\n✗ ${error}\n`); return EXIT.USAGE; }
+  if (tools.length === 0) { toStderr('\n✗ no present, confirmed harnesses detected to install into. Name a target explicitly, or run `pi-research skills`.\n'); return EXIT.CONFIG; }
+
+  let results;
+  try {
+    results = installSkill(tools, { copy: args.copy, dryRun: args.dryRun });
+  } catch (err) {
+    toStderr(`\n✗ ${err instanceof Error ? err.message : String(err)}\n`);
+    return EXIT.SOFTWARE;
+  }
+  if (args.json) { toStdout(pretty(results)); return results.some(r => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK; }
+  for (const r of results) {
+    const verb = r.status === 'installed' ? `${args.dryRun ? 'would install' : 'installed'} (${r.type})`
+      : r.status === 'already-installed' ? 'already installed'
+      : r.status === 'planned' ? `would install (${r.type})`
+      : r.status === 'skipped-foreign' ? 'skipped — foreign skill present'
+      : `ERROR: ${r.message}`;
+    toStdout(`  ${r.tool.padEnd(12)} ${verb}\n      ${r.path}${r.message && r.status !== 'error' ? `  (${r.message})` : ''}\n`);
+  }
+  toStdout(`\nThe skill activates automatically — just ask your agent to research something.\n`);
+  return results.some(r => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK;
+}
+
+/** `uninstall-skill` — remove only the installs we own. */
+function cmdUninstallSkill(args: { tools: string[]; all?: boolean; dryRun?: boolean; json?: boolean }): number {
+  const toolIds = args.all ? undefined : (args.tools.length ? args.tools : undefined);
+  if (!args.all && !toolIds) { toStderr('\n✗ specify target(s) or --all to uninstall.\n'); return EXIT.USAGE; }
+  const results = uninstallSkill(toolIds, { dryRun: args.dryRun });
+  if (args.json) { toStdout(pretty(results)); return EXIT.OK; }
+  if (results.length === 0) { toStdout('Nothing to uninstall — no pi-research skill installs found.\n'); return EXIT.OK; }
+  for (const r of results) {
+    const verb = r.status === 'removed' ? (args.dryRun ? 'would remove' : 'removed')
+      : r.status === 'planned' ? 'would remove'
+      : r.status === 'not-present' ? 'not present'
+      : r.status === 'skipped-foreign' ? 'skipped — not ours'
+      : `ERROR: ${r.message}`;
+    toStdout(`  ${r.tool.padEnd(12)} ${verb}\n      ${r.path}\n`);
+  }
+  return results.some(r => r.status === 'error') ? EXIT.SOFTWARE : EXIT.OK;
+}
+
+// ---------------------------------------------------------------------------
 // Error reporting & shutdown
 // ---------------------------------------------------------------------------
 
@@ -596,6 +688,7 @@ interface ParsedArgs {
   research?: ResearchArgs;
   knowledge?: { queries: string[]; json?: boolean };
   status?: { json?: boolean };
+  skill?: { tools: string[]; all?: boolean; copy?: boolean; dryRun?: boolean; json?: boolean };
   configPath?: string;
   json?: boolean;
 }
@@ -622,6 +715,15 @@ COMMANDS
 
   status                         Show detected config, model/key, and readiness.
     --json                       Emit a JSON object.
+
+  skills                         List detected coding-agent harnesses + install state.
+    --json                       Emit a JSON array.
+  install-skill [targets...]     Install the research skill into coding agents.
+    --all                        All present, confirmed targets (claude-code, pi).
+    --copy                       Copy instead of symlink.
+    --dry-run                    Show what would happen without writing.
+  uninstall-skill [targets...]   Remove the skill (only installs pi-research owns).
+    --all                        Every recorded install.
 
   help, --help, -h               Show this help.
 
@@ -770,6 +872,23 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return out;
   }
 
+  if (cmd === 'install-skill' || cmd === 'uninstall-skill' || cmd === 'skills') {
+    const tools: string[] = [];
+    let all = false, copy = false, dryRun = false, json = false;
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === '--all') all = true;
+      else if (a === '--copy') copy = true;
+      else if (a === '--dry-run') dryRun = true;
+      else if (a === '--json') json = true;
+      else if (a?.startsWith('--')) throw new UsageError(`unknown option for ${cmd}: ${a}`);
+      else if (a !== undefined) tools.push(a);
+    }
+    out.command = cmd;
+    out.skill = { tools, all, copy, dryRun, json };
+    return out;
+  }
+
   throw new UsageError(`unknown command "${cmd}". Run \`${BINARY_NAME} help\`.`);
 }
 
@@ -804,8 +923,10 @@ async function main(argv: string[]): Promise<number> {
     return EXIT.USAGE;
   }
 
-  // Bridge config.env → process.env for every command (cheap, idempotent).
-  if (parsed.command !== 'help' && parsed.command !== 'version') {
+  // Bridge config.env → process.env for commands that touch the engine. Skill
+  // install/listing is filesystem-only and needs no credentials/config.
+  const noBridge = new Set(['help', 'version', 'skills', 'install-skill', 'uninstall-skill']);
+  if (!noBridge.has(parsed.command ?? '')) {
     bridgeConfigEnv(parsed.configPath);
   }
 
@@ -822,6 +943,12 @@ async function main(argv: string[]): Promise<number> {
       return cmdKnowledge(parsed.knowledge!.queries, parsed.knowledge!.json);
     case 'research':
       return cmdResearch(parsed.research!);
+    case 'skills':
+      return cmdSkills(parsed.skill!.json);
+    case 'install-skill':
+      return cmdInstallSkill(parsed.skill!);
+    case 'uninstall-skill':
+      return cmdUninstallSkill(parsed.skill!);
     default:
       toStdout(buildHelp());
       return EXIT.OK;

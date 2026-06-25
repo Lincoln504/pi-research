@@ -243,15 +243,22 @@ export async function executeScrapeTask(
 
     // Intercept navigation redirects and validate each hop against SSRF rules.
     // Without this, Playwright follows 3xx natively and could reach internal IPs.
+    // Must use page.route (a BLOCKING intercept), NOT page.on('request') — the
+    // latter does not pause navigation, so the abort raced the redirect and the
+    // metadata endpoint could be reached before it fired. route.fallback() defers
+    // to the next handler (the CI mock context.route) or the network, so this
+    // preserves mocking while actually gating the redirect.
     const { validateUrlForSSRF: validateForWorker } = await import('../../web-research/scraper-utils.ts');
-    page.on('request', async (req: any) => {
+    await page.route('**', async (route: any, req: any) => {
       if (req.isNavigationRequest() && req.redirectedFrom() != null) {
         try {
           await validateForWorker(req.url());
         } catch (_ssrfErr: unknown) {
-          await req.abort('blockedbyclient').catch(() => {});
+          await route.abort('blockedbyclient').catch(() => {});
+          return;
         }
       }
+      await route.fallback().catch(() => {});
     });
 
     // High-fidelity wait: try domcontentloaded first for speed

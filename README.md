@@ -56,6 +56,26 @@ pi install .                                  # local, from a clone
 
 The first install pulls the stealth browser engine, which takes a few minutes.
 
+### Install the skill into your coding agents
+
+After the global CLI is installed, link the `research` skill into the coding
+agents on your machine so any of them can call it:
+
+```bash
+pi-research skills                 # detect installed harnesses + show install state
+pi-research install-skill --all    # symlink the skill into all detected, confirmed targets
+pi-research install-skill cursor   # opt into a specific (path-unverified) target by name
+pi-research uninstall-skill --all  # remove every install pi-research created
+```
+
+`--all` covers the confirmed targets (Claude Code at `~/.claude/skills`, pi at
+`~/.pi/skills`). Other targets — Cursor, Codex, and the cross-tool
+`~/.agents/skills` convention — are opt-in by name because their skill paths are
+community-reported rather than officially documented. The installer never
+overwrites a non-pi-research `research` skill, records everything it creates, and
+removes exactly that on `uninstall-skill` (and automatically on `npm uninstall`).
+Use `--copy` instead of a symlink, or `--dry-run` to preview.
+
 ## Usage
 
 In pi, just ask — the model invokes the research tool from natural language and

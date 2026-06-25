@@ -84,6 +84,14 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           test "$TAG" = "$VERSION" || { echo "❌ Tag $TAG != package.json v$VERSION"; exit 1; }
 
+      - name: Verify version sync across artifacts
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          OCV="$(node -p "require('./openclaw.plugin.json').version")"
+          test "$OCV" = "$VERSION" || { echo "❌ openclaw.plugin.json v$OCV != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          grep -q "version: \"$VERSION\"" skills/research/SKILL.md || { echo "❌ skills/research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          echo "✔ package.json, openclaw.plugin.json, SKILL.md all at v$VERSION"
+
       - env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
           ONNXRUNTIME_NODE_SKIP_BINARIES: '1'

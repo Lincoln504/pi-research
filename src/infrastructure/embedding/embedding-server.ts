@@ -143,7 +143,9 @@ export class EmbeddingServer implements IEmbedder {
     // a research session's outer captureStdio is already active — the serverId key
     // bypasses the global isAnyLoggerCapturingOutput guard.
     const diskChecker = new DiskSpaceChecker();
-    const logFile = buildDefaultDebugLogPath('embedding-server');
+    // Consolidated log: the embedding server writes into the same file as the
+    // main process (path defaults to tmpdir, overridable via PI_RESEARCH_LOG_PATH).
+    const logFile = buildDefaultDebugLogPath();
     await captureStdio(
       logFile,
       () => diskChecker.checkDiskSpace(path.dirname(logFile)),
@@ -206,12 +208,24 @@ export class EmbeddingServer implements IEmbedder {
 
     if (this.server) {
       this.server.closeAllConnections?.();
+      const srv = this.server;
+      // Bound server.close(): a lingering keep-alive client could otherwise hang
+      // the callback forever and block process shutdown. Force teardown after 5s.
       await new Promise<void>((resolve) => {
-        this.server!.close(() => {
-          this.server = null;
-          resolve();
-        });
-      }).catch(() => { this.server = null; });
+        let settled = false;
+        const done = () => { if (!settled) { settled = true; resolve(); } };
+        const timer = setTimeout(() => {
+          logger.warn('[EmbeddingServer] server.close() timed out after 5s; forcing teardown.');
+          done();
+        }, 5000);
+        timer.unref?.();
+        try {
+          srv.close(() => { clearTimeout(timer); done(); });
+        } catch {
+          clearTimeout(timer); done();
+        }
+      });
+      this.server = null;
     }
 
     await this.embedder.dispose().catch((err) => {

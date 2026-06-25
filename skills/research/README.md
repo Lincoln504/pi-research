@@ -46,14 +46,26 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 
 ## Install the skill
 
-Copy (or symlink) this `research/` directory into your agent's skills folder:
+**Automated (recommended).** With the global CLI installed
+(`npm install -g @lincoln504/pi-research`), let the CLI detect your harnesses and
+symlink the skill in:
 
-| Agent | Location |
-|-------|----------|
-| Claude Code (personal) | `~/.claude/skills/research/` |
-| Claude Code (project)  | `<project>/.claude/skills/research/` |
-| Cross-client default   | `~/.agents/skills/research/` |
-| pi                     | `~/.pi/skills/research/` |
+```bash
+pi-research skills                 # show detected harnesses + install state
+pi-research install-skill --all    # symlink into all detected, confirmed targets
+pi-research uninstall-skill --all  # remove (also runs on npm uninstall)
+```
+
+**Manual.** Or copy/symlink this `research/` directory into your agent's skills folder:
+
+| Agent | Location | Auto-installer id |
+|-------|----------|-------------------|
+| Claude Code (personal) | `~/.claude/skills/research/` | `claude-code` |
+| Claude Code (project)  | `<project>/.claude/skills/research/` | — |
+| pi                     | `~/.pi/skills/research/` | `pi` |
+| Cursor                 | `~/.cursor/skills/research/` | `cursor` (opt-in) |
+| Codex CLI              | `~/.codex/skills/research/` | `codex` (opt-in) |
+| Cross-client default   | `~/.agents/skills/research/` | `agents` (opt-in) |
 
 Then just ask your agent to research something — its skill system matches the
 `description` in `SKILL.md` and activates this skill automatically.

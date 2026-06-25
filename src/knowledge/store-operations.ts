@@ -56,6 +56,18 @@ export async function addDocumentsToStore(
           `[store] embedder returned a wrong-width vector at index ${i} (got ${v?.length ?? 0}, expected ${dim})`,
         );
       }
+      // A correct-width vector can still be poisoned: a WebGPU device-lost
+      // mid-inference, or a truncated server response coerced through
+      // Float32Array, yields NaN/Inf entries that pass every length check but
+      // silently corrupt the ANN index (NaN distances break ordering). Scan
+      // here — this is the last gate before the vector is persisted.
+      for (let j = 0; j < v.length; j++) {
+        if (!Number.isFinite(v[j]!)) {
+          throw new Error(
+            `[store] embedder returned a non-finite value (${v[j]}) at vector ${i}, position ${j}`,
+          );
+        }
+      }
     }
 
     const data = docs.map((doc, i) => ({

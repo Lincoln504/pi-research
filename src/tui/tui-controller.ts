@@ -37,6 +37,12 @@ const state: GlobalTuiState = {
  * @param piSessionId - The current Pi session ID for scoped cancellation
  */
 export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: string): void {
+  // Always refresh the active session id FIRST — even when the input handler is
+  // already wired from a prior run. A second research run in the same process must
+  // scope cancellation (Esc/Ctrl+C), widget hide/restore, and abortAllSessions to
+  // ITS session; the old guard returned early and left piSessionId stuck on run 1.
+  state.piSessionId = piSessionId;
+
   if (state.unsubInput) return;
 
   // Double check if ui and onTerminalInput exist (it should in interactive mode)
@@ -44,9 +50,6 @@ export function initGlobalTuiController(ui: ExtensionUIContext, piSessionId?: st
     logger.debug('[TUI] Global TUI controller skipped: UI context or onTerminalInput not available');
     return;
   }
-
-  // Store the Pi session ID for scoped cancellation
-  state.piSessionId = piSessionId;
 
   /**
    * Handle terminal input for cancellation and protocol cleanup

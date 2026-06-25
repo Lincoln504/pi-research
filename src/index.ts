@@ -22,7 +22,7 @@ import { loadPrompt } from './core/llm/prompts.ts';
 import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
-import { getServiceContainer } from './core/service-registry.ts';
+import { getServiceContainer, resetServiceContainer } from './core/service-registry.ts';
 import { registerInfrastructureServices } from './infrastructure/service-initialization.ts';
 import { registerOrchestrationServices } from './orchestration/service-initialization.ts';
 
@@ -188,6 +188,13 @@ export default async function (pi: ExtensionAPI) {
       // Dispose native resources (ONNX pipeline) while C++ statics are still alive.
       await disposeCoreServices();
       logger.log('[pi-research] All services disposed');
+      // Clear service REGISTRATIONS too (not just instances). disposeCoreServices
+      // nulls instances but leaves the factory map intact, so without this a
+      // same-process re-activate() (pi reload / new session) would re-run
+      // registerCoreServices against an already-populated container and throw on
+      // the first allowOverwrite:false register — leaving isReady=true over stale
+      // services. Matches the SDK and OpenClaw teardown (both reset after dispose).
+      await resetServiceContainer(getServiceContainer());
       // Clear in-memory state after disposal.
       disposeGlobalTuiController();
       clearAllSessionState();

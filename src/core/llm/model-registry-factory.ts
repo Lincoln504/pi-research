@@ -12,6 +12,50 @@ import { AuthStorage, ModelRegistry, getAgentDir } from '@earendil-works/pi-codi
 import type { Model } from '@earendil-works/pi-ai';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { logger } from '../../logger.ts';
+
+/**
+ * A structural subset of ModelRegistry that the research resolvers actually use.
+ * The registry object can arrive from three places — our own factory, the pi
+ * extension host (ctx.modelRegistry), and the OpenClaw host — and a version skew
+ * between the pi-coding-agent we build against and the one the host injects has
+ * historically produced "modelRegistry.getAvailable is not a function" crashes
+ * mid-research. Treating the registry structurally (and feature-detecting each
+ * method) keeps researchers alive across that skew instead of throwing a raw
+ * TypeError that aborts the run.
+ */
+export interface ModelRegistryLike {
+  getAll?: () => Model<any>[];
+  getAvailable?: () => Model<any>[];
+  find?: (provider: string, id: string) => Model<any> | undefined;
+}
+
+/** Safe `getAll()` — returns [] if the host registry lacks the method. */
+export function safeGetAll(registry: ModelRegistryLike | null | undefined): Model<any>[] {
+  if (registry && typeof registry.getAll === 'function') {
+    try { return registry.getAll() ?? []; } catch (err) {
+      logger.warn('[ModelRegistry] getAll() threw; treating as empty:', err);
+    }
+  }
+  return [];
+}
+
+/**
+ * Safe `getAvailable()` — the authed/usable subset. Falls back to getAll() when
+ * the host registry does not expose getAvailable() (older/newer host skew), so a
+ * missing method degrades to "treat every known model as available" rather than
+ * crashing the researcher.
+ */
+export function safeGetAvailable(registry: ModelRegistryLike | null | undefined): Model<any>[] {
+  if (registry && typeof registry.getAvailable === 'function') {
+    try { return registry.getAvailable() ?? []; } catch (err) {
+      logger.warn('[ModelRegistry] getAvailable() threw; falling back to getAll():', err);
+    }
+  } else if (registry) {
+    logger.warn('[ModelRegistry] host registry has no getAvailable(); falling back to getAll(). Possible pi-coding-agent version skew.');
+  }
+  return safeGetAll(registry);
+}
 
 /**
  * Headers commonly required by third-party LLM providers
@@ -101,7 +145,9 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
     if (slashIdx > 0) {
       const prov = modelSpec.slice(0, slashIdx);
       const modelId = modelSpec.slice(slashIdx + 1);
-      const found = registry.find(prov, modelId);
+      const found = typeof registry.find === 'function'
+        ? registry.find(prov, modelId)
+        : safeGetAll(registry).find(m => m.provider === prov && m.id === modelId);
       if (found) return found;
       
       // Fallback for SDK/OpenClaw users without pi config: construct model from credentials
@@ -116,9 +162,9 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
     // A bare id can exist under several providers (a user-configured authed one
     // plus pi's built-in unauthed one); prefer an authed provider so we don't
     // resolve to a keyless entry that fails at the first call.
-    const allModels = registry.getAll();
+    const allModels = safeGetAll(registry);
     const sameId = allModels.filter(m => m.id === modelSpec);
-    const authedKeys = new Set(registry.getAvailable().map(m => `${m.provider}/${m.id}`));
+    const authedKeys = new Set(safeGetAvailable(registry).map(m => `${m.provider}/${m.id}`));
     const found = sameId.find(m => authedKeys.has(`${m.provider}/${m.id}`)) ?? sameId[0];
     if (found) return found;
 
@@ -127,7 +173,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
 
   // 2. Provider-only: pick first available model from that provider
   if (provider) {
-    const allModels = registry.getAll();
+    const allModels = safeGetAll(registry);
     const found = allModels.find(m => m.provider === provider);
     if (found) return found;
   }
@@ -138,13 +184,13 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
   //    the built-ins, so getAvailable()[0] would otherwise always pick a built-in
   //    provider even when the user has a preferred custom one. Walk models.json provider
   //    order first to respect the user's explicit configuration.
-  const available = registry.getAvailable();
+  const available = safeGetAvailable(registry);
   if (available.length > 0) {
     return pickPreferredAvailable(available, readModelsJsonProviderOrder())!;
   }
 
   // 4. Any model at all
-  const all = registry.getAll();
+  const all = safeGetAll(registry);
   if (all.length > 0) return all[0]!;
 
   // 5. Fallback: construct minimal model from credentials when registry is empty

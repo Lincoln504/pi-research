@@ -104,11 +104,18 @@ export class LogRotation {
 
   /**
    * Check if rotation is needed and perform if necessary.
-   * @returns true if rotation was performed
+   *
+   * Throttled to one filesystem stat per 60s. We deliberately do NOT offer a
+   * `force` bypass: a previous version forced a check on every WARN/ERROR, which
+   * turned into a synchronous fs.statSync per line (thousands per heavy run) and
+   * also reset the throttle so the timer path never fired. The 60s timer
+   * preserves all log data on rotation regardless of when it lands — a file may
+   * transiently exceed MAX_LOG_SIZE by at most one check interval, which is fine.
+   * @returns true if a rotation check was performed
    */
-  checkAndRotate(logFile: string, logDir: string, force: boolean = false): boolean {
+  checkAndRotate(logFile: string, logDir: string): boolean {
     const now = Date.now();
-    if (force || now - this.lastRotationCheck > 60_000) {
+    if (now - this.lastRotationCheck > 60_000) {
       this.rotateLogFile(logFile, logDir);
       this.lastRotationCheck = now;
       return true;

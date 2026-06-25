@@ -102,3 +102,6 @@ CIRCULAR_*.md
 ZERO_SCOPE_CREEP_REMEDIATION.md
 VERIFICATION_REPORT.md
 
+
+# Generated skill launcher (built by scripts/build.cjs skill on prepare)
+skills/research/scripts/run.mjs

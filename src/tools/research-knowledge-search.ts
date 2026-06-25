@@ -584,7 +584,10 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           conversationHistory,
           referenceText,
           config.LLM_TIMEOUT_MS,
-          config.PLANNING_MAX_TOKENS,
+          // Synthesis budget, not planning: this call distills up to ~30k tokens of
+          // reference documents into an answer, so the smaller PLANNING_MAX_TOKENS
+          // ceiling truncated the output. SYNTHESIS_MAX_TOKENS is the right bound.
+          config.SYNTHESIS_MAX_TOKENS,
           config.LLM_THINKING_LEVEL,
           signal,
         );

@@ -3,6 +3,7 @@
  */
 
 import * as dns from 'node:dns/promises';
+import * as net from 'node:net';
 import crypto from 'node:crypto';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { errorTracker } from '../utils/error-tracker.ts';
@@ -57,7 +58,11 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
     throw new Error(`Invalid URL: ${url}`, { cause: e });
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // Strip the IPv6 literal brackets that `new URL` preserves ("[::1]" → "::1").
+  // Without this every pattern/literal/DNS check below silently misses bracketed
+  // IPv6 literals — e.g. http://[::1]/ and http://[::ffff:127.0.0.1]/ (which Node
+  // normalizes to the hex form [::ffff:7f00:1]) would bypass the guard entirely.
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'invalid_protocol' });
@@ -74,7 +79,8 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
   if (process.env['PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE'] === 'true') {
     const isLoopback =
       hostname === 'localhost' || hostname.endsWith('.localhost') ||
-      /^127\./.test(hostname) || hostname === '::1' || hostname === '[::1]';
+      /^127\./.test(hostname) || hostname === '::1' ||
+      (net.isIPv6(hostname) && isPrivateIpv6(hostname) && isMappedLoopback(hostname));
     if (isLoopback) return;
   }
 
@@ -88,6 +94,20 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
       metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'internal_network' });
       throw new Error('Access to internal networks is not allowed');
     }
+  }
+
+  // Direct IP-literal check. dns.resolve4/6 REJECT IP literals (EBADNAME), so a
+  // raw-IP host would otherwise skip the resolved-address checks below and slip
+  // through. This is the gate that actually blocks http://[::ffff:127.0.0.1]/ and
+  // other IPv6 literals whose mapped IPv4 Node renders in hex.
+  const literalKind = net.isIP(hostname);
+  if (literalKind === 4 && isPrivateIp(hostname)) {
+    metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'ip_literal_v4' });
+    throw new Error('Access to private/reserved IPv4 address is not allowed');
+  }
+  if (literalKind === 6 && isPrivateIpv6(hostname)) {
+    metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'ip_literal_v6' });
+    throw new Error('Access to private/reserved IPv6 address is not allowed');
   }
 
   // Resolve hostname via DNS (both IPv4 and IPv6) and check all resulting addresses.
@@ -148,14 +168,51 @@ function isPrivateIpv6(ip: string): boolean {
   // Link-local (fe80::/10)
   if (normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
       normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
-  // IPv4-mapped ::ffff:x.x.x.x — check the embedded IPv4 part
-  const mappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mappedMatch && mappedMatch[1]) {
-    return isPrivateIp(mappedMatch[1]);
+  // IPv4-mapped ::ffff:x.x.x.x — check the embedded IPv4 part. The mapped tail
+  // can arrive dotted-decimal (::ffff:127.0.0.1) OR hex (::ffff:7f00:1) — Node's
+  // URL parser normalizes literals to the hex form — and the prefix can be
+  // compressed (::ffff:) or full (0:0:0:0:0:ffff:). Decode all of them.
+  const mapped = extractMappedIpv4(normalized);
+  if (mapped) {
+    return isPrivateIp(mapped);
   }
+  // 6to4 (2002::/16) and Teredo (2001:0::/32) tunnel IPv4 inside the IPv6 address,
+  // so a public-looking literal can carry a private/loopback IPv4 (e.g. 2002:7f00:1::
+  // → 127.0.0.x). Both are deprecated transitional ranges (RFC 7526) with no
+  // legitimate scrape target, so block the whole ranges rather than decode them.
+  if (normalized.startsWith('2002:')) return true;
+  if (/^2001:0{0,4}:/.test(normalized) || normalized.startsWith('2001::')) return true;
   // All-zeros (unspecified address)
   if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
   return false;
+}
+
+/**
+ * Decode the embedded IPv4 of an IPv4-mapped IPv6 address (::ffff:0:0/96) to
+ * dotted-decimal, accepting dotted-decimal or hex tails and compressed or full
+ * prefixes. Returns null when `ip` is not an IPv4-mapped address.
+ */
+function extractMappedIpv4(ip: string): string | null {
+  // ::ffff: prefix, compressed or full (0:0:0:0:0:ffff:)
+  const prefix = /(?:^::ffff:|(?:^0:){5}ffff:)/i;
+  if (!prefix.test(ip)) return null;
+  const tail = ip.replace(prefix, '');
+  // Dotted-decimal tail: ::ffff:127.0.0.1
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(tail)) return tail;
+  // Hex tail: ::ffff:7f00:1  (two 16-bit groups → four octets)
+  const hex = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (hex && hex[1] && hex[2]) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return null;
+}
+
+/** True when the address is an IPv4-mapped IPv6 whose embedded IPv4 is loopback. */
+function isMappedLoopback(ip: string): boolean {
+  const mapped = extractMappedIpv4(ip.toLowerCase().replace(/^\[|\]$/g, ''));
+  return mapped !== null && /^127\./.test(mapped);
 }
 
 /**

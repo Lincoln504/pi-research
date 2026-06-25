@@ -117,6 +117,10 @@
       "reportExportEnabled": {
         "type": "boolean",
         "default": false
+      },
+      "reportExportPath": {
+        "type": "string",
+        "description": "Directory to write exported reports (default: current working directory)"
       }
     }
   },
@@ -199,6 +203,14 @@
     },
     "reportExportEnabled": {
       "label": "Export Report",
+      "advanced": true
+    },
+    "reportExportPath": {
+      "label": "Report Export Directory",
+      "advanced": true
+    },
+    "migrationStrategy": {
+      "label": "Knowledge DB Migration Strategy",
       "advanced": true
     }
   },

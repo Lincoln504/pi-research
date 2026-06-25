@@ -26,7 +26,7 @@ export default defineConfig({
       'test/integration/tools-extended.test.ts',
     ],
     exclude: ['node_modules', 'dist', '.tmp'],
-    setupFiles: [],
+    setupFiles: ['./test/setup/integration.ts'],
     testTimeout: 300000,
     // Sequential file execution required: all files share the global
     // BrowserPoolManager singleton. Concurrent execution causes pool

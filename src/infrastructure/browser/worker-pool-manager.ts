@@ -236,6 +236,12 @@ export class WorkerPoolManager implements IService {
             } finally {
                 // Now nullify the dead pool and clear the flag
                 if (this.pool === deadPool) this.pool = null;
+                // Clear the cached init promise too — it still resolves to the now
+                // DESTROYED pool. Without this, the next ensurePool() skips the
+                // (null) fast-path and returns the stale promise, handing callers a
+                // dead pool ("Cannot execute a task on destroying pool"). shutdown()
+                // already clears it; auto-recovery must as well.
+                this.poolInitializationPromise = null;
                 this._resetInProgress = false;
             }
         }, 1000);

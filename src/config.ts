@@ -445,14 +445,17 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
     // Conflict detection: registry vs legacy .pi-research.env
     for (const [key, val] of Object.entries(registry[normalizedCwd])) {
       if (LOCAL_SCOPE_KEYS.has(key) && legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
-        logger.warn(`[config] Config divergence for ${key} in ${cwd}: Registry="${val}" vs Legacy="${legacyEnv[key]}". Registry wins.`);
+        // Don't interpolate the values — a config key could carry a secret and
+        // redactSecrets won't catch short/non-standard tokens. The key + winner
+        // is all the divergence warning needs.
+        logger.warn(`[config] Config divergence for ${key} in ${cwd}: registry value differs from legacy .pi-research.env. Registry wins.`);
       }
     }
     // Conflict detection: registry vs config.env (user settings)
     // Only warn about keys that are user-scoped but have leaked into the registry
     for (const [key, val] of Object.entries(registry[normalizedCwd])) {
       if (!LOCAL_SCOPE_KEYS.has(key) && merged[key] !== undefined && merged[key] !== val) {
-        logger.warn(`[config] Registry override for user-scoped ${key}: Registry="${val}" overrides config.env="${merged[key]}". This indicates a stale snapshot in the registry. Registry wins — consider re-saving your user settings.`);
+        logger.warn(`[config] Registry override for user-scoped ${key}: registry value overrides config.env (stale snapshot in the project registry). Registry wins — consider re-saving your user settings.`);
       }
     }
     Object.assign(merged, registry[normalizedCwd]);
@@ -663,9 +666,9 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     MAX_SCRAPE_BATCHES: parseEnvNumber(e, 'PI_RESEARCH_MAX_SCRAPE_BATCHES', DEFAULTS.MAX_SCRAPE_BATCHES, 0, 99),
     WORKER_THREADS: parseEnvNumber(e, 'PI_RESEARCH_WORKER_THREADS', DEFAULTS.WORKER_THREADS, 1, 10),
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10),
-    KNOWLEDGE_STORE_MODE: (parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', 'none') as 'none' | 'project' | 'global'),
+    KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'none'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
-    EMBEDDING_DEVICE: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_DEVICE', DEFAULTS.EMBEDDING_DEVICE) as 'webgpu' | 'cpu',
+    EMBEDDING_DEVICE: parseEnvEnum(e, 'PI_RESEARCH_EMBEDDING_DEVICE', ['webgpu', 'cpu'] as const, DEFAULTS.EMBEDDING_DEVICE),
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS, 5000, 120000),
     // Accept both canonical name and legacy name for backward compatibility.
     // saveConfig writes the canonical name (PI_RESEARCH_CACHE_TTL_DAYS) but
@@ -683,10 +686,10 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     TUI_REFRESH_DEBOUNCE_MS: parseEnvNumber(e, 'PI_RESEARCH_TUI_REFRESH_DEBOUNCE_MS', DEFAULTS.TUI_REFRESH_DEBOUNCE_MS, 0, 1000),
     BROWSER_TASK_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS', DEFAULTS.BROWSER_TASK_TIMEOUT_MS, 2000, 120000),
     LLM_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_LLM_TIMEOUT_MS', DEFAULTS.LLM_TIMEOUT_MS, 60000, 600000),
-    LLM_THINKING_LEVEL: parseEnvString(e, 'PI_RESEARCH_LLM_THINKING_LEVEL', DEFAULTS.LLM_THINKING_LEVEL) as 'off' | 'minimal' | 'low' | 'medium' | 'high',
+    LLM_THINKING_LEVEL: parseEnvEnum(e, 'PI_RESEARCH_LLM_THINKING_LEVEL', ['off', 'minimal', 'low', 'medium', 'high'] as const, DEFAULTS.LLM_THINKING_LEVEL),
     PLANNING_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_PLANNING_MAX_TOKENS', DEFAULTS.PLANNING_MAX_TOKENS, 1024, 131072),
     SYNTHESIS_MAX_TOKENS: parseEnvNumber(e, 'PI_RESEARCH_SYNTHESIS_MAX_TOKENS', DEFAULTS.SYNTHESIS_MAX_TOKENS, 1024, 131072),
-    MIGRATION_STRATEGY: parseEnvString(e, 'PI_RESEARCH_MIGRATION_STRATEGY', DEFAULTS.MIGRATION_STRATEGY) as 'drop' | 're-embed' | 'backup',
+    MIGRATION_STRATEGY: parseEnvEnum(e, 'PI_RESEARCH_MIGRATION_STRATEGY', ['drop', 're-embed', 'backup'] as const, DEFAULTS.MIGRATION_STRATEGY),
     CONSOLE_LOG: parseEnvBool(e, 'PI_RESEARCH_CONSOLE_LOG', DEFAULTS.CONSOLE_LOG),
     RESEARCH_MODEL: parseEnvString(e, 'PI_RESEARCH_MODEL', DEFAULTS.RESEARCH_MODEL),
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
@@ -790,4 +793,23 @@ function parseEnvBool(env: Record<string, string | undefined>, key: string, def:
 
 function parseEnvString(env: Record<string, string | undefined>, key: string, def?: string): string | undefined {
   return env[key] || def;
+}
+
+/**
+ * Parse an env var constrained to a fixed set of allowed values. An invalid value
+ * falls back to the default with a WARN rather than being cast straight through —
+ * otherwise a typo like PI_RESEARCH_KNOWLEDGE_STORE_MODE=projetc silently produces
+ * a value no downstream switch handles, degrading behavior with no signal.
+ */
+function parseEnvEnum<T extends string>(
+  env: Record<string, string | undefined>,
+  key: string,
+  allowed: readonly T[],
+  def: T,
+): T {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return def;
+  if ((allowed as readonly string[]).includes(raw)) return raw as T;
+  logger.warn(`[config] Invalid ${key}="${raw}" (expected one of: ${allowed.join(', ')}). Using default "${def}".`);
+  return def;
 }

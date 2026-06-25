@@ -54,7 +54,7 @@ Use unique, targeted queries for any new researchers.
   "action": "delegate",
   "researchers": [
     { 
-      "id": "{ROUND_NUMBER}.1", 
+      "id": "{{round_number}}.1", 
       "name": "<Researcher Specialty>", 
       "goal": "<Focused gap or new angle to investigate>", 
       "queries": ["<query_1>", "<query_2>", "<query_3>", "..."] 
@@ -67,7 +67,7 @@ Use unique, targeted queries for any new researchers.
 **DELEGATION REQUIREMENTS**:
 - **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
-- **Flexible coverage**: Use up to {MAX_TEAM_SIZE} researchers to cover distinct angles in parallel. Scale based on research gaps — a single well-targeted researcher is often sufficient for focused gaps.
+- **Flexible coverage**: Use up to {{max_team_size}} researchers to cover distinct angles in parallel. Scale based on research gaps — a single well-targeted researcher is often sufficient for focused gaps.
 - **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
 
 ---

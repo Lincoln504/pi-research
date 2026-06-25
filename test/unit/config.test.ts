@@ -275,13 +275,23 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(low)).not.toThrow();
     });
 
-    it('should throw for EMBEDDING_DEVICE with an unsupported value', () => {
+    it('coerces an unsupported EMBEDDING_DEVICE env value to the default', () => {
+      // Env parsing is lenient-with-a-warning: a typo'd device falls back to the
+      // default instead of producing a value no downstream code handles.
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'invalid' }, {});
-      expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
+      expect(config.EMBEDDING_DEVICE).toBe('webgpu');
+      expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('should reject EMBEDDING_DEVICE of "cuda"', () => {
+    it('coerces EMBEDDING_DEVICE of "cuda" to the default', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cuda' }, {});
+      expect(config.EMBEDDING_DEVICE).toBe('webgpu');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('validateConfig still rejects an EMBEDDING_DEVICE set invalidly in-object (bypassing env parsing)', () => {
+      const config = createConfig({}, {});
+      (config as any).EMBEDDING_DEVICE = 'cuda';
       expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
     });
 
@@ -313,8 +323,15 @@ describe('config (refactored)', () => {
       expect(() => validateConfig(config)).not.toThrow();
     });
 
-    it('throws on invalid KNOWLEDGE_STORE_MODE value (must be none|project|global)', () => {
+    it('coerces an invalid KNOWLEDGE_STORE_MODE env value to "none"', () => {
       const config = createConfig({ PI_RESEARCH_KNOWLEDGE_STORE_MODE: 'invalid-mode' }, {});
+      expect(config.KNOWLEDGE_STORE_MODE).toBe('none');
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('validateConfig still rejects a KNOWLEDGE_STORE_MODE set invalidly in-object', () => {
+      const config = createConfig({}, {});
+      (config as any).KNOWLEDGE_STORE_MODE = 'invalid-mode';
       expect(() => validateConfig(config)).toThrow('must match a schema in anyOf');
     });
 

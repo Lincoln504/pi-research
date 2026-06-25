@@ -115,11 +115,9 @@ export const DEFAULT_MAX_DELAY_MS = 10000;
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000;
 
-/** Default concurrency for batch 2 and beyond (higher than the configurable Batch 1 concurrency, default 3) */
+/** Upper bound on batch-2+ scrape concurrency; the caller additionally caps this
+ *  to the real browser-pool capacity (WORKER_THREADS × WORKER_CONCURRENCY). */
 export const BATCH_2_DEFAULT_CONCURRENCY = 15;
-
-// ==================== UI Constants ====================
-
 
 // ==================== Orchestrator Constants ====================
 

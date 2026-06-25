@@ -1,8 +1,10 @@
 /**
  * Logger — scoped file-based diagnostics
  *
- * Writes timestamped lines to {tmpdir}/pi-research-{researchRunId}.log when a researchRunId is provided.
- * Falls back to {tmpdir}/pi-research.log when no researchRunId.
+ * Writes newline-delimited JSON records to a single consolidated log file. The
+ * path defaults to {os.tmpdir()}/pi-research.log and is overridable via the
+ * PI_RESEARCH_LOG_PATH env var (see buildDefaultDebugLogPath / log-utils). The
+ * file rotates at 10MB, keeping the last 10 archives.
  * ERROR and WARN levels are always logged.
  * INFO and DEBUG levels are only logged when PI_RESEARCH_DEBUG=true (or config.DEBUG=true).
  *
@@ -62,10 +64,6 @@ export interface LoggerOptions {
   logFilePath?: string;
   researchRunId?: string;
   consoleLog?: boolean;
-}
-
-export function getDefaultDebugLogPathTemplate(): string {
-  return buildDefaultDebugLogPath('{researchRunId}');
 }
 
 /**
@@ -243,9 +241,8 @@ export class Logger implements ILogger {
       return;
     }
 
-    // Rotate log file if needed (check every 60 seconds or on ERROR/WARN)
-    const force = level === 'ERROR' || level === 'WARN';
-    this.rotation.checkAndRotate(this.logFile, this.logDir, force);
+    // Rotate log file if needed (throttled to one stat per 60s — see LogRotation).
+    this.rotation.checkAndRotate(this.logFile, this.logDir);
 
     const timestamp = new Date().toISOString();
     const firstError = args.find((arg): arg is Error => arg instanceof Error);

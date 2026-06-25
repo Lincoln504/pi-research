@@ -73,7 +73,11 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     } catch (e) {
       return { healthy: false, error: `Browser healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
     }
-  }, { timeoutMs: 150000, critical: true });
+    // Honor the configured health timeout but keep a 150s floor: a cold browser
+    // launch (camoufox download/spawn) can legitimately take minutes, so we never
+    // go below that, but a user who raises HEALTH_CHECK_TIMEOUT_MS past it is
+    // respected (same pattern as the KnowledgeStore check's Math.max floor).
+  }, { timeoutMs: Math.max(healthTimeoutMs, 150000), critical: true });
 
   // Register Knowledge Store Check
   registry.register('KnowledgeStore', async (options) => {

@@ -104,13 +104,21 @@ export function setupOrphanProtection(): void {
     try {
       // signal 0 checks if the process is alive
       process.kill(process.ppid, 0);
-      
+
       // Schedule next check
       orphanCheckTimer = setTimeout(checkOrphan, 10000);
       if (orphanCheckTimer) {
         orphanCheckTimer.unref();
       }
     } catch (_e) {
+      // EPERM means the parent is ALIVE but owned by another user (multi-user host
+      // / CI) — NOT orphaned. Only ESRCH (no such process) is a real orphan. Don't
+      // self-terminate a healthy worker (and tear down its live browser) on EPERM.
+      if ((_e as NodeJS.ErrnoException)?.code === 'EPERM') {
+        orphanCheckTimer = setTimeout(checkOrphan, 10000);
+        orphanCheckTimer?.unref();
+        return;
+      }
       // If error is thrown, the parent process is likely dead or unreachable
       logToDebugFile('WARN', `[Worker-${workerId}] Parent process died or unreachable (orphaned), shutting down...`);
       // FIX: Await cleanup to prevent browser/context leaks

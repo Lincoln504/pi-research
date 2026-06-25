@@ -73,6 +73,11 @@ let _sigtermHandler: (() => void) | null = null;
 let _sighupHandler: (() => void) | null = null;
 let _sigbreakHandler: (() => void) | null = null;
 let _shuttingDown = false;
+// In-flight shutdown guard. A cooperative shutdownResearchSDK() can race a
+// signal-triggered one (or two callers in a finally + signal): both pass the
+// early-return while isInitialized is still true and then double-dispose the
+// container and double-wipe globals. Coalesce them onto one promise.
+let _shutdownPromise: Promise<void> | null = null;
 
 function _registerSignalHandlers(): void {
   if (_onSignal) return; // already registered
@@ -270,8 +275,14 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
     _registerSignalHandlers();
   } catch (err) {
     logger.error('[SDK] Initialization failed:', err);
-    // Cleanup on failure
-    await shutdownResearchSDK();
+    // Cleanup on failure. If the cleanup ITSELF throws (AggregateError from
+    // dispose), don't let it mask the root-cause init error the caller needs —
+    // log it and re-throw the original.
+    try {
+      await shutdownResearchSDK();
+    } catch (cleanupErr) {
+      logger.error('[SDK] Cleanup after failed init also errored:', cleanupErr);
+    }
     throw err;
   } finally {
     _initPromise = null;
@@ -418,20 +429,22 @@ export async function runDeepResearch(
     const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, undefined, globalContainer);
     result = synthesisService.appendMetadata(result, globalModel!.id);
 
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
+    const completedAt = Date.now();
+    metrics.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'success', source: 'sdk' });
     _lastRunSummary = {
-      runId: researchId, startedAt: researchStart, completedAt: Date.now(),
-      durationMs: Date.now() - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
+      runId: researchId, startedAt: researchStart, completedAt,
+      durationMs: completedAt - researchStart, status: 'success', snapshot: runRegistry.getSnapshot(),
     };
     metrics.recordRunSummary(_lastRunSummary);
     _lastErrorReport = runTracker.getReport();
     logRunErrorSummary(_lastErrorReport, depthLabel, 'success');
     return result;
   } catch (err) {
-    metrics.observe('research_manager_latency_ms', Date.now() - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
+    const completedAt = Date.now();
+    metrics.observe('research_manager_latency_ms', completedAt - researchStart, { depth: depthLabel, status: 'error', source: 'sdk' });
     _lastRunSummary = {
-      runId: researchId, startedAt: researchStart, completedAt: Date.now(),
-      durationMs: Date.now() - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
+      runId: researchId, startedAt: researchStart, completedAt,
+      durationMs: completedAt - researchStart, status: 'error', snapshot: runRegistry.getSnapshot(),
     };
     metrics.recordRunSummary(_lastRunSummary);
     _lastErrorReport = runTracker.getReport();
@@ -654,7 +667,14 @@ export async function shutdownResearchSDK(): Promise<void> {
   if (!isInitialized && !_initPromise && !globalContainer) {
     return;
   }
+  // Coalesce concurrent/overlapping shutdowns onto a single teardown so the
+  // container is disposed and globals wiped exactly once.
+  if (_shutdownPromise) return _shutdownPromise;
+  _shutdownPromise = _doShutdown().finally(() => { _shutdownPromise = null; });
+  return _shutdownPromise;
+}
 
+async function _doShutdown(): Promise<void> {
   logger.log('[SDK] Shutting down Research SDK...');
 
   const errors: Error[] = [];

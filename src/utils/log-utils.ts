@@ -22,14 +22,16 @@ export interface LogContext {
 
 const logContextStorage = new AsyncLocalStorage<LogContext>();
 
-export function buildDefaultDebugLogPath(_researchRunId?: string): string {
+/**
+ * Resolve the consolidated diagnostic log path.
+ * Defaults to {os.tmpdir()}/pi-research.log; overridable via PI_RESEARCH_LOG_PATH.
+ * All scopes (main process, researchers, embedding server, browser worker) write
+ * to this single file — logging is intentionally consolidated, not per-run-id.
+ */
+export function buildDefaultDebugLogPath(): string {
   const override = process.env['PI_RESEARCH_LOG_PATH'];
   if (override) return override;
   return path.join(os.tmpdir(), 'pi-research.log');
-}
-
-export function getDefaultDebugLogPathTemplate(): string {
-  return buildDefaultDebugLogPath('{researchRunId}');
 }
 
 /**

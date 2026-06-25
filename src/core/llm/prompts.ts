@@ -34,13 +34,17 @@ export function loadPrompt(name: string): string {
   // resolve to a file outside PROMPT_CANDIDATES even if it matches a real .md.
   if (typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || name.includes('..')) {
     logger.error(`[prompts] Rejected unsafe prompt name: ${JSON.stringify(name)}`);
-    return '';
+    throw new Error(`[prompts] Rejected unsafe prompt name: ${JSON.stringify(name)}`);
   }
   for (const dir of PROMPT_CANDIDATES) {
     try {
       return readFileSync(join(dir, `${name}.md`), 'utf-8');
     } catch { /* try next candidate */ }
   }
+  // Fail loud: returning '' here fed a BLANK system prompt straight into the LLM
+  // call (every caller pipes the result into populatePrompt → the model), wasting
+  // tokens and producing garbage with no signal. A missing prompt is a packaging
+  // bug, so surface it.
   logger.error(`[prompts] Failed to load prompt: ${name} (searched: ${PROMPT_CANDIDATES.join(', ')})`);
-  return '';
+  throw new Error(`[prompts] Failed to load prompt "${name}" (searched: ${PROMPT_CANDIDATES.join(', ')})`);
 }

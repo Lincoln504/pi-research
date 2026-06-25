@@ -188,6 +188,11 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       cleanupSharedLinks(targetId);
       resetLogger(targetId);
       clearSessionCircuitBreaker(targetId);
+      // Drop the per-run failure counter. This is a singleton service keyed by a
+      // unique researchId per run, so without this delete the map grows unbounded
+      // for the lifetime of the process.
+      this.failureCounts.delete(targetId);
+      if (researchId) this.failureCounts.delete(researchId);
     }
 
     logger.debug(`[ResearchOrchestrationService] Cleaned up research services for ${targetId}`);

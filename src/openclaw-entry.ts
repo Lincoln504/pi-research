@@ -60,6 +60,7 @@ const OpenClawConfigSchema = Type.Object({
   scrapeTimeoutMs: Type.Optional(Type.Number({ minimum: 5000, maximum: 120000, default: 15000 })),
   stackexchangeApiKey: Type.Optional(Type.String({ description: 'Stack Exchange API key for higher rate limits' })),
   reportExportEnabled: Type.Optional(Type.Boolean({ default: false })),
+  reportExportPath: Type.Optional(Type.String({ description: 'Directory to write exported reports (default: current working directory)' })),
 });
 
 type OpenClawPluginConfig = Static<typeof OpenClawConfigSchema>;
@@ -69,6 +70,13 @@ type OpenClawPluginConfig = Static<typeof OpenClawConfigSchema>;
 // ---------------------------------------------------------------------------
 
 let isInitialized = false;
+// In-flight init guard. Tool calls (research/health/research_knowledge_search)
+// can arrive concurrently — without this, two callers both observe
+// isInitialized === false (it is only set true AFTER the awaited init completes)
+// and each runs full service registration + browser-pool / embedding-server /
+// GPU-lock init against the same global container. Coalesce them onto one
+// promise (mirrors the SDK's _initPromise pattern in sdk.ts).
+let _initPromise: Promise<void> | null = null;
 let globalContainer: ServiceContainer | null = null;
 let globalRegistry: ModelRegistry | null = null;
 let globalModel: Model<any> | null = null;
@@ -76,9 +84,14 @@ let globalConfig: Config | null = null;
 let globalDefaultDepth = 1;
 let _headlessObserver: HeadlessObserver | null = null;
 
-async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
-  if (isInitialized) return;
+function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<void> {
+  if (isInitialized) return Promise.resolve();
+  if (_initPromise) return _initPromise;
+  _initPromise = _doInitialize(pluginConfig).finally(() => { _initPromise = null; });
+  return _initPromise;
+}
 
+async function _doInitialize(pluginConfig: OpenClawPluginConfig) {
   const cwd = process.cwd();
   // Clone so we don't mutate the shared configCache reference.
   globalConfig = { ...getConfig(cwd, 'openclaw') };
@@ -109,25 +122,45 @@ async function ensureInitialized(pluginConfig: OpenClawPluginConfig) {
     globalDefaultDepth = pluginConfig.defaultDepth;
   }
 
-  // Resolve model registry & model
-  globalRegistry = buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
-  globalModel = resolveModel(
-    globalRegistry,
-    pluginConfig.model,
-    pluginConfig.provider,
-    pluginConfig.apiKey
-  );
+  try {
+    // Resolve model registry & model
+    globalRegistry = buildModelRegistry(pluginConfig.apiKey, pluginConfig.provider);
+    globalModel = resolveModel(
+      globalRegistry,
+      pluginConfig.model,
+      pluginConfig.provider,
+      pluginConfig.apiKey
+    );
 
-  // Create and initialize services
-  globalContainer = getServiceContainer();
-  registerInfrastructureServices(globalContainer);
-  registerCoreServices(globalContainer);
-  registerOrchestrationServices(globalContainer);
+    // Create and initialize services
+    globalContainer = getServiceContainer();
+    registerInfrastructureServices(globalContainer);
+    registerCoreServices(globalContainer);
+    registerOrchestrationServices(globalContainer);
 
-  const mockCtx = createMockContext(globalModel!, globalRegistry!);
-  await initializeCoreServices(mockCtx, globalContainer);
+    const mockCtx = createMockContext(globalModel!, globalRegistry!);
+    await initializeCoreServices(mockCtx, globalContainer);
 
-  isInitialized = true;
+    isInitialized = true;
+  } catch (err) {
+    // A partial init (e.g. model resolution or service startup failed) leaves a
+    // dirty container and half-set globals. shutdown() can't help here — it
+    // early-returns while isInitialized is false — so reset explicitly. This lets
+    // the next tool call retry from a clean slate instead of registering twice
+    // onto a poisoned container.
+    logger.error('[OpenClaw] Initialization failed; resetting partial state:', err);
+    try {
+      if (globalContainer) await resetServiceContainer(globalContainer);
+    } catch (cleanupErr) {
+      logger.error('[OpenClaw] Error during init-failure cleanup:', cleanupErr);
+    }
+    isInitialized = false;
+    globalContainer = null;
+    globalRegistry = null;
+    globalModel = null;
+    globalConfig = null;
+    throw err;
+  }
 }
 
 async function shutdown() {
@@ -155,6 +188,9 @@ async function shutdown() {
     globalRegistry = null;
     globalModel = null;
     globalConfig = null;
+    // Drop the headless observer too — it is bound to the now-disposed run state.
+    // Leaving it would have the next init reuse an observer tied to dead services.
+    _headlessObserver = null;
   }
 }
 
@@ -220,6 +256,7 @@ export default definePluginEntry({
       scrapeTimeoutMs: { type: 'number', minimum: 5000, maximum: 120000, default: 15000 },
       stackexchangeApiKey: { type: 'string', description: 'Stack Exchange API key for higher rate limits' },
       reportExportEnabled: { type: 'boolean', default: false },
+      reportExportPath: { type: 'string', description: 'Directory to write exported reports (default: current working directory)' },
     },
   }),
 

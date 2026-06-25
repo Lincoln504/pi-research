@@ -87,8 +87,11 @@ async function cleanupOrphanedProcessesUnix(): Promise<void> {
         try {
           process.kill(ppid, 0);
           isOrphan = false;
-        } catch {
-          isOrphan = true;
+        } catch (e) {
+          // ESRCH = parent is gone (genuine orphan). EPERM = parent is ALIVE but
+          // owned by another user — NOT an orphan. Conflating them would let a
+          // multi-user host / CI side-car kill a live, foreign-owned browser.
+          isOrphan = (e as NodeJS.ErrnoException)?.code !== 'EPERM';
         }
       }
 
