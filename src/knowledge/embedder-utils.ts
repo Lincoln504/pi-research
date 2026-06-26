@@ -117,24 +117,46 @@ let dawnInitialized = false;
 
 
 /**
+ * Names that identify a software / paravirtual / fallback GPU adapter — i.e. one
+ * on which onnxruntime-node's bundled Dawn will load but then SIGSEGV during the
+ * first compute dispatch. Matched case-insensitively against adapter info fields.
+ */
+const SOFTWARE_ADAPTER_PATTERNS = [
+  'llvmpipe',
+  'lavapipe',
+  'swiftshader',
+  'softpipe',
+  'basic render',          // "Microsoft Basic Render Driver"
+  'microsoft basic',
+  'software',
+  'virtio',                // virtio-gpu paravirtual (VMs)
+  'venus',                 // Mesa venus (virtio-gpu Vulkan)
+  'llvm',
+];
+
+/**
  * Verify WebGPU availability for the current Node.js environment.
  *
- * onnxruntime-node@1.23+ bundles Dawn natively as a WebGPU execution provider
- * (verified via listSupportedBackends: { name: 'webgpu', bundled: true }). On Linux
- * this uses the Vulkan backend, which is available on virtually all modern GPUs
- * including integrated graphics (Intel/AMD/NVIDIA all ship Vulkan-capable drivers).
+ * onnxruntime-node bundles Dawn natively as its WebGPU execution provider; on
+ * Linux this uses Vulkan. On hardware GPUs this works. On software/paravirtual
+ * Vulkan adapters (llvmpipe/lavapipe, virtio/venus, SwiftShader, ...) Dawn LOADS
+ * the pipeline but then crashes natively (SIGSEGV) on the first compute dispatch.
  *
- * No additional packages or navigator.gpu polyfills are needed — onnxruntime-node's
- * WebGPU EP is fully self-contained. This function logs GPU info if the optional
- * 'webgpu' package is installed, then signals that WebGPU can proceed.
+ * This function is the in-process secondary guard for the FORCED 'webgpu' path
+ * (the 'auto' path is gated earlier by an out-of-process probe). When the
+ * optional 'webgpu' package is present we inspect the adapter and RETURN FALSE if
+ * it is a software/fallback adapter, so the caller can downgrade to CPU before
+ * any native compute runs. If the 'webgpu' package is absent we cannot inspect
+ * the adapter in-process and proceed (the out-of-process probe remains the real
+ * safeguard for 'auto').
+ *
+ * @returns true if WebGPU may proceed; false if a software/fallback adapter was
+ *          detected and the caller should use CPU instead.
  */
 export async function initializeDawnWebGPU(): Promise<boolean> {
   if (dawnInitialized) return true;
 
   try {
-    // Optional: log GPU adapter info if the 'webgpu' npm package is available.
-    // This package exposes the JS-side WebGPU API (not needed by onnxruntime-node
-    // which uses its own bundled Dawn, but useful for diagnostics).
     // @ts-ignore — optional dependency
     const { create, globals } = await import('webgpu');
     Object.assign(globalThis, globals);
@@ -145,15 +167,33 @@ export async function initializeDawnWebGPU(): Promise<boolean> {
       configurable: true,
     });
     const adapter = await (globalThis as any).navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (adapter?.info) {
-      logger.info(`[embedder] WebGPU adapter: ${adapter.info.vendor} ${adapter.info.device}`);
+
+    if (!adapter) {
+      logger.warn('[embedder] No WebGPU adapter available — using CPU.');
+      return false;
     }
+
+    const info = adapter.info ?? {};
+    const haystack = [info.vendor, info.architecture, info.device, info.description]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    if (adapter.isFallbackAdapter === true || SOFTWARE_ADAPTER_PATTERNS.some((p) => haystack.includes(p))) {
+      logger.warn(
+        `[embedder] WebGPU adapter is software/paravirtual (${haystack || 'fallback'}) — Dawn would crash on compute; using CPU.`,
+      );
+      return false;
+    }
+
+    logger.info(`[embedder] WebGPU adapter: ${info.vendor ?? '?'} ${info.device ?? info.architecture ?? '?'}`);
   } catch {
-    // 'webgpu' package not installed — onnxruntime-node's bundled Dawn EP
-    // handles WebGPU without it; this branch is diagnostic only.
+    // 'webgpu' package not installed — cannot inspect the adapter in-process.
+    // onnxruntime-node's bundled Dawn EP still works without it on real hardware;
+    // for 'auto' the out-of-process probe already validated viability.
   }
 
   dawnInitialized = true;
-  logger.info('[embedder] WebGPU ready via onnxruntime-node bundled Dawn (Vulkan on Linux)');
+  logger.info('[embedder] WebGPU ready via onnxruntime-node bundled Dawn');
   return true;
 }

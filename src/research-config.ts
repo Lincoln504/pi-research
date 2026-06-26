@@ -163,9 +163,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'EMBEDDING_DEVICE',
         label: 'Embedding Device',
-        description: 'Hardware backend for the embedding model. CPU is safer for headless or server environments.',
+        description: 'Hardware backend for the embedding model. "auto" probes whether WebGPU actually runs here and falls back to CPU if not (safe everywhere). CPU forces the safe path; webgpu forces the GPU path.',
         currentValue: config.EMBEDDING_DEVICE,
-        values: ['webgpu', 'cpu'],
+        values: ['auto', 'webgpu', 'cpu'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
@@ -342,7 +342,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             scope = 'user';
             } else if (id === 'EMBEDDING_DEVICE') {
-            config.EMBEDDING_DEVICE = newValue as 'webgpu' | 'cpu';
+            config.EMBEDDING_DEVICE = newValue as 'auto' | 'webgpu' | 'cpu';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
             config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);

@@ -317,13 +317,13 @@ describe('config (refactored)', () => {
       // Env parsing is lenient-with-a-warning: a typo'd device falls back to the
       // default instead of producing a value no downstream code handles.
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'invalid' }, {});
-      expect(config.EMBEDDING_DEVICE).toBe('webgpu');
+      expect(config.EMBEDDING_DEVICE).toBe('auto');
       expect(() => validateConfig(config)).not.toThrow();
     });
 
     it('coerces EMBEDDING_DEVICE of "cuda" to the default', () => {
       const config = createConfig({ PI_RESEARCH_EMBEDDING_DEVICE: 'cuda' }, {});
-      expect(config.EMBEDDING_DEVICE).toBe('webgpu');
+      expect(config.EMBEDDING_DEVICE).toBe('auto');
       expect(() => validateConfig(config)).not.toThrow();
     });
 

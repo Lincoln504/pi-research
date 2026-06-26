@@ -20,6 +20,7 @@
     "dist/openclaw-entry.js",
     "dist/cli.mjs",
     "dist/thread-worker.mjs",
+    "dist/webgpu-probe.mjs",
     "dist/prompts/",
     "skills/",
     "!src/.env",

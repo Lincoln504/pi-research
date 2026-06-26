@@ -38,6 +38,18 @@ const COMMON = {
 
 const p = (...segs) => path.join(ROOT, ...segs);
 
+// The out-of-process WebGPU viability probe is plain .mjs (not bundled). It must
+// sit next to the bundled entry points so the embedder can resolve it relative to
+// import.meta.url, and so it resolves @huggingface/transformers from the installed
+// package's node_modules. Both dist/cli.mjs and dist/openclaw-entry.js depend on it.
+function copyWebGpuProbe() {
+  fs.mkdirSync(p('dist'), { recursive: true });
+  fs.copyFileSync(
+    p('src', 'knowledge', 'webgpu-probe.mjs'),
+    p('dist', 'webgpu-probe.mjs'),
+  );
+}
+
 function copyOpenclawResources() {
   fs.mkdirSync(p('dist', 'prompts'), { recursive: true });
   for (const f of fs.readdirSync(p('src', 'prompts'))) {
@@ -64,14 +76,17 @@ const TARGETS = {
       outfile: p('dist', 'openclaw-entry.js'),
     });
     copyOpenclawResources();
+    copyWebGpuProbe();
   },
-  cli: () =>
-    esbuild.build({
+  cli: async () => {
+    await esbuild.build({
       ...COMMON,
       entryPoints: [p('src', 'cli.ts')],
       outfile: p('dist', 'cli.mjs'),
       banner: { js: SHEBANG },
-    }),
+    });
+    copyWebGpuProbe();
+  },
   skill: () =>
     esbuild.build({
       ...COMMON,

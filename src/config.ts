@@ -40,8 +40,11 @@ export const ConfigSchema = Type.Object({
   KNOWLEDGE_STORE_MODE: Type.Union([Type.Literal('none'), Type.Literal('project'), Type.Literal('global')], { default: 'global' }),
   /** Embedding model to use for the knowledge store */
   EMBEDDING_MODEL: Type.String({ default: 'onnx-community/granite-embedding-small-english-r2-ONNX' }),
-  /** Hardware backend for embeddings: 'webgpu' or 'cpu' */
-  EMBEDDING_DEVICE: Type.Union([Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'webgpu' }),
+  /** Hardware backend for embeddings: 'auto' (probe WebGPU viability out-of-process, fall back to CPU), 'webgpu' (force), or 'cpu' (force).
+   *  Default 'auto': many real targets (VMs, containers, CI, headless/software-Vulkan hosts) have no GPU that
+   *  onnxruntime-node's bundled Dawn can run compute on — and that failure is a native SIGSEGV, not a catchable
+   *  JS error. 'auto' detects this via a disposable child process (a crash there can't kill us) and uses CPU. */
+  EMBEDDING_DEVICE: Type.Union([Type.Literal('auto'), Type.Literal('webgpu'), Type.Literal('cpu')], { default: 'auto' }),
   /** Timeout for scraping operations in milliseconds (default: 15000, range: 5-120 seconds) */
   SCRAPE_TIMEOUT_MS: Type.Number({ minimum: 5000, maximum: 120000, default: 15000 }),
   /** How long to keep documents in the knowledge store before eviction (default: 30 days) */
@@ -682,7 +685,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     WORKER_CONCURRENCY: parseEnvNumber(e, 'PI_RESEARCH_WORKER_CONCURRENCY', DEFAULTS.WORKER_CONCURRENCY, 1, 10),
     KNOWLEDGE_STORE_MODE: parseEnvEnum(e, 'PI_RESEARCH_KNOWLEDGE_STORE_MODE', ['none', 'project', 'global'] as const, 'global'),
     EMBEDDING_MODEL: parseEnvString(e, 'PI_RESEARCH_EMBEDDING_MODEL', DEFAULTS.EMBEDDING_MODEL)!,
-    EMBEDDING_DEVICE: parseEnvEnum(e, 'PI_RESEARCH_EMBEDDING_DEVICE', ['webgpu', 'cpu'] as const, DEFAULTS.EMBEDDING_DEVICE),
+    EMBEDDING_DEVICE: parseEnvEnum(e, 'PI_RESEARCH_EMBEDDING_DEVICE', ['auto', 'webgpu', 'cpu'] as const, DEFAULTS.EMBEDDING_DEVICE),
     SCRAPE_TIMEOUT_MS: parseEnvNumber(e, 'PI_RESEARCH_SCRAPE_TIMEOUT_MS', DEFAULTS.SCRAPE_TIMEOUT_MS, 5000, 120000),
     // Accept both canonical name and legacy name for backward compatibility.
     // saveConfig writes the canonical name (PI_RESEARCH_CACHE_TTL_DAYS) but

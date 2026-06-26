@@ -27,6 +27,7 @@ import {
   initializeDawnWebGPU,
 } from './embedder-utils.ts';
 import { getHFEnv, initializeONNXEnv } from './onnx-env.ts';
+import { resolveEmbeddingDevice } from './webgpu-viability.ts';
 import {
   isWebGpuDeviceError,
   isModelCached,
@@ -71,12 +72,14 @@ export class Embedder {
     this.poolingMode = options.pooling ?? 'mean';
     this.queryPrefix = options.queryPrefix ?? '';
     this.initializationTimeoutMs = options.initializationTimeoutMs ?? 300000;
-    this.originalDevice = options.device ?? 'webgpu';
-    
-    // Check for fallbacks
-    const isWebGpu = this.originalDevice === 'webgpu';
+    this.originalDevice = options.device ?? 'auto';
 
-    if (hasWebGpuFallback() && isWebGpu) {
+    // If WebGPU already proved unusable earlier this session, skip it entirely
+    // for any GPU-capable request ('webgpu' or 'auto') — no point re-probing or
+    // re-attempting a path known to fail.
+    const couldUseWebGpu = this.originalDevice === 'webgpu' || this.originalDevice === 'auto';
+
+    if (hasWebGpuFallback() && couldUseWebGpu) {
       this.device = 'cpu';
       logger.info('[embedder] Skipping WebGPU (previous fallback detected), using CPU directly');
     } else {
@@ -155,6 +158,13 @@ export class Embedder {
 
   private async _initializeInternal(): Promise<void> {
     try {
+      // Resolve 'auto' to a concrete backend BEFORE any native ONNX/Dawn code runs.
+      // For 'auto' this runs an out-of-process probe (cached per host) so that a
+      // native SIGSEGV on a software/paravirtual GPU can never reach this process.
+      if (this.device === 'auto') {
+        this.device = await resolveEmbeddingDevice('auto', this.model, this.initializationTimeoutMs);
+      }
+
       // Acquire GPU lock if using WebGPU
       if (this.device === 'webgpu') {
         const { acquired, shouldFallback } = await acquireGpuLock(this.stateManager);
@@ -165,9 +175,16 @@ export class Embedder {
         }
       }
 
-      // Try to initialize WebGPU via Dawn for Node.js environments
+      // Try to initialize WebGPU via Dawn for Node.js environments. A false
+      // return means a software/fallback adapter was detected in-process —
+      // downgrade to CPU before any native compute runs (and release the GPU lock).
       if (this.device === 'webgpu') {
-        await initializeDawnWebGPU();
+        const webgpuOk = await initializeDawnWebGPU();
+        if (!webgpuOk) {
+          await releaseGpuLock(this.stateManager, this.gpuLockHeld);
+          this.gpuLockHeld = false;
+          this.device = 'cpu';
+        }
       }
 
       const cached = await isModelCached(this.model);

@@ -41,6 +41,14 @@ vi.mock('node:fs/promises', () => ({
   access: (...args: unknown[]) => mockAccess(...args),
 }));
 
+// Keep unit tests hermetic: the real resolveEmbeddingDevice('auto', ...) spawns
+// an out-of-process WebGPU probe child. Stub it so 'auto' resolves to 'webgpu'
+// (exercising the same in-process path the suite asserted before 'auto' existed)
+// and 'cpu'/'webgpu' pass through unchanged — with no subprocess and no GPU.
+vi.mock('../../../src/knowledge/webgpu-viability.ts', () => ({
+  resolveEmbeddingDevice: vi.fn(async (requested: string) => (requested === 'cpu' ? 'cpu' : 'webgpu')),
+}));
+
 describe('Embedder', () => {
   let embedder: Embedder;
 
