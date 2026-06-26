@@ -57,27 +57,41 @@ jobs:
 
       - name: CodeQL Summary
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           {
             echo "## CodeQL Security Analysis"
             echo ""
+            # Authoritative signal = OPEN alerts in the Security tab (dismissals/fixes
+            # applied). The raw SARIF count below counts every finding the engine
+            # produced at this commit and is dismissal-UNAWARE, so it stays high even
+            # when everything has been triaged — report it only as secondary context.
+            # state=open filters server-side; .number emits one line per open alert
+            # across all pages; wc -l totals them. Under the runner's pipefail, a gh
+            # failure makes the pipe non-zero -> "?", while a genuine 0-open result
+            # succeeds and yields "0".
+            OPEN=$(gh api --paginate "repos/${{ github.repository }}/code-scanning/alerts?state=open&per_page=100" \
+                     --jq '.[].number' 2>/dev/null | wc -l | tr -d ' ') || OPEN="?"
             SARIF=$(find codeql-results -name "*.sarif" 2>/dev/null | head -1)
+            RAW="?"
             if [ -n "$SARIF" ] && [ -f "$SARIF" ]; then
-              COUNT=$(node -e "
+              RAW=$(node -e "
                 const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
                 const n = (d.runs || []).reduce((s, r) => s + (r.results || []).length, 0);
                 process.stdout.write(String(n));
               " "$SARIF" 2>/dev/null || echo "?")
-              if [ "$COUNT" = "0" ]; then
-                echo "✅ No findings detected."
-              elif [ "$COUNT" = "?" ]; then
-                echo "_Could not parse SARIF — see [Security tab](../../security/code-scanning)._"
-              else
-                echo "⚠️ **${COUNT} finding(s)** — see the [Security tab](../../security/code-scanning) for details."
-              fi
-            else
-              echo "_SARIF output not found — CodeQL may have encountered an error._"
             fi
+
+            if [ "$OPEN" = "0" ]; then
+              echo "✅ **0 open alerts** in the [Security tab](../../security/code-scanning)."
+            elif [ "$OPEN" = "?" ]; then
+              echo "_Could not query open alerts — see the [Security tab](../../security/code-scanning) for the authoritative state._"
+            else
+              echo "⚠️ **${OPEN} open alert(s)** — see the [Security tab](../../security/code-scanning) for details."
+            fi
+            echo ""
+            echo "<sub>Raw findings this scan: ${RAW} (dismissal-unaware; includes already-triaged/dismissed findings — not the open count).</sub>"
           } >> "$GITHUB_STEP_SUMMARY"
 
   lint:

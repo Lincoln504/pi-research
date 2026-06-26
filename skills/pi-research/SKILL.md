@@ -30,8 +30,9 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 
 - **stdout** = Markdown report — read and cite it.
 - **stderr** = progress + errors — relay errors, suppress routine progress.
-- **Always set a Bash timeout** so a stalled run can't block forever:
-  `knowledge` 300000ms · `research --depth 1` 480000ms · `--depth 2` 600000ms · `--depth 3` 900000ms.
+- **Always set a generous Bash timeout** so a stalled run can't block forever, but
+  leave plenty of headroom — a real run should finish well inside it:
+  `knowledge` 600000ms · `research --depth 1` 900000ms · `--depth 2` 1200000ms · `--depth 3` 1800000ms.
 - **Background**: append `&` and keep the PID to work while a run completes; otherwise it runs foreground (blocks). Timeouts apply either way.
 
 ## Workflow
