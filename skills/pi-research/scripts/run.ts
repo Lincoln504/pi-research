@@ -196,10 +196,18 @@ function notInstalled(): never {
 // ---------------------------------------------------------------------------
 
 function launch(engine: ResolvedEngine): void {
-  const child = spawn(engine.argv[0]!, engine.argv.slice(1).concat(argv), {
+  // On Windows the resolved binary may be an npm batch shim (pi-research.cmd) found
+  // via PATH/PATHEXT for a global install. Since the Node CVE-2024-27980 fix,
+  // spawning a .cmd/.bat WITHOUT shell:true throws EINVAL — which would make the
+  // research skill non-functional for the documented `npm install -g` path. Run
+  // batch shims through the shell so cmd.exe executes them.
+  const target = engine.argv[0]!;
+  const isWinBatchShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(target);
+  const child = spawn(target, engine.argv.slice(1).concat(argv), {
     stdio: 'inherit',
     env: process.env,
     windowsHide: true,
+    ...(isWinBatchShim ? { shell: true } : {}),
   });
 
   child.on('error', (err) => {

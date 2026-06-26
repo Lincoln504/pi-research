@@ -118,6 +118,27 @@ describe('WorkerPoolManager', () => {
     });
   });
 
+  describe('consecutive-error decay (slow crash-loop recovery)', () => {
+    it('decays the counter by one without zeroing it, so slow failures still accumulate', () => {
+      // White-box: the leadership tick used to blind-reset this to 0 every ~5s,
+      // which defeated auto-recovery for any crash-loop slower than 3-errors-per-tick.
+      (manager as any).consecutiveErrors = 2;
+      manager.decayConsecutiveErrors();
+      expect((manager as any).consecutiveErrors).toBe(1);
+      manager.decayConsecutiveErrors();
+      expect((manager as any).consecutiveErrors).toBe(0);
+      // Never goes negative.
+      manager.decayConsecutiveErrors();
+      expect((manager as any).consecutiveErrors).toBe(0);
+    });
+
+    it('resetConsecutiveErrors() still zeroes outright (used by schedule/shutdown paths)', () => {
+      (manager as any).consecutiveErrors = 5;
+      manager.resetConsecutiveErrors();
+      expect((manager as any).consecutiveErrors).toBe(0);
+    });
+  });
+
   describe('fast-fail during active shutdown', () => {
     it('throws "Worker pool is shutting down" if ensurePool() is called while shutdown is still in progress (no pool)', async () => {
       // Start with no pool so ensurePool() enters the creation path (not the

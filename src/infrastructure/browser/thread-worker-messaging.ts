@@ -26,14 +26,22 @@ async function createPageSafe(context: any): Promise<any> {
     const pagePromise = context.newPage();
     pagePromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background page creation rejection: ${err.message}`));
     let timeoutId: NodeJS.Timeout | undefined;
-    const result = await Promise.race([
-      pagePromise,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 60000ms')), 60000);
-      })
-    ]);
-    if (timeoutId) clearTimeout(timeoutId);
-    return result;
+    try {
+      const result = await Promise.race([
+        pagePromise,
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Browser page creation timed out after 60000ms')), 60000);
+        })
+      ]);
+      if (timeoutId) clearTimeout(timeoutId);
+      return result;
+    } catch (err) {
+      if (timeoutId) clearTimeout(timeoutId);
+      // The timeout (or another error) won the race. If newPage() later resolves,
+      // close that orphaned page so it doesn't accumulate in the long-lived context.
+      pagePromise.then((p: any) => { try { p?.close?.(); } catch { /* already gone */ } }).catch(() => {});
+      throw err;
+    }
   } finally {
     release();
   }
@@ -335,12 +343,24 @@ export async function executeScrapeTask(
   }
 }
 
+// Primary health probe target: the live search provider. Verifying it is the most
+// representative precondition for research, but DDG is also the endpoint most prone
+// to bot-blocking/rate-limiting automated browser traffic — so a failure here is NOT
+// proof the web is unreachable.
+const HEALTH_PRIMARY_URL = 'https://lite.duckduckgo.com/lite/';
+// Neutral, automation-tolerant reachability fallback (IANA-operated, no bot
+// protection, returns a stable non-empty title). A successful load here proves the
+// browser CAN reach the open web, which disambiguates "the search provider blocked
+// or hiccupped" from a genuine connectivity outage.
+const HEALTH_FALLBACK_URL = 'https://example.com/';
+
 /**
- * Execute a health check attempt
+ * Execute a health check attempt against a given URL (defaults to the search provider).
  */
 async function executeHealthCheckAttempt(
   _context: any,
-  navTimeoutMs: number
+  navTimeoutMs: number,
+  url: string = HEALTH_PRIMARY_URL
 ): Promise<{ success: boolean; navMs: number }> {
   const page = await createPageSafe(_context);
   page.setDefaultTimeout(navTimeoutMs);
@@ -348,11 +368,11 @@ async function executeHealthCheckAttempt(
 
   try {
     const navStart = Date.now();
-    await page.goto('https://lite.duckduckgo.com/lite/', { waitUntil: 'domcontentloaded' });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
     const navMs = Date.now() - navStart;
 
     if (navMs > 3000) {
-      logToDebugFile('WARN', `[Worker-${workerId}] DDG Lite navigation was slow: ${navMs}ms (expected <1s). Possible rate-limit or network congestion.`);
+      logToDebugFile('WARN', `[Worker-${workerId}] Health navigation to ${url} was slow: ${navMs}ms (expected <1s). Possible rate-limit or network congestion.`);
     }
 
     const title = await page.title();
@@ -390,7 +410,29 @@ export async function executeHealthCheck(
     try {
       return await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT);
     } catch (retryError: unknown) {
-      logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryError instanceof Error ? retryError.message : String(retryError)}`);
+      const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+      // A TIMEOUT is left to propagate: upstream (isBusyPoolHealthFailure) already
+      // treats timed-out probes as a congested-but-live pool and proceeds, and
+      // re-probing would only add latency to an already-slow path.
+      const isTimeout = /tim(e|ed)\s*out|timeout/i.test(retryMsg);
+      if (!isTimeout) {
+        // The search provider failed twice with a non-timeout (e.g. net::ERR*) error.
+        // That is most often DDG-specific bot-blocking, NOT a dead connection — the
+        // observed false negative where the open web was fully reachable yet research
+        // aborted with "check your internet". Confirm raw web reachability against a
+        // neutral endpoint before declaring failure; if it loads, the browser is
+        // healthy enough to research (search has its own retries/fallbacks downstream).
+        logToDebugFile('WARN', `[Worker-${workerId}] Search-provider health probe failed twice (${retryMsg}); verifying open-web reachability via fallback endpoint...`);
+        try {
+          const fallback = await executeHealthCheckAttempt(_context, HEALTH_TIMEOUT, HEALTH_FALLBACK_URL);
+          logToDebugFile('WARN', `[Worker-${workerId}] Fallback endpoint reachable — open web is up, search provider is degraded. Proceeding with research.`);
+          return fallback;
+        } catch (fallbackError: unknown) {
+          logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry + fallback probe: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+          throw retryError;
+        }
+      }
+      logToDebugFile('ERROR', `[Worker-${workerId}] Health check failed after retry: ${retryMsg}`);
       throw retryError;
     }
   }

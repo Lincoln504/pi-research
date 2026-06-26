@@ -56,15 +56,20 @@ startCleanupTimer();
 export function cacheScrapedContent(researchId: string, url: string, content: string) {
     if (!sessionScrapedContent.has(researchId)) {
         sessionScrapedContent.set(researchId, new Map());
-        sessionTimestamps.set(researchId, Date.now());
     }
+    // Refresh on every write so the orphan-cleanup TTL is last-activity based, not
+    // creation based — otherwise a research session running longer than the 2h
+    // SESSION_MAX_AGE_MS has its dedup/content pools wiped mid-run.
+    sessionTimestamps.set(researchId, Date.now());
     const cache = sessionScrapedContent.get(researchId)!;
-    // FIX (#20): Evict oldest entry if at capacity
-    if (cache.size >= MAX_CACHED_CONTENT_PER_SESSION) {
+    const key = normalizeUrl(url);
+    // FIX (#20): Evict oldest entry only when at capacity AND inserting a NEW key.
+    // Re-caching an existing URL must not evict an unrelated entry (net size loss).
+    if (!cache.has(key) && cache.size >= MAX_CACHED_CONTENT_PER_SESSION) {
         const firstKey = cache.keys().next().value;
         if (firstKey !== undefined) cache.delete(firstKey);
     }
-    cache.set(normalizeUrl(url), content);
+    cache.set(key, content);
 }
 
 /**
@@ -87,8 +92,8 @@ export function generateSessionId(piSessionId: string): string {
 export function registerScrapedLinks(researchId: string, links: string[]) {
     if (!sessionLinks.has(researchId)) {
         sessionLinks.set(researchId, new Set());
-        sessionTimestamps.set(researchId, Date.now());
     }
+    sessionTimestamps.set(researchId, Date.now()); // last-activity TTL refresh
     const pool = sessionLinks.get(researchId)!;
     links.forEach(l => pool.add(normalizeUrl(l)));
 }
@@ -155,6 +160,7 @@ export function registerResearcherScrapes(researchId: string, researcherId: stri
     if (!researcherScrapes.has(researchId)) {
         researcherScrapes.set(researchId, new Map());
     }
+    sessionTimestamps.set(researchId, Date.now()); // keep this session reapable + TTL fresh
     const map = researcherScrapes.get(researchId)!;
     if (!map.has(researcherId)) {
         map.set(researcherId, new Set());

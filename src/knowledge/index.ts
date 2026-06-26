@@ -57,13 +57,14 @@ export async function createKnowledgeStoreComponents(
   validateConfig(config);
 
   for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+    let store: KnowledgeStore | undefined;
     try {
       logger.info(`[knowledge] Creating Knowledge Store components (attempt ${attempt}/${MAX_INIT_RETRIES})...`);
 
       const embedder = await embedderFactory();
       const migrationStrategy = getMigrationStrategy(config);
-      
-      const store = new KnowledgeStore({
+
+      store = new KnowledgeStore({
         dbDir: getDbDir(config, workspace),
         embedder,
         modelName: config.EMBEDDING_MODEL,
@@ -84,6 +85,13 @@ export async function createKnowledgeStoreComponents(
 
       return { embedder, store, writerQueue };
     } catch (err) {
+      // Close any partially-opened store before retrying/giving up: store.initialize()
+      // can throw AFTER lancedb.connect() set its db handle, and discarding the object
+      // without close() leaks the LanceDB connection/file handles (up to MAX_INIT_RETRIES
+      // times per failing startup).
+      if (store) {
+        try { await store.close(); } catch { /* best-effort cleanup */ }
+      }
       const givingUp = attempt === MAX_INIT_RETRIES;
       if (givingUp) {
         throw err;

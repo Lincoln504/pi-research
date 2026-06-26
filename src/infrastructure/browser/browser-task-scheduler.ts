@@ -98,7 +98,9 @@ export class BrowserTaskScheduler implements IScheduler {
                 }
                 
                 const poolManager = await this.getWorkerPoolManager();
-                poolManager.resetConsecutiveErrors();
+                // Decay (not reset) so a slow worker crash-loop can still accumulate to
+                // the auto-recovery threshold instead of being zeroed on every tick.
+                poolManager.decayConsecutiveErrors();
             } catch (err) {
                 logger.warn('[Scheduler] Leadership check error:', err);
             } finally {

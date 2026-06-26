@@ -232,6 +232,19 @@ export class WorkerPoolManager implements IService {
     }
 
     /**
+     * Decay the consecutive-error counter by one. Called on each healthy leadership
+     * tick so a single transient blip fades over time WITHOUT fully zeroing the
+     * counter. Blind-resetting to zero every tick (the previous behavior) defeated
+     * auto-recovery for any crash-loop slower than the threshold-per-tick window: a
+     * worker dying once every few seconds never reached `consecutiveErrors >= 3`
+     * because the ~5 s leadership tick kept resetting it. Decay lets a sustained slow
+     * failure accumulate to the reset threshold while still forgiving isolated blips.
+     */
+    decayConsecutiveErrors(): void {
+        if (this.consecutiveErrors > 0) this.consecutiveErrors--;
+    }
+
+    /**
      * Schedule an out-of-band pool reset. Called from poolifier event handlers
      * where destroying the pool synchronously would deadlock. Waits 1 s so the
      * current event-handler call-stack unwinds before the pool is destroyed.
@@ -310,6 +323,11 @@ export class WorkerPoolManager implements IService {
         this.poolInitializationPromise = null;
         this.currentWorkerCount = null;
         this.consecutiveErrors = 0;
+        // Clear any in-flight auto-recovery flag too: if a schedulePoolReset() timer
+        // was pending when shutdown ran, leaving this true makes the next ensurePool()
+        // needlessly busy-wait (up to 3 s) and possibly throw "being reset" even though
+        // the pool is ready to re-init.
+        this._resetInProgress = false;
         // Reset so this instance can be re-used after shutdown — the service
         // registry keeps the same WorkerPoolManager instance across scheduler
         // restarts, so without this reset ensurePool() would permanently throw.

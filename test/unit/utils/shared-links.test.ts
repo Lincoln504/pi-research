@@ -13,7 +13,9 @@ import {
   didResearcherScrape,
   getResearcherScrapes,
   cleanupSharedLinks,
-  buildSessionPoolFooter
+  buildSessionPoolFooter,
+  cacheScrapedContent,
+  getCachedScrapedContent
 } from '../../../src/utils/shared-links.ts';
 
 describe('shared-links', () => {
@@ -107,6 +109,22 @@ describe('shared-links', () => {
       registerResearcherScrapes(researchId, 'r1', ['https://a.com']);
       cleanupSharedLinks(researchId);
       expect(getResearcherScrapes(researchId, 'r1')).toEqual([]);
+    });
+  });
+
+  describe('cacheScrapedContent eviction', () => {
+    it('re-caching an existing URL does not evict an unrelated entry (no over-eviction at capacity)', () => {
+      const MAX = 500; // mirrors MAX_CACHED_CONTENT_PER_SESSION
+      for (let i = 0; i < MAX; i++) {
+        cacheScrapedContent(researchId, `https://example.com/p${i}`, `content-${i}`);
+      }
+      // At capacity; the oldest entry (p0) is still present.
+      expect(getCachedScrapedContent(researchId, 'https://example.com/p0')).toBe('content-0');
+      // Re-cache an EXISTING url — must update in place, evicting nothing.
+      cacheScrapedContent(researchId, 'https://example.com/p250', 'updated-250');
+      expect(getCachedScrapedContent(researchId, 'https://example.com/p250')).toBe('updated-250');
+      // The unrelated oldest entry must survive (it was wrongly evicted before the fix).
+      expect(getCachedScrapedContent(researchId, 'https://example.com/p0')).toBe('content-0');
     });
   });
 
