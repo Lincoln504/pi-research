@@ -19,11 +19,17 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const PKG = '@lincoln504/pi-research';
+// Load-bearing peer dependency of the engine: the standalone CLI statically
+// imports it (model registry + auth + agent dir). On an install that omitted
+// peers it would die at module-load with a raw ERR_MODULE_NOT_FOUND; we preflight
+// it here so the user gets the same clean, actionable exit-78 message as a missing
+// engine instead of a stack trace.
+const PEER = '@earendil-works/pi-coding-agent';
 const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70 } as const;
 
 // ---------------------------------------------------------------------------
@@ -112,7 +118,10 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
   const explicitPath = process.env['PI_RESEARCH_PATH'];
   if (explicitPath) {
     const fromDir = engineFromPackageDir(explicitPath);
-    if (fromDir) return fromDir;
+    if (fromDir) {
+      if (!peerResolvableFrom(explicitPath)) peerMissing(explicitPath);
+      return fromDir;
+    }
   }
 
   // 3. On PATH.
@@ -123,7 +132,12 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
   const pkgDir = resolvePackageDir(PKG, [skillDir, process.cwd(), home, join(home, '.pi')]);
   if (pkgDir) {
     const fromPkg = engineFromPackageDir(pkgDir);
-    if (fromPkg) return fromPkg;
+    if (fromPkg) {
+      // We resolved the engine via its package dir, so we can verify its peer
+      // resolves from the same anchor (where the bundled CLI will look for it).
+      if (!peerResolvableFrom(pkgDir)) peerMissing(pkgDir);
+      return fromPkg;
+    }
   }
 
   // 5. pi's bin directory.
@@ -164,6 +178,47 @@ function engineFromPackageDir(pkgDir: string): ResolvedEngine | null {
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
+
+/**
+ * Is the engine's load-bearing peer dep physically present, reachable from
+ * `anchorDir`? We check for node_modules/<PEER>/package.json walking up parent
+ * dirs (Node's package-lookup algorithm) rather than require.resolve(), because
+ * the peer is an ESM package with conditional `exports` and no CJS/package.json
+ * export — require.resolve() from this CJS launcher throws "No exports main
+ * defined" even when it is installed and the engine imports it fine. Checking the
+ * directory mirrors how Node finds the package, immune to export conditions.
+ */
+function peerResolvableFrom(anchorDir: string): boolean {
+  const peerSegs = PEER.split('/');
+  // Normalize: a relative anchor would otherwise stop the walk at '.' and miss
+  // hoisted node_modules in real parent dirs, wrongly reporting the peer missing.
+  let dir = resolve(anchorDir);
+  for (;;) {
+    if (existsSync(join(dir, 'node_modules', ...peerSegs, 'package.json'))) return true;
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
+function peerMissing(pkgDir: string): never {
+  const lines = [
+    '',
+    `Error: pi-research engine found, but its required peer dependency`,
+    `'${PEER}' is not installed alongside it.`,
+    '',
+    'The standalone engine imports this package at startup, so it cannot run',
+    'without it. Reinstall so peer dependencies are included:',
+    '',
+    '    npm install -g @lincoln504/pi-research     # global (npm 7+ installs peers)',
+    `    # or, in the package dir:  cd "${pkgDir}" && npm install ${PEER}`,
+    '',
+    `(engine located at: ${pkgDir})`,
+    '',
+  ];
+  process.stderr.write(lines.join('\n'));
+  process.exit(EXIT.CONFIG);
+}
 
 function notInstalled(): never {
   const home = homedir();

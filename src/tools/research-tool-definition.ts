@@ -358,8 +358,9 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               const resultWithSummaries = appendResearchSummary(result, runRegistry.getSnapshot(), errorReport);
 
               let finalResult = resultWithSummaries;
-              if (getConfig(ctx.cwd, iface).RESEARCH_REPORT_EXPORT_ENABLED) {
-                const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd);
+              const exportCfg = getConfig(ctx.cwd, iface);
+              if (exportCfg.RESEARCH_REPORT_EXPORT_ENABLED) {
+                const exportPath = await exportResearchReport(sanitizedQuery, resultWithSummaries, (depth ?? 1) <= 1 ? 'quick' : 'deep', ctx.cwd, exportCfg.RESEARCH_REPORT_EXPORT_DIR);
                 if (exportPath) {
                   finalResult = appendExportMessage(resultWithSummaries, exportPath, panelState?.totalCost ?? 0);
                 }

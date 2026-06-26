@@ -112,6 +112,49 @@ describe('FileLockService', () => {
     });
   });
 
+  describe('live-owner lock protection', () => {
+    it('does NOT steal a lock from a live owner aged past lockStaleThreshold but within liveOwnerStaleThreshold', async () => {
+      // A live writer (this process) holding the lock during a slow critical
+      // section must never have it stolen — that would let two writers run the
+      // same read-modify-write and lose an update.
+      const foreignUuid = crypto.randomUUID();
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: foreignUuid, pid: process.pid }), 'utf-8');
+      const aged = new Date(Date.now() - 40_000); // 40s: > 15s stale, < 120s live-stale
+      await fs.utimes(lockFilePath, aged, aged);
+
+      service = new FileLockService({
+        lockFilePath,
+        lockTimeout: 300, // give up quickly — a timeout is the expected outcome
+        lockRetryDelay: 10,
+      });
+      await service.initialize();
+
+      await expect(service.acquireLock()).rejects.toThrow(/Failed to acquire lock/);
+
+      // The live owner's lock must be intact (not stolen).
+      const content = await fs.readFile(lockFilePath, 'utf-8');
+      const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+      expect(parsed.uuid).toBe(foreignUuid);
+    });
+
+    it('reclaims a fresh lock whose owner process is dead', async () => {
+      const foreignUuid = crypto.randomUUID();
+      const deadPid = 2147483646; // not a live process → owner-liveness check fails
+      await fs.writeFile(lockFilePath, JSON.stringify({ uuid: foreignUuid, pid: deadPid }), 'utf-8');
+      // Fresh mtime (no back-dating): a dead owner must be reclaimed regardless of age.
+
+      service = new FileLockService({ lockFilePath, lockTimeout: 5000, lockRetryDelay: 1 });
+      await service.initialize();
+
+      await expect(service.acquireLock()).resolves.toBeUndefined();
+      const content = await fs.readFile(lockFilePath, 'utf-8');
+      const parsed = JSON.parse(content.trim()) as { uuid: string; pid: number };
+      expect(parsed.uuid).toBe(service.getLockUuid());
+
+      await service.releaseLock();
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Non-owner release is a no-op
   // ---------------------------------------------------------------------------

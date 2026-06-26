@@ -162,14 +162,29 @@ export class StateManager {
         }
       }
 
-      if (error instanceof SyntaxError || (error instanceof Error && error.message.includes('parse'))) {
-        logger.error('[StateManager] State file corrupted, attempting recovery...');
-        await this.recoverFromCorruptionDirect();
+      // Corruption is not only truncated/garbage JSON — a well-formed file can
+      // still fail schema validation (missing field, out-of-range port) or carry
+      // an unknown future `version` that the Type.Literal(1) schema rejects. All of
+      // these throw from JSON.parse (SyntaxError) or validateState ("Invalid
+      // state: ..."). Treat every such case as recoverable so a single bad file
+      // can never brick every reader; genuine I/O errors (EACCES/EPERM/EISDIR) are
+      // NOT corruption and still surface via the throw below.
+      const isCorruption =
+        error instanceof SyntaxError ||
+        (error instanceof Error &&
+          (error.message.includes('parse') || error.message.startsWith('Invalid state')));
+      if (isCorruption) {
+        logger.error(
+          `[StateManager] State file corrupt/invalid (${error instanceof Error ? error.message : String(error)}); attempting recovery...`,
+        );
         try {
+          await this.recoverFromCorruptionDirect();
           const recovered = await fs.readFile(this.stateFilePath, 'utf-8');
-          const recoveredState = JSON.parse(recovered) as unknown;
-          return this.validator.validateState(recoveredState);
-        } catch {
+          return this.validator.validateState(JSON.parse(recovered) as unknown);
+        } catch (recoveryError) {
+          logger.error(
+            `[StateManager] Recovery failed (${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}); using in-memory default state.`,
+          );
           return this.getDefaultState();
         }
       }
@@ -220,7 +235,14 @@ export class StateManager {
 
     let tempFilePath: string | null = null;
     try {
-      await this.backupManager.createBackup();
+      // Backups are a safety net, not a prerequisite for writing. The atomic
+      // temp+fsync+rename below already protects the primary file, so a failed
+      // backup (e.g. unwritable backups/ dir) must NOT fail-close every state
+      // write — log and continue. This also keeps backup I/O from extending the
+      // time the state lock is held on a degraded disk.
+      await this.backupManager.createBackup().catch((err: unknown) => {
+        logger.warn(`[StateManager] Backup before write failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+      });
       const tempFileName = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
       tempFilePath = path.join(path.dirname(this.stateFilePath), tempFileName);
       const content = JSON.stringify(state, null, 2);

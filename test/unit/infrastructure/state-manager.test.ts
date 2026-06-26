@@ -185,6 +185,34 @@ describe('StateManager Integration-style Tests', () => {
     expect(state.sessions).toEqual({});
   });
 
+  it('should recover from a schema-invalid (well-formed JSON) state file', async () => {
+    // Valid JSON, but fails schema validation: out-of-range port + missing fields.
+    // This must NOT brick every reader — recover to default rather than throwing.
+    const stateFile = path.join(testDir, 'research-state.json');
+    await fs.mkdir(path.dirname(stateFile), { recursive: true });
+    await fs.writeFile(stateFile, JSON.stringify({ version: 1, port: 999999 }), 'utf-8');
+
+    const state = await manager.readState();
+    expect(state.version).toBe(1);
+    expect(state.sessions).toEqual({});
+  });
+
+  it('should recover from an unknown future state version', async () => {
+    // A `version: 2` file written by a newer build must not throw against the
+    // Type.Literal(1) schema — treat it as corruption and recover to default.
+    const stateFile = path.join(testDir, 'research-state.json');
+    await fs.mkdir(path.dirname(stateFile), { recursive: true });
+    await fs.writeFile(
+      stateFile,
+      JSON.stringify({ version: 2, containerId: '', containerName: '', port: 0, sessions: {}, lastUpdated: Date.now() }),
+      'utf-8',
+    );
+
+    const state = await manager.readState();
+    expect(state.version).toBe(1);
+    expect(state.sessions).toEqual({});
+  });
+
   it('should cleanup stale sessions (timeout)', async () => {
     await manager.addSession('stale-session', 'container');
     

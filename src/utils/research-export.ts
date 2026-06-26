@@ -162,10 +162,25 @@ export async function exportResearchReport(
   result: string,
   _mode: 'quick' | 'deep',
   cwd?: string,
+  explicitDir?: string,
 ): Promise<string | null> {
   const sanitizedQuery = sanitizeQuery(query);
   const baseFilename = `pi-research-${sanitizedQuery}`;
-  const targetDir = await resolveExportDir(cwd ?? tmpdir());
+  // An explicit directory (PI_RESEARCH_REPORT_EXPORT_DIR / openclaw reportExportPath)
+  // is used verbatim — created if needed, no cwd-relative "smart" probing — so a
+  // host can pin a stable location instead of writing into the agent's arbitrary cwd.
+  let targetDir: string;
+  if (explicitDir && explicitDir.trim()) {
+    targetDir = resolve(explicitDir.trim());
+    try {
+      await fs.mkdir(targetDir, { recursive: true });
+    } catch (error) {
+      logger.error(`[export] Could not create export dir "${targetDir}":`, error);
+      return null;
+    }
+  } else {
+    targetDir = await resolveExportDir(cwd ?? tmpdir());
+  }
 
   for (let attempt = 0; attempt < MAX_EXPORT_RETRIES; attempt++) {
     const hash = generateHash();

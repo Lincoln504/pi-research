@@ -28,7 +28,17 @@ export interface ModelRegistryLike {
   getAll?: () => Model<any>[];
   getAvailable?: () => Model<any>[];
   find?: (provider: string, id: string) => Model<any> | undefined;
+  getApiKeyAndHeaders?: (model: Model<any>) => Promise<AuthResultLike>;
 }
+
+/**
+ * Structural result of {@link ModelRegistryLike.getApiKeyAndHeaders}. Mirrors the
+ * pi-coding-agent `ApiKeyAndHeaders` discriminated union without importing it, so
+ * a host skew on the concrete type can't break our build.
+ */
+export type AuthResultLike =
+  | { ok: true; apiKey?: string; headers?: Record<string, string> }
+  | { ok: false; error: string };
 
 /** Safe `getAll()` — returns [] if the host registry lacks the method. */
 export function safeGetAll(registry: ModelRegistryLike | null | undefined): Model<any>[] {
@@ -55,6 +65,31 @@ export function safeGetAvailable(registry: ModelRegistryLike | null | undefined)
     logger.warn('[ModelRegistry] host registry has no getAvailable(); falling back to getAll(). Possible pi-coding-agent version skew.');
   }
   return safeGetAll(registry);
+}
+
+/**
+ * Safe `getApiKeyAndHeaders()` — resolves LLM credentials for a model. The
+ * registry can arrive from the pi extension host (ctx.modelRegistry), so a
+ * version skew that renamed/removed this method must NOT throw a raw TypeError
+ * mid-research (the same failure class {@link safeGetAvailable} guards against).
+ * A missing method or a throw degrades to a structured `{ ok: false }` that every
+ * caller already branches on, instead of aborting the run.
+ */
+export async function safeGetApiKeyAndHeaders(
+  registry: ModelRegistryLike | null | undefined,
+  model: Model<any>,
+): Promise<AuthResultLike> {
+  if (!registry || typeof registry.getApiKeyAndHeaders !== 'function') {
+    logger.warn('[ModelRegistry] host registry has no getApiKeyAndHeaders(); cannot resolve LLM credentials. Possible pi-coding-agent version skew.');
+    return { ok: false, error: 'model registry does not expose getApiKeyAndHeaders() (pi-coding-agent version skew)' };
+  }
+  try {
+    return await registry.getApiKeyAndHeaders(model);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn('[ModelRegistry] getApiKeyAndHeaders() threw; treating as auth failure:', msg);
+    return { ok: false, error: msg };
+  }
 }
 
 /**

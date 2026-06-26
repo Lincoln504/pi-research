@@ -36,6 +36,13 @@ export interface FileLockOptions {
   lockRetryDelay?: number;
   /** Stale lock threshold in milliseconds (default: 15 seconds) */
   lockStaleThreshold?: number;
+  /**
+   * Stale threshold (ms) applied ONLY when the lock's owner process is provably
+   * alive. Much larger than lockStaleThreshold so a live process holding the lock
+   * during a slow critical section (disk stall, fsync) is never stolen from —
+   * only reclaimed in the rare PID-reuse case. Default: max(120s, 4×stale).
+   */
+  liveOwnerStaleThreshold?: number;
 }
 
 /**
@@ -54,6 +61,7 @@ export class FileLockService implements IService {
   private readonly lockRetries: number;
   private readonly lockRetryDelay: number;
   private readonly lockStaleThreshold: number;
+  private readonly liveOwnerStaleThreshold: number;
 
   // Lock tracking
   private lockHandle: fs.FileHandle | null = null;
@@ -68,6 +76,24 @@ export class FileLockService implements IService {
     this.lockRetries = options.lockRetries ?? 200;
     this.lockRetryDelay = options.lockRetryDelay ?? 100;
     this.lockStaleThreshold = options.lockStaleThreshold ?? 15000;
+    this.liveOwnerStaleThreshold =
+      options.liveOwnerStaleThreshold ?? Math.max(120000, this.lockStaleThreshold * 4);
+  }
+
+  /**
+   * Decide whether a contended lock may be reclaimed.
+   *   - Dead owner            → reclaim immediately (crash cleanup).
+   *   - Legacy lock (no pid)  → reclaim once aged past the normal stale threshold.
+   *   - Provably-alive owner  → reclaim ONLY after liveOwnerStaleThreshold, so we
+   *                             never steal a lock a live process is actively
+   *                             holding during a (possibly slow) critical section.
+   *                             Stealing it would let two writers run the same
+   *                             read-modify-write and lose an update.
+   */
+  private _shouldReclaim(pid: number | null, lockAge: number): boolean {
+    if (!this._isOwnerAlive(pid)) return true;
+    if (pid === null) return lockAge > this.lockStaleThreshold;
+    return lockAge > this.liveOwnerStaleThreshold;
   }
 
   async initialize(): Promise<void> {
@@ -110,7 +136,7 @@ export class FileLockService implements IService {
       const parsed = this._parseLockContent(rawContent);
       const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
 
-      if (!ownerAlive || lockAge > this.lockStaleThreshold) {
+      if (this._shouldReclaim(parsed?.pid ?? null, lockAge)) {
         logger.log(
           `[FileLockService] Cleaning up stale lock file (${Math.round(lockAge / 1000)}s old, owner alive: ${ownerAlive})`
         );
@@ -245,14 +271,13 @@ export class FileLockService implements IService {
                   continue;
                 }
 
-                // Reclaim immediately if the owner process is dead (PID-liveness check).
-                // Fall through to mtime-staleness only for processes that appear alive.
-                const ownerAlive = this._isOwnerAlive(parsed?.pid ?? null);
-                // Reclaim when the owner is dead OR the lock has aged past the
-                // staleness threshold. (If the owner is alive AND the lock is
-                // fresh we never enter this branch — that's genuine contention,
-                // handled by the surrounding retry loop.)
-                if (!ownerAlive || lockAge > this.lockStaleThreshold) {
+                // Reclaim a dead owner's lock immediately; for a provably-alive
+                // owner only after the much larger liveOwnerStaleThreshold (see
+                // _shouldReclaim). This closes the lost-update window where a peer
+                // stole the lock from a live writer stalled >15s mid-fsync. A live
+                // owner holding a fresh lock is genuine contention — handled by the
+                // surrounding retry loop / timeout, not by stealing.
+                if (this._shouldReclaim(parsed?.pid ?? null, lockAge)) {
                   const trashPath = `${this.lockFilePath}.trash.${crypto.randomBytes(8).toString('hex')}`;
                   try {
                     await fs.rename(this.lockFilePath, trashPath);

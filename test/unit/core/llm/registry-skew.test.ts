@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { safeGetAll, safeGetAvailable } from '../../../../src/core/llm/model-registry-factory.ts';
+import { safeGetAll, safeGetAvailable, safeGetApiKeyAndHeaders } from '../../../../src/core/llm/model-registry-factory.ts';
 import { resolveResearchModel } from '../../../../src/core/llm/research-model-resolver.ts';
 
 const MODELS = [
@@ -40,6 +40,32 @@ describe('safeGetAll / safeGetAvailable — version-skew tolerance', () => {
     expect(safeGetAll({} as any)).toEqual([]);
     expect(safeGetAvailable(null)).toEqual([]);
     expect(safeGetAll(undefined)).toEqual([]);
+  });
+});
+
+describe('safeGetApiKeyAndHeaders — version-skew tolerance', () => {
+  const model: any = { provider: 'glm-coding', id: 'glm-4.7' };
+
+  it('passes through a successful auth result', async () => {
+    const reg: any = { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'k', headers: { a: '1' } }) };
+    await expect(safeGetApiKeyAndHeaders(reg, model)).resolves.toEqual({ ok: true, apiKey: 'k', headers: { a: '1' } });
+  });
+
+  it('returns ok:false (never throws) when the host registry has no getApiKeyAndHeaders()', async () => {
+    const result = await safeGetApiKeyAndHeaders({} as any, model);
+    expect(result.ok).toBe(false);
+  });
+
+  it('returns ok:false (never throws) when getApiKeyAndHeaders() throws', async () => {
+    const reg: any = { getApiKeyAndHeaders: async () => { throw new Error('host skew'); } };
+    const result = await safeGetApiKeyAndHeaders(reg, model);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain('host skew');
+  });
+
+  it('returns ok:false for a null/undefined registry', async () => {
+    expect((await safeGetApiKeyAndHeaders(null, model)).ok).toBe(false);
+    expect((await safeGetApiKeyAndHeaders(undefined, model)).ok).toBe(false);
   });
 });
 

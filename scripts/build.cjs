@@ -50,26 +50,54 @@ function copyWebGpuProbe() {
   );
 }
 
+// Build the browser worker bundle. Factored out so cli and openclaw can each
+// guarantee it exists when built in isolation (`build:cli` / `build:openclaw`),
+// not only via the full `build all`.
+function buildWorker() {
+  return esbuild.build({
+    ...COMMON,
+    entryPoints: [p('src', 'infrastructure', 'browser', 'thread-worker.ts')],
+    outfile: p('src', 'infrastructure', 'browser', 'thread-worker.mjs'),
+  });
+}
+
+async function ensureWorkerBuilt() {
+  const src = p('src', 'infrastructure', 'browser', 'thread-worker.ts');
+  const out = p('src', 'infrastructure', 'browser', 'thread-worker.mjs');
+  // Rebuild if the bundle is missing OR older than its source, so an isolated
+  // `build:cli` / `build:openclaw` after editing thread-worker.ts never ships a
+  // stale worker.
+  const stale =
+    !fs.existsSync(out) || fs.statSync(out).mtimeMs < fs.statSync(src).mtimeMs;
+  if (stale) {
+    await buildWorker();
+  }
+}
+
+// Copy the built worker bundle into dist/. dist/thread-worker.mjs is resolved by
+// worker-pool-manager.ts at runtime, so every entry point that spins up the
+// browser pool — cli AND openclaw — needs it next to its bundle.
+function copyThreadWorker() {
+  fs.mkdirSync(p('dist'), { recursive: true });
+  fs.copyFileSync(
+    p('src', 'infrastructure', 'browser', 'thread-worker.mjs'),
+    p('dist', 'thread-worker.mjs'),
+  );
+}
+
 function copyOpenclawResources() {
   fs.mkdirSync(p('dist', 'prompts'), { recursive: true });
   for (const f of fs.readdirSync(p('src', 'prompts'))) {
     fs.copyFileSync(p('src', 'prompts', f), p('dist', 'prompts', f));
   }
-  fs.copyFileSync(
-    p('src', 'infrastructure', 'browser', 'thread-worker.mjs'),
-    p('dist', 'thread-worker.mjs'),
-  );
+  copyThreadWorker();
   console.error('Openclaw resources copied to dist/');
 }
 
 const TARGETS = {
-  worker: () =>
-    esbuild.build({
-      ...COMMON,
-      entryPoints: [p('src', 'infrastructure', 'browser', 'thread-worker.ts')],
-      outfile: p('src', 'infrastructure', 'browser', 'thread-worker.mjs'),
-    }),
+  worker: () => buildWorker(),
   openclaw: async () => {
+    await ensureWorkerBuilt();
     await esbuild.build({
       ...COMMON,
       entryPoints: [p('src', 'openclaw-entry.ts')],
@@ -79,12 +107,14 @@ const TARGETS = {
     copyWebGpuProbe();
   },
   cli: async () => {
+    await ensureWorkerBuilt();
     await esbuild.build({
       ...COMMON,
       entryPoints: [p('src', 'cli.ts')],
       outfile: p('dist', 'cli.mjs'),
       banner: { js: SHEBANG },
     });
+    copyThreadWorker();
     copyWebGpuProbe();
   },
   skill: () =>

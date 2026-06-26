@@ -9,6 +9,7 @@ import { exportResearchReport, appendExportMessage } from '../../../src/utils/re
 vi.mock('node:fs', async () => ({
   promises: {
     writeFile: vi.fn(),
+    mkdir: vi.fn(),
   },
   existsSync: vi.fn().mockReturnValue(true),
   mkdirSync: vi.fn(),
@@ -35,6 +36,25 @@ describe('exportResearchReport', () => {
       expect.stringContaining('pi-research-test-query-with-spaces-'),
       'result',
       { flag: 'wx' }
+    );
+  });
+
+  it('writes verbatim into an explicit dir (bypasses cwd-relative smart resolution)', async () => {
+    const mockWriteFile = await getMockWriteFile();
+    mockWriteFile.mockResolvedValue(undefined);
+    const fs = await import('node:fs');
+    const mockMkdir = vi.mocked(fs.promises.mkdir);
+    mockMkdir.mockResolvedValue(undefined as any);
+
+    const explicitDir = '/srv/pinned-reports';
+    await exportResearchReport('q', 'result', 'deep', '/some/agent/cwd', explicitDir);
+
+    // Directory is created and the file is written under the explicit dir, NOT cwd.
+    expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('pinned-reports'), { recursive: true });
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      expect.stringContaining(`${explicitDir}/pi-research-q-`),
+      'result',
+      { flag: 'wx' },
     );
   });
 

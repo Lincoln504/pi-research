@@ -770,6 +770,10 @@ function createMockContext(sessionId: string): ExtensionContext {
       notify: (msg: string) => logger.log(`[PI-UI-NOTIFY] ${msg}`),
       showStatus: () => () => {},
       progress: () => () => {},
+      // No-op widget host — kept field-compatible with the openclaw mock ctx so any
+      // future (hasUI-gated) ctx.ui.setWidget call behaves identically on both
+      // headless hosts instead of throwing on the SDK path.
+      setWidget: () => {},
       custom: async () => ({ type: 'cancel' }),
       confirm: async () => false,
       onTerminalInput: () => () => { return () => {}; },

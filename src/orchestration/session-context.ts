@@ -17,7 +17,11 @@ import {
  * Provides the full linear history of the current branch.
  */
 export async function formatParentContext(ctx: ExtensionContext): Promise<string> {
-  const branch = ctx.sessionManager.getBranch();
+  // Defensive: a synthesized/older host context may not provide sessionManager or
+  // getBranch. Treat a missing branch as "no prior context" rather than throwing a
+  // raw TypeError that would abort the coordinator.
+  const branch =
+    typeof ctx.sessionManager?.getBranch === 'function' ? ctx.sessionManager.getBranch() : [];
   const sessionContext = buildSessionContext(branch);
   const allMessages = sessionContext.messages;
 

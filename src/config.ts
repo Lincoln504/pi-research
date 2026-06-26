@@ -125,6 +125,13 @@ export const ConfigSchema = Type.Object({
   TMP_DIR: Type.Optional(Type.String()),
   /** Whether to automatically export a markdown research report to disk at the end (default: false) */
   RESEARCH_REPORT_EXPORT_ENABLED: Type.Boolean({ default: false }),
+  /**
+   * Explicit directory for exported reports. When set, reports are written here
+   * verbatim (created if needed), bypassing the cwd-relative "smart" resolution.
+   * Lets the skill/openclaw pin a stable location instead of writing into
+   * whatever repo the host agent happens to be in. Empty = smart cwd resolution.
+   */
+  RESEARCH_REPORT_EXPORT_DIR: Type.Optional(Type.String()),
   /** Strategy for database schema/model migrations: 'drop', 're-embed', or 'backup' (default: 'backup') */
   MIGRATION_STRATEGY: Type.Union([
     Type.Literal('drop'),
@@ -195,6 +202,7 @@ const USER_MIGRATION_KEYS = [
   'PI_RESEARCH_KNOWLEDGE_DIR',
   'PI_RESEARCH_TMP_DIR',
   'PI_RESEARCH_REPORT_EXPORT_ENABLED',
+  'PI_RESEARCH_REPORT_EXPORT_DIR',
   'PI_RESEARCH_DEBUG',
 ];
 
@@ -523,6 +531,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     ...(config.KNOWLEDGE_STORE_DIR ? { PI_RESEARCH_KNOWLEDGE_DIR: config.KNOWLEDGE_STORE_DIR } : {}),
     ...(config.TMP_DIR ? { PI_RESEARCH_TMP_DIR: config.TMP_DIR } : {}),
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
+    ...(config.RESEARCH_REPORT_EXPORT_DIR ? { PI_RESEARCH_REPORT_EXPORT_DIR: config.RESEARCH_REPORT_EXPORT_DIR } : {}),
     PI_RESEARCH_DEBUG: String(config.DEBUG),
   };
 
@@ -716,6 +725,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     KNOWLEDGE_STORE_DIR: parseEnvString(e, 'PI_RESEARCH_KNOWLEDGE_DIR', DEFAULTS.KNOWLEDGE_STORE_DIR),
     TMP_DIR: parseEnvString(e, 'PI_RESEARCH_TMP_DIR', DEFAULTS.TMP_DIR),
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
+    RESEARCH_REPORT_EXPORT_DIR: parseEnvString(e, 'PI_RESEARCH_REPORT_EXPORT_DIR', DEFAULTS.RESEARCH_REPORT_EXPORT_DIR),
     DEBUG: parseEnvBool(e, 'PI_RESEARCH_DEBUG', DEFAULTS.DEBUG),
   };
 

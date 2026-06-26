@@ -81,6 +81,10 @@ let globalContainer: ServiceContainer | null = null;
 let globalRegistry: ModelRegistry | null = null;
 let globalModel: Model<any> | null = null;
 let globalConfig: Config | null = null;
+// cwd captured at initialization. Frozen here (like the SDK's globalCwd) so the
+// synthesized mock context and report export stay consistent even if the host
+// process chdir()s mid-session, instead of re-reading process.cwd() live.
+let globalCwd: string | null = null;
 let globalDefaultDepth = 1;
 let _headlessObserver: HeadlessObserver | null = null;
 
@@ -93,6 +97,7 @@ function ensureInitialized(pluginConfig: OpenClawPluginConfig): Promise<void> {
 
 async function _doInitialize(pluginConfig: OpenClawPluginConfig) {
   const cwd = process.cwd();
+  globalCwd = cwd;
   // Clone so we don't mutate the shared configCache reference.
   globalConfig = { ...getConfig(cwd, 'openclaw') };
 
@@ -193,6 +198,7 @@ async function shutdown() {
     globalRegistry = null;
     globalModel = null;
     globalConfig = null;
+    globalCwd = null;
     // Drop the headless observer too — it is bound to the now-disposed run state.
     // Leaving it would have the next init reuse an observer tied to dead services.
     _headlessObserver = null;
@@ -202,7 +208,7 @@ async function shutdown() {
 function createMockContext(model: Model<any>, registry: ModelRegistry) {
   const sessionId = `openclaw-${randomUUID()}`;
   return {
-    cwd: process.cwd(),
+    cwd: globalCwd ?? process.cwd(),
     mode: 'print',
     hasUI: false,
     model,
@@ -361,7 +367,10 @@ export default definePluginEntry({
               exportQuery,
               result,
               depth <= 1 ? 'quick' : 'deep',
-              config.reportExportPath || process.cwd(),
+              globalCwd ?? process.cwd(),
+              // Explicit path is used verbatim; falls back to smart cwd resolution
+              // when unset (preserves the documented default behaviour).
+              config.reportExportPath || globalConfig?.RESEARCH_REPORT_EXPORT_DIR,
             );
             if (savedPath) {
               result = appendExportMessage(result, savedPath);

@@ -24,6 +24,7 @@ import { metrics } from '../utils/metrics.ts';
 import { normalizeCitations } from '../utils/citation-utils.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
+import { safeGetApiKeyAndHeaders } from './llm/model-registry-factory.ts';
 import { withTimeout } from './llm/llm-timeout.ts';
 import { getConfig } from '../config.ts';
 import {
@@ -225,7 +226,7 @@ export class PlanningService implements IPlanningService {
     const userMessage = `Generate the initial research plan for: "${query}"`;
 
     try {
-      const authResult = await modelRegistry.getApiKeyAndHeaders(model);
+      const authResult = await safeGetApiKeyAndHeaders(modelRegistry, model);
       if (!authResult.ok) {
         throw new Error(`Failed to get API key for planning: ${authResult.error}`);
       }
@@ -386,7 +387,7 @@ export class PlanningService implements IPlanningService {
         : `Evaluate the following findings and decide next steps (delegate more researchers or synthesize final report):\n\n${findings}`;
 
     try {
-      const authResult = await modelRegistry.getApiKeyAndHeaders(model);
+      const authResult = await safeGetApiKeyAndHeaders(modelRegistry, model);
       if (!authResult.ok) {
         throw new Error(`Failed to get API key for evaluation: ${authResult.error}`);
       }

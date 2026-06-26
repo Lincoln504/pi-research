@@ -42,7 +42,23 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 // Constants
 // ---------------------------------------------------------------------------
 
-const PKG_VERSION = '1.0.0';
+/**
+ * Read the package version from package.json at runtime so `--version`/`status`
+ * never drift from package.json. `../package.json` relative to import.meta.url
+ * resolves correctly both in dev (src/cli.ts → repo root) and when bundled
+ * (dist/cli.mjs → installed package root).
+ */
+function readPkgVersion(): string {
+  try {
+    const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { version?: string };
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+const PKG_VERSION = readPkgVersion();
 const BINARY_NAME = 'pi-research';
 
 /** sysexits-style exit codes (kept distinct so callers/agents can branch). */
@@ -416,8 +432,9 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
     // The saved path is surfaced in BOTH the report text and the JSON output so
     // the calling agent can tell the user where the file is.
     let reportPath: string | null = null;
-    if (getConfig(process.cwd(), 'cli').RESEARCH_REPORT_EXPORT_ENABLED) {
-      reportPath = await exportResearchReport(args.query, report, depth <= 1 ? 'quick' : 'deep', process.cwd());
+    const exportCfg = getConfig(process.cwd(), 'cli');
+    if (exportCfg.RESEARCH_REPORT_EXPORT_ENABLED) {
+      reportPath = await exportResearchReport(args.query, report, depth <= 1 ? 'quick' : 'deep', process.cwd(), exportCfg.RESEARCH_REPORT_EXPORT_DIR);
       if (reportPath) {
         report = appendExportMessage(report, reportPath);
         toStderr(`[pi-research] report saved to: ${reportPath}\n`);

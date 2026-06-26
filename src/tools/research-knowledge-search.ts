@@ -222,6 +222,7 @@ async function serializeConversationHistory(ctx: ExtensionContext): Promise<stri
 }
 
 import { resolveResearchModel } from '../core/llm/research-model-resolver.ts';
+import { safeGetApiKeyAndHeaders } from '../core/llm/model-registry-factory.ts';
 
 // ---------------------------------------------------------------------------
 // Phase 4: Stateless Background Execution + Agentic Repair
@@ -572,7 +573,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           return missResult(modelError || 'no_model');
         }
 
-        const authResult = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+        const authResult = await safeGetApiKeyAndHeaders(ctx.modelRegistry, model);
         if (!authResult.ok) {
           logger.warn(`[research-knowledge-search] Model auth failed: ${authResult.error}`);
           return missResult('auth_failed');

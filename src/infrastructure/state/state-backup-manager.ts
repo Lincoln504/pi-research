@@ -63,8 +63,12 @@ export class StateBackupManager implements IService {
       // Ensure backup directory exists
       await fs.mkdir(this.backupDirPath, { recursive: true, mode: 0o700 });
 
+      // Timestamp + random suffix: two writers in the same millisecond would
+      // otherwise produce the same filename and silently overwrite one backup
+      // generation. The random suffix keeps both. Prefix/suffix still match the
+      // `research-state-*.json` patterns used by cleanup and recovery.
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupFileName = `research-state-${timestamp}.json`;
+      const backupFileName = `research-state-${timestamp}-${crypto.randomBytes(4).toString('hex')}.json`;
       const backupFilePath = path.join(this.backupDirPath, backupFileName);
 
       await fs.copyFile(this.stateFilePath, backupFilePath);
