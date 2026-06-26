@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ResearchSynthesisService } from '../../../src/orchestration/research-synthesis-service.ts';
 import { ServiceLifecycle } from '../../../src/core/service-registry.ts';
+import { registerScrapedLinks, clearAllSharedLinks } from '../../../src/utils/shared-links.ts';
 
 // Suppress logger output during tests
 import { vi } from 'vitest';
@@ -25,6 +26,8 @@ describe('ResearchSynthesisService', () => {
 
   beforeEach(() => {
     service = new ResearchSynthesisService();
+    // The scrape-provenance registry is a module-level singleton — isolate tests.
+    clearAllSharedLinks();
   });
 
   // ─── storeReport / getReport ────────────────────────────────────────────────
@@ -170,9 +173,30 @@ describe('ResearchSynthesisService', () => {
       expect(result).toContain('https://another.org/page');
     });
 
-    it('returns the original synthesis unchanged when no parseable URLs exist in reports', () => {
+    it('rebuilds CITED LINKS from scrape provenance when the report has no parseable citations', () => {
+      // The researcher actually fetched two pages but its report omitted/mangled the
+      // CITED LINKS block — the sources must still survive via the provenance registry.
+      service.storeReport('test-session', '1.A', 'A report whose author forgot to format a CITED LINKS section.');
+      registerScrapedLinks('test-session', ['https://provenance.org/a', 'https://provenance.org/b']);
+
+      const result = service.ensureCitedLinks('test-session', 'Synthesis without links.');
+      expect(result).toContain('CITED LINKS');
+      expect(result).toContain('https://provenance.org/a');
+      expect(result).toContain('https://provenance.org/b');
+    });
+
+    it('appends an explicit no-sources note when neither citations nor scrape provenance exist', () => {
       service.storeReport('test-session', '1.A', 'A report with no citation section at all.');
       const input = 'Synthesis without links.';
+      const result = service.ensureCitedLinks('test-session', input);
+      expect(result).toContain('CITED LINKS');
+      expect(result).toContain('No web sources were successfully retrieved');
+    });
+
+    it('preserves an existing (unparseable) CITED LINKS block rather than overwriting it with the no-sources note', () => {
+      // No reports, no provenance, but the synthesis already carries a links block:
+      // never destroy what the model wrote.
+      const input = 'Some findings.\n\nCITED LINKS\n[1] https://example.com - desc';
       expect(service.ensureCitedLinks('test-session', input)).toBe(input);
     });
   });

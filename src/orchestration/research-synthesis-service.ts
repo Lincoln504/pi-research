@@ -10,11 +10,20 @@
  */
 
 import { parseCitations } from '../utils/text-utils.ts';
-import { normalizeCitations, formatCitedLinks } from '../utils/citation-utils.ts';
+import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
+import { getScrapedLinks } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/interfaces/service-names.ts';
 import type { SteeringMessage } from './session-state.ts';
+
+// Shown in place of a sources list when a run retrieved no citable web sources at
+// all (no parseable citations AND no successfully-scraped URLs). Keeping the
+// "CITED LINKS" header means downstream consumers and the user always find the
+// section in its usual place; the italic note makes the empty result explicit
+// rather than letting an uncited report read as if it were sourced.
+const NO_SOURCES_NOTE =
+  'CITED LINKS\n_No web sources were successfully retrieved for this report — searches or page fetches may have been blocked (for example by site bot-protection) or returned no usable results. Treat the findings above as unverified._';
 
 /**
  * Research Synthesis Service
@@ -162,22 +171,49 @@ export class ResearchSynthesisService implements IService {
    */
   ensureCitedLinks(sessionId: string, synthesis: string): string {
     const reports = this.getSessionReports(sessionId);
-    if (reports.size === 0) return synthesis;
 
-    // Use the same normalization logic as the planning service
-    const { globalCitations } = normalizeCitations(reports);
-    if (globalCitations.length === 0) return synthesis;
+    // Primary source: citations the researchers wrote into their reports. These are
+    // the richest (they carry descriptions and source tags), so they win when present.
+    let globalCitations: GlobalCitation[] =
+      reports.size > 0 ? normalizeCitations(reports).globalCitations : [];
 
-    const verifiedLinksSection = formatCitedLinks(globalCitations);
-
-    // If the synthesis already has a CITED LINKS section, replace it with the verified version
-    if (/CITED LINKS/i.test(synthesis)) {
-      logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
-      return synthesis.replace(/CITED LINKS[\s\S]*$/i, verifiedLinksSection);
+    // Robustness fallback: if the reports yielded no parseable citations — e.g. the
+    // LLM omitted or mangled its "CITED LINKS" block, or wrote the sources under a
+    // heading parseCitations does not recognize — rebuild the sources list from the
+    // ground-truth provenance: the URLs the researchers ACTUALLY, successfully
+    // scraped this session (registerScrapedLinks only records HTTP-success fetches).
+    // This decouples the final sources list from fragile LLM prose formatting so that
+    // real fetched sources are never silently lost.
+    if (globalCitations.length === 0) {
+      const scraped = getScrapedLinks(sessionId);
+      if (scraped.length > 0) {
+        globalCitations = scraped.map((url, i) => ({ id: i + 1, url, description: '', source: 'Scrape' }));
+        logger.warn(
+          `[ResearchSynthesisService] No citations parsed from reports; rebuilt ${scraped.length} source(s) from scrape provenance.`,
+        );
+      }
     }
 
-    logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
-    return `${synthesis.trim()}\n\n${verifiedLinksSection}`;
+    if (globalCitations.length > 0) {
+      const verifiedLinksSection = formatCitedLinks(globalCitations);
+      // If the synthesis already has a CITED LINKS section, replace it with the verified version
+      if (/CITED LINKS/i.test(synthesis)) {
+        logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
+        return synthesis.replace(/CITED LINKS[\s\S]*$/i, verifiedLinksSection);
+      }
+      logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
+      return `${synthesis.trim()}\n\n${verifiedLinksSection}`;
+    }
+
+    // Genuinely no sources were retrieved (e.g. every search/scrape was blocked by
+    // bot protection, or none returned usable content). Never silently ship an
+    // uncited report that looks sourced — but also never destroy a CITED LINKS block
+    // the model may have written that we simply could not parse (preserve as-is).
+    if (/CITED LINKS/i.test(synthesis)) {
+      return synthesis;
+    }
+    logger.warn('[ResearchSynthesisService] No citations and no scrape provenance — appending explicit no-sources note.');
+    return `${synthesis.trim()}\n\n${NO_SOURCES_NOTE}`;
   }
 
   /**
