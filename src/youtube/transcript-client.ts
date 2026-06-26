@@ -216,6 +216,11 @@ async function fetchOne(
             throw new PermanentError('No captions/transcript available for this video.');
           }
 
+          // base_url is parsed out of YouTube's getInfo() response. Defense in
+          // depth: it must be an https YouTube/Google timedtext host before we
+          // append the PoToken and fetch it — never a private/metadata target.
+          assertTrustedTimedtextUrl(track.base_url);
+
           const sep = track.base_url.includes('?') ? '&' : '?';
           const url = `${track.base_url}${sep}fmt=json3&c=WEB&pot=${encodeURIComponent(contentToken)}`;
           // Pass a combined timeout+caller signal straight into fetch so BOTH the
@@ -226,6 +231,12 @@ async function fetchOne(
             signal: fetchSignal,
             headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': lang },
           });
+          // Surface the real HTTP status. Without this, a 403 (age-restricted) or
+          // 404 (removed) returns HTML that parseJson3 yields '' for, which would
+          // be misreported below as a bot-protection/PoToken failure.
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} from timedtext endpoint`);
+          }
           const body = await response.text();
           const text = parseJson3(body);
 
@@ -284,6 +295,35 @@ function pickTrack(tracks: CaptionTrack[], lang: string): CaptionTrack | undefin
 }
 
 /** Parse YouTube json3 caption payload into a single whitespace-collapsed string. */
+/**
+ * Defense-in-depth SSRF gate for the timedtext URL. The base_url comes from
+ * youtubei.js parsing YouTube's getInfo() response; this guarantees we only ever
+ * fetch it if it is https on a YouTube/Google-owned host, so a manipulated or
+ * misparsed value can never point the PoToken-bearing request at an internal IP
+ * or the cloud metadata endpoint. Throws PermanentError (no retry) on mismatch.
+ */
+function assertTrustedTimedtextUrl(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new PermanentError('Caption track URL is not a valid URL.');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new PermanentError(`Caption track URL must be https (got ${parsed.protocol}).`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  const ok =
+    host === 'youtube.com' ||
+    host.endsWith('.youtube.com') ||
+    host.endsWith('.googlevideo.com') ||
+    host.endsWith('.google.com') ||
+    host.endsWith('.googleapis.com');
+  if (!ok) {
+    throw new PermanentError(`Caption track URL host not trusted: ${host}`);
+  }
+}
+
 function parseJson3(body: string): string {
   if (!body) return '';
   let parsed: unknown;

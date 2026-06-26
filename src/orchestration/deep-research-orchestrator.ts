@@ -115,10 +115,12 @@ export class DeepResearchOrchestrator {
     // Fire onStart observer event
     observer?.onStart?.(query, complexity);
 
-    // Consume all queued messages at the start of the research run so
-    // that getQueuedSteeringMessages() below returns an accurate count
-    // of NEW messages that arrived after prior research (not stale ones).
-    consumeQueuedMessages(this.options.sessionId);
+    // Consume all queued messages at the start of the research run. The
+    // returned list is exactly the messages that were 'queued' for THIS run
+    // (transitioned queued->active here); use its length below rather than
+    // getSteeringMessages(), which also counts 'active' messages left over
+    // from prior runs and would inflate the steering round bonus.
+    const consumedAtStart = consumeQueuedMessages(this.options.sessionId);
 
     // The base round budget for this complexity level, plus extra room
     // for any queued steering messages that arrived before this run
@@ -129,7 +131,7 @@ export class DeepResearchOrchestrator {
     // user push research deeper via Alt+Enter when they have queued
     // guidance waiting to be applied.
     const baseMaxRounds = getMaxRounds(complexity);
-    const queuedAtStart = getSteeringMessages(this.options.sessionId).length;
+    const queuedAtStart = consumedAtStart.length;
     const steeringBonusRounds = Math.min(queuedAtStart, MAX_EXTRA_ROUNDS_WITH_STEERING);
     let maxRounds = baseMaxRounds + steeringBonusRounds;
     // Track total steering-driven extra rounds already granted.
@@ -500,8 +502,16 @@ export class DeepResearchOrchestrator {
 
       throw error;
     } finally {
-      const orch = await this.getOrchestrationService();
-      await orch.cleanupResearchServices(undefined, researchId, ctx);
+      // Guard cleanup: getOrchestrationService()/cleanup can throw when the
+      // container is disposing (e.g. SIGTERM mid-run). An unguarded throw here
+      // would replace the in-flight error or discard a successful return value.
+      // Mirrors QuickResearchOrchestrator's guarded cleanup.
+      try {
+        const orch = await this.getOrchestrationService();
+        await orch.cleanupResearchServices(undefined, researchId, ctx);
+      } catch (cleanupErr) {
+        logger.warn('[DeepOrchestrator] Failed to cleanup research services:', cleanupErr);
+      }
     }
   }
 }

@@ -196,6 +196,14 @@ export class WorkerPoolManager implements IService {
                     this.lifecycle = ServiceLifecycle.INITIALIZED;
                 }
 
+                // Clear the coalescing promise on success too (not only on failure).
+                // Leaving a resolved promise here means a later ensurePool() call with a
+                // CHANGED worker count — which skips the line-79 fast path — would return
+                // this stale promise and hand back the OLD pool, silently ignoring the new
+                // count. Concurrent callers already hold their own reference to this promise,
+                // so clearing it is safe.
+                this.poolInitializationPromise = null;
+
                 return this.pool;
             } catch (error) {
                 metrics.increment('browser_pool_initializations_total', 1, { success: 'false' });

@@ -195,6 +195,13 @@ jobs:
           key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+      # Always (re)build the browser worker bundle. It is gitignored and produced
+      # by the `prepare` lifecycle, which only runs as part of `npm ci`. On a
+      # node_modules cache HIT `npm ci` is skipped, so without this step the
+      # bundle is absent and WorkerPoolManager.ensurePool()'s existsSync guard
+      # fails the worker-pool-manager unit tests (the integration job already
+      # builds it explicitly for the same reason).
+      - run: npm run build:worker
       - name: Install ripgrep (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y ripgrep

@@ -258,10 +258,13 @@ describe('DeepResearchOrchestrator', () => {
     // research run begins. For complexity 1, the base budget is 2 rounds;
     // with 2 queued messages we should get up to 2 extra rounds (capped
     // at MAX_EXTRA_ROUNDS_WITH_STEERING = 2).
-    const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
-    vi.mocked(getSteeringMessages).mockReturnValue([
-      { id: '1', text: 'focus on X', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
-      { id: '2', text: 'and Y', status: 'queued', addedAt: 0, consumedAt: null, poppedAt: null },
+    // The round-budget bonus is driven by the messages consumed (queued->active)
+    // at run start, i.e. the return value of consumeQueuedMessages — not by
+    // getSteeringMessages (which also counts prior-run active messages).
+    const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(consumeQueuedMessages).mockReturnValue([
+      { id: '1', text: 'focus on X', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
+      { id: '2', text: 'and Y', status: 'active', addedAt: 0, consumedAt: 0, poppedAt: null },
     ]);
 
     // Evaluator keeps delegating until the loop exits, then forced synthesis.
@@ -289,9 +292,10 @@ describe('DeepResearchOrchestrator', () => {
   });
 
   it('should NOT extend round budget when no queued steering messages exist', async () => {
-    // Explicitly reset steering mock in case a previous test set it.
-    const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
+    // Explicitly reset steering mocks in case a previous test set them.
+    const { getSteeringMessages, consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
     vi.mocked(getSteeringMessages).mockReturnValue([]);
+    vi.mocked(consumeQueuedMessages).mockReturnValue([]);
 
     mockPlanningService.updatePlanForRound.mockImplementation(async (opts: any) => {
       if (opts.mustSynthesize) {
@@ -315,14 +319,14 @@ describe('DeepResearchOrchestrator', () => {
 
   it('should cap extra rounds at MAX_EXTRA_ROUNDS_WITH_STEERING even with many queued messages', async () => {
     // 5 queued messages — but cap is 2, so we should only get 2 extra rounds.
-    const { getSteeringMessages } = await import('../../../src/orchestration/session-state.ts');
-    vi.mocked(getSteeringMessages).mockReturnValue(
+    const { consumeQueuedMessages } = await import('../../../src/orchestration/session-state.ts');
+    vi.mocked(consumeQueuedMessages).mockReturnValue(
       Array.from({ length: 5 }, (_, i) => ({
         id: String(i),
         text: `steer ${i}`,
-        status: 'queued' as const,
+        status: 'active' as const,
         addedAt: 0,
-        consumedAt: null,
+        consumedAt: 0,
         poppedAt: null,
       })),
     );

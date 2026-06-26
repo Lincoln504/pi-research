@@ -30,7 +30,7 @@ function json3(...phrases: string[]): string {
 
 /** A mock fetch returning a json3 body (or empty body) for timedtext requests. */
 function mockFetch(body: string, status = 200): typeof fetch {
-  return vi.fn(async () => ({ status, text: async () => body })) as unknown as typeof fetch;
+  return vi.fn(async () => ({ status, ok: status >= 200 && status < 300, text: async () => body })) as unknown as typeof fetch;
 }
 
 function seedSession() {
@@ -45,7 +45,7 @@ function infoWith(tracks: Array<{ base_url: string; language_code?: string; kind
   return { basic_info: basic, captions: { caption_tracks: tracks } };
 }
 
-const TRACK = { base_url: 'https://yt.example/timedtext?v=1', language_code: 'en' };
+const TRACK = { base_url: 'https://www.youtube.com/api/timedtext/timedtext?v=1', language_code: 'en' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -132,8 +132,8 @@ describe('youtube/transcript-client', () => {
 
   it('selects the requested language track when multiple are present', async () => {
     const tracks = [
-      { base_url: 'https://yt.example/de', language_code: 'de' },
-      { base_url: 'https://yt.example/en', language_code: 'en' },
+      { base_url: 'https://www.youtube.com/api/timedtext/de', language_code: 'de' },
+      { base_url: 'https://www.youtube.com/api/timedtext/en', language_code: 'en' },
     ];
     const getInfo = vi.fn(async () => infoWith(tracks));
     innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
@@ -237,7 +237,7 @@ describe('youtube/transcript-client', () => {
   });
 
   it('falls back to a language-prefix track when no exact match exists', async () => {
-    const tracks = [{ base_url: 'https://yt.example/enUS', language_code: 'en-US' }];
+    const tracks = [{ base_url: 'https://www.youtube.com/api/timedtext/enUS', language_code: 'en-US' }];
     const getInfo = vi.fn(async () => infoWith(tracks));
     innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
     vi.stubGlobal('fetch', mockFetch(json3('hi')));

@@ -22,8 +22,7 @@ export const INTERNAL_NETWORK_PATTERNS: ReadonlyArray<RegExp> = [
   /^0\./,                          // IPv4 "this" network
   /^::1$/,                         // IPv6 loopback
   /^fe80::/i,                      // IPv6 link-local
-  /^fc00::/i,                      // IPv6 unique local
-  /^fd00::/i,                      // IPv6 unique local
+  /^f[cd][0-9a-f]{2}:/i,           // IPv6 unique local — full fc00::/7 block (fc00::–fdff::)
   /^169\.254\./,                   // IPv4 link-local (and metadata)
   /^10\./,                         // RFC 1918 Class A private
   /^192\.168\./,                   // RFC 1918 Class C private

@@ -96,7 +96,18 @@ export class StackExchangeClient {
 
         clearTimeout(timeoutId);
 
-        const data = await response.json() as StackExchangeWrapper<T>;
+        // The SE API returns a structured JSON wrapper (with error_id) even for
+        // logical errors, so we still parse on non-2xx. But a maintenance page /
+        // CDN interstitial is non-JSON: surface it as an HTTP status error (which
+        // the circuit breaker recognizes as transient) instead of an opaque
+        // "Unexpected token <" SyntaxError that hides the real cause.
+        let data: StackExchangeWrapper<T>;
+        try {
+          data = await response.json() as StackExchangeWrapper<T>;
+        } catch (parseErr) {
+          if (!response.ok) throw new Error(`HTTP ${response.status} from Stack Exchange API`, { cause: parseErr });
+          throw parseErr;
+        }
 
         // Handle API errors
         if (data.error_id) {

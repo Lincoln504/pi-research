@@ -168,6 +168,19 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
       return;
     }
 
+    // If an initialization is still in flight, let it finish before we tear down.
+    // Otherwise the init closure would re-assign this._embedder/_store/_writerQueue
+    // and flip lifecycle back to INITIALIZED *after* dispose() nulled everything —
+    // resurrecting a disposed service with live, never-disposed components (leaked
+    // ONNX sessions + LanceDB handles) that isReady() then reports as ready.
+    if (this._initializationPromise) {
+      try {
+        await this._initializationPromise;
+      } catch {
+        // init failed; its own catch already reset state — nothing to wait on.
+      }
+    }
+
     this.lifecycle = ServiceLifecycle.DISPOSING;
     logger.debug('[KnowledgeStoreService] Disposing...');
 

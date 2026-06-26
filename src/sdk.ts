@@ -38,6 +38,7 @@ import { ErrorTracker, runWithTracker, type ErrorReport } from './utils/error-tr
 import { runHealthCheck } from './healthcheck/index.ts';
 import { buildModelRegistry as sharedBuildModelRegistry, resolveModel } from './core/llm/model-registry-factory.ts';
 import { scrapeSingle } from './web-research/web-scraper.ts';
+import { validateUrlForSSRF } from './web-research/scraper-utils.ts';
 import type { ScrapeResult } from './core/interfaces/scheduler-interfaces.ts';
 import { randomUUID } from 'node:crypto';
 import type { ResearchDepth } from './types/index.ts';
@@ -338,6 +339,12 @@ export async function verifyUrl(url: string, signal?: AbortSignal): Promise<bool
   if (!isInitialized || !globalContainer) throw new Error('SDK not initialized. Call initResearchSDK() first.');
 
   try {
+    // SSRF gate: runBrowserTask navigates the initial URL directly (the worker
+    // only re-validates redirect hops), so unlike scrapeSingle this path has no
+    // entry-point validation of its own. Block private/loopback/metadata targets
+    // before any browser navigation.
+    await validateUrlForSSRF(url);
+
     const result = await runBrowserTask<{ content: string; success: boolean }>(
       url,
       'scrape',

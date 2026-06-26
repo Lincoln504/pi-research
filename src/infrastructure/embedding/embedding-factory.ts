@@ -208,8 +208,12 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
 
   p = init();
   _embeddingInitPromise = p;
-  p.then((r) => {
-    _embeddingInstance = r;
+  // init() already assigns _embeddingInstance before it resolves, so do NOT
+  // re-assign it here. If clearEmbeddingInstance() ran (and disposed the server)
+  // between init resolving and this microtask, re-assigning would resurrect the
+  // disposed instance and hand it to the next getEmbedder() caller. Only clear
+  // the in-flight promise marker.
+  p.then(() => {
     _embeddingInitPromise = null;
   }).catch(() => {
     _embeddingInitPromise = null;

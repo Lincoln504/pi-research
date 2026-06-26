@@ -89,7 +89,7 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           OCV="$(node -p "require('./openclaw.plugin.json').version")"
           test "$OCV" = "$VERSION" || { echo "❌ openclaw.plugin.json v$OCV != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
-          grep -q "version: \"$VERSION\"" skills/research/SKILL.md || { echo "❌ skills/research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          grep -q "version: \"$VERSION\"" skills/pi-research/SKILL.md || { echo "❌ skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
           echo "✔ package.json, openclaw.plugin.json, SKILL.md all at v$VERSION"
 
       - env:
