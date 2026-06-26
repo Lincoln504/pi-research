@@ -19,7 +19,9 @@ const projectRoot = path.join(__dirname, '..');
  */
 function removeInstalledSkills() {
   const manifestPath = path.join(os.homedir(), '.pi', 'research', 'installed-skills.json');
-  if (!existsSync(manifestPath)) return;
+  // Read directly and let the catch handle a missing/unreadable manifest. Avoiding
+  // a separate existsSync() check removes a check-then-use (TOCTOU) on the file that
+  // is later rewritten below — the read itself is the only gate we need.
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
