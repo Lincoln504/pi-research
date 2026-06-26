@@ -376,7 +376,7 @@ interface ResearchArgs {
 async function cmdResearch(args: ResearchArgs): Promise<number> {
   const det = detectCredentials();
   if (det.problem) {
-    toStderr(`\n✗ ${det.problem}\n\n${configBlock(det)}\n`);
+    toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
     return EXIT.CONFIG;
   }
 
@@ -445,7 +445,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
 async function cmdKnowledge(queries: string[], json?: boolean): Promise<number> {
   const det = detectCredentials();
   if (det.problem) {
-    toStderr(`\n✗ ${det.problem}\n\n${configBlock(det)}\n`);
+    toStderr(`\nError: ${det.problem}\n\n${configBlock(det)}\n`);
     return EXIT.CONFIG;
   }
 
@@ -546,17 +546,17 @@ function reportError(err: unknown, what: string): number {
     lower.includes('api key');
 
   if (isConfigError) {
-    toStderr(`\n✗ pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
+    toStderr(`\nError: pi-research ${what} failed: ${msg}\n\n${configBlock(detectCredentials())}\n`);
     return EXIT.CONFIG;
   }
 
   // Rate limits are operational, not fatal setup problems.
   if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
-    toStderr(`\n✗ pi-research ${what} halted: provider rate limit reached. Wait a moment and retry.\n  ${msg}\n`);
+    toStderr(`\nError: pi-research ${what} halted: provider rate limit reached. Wait a moment and retry.\n  ${msg}\n`);
     return EXIT.SOFTWARE;
   }
 
-  toStderr(`\n✗ pi-research ${what} failed: ${msg}\n`);
+  toStderr(`\nError: pi-research ${what} failed: ${msg}\n`);
   if (process.env['PI_RESEARCH_DEBUG'] === 'true' && err instanceof Error && err.stack) {
     toStderr('\n' + err.stack + '\n');
   }
@@ -801,7 +801,7 @@ async function main(argv: string[]): Promise<number> {
     parsed = parseArgs(argv);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    toStderr(`\n✗ ${msg}\n\n${buildHelp()}`);
+    toStderr(`\nError: ${msg}\n\n${buildHelp()}`);
     return EXIT.USAGE;
   }
 
@@ -862,7 +862,7 @@ if (_isMain) {
   main(process.argv)
     .then(flushAndExit)
     .catch((err) => {
-      toStderr(`\n✗ fatal: ${err instanceof Error ? err.message : String(err)}\n`);
+      toStderr(`\nError: fatal: ${err instanceof Error ? err.message : String(err)}\n`);
       flushAndExit(EXIT.SOFTWARE);
     });
 }

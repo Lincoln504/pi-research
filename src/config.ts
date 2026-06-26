@@ -435,7 +435,7 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
   let legacyEnv: Record<string, string> = {};
   if (fs.existsSync(legacyPath)) {
     try {
-      logger.warn(`[config] ⚠ .pi-research.env files are deprecated. Settings will be auto-migrated to the centralized registry. Remove ${legacyPath} after migration.`);
+      logger.warn(`[config] WARNING: .pi-research.env files are deprecated. Settings will be auto-migrated to the centralized registry. Remove ${legacyPath} after migration.`);
       legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
       Object.assign(merged, legacyEnv);
       

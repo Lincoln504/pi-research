@@ -459,7 +459,7 @@ export default new ThreadWorker(runTask, {
         }
         
         summary += `## Recommendations\n\n`;
-        summary += `✅ Production configuration validated.\n`;
+        summary += `OK Production configuration validated.\n`;
         summary += `- Warm browser mode working optimally.\n`;
         summary += `- No rate limiting detected.\n`;
         summary += `- High search quality maintained (${metrics.avgRelevance}/100 relevance).\n`;

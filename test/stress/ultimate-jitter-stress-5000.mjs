@@ -221,7 +221,7 @@ export default new ThreadWorker(runTask, { maxInactiveTime: 60000 });
             }
             
             if (this.stats.rollingBlocks.length >= CONFIG.hardLimitThreshold) {
-                this.log('🚨 HARD LIMIT REACHED IN ROLLING WINDOW. STOPPING.');
+                this.log('ALERT HARD LIMIT REACHED IN ROLLING WINDOW. STOPPING.');
                 break;
             }
         }
@@ -244,17 +244,17 @@ export default new ThreadWorker(runTask, { maxInactiveTime: 60000 });
 
             if (this.stats.total % 25 === 0) {
                 const avgRel = (this.stats.relevanceScores.reduce((a,b)=>a+b,0)/this.stats.relevanceScores.length).toFixed(1);
-                this.log(`[${this.stats.total}/${CONFIG.maxQueries}] ✅ Success | Rel: ${avgRel}% | Dur: ${res.duration}ms | Jitter: ${res.jitter}ms`);
+                this.log(`[${this.stats.total}/${CONFIG.maxQueries}] OK Success | Rel: ${avgRel}% | Dur: ${res.duration}ms | Jitter: ${res.jitter}ms`);
             }
         } else if (res.blocked) {
             this.stats.blocked++;
             this.stats.lastWasBlocked = true;
             this.stats.rollingBlocks.push(index);
             this.stats.blockReasons[res.reason] = (this.stats.blockReasons[res.reason] || 0) + 1;
-            this.log(`[${this.stats.total}/${CONFIG.maxQueries}] ❌ BLOCKED: ${res.reason} | Window: ${this.stats.rollingBlocks.length}/${CONFIG.hardLimitThreshold}`);
+            this.log(`[${this.stats.total}/${CONFIG.maxQueries}] FAIL BLOCKED: ${res.reason} | Window: ${this.stats.rollingBlocks.length}/${CONFIG.hardLimitThreshold}`);
         } else {
             this.stats.errors++;
-            this.log(`[${this.stats.total}/${CONFIG.maxQueries}] ⚠️ ERROR: ${res.error}`);
+            this.log(`[${this.stats.total}/${CONFIG.maxQueries}] WARN ERROR: ${res.error}`);
         }
     }
 

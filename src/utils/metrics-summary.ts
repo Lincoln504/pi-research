@@ -453,9 +453,9 @@ export function buildRunCompactLine(run: {
   completedAt: number;
   snapshot: IMetricsSnapshot;
 }): string {
-  const icon = run.status === 'success' ? '✓'
-    : run.status === 'cancelled' ? '⊘'
-    : '✗';
+  const icon = run.status === 'success' ? '[ok]'
+    : run.status === 'cancelled' ? '[cancelled]'
+    : '[failed]';
 
   const stats = extractRunStats(run.snapshot);
   const extraParts: string[] = [];

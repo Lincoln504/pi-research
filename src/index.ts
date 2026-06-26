@@ -219,7 +219,7 @@ export default async function (pi: ExtensionAPI) {
     // Pass pi as context — includes cwd for proper config loading
     const result = await initializeCoreServices(pi, container);
     if (result.failed.length > 0) {
-      logger.error(`[pi-research] ⚠ Service initialization incomplete: ${result.failed.join(', ')}`);
+      logger.error(`[pi-research] WARNING: Service initialization incomplete: ${result.failed.join(', ')}`);
     } else {
       logger.log('[pi-research] All critical services initialized and ready');
       container.isReady = true;
@@ -235,7 +235,7 @@ export default async function (pi: ExtensionAPI) {
     validateConfig(config);
     logger.debug('[pi-research] Config validated');
   } catch (err) {
-    logger.error(`[pi-research] ⚠ Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
+    logger.error(`[pi-research] WARNING: Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Primary cleanup path for pi -p (print mode) and normal session end.
@@ -429,7 +429,7 @@ export default async function (pi: ExtensionAPI) {
         .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());
       
       if (!isKnowledgeSearchAvailable) {
-        researchPrompt = researchPrompt.replace(/\n\*\*⚡ KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');
+        researchPrompt = researchPrompt.replace(/\n\*\*KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');
       }
       
       return {

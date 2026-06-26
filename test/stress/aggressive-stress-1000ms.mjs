@@ -369,7 +369,7 @@ async function runAggressiveStressTest() {
         // Check stopping conditions
         if (stats.hitHardLimit) {
             log('\n' + '='.repeat(70));
-            log('🚨 HARD LIMIT REACHED');
+            log('ALERT HARD LIMIT REACHED');
             log('='.repeat(70));
             log(`Stopping test at query ${batchStart}`);
             log(`Reason: Hard limit threshold (${CONFIG.hardLimitBlockThreshold} blocks in ${CONFIG.rollingWindowSize} queries) exceeded`);
@@ -378,7 +378,7 @@ async function runAggressiveStressTest() {
         
         if (stats.hitConsistentLimit) {
             log('\n' + '='.repeat(70));
-            log('⚠️  CONSISTENT LIMIT REACHED');
+            log('WARN  CONSISTENT LIMIT REACHED');
             log('='.repeat(70));
             log(`Stopping test at query ${batchStart}`);
             log(`Reason: Consistent limit threshold (${CONFIG.maxConsecutiveBlocks} consecutive blocks) exceeded`);
@@ -411,7 +411,7 @@ async function runAggressiveStressTest() {
                 stats.relevanceScores.push(result.relevance.score);
                 stats.rollingWindowBlocks = [];
                 
-                log(`[${result.queryNum + 1}] ✅ | P1:${result.page1Results} P2:${result.page2Results} Total:${result.resultCount} | Rel:${result.relevance.score}% | ${result.duration}ms | Block Gap:${stats.lastBlockIndex > -1 ? result.queryNum - stats.lastBlockIndex : 'N/A'}`);
+                log(`[${result.queryNum + 1}] OK | P1:${result.page1Results} P2:${result.page2Results} Total:${result.resultCount} | Rel:${result.relevance.score}% | ${result.duration}ms | Block Gap:${stats.lastBlockIndex > -1 ? result.queryNum - stats.lastBlockIndex : 'N/A'}`);
             } else if (result.blocked) {
                 stats.blocked++;
                 stats.consecutiveBlocks++;
@@ -430,13 +430,13 @@ async function runAggressiveStressTest() {
                     stats.hitHardLimit = true;
                 }
                 
-                log(`[${result.queryNum + 1}] ❌ BLOCKED | ${result.blockReason} | ${result.duration}ms | Consecutive:${stats.consecutiveBlocks} | Rolling:${stats.rollingWindowBlocks.length}/${CONFIG.hardLimitBlockThreshold}`);
+                log(`[${result.queryNum + 1}] FAIL BLOCKED | ${result.blockReason} | ${result.duration}ms | Consecutive:${stats.consecutiveBlocks} | Rolling:${stats.rollingWindowBlocks.length}/${CONFIG.hardLimitBlockThreshold}`);
             } else {
                 stats.errors++;
                 stats.consecutiveBlocks = 0;
                 stats.rollingWindowBlocks = [];
                 
-                log(`[${result.queryNum + 1}] ⚠️  ERROR | ${result.error} | ${result.duration}ms`);
+                log(`[${result.queryNum + 1}] WARN  ERROR | ${result.error} | ${result.duration}ms`);
             }
         }
         
@@ -463,7 +463,7 @@ async function runAggressiveStressTest() {
             log(`  Throughput: ${throughput} queries/sec`);
             log(`  Page Stats: Avg P1:${avgPage1} | Avg P2:${avgPage2} | Total:${parseFloat(avgPage1) + parseFloat(avgPage2)} | P2 Success:${page2Rate}%`);
             log(`  Relevance: Avg ${avgRel}% | High: ${stats.relevanceScores.filter(s => s >= 70).length}/${stats.relevanceScores.length}`);
-            log(`  Status: ${stats.hitHardLimit ? '🚨 HARD LIMIT' : stats.hitConsistentLimit ? '⚠️ CONSISTENT LIMIT' : '✅ CONTINUING'}`);
+            log(`  Status: ${stats.hitHardLimit ? 'ALERT HARD LIMIT' : stats.hitConsistentLimit ? 'WARN CONSISTENT LIMIT' : 'OK CONTINUING'}`);
         }
     }
     
@@ -554,7 +554,7 @@ async function runAggressiveStressTest() {
     log(`Throughput: ${throughput} queries/sec`);
     log(`Page Stats: Avg P1:${avgPage1} | Avg P2:${avgPage2} | Total:${parseFloat(avgPage1) + parseFloat(avgPage2)} | P2 Success:${page2Rate}%`);
     log(`Relevance: Avg ${avgRel}%`);
-    log(`Status: ${stats.hitHardLimit ? '🚨 HARD LIMIT REACHED' : stats.hitConsistentLimit ? '⚠️ CONSISTENT LIMIT REACHED' : '✅ NO HARD LIMIT'}`);
+    log(`Status: ${stats.hitHardLimit ? 'ALERT HARD LIMIT REACHED' : stats.hitConsistentLimit ? 'WARN CONSISTENT LIMIT REACHED' : 'OK NO HARD LIMIT'}`);
     log('');
     log('Recommendations:');
     for (const rec of finalData.recommendations) {
@@ -570,8 +570,8 @@ async function runAggressiveStressTest() {
 
 // Run test
 runAggressiveStressTest().then(() => {
-    console.log('✅ Test complete!');
+    console.log('OK Test complete!');
 }).catch(error => {
-    console.error('❌ Test failed:', error);
+    console.error('FAIL Test failed:', error);
     process.exit(1);
 });

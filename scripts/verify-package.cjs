@@ -77,7 +77,7 @@ const FORBIDDEN = [
 ];
 
 function fail(msg) {
-  console.error(`❌ ${msg}`);
+  console.error(`ERROR: ${msg}`);
   process.exitCode = 1;
 }
 
@@ -146,7 +146,7 @@ function verifyManifest() {
   if (process.exitCode) {
     console.error(`\nManifest verification FAILED (${files.length} files inspected).`);
   } else {
-    console.log(`✅ Tarball manifest verified: ${files.length} files, all required present, no junk.`);
+    console.log(`OK: Tarball manifest verified: ${files.length} files, all required present, no junk.`);
   }
 }
 
@@ -191,7 +191,7 @@ function verifyInstalled(pkgDir) {
   if (process.exitCode) {
     console.error('\nInstalled-package verification FAILED.');
   } else {
-    console.log(`✅ Installed package verified at ${pkgDir}: all entry points, bundles, worker, and prompts present.`);
+    console.log(`OK: Installed package verified at ${pkgDir}: all entry points, bundles, worker, and prompts present.`);
   }
 }
 

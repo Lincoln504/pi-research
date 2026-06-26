@@ -257,8 +257,11 @@ export class EmbeddingServer implements IEmbedder {
         const serverInfo = await this.getEmbeddingServerWithRetry();
         
         // Resilience: Skip check if server info is transiently unavailable after retries.
+        // This is a benign, explicitly-handled condition (the state entry can be briefly
+        // absent while a concurrent run rewrites shared state), so log at DEBUG — at WARN
+        // it spams the log every 30s for the life of the process.
         if (!serverInfo) {
-          logger.warn('[EmbeddingServer] Leadership check: no embedding server found in state after retries. Skipping check.');
+          logger.debug('[EmbeddingServer] Leadership check: no embedding server found in state after retries. Skipping check.');
           return;
         }
 

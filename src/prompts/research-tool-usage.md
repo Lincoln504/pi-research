@@ -2,7 +2,7 @@
 argument-hint: <query> [depth:1|2|3] [model:<id>]
 ---
 
-### 🔍 RESEARCH TOOL USAGE
+### RESEARCH TOOL USAGE
 
 **For any web/internet research questions, use the `research` tool.**
 
@@ -14,7 +14,7 @@ argument-hint: <query> [depth:1|2|3] [model:<id>]
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
-**⚡ KNOWLEDGE SEARCH**
+**KNOWLEDGE SEARCH**
 - The `research_knowledge_search` tool searches the research knowledge database for previously researched information.
 - **Unified Results**: It searches both your **Project Knowledge Store** and your **User Knowledge Store** simultaneously.
 - It is **instant and free** — always try it FIRST before using the live `research` tool.

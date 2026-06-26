@@ -149,7 +149,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         return {
           content: [{
             type: 'text',
-            text: '❌ **Research system is not ready.**\n\nOne or more critical services failed to initialize during startup. Please check the logs for error details or try restarting the extension.\n\nYou can also run `/research-config health` to diagnose the issue.'
+            text: '**Research system is not ready.**\n\nOne or more critical services failed to initialize during startup. Please check the logs for error details or try restarting the extension.\n\nYou can also run `/research-config health` to diagnose the issue.'
           }],
           details: { error: 'system_not_ready' }
         };

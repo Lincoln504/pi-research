@@ -272,7 +272,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         const partialResponse = ensureAssistantResponse(session, id);
         if (partialResponse && partialResponse.trim().length > 50) {
           const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
-          synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*⚠ This report was truncated due to a timeout/error. Content may be incomplete.*');
+          synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*WARNING: This report was truncated due to a timeout/error. Content may be incomplete.*');
           logger.log(`[ResearcherExecutor] Researcher ${id} salvaged partial content (${partialResponse.length} chars) after error: ${errMsg}`);
           observer?.onResearcherComplete?.(id, partialResponse);
           return;

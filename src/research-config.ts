@@ -732,9 +732,9 @@ async function showMetricsAction(_ctx: ExtensionContext, pi: ExtensionAPI): Prom
     const lastStats = extractRunStats(lastRun.snapshot);
 
     lines.push(`### Last Run`);
-    const statusIcon = lastRun.status === 'success' ? '✓'
-                     : lastRun.status === 'cancelled' ? '⊘'
-                     : '✗';
+    const statusIcon = lastRun.status === 'success' ? '[ok]'
+                     : lastRun.status === 'cancelled' ? '[cancelled]'
+                     : '[failed]';
     lines.push(`${statusIcon} \`${lastRun.runId.slice(0, 8)}\` — ${formatDuration(lastRun.durationMs)} — completed ${formatTimeAgo(new Date(lastRun.completedAt).toISOString())}`);
     lines.push('');
 

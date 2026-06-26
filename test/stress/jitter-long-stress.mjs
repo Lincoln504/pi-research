@@ -242,19 +242,19 @@ export default new ThreadWorker(runTask, {
                 if (result.success) {
                     this.successCount++;
                     if (this.queryCount % 10 === 0 || this.queryCount < 10) {
-                        this.log(`[${this.queryCount}/${CONFIG.maxQueries}] ✅ Success: ${result.totalCount} results (${result.p1Count}+${result.p2Count}) in ${result.duration}ms (Jitter: ${result.jitter}ms)`);
+                        this.log(`[${this.queryCount}/${CONFIG.maxQueries}] OK Success: ${result.totalCount} results (${result.p1Count}+${result.p2Count}) in ${result.duration}ms (Jitter: ${result.jitter}ms)`);
                     }
                 } else if (result.blocked) {
                     this.blockedCount++;
-                    this.log(`[${this.queryCount}/${CONFIG.maxQueries}] ❌ BLOCKED: ${result.reason} (Worker: ${result.pid})`);
+                    this.log(`[${this.queryCount}/${CONFIG.maxQueries}] FAIL BLOCKED: ${result.reason} (Worker: ${result.pid})`);
                 } else {
                     this.errorCount++;
-                    this.log(`[${this.queryCount}/${CONFIG.maxQueries}] ⚠️ ERROR: ${result.error} (Worker: ${result.pid})`);
+                    this.log(`[${this.queryCount}/${CONFIG.maxQueries}] WARN ERROR: ${result.error} (Worker: ${result.pid})`);
                 }
             }).catch(err => {
                 this.queryCount++;
                 this.errorCount++;
-                this.log(`[${this.queryCount}/${CONFIG.maxQueries}] 🔥 FATAL ERROR: ${err.message}`);
+                this.log(`[${this.queryCount}/${CONFIG.maxQueries}] HOT FATAL ERROR: ${err.message}`);
             });
 
             activePromises.push(promise);

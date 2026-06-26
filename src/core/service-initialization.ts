@@ -145,7 +145,7 @@ export async function initializeCoreServices(ctx?: any, container: ServiceContai
     if (failed.length === 0) {
       logger.log(`[ServiceInitialization] All ${initialized.length} critical services initialized successfully`);
     } else {
-      logger.warn(`[ServiceInitialization] ⚠ ${initialized.length}/${initialized.length + failed.length} services initialized, ${failed.length} failed`);
+      logger.warn(`[ServiceInitialization] WARNING: ${initialized.length}/${initialized.length + failed.length} services initialized, ${failed.length} failed`);
       for (const failure of failed) {
         logger.warn(`[ServiceInitialization]   - ${failure}`);
       }

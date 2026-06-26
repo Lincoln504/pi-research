@@ -169,7 +169,7 @@ function notInstalled(): never {
   const home = homedir();
   const lines = [
     '',
-    '✗ pi-research engine not found.',
+    'Error: pi-research engine not found.',
     '',
     'This research skill drives the pi-research engine, but it is not installed in',
     'any of the locations this launcher checks (PATH, node_modules, ~/.pi/bin,',
@@ -203,13 +203,13 @@ function launch(engine: ResolvedEngine): void {
   });
 
   child.on('error', (err) => {
-    process.stderr.write(`\n✗ failed to launch pi-research (${engine.label}): ${err.message}\n`);
+    process.stderr.write(`\nError: failed to launch pi-research (${engine.label}): ${err.message}\n`);
     process.exit(EXIT.SOFTWARE);
   });
 
   child.on('exit', (code, signal) => {
     if (signal) {
-      process.stderr.write(`\n✗ pi-research killed by ${signal}\n`);
+      process.stderr.write(`\nError: pi-research killed by ${signal}\n`);
       process.exit(EXIT.SOFTWARE);
     }
     process.exit(code ?? EXIT.SOFTWARE);

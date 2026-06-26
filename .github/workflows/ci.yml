@@ -84,11 +84,11 @@ jobs:
             fi
 
             if [ "$OPEN" = "0" ]; then
-              echo "✅ **0 open alerts** in the [Security tab](../../security/code-scanning)."
+              echo "OK: **0 open alerts** in the [Security tab](../../security/code-scanning)."
             elif [ "$OPEN" = "?" ]; then
               echo "_Could not query open alerts — see the [Security tab](../../security/code-scanning) for the authoritative state._"
             else
-              echo "⚠️ **${OPEN} open alert(s)** — see the [Security tab](../../security/code-scanning) for details."
+              echo "WARNING: **${OPEN} open alert(s)** — see the [Security tab](../../security/code-scanning) for details."
             fi
             echo ""
             echo "<sub>Raw findings this scan: ${RAW} (dismissal-unaware; includes already-triaged/dismissed findings — not the open count).</sub>"
@@ -138,9 +138,9 @@ jobs:
               const sev = ['critical','high','moderate','low'];
               console.log('### Production (shipped) — release gate @ moderate');
               if ((pv.total || 0) === 0) {
-                console.log('✅ No vulnerabilities in production dependencies.');
+                console.log('OK: No vulnerabilities in production dependencies.');
               } else {
-                console.log('❌ Production vulnerabilities found — build blocked:');
+                console.log('ERROR: Production vulnerabilities found — build blocked:');
                 console.log('');
                 console.log('| Severity | Count |'); console.log('|---|---|');
                 sev.forEach(k => { if (pv[k] > 0) console.log('| \`' + k + '\` | ' + pv[k] + ' |'); });
@@ -148,7 +148,7 @@ jobs:
               console.log('');
               console.log('### Full tree (incl. devDependencies) — informational, non-blocking');
               if ((fv.total || 0) === 0) {
-                console.log('✅ No vulnerabilities found.');
+                console.log('OK: No vulnerabilities found.');
               } else {
                 console.log('| Severity | Count |'); console.log('|---|---|');
                 sev.forEach(k => { if (fv[k] > 0) console.log('| \`' + k + '\` | ' + fv[k] + ' |'); });
@@ -437,7 +437,7 @@ jobs:
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - name: Validate package.json
-        run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('✓',p.name+'@'+p.version)"
+        run: node -e "const p=require('./package.json');if(!p.name||!p.version||!p.keywords?.includes('pi-package'))process.exit(1);console.log('OK',p.name+'@'+p.version)"
       - name: Build distribution artifacts
         run: |
           npm run build:worker
