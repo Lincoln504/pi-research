@@ -68,6 +68,10 @@ export async function performSearch(
     const filteredQueries = queries.filter(q => q.trim());
     let timeoutCount = 0;
     let errorCount = 0;
+    // Keep one representative worker error so total-failure surfaces the real
+    // cause (e.g. a worker that cannot load its module) instead of a generic
+    // timeout guess that misdirects to the network or system load.
+    let sampleWorkerError = '';
 
     const searchTasks = filteredQueries.map(async (query) => {
         const queryStartTime = Date.now();
@@ -124,6 +128,7 @@ export async function performSearch(
             } else {
                 const msg = error instanceof Error ? error.message : String(error);
                 if (msg !== 'Aborted') {
+                    if (!sampleWorkerError) sampleWorkerError = msg;
                     logger.error(`[Search] Worker failed for "${query}": ${msg}`);
                 }
             }
@@ -152,7 +157,8 @@ export async function performSearch(
 
         throw new Error(
             `Search completely failed: ${reason}. ` +
-            `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.`
+            `Browser workers may be unavailable, DuckDuckGo is unreachable, or the system is under extreme load.` +
+            (sampleWorkerError ? ` Last worker error: ${sampleWorkerError}` : '')
         );
     }
 

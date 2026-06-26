@@ -6,6 +6,7 @@
  */
 
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FixedClusterPool, WorkerChoiceStrategies } from 'poolifier';
 import { logger } from '../../logger.ts';
@@ -126,7 +127,22 @@ export class WorkerPoolManager implements IService {
                 // thread-worker.mjs is the esbuild-compiled bundle of thread-worker.ts and its
                 // local imports. Using a pre-compiled JS file eliminates any TypeScript loading
                 // concern in cluster child processes — no execArgv loader flags needed.
-                this.pool = new FixedClusterPool(maxWorkers, join(__dirname, './thread-worker.mjs'), {
+                const workerPath = join(__dirname, './thread-worker.mjs');
+
+                // Fail loud and actionable if the worker bundle is missing. It is built by the
+                // `prepare` lifecycle (scripts/build.cjs), not committed to git, so a clone that
+                // skipped install scripts (or a partial install) leaves it absent. Without this
+                // guard poolifier throws an opaque ERR_MODULE_NOT_FOUND for the worker FILE and
+                // then respawns workers forever — the exact crash-loop that masks the real cause.
+                if (!existsSync(workerPath)) {
+                    throw new Error(
+                        `Browser worker bundle is missing at ${workerPath}. ` +
+                        `It is produced by the build step; reinstall the extension (e.g. \`pi update --extensions\`) ` +
+                        `or run \`npm install\` in the extension directory so the prepare/build script regenerates it.`,
+                    );
+                }
+
+                this.pool = new FixedClusterPool(maxWorkers, workerPath, {
                     env: browserEnv,
                     // Prevent query leakage via process.argv in forked workers
                     workerOptions: { execArgv: [] },

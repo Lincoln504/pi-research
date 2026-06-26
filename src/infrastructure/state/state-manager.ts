@@ -22,7 +22,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import process from 'node:process';
-import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
+import { getConfigDirName } from '../../utils/host-config.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import type { IProcessLifecycle } from '../../core/interfaces/process-interfaces.ts';
@@ -91,7 +91,7 @@ export class StateManager {
     
     if (!stateDir) {
       const homeDir = os.homedir();
-      stateDir = path.join(homeDir, CONFIG_DIR_NAME, 'state');
+      stateDir = path.join(homeDir, getConfigDirName(), 'state');
     }
 
     this.stateFilePath = path.join(stateDir, 'research-state.json');

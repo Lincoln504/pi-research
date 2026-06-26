@@ -9,8 +9,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent';
 import { logger } from './logger.ts';
+import { getConfigDirName } from './utils/host-config.ts';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { normalizeWorkspacePath } from './utils/text-utils.ts';
@@ -204,7 +204,7 @@ const USER_MIGRATION_KEYS = [
  */
 export function getProjectSettingsRegistryPath(): string {
   const stateDir = process.env['PI_RESEARCH_STATE_DIR']
-    ?? path.join(os.homedir(), CONFIG_DIR_NAME, 'state');
+    ?? path.join(os.homedir(), getConfigDirName(), 'state');
   return path.join(stateDir, 'project-settings.json');
 }
 
@@ -302,7 +302,7 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
  * Returns the global configuration directory (~/.pi/research).
  */
 export function getGlobalConfigDir(): string {
-  return path.join(os.homedir(), CONFIG_DIR_NAME, 'research');
+  return path.join(os.homedir(), getConfigDirName(), 'research');
 }
 
 /**
