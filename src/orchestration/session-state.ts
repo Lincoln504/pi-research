@@ -112,12 +112,19 @@ export function addSteeringMessage(piSessionId: string | undefined, message: str
     return;
   }
   
-  // Enforce cap: remove oldest queued message if at limit
+  // Enforce cap: evict the oldest non-popped message to make room. Prefer evicting
+  // an oldest 'queued' message; if none are queued (every slot is 'active' from prior
+  // rounds), evict the oldest 'active' one. Without the active fallback the new message
+  // was pushed anyway, letting the array grow unbounded past MAX_STEERING_MESSAGES and
+  // feeding ever more user text into evaluator prompts.
   if (state.steeringMessages.filter(m => m.status !== 'popped').length >= MAX_STEERING_MESSAGES) {
-    const oldestQueuedIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
-    if (oldestQueuedIdx !== -1) {
-      logger.debug(`[session-state] Steering message cap reached, removing oldest queued in session ${sid}`);
-      state.steeringMessages.splice(oldestQueuedIdx, 1);
+    let evictIdx = state.steeringMessages.findIndex(m => m.status === 'queued');
+    if (evictIdx === -1) {
+      evictIdx = state.steeringMessages.findIndex(m => m.status !== 'popped');
+    }
+    if (evictIdx !== -1) {
+      logger.debug(`[session-state] Steering message cap reached, evicting oldest ${state.steeringMessages[evictIdx]!.status} message in session ${sid}`);
+      state.steeringMessages.splice(evictIdx, 1);
     }
   }
     

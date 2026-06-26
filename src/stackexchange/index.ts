@@ -24,6 +24,7 @@ import {
   formatSitesCompact,
 } from './output/compact.ts';
 import type { ExtensionContext, AgentToolResult } from '@earendil-works/pi-coding-agent';
+import { logger } from '../logger.ts';
 
 function notify(
   ctx: ExtensionContext,
@@ -182,17 +183,28 @@ async function executeSearch(
 
     const searchParams = buildSearchQuery(queryParams);
 
-    // Make request
-    const response = await client.request<Question>(
-      { method: 'GET', endpoint: '/search/advanced', params: searchParams },
-      signal,
-    );
+    // Make request. If a later page fails (rate limit, HTTP error) but we already
+    // have results from earlier pages, return those rather than discarding the whole
+    // search — only rethrow when we have nothing to show.
+    let response;
+    try {
+      response = await client.request<Question>(
+        { method: 'GET', endpoint: '/search/advanced', params: searchParams },
+        signal,
+      );
+    } catch (err) {
+      if (allQuestions.length > 0) {
+        logger.warn(`[stackexchange] Pagination stopped at page ${page} after error; returning ${allQuestions.length} partial result(s):`, err);
+        break;
+      }
+      throw err;
+    }
 
     if (response.items.length === 0) {
       // No more results
       break;
     }
-    
+
     allQuestions.push(...response.items);
   }
 

@@ -18,132 +18,66 @@ metadata:
 allowed-tools: Bash(node:*)
 ---
 
-# pi-research — pi-research skill
+# pi-research skill
 
-Run research by invoking the launcher with your **Bash** tool. Replace
-`<SKILL_DIR>` with this file's parent directory.
+Run via your **Bash** tool. Replace `<SKILL_DIR>` with this file's parent dir.
 
 ```
-node "<SKILL_DIR>/scripts/run.mjs" research  "<query>" --depth <1|2|3>
+node "<SKILL_DIR>/scripts/run.mjs" research  "<query>" --depth 1
 node "<SKILL_DIR>/scripts/run.mjs" knowledge "<query>" ["<q2>" ...]
 node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 ```
 
-**stdout** = Markdown report. Read it and cite it in your response.
-**stderr** = progress lines and errors. Relay errors to the user; suppress routine progress.
+- **stdout** = Markdown report — read and cite it.
+- **stderr** = progress + errors — relay errors, suppress routine progress.
+- **Always set a Bash timeout** so a stalled run can't block forever:
+  `knowledge` 300000ms · `research --depth 1` 480000ms · `--depth 2` 600000ms · `--depth 3` 900000ms.
+- **Background**: append `&` and keep the PID to work while a run completes; otherwise it runs foreground (blocks). Timeouts apply either way.
 
-## Reporting results back to the user (always)
+## Workflow
 
-When you summarize or explain the findings, you MUST:
+1. **Knowledge store first (always).** Run one `knowledge` check with the same
+   intent before any live research — it's instant and free.
+   - Complete answer → use it, skip live research.
+   - Partial → note it, fill gaps with `research`.
+   - Exit 78 → store disabled/empty; stay silent (opt-in feature), just proceed.
+2. **Live research — always depth `1`.** It's the default and correct for
+   effectively every request; depth 1 already decomposes and parallelises
+   internally, so it covers big/broad/complex/important topics too. Do NOT raise
+   depth on your own judgment.
+   - **Depth `2` — super rare:** only a genuinely ultra-broad or unusually detailed
+     topic where the user signalled they want deeper/thorough work. Unsure → depth 1.
+   - **Depth `3` — never** unless the user explicitly asks for ludicrously deep /
+     exhaustive research ("ultra", "exhaustive", "comprehensive deep-dive", "maximum").
 
-1. **Cite the sources from the report.** The report grounds its claims in specific
-   URLs / citations (inline links, a "Sources" section, or `[n]` references). Carry
-   those same sources into your answer — attribute each non-trivial claim to the
-   source the report used, and include the links. Do not present researched facts as
-   unsourced. Never invent or substitute sources the report did not contain.
-2. **Surface the saved report file, if any.** When report export is enabled, the
-   report (and the run's stderr) ends with a line like
-   `Research report saved to: <path>`. If that line is present, tell the user the
-   exact file path so they can open the full report. If no such line appears, no
-   file was written — say nothing about a file.
+## Reporting back to the user (always)
 
----
+- **Cite the report's sources.** Carry its URLs/`[n]` references into your answer;
+  attribute each non-trivial claim. Never present researched facts as unsourced;
+  never invent or substitute sources.
+- **Surface the saved file.** If stderr/stdout ends with `Research report saved to: <path>`,
+  give the user that exact path. If absent, no file was written — say nothing about one.
 
-## Foreground vs background
-
-You can run the launcher either way — both are correct:
-
-- **Foreground** (default): the Bash call blocks until the report arrives. Suitable for most queries.
-- **Background**: append `&` to the command and collect the PID if you want to continue working while research runs. Retrieve output from the process when it exits. Use this when the user wants to keep chatting or when you have other work to do while a depth-2/3 run completes.
-
-The timeouts below apply regardless of which mode you choose.
-
-**Always set a Bash timeout** so a stalled run does not block indefinitely:
-
-| Command | timeout |
-|---------|---------|
-| `knowledge` | 5 minutes (`timeout_ms: 300000`) |
-| `research --depth 1` | 8 minutes (`timeout_ms: 480000`) |
-| `research --depth 2` | 10 minutes (`timeout_ms: 600000`) |
-| `research --depth 3` | 15 minutes (`timeout_ms: 900000`) |
-
----
-
-## Step 1 — check knowledge store first (always)
-
-Before any live research call, run one `knowledge` check with the same intent.
-It is instant and free.
-
-```
-node "<SKILL_DIR>/scripts/run.mjs" knowledge "<query>"
-```
-
-- **Complete answer found** → use it; skip live research entirely.
-- **Partial answer** → note what it found; fill gaps with live `research`.
-- **Exit 78 (store disabled or empty)** → silent. Just proceed to `research`.
-  Do not tell the user the knowledge store is disabled — it is an opt-in
-  feature. Only surface it if the user asks how to enable it.
-
----
-
-## Step 2 — live research
-
-Default depth is **1**. Use it unless the topic genuinely requires more.
-
-```
-node "<SKILL_DIR>/scripts/run.mjs" research "<query>" --depth 1
-```
-
-**Depth rules:**
-
-| Depth | Use when |
-|-------|----------|
-| `1` | **Default — almost always.** Lookups, news, facts, API/library behavior, recent releases, comparisons, CVEs. |
-| `2` | Multi-angle analysis: policy, contested technical trade-offs, topics requiring cross-source corroboration. |
-| `3` | Only when the user explicitly says "ultra", "exhaustive", or "comprehensive deep-dive". Never pick this yourself. |
-
-The engine parallelises internally. Do not escalate depth just because a topic
-is broad — depth 1 handles broad topics by decomposing them internally.
-
-**Keyword extraction** (strip from query before passing):
-- "quick / brief / simple" → `--depth 1`
-- "deep / thorough / in-depth" → `--depth 2`
-- "ultra / exhaustive / comprehensive" → `--depth 3`
-
----
-
-## Exit codes — what to do
+## Exit codes
 
 | Exit | Meaning | Action |
 |------|---------|--------|
-| `0` | Success | Read stdout; cite the report's sources in your answer, and relay the "Research report saved to: <path>" line if present. |
-| `78` on `knowledge` | Store disabled or not configured | Silent. Proceed to live `research`. |
-| `78` on `research` | Engine missing or no model/key | **Stop. Relay the full stderr to the user.** It shows exactly where to configure. Do not retry until the user fixes the setup. |
-| `70` | Runtime error | Relay the error from stderr. Suggest retrying once for transient failures (network, rate limit). |
-| `64` | Bad arguments | Fix the arguments; do not surface to the user unless the query itself is malformed. |
+| `0` | Success | Read stdout; cite sources; relay any "saved to: <path>" line. |
+| `78` on `knowledge` | Store disabled/unconfigured | Silent; proceed to `research`. |
+| `78` on `research` | Engine missing or no model/key | **Stop. Relay full stderr** (it shows where to configure). Don't retry until fixed. |
+| `70` | Runtime error | Relay stderr; suggest one retry for transient failures (network, rate limit). |
+| `64` | Bad arguments | Fix args; don't surface unless the query itself is malformed. |
 
----
+## When NOT to use this
 
-## When not to use this
+WEB / internet research ONLY. Never use it to investigate *this* project (source,
+config, architecture, tests, logs, anything on this machine) — use your own
+Read/Grep/Bash for that. Reach for `pi-research` only when the answer lives on the
+public internet or in the knowledge store.
 
-**This is WEB / internet research ONLY.** Never use it to investigate *this* project — its
-source, configuration, architecture, tests, logs, or anything answerable on this machine.
-For project/codebase research, use your own file and shell tools:
+## Configuration (relay only on exit 78 from `research`)
 
-- Reading or searching files in this project → Read/Grep
-- Investigating this repo's code, bugs, config, or architecture → Read/Grep/Bash
-- Running commands or tests → Bash directly
-- Anything answerable from the local codebase or session → your own tools
-
-Reach for `pi-research` only when the answer lives on the public internet (or in the
-previously-researched knowledge store).
-
----
-
-## Configuration (relay to user only on exit 78 from `research`)
-
-When `research` exits 78, the engine prints the exact configure locations to
-stderr. Relay that message verbatim. The locations are:
+On exit 78 the engine prints exact configure locations to stderr — relay verbatim:
 
 ```
 config file:  ~/.pi/research/config.env
@@ -152,18 +86,8 @@ pi auth:      ~/.pi/agent/auth.json
 pi models:    ~/.pi/agent/models.json
 ```
 
-Run `status` to see the actual resolved paths on this machine:
+Run `status` for the resolved paths on this machine. Full reference:
+[`references/configuration.md`](references/configuration.md).
 
-```
-node "<SKILL_DIR>/scripts/run.mjs" status
-```
-
-Full configuration reference: [`references/configuration.md`](references/configuration.md)
-
----
-
-## Process cleanup
-
-The engine shuts itself down cleanly on every exit — normal, error, and
-signal (SIGINT/SIGTERM). Browser pool, LanceDB state, and embedding model
-are all released. Nothing is left behind between runs.
+The engine shuts down cleanly on every exit (browser pool, LanceDB, embedding
+model all released) — nothing is left behind between runs.

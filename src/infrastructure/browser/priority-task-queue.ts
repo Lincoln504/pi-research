@@ -26,6 +26,7 @@ export class PriorityTaskQueue {
     private activeCount = 0;
     private maxTotalConcurrency: number;
     private readonly maxQueueDepth: number;
+    private isShutdown = false;
 
     constructor(maxTotalConcurrency: number, maxQueueDepth = 500) {
         this.maxTotalConcurrency = maxTotalConcurrency;
@@ -39,6 +40,10 @@ export class PriorityTaskQueue {
     enqueue<T>(type: TaskType, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
         return new Promise<T>((resolve, reject) => {
             const task: QueuedTask<T> = { type, fn, resolve, reject, signal };
+
+            if (this.isShutdown) {
+                return reject(new Error(`PriorityTaskQueue is shutting down; rejecting ${type} task`));
+            }
 
             if (signal?.aborted) {
                 return reject(new Error(`Task ${type} aborted before enqueuing`));
@@ -162,6 +167,10 @@ export class PriorityTaskQueue {
      * holding unsettled promises that would hang the calling orchestrator.
      */
     shutdown(): void {
+        // Latch shutdown so any enqueue() racing with (or following) teardown is
+        // rejected instead of landing in a just-cleared queue and dispatching onto a
+        // pool that is mid-destroy.
+        this.isShutdown = true;
         const error = new Error('PriorityTaskQueue is shutting down');
         for (const task of this.healthcheckQueue) {
             task.reject(error);

@@ -50,6 +50,8 @@ const REQUIRED = [
   // Agent skill — the launcher + definition that coding agents load
   'skills/pi-research/SKILL.md',
   'skills/pi-research/scripts/run.mjs',
+  // Referenced by SKILL.md ("Full reference: references/configuration.md")
+  'skills/pi-research/references/configuration.md',
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',

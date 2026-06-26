@@ -430,7 +430,13 @@ export class DeepResearchOrchestrator {
           });
       }
 
-      observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
+      // Only emit the synthesis decision here for the FORCED-synthesis path. When the
+      // evaluator itself chose to synthesize inside the loop (loopSynthesisPlan set),
+      // onEvaluationDecision('synthesize', ...) was already fired at that point; emitting
+      // again would double-count synthesis for observers (e.g. the TUI progress bar).
+      if (loopSynthesisPlan === null) {
+          observer?.onEvaluationDecision?.('synthesize', finalReport, maxRounds);
+      }
 
       let result = finalReport.content || '';
       

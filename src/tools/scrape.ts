@@ -131,11 +131,17 @@ export function createScrapeTool(options: {
         };
       }
 
+      // Global deduplication: Identify URLs already scraped in this session.
+      // Done BEFORE the context gate so the projection bills only URLs that will
+      // actually be freshly scraped — a batch dominated by session cache hits costs
+      // almost nothing and must not be blocked as if every URL were a full scrape.
+      const { kept: dedupedUrls, duplicates } = deduplicateUrls(rawUrls, getGlobalState().researchId);
+
       // Context gate: block if projected token usage would exceed threshold
       if (options.getTokensUsed) {
         const ctxWindow = options.contextWindowSize ?? DEFAULT_MODEL_CONTEXT_WINDOW;
         const tokensUsed = options.getTokensUsed();
-        const projected = (tokensUsed + rawUrls.length * config.AVG_TOKENS_PER_SCRAPE) / ctxWindow;
+        const projected = (tokensUsed + dedupedUrls.length * config.AVG_TOKENS_PER_SCRAPE) / ctxWindow;
         if (projected >= config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING) {
           const pct = Math.round(config.MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING * 100);
           metrics.increment('tool_scrape_calls_total', 1, { status: 'context_limit' });
@@ -155,9 +161,6 @@ export function createScrapeTool(options: {
       const batchLabel = `Batch ${callCount + 1}`;
       options.tracker?.recordCall('scrape');
       const scrapeStartTime = Date.now();
-
-      // Global deduplication: Identify URLs already scraped in this session
-      const { kept: dedupedUrls, duplicates } = deduplicateUrls(rawUrls, getGlobalState().researchId);
       const dedupNote = duplicates.length > 0
         ? `**Global Cache Hit**: ${duplicates.length} URL(s) retrieved from session memory (already scraped).\n\n`
         : '';

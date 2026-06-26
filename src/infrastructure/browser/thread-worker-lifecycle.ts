@@ -51,7 +51,14 @@ export function setupUncaughtExceptionHandler(): void {
     }
     
     logToDebugFile('ERROR', `[Worker-${workerId}] Uncaught Exception: ${err.stack || err.message}`);
-    // Don't crash immediately unless it's critical, the worker will be replaced by poolifier if it hangs
+    // A non-suppressed uncaughtException leaves the worker's V8 state undefined
+    // (Node's documented semantics). Continuing to serve scrape/search tasks from
+    // here risks corrupt results, so exit and let poolifier respawn a clean worker.
+    // The pool's exitHandler counts non-zero exits and auto-recovers after a few,
+    // so a genuinely crash-looping worker is still handled — unlike a silently
+    // broken one. The two Playwright-internal patterns above are returned before
+    // this point precisely because they do NOT corrupt worker state.
+    process.exit(1);
   });
 
   process.on('unhandledRejection', (reason: unknown) => {

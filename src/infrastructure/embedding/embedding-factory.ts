@@ -69,7 +69,12 @@ let _cachedDevice: string | null = null;
 // getEmbedder — public entry point
 // ---------------------------------------------------------------------------
 
-export async function getEmbedder(config?: Config): Promise<IEmbedder> {
+// Bounds the leader-wait retry tail-call below. Without a cap, a cluster where no
+// process can ever become leader (e.g. every model init OOMs) would recurse
+// forever, each hop doing a state-lock round-trip and accumulating async frames.
+const MAX_LEADER_WAIT_RETRIES = 5;
+
+export async function getEmbedder(config?: Config, _attempt = 0): Promise<IEmbedder> {
   const cfg = config ?? getConfig();
 
   // If we have a cached instance, check if it matches the current config
@@ -157,9 +162,15 @@ export async function getEmbedder(config?: Config): Promise<IEmbedder> {
       }
 
       // Timed out or candidate died — attempt to claim candidacy ourselves (tail-call)
-      logger.warn('[EmbeddingFactory] Wait for embedding leader timed out or leader died, retrying...');
       _embeddingInitPromise = null;
-      return getEmbedder(cfg);
+      if (_attempt + 1 >= MAX_LEADER_WAIT_RETRIES) {
+        throw new Error(
+          `[EmbeddingFactory] Could not obtain an embedding server after ${MAX_LEADER_WAIT_RETRIES} attempts ` +
+          `(no process became leader; model init may be failing repeatedly).`,
+        );
+      }
+      logger.warn(`[EmbeddingFactory] Wait for embedding leader timed out or leader died, retrying (attempt ${_attempt + 2}/${MAX_LEADER_WAIT_RETRIES})...`);
+      return getEmbedder(cfg, _attempt + 1);
     }
 
     // ---- Phase 2: We are the exclusive candidate — do model init ----

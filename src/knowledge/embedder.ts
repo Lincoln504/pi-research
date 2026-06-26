@@ -506,9 +506,10 @@ export class Embedder {
         this.pipeline = null;
       }
 
-      // Release GPU lock if still held (shouldn't happen after normal init, but safe for edge cases)
-      await releaseGpuLock(this.stateManager, this.gpuLockHeld);
-      // Always try to release on dispose for safety (test expects this)
+      // Always release the GPU lock once on dispose (defensive: the gpuLockHeld flag
+      // may be stale, and a normal init already released it). A single unconditional
+      // release covers both cases — previously this also called releaseGpuLock(sm,
+      // gpuLockHeld) first, double-releasing when the flag was still true.
       if (this.stateManager) {
         await this.stateManager.releaseGpuLock().catch(err => {
           logger.warn('[embedder] Failed to release GPU lock during dispose:', err);

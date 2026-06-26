@@ -99,12 +99,15 @@ export async function performSearch(
                 logger.debug(`[Search] Worker returned ${results.length} results for: ${query}`);
 
                 const uniqueResults: SearchResult[] = [];
-                const localSeen = new Set<string>();
                 for (const r of results) {
-                    if (r.url && !localSeen.has(r.url)) {
-                        localSeen.add(r.url);
-                        uniqueResults.push(r);
+                    // Dedup across ALL queries (seenUrls), not just within this query.
+                    // The same URL surfacing for several queries would otherwise repeat
+                    // its snippet in the combined output, wasting context tokens; this
+                    // also makes seenUrls.size a true cross-query unique count for the
+                    // progress callback and the unique-URLs metric.
+                    if (r.url && !seenUrls.has(r.url)) {
                         seenUrls.add(r.url);
+                        uniqueResults.push(r);
                     }
                 }
                 resultMap.set(query, uniqueResults);

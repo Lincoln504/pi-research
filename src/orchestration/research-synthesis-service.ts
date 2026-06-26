@@ -27,24 +27,33 @@ export class ResearchSynthesisService implements IService {
 
   // Map of sessionId -> Map<reportId, reportContent>
   private sessions = new Map<string, Map<string, string>>();
-  // FIX (New Issue D): Maximum number of sessions to prevent unbounded growth
-  // from orphaned sessions during long-lived Pi sessions.
-  private static readonly MAX_SESSIONS = 50;
+  // Cap to prevent unbounded growth from orphaned sessions during long-lived Pi
+  // sessions. Generous because each session map is small and the normal path clears
+  // reports via cleanupResearchServices on run completion — this is only a backstop
+  // for runs that never cleaned up (e.g. crashes).
+  private static readonly MAX_SESSIONS = 200;
 
   private getSessionReports(sessionId: string): Map<string, string> {
     let reports = this.sessions.get(sessionId);
-    if (!reports) {
-      // FIX (New Issue D): Evict the oldest session when at capacity
-      if (this.sessions.size >= ResearchSynthesisService.MAX_SESSIONS) {
-        const oldestKey = this.sessions.keys().next().value;
-        if (oldestKey !== undefined) {
-          logger.warn(`[ResearchSynthesisService] Session limit (${ResearchSynthesisService.MAX_SESSIONS}) reached, evicting oldest: ${oldestKey}`);
-          this.sessions.delete(oldestKey);
-        }
-      }
-      reports = new Map<string, string>();
+    if (reports) {
+      // LRU touch: re-insert to move to the end so an actively-written session is
+      // never the eviction victim below (Map preserves insertion order).
+      this.sessions.delete(sessionId);
       this.sessions.set(sessionId, reports);
+      return reports;
     }
+    // Evict the least-recently-used session when at capacity. Because every
+    // store/read touches its session to the end (above), the head is the genuinely
+    // stalest session, not merely the first-created — so an in-flight run is spared.
+    if (this.sessions.size >= ResearchSynthesisService.MAX_SESSIONS) {
+      const oldestKey = this.sessions.keys().next().value;
+      if (oldestKey !== undefined) {
+        logger.warn(`[ResearchSynthesisService] Session limit (${ResearchSynthesisService.MAX_SESSIONS}) reached, evicting least-recently-used: ${oldestKey}`);
+        this.sessions.delete(oldestKey);
+      }
+    }
+    reports = new Map<string, string>();
+    this.sessions.set(sessionId, reports);
     return reports;
   }
 

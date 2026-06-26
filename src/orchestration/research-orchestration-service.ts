@@ -266,6 +266,16 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     for (const configItem of researchers) {
       if (signal?.aborted) break;
 
+      // Stop BEFORE launching if the failure threshold is already crossed. The
+      // post-launch check below only fires after a researcher is in-flight, so
+      // without this an early check, up to maxConcurrent-1 extra researchers could
+      // start past the stop threshold and waste a browser slot + an LLM call.
+      if (shouldStopResearch(sessionId, researchId)) {
+        const sessionService = await getService<ResearchSessionService>(ServiceNames.RESEARCH_SESSION_SERVICE, ctx, container);
+        await sessionService.abortAllSessions(researchId);
+        throw new Error(getResearchStopMessage(sessionId, researchId));
+      }
+
       // Enforce the concurrency cap before launching the next researcher.
       // Wait for one slot to free up when we're at capacity, or abort immediately if signalled.
       if (active.size >= maxConcurrent) {
@@ -320,9 +330,23 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       promise.finally(() => active.delete(promise));
       active.add(promise);
 
-      // Throttled launch to prevent resource spikes (stagger by RESEARCHER_LAUNCH_DELAY_MS, skip after last)
+      // Throttled launch to prevent resource spikes (stagger by RESEARCHER_LAUNCH_DELAY_MS,
+      // skip after last). Abortable: an inert setTimeout would keep the loop alive for up to
+      // RESEARCHER_LAUNCH_DELAY_MS per pending researcher after a cancel, delaying shutdown.
       if (RESEARCHER_LAUNCH_DELAY_MS > 0 && researchers.indexOf(configItem) < researchers.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, RESEARCHER_LAUNCH_DELAY_MS));
+        if (signal?.aborted) break;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            if (signal) signal.removeEventListener('abort', onAbort);
+            resolve();
+          }, RESEARCHER_LAUNCH_DELAY_MS);
+          const onAbort = () => { clearTimeout(timer); resolve(); };
+          if (signal) {
+            if (signal.aborted) onAbort();
+            else signal.addEventListener('abort', onAbort, { once: true });
+          }
+        });
+        if (signal?.aborted) break;
       }
 
       if (shouldStopResearch(sessionId, researchId)) {

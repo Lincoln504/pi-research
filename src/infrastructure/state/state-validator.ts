@@ -51,6 +51,16 @@ export class StateValidator implements IService {
       throw new Error(`Invalid state: browserServer.port must be 0-65535, got ${coerced.browserServer.port}`);
     }
 
+    // embeddingServer.port allows the sentinel -1 ("a process is initializing"),
+    // otherwise must be a valid TCP port. This rejects garbage (e.g. -5, 99999)
+    // that would otherwise produce confusing socket errors in EmbeddingClient.
+    if (coerced.embeddingServer) {
+      const ep = coerced.embeddingServer.port;
+      if (ep < -1 || ep > 65535) {
+        throw new Error(`Invalid state: embeddingServer.port must be -1 or 0-65535, got ${ep}`);
+      }
+    }
+
     return coerced;
   }
 

@@ -91,6 +91,13 @@ export async function searchGitHubAdvisories(
       }
 
       const [owner, name] = repoParts;
+      // Constrain to GitHub's allowed owner/repo character set before interpolating
+      // into the API path. encodeURIComponent already neutralises traversal, but this
+      // rejects malformed input early instead of issuing a doomed request.
+      const repoNameRe = /^[A-Za-z0-9._-]+$/;
+      if (!repoNameRe.test(owner!) || !repoNameRe.test(name!)) {
+        throw new Error(`Invalid repo format: "${options.repo}". Owner and name may only contain letters, digits, '.', '_' and '-'.`);
+      }
       const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}/security-advisories?per_page=${maxResults}`;
 
       const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {

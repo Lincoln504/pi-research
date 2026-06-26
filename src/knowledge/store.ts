@@ -51,6 +51,8 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   private db: lancedb.Connection | null = null;
   private table: lancedb.Table | null = null;
+  // Coalesces concurrent open() calls (see open()).
+  private _openPromise: Promise<void> | null = null;
   private options: StoreOptions;
   private tableName = 'knowledge';
   private manifestPath: string;
@@ -124,11 +126,27 @@ export class KnowledgeStore implements IKnowledgeStore {
   async open(): Promise<void> {
     if (this.db) return;
 
-    if (this.options.withLock) {
-      await this.options.withLock(() => this.openInternal());
-    } else {
-      await this.openInternal();
-    }
+    // Coalesce concurrent opens in-process. withLock (when provided) is a
+    // cross-process FILE lock, not an in-process mutex — and when it's absent there
+    // is no serialization at all, so two concurrent open() calls would both run
+    // lancedb.connect() and the second would overwrite this.db, leaking the first
+    // connection's file handles. This sentinel makes all concurrent callers await
+    // the same open.
+    if (this._openPromise) return this._openPromise;
+
+    this._openPromise = (async () => {
+      try {
+        if (this.options.withLock) {
+          await this.options.withLock(() => this.openInternal());
+        } else {
+          await this.openInternal();
+        }
+      } finally {
+        this._openPromise = null;
+      }
+    })();
+
+    return this._openPromise;
   }
 
   private async openInternal(): Promise<void> {
@@ -154,18 +172,9 @@ export class KnowledgeStore implements IKnowledgeStore {
         try {
           const schema = await this.table.schema();
 
-          // Extract vector dimension for embedder initialization
-          const vectorField = schema.fields.find(f => f.name === 'vector');
-          if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
-            const dim = (vectorField.type as any).listSize;
-            if (this.options.embedder.getDimension() === null) {
-              // Set dimension from existing table schema before embedder is warmed up
-              this.options.embedder.setDimension(dim);
-              logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
-            }
-          }
-
-          // Check model and schema version metadata
+          // Read the stored model/version FIRST so we know whether a migration is
+          // imminent before deciding whether the old table's vector width is safe
+          // to adopt.
           let storedModel = schema.metadata.get('embedding_model');
           let storedVersion = schema.metadata.get('schema_version');
 
@@ -179,12 +188,40 @@ export class KnowledgeStore implements IKnowledgeStore {
           const isModelMismatch = storedModel !== this.options.modelName;
           const isVersionMismatch = storedVersion !== CURRENT_SCHEMA_VERSION;
 
+          // Seed the embedder dimension from the existing table ONLY when the model
+          // is unchanged (same model ⇒ same vector width). On a model change the old
+          // width is wrong for the new table; seeding it would make createTable()
+          // build the new table at the old dimension and every insert would then
+          // fail on an Arrow FixedSizeList width mismatch once the new model warms
+          // up. In that case we leave the dimension unset and warm the new embedder
+          // below before creating any table.
+          if (!isModelMismatch) {
+            const vectorField = schema.fields.find(f => f.name === 'vector');
+            if (vectorField && (vectorField.type as any).constructor.name === 'FixedSizeList') {
+              const dim = (vectorField.type as any).listSize;
+              if (this.options.embedder.getDimension() === null) {
+                this.options.embedder.setDimension(dim);
+                logger.debug(`[store] Extracted dimension ${dim} from existing table schema`);
+              }
+            }
+          }
+
           if (isModelMismatch || isVersionMismatch) {
             const reason = isModelMismatch ? 'Model change' : 'Schema version change';
             logger.warn(`[store] ${reason} detected: ${storedModel} (v${storedVersion}) → ${this.options.modelName} (v${CURRENT_SCHEMA_VERSION})`);
             const strategy = this.options.migrationStrategy || 'backup';
 
             migrationInProgress = true;
+            // Ensure the embedder knows the NEW model's dimension before any
+            // createTable() runs inside migration. On a model change the old width
+            // was deliberately not seeded above, so getDimension() is null here; a
+            // single real embed warms the model across every IEmbedder impl
+            // (local Embedder, EmbeddingServer, EmbeddingClient) and makes
+            // getDimension() report the correct new width. (re-embed needs the warm
+            // embedder regardless.)
+            if (this.options.embedder.getDimension() === null) {
+              await this.options.embedder.embedMany([' ']);
+            }
             try {
               await this.handleModelChange(storedModel || 'unknown', this.options.modelName, strategy);
             } catch (err) {
@@ -939,7 +976,11 @@ export class KnowledgeStore implements IKnowledgeStore {
       this.table = null;
       this.rrfReranker = null;
       if (this.db) {
-        this.db.close();
+        // close() is typed void, but the native LanceDB binding may dispatch
+        // file-descriptor/manifest-flush teardown asynchronously. Await it (via
+        // Promise.resolve so a sync void return is fine too) before dropping the
+        // reference, so a rapid close→reconnect can't observe a half-flushed manifest.
+        await Promise.resolve(this.db.close());
         this.db = null;
       }
     } catch (err) {
