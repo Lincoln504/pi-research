@@ -493,7 +493,27 @@ export class PlanningService implements IPlanningService {
       return finalPlan;
     } catch (err) {
       logger.error('[PlanningService] Failed to update plan:', err);
-      throw err;
+      // A genuine cancellation must propagate so the orchestrator can abort cleanly.
+      if (signal?.aborted) throw err;
+      // Otherwise degrade gracefully: a transient evaluator failure (timeout, empty
+      // or provider error) reaches here BEFORE the JSON-parse fallback above and used
+      // to throw — aborting the whole run with no decision (looks like "the evaluator
+      // never came"). Mirror that fallback: continue the prior agenda mid-run, else
+      // synthesize from whatever reports were already collected. maxRounds still bounds it.
+      if (!mustSynthesize && previousPlan?.researchers && previousPlan.researchers.length > 0) {
+        logger.warn('[PlanningService] Evaluator call failed mid-research; continuing the prior agenda rather than aborting the run');
+        const fallback = this.capResearcherQueries(
+          { action: 'delegate', content: '', researchers: previousPlan.researchers },
+          complexity,
+          this.name,
+        );
+        this.currentPlans.set(sessionId, fallback);
+        return fallback;
+      }
+      logger.warn('[PlanningService] Evaluator call failed with no prior agenda; synthesizing from collected reports');
+      const fallback: ResearchPlan = { action: 'synthesize', content: '', researchers: [] };
+      this.currentPlans.set(sessionId, fallback);
+      return fallback;
     }
   }
 

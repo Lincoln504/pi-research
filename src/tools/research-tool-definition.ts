@@ -26,7 +26,7 @@ import { metrics, MetricsRegistry, runWithRunRegistry } from '../utils/metrics.t
 import { createResearchRunId, logger, createLogger, isVerboseFromEnv, runWithLogger } from '../logger.ts';
 import { exportResearchReport, appendExportMessage } from '../utils/research-export.ts';
 import { validateAndSanitizeQuery } from '../utils/input-validation.ts';
-import { startResearchSession, registerSessionAbort, clearSteeringMessages } from '../orchestration/session-state.ts';
+import { startResearchSession, registerSessionAbort, clearSteeringMessages, getPiActivePanels } from '../orchestration/session-state.ts';
 import { createResearchTuiManager, hideWorkingIndicator } from '../tui/research-tui-manager.ts';
 import { createCleanupFunction } from '../cleanup/research-cleanup.ts';
 import { createResearchObserver, createObserverState, stopObserverWaveAnimation } from '../observers/research-observer-impl.ts';
@@ -196,7 +196,14 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
         if (observerState && panelState) {
           try { stopObserverWaveAnimation(observerState, panelState); } catch (e) { logger.error('[research] Stop wave animation failed:', e); }
         }
-        try { clearSteeringMessages(piSessionId); } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
+        // Steering messages are shared per pi-session. Only reset them when THIS is
+        // the last active run — otherwise a finishing run wipes a concurrent sibling
+        // run's queued/active steering mid-flight. This run's panel is still
+        // registered here (endResearchSession runs later in cleanup()), so a count
+        // of <= 1 means no other run is active.
+        try {
+          if (getPiActivePanels(piSessionId).length <= 1) clearSteeringMessages(piSessionId);
+        } catch (e) { logger.error('[research] Clear steering messages failed:', e); }
         if (detachAbortListener) {
           try { detachAbortListener(); } catch { /* best-effort */ } finally { detachAbortListener = undefined; }
         }

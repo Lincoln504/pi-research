@@ -117,23 +117,25 @@ describe('Deep Research Orchestrator - Wait Handling', () => {
   });
 
   describe('Wait Retry Counter', () => {
-    it('throws descriptive error after 6 wait actions (hits limit of 5)', async () => {
+    it('synthesizes from collected work after exceeding the wait limit (no longer throws)', async () => {
       vi.useFakeTimers();
 
       mockPlanningService.generatePlan.mockResolvedValue({ action: 'wait' });
+      // After max wait retries the orchestrator breaks to final synthesis rather than
+      // discarding the whole run; the final block calls updatePlanForRound(mustSynthesize).
+      mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Synthesized after waits' });
 
       const orchestrator = new DeepResearchOrchestrator(baseOptions);
       const runPromise = orchestrator.run();
-      // Attach a no-op catch early so Node doesn't flag this as an unhandled rejection
-      // while timers are advancing. The .rejects assertion below still catches it correctly.
-      runPromise.catch(() => {});
 
       // We need 6 calls to 'wait' to exceed MAX_WAIT_RETRIES (5)
       for (let i = 0; i < 6; i++) {
         await vi.advanceTimersByTimeAsync(5000);
       }
+      await vi.runAllTimersAsync();
 
-      await expect(runPromise).rejects.toThrow(/Max wait retries/);
+      const result = await runPromise;
+      expect(result).toBe('Synthesized after waits');
     });
 
     it('resets wait retry counter after a successful action', async () => {

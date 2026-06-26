@@ -323,6 +323,25 @@ describe('PlanningService', () => {
       expect(plan.researchers!.length).toBeGreaterThan(0);
     });
 
+    it('does NOT throw when the evaluator LLM call fails mid-run — continues the prior agenda', async () => {
+      vi.mocked(completeSimple).mockRejectedValue(new Error('LLM call timed out'));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        previousPlan: { action: 'delegate', researchers: [{ id: '1.1', name: 'R', goal: 'g', queries: ['q1'] }], allQueries: ['q1'] },
+      });
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.length).toBeGreaterThan(0);
+    });
+
+    it('synthesizes (does not throw) when the evaluator LLM call fails and there is no prior agenda', async () => {
+      vi.mocked(completeSimple).mockRejectedValue(new Error('empty response'));
+      const plan = await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        previousPlan: { action: 'delegate', researchers: [], allQueries: [] },
+      });
+      expect(plan.action).toBe('synthesize');
+    });
+
     it('normalizes citations across reports and injects a GLOBAL SOURCE LIST into the synthesis input', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('done')));
       const reports = new Map([

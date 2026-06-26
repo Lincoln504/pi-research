@@ -17,6 +17,9 @@ export type { SteeringMessage, SteeringMessageStatus } from '../core/interfaces/
 /** Maximum number of steering messages per Pi session */
 const MAX_STEERING_MESSAGES = 20;
 
+/** Maximum length (chars) of a single steering message; longer input is truncated */
+const MAX_STEERING_MESSAGE_LENGTH = 2000;
+
 /**
  * State container for a single Pi session
  */
@@ -88,7 +91,14 @@ function getPiState(piSessionId: string | undefined): PiSessionState {
 export function addSteeringMessage(piSessionId: string | undefined, message: string): void {
   const sid = normalizeSessionId(piSessionId);
   const state = getPiState(sid);
-  
+
+  // Cap per-message length. All active steering is re-sent to the evaluator every
+  // round (up to MAX_STEERING_MESSAGES of them), so an unbounded message could
+  // inflate the evaluator prompt toward the context ceiling and trigger timeouts.
+  if (message.length > MAX_STEERING_MESSAGE_LENGTH) {
+    message = message.slice(0, MAX_STEERING_MESSAGE_LENGTH);
+  }
+
   // Normalize whitespace to prevent functional duplicates
   const normalizedMsg = message.trim().replace(/\s+/g, ' ');
   

@@ -232,7 +232,11 @@ export class DeepResearchOrchestrator {
         if (plan.action === 'delegate') {
           if (this.currentRound === 1) {
             observer?.onPlanningSuccess?.(plan);
-          } else {
+          } else if (this.currentRound < maxRounds) {
+            // Only announce a delegation that will actually run. At the round cap
+            // the loop breaks to synthesis below regardless of this decision, so
+            // emitting it here would grow the progress bar's expected units for
+            // researchers that never execute — the bar then visibly regresses.
             observer?.onEvaluationDecision?.('delegate', plan, this.currentRound);
           }
         }
@@ -250,9 +254,11 @@ export class DeepResearchOrchestrator {
             waitRetryCount++;
             observer?.onPlanningProgress?.('planning');
             if (waitRetryCount > MAX_WAIT_RETRIES) {
-                logger.error(`[DeepOrchestrator] Max wait retries (${MAX_WAIT_RETRIES}) exceeded at Round ${this.currentRound}, stopping research`);
-                observer?.onError?.(new Error('Max wait retries exceeded'));
-                throw new Error(`Max wait retries (${MAX_WAIT_RETRIES}) exceeded. The research coordinator was unable to proceed after multiple wait requests.`);
+                // Don't throw away everything gathered so far. Break to final synthesis
+                // (mustSynthesize) so the user still gets a report from collected reports
+                // instead of a hard error that discards the whole run.
+                logger.warn(`[DeepOrchestrator] Max wait retries (${MAX_WAIT_RETRIES}) exceeded at Round ${this.currentRound}; synthesizing from collected reports`);
+                break;
             }
             logger.debug(`[DeepOrchestrator] AI requested wait, retrying Round ${this.currentRound} in 5s (retry ${waitRetryCount}/${MAX_WAIT_RETRIES})...`);
             
@@ -390,14 +396,17 @@ export class DeepResearchOrchestrator {
       observer?.onEvaluationStart?.(maxRounds);
       observer?.onEvaluationProgress?.('evaluating');
 
+      // One final check for new steering messages before synthesis. Done for BOTH
+      // exit paths: a message arriving after the evaluator chose 'synthesize' (the
+      // loopSynthesisPlan path) was previously never consumed nor appended — fully
+      // dropped. Consuming here marks it active so appendSteeringGuidance includes it.
+      consumeQueuedMessages(this.options.sessionId);
+      const finalSteeringTexts = getSteeringMessages(this.options.sessionId).map(m => m.text);
+
       let finalReport: ResearchPlan;
       if (loopSynthesisPlan !== null) {
           finalReport = loopSynthesisPlan;
       } else {
-          // One final check for new steering messages before synthesis
-          consumeQueuedMessages(this.options.sessionId);
-          const finalSteeringTexts = getSteeringMessages(this.options.sessionId).map(m => m.text);
-
           const synthesisServiceFinal = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           finalReport = await planningService.updatePlanForRound({
               sessionId: researchId,

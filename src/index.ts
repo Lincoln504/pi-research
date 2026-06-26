@@ -160,11 +160,11 @@ export default async function (pi: ExtensionAPI) {
 
         // Surface the outcome so the action is never invisible.
         if (queued > 0 && forwarded === 0) {
-          notify('Queued for research steering.', 'info');
+          notify('Queued — will steer the next research round.', 'info');
         } else if (forwarded > 0 && queued === 0) {
-          notify('Research busy — steering will apply at the next step.', 'info');
+          notify('Research is finishing — sent as a follow-up to pi.', 'info');
         } else if (queued > 0 && forwarded > 0) {
-          notify('Steering received (queued + forwarded to next step).', 'info');
+          notify('Steering received (queued for next round + follow-up to pi).', 'info');
         } else {
           // Nothing was delivered (e.g. the follow-up send threw) — let pi handle it
           // natively rather than eating the message.
@@ -305,8 +305,16 @@ export default async function (pi: ExtensionAPI) {
       const popped = popQueuedMessages(piSessionId);
 
       if (popped.length === 0) {
-        if (ctx.hasUI && queuedBefore.length === 0) {
-          ctx.ui.notify('No steering messages found.', 'info');
+        if (ctx.hasUI) {
+          // queuedBefore>0 but nothing popped means the orchestrator consumed the
+          // message between the panel render and this keypress — tell the user
+          // rather than appearing to do nothing.
+          ctx.ui.notify(
+            queuedBefore.length === 0
+              ? 'No steering messages found.'
+              : 'Steering already consumed by research.',
+            'info',
+          );
         }
         return;
       }

@@ -95,8 +95,11 @@ export function createResearchObserver(
       const status = attempt > 1 ? `planning (retry ${attempt - 1})` : 'planning';
       updateSliceStatus(panelState, 'coord', status, debouncedRefresh);
       panelState.statusMessage = status;
-      // Coordinator LLM is running — do not accept steering during the call
-      panelState.steeringAcceptable = false;
+      // Keep steering acceptable: the coordinator LLM cannot be interrupted, but a
+      // message entered now is queued (not injected mid-call) and consumed at the
+      // next round boundary. Forcing it false here diverted it to a separate pi
+      // follow-up turn that never reached this run's evaluator.
+      panelState.steeringAcceptable = true;
       debouncedRefresh();
     },
 
@@ -360,10 +363,12 @@ export function createResearchObserver(
       activateSlice(panelState, 'eval');
       updateSliceStatus(panelState, 'eval', 'evaluating', debouncedRefresh);
       panelState.statusMessage = 'evaluating';
-      // Evaluator LLM is running — do not accept steering during the call.
-      // Messages entered now would only be consumed at the next round boundary
-      // (if the evaluator delegates), not during this decision.
-      panelState.steeringAcceptable = false;
+      // Keep steering acceptable during evaluation. The running evaluator call
+      // already captured its inputs, so a message entered now is queued and acted
+      // on at the NEXT round start (the whole point of mid-run steering). Forcing
+      // it false here is exactly when users steer — and diverted that steering to
+      // a separate pi follow-up turn instead of the current run's next round.
+      panelState.steeringAcceptable = true;
       debouncedRefresh();
     },
 

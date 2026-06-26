@@ -561,25 +561,30 @@ describe('DeepResearchOrchestrator', () => {
     const onError = vi.fn();
 
     mockPlanningService.generatePlan.mockResolvedValue({ action: 'wait' });
+    // After exceeding the wait limit the orchestrator breaks to synthesis instead of
+    // throwing, so the final block resolves a report.
+    mockPlanningService.updatePlanForRound.mockResolvedValue({ action: 'synthesize', content: 'Synthesized after waits' });
 
     const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onPlanningProgress, onError } });
 
     // Use fake timers so the 5-second wait between retries resolves immediately
     vi.useFakeTimers();
+    let result: string;
     try {
       const runPromise = orchestrator.run();
-      // Attach the rejection handler BEFORE advancing any timers.
-      const settled = expect(runPromise).rejects.toThrow('Max wait retries');
       // Drain all pending timers (each retry schedules one 5s setTimeout)
       for (let i = 0; i < 6; i++) {
         await vi.runAllTimersAsync();
       }
-      await settled;
+      result = await runPromise;
     } finally {
       vi.useRealTimers();
     }
 
-    // onPlanningProgress should have been called (with 'planning' for wait retries)
+    // onPlanningProgress should have been called (with 'planning' for wait retries),
+    // and the run should end in a graceful synthesis rather than an error.
     expect(onPlanningProgress).toHaveBeenCalledWith('planning');
+    expect(onError).not.toHaveBeenCalled();
+    expect(result).toBe('Synthesized after waits');
   }, 15000);
 });
