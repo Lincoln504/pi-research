@@ -38,6 +38,8 @@ vi.mock('../../../src/core/llm/inject-date.ts', () => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 import { completeSimple } from '@earendil-works/pi-ai/compat';
+import { loadPrompt } from '../../../src/core/llm/prompts.ts';
+import { getConfig } from '../../../src/config.ts';
 import type { StopReason } from '@earendil-works/pi-ai';
 
 const STUB_MODEL = { id: 'test-model' } as any;
@@ -319,6 +321,63 @@ describe('PlanningService', () => {
       const plan = await service.updatePlanForRound(BASE_OPTIONS);
       expect(plan.action).toBe('delegate');
       expect(plan.researchers!.length).toBeGreaterThan(0);
+    });
+
+    it('normalizes citations across reports and injects a GLOBAL SOURCE LIST into the synthesis input', async () => {
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('done')));
+      const reports = new Map([
+        ['1.1', 'Alpha point [1] and beta [2].\n\nCITED LINKS\n[1] https://alpha.example.com — Alpha\n[2] https://beta.example.com — Beta'],
+        ['1.2', 'Gamma [1], alpha again [2].\n\nCITED LINKS\n[1] https://gamma.example.com — Gamma\n[2] https://alpha.example.com — Alpha'],
+      ]);
+
+      await service.updatePlanForRound({ ...BASE_OPTIONS, reports, mustSynthesize: true });
+
+      const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+      const ctx = call[1] as { messages: Array<{ content: Array<{ text: string }> }> };
+      const userMsg = ctx.messages[0]!.content[0]!.text;
+
+      // A Global Source List is present (the evaluator prompt promises this).
+      expect(userMsg).toContain('GLOBAL SOURCE LIST');
+      // Dedup: alpha is cited in BOTH reports but gets exactly ONE global id.
+      expect(userMsg).toContain('[1] https://alpha.example.com');
+      expect(userMsg).toContain('[2] https://beta.example.com');
+      expect(userMsg).toContain('[3] https://gamma.example.com');
+      // Report 1.2's local [1] (gamma) is renumbered to global [3]...
+      expect(userMsg).toMatch(/Gamma \[3\]/);
+      // ...and its local [2] (alpha) to global [1] — bodies now share one numbering.
+      expect(userMsg).toMatch(/alpha again \[1\]/);
+    });
+
+    it('drops a malformed URL fragment without shifting global ids (no-shift, through the synthesis layer)', async () => {
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validSynthesizePlanJson('done')));
+      const reports = new Map([
+        ['1.1', 'Point [1] and real [2].\n\nCITED LINKS\n[1] https://www\n[2] https://real.example.com — Real'],
+      ]);
+
+      await service.updatePlanForRound({ ...BASE_OPTIONS, reports, mustSynthesize: true });
+
+      const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+      const ctx = call[1] as { messages: Array<{ content: Array<{ text: string }> }> };
+      const userMsg = ctx.messages[0]!.content[0]!.text;
+
+      // The garbage fragment never appears; the real source holds global id 1.
+      expect(userMsg).not.toContain('https://www\n');
+      expect(userMsg).toContain('[1] https://real.example.com');
+    });
+
+    it('substitutes {{youtube_query_every_n}} into the evaluator prompt from config', async () => {
+      vi.mocked(loadPrompt).mockReturnValueOnce('eval {{root_query}} — youtube every {{youtube_query_every_n}}');
+      vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse(validDelegatePlanJson(1)));
+
+      await service.updatePlanForRound({
+        ...BASE_OPTIONS,
+        config: { ...getConfig('/test/cwd'), YOUTUBE_QUERY_EVERY_N: 9 } as any,
+      });
+
+      const call = vi.mocked(completeSimple).mock.calls.at(-1)!;
+      const ctx = call[1] as { systemPrompt: string };
+      expect(ctx.systemPrompt).toContain('youtube every 9');
+      expect(ctx.systemPrompt).not.toContain('{{youtube_query_every_n}}');
     });
 
     it('forces synthesize when mustSynthesize is true, regardless of LLM response', async () => {

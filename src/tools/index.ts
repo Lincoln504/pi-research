@@ -87,6 +87,9 @@ export function createResearchTools(options: CreateToolsOptions): ToolDefinition
       ctx: resolvedOptions.ctx,
       tracker: resolvedOptions.tracker,
       onUrlScrapeResult: options.onUrlScrapeResult,
+      getGlobalState: resolvedOptions.getGlobalState,
+      updateGlobalLinks: resolvedOptions.updateGlobalLinks,
+      researcherId: resolvedOptions.researcherId,
       config: resolvedOptions.config,
     }),
   ];

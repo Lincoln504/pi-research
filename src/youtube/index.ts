@@ -19,6 +19,23 @@ export interface YoutubeTranscriptCommandOptions {
   requestKey?: string;
   signal?: AbortSignal;
   onVideoComplete?: (videoId: string, success: boolean) => void;
+  /**
+   * Called for each successfully-fetched transcript with a knowledge-store-ready
+   * document (title/channel header + full transcript). The tool wires this to the
+   * session scrape cache so the orchestrator ingests the full transcript text into
+   * the knowledge store — exactly like a scraped page — when the store is enabled.
+   */
+  onTranscriptDocument?: (url: string, document: string) => void;
+}
+
+/** Build a knowledge-store-ready document: identifying header + full transcript. */
+export function buildTranscriptDocument(r: VideoTranscript): string {
+  const header: string[] = [];
+  if (r.title) header.push(`# ${r.title}`);
+  if (r.author) header.push(`Channel: ${r.author}`);
+  header.push(`YouTube: ${r.url}`);
+  if (typeof r.durationSeconds === 'number') header.push(`Duration: ${formatDuration(r.durationSeconds)}`);
+  return `${header.join('\n')}\n\n${r.text ?? ''}`.trim();
 }
 
 export interface YoutubeTranscriptDetails {
@@ -59,6 +76,13 @@ export async function youtubeTranscriptCommand(
   const succeeded = results.filter((r) => r.success);
   const failed = results.filter((r) => !r.success);
 
+  // Hand each successful transcript to the caller for knowledge-store ingestion.
+  if (opts.onTranscriptDocument) {
+    for (const r of succeeded) {
+      if (r.text) opts.onTranscriptDocument(r.url, buildTranscriptDocument(r));
+    }
+  }
+
   metrics.increment('tool_youtube_transcript_calls_total', 1, { status: 'success' });
   metrics.increment('tool_youtube_transcript_videos_succeeded_total', succeeded.length);
   metrics.increment('tool_youtube_transcript_videos_failed_total', failed.length);
@@ -91,6 +115,11 @@ function formatResults(results: VideoTranscript[], rejected: string[]): string {
     if (r.lang) meta.push(`Language: ${r.lang}`);
     if (typeof r.charCount === 'number') meta.push(`${r.charCount.toLocaleString()} chars`);
     if (meta.length) md += `**${meta.join(' · ')}**\n`;
+    // Exact, copy-ready citation string so the report cites the real video title
+    // and channel rather than a paraphrase (the watch URL is not identifiable).
+    if (r.title) {
+      md += `**Cite as:** '${r.title}'${r.author ? ` by ${r.author}` : ''}\n`;
+    }
     md += `\n${r.text}\n\n---\n\n`;
   }
 

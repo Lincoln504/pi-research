@@ -29,6 +29,24 @@ describe('citation-utils', () => {
       expect(norm2).not.toContain('CITED LINKS');
     });
 
+    it('does not let a malformed URL fragment take a global ID slot (regression)', () => {
+      // res1's first CITED LINKS line is a soft-wrapped fragment "https://www".
+      // It must be dropped so the real first source keeps global id 1 and the
+      // inline [1] in the body still resolves to the real source.
+      const reports = new Map([
+        ['res1', 'Geography point [1].\n\nCITED LINKS\n[1] https://www\n[2] https://geo.example.com — Geography'],
+      ]);
+
+      const { normalizedReports, globalCitations } = normalizeCitations(reports);
+
+      expect(globalCitations).toHaveLength(1);
+      expect(globalCitations[0]!.url).toBe('https://geo.example.com');
+      // The body's [1] should NOT survive as a dangling reference to a garbage
+      // entry — there is no global id for the dropped fragment.
+      expect(globalCitations.some(c => c.url === 'https://www')).toBe(false);
+      expect(normalizedReports.get('res1')).not.toContain('https://www');
+    });
+
     it('should handle different local IDs for the same URL', () => {
       const reports = new Map([
         ['res1', 'Info [1].\n\nCITED LINKS\n[1] https://common.com — Common'],

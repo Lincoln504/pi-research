@@ -166,4 +166,84 @@ describe('youtube/transcript-client', () => {
     expect(results).toEqual([]);
     expect(innertubeCreate).not.toHaveBeenCalled();
   });
+
+  it('treats an unparseable (non-JSON) timedtext body as a failure', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    vi.stubGlobal('fetch', mockFetch('<html>Bot check</html>'));
+    const [res] = await fetchVideoTranscripts(['vid00000001']);
+    expect(res.success).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('treats valid JSON without events as a failure', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    vi.stubGlobal('fetch', mockFetch(JSON.stringify({ error: 'quota exceeded' })));
+    const [res] = await fetchVideoTranscripts(['vid00000001']);
+    expect(res.success).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('skips events that have no segs and still parses the rest', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    const body = JSON.stringify({ events: [{ tStartMs: 0 }, { segs: [{ utf8: 'hello' }, { utf8: ' world' }] }] });
+    vi.stubGlobal('fetch', mockFetch(body));
+    const [res] = await fetchVideoTranscripts(['vid00000001']);
+    expect(res.success).toBe(true);
+    expect(res.text).toBe('hello world');
+    vi.unstubAllGlobals();
+  });
+
+  it('fails all videos when the seed session yields no visitor data', async () => {
+    innertubeCreate.mockResolvedValueOnce({ session: { context: { client: {} } } });
+    vi.stubGlobal('fetch', mockFetch(json3('x')));
+    const results = await fetchVideoTranscripts(['vid00000001', 'vid00000002']);
+    expect(results.every((r) => !r.success)).toBe(true);
+    expect(results[0]!.error).toMatch(/visitor data/i);
+    vi.unstubAllGlobals();
+  });
+
+  it('marks a video unavailable when the minter omitted its content token', async () => {
+    // Minter returns the session token + a token for vid #1 only (partial map).
+    mintPoTokens.mockImplementationOnce(async (ids: string[]) => {
+      const m = new Map<string, string>();
+      m.set(ids[0]!, `tok-${ids[0]}`); // visitorData
+      m.set('vid00000001', 'tok-vid00000001');
+      return m;
+    });
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    vi.stubGlobal('fetch', mockFetch(json3('ok')));
+
+    const results = await fetchVideoTranscripts(['vid00000001', 'vid00000002']);
+    const byId = Object.fromEntries(results.map((r) => [r.videoId, r]));
+    expect(byId['vid00000001']!.success).toBe(true);
+    expect(byId['vid00000002']!.success).toBe(false);
+    expect(byId['vid00000002']!.error).toMatch(/content-bound token/i);
+    vi.unstubAllGlobals();
+  });
+
+  it('does not reject when onVideoComplete throws (never-throws contract)', async () => {
+    const getInfo = vi.fn(async () => infoWith([TRACK]));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    vi.stubGlobal('fetch', mockFetch(json3('hi')));
+    const results = await fetchVideoTranscripts(['vid00000001'], {
+      onVideoComplete: () => { throw new Error('callback boom'); },
+    });
+    expect(results[0]!.success).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('falls back to a language-prefix track when no exact match exists', async () => {
+    const tracks = [{ base_url: 'https://yt.example/enUS', language_code: 'en-US' }];
+    const getInfo = vi.fn(async () => infoWith(tracks));
+    innertubeCreate.mockResolvedValueOnce(seedSession()).mockResolvedValueOnce(realSession(getInfo));
+    vi.stubGlobal('fetch', mockFetch(json3('hi')));
+    const [res] = await fetchVideoTranscripts(['vid00000001'], { lang: 'en' });
+    expect(res.success).toBe(true);
+    expect(res.lang).toBe('en-US');
+    vi.unstubAllGlobals();
+  });
 });

@@ -69,9 +69,32 @@ describe('youtube/command', () => {
     expect(text).toContain('Channel: Chan');
     expect(text).toContain('Duration: 1:05');
     expect(text).toContain('transcript text');
+    expect(text).toContain("**Cite as:** 'Good' by Chan");
     expect(text).toContain('## Unavailable (1)');
     expect(text).toContain('No captions/transcript available');
     expect(res.details).toMatchObject({ requested: 2, fetched: 1, failed: 1 });
+  });
+
+  it('emits a knowledge-store document only for successful transcripts', async () => {
+    fetchVideoTranscripts.mockResolvedValueOnce([
+      { videoId: 'aaaaaaaaaaa', url: 'https://youtu.be/aaaaaaaaaaa', success: true, title: 'Good Video', author: 'Chan', durationSeconds: 65, text: 'the full transcript', charCount: 19 },
+      { videoId: 'bbbbbbbbbbb', url: 'https://youtu.be/bbbbbbbbbbb', success: false, error: 'no captions' },
+    ]);
+    const docs: Array<{ url: string; document: string }> = [];
+
+    await youtubeTranscriptCommand({
+      urls: ['https://youtu.be/aaaaaaaaaaa', 'https://youtu.be/bbbbbbbbbbb'],
+      maxVideos: 3,
+      timeoutMs: 20000,
+      lang: 'en',
+      onTranscriptDocument: (url, document) => docs.push({ url, document }),
+    });
+
+    expect(docs).toHaveLength(1); // only the successful video
+    expect(docs[0]!.url).toBe('https://youtu.be/aaaaaaaaaaa');
+    expect(docs[0]!.document).toContain('# Good Video');
+    expect(docs[0]!.document).toContain('Channel: Chan');
+    expect(docs[0]!.document).toContain('the full transcript');
   });
 
   it('notes skipped non-YouTube links in the output', async () => {

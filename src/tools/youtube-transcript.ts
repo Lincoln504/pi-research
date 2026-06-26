@@ -19,6 +19,8 @@ import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
 import { youtubeTranscriptCommand } from '../youtube/index.ts';
 import type { ToolUsageTracker } from '../utils/tool-usage-tracker.ts';
+import type { SystemResearchState } from '../orchestration/deep-research-types.ts';
+import { cacheScrapedContent, registerScrapedLinks, registerResearcherScrapes } from '../utils/shared-links.ts';
 import { type Config, getConfig } from '../config.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -28,6 +30,12 @@ export function createYoutubeTranscriptTool(options: {
   tracker?: ToolUsageTracker;
   /** Fires for each video as it completes (success or failure) — used for TUI flash. */
   onUrlScrapeResult?: (url: string, success: boolean) => void;
+  /** Provides the research session id for knowledge-store ingestion of transcripts. */
+  getGlobalState?: () => SystemResearchState;
+  /** Registers transcribed URLs in the global pool (mirrors scrape). */
+  updateGlobalLinks?: (links: string[]) => void;
+  /** Researcher id for per-researcher source tracking. */
+  researcherId?: string;
   config?: Config;
 }): ToolDefinition {
   const { tracker } = options;
@@ -56,6 +64,7 @@ export function createYoutubeTranscriptTool(options: {
       'You may call this tool only ONCE, so choose the videos carefully before calling.',
       'Pass full watch URLs, youtu.be links, or shorts/embed/live links. Non-YouTube links are ignored.',
       'Videos without captions, or that are private/age-restricted, are reported as unavailable — the rest still succeed.',
+      "When you cite a YouTube source in CITED LINKS, use the video's ACTUAL title and channel (both shown in this tool's output) as the description — e.g. \"'<exact title>' by <channel>\". Do NOT paraphrase or invent a title; the watch URL alone is not human-identifiable.",
     ],
     parameters: YoutubeParamsSchema,
     executionMode: 'parallel',
@@ -103,8 +112,16 @@ export function createYoutubeTranscriptTool(options: {
       // env var by the minter (SDK callers may pass it through the command).
       const liveConfig = options.config || getConfig(extensionCtx.cwd);
 
+      // Session id for knowledge-store ingestion: caching each transcript under
+      // its watch URL lets the orchestrator's post-round writer pick it up as the
+      // document `content` and embed the FULL transcript (gated by the writer
+      // queue, i.e. only when the knowledge store is enabled). Also feeds in-run
+      // dedup so a sibling never re-fetches the same video.
+      const researchId = options.getGlobalState?.().researchId;
+      const cachedUrls: string[] = [];
+
       try {
-        return await youtubeTranscriptCommand({
+        const result = await youtubeTranscriptCommand({
           urls,
           maxVideos,
           timeoutMs: liveConfig.YOUTUBE_TRANSCRIPT_TIMEOUT_MS,
@@ -112,7 +129,23 @@ export function createYoutubeTranscriptTool(options: {
           signal,
           onVideoComplete: (videoId, success) =>
             options.onUrlScrapeResult?.(`https://www.youtube.com/watch?v=${videoId}`, success),
+          onTranscriptDocument: (url, document) => {
+            if (researchId) {
+              cacheScrapedContent(researchId, url, document);
+              cachedUrls.push(url);
+            }
+          },
         });
+
+        if (researchId && cachedUrls.length > 0) {
+          registerScrapedLinks(researchId, cachedUrls);
+          options.updateGlobalLinks?.(cachedUrls);
+          if (options.researcherId) {
+            registerResearcherScrapes(researchId, options.researcherId, cachedUrls);
+          }
+        }
+
+        return result;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error(`[youtube_transcript tool] Failed: ${errorMsg}`);

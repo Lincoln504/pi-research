@@ -114,10 +114,13 @@ async function _doInitialize(pluginConfig: OpenClawPluginConfig) {
     process.env['STACKEXCHANGE_API_KEY'] = pluginConfig.stackexchangeApiKey;
   }
 
-  if (pluginConfig.knowledgeEnabled !== undefined) {
-    // 'global' matches the project-wide default: one shared knowledge store
-    // across every directory rather than a per-project one.
-    globalConfig.KNOWLEDGE_STORE_MODE = pluginConfig.knowledgeEnabled ? 'global' : 'none';
+  if (pluginConfig.knowledgeEnabled === false) {
+    // Only an EXPLICIT opt-out disables the store. When enabled (or left at its
+    // default), keep the mode getConfig already resolved — which defaults to
+    // 'global' and still honours a PI_RESEARCH_KNOWLEDGE_STORE_MODE override in
+    // ~/.pi/research/openclaw.env. (Previously this forced a value on every run,
+    // silently shadowing that overlay.)
+    globalConfig.KNOWLEDGE_STORE_MODE = 'none';
   }
   
   if (pluginConfig.defaultDepth !== undefined) {

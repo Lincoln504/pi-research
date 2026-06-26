@@ -207,6 +207,31 @@ describe('text-utils', () => {
       expect(result[1]!.url).toBe('https://other.org');
     });
 
+    it('drops a malformed/truncated URL fragment instead of emitting garbage (regression: "https://www")', () => {
+      // A soft-wrapped URL leaves "https://www" on the first line of a citation.
+      const report = [
+        'CITED LINKS',
+        '[1] https://www',
+        '[2] https://realsource.com — Real source',
+      ].join('\n');
+      const result = parseCitations(report);
+      // The fragment is skipped; only the real source survives, and it is NOT
+      // shifted behind a garbage entry.
+      expect(result).toHaveLength(1);
+      expect(result[0]!.url).toBe('https://realsource.com');
+    });
+
+    it('rejects scheme-only / hostless URLs', () => {
+      const report = [
+        'CITED LINKS',
+        '[1] https:// — broken',
+        '[2] http://localhost — no TLD',
+        '[3] https://good.example.com — fine',
+      ].join('\n');
+      const urls = parseCitations(report).map((c) => c.url);
+      expect(urls).toEqual(['https://good.example.com']);
+    });
+
     it('strips trailing punctuation from URL', () => {
       const report = `CITED LINKS\n[1] https://example.com.\n`;
       const result = parseCitations(report);

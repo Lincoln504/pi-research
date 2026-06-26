@@ -13,6 +13,15 @@ vi.mock('../../../src/youtube/index.ts', () => ({
   youtubeTranscriptCommand: (...args: unknown[]) => youtubeTranscriptCommand(...args),
 }));
 
+const cacheScrapedContent = vi.fn();
+const registerScrapedLinks = vi.fn();
+const registerResearcherScrapes = vi.fn();
+vi.mock('../../../src/utils/shared-links.ts', () => ({
+  cacheScrapedContent: (...a: unknown[]) => cacheScrapedContent(...a),
+  registerScrapedLinks: (...a: unknown[]) => registerScrapedLinks(...a),
+  registerResearcherScrapes: (...a: unknown[]) => registerResearcherScrapes(...a),
+}));
+
 import { createYoutubeTranscriptTool } from '../../../src/tools/youtube-transcript.ts';
 import { ToolUsageTracker, createDefaultToolLimits } from '../../../src/utils/tool-usage-tracker.ts';
 
@@ -86,6 +95,39 @@ describe('tools/youtube-transcript', () => {
 
     // 3 urls exceeds maxItems=2 → schema rejects.
     expect((res as any).details.error).toBe('invalid_params');
+  });
+
+  it('ingests fetched transcripts into the session cache for knowledge-store pickup', async () => {
+    // Make the mocked command invoke the ingestion callback like the real one.
+    youtubeTranscriptCommand.mockImplementationOnce(async (opts: any) => {
+      opts.onTranscriptDocument?.('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '# Title\n\ntranscript body');
+      return okResult;
+    });
+    const tool = createYoutubeTranscriptTool({
+      ctx,
+      tracker: new ToolUsageTracker(createDefaultToolLimits()),
+      getGlobalState: () => ({ researchId: 'res-123' }) as any,
+      researcherId: '1.1',
+      updateGlobalLinks: vi.fn(),
+    });
+
+    await tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, undefined, undefined as any, ctx);
+
+    expect(cacheScrapedContent).toHaveBeenCalledWith('res-123', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', expect.stringContaining('transcript body'));
+    expect(registerScrapedLinks).toHaveBeenCalledWith('res-123', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
+    expect(registerResearcherScrapes).toHaveBeenCalledWith('res-123', '1.1', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
+  });
+
+  it('does not cache when there is no research session (no knowledge-store context)', async () => {
+    youtubeTranscriptCommand.mockImplementationOnce(async (opts: any) => {
+      opts.onTranscriptDocument?.('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'doc');
+      return okResult;
+    });
+    const tool = createYoutubeTranscriptTool({ ctx, tracker: new ToolUsageTracker(createDefaultToolLimits()) });
+
+    await tool.execute('id', { urls: ['https://youtu.be/dQw4w9WgXcQ'] }, undefined, undefined as any, ctx);
+
+    expect(cacheScrapedContent).not.toHaveBeenCalled();
   });
 
   it('wraps backend errors into a tool result instead of throwing', async () => {

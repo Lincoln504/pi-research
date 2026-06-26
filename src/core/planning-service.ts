@@ -21,6 +21,7 @@ import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
 import { extractUsage } from '../types/llm.ts';
 import { metrics } from '../utils/metrics.ts';
+import { normalizeCitations } from '../utils/citation-utils.ts';
 import { repairJsonWithLlm } from './llm/agentic-repair.ts';
 import { buildSafeOptions, validateAndExtractText } from './llm/llm-utils.ts';
 import { withTimeout } from './llm/llm-timeout.ts';
@@ -362,7 +363,21 @@ export class PlanningService implements IPlanningService {
       youtube_query_every_n: config.YOUTUBE_QUERY_EVERY_N,
     });
 
-    const findings = Array.from(reports.entries())
+    // Normalize citations across all reports to ONE global numbering BEFORE the
+    // evaluator/synthesis LLM sees them, and hand it the matching Global Source
+    // List. The evaluator prompt promises exactly this ("reports have already
+    // been normalized to these global numbers"); doing it here is what makes the
+    // synthesized body's [N] line up with the final CITED LINKS list that
+    // ensureCitedLinks() regenerates from the same normalization.
+    const { normalizedReports, globalCitations } = normalizeCitations(reports);
+    const globalSourceList = globalCitations.length > 0
+      ? 'GLOBAL SOURCE LIST (use these exact [N] numbers for every inline citation):\n' +
+        globalCitations
+          .map((c) => `[${c.id}] ${c.url}${c.source ? ` [Source: ${c.source}]` : ''}${c.description ? ` — ${c.description}` : ''}`)
+          .join('\n') +
+        '\n\n---\n\n'
+      : '';
+    const findings = globalSourceList + Array.from(normalizedReports.entries())
         .map(([id, report]) => `### Researcher ${id}\n${report}`)
         .join('\n\n');
 

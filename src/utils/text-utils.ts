@@ -170,6 +170,21 @@ export interface Citation {
 }
 
 /**
+ * A citation URL is only plausible if it parses and has a real host (a dot in
+ * the hostname). This rejects fragments like `https://www` that occur when an
+ * LLM soft-wraps or truncates a URL in its CITED LINKS — without this guard such
+ * a fragment becomes a garbage citation AND shifts every downstream global ID.
+ */
+function isPlausibleCitationUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.includes('.');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Parses the CITED LINKS section from a researcher report, extracting URLs, sources, and their descriptions.
  * Handles both single-line 'URL - description' and multi-line 'Source:'/'Description:' formats.
  */
@@ -227,7 +242,7 @@ export function parseCitations(report: string): Citation[] {
       desc = descLines.join('\n').trim();
     }
     
-    if (url) {
+    if (url && isPlausibleCitationUrl(url)) {
       citations.push({ url, description: desc, source });
     }
   }

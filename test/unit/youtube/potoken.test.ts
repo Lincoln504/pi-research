@@ -1,0 +1,124 @@
+/**
+ * Unit tests for the YouTube PoToken minter.
+ *
+ * bgutils-js and jsdom are mocked so the BotGuard flow is deterministic and
+ * offline. These tests cover the load-bearing correctness invariants that the
+ * rest of the feature depends on: the empty short-circuit, the happy path,
+ * globalThis restoration on success AND failure (no global pollution leak), and
+ * the module-level mutex that serializes the globalThis-mutating critical section
+ * across concurrent callers.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// --- Mock jsdom: a minimal window exposing the bridged globals + close(). ---
+const windowClose = vi.fn();
+function makeWindow(): Record<string, unknown> {
+  const win: Record<string, unknown> = {
+    document: { kind: 'doc' },
+    location: { href: 'https://www.youtube.com/' },
+    navigator: { userAgent: 'test' },
+    origin: 'https://www.youtube.com',
+    close: windowClose,
+  };
+  win['window'] = win; // window.window === window, like a real DOM
+  return win;
+}
+vi.mock('jsdom', () => ({
+  // Must be a regular function so `new JSDOM(...)` works (arrow fns can't construct).
+  JSDOM: vi.fn(function (this: unknown) {
+    return { window: makeWindow() };
+  }),
+}));
+
+// --- Mock bgutils-js. challengeCreate is overridable per test (for the mutex/delay test). ---
+const challengeCreate = vi.fn();
+const snapshot = vi.fn(async () => 'botguard-response');
+const mintAsWebsafeString = vi.fn(async (id: string) => `tok-${id}`);
+vi.mock('bgutils-js', () => ({
+  BG: {
+    Challenge: { create: (...a: unknown[]) => challengeCreate(...a) },
+    BotGuardClient: { create: vi.fn(async () => ({ snapshot })) },
+    WebPoMinter: { create: vi.fn(async () => ({ mintAsWebsafeString })) },
+  },
+  buildURL: () => 'https://jnn-pa.googleapis.com/$rpc/GenerateIT',
+  getHeaders: () => ({ 'content-type': 'application/json+protobuf' }),
+}));
+
+import { mintPoTokens } from '../../../src/youtube/potoken.ts';
+
+const okChallenge = {
+  interpreterJavascript: { privateDoNotAccessOrElseSafeScriptWrappedValue: '/* noop vm */' },
+  program: 'program-bytecode',
+  globalName: 'vmGlobalName',
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  challengeCreate.mockResolvedValue(okChallenge);
+  // Integrity-token POST returns [integrityToken, ttl, ...]
+  vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ['integrity-token-abc', 43200] })));
+});
+
+describe('youtube/potoken', () => {
+  it('short-circuits on empty identifiers without touching the DOM/network', async () => {
+    const result = await mintPoTokens([]);
+    expect(result.size).toBe(0);
+    expect(challengeCreate).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('mints one token per identifier and restores globalThis afterwards', async () => {
+    const hadWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+
+    const tokens = await mintPoTokens(['VISITOR', 'vid00000001', 'vid00000002']);
+
+    expect(tokens.get('VISITOR')).toBe('tok-VISITOR');
+    expect(tokens.get('vid00000001')).toBe('tok-vid00000001');
+    expect(tokens.get('vid00000002')).toBe('tok-vid00000002');
+    // globalThis must be restored to its original state (no window leak).
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).toEqual(hadWindow);
+    expect(windowClose).toHaveBeenCalled(); // DOM torn down
+    vi.unstubAllGlobals();
+  });
+
+  it('throws AND restores globalThis when the challenge fails (no global pollution leak)', async () => {
+    const hadWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    challengeCreate.mockRejectedValueOnce(new Error('attestation rejected'));
+
+    await expect(mintPoTokens(['VISITOR', 'vid00000001'])).rejects.toThrow(/attestation rejected/);
+
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'window')).toEqual(hadWindow);
+    expect(windowClose).toHaveBeenCalled(); // DOM still torn down on failure
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects when the attestation server returns no integrity token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => [undefined, 0] })));
+    await expect(mintPoTokens(['VISITOR'])).rejects.toThrow(/integrity token/i);
+    vi.unstubAllGlobals();
+  });
+
+  it('serializes concurrent callers through the mutex (no overlapping bridged sections)', async () => {
+    let active = 0;
+    let maxConcurrent = 0;
+    // Gate the challenge so we can hold the first call inside its critical section.
+    challengeCreate.mockImplementation(async () => {
+      active++;
+      maxConcurrent = Math.max(maxConcurrent, active);
+      await new Promise((r) => setTimeout(r, 15));
+      active--;
+      return okChallenge;
+    });
+
+    await Promise.all([
+      mintPoTokens(['A']),
+      mintPoTokens(['B']),
+      mintPoTokens(['C']),
+    ]);
+
+    // If the mutex works, the bridged critical sections never overlap.
+    expect(maxConcurrent).toBe(1);
+    vi.unstubAllGlobals();
+  });
+});
