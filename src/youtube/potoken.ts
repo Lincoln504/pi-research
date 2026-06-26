@@ -24,6 +24,18 @@
  *     serialized behind a module-level async mutex to prevent concurrent
  *     researchers from racing on the shared globals.
  *
+ *     The mutex only guards youtube-vs-youtube. The one other main-process
+ *     consumer that feature-detects `window` is @huggingface/transformers, which
+ *     computes `IS_BROWSER_ENV = typeof window !== 'undefined' && …` ONCE at
+ *     import time and freezes it (Object.freeze). That import is forced — and the
+ *     constant frozen as NODE — before any mint can bridge: the deep orchestrator
+ *     awaits `getService(KNOWLEDGE_STORE)` (→ static transformers import) in its
+ *     pre-research phase before researchers spawn, and quick mode runs a single
+ *     agent whose tools never overlap. So the bridge cannot flip the embedder's
+ *     environment. If you ever make the store load lazily AFTER gathering begins,
+ *     or make quick mode multi-agent, pre-warm the transformers import explicitly
+ *     or this invariant breaks.
+ *
  *  4. Content binding. timedtext needs a token minted with `identifier =
  *     videoId`; the session token (identifier = visitorData) is only used to
  *     create the Innertube session. We mint both from a single challenge.
