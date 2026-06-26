@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -97,11 +97,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
@@ -162,11 +162,11 @@ jobs:
   type-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
@@ -196,11 +196,11 @@ jobs:
     # bound is generous relative to the sub-minute Linux runtime.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
@@ -252,11 +252,11 @@ jobs:
     # sequential execution and retries across the slower macOS/Windows runners.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
@@ -287,7 +287,7 @@ jobs:
       # ~/Library/Caches/camoufox and on Windows under
       # %USERPROFILE%/AppData/Local/camoufox/camoufox/Cache; both are fetched
       # fresh (setup.cjs during npm ci, plus the prefetch step below).
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-camoufox
         if: runner.os == 'Linux'
         with:
@@ -389,11 +389,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
@@ -425,11 +425,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache-modules
         with:
           path: node_modules
