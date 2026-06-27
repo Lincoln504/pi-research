@@ -37,7 +37,7 @@ describe('preuninstall (scripts/cleanup.cjs) parity with npm uninstall', () => {
   it('removes owned skill installs and preserves foreign ones', () => {
     // Install exactly as the TUI does (symlink + manifest), into a throwaway HOME.
     fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
-    const r0 = installSkill(['claude-code'], { home: HOME });
+    const r0 = installSkill(['claude'], { home: HOME });
     expect(r0[0]!.status).toBe('installed');
     expect(fs.lstatSync(claudeSkill()).isSymbolicLink()).toBe(true);
     expect(fs.existsSync(manifest())).toBe(true);

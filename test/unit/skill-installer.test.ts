@@ -51,7 +51,7 @@ function skillPathFor(id: string): string {
 
 describe('SKILL_AGENT_TARGETS (in-app installer scope)', () => {
   it('targets exactly Claude and Codex — never Cursor (project-only, no global dir), pi, or ~/.agents', () => {
-    expect([...SKILL_AGENT_TARGETS]).toEqual(['claude-code', 'codex']);
+    expect([...SKILL_AGENT_TARGETS]).toEqual(['claude', 'codex']);
     expect(SKILL_AGENT_TARGETS).not.toContain('cursor');
     expect(SKILL_AGENT_TARGETS).not.toContain('pi');
     expect(SKILL_AGENT_TARGETS).not.toContain('agents');
@@ -70,11 +70,11 @@ describe('install/uninstall gating candidates', () => {
 
     // Create only ~/.claude → only Claude becomes a candidate; Codex still absent.
     fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
-    expect(skillInstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude-code']);
+    expect(skillInstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude']);
 
     // Add ~/.codex → both are candidates.
     fs.mkdirSync(path.join(HOME, '.codex'), { recursive: true });
-    expect(skillInstallCandidates({ home: HOME }).map(d => d.id).sort()).toEqual(['claude-code', 'codex']);
+    expect(skillInstallCandidates({ home: HOME }).map(d => d.id).sort()).toEqual(['claude', 'codex']);
   });
 
   it('uninstall candidates require the skill to be actually installed (owned)', () => {
@@ -84,8 +84,8 @@ describe('install/uninstall gating candidates', () => {
     expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual([]);
 
     // Install into Claude only → it (and only it) becomes an uninstall candidate.
-    installSkill(['claude-code'], { home: HOME });
-    expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude-code']);
+    installSkill(['claude'], { home: HOME });
+    expect(skillUninstallCandidates({ home: HOME }).map(d => d.id)).toEqual(['claude']);
   });
 
   it('a foreign skill occupying the slot is NOT an uninstall candidate', () => {
@@ -112,9 +112,9 @@ describe('resolveSkillSourceDir', () => {
 
 describe('detectHarnesses', () => {
   it('reports present=true only when the harness base dir exists', () => {
-    mkHarnessBase('claude-code');
+    mkHarnessBase('claude');
     const detected = detectHarnesses(opts());
-    expect(detected.find(d => d.id === 'claude-code')!.present).toBe(true);
+    expect(detected.find(d => d.id === 'claude')!.present).toBe(true);
     expect(detected.find(d => d.id === 'pi')!.present).toBe(false);
   });
   it('every harness starts uninstalled and exposes a confidence tag', () => {
@@ -127,12 +127,12 @@ describe('detectHarnesses', () => {
 
 describe('installSkill — symlink (default)', () => {
   it('creates an owned symlink, writes a manifest entry, and is idempotent', () => {
-    mkHarnessBase('claude-code');
-    const r1 = installSkill(['claude-code'], opts());
+    mkHarnessBase('claude');
+    const r1 = installSkill(['claude'], opts());
     expect(r1[0]!.status).toBe('installed');
     expect(r1[0]!.type).toBe('symlink');
 
-    const sp = skillPathFor('claude-code');
+    const sp = skillPathFor('claude');
     expect(fs.lstatSync(sp).isSymbolicLink()).toBe(true);
     expect(path.resolve(path.dirname(sp), fs.readlinkSync(sp))).toBe(path.resolve(SKILL_SRC));
 
@@ -141,13 +141,13 @@ describe('installSkill — symlink (default)', () => {
 
     const manifest = readManifest(opts());
     expect(manifest.entries).toHaveLength(1);
-    expect(manifest.entries[0]).toMatchObject({ tool: 'claude-code', path: sp, type: 'symlink' });
+    expect(manifest.entries[0]).toMatchObject({ tool: 'claude', path: sp, type: 'symlink' });
 
     // Detection now reports it as owned.
-    expect(detectHarnesses(opts()).find(d => d.id === 'claude-code')!.installed).toBe('owned-symlink');
+    expect(detectHarnesses(opts()).find(d => d.id === 'claude')!.installed).toBe('owned-symlink');
 
     // Second install is a no-op (already-installed), manifest stays size 1.
-    const r2 = installSkill(['claude-code'], opts());
+    const r2 = installSkill(['claude'], opts());
     expect(r2[0]!.status).toBe('already-installed');
     expect(readManifest(opts()).entries).toHaveLength(1);
   });
@@ -162,14 +162,14 @@ describe('installSkill — symlink (default)', () => {
 
 describe('installSkill — copy', () => {
   it('copies a real directory carrying our package marker (owned-copy)', () => {
-    mkHarnessBase('claude-code');
-    const r = installSkill(['claude-code'], { ...opts(), copy: true });
+    mkHarnessBase('claude');
+    const r = installSkill(['claude'], { ...opts(), copy: true });
     expect(r[0]!.status).toBe('installed');
     expect(r[0]!.type).toBe('copy');
-    const sp = skillPathFor('claude-code');
+    const sp = skillPathFor('claude');
     expect(fs.lstatSync(sp).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(path.join(sp, 'SKILL.md'), 'utf-8')).toContain('@lincoln504/pi-research');
-    expect(detectHarnesses(opts()).find(d => d.id === 'claude-code')!.installed).toBe('owned-copy');
+    expect(detectHarnesses(opts()).find(d => d.id === 'claude')!.installed).toBe('owned-copy');
   });
 });
 
@@ -192,10 +192,10 @@ describe('installSkill — foreign safety', () => {
 
 describe('installSkill — dry run', () => {
   it('plans without writing anything (no link, no manifest)', () => {
-    mkHarnessBase('claude-code');
-    const r = installSkill(['claude-code'], { ...opts(), dryRun: true });
+    mkHarnessBase('claude');
+    const r = installSkill(['claude'], { ...opts(), dryRun: true });
     expect(r[0]!.status).toBe('planned');
-    expect(fs.existsSync(skillPathFor('claude-code'))).toBe(false);
+    expect(fs.existsSync(skillPathFor('claude'))).toBe(false);
     expect(fs.existsSync(getManifestPath(opts()))).toBe(false);
   });
 });
@@ -209,8 +209,8 @@ describe('installSkill — bad target', () => {
 
 describe('uninstallSkill', () => {
   it('removes only owned installs and preserves foreign ones', () => {
-    mkHarnessBase('claude-code');
-    installSkill(['claude-code'], opts());
+    mkHarnessBase('claude');
+    installSkill(['claude'], opts());
 
     // A foreign cursor skill must survive uninstall.
     const foreign = skillPathFor('cursor');
@@ -218,9 +218,9 @@ describe('uninstallSkill', () => {
     fs.writeFileSync(path.join(foreign, 'SKILL.md'), '# foreign', 'utf-8');
 
     const r = uninstallSkill(undefined, opts()); // --all
-    const claude = r.find(x => x.tool === 'claude-code')!;
+    const claude = r.find(x => x.tool === 'claude')!;
     expect(claude.status).toBe('removed');
-    expect(fs.existsSync(skillPathFor('claude-code'))).toBe(false);
+    expect(fs.existsSync(skillPathFor('claude'))).toBe(false);
 
     // Foreign untouched and manifest emptied.
     expect(fs.existsSync(path.join(foreign, 'SKILL.md'))).toBe(true);
@@ -228,12 +228,12 @@ describe('uninstallSkill', () => {
   });
 
   it('uninstalls only the named tool, leaving others installed', () => {
-    installSkill(['claude-code', 'pi'], opts());
+    installSkill(['claude', 'pi'], opts());
     expect(readManifest(opts()).entries).toHaveLength(2);
 
-    const r = uninstallSkill(['claude-code'], opts());
-    expect(r.find(x => x.tool === 'claude-code')!.status).toBe('removed');
-    expect(fs.existsSync(skillPathFor('claude-code'))).toBe(false);
+    const r = uninstallSkill(['claude'], opts());
+    expect(r.find(x => x.tool === 'claude')!.status).toBe('removed');
+    expect(fs.existsSync(skillPathFor('claude'))).toBe(false);
     expect(fs.existsSync(skillPathFor('pi'))).toBe(true);
     expect(readManifest(opts()).entries.map(e => e.tool)).toEqual(['pi']);
   });
@@ -242,13 +242,13 @@ describe('uninstallSkill', () => {
     // Hand-craft a foreign symlink at the claude skill path, plus a manifest
     // entry claiming it — uninstall must refuse to remove it.
     const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-foreign-'));
-    const sp = skillPathFor('claude-code');
+    const sp = skillPathFor('claude');
     fs.mkdirSync(path.dirname(sp), { recursive: true });
     fs.symlinkSync(elsewhere, sp, 'dir');
     fs.mkdirSync(path.dirname(getManifestPath(opts())), { recursive: true });
     fs.writeFileSync(getManifestPath(opts()), JSON.stringify({
       version: 1, package: '@lincoln504/pi-research',
-      entries: [{ tool: 'claude-code', path: sp, type: 'symlink', source: elsewhere, createdAt: 'x' }],
+      entries: [{ tool: 'claude', path: sp, type: 'symlink', source: elsewhere, createdAt: 'x' }],
     }), 'utf-8');
 
     const r = uninstallSkill(undefined, opts());
@@ -258,22 +258,22 @@ describe('uninstallSkill', () => {
   });
 
   it('reports not-present and prunes a manifest entry whose file is already gone', () => {
-    installSkill(['claude-code'], opts());
-    fs.rmSync(skillPathFor('claude-code'), { recursive: true, force: true });
+    installSkill(['claude'], opts());
+    fs.rmSync(skillPathFor('claude'), { recursive: true, force: true });
     const r = uninstallSkill(undefined, opts());
-    expect(r.find(x => x.tool === 'claude-code')!.status).toBe('not-present');
+    expect(r.find(x => x.tool === 'claude')!.status).toBe('not-present');
     expect(readManifest(opts()).entries).toHaveLength(0);
   });
 });
 
 describe('round-trip', () => {
   it('install → uninstall leaves the filesystem as it started', () => {
-    mkHarnessBase('claude-code');
+    mkHarnessBase('claude');
     const before = fs.readdirSync(path.join(HOME, '.claude'));
-    installSkill(['claude-code'], opts());
+    installSkill(['claude'], opts());
     uninstallSkill(undefined, opts());
     // skills/ dir may remain (empty) but the research link is gone and no manifest.
-    expect(fs.existsSync(skillPathFor('claude-code'))).toBe(false);
+    expect(fs.existsSync(skillPathFor('claude'))).toBe(false);
     expect(fs.existsSync(getManifestPath(opts()))).toBe(false);
     expect(before).toEqual(expect.arrayContaining([]));
   });

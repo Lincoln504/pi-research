@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 export type HarnessConfidence = 'confirmed' | 'partial' | 'unverified';
 
 export interface HarnessDef {
-  /** Stable id used on the CLI (e.g. "claude-code"). */
+  /** Stable id used on the CLI (e.g. "claude"). */
   id: string;
   /** Human label. */
   label: string;
@@ -46,7 +46,7 @@ export interface HarnessDef {
  * can override $HOME.
  */
 export const HARNESSES: readonly HarnessDef[] = [
-  { id: 'claude-code', label: 'Claude', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
+  { id: 'claude', label: 'Claude', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
   { id: 'pi', label: 'pi', baseDir: '.pi', skillsDir: path.join('.pi', 'skills'), confidence: 'confirmed' },
   { id: 'cursor', label: 'Cursor', baseDir: '.cursor', skillsDir: path.join('.cursor', 'skills'), confidence: 'partial', note: 'Cursor project-level skills are documented; the global ~/.cursor/skills path is community-reported.' },
   { id: 'codex', label: 'OpenAI Codex CLI', baseDir: '.codex', skillsDir: path.join('.codex', 'skills'), confidence: 'unverified', note: 'Codex skills support is emerging; path not confirmed by official docs.' },
@@ -66,7 +66,7 @@ const PACKAGE_NAME = '@lincoln504/pi-research';
  * `~/.cursor/skills` symlink would never be read. `pi` (the host itself) and the
  * speculative `~/.agents` convention are likewise excluded from the one-click flow.
  */
-export const SKILL_AGENT_TARGETS = ['claude-code', 'codex'] as const;
+export const SKILL_AGENT_TARGETS = ['claude', 'codex'] as const;
 
 export interface ManifestEntry {
   tool: string;
