@@ -4,7 +4,8 @@
  * Tests that verify planning state is properly reset between research sessions
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { resetConfig } from '../../../src/config.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from '../../../src/core/service-initialization.ts';
 import { registerInfrastructureServices } from '../../../src/infrastructure/service-initialization.ts';
 import { registerOrchestrationServices } from '../../../src/orchestration/service-initialization.ts';
@@ -13,8 +14,27 @@ import { ServiceNames, type IResearchOrchestration, type IPlanningService } from
 
 describe('Planning Service State Reset', () => {
   let orchestrationService: IResearchOrchestration;
+  let prevKnowledgeMode: string | undefined;
+
+  beforeAll(() => {
+    // Disable the knowledge store for this suite. cleanupResearchServices()
+    // otherwise resolves the real KNOWLEDGE_STORE (default mode 'global'), whose
+    // embedder probes a GPU; on headless CI with no GPU that probe hangs (~150s),
+    // timing the test out and cascading "Cannot reset container while disposing"
+    // into sibling tests. Planning-state reset is independent of the store, so
+    // mode 'none' keeps the suite hermetic and fast.
+    prevKnowledgeMode = process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+    process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = 'none';
+  });
+
+  afterAll(() => {
+    if (prevKnowledgeMode === undefined) delete process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'];
+    else process.env['PI_RESEARCH_KNOWLEDGE_STORE_MODE'] = prevKnowledgeMode;
+    resetConfig();
+  });
 
   beforeEach(async () => {
+    resetConfig(); // re-read config so KNOWLEDGE_STORE_MODE='none' takes effect
     await resetServiceContainer();
     registerCoreServices();
     registerInfrastructureServices();

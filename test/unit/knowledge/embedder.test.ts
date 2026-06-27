@@ -49,6 +49,17 @@ vi.mock('../../../src/knowledge/webgpu-viability.ts', () => ({
   resolveEmbeddingDevice: vi.fn(async (requested: string) => (requested === 'cpu' ? 'cpu' : 'webgpu')),
 }));
 
+// initializeDawnWebGPU() lazily `import('webgpu')` and probes a real GPU. On a
+// headless host with no GPU (CI ubuntu/windows) it returns false, so the embedder
+// silently falls back to CPU and the GPU-lock path is never exercised — making
+// these tests pass only on real-GPU machines (local dev, macOS Metal runners).
+// Force it true so the WebGPU code path is deterministic everywhere; importActual
+// keeps the real fallback-flag helpers (resetWebGpuFallbackFlag/markWebGpuFallback).
+vi.mock('../../../src/knowledge/embedder-utils.ts', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/knowledge/embedder-utils.ts')>();
+  return { ...actual, initializeDawnWebGPU: vi.fn(async () => true) };
+});
+
 describe('Embedder', () => {
   let embedder: Embedder;
 

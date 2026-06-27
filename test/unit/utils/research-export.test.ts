@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { join } from 'node:path';
 import { exportResearchReport, appendExportMessage } from '../../../src/utils/research-export.ts';
 
 // Mock at top level
@@ -51,8 +52,10 @@ describe('exportResearchReport', () => {
 
     // Directory is created and the file is written under the explicit dir, NOT cwd.
     expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining('pinned-reports'), { recursive: true });
+    // Use path.join so the separator matches the platform (the code does
+    // join(resolve(explicitDir), filename) → backslashes on Windows).
     expect(mockWriteFile).toHaveBeenCalledWith(
-      expect.stringContaining(`${explicitDir}/pi-research-q-`),
+      expect.stringContaining(join('pinned-reports', 'pi-research-q-')),
       'result',
       { flag: 'wx' },
     );

@@ -36,6 +36,17 @@ vi.mock('node:fs/promises', () => ({
   access: (...args: unknown[]) => mockAccess(...args),
 }));
 
+// initializeDawnWebGPU() lazily `import('webgpu')` and probes a real GPU. On a
+// headless host with no GPU (CI ubuntu/windows) it returns false, so the embedder
+// falls back to CPU BEFORE the pipeline loads — defeating these tests, which drive
+// the fallback deliberately via the mocked pipeline throwing WebGPU errors. Force
+// it true so the device stays 'webgpu' and the fallback is exercised as intended.
+// importActual keeps the real fallback-flag helpers intact.
+vi.mock('../../../src/knowledge/embedder-utils.ts', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/knowledge/embedder-utils.ts')>();
+  return { ...actual, initializeDawnWebGPU: vi.fn(async () => true) };
+});
+
 describe('Embedder WebGPU Fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
