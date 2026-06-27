@@ -14,6 +14,7 @@ import type { ServiceContainer } from '../core/service-registry.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IStateManager, IHealthRegistryService, IKnowledgeStoreService, ISchedulerService } from '../core/service-interfaces.ts';
 import { healthRegistry as globalHealthRegistry } from './registry.ts';
+import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
 
 /**
  * Standalone BrowserCapability check, exported so tests can call it directly
@@ -85,15 +86,26 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
     // health check reads the SAME config the store actually uses. Reading
     // process.cwd() here silently ignored SDK/openclaw cwd overrides.
     let service: IKnowledgeStoreService | null = null;
+    let initError: unknown = null;
     try {
       service = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, { container }, container);
-    } catch {
-      // service stays null; the guard below reports it unavailable.
+    } catch (e) {
+      // service stays null; classify the failure below (native-unavailable vs real).
+      initError = e;
     }
     const cwd = service?.getCwd() ?? process.cwd();
     const config = getConfig(cwd);
     if (config.KNOWLEDGE_STORE_MODE === 'none') {
       return { healthy: true, diagnostic: { status: 'disabled in config' } };
+    }
+    // The native ML/vector stack ships no prebuilt for some platforms (Intel macOS
+    // / darwin-x64 has no onnxruntime-node binary nor @lancedb native binding). That
+    // is a permanent capability gap, not a fault — report the store as DISABLED
+    // (healthy) so research still runs without the optional cache. Otherwise this
+    // critical component drags overall health to 'unhealthy' and quick (depth-0)
+    // research aborts with "Research cannot start" for any fresh user on such a host.
+    if (isNativeStackUnavailableError(initError)) {
+      return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
     }
     try {
       if (!service) {
@@ -153,6 +165,11 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
           } 
       };
     } catch (e) {
+      // Same platform-capability gap as above, but surfacing only when the store
+      // is touched lazily (getStore/getEmbedder load the native binding here).
+      if (isNativeStackUnavailableError(e)) {
+        return { healthy: true, diagnostic: { status: 'disabled (native embedding/vector stack unavailable on this platform)' } };
+      }
       return { healthy: false, error: `Knowledge store healthcheck failed: ${e instanceof Error ? e.message : String(e)}` };
     }
   }, { timeoutMs: Math.max(healthTimeoutMs, 45000) });

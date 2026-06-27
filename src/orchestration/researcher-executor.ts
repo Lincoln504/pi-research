@@ -301,7 +301,9 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
 
       // Restore the default thinking label now that the researcher is done.
       // Otherwise "Researcher X" persists for all subsequent agent turns.
-      if (ctx.hasUI && typeof ctx.ui.setHiddenThinkingLabel === 'function') {
+      // Symmetric with where the label is set (researcher.ts): a no-op in the
+      // research TUI, where the label is never applied in the first place.
+      if (ctx.mode !== 'tui' && ctx.hasUI && typeof ctx.ui.setHiddenThinkingLabel === 'function') {
         ctx.ui.setHiddenThinkingLabel();
       }
     }

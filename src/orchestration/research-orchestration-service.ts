@@ -154,13 +154,19 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
         await sessionService.cleanup(targetId);
       }
       
-      // Perform FTS index rebuild here after synthesis/completion
-      const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
-      if (ksService && ksService.isReady()) {
-        const store = await ksService.getStore();
-        if (store) {
-          logger.info('[ResearchOrchestrationService] Rebuilding FTS index after research run');
-          await store.rebuildFtsIndex();
+      // Perform FTS index rebuild here after synthesis/completion — but only when
+      // the knowledge store is enabled. With KNOWLEDGE_STORE_MODE='none' (or on a
+      // platform missing the native @lancedb binding, e.g. Intel macOS) merely
+      // resolving the service loads the native vector stack and throws; gating it
+      // lets the rest of cleanup proceed instead of jumping to the catch below.
+      if (getConfig(ctx?.cwd).KNOWLEDGE_STORE_MODE !== 'none') {
+        const ksService = await getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, container);
+        if (ksService && ksService.isReady()) {
+          const store = await ksService.getStore();
+          if (store) {
+            logger.info('[ResearchOrchestrationService] Rebuilding FTS index after research run');
+            await store.rebuildFtsIndex();
+          }
         }
       }
     } catch (_err) {
@@ -394,7 +400,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    * @param config - Research configuration
    * @param ctx - Optional extension context for container isolation
    */
-  async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, _config: Config, ctx?: any): Promise<void> {
+  async storeLinkDescriptions(_sessionId: string, round: number, researchId: string, config: Config, ctx?: any): Promise<void> {
+    // Knowledge store disabled — never load the native vector stack. Mirrors the
+    // gates in the quick orchestrator and scrape.ts; without this, resolving the
+    // service throws on platforms lacking the native @lancedb binding (e.g. Intel
+    // macOS) and needlessly opens LanceDB even when the user set MODE='none'.
+    if (config.KNOWLEDGE_STORE_MODE === 'none') return;
+
     const container = tryGetServiceContainerFromCtx(ctx);
 
     try {

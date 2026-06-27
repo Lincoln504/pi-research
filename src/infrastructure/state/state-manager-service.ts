@@ -168,6 +168,13 @@ export class StateManagerService implements IStateManager {
    * Get the current browser server information
    */
   async getBrowserServer(): Promise<{ port: number; pid: number; schedulerId?: string; authSecret?: string } | null> {
+    // Read-only query. When the state manager was never initialized — common for a
+    // run that never registered a browser server (e.g. KNOWLEDGE_STORE_MODE='none',
+    // or an early failure before browser startup) — there is simply nothing
+    // recorded. Return null instead of throwing so shutdown paths that probe for a
+    // browser server (scheduler.shutdown) degrade quietly rather than logging a
+    // misleading "State manager not initialized" error.
+    if (!this._stateManager) return null;
     return this.getStateManager().getBrowserServer();
   }
 

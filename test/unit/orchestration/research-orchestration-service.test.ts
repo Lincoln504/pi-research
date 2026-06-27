@@ -259,6 +259,24 @@ describe('ResearchOrchestrationService', () => {
       expect(mockSynthesisService.getAllReports).not.toHaveBeenCalled();
     });
 
+    it('returns early WITHOUT resolving the knowledge store when mode is none', async () => {
+      // With KNOWLEDGE_STORE_MODE='none' the deep orchestrator must never resolve
+      // the knowledge-store service — doing so loads the native @lancedb binding,
+      // which throws on platforms that ship no prebuilt (e.g. Intel macOS) and
+      // contradicts the user's explicit opt-out.
+      const ksSpy = vi.fn();
+      vi.mocked(getService).mockImplementation(async (name) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) { ksSpy(); return mockKnowledgeStoreService as any; }
+        if (name === ServiceNames.RESEARCH_SYNTHESIS_SERVICE) return mockSynthesisService as any;
+        return null;
+      });
+
+      await service.storeLinkDescriptions('s1', 1, 'r1', { KNOWLEDGE_STORE_MODE: 'none' } as any);
+
+      expect(ksSpy).not.toHaveBeenCalled();
+      expect(mockSynthesisService.getAllReports).not.toHaveBeenCalled();
+    });
+
     it('enqueues citations from reports matching the round prefix', async () => {
       const localMockWriter = {
         enqueue: vi.fn(),

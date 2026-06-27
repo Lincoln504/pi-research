@@ -250,6 +250,39 @@ describe('healthcheck', () => {
     expect(ks?.error).toMatch(/unreachable|ECONNREFUSED/i);
   });
 
+  it('reports the knowledge store DISABLED (healthy) when the native vector stack is unavailable on this platform', async () => {
+    // Platforms without a prebuilt native binding (e.g. Intel macOS / darwin-x64:
+    // no onnxruntime-node binary, no @lancedb native binding) throw when the store
+    // is resolved. That is a permanent capability gap, not a fault: the store must
+    // degrade to disabled so a fresh user (default KNOWLEDGE_STORE_MODE='global')
+    // is not blocked from research by an optional cache.
+    vi.mocked(isBrowserAvailable).mockReturnValue(true);
+    vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: true });
+    vi.mocked(getConfig).mockReturnValue({
+      HEALTH_CHECK_TIMEOUT_MS: 25000,
+      KNOWLEDGE_STORE_MODE: 'global',
+      EMBEDDING_MODEL: 'test-model',
+    } as any);
+    // Resolving the knowledge-store service throws the canonical lancedb error.
+    registerService(
+      ServiceNames.KNOWLEDGE_STORE,
+      () => {
+        throw new Error(
+          'Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828).'
+        );
+      },
+      { lazyInitialization: true, allowOverwrite: true, enableLogging: false }
+    );
+
+    const result = await runHealthCheck();
+
+    const ks = result.components?.find(c => c.component === 'KnowledgeStore');
+    expect(ks?.healthy).toBe(true);
+    expect(String(ks?.diagnostic?.['status'])).toMatch(/native embedding\/vector stack unavailable/i);
+    // The degraded store must NOT drag overall health to unhealthy.
+    expect(result.status).not.toBe('unhealthy');
+  });
+
   it('should fail when browser pool health check fails', async () => {
     vi.mocked(isBrowserAvailable).mockReturnValue(true);
     vi.mocked(runBrowserHealthCheck).mockResolvedValue({ success: false });

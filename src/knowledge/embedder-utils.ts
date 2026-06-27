@@ -22,6 +22,36 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMess
 }
 
 /**
+ * Detect whether an error indicates the native ML/vector stack is unavailable on
+ * this platform — i.e. a prebuilt native binding is genuinely missing, not a
+ * transient/logic failure. This is the case on platforms the upstream packages
+ * do not ship binaries for (e.g. Intel macOS / darwin-x64, where onnxruntime-node
+ * has no prebuilt and @lancedb/lancedb's optional native binding is absent).
+ *
+ * Such an error is a permanent capability gap, not a fault: callers should treat
+ * the knowledge store as DISABLED (degrade gracefully) rather than UNHEALTHY, so
+ * research still runs without the optional embedding/vector cache.
+ *
+ * Pure string matching — safe to call from native-import-free modules.
+ * Matched signatures (observed in the wild):
+ *   - onnxruntime-node:  "Cannot find module '.../bin/napi-v6/darwin/x64/onnxruntime_binding.node'"
+ *   - @lancedb/lancedb:  "Cannot find native binding. npm has a bug related to optional dependencies"
+ *   - jiti-masked module-eval failure of the above surfaces as:
+ *                        "KnowledgeStoreService is not a constructor"
+ */
+export function isNativeStackUnavailableError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err instanceof Error ? `${err.message} ${err.stack ?? ''}` : String(err)).toLowerCase();
+  return (
+    msg.includes('cannot find native binding') ||
+    msg.includes('onnxruntime_binding.node') ||
+    /cannot find module '[^']*onnxruntime/.test(msg) ||
+    /cannot find module '[^']*lancedb/.test(msg) ||
+    msg.includes('knowledgestoreservice is not a constructor')
+  );
+}
+
+/**
  * Get the model cache directory
  */
 export function getModelCacheDir(): string {

@@ -147,10 +147,13 @@ export async function createResearcherSession(options: CreateResearcherSessionOp
       thinkingLevel: config?.LLM_THINKING_LEVEL ?? 'off',
     });
 
-    // Customize thinking label for researchers to distinguish them in the TUI.
-    // Use the actual researcherId passed by the caller (not regex on the prompt,
-    // since the ID is never injected into the template).
-    if (extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
+    // Customize the agent thinking label for researchers (e.g. "Researcher 1.1")
+    // so non-TUI surfaces can tell concurrent researchers apart. Skip this in the
+    // research TUI (mode === 'tui'): the panel already shows every researcher, and
+    // the host renders this label as dim/italic thinking text ABOVE the panel —
+    // stray output the panel was meant to replace. Use the researcherId passed by
+    // the caller (not regex on the prompt, since the ID is never templated in).
+    if (extensionCtx.mode !== 'tui' && extensionCtx.hasUI && typeof extensionCtx.ui.setHiddenThinkingLabel === 'function') {
       extensionCtx.ui.setHiddenThinkingLabel(
         researcherId ? `Researcher ${researcherId}` : undefined
       );
