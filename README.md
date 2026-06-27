@@ -1,4 +1,4 @@
-![pi-research banner](docs/README-banner.jpg)
+![pi-research banner](docs/banner.jpg)
 
 <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
 
@@ -43,7 +43,7 @@ pi -p "research the latest developments in WebAssembly"
 ## Documentation
 
 - [Pi extension](docs/PI-EXTENSION.md) — commands, the live TUI, and the extension lifecycle.
-- [Agent skill](skills/pi-research/README.md) — the portable skill that gives any coding agent research via the CLI.
+- [Agent skill](docs/AGENT-SKILL.md) — the portable skill that gives any coding agent research, and how it installs.
 - [OpenClaw plugin](docs/OPENCLAW.md) — install and use pi-research inside OpenClaw.
 - [SDK](docs/SDK.md) — the programmatic library.
 - [Configuration](docs/CONFIGURATION.md) — the TUI settings, every environment variable, and how config layers resolve.

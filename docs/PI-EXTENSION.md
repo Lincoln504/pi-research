@@ -68,22 +68,9 @@ environment-variable list live in [CONFIGURATION.md](CONFIGURATION.md).
 ## Coding-agent skill installer
 
 The `/research-config` menu can install the `pi-research` skill into your other
-coding agents so they can run web research through the CLI:
-
-- **Install in External Agents** — symlinks the skill into Claude (`~/.claude/skills`)
-  and Codex (`~/.codex/skills`), whichever are present on your machine. It never
-  overwrites an unrelated skill already in that slot, and records what it created so
-  removal is exact.
-- **Remove from External Agents** — removes only the symlinks it created. This also
-  runs automatically on `npm uninstall`.
-
-Only agents whose config directory already exists are touched. Cursor is not
-auto-installed (it has no global skills directory and reads only project-level
-`.cursor/skills/`); symlink the skill into a project to use it there:
-
-```bash
-ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" .cursor/skills/pi-research
-```
+coding agents (Claude, Codex) so they can run web research through the CLI, and
+remove it again — with exact, manifest-tracked cleanup. See
+[AGENT-SKILL.md](AGENT-SKILL.md) for the full installation flow.
 
 ## Lifecycle
 
