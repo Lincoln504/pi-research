@@ -625,7 +625,7 @@ USAGE
 
 COMMANDS
   research  "<query>"            Run multi-agent web research (default depth: 1).
-    --depth <1|2|3>              1 = fast/default, 2 = deep, 3 = exhaustive.
+    --depth <0-3>                0 = quick, 1 = normal (default), 2 = deep, 3 = exhaustive.
     --model <provider/id>        Override the model for this run.
     --exclude-tools <a,b>        Disable internal tools (e.g. security,stackexchange).
     --initial-links <url ...>    Seed URLs to investigate first (-- ends options).
