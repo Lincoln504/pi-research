@@ -139,35 +139,31 @@ export function createResearchObserver(
     },
 
     onSearchStart: (_queries) => {
-      // Deferred clearing: remove researchers from previous rounds only when the
-      // new round's search phase starts. This ensures results remain visible
-      // throughout the evaluation phase that preceded this search.
-      if (panelState.needsClear) {
-        clearCompletedResearchers(panelState);
-        panelState.needsClear = false;
-      }
+      // Do NOT clear the previous round's finished boxes here. They stay visible
+      // (greyed) throughout this round's search so the panel never collapses to a
+      // single lone box mid-wave. The deferred clear runs atomically in
+      // onResearcherStart, so every old box (researchers + evaluator) disappears
+      // at once and the new round populates in their place. (needsClear is set by
+      // onRoundStart and consumed there.)
 
-      let sliceId = 'coord';
-      const hasEval = panelState.slices.has('eval');
-      const hasCoord = panelState.slices.has('coord');
-      
+      // Bind the "searching..." status to a real, phase-appropriate box only:
+      //   - quick mode: the single quick-researcher slice
+      //   - round 1:    the coordinator slice (still present before researchers)
+      //   - rounds 2+:  NONE. The coordinator is gone and the evaluator must NOT
+      //     be resurrected as a lone search box (that is the regression this
+      //     guards against). The animated header wave is the search indicator.
+      let sliceId: string | null = null;
       if (state.quickSliceLabel) {
-         sliceId = state.quickSliceLabel;
-      } else if (hasEval || !hasCoord) {
-         // Use eval if it already exists (from a previous round's evaluation)
-         // or if coord is missing (removed after Round 1 started).
-         sliceId = 'eval';
-         if (!hasEval) {
-            addSlice(panelState, 'eval', 'eval', false);
-            updateSliceStatus(panelState, 'eval', 'starting...', debouncedRefresh);
-         }
+        sliceId = state.quickSliceLabel;
+      } else if (panelState.slices.has('coord')) {
+        sliceId = 'coord';
       }
 
-      if (panelState.slices.has(sliceId)) {
-          reactivateSlice(panelState, sliceId);
-          activateSlice(panelState, sliceId); // Ensure not queued
+      if (sliceId && panelState.slices.has(sliceId)) {
+        reactivateSlice(panelState, sliceId);
+        activateSlice(panelState, sliceId); // Ensure not queued
+        updateSliceStatus(panelState, sliceId, 'searching...', debouncedRefresh);
       }
-      updateSliceStatus(panelState, sliceId, 'searching...', debouncedRefresh);
       panelState.statusMessage = 'searching';
       panelState.isSearching = true;
 
@@ -203,18 +199,14 @@ export function createResearchObserver(
     },
 
     onSearchProgress: (count) => {
-      let sliceId = 'coord';
-      const hasEval = panelState.slices.has('eval');
-      const hasCoord = panelState.slices.has('coord');
+      // Only the coordinator (round 1) or quick slice carries a textual search
+      // count. Rounds 2+ have no search box (header wave only) — see onSearchStart.
+      let sliceId: string | null = null;
+      if (state.quickSliceLabel) sliceId = state.quickSliceLabel;
+      else if (panelState.slices.has('coord')) sliceId = 'coord';
 
-      if (state.quickSliceLabel) {
-          sliceId = state.quickSliceLabel;
-      } else if (hasEval || !hasCoord) {
-          sliceId = 'eval';
-      }
-      
       const status = `${count} results`;
-      updateSliceStatus(panelState, sliceId, status, debouncedRefresh);
+      if (sliceId) updateSliceStatus(panelState, sliceId, status, debouncedRefresh);
       panelState.statusMessage = `searching: ${status}`;
       debouncedRefresh();
     },
@@ -231,30 +223,30 @@ export function createResearchObserver(
       panelState.waveColors = undefined; // Clear persistent colors for next search
       panelState.statusMessage = undefined;
 
-      let sliceId = 'coord';
-      const hasEval = panelState.slices.has('eval');
-      const hasCoord = panelState.slices.has('coord');
-      if (state.quickSliceLabel) {
-          sliceId = state.quickSliceLabel;
-      } else if (hasEval || !hasCoord) {
-          sliceId = 'eval';
+      // Mirror onSearchStart: only complete a box that actually hosted the search
+      // (coordinator in round 1, quick slice in quick mode). Rounds 2+ have none.
+      let sliceId: string | null = null;
+      if (state.quickSliceLabel) sliceId = state.quickSliceLabel;
+      else if (panelState.slices.has('coord')) sliceId = 'coord';
+
+      if (sliceId) {
+        updateSliceStatus(panelState, sliceId, `${count} results`, debouncedRefresh);
+        completeSlice(panelState, sliceId);
       }
-      
-      updateSliceStatus(panelState, sliceId, `${count} results`, debouncedRefresh);
-      completeSlice(panelState, sliceId);
       debouncedRefresh();
     },
 
     onResearcherStart: (id, _name, _goal, _roundNumber) => {
       if (panelState.slices.get('coord')?.completed) removeSlice(panelState, 'coord');
-      // Clear the completed evaluator box when the next round's researchers begin,
-      // so the evaluator never lingers alongside the new round. This complements
-      // the deferred clearing below (which may already have run during onSearchStart,
-      // consuming needsClear and leaving a reused/completed 'eval' slice behind).
-      if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
 
-      // Deferred clearing: remove researchers from previous rounds only when the
-      // first researcher of the current round starts.
+      // Atomic round transition: this is the single point where the previous
+      // round's finished boxes (researchers AND evaluator) are cleared, right as
+      // the new round's first researcher appears — so they all vanish together and
+      // the new round populates in their place, never leaving a lone box on screen.
+      // clearCompletedResearchers already removes the completed 'eval'; the explicit
+      // removeSlice is a defensive backstop for the rare path where needsClear is
+      // unset (e.g. round 1 has no prior eval, so it is simply a no-op there).
+      if (panelState.slices.get('eval')?.completed) removeSlice(panelState, 'eval');
       if (panelState.needsClear) {
         clearCompletedResearchers(panelState);
         panelState.needsClear = false;
