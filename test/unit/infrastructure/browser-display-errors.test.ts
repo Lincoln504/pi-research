@@ -30,8 +30,20 @@ vi.mock('camoufox-js', () => ({
   Camoufox: mockCamoufox,
 }));
 
+// Mock node:os so platform() is deterministic regardless of the CI runner OS.
+// thread-worker-browser.ts imports `platform` from node:os to gate the Windows
+// headed-launch fallback; without pinning it, these display-translation tests
+// would trip that fallback (a second Camoufox call) on windows-latest runners.
+vi.mock('node:os', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:os')>();
+  return { ...real, platform: vi.fn().mockImplementation(real.platform) };
+});
+
+import * as nodeOs from 'node:os';
 import { initBrowser, resetBrowser, cleanupBrowser } from '../../../src/infrastructure/browser/thread-worker-browser.ts';
 import { formatHealthError } from '../../../src/tui/research-health.ts';
+
+const platformSpy = vi.mocked(nodeOs.platform);
 
 // ---------------------------------------------------------------------------
 // Named error classes that camoufox-js throws in real production scenarios.
@@ -70,6 +82,10 @@ describe('initBrowser() CannotFindXvfb / display-error translation', () => {
   beforeEach(() => {
     cleanBrowserState();
     vi.clearAllMocks();
+    // Pin to Linux so the win32 headed-launch fallback never re-invokes the
+    // single-shot camoufox mock. These tests assert error translation, not the
+    // Windows fallback (covered separately below).
+    platformSpy.mockReturnValue('linux');
   });
 
   it('wraps CannotFindXvfb into an actionable message with sudo apt install hint', async () => {
@@ -143,6 +159,52 @@ describe('initBrowser() CannotFindXvfb / display-error translation', () => {
 
     // Should not throw — the module-level state was cleaned up by the first failure.
     await expect(initBrowser()).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Windows headed-launch fallback (camoufox issue #614)
+//
+// On a minority of Windows machines a headless camoufox launch crashes
+// immediately (STATUS_BREAKPOINT). thread-worker-browser.ts falls back ONCE to a
+// headed (visible) window so research still works there. This must NOT happen on
+// other platforms, and must not trigger for launch timeouts.
+// ---------------------------------------------------------------------------
+
+describe('initBrowser() Windows headed-launch fallback (#614)', () => {
+  const fakeBrowser = () => ({
+    isConnected: () => true,
+    newContext: vi.fn().mockResolvedValue({
+      close: vi.fn().mockResolvedValue(undefined),
+      route: vi.fn().mockResolvedValue(undefined),
+    }),
+    close: vi.fn().mockResolvedValue(undefined),
+  });
+
+  beforeEach(() => {
+    cleanBrowserState();
+    vi.clearAllMocks();
+  });
+
+  it('on win32, retries once with a headed window after a headless crash', async () => {
+    platformSpy.mockReturnValue('win32');
+    mockCamoufox
+      .mockRejectedValueOnce(new Error('Browser closed (STATUS_BREAKPOINT 0x80000003)'))
+      .mockResolvedValueOnce(fakeBrowser());
+
+    await expect(initBrowser()).resolves.toBeUndefined();
+    // First call headless:true, second (fallback) headless:false.
+    expect(mockCamoufox).toHaveBeenCalledTimes(2);
+    expect(mockCamoufox.mock.calls[0]?.[0]).toMatchObject({ headless: true });
+    expect(mockCamoufox.mock.calls[1]?.[0]).toMatchObject({ headless: false });
+  });
+
+  it('does NOT fall back on non-Windows platforms', async () => {
+    platformSpy.mockReturnValue('linux');
+    mockCamoufox.mockRejectedValueOnce(new Error('Browser closed (STATUS_BREAKPOINT 0x80000003)'));
+
+    await expect(initBrowser()).rejects.toThrow();
+    expect(mockCamoufox).toHaveBeenCalledTimes(1);
   });
 });
 
