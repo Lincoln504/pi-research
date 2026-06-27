@@ -17,33 +17,27 @@ pi CLI
         └── Core            service registry, scheduler, health checks
 ```
 
----
-
-## Layers
-
-### Orchestration
+## Orchestration
 
 Two orchestrators handle research sessions:
 
-**QuickResearchOrchestrator** (`src/orchestration/quick-research-orchestrator.ts`)
+QuickResearchOrchestrator (`src/orchestration/quick-research-orchestrator.ts`)
 - Single researcher agent, depth 0
 - No planning phase — agent runs directly with all tools
 
-**DeepResearchOrchestrator** (`src/orchestration/deep-research-orchestrator.ts`)
+DeepResearchOrchestrator (`src/orchestration/deep-research-orchestrator.ts`)
 - Coordinator → N parallel researchers → evaluator → synthesis
 - Depths 1–3 map to 2/3/5 researchers and 2/3/3 rounds
 - Coordinator plans research tracks; evaluator decides whether to go deeper
 
 `runResearch` in `IResearchOrchestration` is the single internal entry point, implemented in `src/orchestration/research-orchestration-service.ts`.
 
-**LLM-call conventions.** The coordinator, evaluator, final synthesis, JSON-repair, and knowledge-extraction calls all go through `completeSimple` + `buildSafeOptions` (`src/core/llm/llm-utils.ts`), and the researcher sub-agents through `createAgentSession`. Two conventions apply uniformly:
+LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and knowledge-extraction calls go through `completeSimple` + `buildSafeOptions` (`src/core/llm/llm-utils.ts`); researcher sub-agents go through `createAgentSession`. Two conventions apply:
 
-- **Thinking is off by default.** These calls emit structured JSON or cited reports, not open-ended reasoning, so a chain-of-thought block only consumes the output-token budget (and can truncate the answer before any text is produced) for at most a marginal quality gain that does not justify the latency and token cost. The level is the single `PI_RESEARCH_LLM_THINKING_LEVEL` knob (default `off`), passed through pi's model-agnostic reasoning option — pi clamps it to whatever each provider supports.
-- **Output budgets are sized per role**, clamped to the model's real ceiling: a generous budget for the plan/decision (`PLANNING_MAX_TOKENS`) and a larger one for the final report (`SYNTHESIS_MAX_TOKENS`). The final report *is* the evaluator's `synthesize` response, so that call carries the report budget. A mid-round evaluation that cannot be parsed continues the existing agenda rather than finalizing early, so a transient model hiccup never truncates a run.
+- Thinking is off by default. These calls emit structured JSON or cited reports, so a chain-of-thought block consumes output-token budget (and can truncate the answer) for little gain. One knob controls it: `PI_RESEARCH_LLM_THINKING_LEVEL` (default `off`), passed through pi's reasoning option and clamped per provider.
+- Output budgets are sized per role and clamped to the model's ceiling: `PLANNING_MAX_TOKENS` for the plan/decision, `SYNTHESIS_MAX_TOKENS` for the final report. The report is the evaluator's `synthesize` response, so that call carries the report budget. A mid-round evaluation that cannot be parsed continues the existing agenda rather than finalizing early, so a parse failure does not truncate a run.
 
----
-
-### Research Tools
+## Research Tools
 
 Each researcher agent has access to a fixed tool set with shared budget (12 calls across gathering tools per phase):
 
@@ -61,9 +55,7 @@ In deep research, `search` is excluded from researchers — the orchestrator run
 
 Researchers cannot write files, run shell commands, or access the network outside these tools.
 
----
-
-### Browser Infrastructure
+## Browser Infrastructure
 
 All browser operations (search, scrape, health checks) go through a poolifier `FixedClusterPool` of worker processes. Workers are Node.js child processes each running a camoufox (stealth Firefox) instance.
 
@@ -83,13 +75,11 @@ Key files:
 
 Workers run in `FULL_MOCK_MODE` (both `PI_RESEARCH_MOCK_SEARCH` and `PI_RESEARCH_MOCK_SCRAPE` set) during CI to avoid FixedClusterPool deadlocks in Vitest's fork context.
 
----
-
-### Knowledge Store
+## Knowledge Store
 
 Scraped content is embedded and stored in LanceDB for cross-session deduplication and RAG retrieval.
 
-**Pipeline integration** — the knowledge store is accessed at the orchestrator level, not by researcher agents directly:
+Pipeline integration — the knowledge store is accessed at the orchestrator level, not by researcher agents directly:
 - Before each researcher starts, the orchestrator queries the store per-researcher goal and injects matching historical URLs (with summaries) into the researcher's system prompt.
 - After research completes, parsed citation URLs and descriptions are enqueued into the writer queue for the next session.
 
@@ -112,12 +102,10 @@ Key files:
 
 The store depends on native ONNX-runtime and LanceDB bindings. Platforms without a
 prebuilt binary — notably Intel macOS (`darwin-x64`) — have no store: the health
-check reports it as *disabled (healthy)* and research runs without the cache. See
+check reports it as disabled (healthy) and research runs without the cache. See
 [KNOWLEDGE-STORE.md](KNOWLEDGE-STORE.md) for the full subsystem and platform matrix.
 
----
-
-### Service Registry
+## Service Registry
 
 Services are registered with async factory functions and initialized lazily or eagerly. Dependencies are resolved at initialization time via `getService()`.
 
@@ -138,19 +126,13 @@ Core services (`src/core/`): `PlanningService`, `SchedulerService`
 Infrastructure services (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`.
 Orchestration services (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`.
 
----
-
-### State Management
+## State Management
 
 Cross-session and cross-process state (active sessions, browser status, metrics) is managed by `StateManagerService` (in `src/infrastructure/state/`) using file-based locking (`FileLockService`) to serialize concurrent writes.
 
----
-
-### TUI
+## TUI
 
 The research TUI uses `@earendil-works/pi-tui` to render live progress panels. Terminal state (keyboard protocol, mouse tracking, bracketed paste) and stdio capture are managed by utilities in `src/tui/utils/` to ensure a clean exit.
-
----
 
 ## Project Structure
 
@@ -206,21 +188,17 @@ src/
 └── utils/                circuit breaker, text-utils, shared-links, metrics, error tracking
 ```
 
----
-
 ## Key Design Decisions
 
-**No shell commands in researchers** — researcher agents are sandboxed to the tool set above. They cannot write files, spawn processes, or make arbitrary network calls.
+No shell commands in researchers — researcher agents are sandboxed to the tool set above. They cannot write files, spawn processes, or make arbitrary network calls.
 
-**Worker pool over direct browser** — browser processes are isolated in workers so a crash in one worker does not affect the orchestrator or other sessions.
+Worker pool over direct browser — browser processes are isolated in workers so a crash in one worker does not affect the orchestrator or other sessions.
 
-**Service registry over direct imports** — services are registered and resolved through the registry to support testing (mock replacement) and to enforce lifecycle discipline (init → use → dispose).
+Service registry over direct imports — services are registered and resolved through the registry to support testing (mock replacement) and to enforce lifecycle discipline (init → use → dispose).
 
-**Pure ESM** — the entire codebase uses ES Modules (`"type": "module"`). Worker bundles are built with esbuild (`npm run build:worker`) before integration tests or publishing.
+Pure ESM — the entire codebase uses ES Modules (`"type": "module"`). Worker bundles are built with esbuild (`npm run build:worker`) before integration tests or publishing.
 
-**Dependency graph** — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).
-
----
+Dependency graph — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).
 
 ## Development
 

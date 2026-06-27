@@ -1,7 +1,7 @@
 # research — an Agent Skill for pi-research
 
 A portable [Agent Skill](https://agentskills.io/specification) that gives any
-coding agent **multi-agent web research** by driving the
+coding agent multi-agent web research by driving the
 [pi-research](https://github.com/Lincoln504/pi-research) engine. It is the same
 engine the `pi` extension uses, packaged as a skill so Claude, Cursor,
 Codex, Gemini CLI, and other Agent-Skills-compatible tools can use it.
@@ -10,12 +10,12 @@ Codex, Gemini CLI, and other Agent-Skills-compatible tools can use it.
 
 Two capabilities, invoked as shell subcommands:
 
-- **`research "<query>"`** — live multi-agent web research (search + stealth
+- `research "<query>"` — live multi-agent web research (search + stealth
   scraping + security databases + Stack Exchange). Returns a cited Markdown report.
-- **`knowledge "<query>"`** — search a local database of previously researched
+- `knowledge "<query>"` — search a local database of previously researched
   findings before doing live research (instant, free, opt-in).
 
-Plus **`status`** to inspect detection/config without running research.
+Plus `status` to inspect detection/config without running research.
 
 ## How it works
 
@@ -36,7 +36,7 @@ model/key is missing.
 ## Prerequisites
 
 - Node.js >= 22.19
-- `pi-research` installed somewhere the launcher can find it, **and** a model +
+- `pi-research` installed somewhere the launcher can find it, and a model +
   API key configured. See [`references/configuration.md`](references/configuration.md).
 
 ```bash
@@ -46,15 +46,15 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 
 ## Install the skill
 
-**Recommended.** From the pi extension, run `/research-config` and choose
-**Install Skill in Coding Agents**. It detects Claude and Codex and symlinks this
-skill into each one that is installed. **Uninstall Skill from Coding Agents**
+Recommended. From the pi extension, run `/research-config` and choose
+Install Skill in Coding Agents. It detects Claude and Codex and symlinks this
+skill into each one that is installed. Uninstall Skill from Coding Agents
 removes those symlinks (cleanup also runs automatically on `npm uninstall`).
 
 Cursor is not auto-installed — it has no global skills directory and only reads
 project-level `.cursor/skills/`. Symlink it per-project instead (see the table).
 
-**Manual.** Or symlink this `pi-research/` directory into your agent's skills folder:
+Manual. Or symlink this `pi-research/` directory into your agent's skills folder:
 
 | Agent | Location |
 |-------|----------|
@@ -64,7 +64,7 @@ project-level `.cursor/skills/`. Symlink it per-project instead (see the table).
 | Codex CLI (project)  | `<project>/.codex/skills/pi-research/` |
 | Cursor (project-only) | `<project>/.cursor/skills/pi-research/` |
 
-Then just ask your agent to pi-research something — its skill system matches the
+Then ask your agent to pi-research something — its skill system matches the
 `description` in `SKILL.md` and activates this skill automatically.
 
 ## Usage from an agent

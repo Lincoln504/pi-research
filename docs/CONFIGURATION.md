@@ -10,17 +10,15 @@ environment-variable reference, and finally how the configuration layers resolve
 - [How configuration is layered](#how-configuration-is-layered)
 - [Where files live](#where-files-live)
 
----
-
 ## Settings in the TUI
 
 Run `/research-config` in the pi extension to open an interactive menu. Selecting a
 setting and pressing `Enter` / `Space` cycles its value; the change is saved
 immediately. A setting is written to one of two scopes:
 
-- **`[project]`** — saved per working directory in the central project registry, so
+- `[project]` — saved per working directory in the central project registry, so
   a given repo can carry its own value without changing your global default.
-- **user** — saved to the shared base file (`config.env`), applying to every
+- user — saved to the shared base file (`config.env`), applying to every
   directory and front-end unless a higher layer overrides it.
 
 | Setting | Scope | Values | Env var |
@@ -36,23 +34,21 @@ immediately. A setting is written to one of two scopes:
 | Cache Retention | user | 7 · 14 · 30 · 60 · 90 · 180 · 365 (days) | `PI_RESEARCH_CACHE_TTL_DAYS` |
 | Debug Logging | user | true · false | `PI_RESEARCH_DEBUG` |
 
-**Embedding Device** offers two choices in the menu. **GPU** maps to the safe
+Embedding Device offers two choices in the menu. GPU maps to the
 auto-detect path: pi-research probes whether WebGPU actually runs on this machine
-and automatically falls back to CPU if it does not. **CPU** forces CPU-only
+and falls back to CPU if it does not. CPU forces CPU-only
 inference. Raw forced-GPU (no probe) is reachable only through the
 `PI_RESEARCH_EMBEDDING_DEVICE=webgpu` environment variable, for benchmarking — see
 the [knowledge store doc](KNOWLEDGE-STORE.md#device-selection).
 
-The **Embedding Model**, **Embedding Device**, and **Cache Retention** rows appear
+The Embedding Model, Embedding Device, and Cache Retention rows appear
 only when Knowledge Mode is not `none`.
 
-The menu also offers actions that are not settings: **Run Diagnostics** (health
-check), **Database Status**, **Clear Project / User Store**, **Session Metrics**,
-**Clear Debug Logs**, and **Install / Remove in External Agents** (the coding-agent
-skill installer). Browser worker count is deliberately **not** in the menu — it is
+The menu also offers actions that are not settings: Run Diagnostics (health
+check), Database Status, Clear Project / User Store, Session Metrics,
+Clear Debug Logs, and Install / Remove in External Agents (the coding-agent
+skill installer). Browser worker count is deliberately not in the menu — it is
 CPU/RAM-sensitive and set only via `PI_RESEARCH_WORKER_THREADS`.
-
----
 
 ## Environment variables
 
@@ -62,30 +58,30 @@ notes; this section groups the same variables with their defaults and valid rang
 Out-of-range numeric values are clamped (with a warning); an invalid enum value
 falls back to the default (with a warning).
 
-The TUI-exposed variables are marked **(TUI)**. The `[project]` mark indicates a
+The TUI-exposed variables are marked `(TUI)`. The `[project]` mark indicates a
 project-scoped key (saved per directory in the registry); all others are
 user-scoped.
 
-### Research
+## Research
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_TIMEOUT_MS` **(TUI)** | `300000` | 180000–1800000 | Per-researcher timeout (3–30 min). |
-| `PI_RESEARCH_MAX_RESEARCHERS` **(TUI)** | `3` | 1–5 | Parallel researchers. |
-| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` **(TUI)** `[project]` | `1` | 1–3 | Depth for `/research` and the CLI when `--depth` is omitted (1=normal, 2=deep, 3=ultra). |
-| `PI_RESEARCH_MAX_SCRAPE_BATCHES` **(TUI)** | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). |
+| `PI_RESEARCH_TIMEOUT_MS` (TUI) | `300000` | 180000–1800000 | Per-researcher timeout (3–30 min). |
+| `PI_RESEARCH_MAX_RESEARCHERS` (TUI) | `3` | 1–5 | Parallel researchers. |
+| `PI_RESEARCH_DEFAULT_RESEARCH_DEPTH` (TUI) `[project]` | `1` | 1–3 | Depth for `/research` and the CLI when `--depth` is omitted (1=normal, 2=deep, 3=ultra). |
+| `PI_RESEARCH_MAX_SCRAPE_BATCHES` (TUI) | `2` | 0–99 | Scrape batches per researcher (0 = unlimited). |
 | `PI_RESEARCH_MAX_CONCURRENT_SCRAPES` | `3` | 1–20 | Concurrent URLs fetched per scrape batch. |
 | `PI_RESEARCH_MAX_RETRIES` | `2` | 0–5 | Retries per researcher request. |
 | `PI_RESEARCH_RETRY_DELAY_MS` | `2000` | 100–10000 | Base delay between retries. |
 | `PI_RESEARCH_WORKER_THREADS` | `4` | 1–10 | Browser worker processes. Higher = more throughput, more CPU/RAM. |
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
 | `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents (deep and quick) and knowledge synthesis. The coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |
-| `PI_RESEARCH_REPORT_EXPORT_ENABLED` **(TUI)** | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
+| `PI_RESEARCH_REPORT_EXPORT_ENABLED` (TUI) | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
 | `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the skill / OpenClaw, which run from the host agent's arbitrary directory. |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape result, used for planning. |
 
-### YouTube transcripts
+## YouTube transcripts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -95,7 +91,7 @@ user-scoped.
 | `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | 1–100 | Append `youtube` to roughly one-in-N search queries (1 = every query). |
 | `PI_RESEARCH_YOUTUBE_POTOKEN_REQUEST_KEY` | _(built-in)_ | — | Advanced: override the BotGuard PoToken web request key (only if YouTube rotates the public key and transcripts start failing). |
 
-### Timeouts
+## Timeouts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -105,32 +101,32 @@ user-scoped.
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait / overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Pre-flight health-check timeout. |
 
-### LLM output & reasoning
+## LLM output & reasoning
 
 These are advanced, env-only knobs (not in the TUI).
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for **all** engine LLM work (coordinator, evaluator, synthesis, JSON-repair, knowledge extraction, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so a thinking block only consumes the output budget and can truncate the answer. Clamped per model by pi. |
+| `PI_RESEARCH_LLM_THINKING_LEVEL` | `off` | off · minimal · low · medium · high | Chain-of-thought level for all engine LLM work (coordinator, evaluator, synthesis, JSON-repair, knowledge extraction, and researcher sub-agents). Off by default — these calls emit structured JSON / cited reports, so a thinking block only consumes the output budget and can truncate the answer. Clamped per model by pi. |
 | `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision. Clamped to the model's real ceiling. |
 | `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report. Clamped to the model's real ceiling. |
 
-### Knowledge store
+## Knowledge store
 
 See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` **(TUI)** `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). |
-| `PI_RESEARCH_EMBEDDING_MODEL` **(TUI)** | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model. Changing it clears the store and starts fresh. |
-| `PI_RESEARCH_EMBEDDING_DEVICE` **(TUI)** | `auto` | auto · webgpu · cpu | Inference backend. `auto` probes WebGPU viability out-of-process and falls back to CPU; `cpu` forces CPU; `webgpu` forces the GPU path with no probe (advanced — can hard-crash on a software GPU). The TUI exposes only `auto` (as "GPU") and `cpu`. |
-| `PI_RESEARCH_CACHE_TTL_DAYS` **(TUI)** | `30` | 1–365 | How long cached findings are kept before eviction. |
+| `PI_RESEARCH_KNOWLEDGE_STORE_MODE` (TUI) `[project]` | `global` | none · project · global | Store scope: one shared store across every directory (`global`), scoped to the current directory (`project`), or disabled (`none`). |
+| `PI_RESEARCH_EMBEDDING_MODEL` (TUI) | `onnx-community/granite-embedding-small-english-r2-ONNX` | — | Embedding model. Changing it clears the store and starts fresh. |
+| `PI_RESEARCH_EMBEDDING_DEVICE` (TUI) | `auto` | auto · webgpu · cpu | Inference backend. `auto` probes WebGPU viability out-of-process and falls back to CPU; `cpu` forces CPU; `webgpu` forces the GPU path with no probe (advanced — can hard-crash on a software GPU). The TUI exposes only `auto` (as "GPU") and `cpu`. |
+| `PI_RESEARCH_CACHE_TTL_DAYS` (TUI) | `30` | 1–365 | How long cached findings are kept before eviction. |
 | `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` | drop · backup · re-embed | What to do with stored data when the embedding model changes. |
 | `PI_RESEARCH_KNOWLEDGE_DIR` | _(auto)_ | — | Override the knowledge-store database directory. Default: `~/.pi/research/knowledge_db`. |
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model initialization timeout (first-time download can be slow). |
 | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ | — | Set `1` to discard the cached WebGPU-viability verdict and probe again on next use. |
 
-### API keys (all optional)
+## API keys (all optional)
 
 | Variable | Description |
 |----------|-------------|
@@ -139,11 +135,11 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. |
 
-### Diagnostics & platform
+## Diagnostics & platform
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PI_RESEARCH_DEBUG` **(TUI)** | `false` | Verbose INFO+DEBUG logging to the log file. |
+| `PI_RESEARCH_DEBUG` (TUI) | `false` | Verbose INFO+DEBUG logging to the log file. |
 | `PI_RESEARCH_CONSOLE_LOG` | `false` | Mirror logs to stdout/stderr (useful in CI / headless). |
 | `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path. Browser workers inherit it automatically. |
 | `PI_RESEARCH_LOG_FILE` | _(unset)_ | Send browser worker-thread logs to a separate file. If unset, workers log to `PI_RESEARCH_LOG_PATH`. |
@@ -155,7 +151,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
 
-### Testing only — never enable in production
+## Testing only — never enable in production
 
 | Variable | Description |
 |----------|-------------|
@@ -164,12 +160,10 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_FORCE_READY` | Bypass readiness checks and run even when critical services failed to initialize. |
 | `PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE` | Permit scraping loopback/private/internal addresses, bypassing SSRF protection. |
 
----
-
 ## How configuration is layered
 
 Configuration resolves from the following layers, lowest to highest precedence
-(**later wins**):
+(later wins):
 
 ```
 built-in defaults
@@ -180,11 +174,11 @@ built-in defaults
   < process.env                                      (real shell env always wins)
 ```
 
-**Base file.** `config.env` holds your shared, user-scoped settings. The
+Base file. `config.env` holds your shared, user-scoped settings. The
 `/research-config` TUI edits only this file (and the project registry) — never the
 overlays or the merged view — so overlay values are never baked back into the base.
 
-**Per-front-end overlays.** Each front-end reads only its own optional overlay,
+Per-front-end overlays. Each front-end reads only its own optional overlay,
 layered over the shared base, so they can be configured independently. Exactly three
 exist:
 
@@ -193,7 +187,7 @@ exist:
 - `~/.pi/research/cli.env` — the standalone CLI / agent skill
 
 The overlay files do not exist by default; create the one you need by hand. There is
-intentionally **no `sdk.env`**: the SDK is a library configured from code (see
+intentionally no `sdk.env`: the SDK is a library configured from code (see
 [SDK.md](SDK.md)), not from a global file.
 
 Example — give the standalone CLI / agent skill its own model and depth without
@@ -208,18 +202,16 @@ PI_RESEARCH_MODEL=openrouter/anthropic/claude-sonnet-4-6
 PI_RESEARCH_DEFAULT_RESEARCH_DEPTH=2
 ```
 
-**Project registry.** Project-scoped settings (research depth and knowledge-store
+Project registry. Project-scoped settings (research depth and knowledge-store
 mode) are stored per directory in `project-settings.json`, keyed by normalized
 working-directory path. They override the base and overlays for that directory only.
 
-**process.env.** A real environment variable always wins. For a one-off override,
+process.env. A real environment variable always wins. For a one-off override,
 just export the variable for that process.
 
 > The base file is not loaded automatically by your shell. Either use the
 > `/research-config` TUI (which writes it), export variables in your shell, or use a
 > loader such as direnv. `.env.example` is a reference, not an active config file.
-
----
 
 ## Where files live
 

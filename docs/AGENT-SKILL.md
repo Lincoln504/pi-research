@@ -27,14 +27,14 @@ is missing. It exposes three subcommands: `research "<query>"` (live research),
 The skill source lives at `skills/pi-research/` inside the package. Installing means
 linking that directory into each agent's skills folder.
 
-**One-click (recommended).** From the `pi` extension, run `/research-config` →
-**Install Skill in Coding Agents**. The installer:
+One-click (recommended). From the `pi` extension, run `/research-config` →
+Install Skill in Coding Agents. The installer:
 
-1. Detects which target agents are present under `$HOME` — currently **Claude**
-   (`~/.claude/skills`) and **OpenAI Codex CLI** (`~/.codex/skills`).
-2. Symlinks `skills/pi-research/` into each present agent, **never** overwriting an
+1. Detects which target agents are present under `$HOME` — currently Claude
+   (`~/.claude/skills`) and OpenAI Codex CLI (`~/.codex/skills`).
+2. Symlinks `skills/pi-research/` into each present agent, never overwriting an
    unrelated skill already in that slot.
-3. Records what it created in a manifest, so **Uninstall Skill in Coding Agents**
+3. Records what it created in a manifest, so Uninstall Skill in Coding Agents
    removes only its own links. Stale links are also garbage-collected on startup and
    on `npm uninstall`.
 
@@ -45,7 +45,7 @@ directory and reads only project-level `.cursor/skills/`. Link it per project:
 ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" .cursor/skills/pi-research
 ```
 
-**Manual.** Symlink the directory into any agent's skills folder yourself:
+Manual. Symlink the directory into any agent's skills folder yourself:
 
 | Agent | Personal | Project |
 |-------|----------|---------|
@@ -64,7 +64,7 @@ npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status   # verify the engine is detected
 ```
 
-Once installed, just ask the agent to research something — its skill system activates
+Once installed, ask the agent to research something — its skill system activates
 pi-research automatically. The in-package readme (`skills/pi-research/README.md`) and
 `skills/pi-research/references/configuration.md` carry the same detail for anyone
 browsing the skill directly.

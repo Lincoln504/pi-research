@@ -17,8 +17,6 @@ without it — but it makes repeat work faster and cheaper.
 - [Managing the store](#managing-the-store)
 - [Settings](#settings)
 
----
-
 ## What it stores
 
 The store is a [LanceDB](https://lancedb.com) table on disk. After each research
@@ -35,11 +33,9 @@ finding can be rehydrated later without re-scraping.
 Writes never block a research run — they go through an asynchronous writer queue that
 is drained at the end of the round and on shutdown.
 
----
-
 ## Scopes: none, project, global
 
-The store's reach is set by **Knowledge Mode** (`PI_RESEARCH_KNOWLEDGE_STORE_MODE`),
+The store's reach is set by Knowledge Mode (`PI_RESEARCH_KNOWLEDGE_STORE_MODE`),
 a project-scoped setting you can change per directory:
 
 | Mode | Behavior |
@@ -53,29 +49,25 @@ distinguished by columns (a normalized workspace path and a global flag) and fil
 at query time, not by separate folders. The default database directory is
 `~/.pi/research/knowledge_db/` (override with `PI_RESEARCH_KNOWLEDGE_DIR`).
 
-The embedding model is **lazy** — it only downloads and initializes the first time
+The embedding model is lazy — it only downloads and initializes the first time
 the store is actually written or searched, so the `global` default adds no startup
 cost until a run caches its first page.
-
----
 
 ## How a run uses the store
 
 The store is driven by the orchestrator, not called ad hoc by researcher agents,
 which keeps its use deterministic:
 
-1. **Before** each researcher starts, the orchestrator searches the store for the
+1. Before each researcher starts, the orchestrator searches the store for the
    researcher's goal and injects any matching historical URLs — each with its prior
    summary — into that researcher's prompt as suggested starting points to re-scrape.
-2. **After** the round, the cited URLs and their descriptions are enqueued into the
+2. After the round, the cited URLs and their descriptions are enqueued into the
    writer queue for the next session.
 
 Separately, the `research_knowledge_search` tool (and the SDK's `searchKnowledge()`)
 lets the model query the store directly: it rehydrates the most relevant stored
 documents, asks a background LLM whether they answer the question, and returns a
 synthesized answer with citations — or reports that live research is needed.
-
----
 
 ## Embeddings and the model
 
@@ -107,37 +99,31 @@ The model is downloaded from Hugging Face on first use and cached; the first dow
 can take a few minutes (raise `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` on a slow
 connection).
 
----
-
 ## Device selection
 
 Embeddings run on either the GPU (WebGPU, via the runtime's bundled Dawn backend) or
 the CPU. The backend is chosen by `PI_RESEARCH_EMBEDDING_DEVICE`:
 
-- **`auto`** (default; shown as **GPU** in the TUI) — pi-research probes WebGPU
+- `auto` (default; shown as GPU in the TUI) — pi-research probes WebGPU
   viability in a disposable child process: it loads the model and runs one real
   embedding there. If that succeeds, the GPU is used; if it fails, the CPU is used.
   The verdict is cached, so the probe runs at most once per machine + model.
-- **`cpu`** (shown as **CPU** in the TUI) — forces CPU inference, no probe.
-- **`webgpu`** — forces the GPU path with **no** probe. Advanced / env-only; see
-  below.
+- `cpu` (shown as CPU in the TUI) — forces CPU inference, no probe.
+- `webgpu` — forces the GPU path with no probe. Advanced / env-only; see below.
 
-**Why the probe exists.** Many real targets — VMs, containers, CI runners, and
-headless hosts with only a software Vulkan driver — expose a GPU that the native
-backend cannot actually run compute on, and that failure is a native segfault, not a
-catchable error: it kills the process. The `auto` probe detects this safely in a
-throwaway child (whose crash cannot take the main process down) and falls back to
-CPU. Because forcing `webgpu` skips this safety check and can hard-crash on such a
-host, the `/research-config` menu intentionally offers only **GPU** (= `auto`) and
-**CPU**. Raw `webgpu` remains available through the environment variable for
+Why the probe exists. Some hosts — VMs, containers, CI runners, headless machines
+with a software Vulkan driver — expose a GPU the native backend cannot run compute
+on. That failure is a native segfault, not a catchable error, so it terminates the
+process. The `auto` probe tests viability in a child process (whose crash cannot
+affect the main process) and falls back to CPU. Forcing `webgpu` skips this check and
+can crash on such a host, so the `/research-config` menu offers only GPU (= `auto`)
+and CPU. Raw `webgpu` stays available through the environment variable for
 benchmarking on a host with a known-good GPU.
 
 The cached verdict lives at `~/.cache/pi-research/webgpu-viability.json`, keyed by
 platform, architecture, Node major version, and model. Set
 `PI_RESEARCH_WEBGPU_REPROBE=1` to discard it and probe again (for example after a
 driver upgrade).
-
----
 
 ## Platform support (no Intel Mac)
 
@@ -148,28 +134,22 @@ platform/architecture pairs:
 | Platform | Architecture | Knowledge store |
 |----------|--------------|-----------------|
 | macOS | Apple Silicon (arm64) | Supported |
-| macOS | **Intel (x64)** | **Not available** |
+| macOS | Intel (x64) | Not available |
 | Linux | x64 / arm64 | Supported |
 | Windows | x64 / arm64 | Supported |
 
-**Intel Macs (`darwin-x64`) have no prebuilt binary for either component**, so the
-knowledge store cannot run there. This is a permanent capability gap, not a fault,
-and it is handled gracefully:
+Intel Macs (`darwin-x64`) have no prebuilt binary for either component, so the
+knowledge store cannot run there. The degradation is automatic:
 
-- **Research still works fully.** Search, scraping, YouTube transcripts, the security
-  databases, Stack Exchange, planning, and synthesis are all unaffected — only the
-  optional store is missing.
-- **The health check reports the store as disabled, not unhealthy.** When the native
-  stack is unavailable, the store's health component returns *disabled (native
-  embedding/vector stack unavailable on this platform)* with a healthy status, so the
-  missing component does not drag overall health to "unhealthy" or block a quick
-  (depth-0) run from starting.
-- The `research_knowledge_search` tool simply does no caching or retrieval; every run
-  goes straight to the live web.
+- Research still works. Search, scraping, YouTube transcripts, the security databases,
+  Stack Exchange, planning, and synthesis are unaffected — only the store is missing.
+- The health check reports the store as disabled, not unhealthy: its health component
+  returns disabled (native embedding/vector stack unavailable on this platform) with a
+  healthy status, so the missing component does not drag overall health to "unhealthy"
+  or block a quick (depth-0) run.
+- `research_knowledge_search` does no caching or retrieval; every run goes to the live web.
 
-No configuration is needed on an Intel Mac — the degradation is automatic.
-
----
+No configuration is needed on an Intel Mac.
 
 ## Retention and eviction
 
@@ -177,8 +157,6 @@ Cached findings are kept for `PI_RESEARCH_CACHE_TTL_DAYS` (default 30; range 1�
 Eviction is checked when the store opens and removes only rows older than the cutoff
 within the current scope. Lower the value for fresher data and less disk; raise it to
 keep history longer.
-
----
 
 ## Changing the model: migration
 
@@ -195,20 +173,16 @@ If the chosen strategy fails, pi-research falls back to `backup`, then to `drop`
 rather than leaving the store in a broken state. Changing the model from the
 `/research-config` menu always clears the current store and starts fresh.
 
----
-
 ## Managing the store
 
 From `/research-config`:
 
-- **Database Status** — entry counts (project and user), the active embedding model
+- Database Status — entry counts (project and user), the active embedding model
   and device, and the on-disk path.
-- **Clear Project Store** / **Clear User Store** — permanently delete the
+- Clear Project Store / Clear User Store — permanently delete the
   project-scoped or global rows (shown according to the current mode).
-- **Run Diagnostics** — exercises the browser pool, GPU/embedding, and database
+- Run Diagnostics — exercises the browser pool, GPU/embedding, and database
   connectivity, and reports the store's health state.
-
----
 
 ## Settings
 

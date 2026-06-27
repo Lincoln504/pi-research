@@ -7,21 +7,19 @@ layering model, the TUI settings, and every environment variable — see
 - [Programmatic SDK](#programmatic-sdk)
 - [Health & knowledge-store APIs](#health--knowledge-store-apis)
 
----
-
 ## Programmatic SDK
 
-`src/sdk.ts` is a library for scripts, CI, and custom tooling. **It is configured
-from code, not from a global overlay file** — there is no `sdk.env`. It reads the
-base `~/.pi/research/config.env` as a convenience baseline, and everything is
+`src/sdk.ts` is a library for scripts, CI, and custom tooling. It is configured
+from code, not from a global overlay file — there is no `sdk.env`. It reads the
+base `~/.pi/research/config.env` as a baseline, and everything is
 overridable via `options.config`. Pass `ignoreGlobalConfig: true` to ignore the
 global file entirely and run purely from defaults + `process.env` + `options.config`
-— fully self-contained and reproducible from code.
+— self-contained and reproducible from code.
 
-> **Runtime requirement.** The package exports (`.` and `/sdk`) resolve to
+> Runtime requirement. The package exports (`.` and `/sdk`) resolve to
 > TypeScript source — there is no transpiled `dist/sdk.js`. Import it from a
-> TypeScript-aware runtime: the pi host (which loads it natively), **Node ≥ 22.6
-> with type stripping** (`node --experimental-strip-types your-script.ts`, the
+> TypeScript-aware runtime: the pi host (which loads it natively), Node ≥ 22.6
+> with type stripping (`node --experimental-strip-types your-script.ts`, the
 > default from Node 23.6+), or a loader such as `tsx` / `ts-node`. Plain
 > `node script.js` doing `require('@lincoln504/pi-research/sdk')` will not work.
 > (`engines.node` is `>=22.19.0`, so a supported install already meets this.)
@@ -62,11 +60,10 @@ await shutdownResearchSDK();
 `getLastRunStats`, and `getSessionMetrics`. Both `@lincoln504/pi-research` and
 `@lincoln504/pi-research/sdk` export these symbols.
 
-The SDK never writes report files (a library should not have surprising side
-effects). Report export is a front-end concern — the pi extension, OpenClaw
-plugin, and CLI do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
+The SDK does not write report files. Report export is a front-end concern — the pi
+extension, OpenClaw plugin, and CLI do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 
-### Init options
+## Init options
 
 | Option | Description |
 |--------|-------------|
@@ -79,10 +76,8 @@ plugin, and CLI do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 
 For configuration precedence, the per-front-end overlays, and the full
 environment-variable reference, see [CONFIGURATION.md](CONFIGURATION.md). Note that
-the SDK is configured **from code** and has no overlay file — pass `ignoreGlobalConfig: true`
-for a fully hermetic run.
-
----
+the SDK is configured from code and has no overlay file — pass `ignoreGlobalConfig: true`
+for a hermetic run.
 
 ## Health & knowledge-store APIs
 
