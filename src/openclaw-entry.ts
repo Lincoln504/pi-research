@@ -379,7 +379,11 @@ export default definePluginEntry({
             depth: String(depth), status: 'success', source: 'openclaw',
           });
           
-          if (config.reportExportEnabled) {
+          // Gate on the fully-resolved config (config.env < openclaw.env < plugin
+          // option, folded in at init), not the raw plugin option alone — otherwise
+          // PI_RESEARCH_REPORT_EXPORT_ENABLED set via openclaw.env would be honored on
+          // pi/CLI but silently ignored here.
+          if (globalConfig?.RESEARCH_REPORT_EXPORT_ENABLED) {
             const exportQuery = query || (initialLinks?.[0] ?? 'Research');
             const savedPath = await exportResearchReport(
               exportQuery,

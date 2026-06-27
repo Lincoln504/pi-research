@@ -97,6 +97,21 @@ function preRepairJson(jsonStr: string): string {
 }
 
 /**
+ * Parse a JSON slice, trying it verbatim first and only running preRepairJson on
+ * failure. preRepairJson rewrites smart quotes and trailing commas even inside
+ * string values, so applying it unconditionally would corrupt otherwise-valid JSON
+ * whose content legitimately contains curly quotes (common when a summary quotes
+ * web text). Raw-first keeps the happy path lossless; repair is the fallback.
+ */
+function parseRawThenRepair(jsonStr: string): unknown {
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return JSON.parse(preRepairJson(jsonStr));
+  }
+}
+
+/**
  * Extract JSON object from raw text
  *
  * Finds the first `{` then walks forward with depth-tracking (respecting string
@@ -150,8 +165,7 @@ export function extractJsonObject<T = unknown>(
   }
 
   try {
-    const jsonStr = preRepairJson(text.slice(objStart, objEnd + 1));
-    const parsed = JSON.parse(jsonStr);
+    const parsed = parseRawThenRepair(text.slice(objStart, objEnd + 1));
     return { success: true, value: parsed as T, method: 'raw-object' };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -216,8 +230,7 @@ export function extractJsonArray<T = unknown>(
   }
 
   try {
-    const jsonStr = preRepairJson(text.slice(arrStart, arrEnd + 1));
-    const parsed = JSON.parse(jsonStr);
+    const parsed = parseRawThenRepair(text.slice(arrStart, arrEnd + 1));
     if (!Array.isArray(parsed)) {
       return {
         success: false,

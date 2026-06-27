@@ -173,7 +173,10 @@ export class StateBackupManager implements IService {
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const tempFile = `research-state-${crypto.randomBytes(16).toString('hex')}.tmp`;
     const tempPath = path.join(stateDir, tempFile);
-    await fs.writeFile(tempPath, content, 'utf-8');
+    // 0o600: the state file holds browserServer.authSecret. The primary writer
+    // (state-manager) forces owner-only; this recovery/default path must match so a
+    // corruption-recovery write never lands world-readable.
+    await fs.writeFile(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
     try {
       await fs.rename(tempPath, this.stateFilePath);
     } catch (renameErr) {

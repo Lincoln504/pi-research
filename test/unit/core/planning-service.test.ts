@@ -253,8 +253,21 @@ describe('PlanningService', () => {
 
     it('throws immediately when the model returns an error stop reason', async () => {
       vi.mocked(completeSimple).mockResolvedValue(makeCompleteResponse('', 'error'));
-      // In generatePlan, it's actually handled by internal try-catch or agentic repair.
-      // But if stopReason is 'error', it throws.
+      // A provider error is fatal — a fallback plan can't run without a working model.
+      await expect(service.generatePlan(BASE_OPTIONS)).rejects.toThrow();
+    });
+
+    it('falls back to a single-researcher plan when the coordinator call fails transiently', async () => {
+      // A timeout / transient failure on the very first coordinator call must not abort
+      // the whole run — it degrades to the deterministic single-researcher plan.
+      vi.mocked(completeSimple).mockRejectedValueOnce(new Error('coordinator-generatePlan timed out after 300000ms'));
+      const plan = await service.generatePlan(BASE_OPTIONS);
+      expect(plan.action).toBe('delegate');
+      expect(plan.researchers!.length).toBeGreaterThan(0);
+    });
+
+    it('still throws if the coordinator fails for a non-transient reason', async () => {
+      vi.mocked(completeSimple).mockRejectedValueOnce(new Error('500 Internal Server Error from provider'));
       await expect(service.generatePlan(BASE_OPTIONS)).rejects.toThrow();
     });
 

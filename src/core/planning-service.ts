@@ -301,11 +301,29 @@ export class PlanningService implements IPlanningService {
           plan.action = 'delegate';
       }
       this.currentPlans.set(sessionId, plan);
-      
+
       return plan;
     } catch (err) {
       logger.error('[PlanningService] Failed to generate plan:', err);
-      throw err;
+      // A genuine cancellation must propagate so the orchestrator can abort cleanly.
+      if (signal?.aborted) throw err;
+      // A transient coordinator failure — the call timed out, or the model returned an
+      // empty / thinking-only response — used to abort the entire run on the very first
+      // call (this path runs BEFORE the in-band JSON-parse fallback above). Degrade like
+      // updatePlanForRound: build the deterministic single-researcher plan so the run can
+      // still proceed. Hard failures (missing auth, an explicit provider error / rate
+      // limit) stay fatal — a fallback plan can't run without a working model anyway.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient = msg.includes('timed out') || msg.includes('returned no text content');
+      if (!isTransient) throw err;
+      logger.warn('[PlanningService] Coordinator call failed transiently; building fallback plan so the run can proceed');
+      let plan = this.buildFallbackCoordinatorPlan('', query);
+      plan = this.capResearcherQueries(plan, complexity, this.name);
+      if (plan.action !== 'synthesize') {
+        plan.action = 'delegate';
+      }
+      this.currentPlans.set(sessionId, plan);
+      return plan;
     }
   }
 

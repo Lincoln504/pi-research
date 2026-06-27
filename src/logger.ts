@@ -23,7 +23,7 @@
  *    which is acceptable for non-critical diagnostics.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
@@ -220,13 +220,19 @@ export class Logger implements ILogger {
     this.rotation = new LogRotation(this);
     this.diskSpaceChecker = new DiskSpaceChecker();
 
-    // Ensure parent directory exists
+    // Ensure parent directory exists, and pre-create the log file owner-only.
+    // The default path lives in a world-traversable tmpdir; appendFile would create
+    // it at the umask default (often world-readable). Logs are redacted, but the
+    // file should still match the 0o600 posture used for state/lock/knowledge files.
     try {
       if (!existsSync(this.logDir)) {
-        mkdirSync(this.logDir, { recursive: true });
+        mkdirSync(this.logDir, { recursive: true, mode: 0o700 });
+      }
+      if (!existsSync(this.logFile)) {
+        closeSync(openSync(this.logFile, 'a', 0o600));
       }
     } catch {
-      // Ignore if we can't create dir
+      // Ignore if we can't create the dir or file
     }
   }
 

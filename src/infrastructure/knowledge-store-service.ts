@@ -24,6 +24,7 @@ import {
 } from '../knowledge/index.ts';
 import { getEmbedder, clearEmbeddingInstance } from './embedding/embedding-factory.ts';
 import { getConfig } from '../config.ts';
+import { isNativeStackUnavailableError } from '../knowledge/embedder-utils.ts';
 
 /**
  * Knowledge Store Service Implementation
@@ -152,6 +153,18 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
 
         this.lifecycle = ServiceLifecycle.INITIALIZED;
       } catch (err) {
+        // A genuinely missing native binding (e.g. Intel macOS / darwin-x64, which
+        // has no onnxruntime-node nor @lancedb prebuilt) will never succeed on a
+        // retry. Memoize it as DISABLED so every later getStore()/embed() degrades
+        // gracefully instead of re-running the full init + retry/backoff storm.
+        if (isNativeStackUnavailableError(err)) {
+          logger.warn('[KnowledgeStoreService] Native ML/vector stack unavailable on this platform; disabling the knowledge store.');
+          this.lifecycle = ServiceLifecycle.DISABLED;
+          this._embedder = null;
+          this._store = null;
+          this._writerQueue = null;
+          return;
+        }
         logger.error('[KnowledgeStoreService] Initialization failed:', err);
         this.lifecycle = ServiceLifecycle.UNINITIALIZED;
         throw err;
