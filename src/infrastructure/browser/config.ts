@@ -208,9 +208,13 @@ export function getSchedulerVersion(config?: Config): string {
 /**
  * Resolve the camoufox headless mode for the current platform.
  *
- * Returns false on Windows (headless:true crashes Firefox, exit code 0x80000003,
- * camoufox-js issue #614 — headless:false uses a visible window which works fine
- * on Windows CI runners and local dev).
+ * Returns true (true headless — no visible window) on Windows and macOS.
+ * Historically Windows used headless:false because headless:true crashed Firefox
+ * (exit 0x80000003, camoufox-js issue #614); that is fixed in camoufox-js >=0.10
+ * (verified on Windows 11 x64 with 0.10.2: headless:true launches and navigates
+ * reliably and, crucially, NO browser window pops up on the desktop). Using
+ * headless:false on a real Windows desktop flashed visible, sometimes fullscreen,
+ * browser windows during every scrape — true headless avoids that entirely.
  *
  * Returns true in all other cases (macOS, Linux+X11, Linux+Wayland, Linux TTY).
  *
@@ -234,7 +238,8 @@ export function getSchedulerVersion(config?: Config): string {
  */
 export function resolveHeadlessMode(): boolean | 'virtual' {
   const osPlatform = platform();
-  if (osPlatform === 'win32') return false;
+  // Windows + macOS: true headless (no visible window). camoufox-js >=0.10 no
+  // longer crashes on Windows with headless:true (see the doc comment above).
   if (osPlatform !== 'linux') return true;
   if (process.env['DISPLAY']) return true;
   if (process.env['WAYLAND_DISPLAY']) return true;

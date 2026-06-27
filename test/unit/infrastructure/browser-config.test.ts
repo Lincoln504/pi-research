@@ -141,10 +141,10 @@ describe('browser-config', () => {
             expect(resolveHeadlessMode()).toBe(true);
         });
 
-        it('returns false on Windows — headless:true crashes Firefox (camoufox-js issue #614)', () => {
+        it('returns true on Windows — true headless, no visible window (camoufox-js >=0.10 fixed the old crash)', () => {
             osMock.current = 'win32';
             delete process.env['DISPLAY'];
-            expect(resolveHeadlessMode()).toBe(false);
+            expect(resolveHeadlessMode()).toBe(true);
         });
 
         it('returns true on Linux when DISPLAY is set (X11 or XWayland)', () => {

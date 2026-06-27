@@ -7,7 +7,7 @@
  * without needing a Windows or macOS machine.
  *
  * Key contract being verified:
- *   win32  → false     (headless:true crashes Firefox, camoufox-js issue #614)
+ *   win32  → true      (true headless; camoufox-js >=0.10 fixed the old crash, no visible window)
  *   darwin → true      (native headless works on macOS)
  *   linux + DISPLAY    → true   (X11 or XWayland present)
  *   linux + WAYLAND_DISPLAY only → true  (pure Wayland; JS port doesn't strip WAYLAND_DISPLAY)
@@ -46,9 +46,9 @@ describe('resolveHeadlessMode() — platform and display-environment branching',
     else delete process.env['PI_RESEARCH_USE_XVFB'];
   });
 
-  it('returns false on Windows — headless:true crashes Firefox (camoufox-js issue #614)', () => {
+  it('returns true on Windows — true headless, no visible window (camoufox-js >=0.10 fixed the old crash)', () => {
     platformSpy.mockReturnValueOnce('win32');
-    expect(resolveHeadlessMode()).toBe(false);
+    expect(resolveHeadlessMode()).toBe(true);
   });
 
   it('returns true on macOS — native headless works correctly', () => {

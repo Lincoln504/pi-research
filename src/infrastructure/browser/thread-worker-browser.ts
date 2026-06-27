@@ -8,6 +8,7 @@
  * written to the file path in PI_RESEARCH_LOG_FILE (set by the worker pool manager).
  */
 
+import { platform } from 'node:os';
 import { setupMocking } from './thread-worker-messaging.ts';
 import { redactSecrets } from '../../utils/log-utils.ts';
 import { resolveHeadlessMode } from './config.ts';
@@ -106,30 +107,55 @@ export async function initBrowser(): Promise<void> {
         // when it has both CPUs. The old 45s limit was too tight and caused silent
         // init failures under resource pressure.
         const launchTimeoutMs = 90000;
-        const launchPromise = Camoufox({
-          headless: resolveHeadlessMode(),
-          humanize: true,
-          locale: 'en-US',
-          screen: {
-            width: 1920,
-            height: 1080,
-            colorDepth: 24,
-            pixelRatio: 1,
-          },
-        });
+        const launchOnce = async (headless: boolean | 'virtual') => {
+          const launchPromise = Camoufox({
+            headless,
+            humanize: true,
+            locale: 'en-US',
+            screen: {
+              width: 1920,
+              height: 1080,
+              colorDepth: 24,
+              pixelRatio: 1,
+            },
+          });
+          // Guard with a hard timeout. We catch the launchPromise rejection so it
+          // doesn't surface as an UnhandledPromiseRejection if it rejects after the
+          // timeout races ahead.
+          launchPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser launch rejection: ${err.message}`));
+          let launchTimeoutId: NodeJS.Timeout | undefined;
+          try {
+            return await Promise.race([
+              launchPromise,
+              new Promise<never>((_, reject) => {
+                launchTimeoutId = setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs);
+              })
+            ]);
+          } finally {
+            if (launchTimeoutId) clearTimeout(launchTimeoutId);
+          }
+        };
 
-        // Guard with a hard timeout. We catch the launchPromise rejection so it
-        // doesn't surface as an UnhandledPromiseRejection if it rejects after the
-        // timeout races ahead.
-        launchPromise.catch((err: Error) => logToDebugFile('DEBUG', `[ThreadWorker] Background browser launch rejection: ${err.message}`));
-        let launchTimeoutId: NodeJS.Timeout | undefined;
-        const launchedBrowser = await Promise.race([
-          launchPromise,
-          new Promise<never>((_, reject) => {
-            launchTimeoutId = setTimeout(() => reject(new Error(`Browser launch timed out after ${launchTimeoutMs}ms`)), launchTimeoutMs);
-          })
-        ]);
-        if (launchTimeoutId) clearTimeout(launchTimeoutId);
+        // Prefer true headless (no visible window — see resolveHeadlessMode).
+        // Windows safety net: on a minority of Windows machines camoufox crashes
+        // immediately in headless mode (exit 0x80000003 / STATUS_BREAKPOINT,
+        // camoufox issue #614). If the headless launch fails for a non-timeout
+        // reason there, fall back ONCE to a headed (visible) window so research
+        // still works on those machines. Everywhere else the error propagates.
+        const primaryHeadless = resolveHeadlessMode();
+        let launchedBrowser: Awaited<ReturnType<typeof launchOnce>>;
+        try {
+          launchedBrowser = await launchOnce(primaryHeadless);
+        } catch (launchErr: unknown) {
+          const lmsg = launchErr instanceof Error ? launchErr.message : String(launchErr);
+          const wasTimeout = lmsg.includes('timed out');
+          if (platform() === 'win32' && primaryHeadless === true && !wasTimeout) {
+            logToDebugFile('WARN', `[Worker-${workerId}] Headless browser launch failed on Windows (${lmsg}); falling back to a visible window so scraping still works (camoufox issue #614).`);
+            launchedBrowser = await launchOnce(false);
+          } else {
+            throw launchErr;
+          }
+        }
 
         browser = launchedBrowser;
         // newContext() can hang if the browser process becomes unresponsive immediately
