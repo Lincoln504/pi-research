@@ -55,7 +55,7 @@ During a run pi-research renders a live progress panel:
 Manage settings through `/research-config`, which edits two layers:
 
 - **Global** — base `~/.pi/research/config.env` (applies to all front-ends).
-- **Project** — the centralized registry (`~/.pi/state/project-settings.json`),
+- **Project** — the centralized registry (`~/.pi/research/state/project-settings.json`),
   scoped per working directory. Only depth and knowledge-store mode are
   project-scoped, so a given repo can carry its own research depth without
   changing your global default.

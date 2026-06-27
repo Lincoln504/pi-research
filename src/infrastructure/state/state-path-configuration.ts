@@ -6,9 +6,8 @@
  * can depend on it for their path configuration.
  */
 
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { getConfigDirName } from '../../utils/host-config.ts';
+import { getGlobalConfigDir } from '../../config.ts';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
@@ -39,7 +38,9 @@ export class StatePathConfiguration implements IService {
   private readonly projectSettingsPath: string;
 
   constructor(stateDir?: string) {
-    const resolvedStateDir = stateDir || path.join(os.homedir(), getConfigDirName(), 'state');
+    // pi-research's own namespace (~/.pi/research/state), beside config.env and
+    // knowledge_db — not the host pi config root (~/.pi/state).
+    const resolvedStateDir = stateDir || path.join(getGlobalConfigDir(), 'state');
     this.stateDir = resolvedStateDir;
     this.stateFilePath = path.join(resolvedStateDir, 'research-state.json');
     this.lockDirPath = path.join(resolvedStateDir, '.locks');

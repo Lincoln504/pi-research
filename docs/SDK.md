@@ -81,7 +81,7 @@ built-in defaults
   < ~/.pi/research/config.env                 (base, shared; edited by /research-config)
   < ~/.pi/research/{pi,openclaw,cli}.env       (optional per-front-end overlay)
   < legacy .pi-research.env (deprecated; auto-migrated to the registry)
-  < project registry (~/.pi/state/project-settings.json, per-directory)
+  < project registry (~/.pi/research/state/project-settings.json, per-directory)
   < process.env                                (real shell env always wins)
 ```
 
@@ -165,7 +165,7 @@ and defaults. The most-used variables:
 | `PI_RESEARCH_KNOWLEDGE_DIR` | _(auto)_ | — | Override the knowledge-store database directory |
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model init timeout |
 
-> ¹ Project-scoped: saved per-directory in `~/.pi/state/project-settings.json` via
+> ¹ Project-scoped: saved per-directory in `~/.pi/research/state/project-settings.json` via
 > `/research-config`. All other variables are user-scoped (base `config.env` or a
 > front-end overlay).
 
@@ -188,7 +188,7 @@ and defaults. The most-used variables:
 | `PI_RESEARCH_DEBUG` | `false` | Verbose diagnostic logging to the OS temp dir. |
 | `PI_RESEARCH_CONSOLE_LOG` | `false` | Mirror logs to stdout/stderr (useful in CI / headless). |
 | `PI_RESEARCH_LOG_PATH` | _(OS temp)_ | Override the verbose log file path (browser workers inherit it automatically). |
-| `PI_RESEARCH_STATE_DIR` | `~/.pi/state` | Override the state directory. |
+| `PI_RESEARCH_STATE_DIR` | `~/.pi/research/state` | Override the state directory. |
 | `PI_RESEARCH_SKIP_HEALTHCHECK` | _(unset)_ | Set `1`/`true` to skip the pre-flight browser/embedding health check and rely on per-task timeouts. |
 
 ---

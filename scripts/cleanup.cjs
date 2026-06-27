@@ -114,4 +114,35 @@ if (existsSync(legacyCacheDir)) {
   }
 }
 
+/**
+ * Purge pi-research's OWN scratch dirs on uninstall — there is no next startup to
+ * reclaim them, so they would otherwise persist forever. Both are exclusively ours
+ * (named `pi-research`), so removal is safe. User config (~/.pi/research/config.env)
+ * and the knowledge_db are deliberately preserved. Best-effort; never throws.
+ * Paths mirror the runtime resolution (config.ts / state-path-configuration.ts) and
+ * honor the same overrides, so this stays correct cross-platform.
+ */
+function removeOwnedScratchDir(label, dir) {
+  if (!dir || !existsSync(dir)) return;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    console.log(`pi-research: removed ${label} ${dir}`);
+  } catch (error) {
+    console.warn(`pi-research: could not remove ${label} ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Cache tree: browser profiles, webgpu-viability probe, downloaded embedding models.
+// Same resolution as config.ts (XDG_CACHE_HOME || ~/.cache, then pi-research) on
+// every platform. Shared camoufox binaries live in ~/.cache/camoufox (handled above).
+const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+removeOwnedScratchDir('cache dir', path.join(cacheHome, 'pi-research'));
+
+// State tree: transient run state, locks, backups, project-settings. Now lives in
+// pi-research's own namespace (~/.pi/research/state), honoring the same overrides
+// as getGlobalConfigDir()/PI_RESEARCH_STATE_DIR.
+const stateDir = process.env.PI_RESEARCH_STATE_DIR
+  || path.join(os.homedir(), process.env.PI_RESEARCH_CONFIG_DIR_NAME || '.pi', 'research', 'state');
+removeOwnedScratchDir('state dir', stateDir);
+
 process.exit(0);

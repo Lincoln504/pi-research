@@ -94,7 +94,10 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     try {
       const bin = resolveCamoufoxBin();
       const cmd = bin ? `"${bin}" fetch` : 'npx camoufox-js fetch';
-      execSync(cmd, { stdio: 'inherit', env });
+      // Bound the ~100MB download so a stalled/interrupted network fails fast
+      // instead of hanging `npm install` forever (the catch below exits 0, and the
+      // browser is re-fetchable manually). 15 min is ample even on slow links.
+      execSync(cmd, { stdio: 'inherit', env, timeout: 15 * 60 * 1000 });
       browsersInstalled = true;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

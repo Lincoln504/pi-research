@@ -214,8 +214,11 @@ const USER_MIGRATION_KEYS = [
  * Returns the path to the centralized project settings file.
  */
 export function getProjectSettingsRegistryPath(): string {
+  // State lives under pi-research's OWN namespace (~/.pi/research/state), beside
+  // config.env and knowledge_db — not in the host pi config dir root (~/.pi/state),
+  // which would pollute and risk colliding with the host's own state.
   const stateDir = process.env['PI_RESEARCH_STATE_DIR']
-    ?? path.join(os.homedir(), getConfigDirName(), 'state');
+    ?? path.join(getGlobalConfigDir(), 'state');
   return path.join(stateDir, 'project-settings.json');
 }
 

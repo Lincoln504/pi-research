@@ -32,7 +32,9 @@ vi.mock('node:os', async (importOriginal) => ({
 
 describe('Configuration Scoping', () => {
   const mockCwd = '/home/user/project';
-  const projectSettingsPath = path.join(os.homedir(), CONFIG_DIR_NAME, 'state', 'project-settings.json');
+  // State lives under pi-research's own namespace (~/.pi/research/state), beside
+  // config.env and knowledge_db — not the host pi config root (~/.pi/state).
+  const projectSettingsPath = path.join(os.homedir(), CONFIG_DIR_NAME, 'research', 'state', 'project-settings.json');
 
   beforeEach(() => {
     vi.clearAllMocks();

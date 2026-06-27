@@ -21,7 +21,6 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,7 +34,7 @@ import {
 } from './sdk.ts';
 import type { HeadlessObserverOptions } from './orchestration/headless-observer.ts';
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
-import { getConfig, getGlobalEnvFilePath, getInterfaceEnvFilePath } from './config.ts';
+import { getConfig, getGlobalConfigDir, getGlobalEnvFilePath, getInterfaceEnvFilePath } from './config.ts';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 // ---------------------------------------------------------------------------
@@ -215,13 +214,13 @@ export interface ResolvedConfigPaths {
   piAuth: string;
   /** pi model definitions (~/.pi/agent/models.json). */
   piModels: string;
-  /** pi state dir (~/.pi/state). */
+  /** pi-research state dir (~/.pi/research/state). */
   piState: string;
 }
 
 function resolvedConfigPaths(): ResolvedConfigPaths {
   const agentDir = getAgentDir();
-  const configDir = path.join(os.homedir(), '.pi', 'research');
+  const configDir = getGlobalConfigDir();
   return {
     configEnv: getGlobalEnvFilePath(),
     configDir,
@@ -230,7 +229,7 @@ function resolvedConfigPaths(): ResolvedConfigPaths {
     oclIfaceEnv: getInterfaceEnvFilePath('openclaw'),
     piAuth: path.join(agentDir, 'auth.json'),
     piModels: path.join(agentDir, 'models.json'),
-    piState: path.join(os.homedir(), '.pi', 'state'),
+    piState: process.env['PI_RESEARCH_STATE_DIR'] ?? path.join(getGlobalConfigDir(), 'state'),
   };
 }
 

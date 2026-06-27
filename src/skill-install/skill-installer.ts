@@ -301,6 +301,23 @@ export function installSkill(toolIds: string[], opts: InstallOptions = {}): Inst
 
     // Already there?
     if (isOwnedSymlink(absSkillPath, source) || isOwnedCopy(absSkillPath)) {
+      // An owned symlink may point at a STALE source — e.g. after `pi update`
+      // relocated the package to a new (version-stamped) dir, the old link now
+      // dangles and the skill is silently broken. Re-point it to the current
+      // source. (Copies always reflect current content, so only links need this.)
+      try {
+        const lst = fs.lstatSync(absSkillPath);
+        if (lst.isSymbolicLink()) {
+          const dest = path.resolve(path.dirname(absSkillPath), fs.readlinkSync(absSkillPath));
+          if (dest !== path.resolve(source)) {
+            fs.unlinkSync(absSkillPath);
+            fs.symlinkSync(source, absSkillPath, process.platform === 'win32' ? 'junction' : 'dir');
+            upsertEntry(manifest, { tool: id, path: absSkillPath, type: 'symlink', source, createdAt: now });
+            results.push({ tool: id, path: absSkillPath, type: 'symlink', status: 'installed', message: 're-pointed stale symlink to current source' });
+            continue;
+          }
+        }
+      } catch { /* fall through to already-installed below */ }
       results.push({ tool: id, path: absSkillPath, type, status: 'already-installed' });
       upsertEntry(manifest, { tool: id, path: absSkillPath, type: isSymlinkPresent(absSkillPath) ? 'symlink' : 'copy', source, createdAt: now });
       continue;

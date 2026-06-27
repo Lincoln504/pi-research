@@ -20,9 +20,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import * as os from 'node:os';
 import process from 'node:process';
-import { getConfigDirName } from '../../utils/host-config.ts';
+import { getGlobalConfigDir } from '../../config.ts';
 import { logger } from '../../logger.ts';
 import { metrics } from '../../utils/metrics.ts';
 import type { IProcessLifecycle } from '../../core/interfaces/process-interfaces.ts';
@@ -90,8 +89,8 @@ export class StateManager {
     let stateDir = providedStateDir;
     
     if (!stateDir) {
-      const homeDir = os.homedir();
-      stateDir = path.join(homeDir, getConfigDirName(), 'state');
+      // pi-research's own namespace (~/.pi/research/state), not the host pi root.
+      stateDir = path.join(getGlobalConfigDir(), 'state');
     }
 
     this.stateFilePath = path.join(stateDir, 'research-state.json');
