@@ -17,17 +17,39 @@ skill, the OpenClaw plugin, and a programmatic SDK.
 - Node.js >= 22.19.0
 - An LLM with a 100k+ context window (bring your own key)
 - Internet access
+- A residential IP address — search, scraping, and YouTube transcripts all rely on a residential connection. A datacenter/VPS/cloud IP gets bot-blocked by the providers these features depend on.
 
 ## Install
 
+One engine, several front-ends — install only the one you want. Each is a separate command.
+
+**pi extension**
+
 ```bash
-pi install npm:@lincoln504/pi-research                  # pi extension
-openclaw plugins install npm:@lincoln504/pi-research    # OpenClaw plugin
-npm install -g @lincoln504/pi-research                  # standalone CLI / agent skill
-pi install .                                            # local, from a clone
+pi install npm:@lincoln504/pi-research
 ```
 
-The first install pulls the stealth browser engine, which takes a few minutes.
+**OpenClaw plugin**
+
+```bash
+openclaw plugins install npm:@lincoln504/pi-research
+```
+
+**Standalone CLI / agent skill**
+
+```bash
+npm install -g @lincoln504/pi-research
+```
+
+**Development build (bleeding edge, from a git clone)**
+
+```bash
+git clone https://github.com/Lincoln504/pi-research.git
+cd pi-research
+pi install .
+```
+
+The npm commands above are the **stable** channel; the git clone is the **bleeding-edge / development** build — see [the stability note](#a-note-on-stability-v100) below. The first install of any front-end pulls the stealth browser engine, which takes a few minutes.
 
 ## Usage
 
@@ -42,13 +64,15 @@ pi -p "research the latest developments in WebAssembly"
 
 ## Documentation
 
-- [Pi extension](docs/PI-EXTENSION.md) — commands, the live TUI, and the extension lifecycle.
-- [Agent skill](docs/AGENT-SKILL.md) — the portable skill that gives any coding agent research, and how it installs.
-- [OpenClaw plugin](docs/OPENCLAW.md) — install and use pi-research inside OpenClaw.
-- [SDK](docs/SDK.md) — the programmatic library.
-- [Configuration](docs/CONFIGURATION.md) — the TUI settings, every environment variable, and how config layers resolve.
-- [Knowledge store](docs/KNOWLEDGE-STORE.md) — the local vector cache of past findings.
-- [Architecture](docs/ARCHITECTURE.md) — how the engine is built: layers, services, and the research pipeline.
+| Doc | What's inside |
+|-----|---------------|
+| [Pi extension](docs/PI-EXTENSION.md) | Commands, the live TUI, and the extension lifecycle. |
+| [Agent skill](docs/AGENT-SKILL.md) | The portable skill that gives any coding agent research, and how it installs. |
+| [OpenClaw plugin](docs/OPENCLAW.md) | Install and use pi-research inside OpenClaw. |
+| [SDK](docs/SDK.md) | The programmatic library. |
+| [Configuration](docs/CONFIGURATION.md) | The TUI settings, every environment variable, and how config layers resolve. |
+| [Knowledge store](docs/KNOWLEDGE-STORE.md) | The local vector cache of past findings. |
+| [Architecture](docs/ARCHITECTURE.md) | How the engine is built: layers, services, and the research pipeline. |
 
 ## Built with
 
@@ -72,6 +96,22 @@ pi -p "research the latest developments in WebAssembly"
 **Host & runtime**
 - [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
 - [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation
+
+## A note on stability (v1.0.0)
+
+Thank you for your patience. After the last tagged release (**v0.1.13**, April 20, 2026)
+the extension broke within a couple of days and stayed effectively non-functional for
+roughly eight weeks. Two things landed at once: a run of breaking changes in the
+upstream pi/SDK API, and a ground-up re-architecture of the engine around the
+stealth-browser search/scrape stack. Realigning to the moving API while rebuilding the
+core took until mid-June 2026 to fully stabilize.
+
+That period is over. **From v1.0.0 onward:**
+
+- The **npm release** (`npm:@lincoln504/pi-research`) is the **stable** channel — kept working and updated to track the latest breaking pi changes.
+- A **git install** (clone + `pi install .`) is the **bleeding-edge / development** build: the newest work, and the place breakage surfaces first.
+
+Install the npm package unless you specifically want to track the latest commits.
 
 ## License
 

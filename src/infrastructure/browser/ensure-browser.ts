@@ -21,7 +21,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync, openSync, closeSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, fstatSync, openSync, closeSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { logger } from '../../logger.ts';
@@ -131,9 +131,19 @@ async function provision(): Promise<void> {
     closeSync(openSync(lockPath, 'wx', 0o600));
     haveLock = true;
   } catch {
-    // Lock held — but steal it if it's stale (a crash left it behind).
+    // Lock held — but steal it if it's stale (a crash left it behind). Read the
+    // mtime through a file descriptor rather than re-stat'ing by path (avoids a
+    // check-then-use race), then re-acquire with O_EXCL: a process that recreated
+    // the lock in the meantime makes our 'wx' create fail, so we never double-acquire.
     try {
-      if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
+      let mtimeMs: number;
+      const fd = openSync(lockPath, 'r');
+      try {
+        mtimeMs = fstatSync(fd).mtimeMs;
+      } finally {
+        closeSync(fd);
+      }
+      if (Date.now() - mtimeMs > STALE_LOCK_MS) {
         rmSync(lockPath, { force: true });
         closeSync(openSync(lockPath, 'wx', 0o600));
         haveLock = true;
