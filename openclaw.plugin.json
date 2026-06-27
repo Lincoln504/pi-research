@@ -72,6 +72,10 @@
         "anyOf": [
           {
             "type": "string",
+            "const": "auto"
+          },
+          {
+            "type": "string",
             "const": "webgpu"
           },
           {
@@ -79,7 +83,7 @@
             "const": "cpu"
           }
         ],
-        "default": "webgpu"
+        "default": "auto"
       },
       "migrationStrategy": {
         "anyOf": [
