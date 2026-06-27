@@ -8,12 +8,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSearchTool } from '../../src/tools/search.ts';
 import { createScrapeTool } from '../../src/tools/scrape.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, skipsLiveNetwork, type TestContext } from './helpers/setup.ts';
 import { ToolUsageTracker } from '../../src/utils/tool-usage-tracker.ts';
 
 import { isNetworkUnavailable } from './helpers/network.ts';
 
-describe('Search and Scrape Tools Connectivity', () => {
+// This whole suite exercises real network targets (live search + scrape). On CI it
+// runs from a datacenter IP that search engines / sites throttle or block, so a live
+// scrape can hang to the 300s test timeout (observed on ubuntu). Skip the entire
+// suite — including the browser-spinning beforeAll — when live-network tests are
+// disabled (PI_RESEARCH_SKIP_LIVE_NETWORK_TESTS=true, set by CI). Runs in full locally.
+describe.skipIf(skipsLiveNetwork())('Search and Scrape Tools Connectivity', () => {
   const mockExtensionCtx = {
     cwd: process.cwd(),
     ui: { setWidget: () => {}, notify: () => {} },
