@@ -271,7 +271,12 @@ export default definePluginEntry({
     },
   }),
 
-  async register(api) {
+  // OpenClaw requires register() to be synchronous — it wires tools and the
+  // lifecycle hook synchronously here; all actual async work (service init,
+  // research runs, shutdown) happens inside the tool/cleanup callbacks, which
+  // are invoked later by the host. Returning a Promise here makes the host
+  // reject the plugin with "plugin register must be synchronous".
+  register(api) {
     // 1. Lifecycle
     api.lifecycle.registerRuntimeLifecycle({
       id: 'pi-research-lifecycle',

@@ -14,6 +14,7 @@ import { metrics } from '../../utils/metrics.ts';
 import type { Config } from '../../config.ts';
 import { getConfig } from '../../config.ts';
 import { ensureBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getMaxWorkers } from './config.ts';
+import { ensureBrowserInstalled } from './ensure-browser.ts';
 import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
@@ -98,6 +99,15 @@ export class WorkerPoolManager implements IService {
                 logger.log(`[WorkerPoolManager] Initializing Unified FixedClusterPool (Size: ${maxWorkers}) on PID ${process.pid}`);
 
                 ensureBrowserCacheDir();
+
+                // Provision the camoufox browser if it is missing. This is a no-op
+                // (cheap existsSync) when the browser is already installed — i.e. on
+                // every install path whose postinstall ran (pi extension, plain npm).
+                // It only does work on hosts that skip postinstall (e.g. OpenClaw,
+                // which installs plugins with --ignore-scripts), where the binary
+                // would otherwise be absent and the first scrape would fail.
+                await ensureBrowserInstalled();
+
                 const browserEnv = getBrowserEnv(config);
 
                 // Reclaim browser profiles leaked by a previously crashed run

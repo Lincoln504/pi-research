@@ -11,7 +11,26 @@ plugin.
 openclaw plugins install npm:@lincoln504/pi-research
 ```
 
+This is the supported install path. The published npm tarball ships the prebuilt
+plugin bundle (`dist/openclaw-entry.js`) plus all runtime dependencies, so it
+installs and loads without a build step.
+
+`openclaw plugins install git:…` is **not** supported: OpenClaw installs plugins
+with `--ignore-scripts`, so the package's build (`prepare`) never runs and the
+prebuilt bundle — which is not committed to git — would be absent. Use the npm
+spec above. (The pi extension, by contrast, does build on install, so it can be
+installed from git via `pi install`.)
+
 Requires a host whose plugin API is `>=2026.5.17` (declared as `openclaw.compat.pluginApi` in `package.json`).
+
+### Browser provisioning
+
+The stealth browser (camoufox) is normally fetched by the package's
+`postinstall`. Because OpenClaw installs plugins with `--ignore-scripts`, that
+postinstall does not run, so pi-research fetches the browser **lazily on first
+use** instead — the first research run downloads it once (~100MB) before the
+browser pool starts. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` to opt out (then
+fetch manually with `npx camoufox-js fetch`).
 
 ## Usage
 

@@ -63,7 +63,7 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match peerDependencies minimum (>=0.80.0)
+  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.0)
   const versionParts = PI_VERSION.split('.').map(Number);
   const major = versionParts[0] ?? 0;
   const minor = versionParts[1] ?? 0;
