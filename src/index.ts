@@ -19,7 +19,7 @@ import { getConfig, validateConfig } from './config.ts';
 import { metrics } from './utils/metrics.ts';
 import { handleResearchConfigCommand } from './research-config.ts';
 import { loadPrompt } from './core/llm/prompts.ts';
-import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
+import { clearAllSessionState, addSteeringMessage, getSteeringMessages, normalizeSessionId, getActiveSessionCount, popQueuedMessages, requeuePoppedMessage, getAllTrackedSessions, getPiActiveSessionOrder, getPiActivePanels } from './orchestration/session-state.ts';
 import { initGlobalTuiController, disposeGlobalTuiController } from './tui/tui-controller.ts';
 import { registerCoreServices, initializeCoreServices, disposeCoreServices } from './core/service-initialization.ts';
 import { getServiceContainer, resetServiceContainer } from './core/service-registry.ts';
@@ -92,6 +92,11 @@ export default async function (pi: ExtensionAPI) {
   // 1. REGISTER CRITICAL EVENT LISTENERS IMMEDIATELY
   // This ensures we capture steering even if initialization takes time.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
+    // Only intercept genuine interactive keystrokes. Programmatic sends originate
+    // from this extension (source 'extension') — e.g. the Alt+P pop handler forwards
+    // a popped message as 'steer'. Without this guard that forward would be captured
+    // straight back into the research queue, so the pop could never reach pi.
+    if (event.source === 'extension') return undefined;
     if (event.streamingBehavior === 'steer' && event.text) {
       try {
         const eCtx = ctx as ExtendedExtensionContext;
@@ -146,14 +151,18 @@ export default async function (pi: ExtensionAPI) {
             addSteeringMessage(sid, sanitized);
             queued++;
           } else {
-            // Steering not acceptable right now — forward to pi's follow-up queue so it
-            // is applied at the next turn instead of being lost.
-            logger.debug(`[pi-research] Steering not acceptable for session ${sid}, forwarding to follow-up: ${sanitized}`);
+            // Steering not acceptable right now (e.g. an eval/coordinator LLM call is in
+            // flight). Forward to pi as a STEER, not a follow-up: steer is injected at the
+            // next agent step — right after the running research tool returns its report —
+            // so it lands as the next message instead of sitting until the agent stops
+            // (which, in a long autonomous turn, may never happen). The source-'extension'
+            // guard above prevents this from being re-captured back into the queue.
+            logger.debug(`[pi-research] Steering not acceptable for session ${sid}, forwarding as steer: ${sanitized}`);
             try {
-              pi.sendUserMessage(sanitized, { deliverAs: 'followUp' });
+              await pi.sendUserMessage(sanitized, { deliverAs: 'steer' });
               forwarded++;
             } catch (err) {
-              logger.warn('[pi-research] Failed to forward steering to follow-up:', err);
+              logger.warn('[pi-research] Failed to forward steering to pi:', err);
             }
           }
         }
@@ -162,11 +171,11 @@ export default async function (pi: ExtensionAPI) {
         if (queued > 0 && forwarded === 0) {
           notify('Queued — will steer the next research round.', 'info');
         } else if (forwarded > 0 && queued === 0) {
-          notify('Research is finishing — sent as a follow-up to pi.', 'info');
+          notify('Sent to pi to steer the agent.', 'info');
         } else if (queued > 0 && forwarded > 0) {
-          notify('Steering received (queued for next round + follow-up to pi).', 'info');
+          notify('Steering received (queued for next round + steer to pi).', 'info');
         } else {
-          // Nothing was delivered (e.g. the follow-up send threw) — let pi handle it
+          // Nothing was delivered (e.g. the steer send threw) — let pi handle it
           // natively rather than eating the message.
           return undefined;
         }
@@ -279,10 +288,10 @@ export default async function (pi: ExtensionAPI) {
     pi.registerTool(researchKnowledgeSearchTool);
   }
 
-  // Alt+P — Pop queued steering messages back to pi's follow-up queue.
+  // Alt+P — Pop queued steering messages out of the research queue and steer pi with them.
   pi.registerShortcut(Key.alt('p'), {
     description: 'Pop queued research steering messages back to chat',
-    handler: (ctx: ExtensionContext) => {
+    handler: async (ctx: ExtensionContext) => {
       const eCtx = ctx as ExtendedExtensionContext;
       let piSessionId = eCtx.sessionId || eCtx.sessionManager?.getSessionId();
 
@@ -318,12 +327,31 @@ export default async function (pi: ExtensionAPI) {
         }
         return;
       }
+      // Forward as 'steer', NOT 'followUp'. A popped message means "redirect the agent
+      // now". A follow-up is only consumed once the agent would otherwise stop, so during
+      // a long autonomous turn — e.g. a multi-round research the model keeps extending —
+      // it never drains and the user sees their instruction ignored. 'steer' is injected
+      // at the next agent step: right after the running research tool returns its report
+      // into chat, the agent acts on it. (The input handler ignores source 'extension',
+      // so this is not re-captured into the research queue.)
+      let sent = 0;
       for (const msg of popped) {
-        pi.sendUserMessage(msg.text, { deliverAs: 'followUp' });
+        try {
+          await pi.sendUserMessage(msg.text, { deliverAs: 'steer' });
+          sent++;
+        } catch (err) {
+          // Never lose the user's words: restore the message to queued (still poppable).
+          logger.warn('[pi-research] Failed to forward popped steering to pi:', err);
+          requeuePoppedMessage(piSessionId, msg.id);
+        }
       }
-      
+
       if (ctx.hasUI) {
-        ctx.ui.notify(`Sent ${popped.length} steering message(s).`, 'info');
+        if (sent > 0) {
+          ctx.ui.notify(`Sent ${sent} steering message(s) to pi.`, 'info');
+        } else {
+          ctx.ui.notify('Could not send steering to pi — left it queued.', 'warning');
+        }
       }
     },
   });

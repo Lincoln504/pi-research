@@ -14,6 +14,7 @@ import {
   getActiveSteeringMessages,
   consumeQueuedMessages,
   popQueuedMessages,
+  requeuePoppedMessage,
   hasQueuedSteeringMessages,
   normalizeSessionId,
 } from '../../../src/orchestration/session-state.ts';
@@ -291,9 +292,37 @@ describe('Steering Messages', () => {
     it('popped messages should not appear in getSteeringMessages', () => {
       addSteeringMessage(testSessionId, 'Pop me');
       popQueuedMessages(testSessionId);
-      
+
       const all = getSteeringMessages(testSessionId);
       expect(all).toHaveLength(0);
+    });
+  });
+
+  // ─── requeuePoppedMessage ───────────────────────────────────────────────────
+
+  describe('requeuePoppedMessage', () => {
+    it('restores a popped message to queued so a failed forward is never lost', () => {
+      addSteeringMessage(testSessionId, 'now write the cover letters');
+      const popped = popQueuedMessages(testSessionId);
+      expect(popped).toHaveLength(1);
+      // Simulate the pop handler's forward to pi failing.
+      requeuePoppedMessage(testSessionId, popped[0]!.id);
+
+      const queued = getQueuedSteeringMessages(testSessionId);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]!.text).toBe('now write the cover letters');
+      expect(queued[0]!.status).toBe('queued');
+      // It is poppable again.
+      expect(hasQueuedSteeringMessages(testSessionId)).toBe(true);
+    });
+
+    it('is a no-op for an unknown id or a non-popped message', () => {
+      addSteeringMessage(testSessionId, 'still queued');
+      requeuePoppedMessage(testSessionId, 'no-such-id');
+      requeuePoppedMessage(testSessionId, getQueuedSteeringMessages(testSessionId)[0]!.id);
+      const queued = getQueuedSteeringMessages(testSessionId);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]!.status).toBe('queued');
     });
   });
 

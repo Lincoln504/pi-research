@@ -243,6 +243,24 @@ export function popQueuedMessages(piSessionId: string | undefined): SteeringMess
 }
 
 /**
+ * Restore a previously-popped steering message back to 'queued'.
+ * Called when forwarding a popped message to pi fails, so the user's input is
+ * never silently lost — it stays poppable instead of vanishing.
+ */
+export function requeuePoppedMessage(piSessionId: string | undefined, messageId: string): void {
+  const sid = normalizeSessionId(piSessionId);
+  const state = piSessions.get(sid);
+  if (!state) return;
+
+  const msg = state.steeringMessages.find(m => m.id === messageId && m.status === 'popped');
+  if (!msg) return;
+  msg.status = 'queued';
+  msg.poppedAt = null;
+  logger.debug(`[session-state] Restored popped steering message to queued in session ${sid} (id: ${messageId})`);
+  refreshAllSessions(sid);
+}
+
+/**
  * Clear all steering messages for a Pi session regardless of status.
  */
 export function clearSteeringMessages(piSessionId: string | undefined): void {
