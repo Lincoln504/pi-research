@@ -125,14 +125,17 @@ async function provision(): Promise<void> {
   const lockPath = join(tmpdir(), `pi-research-camoufox-fetch-${cacheKey}.lock`);
   let haveLock = false;
   try {
-    closeSync(openSync(lockPath, 'wx')); // O_EXCL: fails if another process holds it
+    // 'wx' = O_CREAT|O_EXCL: fails if another process holds it. Mode 0o600 keeps
+    // the (empty) lock owner-only, matching FileLockService and avoiding a
+    // world-readable temp file.
+    closeSync(openSync(lockPath, 'wx', 0o600));
     haveLock = true;
   } catch {
     // Lock held — but steal it if it's stale (a crash left it behind).
     try {
       if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
         rmSync(lockPath, { force: true });
-        closeSync(openSync(lockPath, 'wx'));
+        closeSync(openSync(lockPath, 'wx', 0o600));
         haveLock = true;
       }
     } catch {

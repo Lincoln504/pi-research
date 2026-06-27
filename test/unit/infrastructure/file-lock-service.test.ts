@@ -11,8 +11,9 @@ describe('FileLockService', () => {
   let service: FileLockService;
 
   beforeEach(async () => {
-    tmpDir = path.join(os.tmpdir(), `file-lock-test-${crypto.randomBytes(6).toString('hex')}`);
-    await fs.mkdir(tmpDir, { recursive: true });
+    // mkdtemp atomically creates a unique, owner-only (0o700) dir — avoids the
+    // predictable-name temp-file pattern CodeQL flags.
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'file-lock-test-'));
     lockFilePath = path.join(tmpDir, 'test.lock');
   });
 

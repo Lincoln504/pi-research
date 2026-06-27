@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
+import { mkdtempSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { StateManager } from '../../../src/infrastructure/state/state-manager.ts';
@@ -13,7 +14,9 @@ import { FileLockService } from '../../../src/infrastructure/file-lock-service.t
 import { StateBackupManager } from '../../../src/infrastructure/state/state-backup-manager.ts';
 
 describe('StateManager Integration-style Tests', () => {
-  const testDir = path.join(os.tmpdir(), `pi-test-state-${Date.now()}`);
+  // mkdtempSync atomically creates a unique, owner-only (0o700) dir — avoids the
+  // predictable-name temp-file pattern CodeQL flags.
+  const testDir = mkdtempSync(path.join(os.tmpdir(), 'pi-test-state-'));
   let manager: StateManager;
   let processLifecycle: ProcessLifecycleService;
   let fileLockService: FileLockService;
@@ -253,7 +256,7 @@ describe('StateManager Integration-style Tests', () => {
 });
 
 describe('StateManager GPU lock', () => {
-  const testDir = path.join(os.tmpdir(), `pi-test-gpu-lock-${Date.now()}`);
+  const testDir = mkdtempSync(path.join(os.tmpdir(), 'pi-test-gpu-lock-'));
   let manager: StateManager;
   let processLifecycle: ProcessLifecycleService;
   let fileLockService: FileLockService;
