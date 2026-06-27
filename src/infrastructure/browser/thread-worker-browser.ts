@@ -162,7 +162,7 @@ export async function initBrowser(): Promise<void> {
       const msg = e instanceof Error ? e.message : String(e);
 
       if (msg.includes('Camoufox is not installed') || msg.includes('Version information not found')) {
-        throw new Error(`[Worker] Browser binaries not found. Please run 'npm run setup' to install them.`, { cause: e });
+        throw new Error(`[Worker] Browser binaries not found. Please run 'npx camoufox-js fetch' to install them.`, { cause: e });
       }
 
       // camoufox headless: "virtual" spawns Xvfb on Linux when no DISPLAY is set.

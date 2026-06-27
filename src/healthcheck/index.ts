@@ -40,7 +40,7 @@ export async function checkBrowserCapability(): Promise<{ healthy: boolean; erro
     }
     return { healthy: true, diagnostic: { status: mockMode ? 'mocked' : 'available' } };
   } else {
-    return { healthy: false, error: 'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.' };
+    return { healthy: false, error: 'Camoufox (browser) not found. Run "npx camoufox-js fetch" to install the browser.' };
   }
 }
 

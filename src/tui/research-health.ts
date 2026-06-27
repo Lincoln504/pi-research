@@ -59,7 +59,7 @@ export function formatHealthError(raw: string): string {
   if (raw.includes('Xvfb') || raw.includes('xvfb') || raw.includes('virtual display') || raw.includes('display server') || raw.includes('DISPLAY not set')) {
     return 'No display server found on Linux. Install Xvfb for TTY/Wayland use: sudo apt install xvfb';
   } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
-    return 'Browser engine not installed. Run `npm run setup` to install it.';
+    return 'Browser engine not installed. Run `npx camoufox-js fetch` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
     return 'The browser could not load a page in time (timed out). This is usually the search engine blocking automated traffic or a slow connection — not necessarily your internet. Retry; if it persists, check your connection.';
   } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {

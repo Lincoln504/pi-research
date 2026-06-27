@@ -452,7 +452,7 @@ describe('Linux display-mode integration tests', () => {
       const result = await checkBrowserCapability();
 
       expect(result.healthy).toBe(false);
-      expect(result.error).toContain('npm run setup');
+      expect(result.error).toContain('npx camoufox-js fetch');
     });
   });
 

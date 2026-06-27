@@ -122,7 +122,7 @@ describe('initBrowser() CannotFindXvfb / display-error translation', () => {
       new Error('Camoufox is not installed. Please run `npx camoufox-js fetch`.')
     );
 
-    await expect(initBrowser()).rejects.toThrow("npm run setup");
+    await expect(initBrowser()).rejects.toThrow("npx camoufox-js fetch");
   });
 
   it('resets browser to null after a failed launch so subsequent calls can retry', async () => {
@@ -218,15 +218,15 @@ describe('formatHealthError() TUI message mapping', () => {
     expect(msg).toContain('sudo apt install xvfb');
   });
 
-  it('maps browser binary missing to npm run setup hint', () => {
+  it('maps browser binary missing to a camoufox-fetch hint', () => {
     const inputs = [
-      'Camoufox (browser) not found. Run "npm run setup" to install browser binaries.',
+      'Camoufox (browser) not found. Run "npx camoufox-js fetch" to install the browser.',
       'camoufox binaries not installed',
       'browser not found',
     ];
     for (const raw of inputs) {
       const msg = formatHealthError(raw);
-      expect(msg).toContain('npm run setup');
+      expect(msg).toContain('npx camoufox-js fetch');
     }
   });
 
