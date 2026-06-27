@@ -99,7 +99,7 @@ This keeps the knowledge store integration deterministic and pipeline-controlled
 WriterQueue (async, non-blocking)
 └── KnowledgeStore
     ├── Embedder  (onnx-community/granite-embedding-small-english-r2-ONNX via @huggingface/transformers)
-    │   └── inference backend: webgpu (Dawn/Vulkan/Metal/D3D12) or cpu
+    │   └── inference backend: auto (out-of-process WebGPU probe → webgpu or cpu) / webgpu / cpu
     └── LanceDB   (knowledge_db/ directory, Arrow-backed vector table)
 ```
 
@@ -107,7 +107,13 @@ Key files:
 - `src/knowledge/store.ts` — LanceDB operations
 - `src/knowledge/embedder.ts` — model loading and batched inference
 - `src/knowledge/writer-queue.ts` — async write queue
-- `src/knowledge/migration.ts` — model change migration (drop or re-embed)
+- `src/knowledge/webgpu-viability.ts` — out-of-process WebGPU probe + cached verdict
+- `src/knowledge/migration.ts` — model change migration (drop, backup, or re-embed)
+
+The store depends on native ONNX-runtime and LanceDB bindings. Platforms without a
+prebuilt binary — notably Intel macOS (`darwin-x64`) — have no store: the health
+check reports it as *disabled (healthy)* and research runs without the cache. See
+[KNOWLEDGE-STORE.md](KNOWLEDGE-STORE.md) for the full subsystem and platform matrix.
 
 ---
 
@@ -213,3 +219,17 @@ src/
 **Pure ESM** — the entire codebase uses ES Modules (`"type": "module"`). Worker bundles are built with esbuild (`npm run build:worker`) before integration tests or publishing.
 
 **Dependency graph** — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).
+
+---
+
+## Development
+
+```bash
+npm run test:unit         # unit tests, no browser required
+npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
+npm run type-check        # TypeScript strict mode (src)
+npm run type-check:tests  # TypeScript strict mode (tests)
+npm run lint              # ESLint
+npm run deps:check        # architectural rule enforcement
+npm run build:worker      # bundle the browser worker (required before integration tests / publish)
+```

@@ -163,9 +163,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'EMBEDDING_DEVICE',
         label: 'Embedding Device',
-        description: 'Hardware backend for the embedding model. "auto" probes whether WebGPU actually runs here and falls back to CPU if not (safe everywhere). CPU forces the safe path; webgpu forces the GPU path.',
-        currentValue: config.EMBEDDING_DEVICE,
-        values: ['auto', 'webgpu', 'cpu'],
+        description: 'Hardware backend for the embedding model. GPU probes whether WebGPU actually runs on this machine and automatically falls back to CPU if it does not (safe everywhere). CPU forces CPU-only inference. (Raw forced-GPU is available via the PI_RESEARCH_EMBEDDING_DEVICE=webgpu env var for benchmarking.)',
+        currentValue: config.EMBEDDING_DEVICE === 'cpu' ? 'CPU' : 'GPU',
+        values: ['GPU', 'CPU'],
       },
       {
         id: 'KNOWLEDGE_STORE_CACHE_TTL_DAYS',
@@ -342,7 +342,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             config.EMBEDDING_MODEL = SUPPORTED_MODELS.find(m => m.id.split('/').pop() === newValue)?.id ?? newValue;
             scope = 'user';
             } else if (id === 'EMBEDDING_DEVICE') {
-            config.EMBEDDING_DEVICE = newValue as 'auto' | 'webgpu' | 'cpu';
+            // TUI offers only GPU (= safe auto/probe-then-fallback) and CPU.
+            // Raw forced 'webgpu' (no probe) stays reachable via env var only.
+            config.EMBEDDING_DEVICE = newValue === 'CPU' ? 'cpu' : 'auto';
             scope = 'user';
             } else if (id === 'KNOWLEDGE_STORE_CACHE_TTL_DAYS') {
             config.KNOWLEDGE_STORE_CACHE_TTL_DAYS = parseInt(newValue, 10);

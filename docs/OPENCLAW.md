@@ -52,8 +52,8 @@ same typed configuration. Real environment variables override the files.
 
 Precedence: `defaults < config.env < openclaw.env < project registry < process.env`.
 
-The complete environment-variable list and the full config model are in the
-[SDK & configuration reference](SDK.md).
+The complete environment-variable list and the full config model are in
+[CONFIGURATION.md](CONFIGURATION.md).
 
 ## Lifecycle
 

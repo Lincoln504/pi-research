@@ -1,0 +1,228 @@
+# Knowledge Store
+
+The knowledge store is a local vector database of past research findings. Before a
+run goes to the live web, the orchestrator searches it; a repeat or overlapping
+question can be answered from stored results, and previously useful URLs are handed
+to the new researchers as a starting point. It is an optional cache — research works
+without it — but it makes repeat work faster and cheaper.
+
+- [What it stores](#what-it-stores)
+- [Scopes: none, project, global](#scopes-none-project-global)
+- [How a run uses the store](#how-a-run-uses-the-store)
+- [Embeddings and the model](#embeddings-and-the-model)
+- [Device selection](#device-selection)
+- [Platform support (no Intel Mac)](#platform-support-no-intel-mac)
+- [Retention and eviction](#retention-and-eviction)
+- [Changing the model: migration](#changing-the-model-migration)
+- [Managing the store](#managing-the-store)
+- [Settings](#settings)
+
+---
+
+## What it stores
+
+The store is a [LanceDB](https://lancedb.com) table on disk. After each research
+round, the cited URLs from the researchers' reports are enqueued and written in the
+background: each source's summary (and, when available, its full scraped Markdown) is
+split into chunks, each chunk is embedded into a vector, and the rows are stored.
+
+Each row carries the embedding vector, the source URL (normalized for
+deduplication), the summary text and full content, a timestamp, and scope flags. A
+content hash dedupes re-ingested URLs: an unchanged page is skipped; a changed page
+replaces the old rows. The full page Markdown is cached once per document so a stored
+finding can be rehydrated later without re-scraping.
+
+Writes never block a research run — they go through an asynchronous writer queue that
+is drained at the end of the round and on shutdown.
+
+---
+
+## Scopes: none, project, global
+
+The store's reach is set by **Knowledge Mode** (`PI_RESEARCH_KNOWLEDGE_STORE_MODE`),
+a project-scoped setting you can change per directory:
+
+| Mode | Behavior |
+|------|----------|
+| `global` (default) | One store shared across every directory. A finding cached in one project is retrievable from any other. |
+| `project` | Findings are scoped to the working directory they were created in; only that directory retrieves them. |
+| `none` | The store is disabled. No data is read or written, and the `research_knowledge_search` tool is not registered. |
+
+All scopes share one physical LanceDB directory; project vs. global rows are
+distinguished by columns (a normalized workspace path and a global flag) and filtered
+at query time, not by separate folders. The default database directory is
+`~/.pi/research/knowledge_db/` (override with `PI_RESEARCH_KNOWLEDGE_DIR`).
+
+The embedding model is **lazy** — it only downloads and initializes the first time
+the store is actually written or searched, so the `global` default adds no startup
+cost until a run caches its first page.
+
+---
+
+## How a run uses the store
+
+The store is driven by the orchestrator, not called ad hoc by researcher agents,
+which keeps its use deterministic:
+
+1. **Before** each researcher starts, the orchestrator searches the store for the
+   researcher's goal and injects any matching historical URLs — each with its prior
+   summary — into that researcher's prompt as suggested starting points to re-scrape.
+2. **After** the round, the cited URLs and their descriptions are enqueued into the
+   writer queue for the next session.
+
+Separately, the `research_knowledge_search` tool (and the SDK's `searchKnowledge()`)
+lets the model query the store directly: it rehydrates the most relevant stored
+documents, asks a background LLM whether they answer the question, and returns a
+synthesized answer with citations — or reports that live research is needed.
+
+---
+
+## Embeddings and the model
+
+Embeddings are computed locally with
+[`@huggingface/transformers`](https://github.com/huggingface/transformers.js) over
+ONNX. The default model is
+`onnx-community/granite-embedding-small-english-r2-ONNX` (English; a 512-token
+chunk window). Each supported model defines its own chunk size, pooling strategy,
+and prefixes, and produces a fixed vector dimension that the table's schema is built
+around.
+
+Supported models (`PI_RESEARCH_EMBEDDING_MODEL`):
+
+| Model | Languages |
+|-------|-----------|
+| `onnx-community/granite-embedding-small-english-r2-ONNX` (default) | English |
+| `Xenova/multilingual-e5-small` | Multilingual |
+| `Xenova/multilingual-e5-base` | Multilingual |
+| `Xenova/bge-m3` | Multilingual |
+| `onnx-community/embeddinggemma-300m-ONNX` | Multilingual |
+| `onnx-community/Qwen3-Embedding-0.6B-ONNX` | Multilingual |
+| `Xenova/all-MiniLM-L6-v2` | English |
+| `Xenova/bge-small-en-v1.5` | English |
+| `Xenova/all-mpnet-base-v2` | English |
+
+Changing the model invalidates existing vectors (they have a different dimension and
+meaning), so the store is migrated — see [migration](#changing-the-model-migration).
+The model is downloaded from Hugging Face on first use and cached; the first download
+can take a few minutes (raise `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` on a slow
+connection).
+
+---
+
+## Device selection
+
+Embeddings run on either the GPU (WebGPU, via the runtime's bundled Dawn backend) or
+the CPU. The backend is chosen by `PI_RESEARCH_EMBEDDING_DEVICE`:
+
+- **`auto`** (default; shown as **GPU** in the TUI) — pi-research probes WebGPU
+  viability in a disposable child process: it loads the model and runs one real
+  embedding there. If that succeeds, the GPU is used; if it fails, the CPU is used.
+  The verdict is cached, so the probe runs at most once per machine + model.
+- **`cpu`** (shown as **CPU** in the TUI) — forces CPU inference, no probe.
+- **`webgpu`** — forces the GPU path with **no** probe. Advanced / env-only; see
+  below.
+
+**Why the probe exists.** Many real targets — VMs, containers, CI runners, and
+headless hosts with only a software Vulkan driver — expose a GPU that the native
+backend cannot actually run compute on, and that failure is a native segfault, not a
+catchable error: it kills the process. The `auto` probe detects this safely in a
+throwaway child (whose crash cannot take the main process down) and falls back to
+CPU. Because forcing `webgpu` skips this safety check and can hard-crash on such a
+host, the `/research-config` menu intentionally offers only **GPU** (= `auto`) and
+**CPU**. Raw `webgpu` remains available through the environment variable for
+benchmarking on a host with a known-good GPU.
+
+The cached verdict lives at `~/.cache/pi-research/webgpu-viability.json`, keyed by
+platform, architecture, Node major version, and model. Set
+`PI_RESEARCH_WEBGPU_REPROBE=1` to discard it and probe again (for example after a
+driver upgrade).
+
+---
+
+## Platform support (no Intel Mac)
+
+The store depends on two native components — the ONNX runtime for embeddings and
+LanceDB for vector storage — that ship prebuilt binaries only for certain
+platform/architecture pairs:
+
+| Platform | Architecture | Knowledge store |
+|----------|--------------|-----------------|
+| macOS | Apple Silicon (arm64) | Supported |
+| macOS | **Intel (x64)** | **Not available** |
+| Linux | x64 / arm64 | Supported |
+| Windows | x64 / arm64 | Supported |
+
+**Intel Macs (`darwin-x64`) have no prebuilt binary for either component**, so the
+knowledge store cannot run there. This is a permanent capability gap, not a fault,
+and it is handled gracefully:
+
+- **Research still works fully.** Search, scraping, YouTube transcripts, the security
+  databases, Stack Exchange, planning, and synthesis are all unaffected — only the
+  optional store is missing.
+- **The health check reports the store as disabled, not unhealthy.** When the native
+  stack is unavailable, the store's health component returns *disabled (native
+  embedding/vector stack unavailable on this platform)* with a healthy status, so the
+  missing component does not drag overall health to "unhealthy" or block a quick
+  (depth-0) run from starting.
+- The `research_knowledge_search` tool simply does no caching or retrieval; every run
+  goes straight to the live web.
+
+No configuration is needed on an Intel Mac — the degradation is automatic.
+
+---
+
+## Retention and eviction
+
+Cached findings are kept for `PI_RESEARCH_CACHE_TTL_DAYS` (default 30; range 1–365).
+Eviction is checked when the store opens and removes only rows older than the cutoff
+within the current scope. Lower the value for fresher data and less disk; raise it to
+keep history longer.
+
+---
+
+## Changing the model: migration
+
+When the configured embedding model differs from the one the stored vectors were
+built with, the store is migrated according to `PI_RESEARCH_MIGRATION_STRATEGY`:
+
+| Strategy | What happens |
+|----------|--------------|
+| `backup` (default) | The old table is renamed aside (`knowledge_backup_<timestamp>.lance`) and a fresh table is created for the new model. Old data is preserved on disk but not searched. |
+| `drop` | The old table is discarded and a fresh one created. Fast; no backup. |
+| `re-embed` | Every stored document is re-embedded with the new model into a new table, preserving history. Slowest. |
+
+If the chosen strategy fails, pi-research falls back to `backup`, then to `drop`,
+rather than leaving the store in a broken state. Changing the model from the
+`/research-config` menu always clears the current store and starts fresh.
+
+---
+
+## Managing the store
+
+From `/research-config`:
+
+- **Database Status** — entry counts (project and user), the active embedding model
+  and device, and the on-disk path.
+- **Clear Project Store** / **Clear User Store** — permanently delete the
+  project-scoped or global rows (shown according to the current mode).
+- **Run Diagnostics** — exercises the browser pool, GPU/embedding, and database
+  connectivity, and reports the store's health state.
+
+---
+
+## Settings
+
+| Setting | Variable | Default |
+|---------|----------|---------|
+| Knowledge Mode (project-scoped) | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` |
+| Embedding model | `PI_RESEARCH_EMBEDDING_MODEL` | `onnx-community/granite-embedding-small-english-r2-ONNX` |
+| Embedding device | `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` |
+| Cache retention (days) | `PI_RESEARCH_CACHE_TTL_DAYS` | `30` |
+| Migration strategy | `PI_RESEARCH_MIGRATION_STRATEGY` | `backup` |
+| Database directory | `PI_RESEARCH_KNOWLEDGE_DIR` | `~/.pi/research/knowledge_db` |
+| Model init timeout (ms) | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` |
+| Re-probe WebGPU | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ |
+
+See [CONFIGURATION.md](CONFIGURATION.md) for the full configuration model, and
+[ARCHITECTURE.md](ARCHITECTURE.md#knowledge-store) for how the store fits into the
+engine.

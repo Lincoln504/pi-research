@@ -30,6 +30,8 @@
     "docs/PI-EXTENSION.md",
     "docs/OPENCLAW.md",
     "docs/SDK.md",
+    "docs/CONFIGURATION.md",
+    "docs/KNOWLEDGE-STORE.md",
     "docs/ARCHITECTURE.md",
     "docs/README-banner.jpg",
     "scripts/setup.cjs",

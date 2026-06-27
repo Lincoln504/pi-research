@@ -7,79 +7,27 @@ breaks a question into parallel research tracks, each researcher searches and sc
 the live web through a stealth browser, and an evaluator decides whether the answer is
 complete or another round is needed. The result is a single cited Markdown report.
 
----
-
-## Why
-
-- **Reads the open web directly.** Search runs through `camoufox` (a stealth Firefox)
-  rather than a paid search API, so there is no search key to manage, no per-query rate
-  limit, and no infrastructure to stand up. You still bring your own LLM key.
-- **Parallel by default.** A question is decomposed into independent researcher sessions
-  that run at the same time, so a broad topic is covered in breadth without you having to
-  split it up yourself.
-- **Safe to hand to an agent.** Researchers can search and scrape, but they cannot write
-  files, edit files, or run shell commands. The web tools are isolated and rate-limited,
-  which keeps an autonomous agent on task and contained.
-- **One engine, several front-ends.** The same core backs the pi extension, a standalone
-  CLI / agent skill, the OpenClaw plugin, and a programmatic SDK — so it fits wherever you
-  already work, and a fix in the engine reaches all of them at once.
-
-## What it does
-
-- **Web search** — parallel search bursts over DuckDuckGo Lite.
-- **Scraping** — batched, deduplicated page scraping with PDF support.
-- **YouTube transcripts** — read the captions of relevant videos (BotGuard PoToken handled), so video sources count too.
-- **Security databases** — NVD, CISA KEV, GitHub Advisories, and OSV.
-- **Stack Exchange** — full network search and filtering.
-- **Local knowledge store** — a vector database of past findings (global by default,
-  shared across every directory; configurable to per-project or off), searched before
-  going live so a repeat question can be answered from local results without a new web run.
-- **Real-time TUI** — live progress, so a long multi-agent run is observable: which
-  researcher is active, what it is scraping, and the running token and cost totals,
-  rather than waiting blind.
+One engine backs several front-ends — the pi extension, a standalone CLI / agent
+skill, the OpenClaw plugin, and a programmatic SDK.
 
 ---
 
 ## Requirements
 
 - Node.js >= 22.19.0
-- An LLM with a 100k+ context window
+- An LLM with a 100k+ context window (bring your own key)
 - Internet access
 
 ## Install
 
 ```bash
-pi install npm:@lincoln504/pi-research        # pi extension
-openclaw plugins install npm:@lincoln504/pi-research   # OpenClaw plugin
-npm install -g @lincoln504/pi-research        # standalone CLI / agent skill
-pi install .                                  # local, from a clone
+pi install npm:@lincoln504/pi-research                  # pi extension
+openclaw plugins install npm:@lincoln504/pi-research    # OpenClaw plugin
+npm install -g @lincoln504/pi-research                  # standalone CLI / agent skill
+pi install .                                            # local, from a clone
 ```
 
 The first install pulls the stealth browser engine, which takes a few minutes.
-
-### Install the skill into your coding agents
-
-Installation is driven from the pi extension's config menu. Run `/research-config`
-and choose:
-
-- **Install Skill in Coding Agents** — symlinks the `pi-research` skill into Claude
-  and Codex (whichever are installed on your machine).
-- **Uninstall Skill from Coding Agents** — removes the symlinks it created.
-
-The installer detects which agents are present, symlinks the skill into each
-(`~/.claude/skills`, `~/.codex/skills`), never overwrites an unrelated skill
-already occupying that slot, and records everything it creates so uninstall
-removes exactly that — also automatically on `npm uninstall`.
-
-Cursor is not auto-installed: it has no global skills directory and only reads
-project-level `.cursor/skills/`. To use the skill in Cursor, symlink it into a
-project: `ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" .cursor/skills/pi-research`.
-
-Prefer to do Claude/Codex by hand too? It is just a symlink, e.g.:
-
-```bash
-ln -s "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" ~/.claude/skills/pi-research
-```
 
 ## Usage
 
@@ -97,22 +45,35 @@ pi -p "research the latest developments in WebAssembly"
 - [Pi extension](docs/PI-EXTENSION.md) — commands, the live TUI, and the extension lifecycle.
 - [Agent skill](skills/pi-research/README.md) — the portable skill that gives any coding agent research via the CLI.
 - [OpenClaw plugin](docs/OPENCLAW.md) — install and use pi-research inside OpenClaw.
-- [SDK & configuration](docs/SDK.md) — the programmatic library, plus the full configuration model and every environment variable.
+- [SDK](docs/SDK.md) — the programmatic library.
+- [Configuration](docs/CONFIGURATION.md) — the TUI settings, every environment variable, and how config layers resolve.
+- [Knowledge store](docs/KNOWLEDGE-STORE.md) — the local vector cache of past findings.
 - [Architecture](docs/ARCHITECTURE.md) — how the engine is built: layers, services, and the research pipeline.
 
----
+## Built with
 
-## Development
+**Browser & scraping**
+- [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
+- [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
+- [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
+- `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
 
-```bash
-npm run test:unit         # unit tests, no browser required
-npm run test:integration  # requires camoufox (Xvfb only for the opt-in virtual-display tests)
-npm run type-check        # TypeScript strict mode (src)
-npm run type-check:tests  # TypeScript strict mode (tests)
-npm run lint              # ESLint
-npm run deps:check        # architectural rule enforcement
-```
+**Knowledge store & embeddings**
+- [Transformers.js](https://github.com/huggingface/transformers.js) — local embedding inference (model execution via ONNX Runtime)
+- Google [Dawn](https://dawn.googlesource.com/dawn) — the WebGPU backend, accessed through the `webgpu` Node binding
+- [LanceDB](https://lancedb.com) — on-disk vector database
+- [Apache Arrow](https://arrow.apache.org) — the columnar schema the vector table is built on
+
+**YouTube transcripts**
+- [youtubei.js](https://github.com/LuanRT/YouTube.js) — YouTube internal-API client
+- [BgUtils](https://github.com/LuanRT/BgUtils) — BotGuard PoToken generation
+- [jsdom](https://github.com/jsdom/jsdom) — DOM environment for minting the PoToken
+
+**Host & runtime**
+- [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
+- [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation
 
 ## License
 
 MIT
+
