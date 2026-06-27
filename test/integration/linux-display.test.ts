@@ -20,7 +20,7 @@
  *        (B) TTY + Xvfb absent  → healthy:false with actionable install hint (mocked)
  *        (C) DISPLAY set        → which Xvfb is NOT called at all
  *        (C2) pure Wayland      → which Xvfb is NOT called (headless:true used instead)
- *        (D) binary absent      → healthy:false with npm run setup hint
+ *        (D) binary absent      → healthy:false with `npx camoufox-js fetch` hint
  *
  * Skip semantics: every test uses ctx.skip() — never a silent pass-green.
  * Platform guard:  Linux-only tests are skipped via ctx.skip() on non-Linux,
