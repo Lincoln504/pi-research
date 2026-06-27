@@ -91,7 +91,31 @@ function exportsTargets() {
   return out;
 }
 
+// The package version is duplicated in three hand-maintained places. The `npm
+// version` lifecycle syncs them, but a manual edit can drift them silently —
+// shipping a plugin manifest / skill that disagrees with package.json. Assert
+// equality so a drift fails the publish gate instead of reaching users.
+function verifyVersionSync() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'openclaw.plugin.json'), 'utf8'));
+  const skillMd = fs.readFileSync(path.join(ROOT, 'skills/pi-research/SKILL.md'), 'utf8');
+  const skillMatch = skillMd.match(/^\s*version:\s*["']?([^"'\s]+)["']?\s*$/m);
+  const skillVersion = skillMatch ? skillMatch[1] : null;
+
+  if (manifest.version !== pkg.version) {
+    fail(`openclaw.plugin.json version (${manifest.version}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
+  }
+  if (skillVersion !== pkg.version) {
+    fail(`skills/pi-research/SKILL.md version (${skillVersion}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
+  }
+  if (!process.exitCode) {
+    console.log(`OK: version ${pkg.version} consistent across package.json, openclaw.plugin.json, SKILL.md.`);
+  }
+}
+
 function verifyManifest() {
+  verifyVersionSync();
+
   let raw;
   try {
     raw = execSync('npm pack --dry-run --json --ignore-scripts', {

@@ -207,7 +207,9 @@ describe('OpenClaw Plugin Integration', () => {
     await plugin.register(mockApi as any);
     const healthTool = registeredTools.find(t => t.name === 'health')!;
     const result = await healthTool.execute('call-id', {});
-    expect(result.content[0]!.text).toContain('status');
+    // OpenClaw now delegates to the shared health tool, which renders the same
+    // Markdown report as the pi extension / SDK (not raw JSON).
+    expect(result.content[0]!.text).toContain('System Health Status');
   });
 
   it('initializes services exactly once under concurrent tool calls', async () => {

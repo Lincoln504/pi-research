@@ -26,10 +26,10 @@ import { QuickResearchOrchestrator, type QuickResearchOrchestratorOptions } from
 import { exportResearchReport, appendExportMessage } from './utils/research-export.ts';
 import { HeadlessObserver } from './orchestration/headless-observer.ts';
 import { createResearchKnowledgeSearchTool } from './tools/research-knowledge-search.ts';
+import { createHealthTool } from './tools/health-tool-definition.ts';
 import { createResearchRunId, logger } from './logger.ts';
 import { getConfig, type Config } from './config.ts';
 import { shutdownManager } from './utils/shutdown-manager.ts';
-import { healthRegistry } from './healthcheck/index.ts';
 import { metrics } from './utils/metrics.ts';
 import { clearAllSessionState } from './orchestration/session-state.ts';
 
@@ -301,6 +301,9 @@ export default definePluginEntry({
           maximum: 3,
           description: 'Research complexity. 0=quick, 1=normal, 2=deep, 3=ultra.',
         })),
+        model: Type.Optional(Type.String({
+          description: 'Optional model ID override for this research run (defaults to the configured model).',
+        })),
         excludeTools: Type.Optional(Type.Array(Type.String(), {
           description: 'List of internal research tools to disable. Defaults to ["grep", "read"].',
         })),
@@ -323,7 +326,17 @@ export default definePluginEntry({
         const initialLinks = params.initialLinks;
         const researchId = createResearchRunId();
         const piSessionId = `openclaw-${randomUUID()}`;
-        const mockCtx = createMockContext(globalModel!, globalRegistry!);
+        // Per-call model override (parity with the pi/SDK research tool). Falls
+        // back to the configured model when unset. Resolved against the same
+        // registry so an unknown id surfaces a clear error rather than a later
+        // opaque failure deep in the orchestrator.
+        let runModel: Model<any>;
+        try {
+          runModel = params.model ? resolveModel(globalRegistry!, params.model) : globalModel!;
+        } catch (e) {
+          throw new Error(`Unknown model "${params.model}": ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+        }
+        const mockCtx = createMockContext(runModel, globalRegistry!);
         const observer = _headlessObserver ??= new HeadlessObserver({ enableLogging: true });
 
         const researchStart = Date.now();
@@ -333,7 +346,7 @@ export default definePluginEntry({
           if (depth === 0) {
             const orchestrator = new QuickResearchOrchestrator({
               ctx: mockCtx,
-              model: globalModel!,
+              model: runModel,
               query: query || (initialLinks?.[0] ?? 'Initial Links Research'),
               sessionId: piSessionId,
               researchId,
@@ -348,7 +361,7 @@ export default definePluginEntry({
             const orchService = await getService<any>(ServiceNames.RESEARCH_ORCHESTRATION, mockCtx, globalContainer!);
             const orchestrator = new DeepResearchOrchestrator({
               ctx: mockCtx,
-              model: globalModel!,
+              model: runModel,
               query: query || (initialLinks?.[0] ?? 'Initial Links Research'),
               complexity,
               sessionId: piSessionId,
@@ -391,20 +404,21 @@ export default definePluginEntry({
       },
     });
 
+    // Delegate to the shared health tool so OpenClaw renders the same Markdown
+    // report (and honours `verbose`) as the pi extension and SDK, instead of
+    // dumping raw JSON. Keeps the three surfaces from drifting.
+    const healthTool = createHealthTool();
     api.registerTool({
-      name: 'health',
-      label: 'Health Check',
-      description: 'Check system health status across all research components.',
-      parameters: Type.Object({
-        verbose: Type.Optional(Type.Boolean({ default: true })),
-        probe: Type.Optional(Type.Boolean({ default: false })),
-      }),
-      async execute(_toolCallId, params: any) {
+      name: healthTool.name,
+      label: healthTool.label ?? 'Health Check',
+      description: healthTool.description,
+      parameters: healthTool.parameters,
+      async execute(_toolCallId, params, signal) {
         const config = (api as any).pluginConfig ?? {};
         await ensureInitialized(config);
-        const { probe = false } = params;
-        const systemHealth = await healthRegistry.runAll({ force: probe });
-        return { content: [{ type: 'text', text: JSON.stringify(systemHealth, null, 2) }], details: {} };
+        const mockCtx = createMockContext(globalModel!, globalRegistry!);
+        const result = await healthTool.execute(_toolCallId, params, signal, undefined as any, mockCtx);
+        return { ...result, details: result.details ?? {} };
       }
     });
 
