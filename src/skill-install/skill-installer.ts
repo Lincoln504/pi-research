@@ -428,6 +428,84 @@ export function uninstallSkill(toolIds?: string[], opts: InstallOptions = {}): U
 }
 
 // ---------------------------------------------------------------------------
+// Reconcile (self-heal on startup)
+// ---------------------------------------------------------------------------
+
+export interface ReconcileResult {
+  /** Dead owned symlinks removed (target package gone, no current source). */
+  pruned: string[];
+  /** Stale/dangling owned symlinks re-pointed to the current package source. */
+  repointed: string[];
+}
+
+/**
+ * Self-heal the cross-harness skill installs. Cheap, best-effort, idempotent —
+ * meant to run once on extension/CLI startup.
+ *
+ * Why this exists: the host removes a pi-research install by deleting its
+ * directory (git path) or via `npm uninstall` — and modern npm does NOT run the
+ * `preuninstall` lifecycle for a removed dependency, so `cleanup.cjs` never
+ * fires on uninstall. A skill symlink the user installed into another agent
+ * (~/.claude/skills, ~/.codex/skills) therefore dangles after the package is
+ * removed or relocated by an update. The next time ANY pi-research runs, this:
+ *   - re-points an owned symlink whose target moved (update/reinstall) to the
+ *     current source, so the skill keeps working without a manual re-install;
+ *   - removes an owned symlink that now dangles with no resolvable source, and
+ *     drops manifest entries whose link the user deleted by hand.
+ * Foreign (non-owned) paths and self-contained copies are never touched.
+ */
+export function reconcileSkillInstalls(opts: InstallOptions = {}): ReconcileResult {
+  const result: ReconcileResult = { pruned: [], repointed: [] };
+  const manifest = readManifest(opts);
+  if (manifest.entries.length === 0) return result;
+
+  let source: string | null;
+  try { source = resolveSkillSourceDir(opts.skillSourceDir); } catch { source = null; }
+
+  const keep: ManifestEntry[] = [];
+  for (const e of manifest.entries) {
+    // Copies are self-contained (no target to dangle); leave them as-is.
+    if (e.type !== 'symlink') { keep.push(e); continue; }
+
+    // Link the user deleted by hand — nothing on disk; drop the stale entry.
+    if (!isSymlinkPresent(e.path)) { result.pruned.push(e.path); continue; }
+
+    // Only ever touch links we own; a foreign link at this path stays + tracked.
+    if (!isOwnedSymlink(e.path)) { keep.push(e); continue; }
+
+    const targetLive = fs.existsSync(e.path); // existsSync follows the link
+    let dest: string | null = null;
+    try { dest = path.resolve(path.dirname(e.path), fs.readlinkSync(e.path)); } catch { /* unreadable */ }
+
+    const stale = source !== null && dest !== null && dest !== path.resolve(source);
+    if (!targetLive || stale) {
+      if (source !== null) {
+        // Re-point to the current package source (handles update/reinstall).
+        try {
+          fs.unlinkSync(e.path);
+          fs.symlinkSync(source, e.path, process.platform === 'win32' ? 'junction' : 'dir');
+          keep.push({ ...e, type: 'symlink', source });
+          result.repointed.push(e.path);
+        } catch { keep.push(e); /* leave entry; retry next startup */ }
+      } else if (!targetLive) {
+        // Dangling with no resolvable source (package fully removed): remove the
+        // dead link and drop the entry so the agent's skills dir stays clean.
+        try { fs.unlinkSync(e.path); result.pruned.push(e.path); }
+        catch { keep.push(e); }
+      } else {
+        keep.push(e);
+      }
+      continue;
+    }
+    keep.push(e);
+  }
+
+  if (keep.length > 0) writeManifest({ version: 1, package: PACKAGE_NAME, entries: keep }, opts);
+  else { try { fs.rmSync(getManifestPath(opts)); } catch { /* already gone */ } }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

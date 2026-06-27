@@ -247,6 +247,20 @@ export default async function (pi: ExtensionAPI) {
     logger.error(`[pi-research] WARNING: Config validation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // Self-heal cross-harness skill installs: re-point links left stale by an
+  // update and prune ones left dangling by a prior removal. Best-effort — a
+  // filesystem hiccup here must never block activation. (npm does not run our
+  // preuninstall on uninstall, so this startup pass is the reliable GC.)
+  try {
+    const { reconcileSkillInstalls } = await import('./skill-install/skill-installer.ts');
+    const r = reconcileSkillInstalls();
+    if (r.repointed.length || r.pruned.length) {
+      logger.info(`[pi-research] Skill links reconciled: ${r.repointed.length} re-pointed, ${r.pruned.length} pruned`);
+    }
+  } catch (err) {
+    logger.debug('[pi-research] Skill reconcile skipped:', err);
+  }
+
   // Primary cleanup path for pi -p (print mode) and normal session end.
   // Only arm force-exit and mark PI_PROCESS_EXITING on a genuine quit — not on
   // reload/new/resume/fork where the process continues under a rebuilt extension.

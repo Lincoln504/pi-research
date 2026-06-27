@@ -23,6 +23,7 @@ import {
   resolveSkillSourceDir,
   skillInstallCandidates,
   skillUninstallCandidates,
+  reconcileSkillInstalls,
   SKILL_AGENT_TARGETS,
 } from '../../src/skill-install/skill-installer.ts';
 
@@ -263,6 +264,62 @@ describe('uninstallSkill', () => {
     const r = uninstallSkill(undefined, opts());
     expect(r.find(x => x.tool === 'claude')!.status).toBe('not-present');
     expect(readManifest(opts()).entries).toHaveLength(0);
+  });
+});
+
+describe('reconcileSkillInstalls (startup self-heal)', () => {
+  // Build a fake "old package" whose path matches the owned-symlink layout
+  // (…/pi-research/skills/pi-research), so an owned link can point at it.
+  function fakeOldSource(): string {
+    const src = path.join(HOME, 'oldpkg', 'pi-research', 'skills', 'pi-research');
+    fs.mkdirSync(src, { recursive: true });
+    fs.writeFileSync(path.join(src, 'SKILL.md'), '# old\n');
+    return src;
+  }
+  function manualInstall(id: string, source: string) {
+    const dest = skillPathFor(id);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.symlinkSync(source, dest, process.platform === 'win32' ? 'junction' : 'dir');
+    const mp = getManifestPath(opts());
+    fs.mkdirSync(path.dirname(mp), { recursive: true });
+    fs.writeFileSync(mp, JSON.stringify({
+      version: 1, package: '@lincoln504/pi-research',
+      entries: [{ tool: id, path: dest, type: 'symlink', source, createdAt: '2020-01-01T00:00:00Z' }],
+    }, null, 2));
+    return dest;
+  }
+
+  it('re-points an owned symlink left stale by an update to the current source', () => {
+    mkHarnessBase('claude');
+    const dest = manualInstall('claude', fakeOldSource());
+    const r = reconcileSkillInstalls(opts()); // current source = real bundled SKILL_SRC
+    expect(r.repointed).toContain(dest);
+    expect(fs.realpathSync(dest)).toBe(fs.realpathSync(SKILL_SRC));
+    expect(readManifest(opts()).entries[0]!.source).toBe(SKILL_SRC);
+  });
+
+  it('prunes a manifest entry whose link the user deleted by hand', () => {
+    mkHarnessBase('claude');
+    const dest = manualInstall('claude', fakeOldSource());
+    fs.unlinkSync(dest); // user removed the link; manifest still references it
+    const r = reconcileSkillInstalls(opts());
+    expect(r.pruned).toContain(dest);
+    expect(fs.existsSync(getManifestPath(opts()))).toBe(false); // emptied → removed
+  });
+
+  it('never touches a foreign (non-owned) symlink at our path', () => {
+    mkHarnessBase('claude');
+    const foreign = path.join(HOME, 'someone-elses-skill');
+    fs.mkdirSync(foreign, { recursive: true });
+    const dest = manualInstall('claude', foreign); // dest does NOT match owned layout
+    reconcileSkillInstalls(opts());
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(fs.readlinkSync(dest)).toBe(foreign); // unchanged
+  });
+
+  it('is a no-op when there is no manifest', () => {
+    const r = reconcileSkillInstalls(opts());
+    expect(r).toEqual({ pruned: [], repointed: [] });
   });
 });
 
