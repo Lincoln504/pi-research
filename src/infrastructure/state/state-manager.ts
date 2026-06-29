@@ -195,10 +195,16 @@ export class StateManager {
       // never brick every reader; genuine I/O errors (EACCES/EPERM/EISDIR) are
       // NOT corruption and still surface via the throw below. A future `version`
       // is handled separately above (quarantine, not overwrite).
+      // A missing migration step ("No migration registered from state version
+      // N…") means an old, un-upgradeable file — recover to a fresh default like
+      // any other corruption. A buggy migration ("Migration … produced version
+      // …") is a programming error and is intentionally left to surface.
       const isCorruption =
         error instanceof SyntaxError ||
         (error instanceof Error &&
-          (error.message.includes('parse') || error.message.startsWith('Invalid state')));
+          (error.message.includes('parse') ||
+            error.message.startsWith('Invalid state') ||
+            error.message.startsWith('No migration registered')));
       if (isCorruption) {
         logger.error(
           `[StateManager] State file corrupt/invalid (${error instanceof Error ? error.message : String(error)}); attempting recovery...`,

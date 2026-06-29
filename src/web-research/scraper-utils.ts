@@ -275,8 +275,10 @@ function isPrivateIpv6(ip: string): boolean {
  * prefixes. Returns null when `ip` is not an IPv4-mapped address.
  */
 function extractMappedIpv4(ip: string): string | null {
-  // ::ffff: prefix, compressed or full (0:0:0:0:0:ffff:)
-  const prefix = /(?:^::ffff:|(?:^0:){5}ffff:)/i;
+  // ::ffff: prefix, compressed or full (0:0:0:0:0:ffff:). Anchor once at the
+  // start: a `^` inside the {5} group would only match the first repetition,
+  // making the full-form alternative dead.
+  const prefix = /^(?:::ffff:|(?:0:){5}ffff:)/i;
   if (!prefix.test(ip)) return null;
   const tail = ip.replace(prefix, '');
   // Dotted-decimal tail: ::ffff:127.0.0.1

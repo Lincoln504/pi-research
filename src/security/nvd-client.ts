@@ -457,10 +457,10 @@ export async function searchNVD(
  * @param cveId - The CVE ID to fetch (e.g., "CVE-2023-1234")
  * @returns Promise<Vulnerability | null> containing the vulnerability or null if not found
  */
-export async function getCVEById(cveId: string): Promise<Vulnerability | null> {
+export async function getCVEById(cveId: string, signal?: AbortSignal): Promise<Vulnerability | null> {
   const startTime = Date.now();
   try {
-    const results = await searchNVD([cveId], { maxResults: 1 });
+    const results = await searchNVD([cveId], { maxResults: 1, signal });
     const duration = Date.now() - startTime;
     metrics.observe('nvd_cve_fetch_duration_ms', duration, { found: results.vulnerabilities.length > 0 ? 'true' : 'false' });
     return results.vulnerabilities[0] ?? null;

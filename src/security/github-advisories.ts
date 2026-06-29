@@ -334,7 +334,7 @@ export async function searchGitHubAdvisories(
  * @param id - The GHSA ID or CVE ID to fetch
  * @returns Promise resolving to Advisory or null if not found
  */
-export async function getAdvisoryById(id: string): Promise<Advisory | null> {
+export async function getAdvisoryById(id: string, signal?: AbortSignal): Promise<Advisory | null> {
   const startTime = Date.now();
   try {
     if (id === '') {
@@ -346,7 +346,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
     const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
       const resp = await fetch(url, {
         headers: githubHeaders(),
-        signal: createTimeoutSignal(10000),
+        signal: createTimeoutSignal(10000, signal),
       });
 
       if (!resp.ok) {
@@ -378,6 +378,7 @@ export async function getAdvisoryById(id: string): Promise<Advisory | null> {
       maxRetries: 2,
       initialDelay: 1000,
       maxDelay: 5000,
+      signal,
     }));
 
     let data: unknown;

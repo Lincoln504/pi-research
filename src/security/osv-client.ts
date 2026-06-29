@@ -218,7 +218,7 @@ export async function searchOSV(
  * @param osvId - OSV vulnerability ID (e.g., CVE-2023-1234, GHSA-abc1-23de-fg45)
  * @returns Vulnerability object if found, null otherwise
  */
-export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
+export async function getOSVById(osvId: string, signal?: AbortSignal): Promise<Vulnerability | null> {
   const startTime = Date.now();
   try {
     const url: string = `${OSV_BASE_URL}/vulns/${encodeURIComponent(osvId)}`;
@@ -227,8 +227,8 @@ export async function getOSVById(osvId: string): Promise<Vulnerability | null> {
         'User-Agent': 'pi-research/2.0',
         'Accept': 'application/json',
       },
-      signal: createTimeoutSignal(OSV_TIMEOUT_MS),
-    });
+      signal: createTimeoutSignal(OSV_TIMEOUT_MS, signal),
+    }, signal);
 
     let data: unknown;
     try {

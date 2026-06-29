@@ -220,8 +220,8 @@ class DefaultNVDClient implements INVDClient {
   async search(terms: readonly string[], options?: NVDSearchOptions): Promise<NVDResult> {
     return searchNVD(terms as string[], options);
   }
-  async getById(cveId: string): Promise<import('./types.ts').Vulnerability | null> {
-    return getCVEById(cveId);
+  async getById(cveId: string, signal?: AbortSignal): Promise<import('./types.ts').Vulnerability | null> {
+    return getCVEById(cveId, signal);
   }
 }
 
@@ -235,8 +235,8 @@ class DefaultGitHubClient implements IGitHubAdvisoriesClient {
   async search(terms: readonly string[], options?: GitHubSearchOptions): Promise<GitHubResult> {
     return searchGitHubAdvisories(terms as string[], options);
   }
-  async getById(id: string): Promise<import('./types.ts').Advisory | null> {
-    return getAdvisoryById(id);
+  async getById(id: string, signal?: AbortSignal): Promise<import('./types.ts').Advisory | null> {
+    return getAdvisoryById(id, signal);
   }
 }
 
@@ -244,8 +244,8 @@ class DefaultOSVClient implements IOSVClient {
   async search(terms: readonly string[], options?: OSVSearchOptions): Promise<OSVResult> {
     return searchOSV(terms as string[], options);
   }
-  async getById(osvId: string): Promise<import('./types.ts').Vulnerability | null> {
-    return getOSVById(osvId);
+  async getById(osvId: string, signal?: AbortSignal): Promise<import('./types.ts').Vulnerability | null> {
+    return getOSVById(osvId, signal);
   }
 }
 

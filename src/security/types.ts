@@ -99,7 +99,7 @@ export interface SecuritySearchResult {
 
 export interface INVDClient {
   search(terms: readonly string[], options?: NVDSearchOptions): Promise<NVDResult>;
-  getById(cveId: string): Promise<Vulnerability | null>;
+  getById(cveId: string, signal?: AbortSignal): Promise<Vulnerability | null>;
 }
 
 export interface NVDSearchOptions {
@@ -127,7 +127,7 @@ export interface CisaKevSearchOptions {
 
 export interface IGitHubAdvisoriesClient {
   search(terms: readonly string[], options?: GitHubSearchOptions): Promise<GitHubResult>;
-  getById(id: string): Promise<Advisory | null>;
+  getById(id: string, signal?: AbortSignal): Promise<Advisory | null>;
 }
 
 export interface GitHubSearchOptions {
@@ -140,7 +140,7 @@ export interface GitHubSearchOptions {
 
 export interface IOSVClient {
   search(terms: readonly string[], options?: OSVSearchOptions): Promise<OSVResult>;
-  getById(osvId: string): Promise<Vulnerability | null>;
+  getById(osvId: string, signal?: AbortSignal): Promise<Vulnerability | null>;
 }
 
 export interface OSVSearchOptions {

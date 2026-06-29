@@ -274,19 +274,40 @@ describe('SecuritySearcher', () => {
       expect(calls[0]!.options?.includeExploited).toBe(true);
     });
 
-    it('threads the caller AbortSignal through to the client options', async () => {
+    it('threads the caller AbortSignal through to every queried client, and abort is observable', async () => {
       const mockNVD = new MockNVDClient();
-      mockNVD.setMockResult('test', { count: 0, vulnerabilities: [] });
-      const searcher = createFastSearcher({ nvdClient: mockNVD });
+      const mockCisa = new MockCisaKevClient();
+      const mockGitHub = new MockGitHubClient();
+      const mockOSV = new MockOSVClient();
+      // No mock results needed — each client falls back to an empty result; the
+      // point of this test is that the signal reaches every client's search().
+
+      const searcher = createFastSearcher({
+        nvdClient: mockNVD,
+        cisaKevClient: mockCisa,
+        githubAdvisoriesClient: mockGitHub,
+        osvClient: mockOSV,
+      });
       const controller = new AbortController();
 
-      await searcher.search({ terms: ['test'], databases: ['nvd'] }, controller.signal);
+      await searcher.search(
+        { terms: ['test'], databases: ['nvd', 'cisa_kev', 'github', 'osv'] },
+        controller.signal,
+      );
 
-      const calls = mockNVD.getSearchCalls();
-      expect(calls).toHaveLength(1);
-      // The same signal instance must reach the client so it can cancel its
-      // own rate-limit/backoff/pagination promptly.
-      expect(calls[0]!.options?.signal).toBe(controller.signal);
+      // The same signal instance must reach EVERY client so each can cancel its
+      // own rate-limit/backoff/pagination promptly — not just NVD.
+      for (const mock of [mockNVD, mockCisa, mockGitHub, mockOSV]) {
+        const calls = mock.getSearchCalls();
+        expect(calls).toHaveLength(1);
+        expect(calls[0]!.options?.signal).toBe(controller.signal);
+      }
+
+      // Firing the controller must actually flip the forwarded signal — proves
+      // the client received a live, cancellable signal rather than a stored copy.
+      expect(mockNVD.getSearchCalls()[0]!.options?.signal?.aborted).toBe(false);
+      controller.abort();
+      expect(mockNVD.getSearchCalls()[0]!.options?.signal?.aborted).toBe(true);
     });
 
     it('should handle NVD errors', async () => {
