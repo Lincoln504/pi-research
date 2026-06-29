@@ -228,8 +228,13 @@ export class Logger implements ILogger {
       if (!existsSync(this.logDir)) {
         mkdirSync(this.logDir, { recursive: true, mode: 0o700 });
       }
-      if (!existsSync(this.logFile)) {
-        closeSync(openSync(this.logFile, 'a', 0o600));
+      // Atomically create the log file owner-only if it's absent. 'wx' = O_CREAT|
+      // O_EXCL: it either creates the file at 0o600 or fails with EEXIST when one
+      // already exists — no check-then-create window for another user to win.
+      try {
+        closeSync(openSync(this.logFile, 'wx', 0o600));
+      } catch {
+        // Already exists (or not creatable) — appendFile uses the existing file.
       }
     } catch {
       // Ignore if we can't create the dir or file
