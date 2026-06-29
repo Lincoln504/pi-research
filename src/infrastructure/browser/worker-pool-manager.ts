@@ -35,6 +35,13 @@ export class WorkerPoolManager implements IService {
     private currentWorkerCount: number | null = null;
     private consecutiveErrors: number = 0;
     private isShuttingDown: boolean = false;
+    // Monotonic shutdown generation. Each shutdown() bumps it, so an in-flight
+    // ensurePool() that started before the shutdown can detect it even after
+    // isShuttingDown has been reset to false (shutdown resets it so the instance
+    // is reusable). A bare boolean can't distinguish "no shutdown" from "a
+    // shutdown already started AND finished while I was building the pool" —
+    // exactly the window that let a freshly-built pool survive un-referenced.
+    private generation: number = 0;
     // FIX (#12): Flag to indicate a pool reset is in progress
     private _resetInProgress: boolean = false;
 
@@ -86,6 +93,10 @@ export class WorkerPoolManager implements IService {
             return this.poolInitializationPromise;
         }
 
+        // Snapshot the generation this init belongs to. If a shutdown bumps it
+        // while we await below (ensureBrowserInstalled can be slow), the checks
+        // after pool construction tear the new pool down instead of leaking it.
+        const myGeneration = this.generation;
         this.poolInitializationPromise = (async () => {
             try {
                 if (this.pool && this.currentWorkerCount !== maxWorkers) {
@@ -103,9 +114,9 @@ export class WorkerPoolManager implements IService {
                 // Provision the camoufox browser if it is missing. This is a no-op
                 // (cheap existsSync) when the browser is already installed — i.e. on
                 // every install path whose postinstall ran (pi extension, plain npm).
-                // It only does work on hosts that skip postinstall (e.g. OpenClaw,
-                // which installs plugins with --ignore-scripts), where the binary
-                // would otherwise be absent and the first scrape would fail.
+                // It only does work on install flows that skip postinstall (e.g.
+                // `npm install --ignore-scripts`), where the binary would
+                // otherwise be absent and the first scrape would fail.
                 await ensureBrowserInstalled();
 
                 const browserEnv = getBrowserEnv(config);
@@ -190,12 +201,20 @@ export class WorkerPoolManager implements IService {
                     }
                 });
 
-                // Secondary race check: if shutdown() was called concurrent with the
-                // async pool construction above (between the early check and here).
-                if (this.isShuttingDown) {
-                    logger.warn('[WorkerPoolManager] Pool initialized but is already shutting down. Destroying...');
-                    await this.pool.destroy().catch((err: any) => logger.debug('Swallowed pool destroy error:', err));
-                    this.pool = null;
+                // Secondary race check: if a shutdown() was called concurrent with
+                // the async pool construction above (between the early check and
+                // here). Checking the generation — not just isShuttingDown — catches
+                // a shutdown that has already STARTED AND FINISHED during our await
+                // (which resets isShuttingDown back to false). shutdown() also awaits
+                // this promise, so whichever side runs the destroy, the pool never
+                // survives un-referenced.
+                if (this.isShuttingDown || this.generation !== myGeneration) {
+                    logger.warn('[WorkerPoolManager] Pool initialized but a shutdown intervened. Destroying...');
+                    const built = this.pool;
+                    // Only null the shared field if it still points at the pool we built —
+                    // a concurrent path may already have moved on.
+                    if (this.pool === built) this.pool = null;
+                    await built.destroy().catch((err: any) => logger.debug('Swallowed pool destroy error:', err));
                     throw new Error('Worker pool is shutting down');
                 }
 
@@ -308,6 +327,20 @@ export class WorkerPoolManager implements IService {
     async shutdown(): Promise<void> {
         if (this.isShuttingDown) return;
         this.isShuttingDown = true;
+        // Invalidate any in-flight ensurePool() so the pool it builds is torn down
+        // by its own generation check rather than surviving past this shutdown.
+        this.generation++;
+
+        // Await an in-flight initialization before tearing down. Without this, a
+        // pool whose construction had not yet assigned this.pool when we entered
+        // would be built AFTER we returned and leak (cluster workers + Camoufox).
+        // The init either self-destroys (generation check) or assigns this.pool,
+        // which we then destroy below. Its rejection from the generation check is
+        // expected — swallow it.
+        const initInFlight = this.poolInitializationPromise;
+        if (initInFlight) {
+            await initInFlight.catch(() => { /* generation-aborted or failed init — nothing to keep */ });
+        }
 
         if (this.pool) {
             try {

@@ -79,12 +79,16 @@ export interface SearchOptions {
   readonly startDate?: string;
   readonly endDate?: string;
   readonly maxPages?: number;
+  // Caller cancellation; composed with the per-request timeout and used to
+  // short-circuit the rate-limit spacing, pagination, and retry backoff.
+  readonly signal?: AbortSignal;
 }
 
 export interface RetryOptions {
   readonly maxRetries: number;
   readonly initialDelay: number;
   readonly maxDelay: number;
+  readonly signal?: AbortSignal;
 }
 
 // Type guards

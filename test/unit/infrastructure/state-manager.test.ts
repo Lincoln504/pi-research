@@ -381,4 +381,39 @@ describe('StateManager GPU lock', () => {
     (state as any).gpuOwner = { pid: 'not-a-number', startedAt: Date.now() };
     await expect(manager.writeState(state)).rejects.toThrow(/Invalid state/i);
   });
+
+  describe('newer-build state file (forward-version protection)', () => {
+    it('does not overwrite a future-version file, runs read-only, and quarantines a copy', async () => {
+      // Simulate a newer co-installed build having written version: 2 with its own
+      // authSecret. The older reader must not treat this as corruption.
+      const newer = {
+        version: 2,
+        containerId: 'newer-build',
+        containerName: 'pi-research-shared-state',
+        port: 0,
+        sessions: {},
+        lastUpdated: Date.now(),
+        browserServer: { port: 1234, pid: 99, authSecret: 'newer-secret' },
+      };
+      const stateFile = path.join(testDir, 'research-state.json');
+      await fs.writeFile(stateFile, JSON.stringify(newer));
+
+      // Read returns an in-memory default (not the unreadable newer state).
+      const read = await manager.readState();
+      expect(read.version).toBe(1);
+      expect(read.containerId).not.toBe('newer-build');
+
+      // A mutation must be suppressed — the on-disk newer file is untouched.
+      await manager.addSession('s1', process.pid);
+      const onDisk = JSON.parse(await fs.readFile(stateFile, 'utf-8'));
+      expect(onDisk.version).toBe(2);
+      expect(onDisk.containerId).toBe('newer-build');
+      expect(onDisk.browserServer.authSecret).toBe('newer-secret');
+      expect(onDisk.sessions.s1).toBeUndefined();
+
+      // A quarantine copy was preserved for forensics.
+      const backups = await fs.readdir(path.join(testDir, 'backups'));
+      expect(backups.some(b => b.includes('.quarantine'))).toBe(true);
+    });
+  });
 });

@@ -202,7 +202,7 @@ export default async function (pi: ExtensionAPI) {
       // same-process re-activate() (pi reload / new session) would re-run
       // registerCoreServices against an already-populated container and throw on
       // the first allowOverwrite:false register — leaving isReady=true over stale
-      // services. Matches the SDK and OpenClaw teardown (both reset after dispose).
+      // services. Matches the SDK and CLI teardown (both reset after dispose).
       await resetServiceContainer(getServiceContainer());
       // Clear in-memory state after disposal.
       disposeGlobalTuiController();

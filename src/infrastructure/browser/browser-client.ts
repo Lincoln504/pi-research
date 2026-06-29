@@ -85,13 +85,17 @@ export class BrowserClient implements IScheduler {
                     'X-Browser-Auth': this.authSecret,
                 }
             }, (res) => {
-                clearTimeout(timer);
-                abortCleanup?.();
+                // Do NOT clear the timeout/abort here. The response callback fires
+                // when headers arrive, but the body is still streaming — clearing
+                // now would let a stalled body hang forever and make an external
+                // abort a no-op. Keep both armed until 'end' or 'error'.
                 let body = '';
                 res.on('data', chunk => body += chunk);
                 res.on('end', () => {
                     if (resolved) return;
                     resolved = true;
+                    clearTimeout(timer);
+                    abortCleanup?.();
                     const duration = Date.now() - start;
                     try {
                         const parsed = JSON.parse(body);

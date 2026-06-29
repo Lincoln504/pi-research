@@ -47,16 +47,36 @@ vi.mock('../../../src/infrastructure/browser/cleanup-utils.ts', () => ({
   cleanupStaleProfiles: vi.fn(async () => ({ removed: 0, errors: 0 })),
 }));
 
+// Browser provisioning + orphan sweep run inside ensurePool(); stub them so the
+// init path is deterministic and offline. ensureBrowserInstalled is also the
+// hook the resurrection test uses to hold the init mid-flight.
+vi.mock('../../../src/infrastructure/browser/ensure-browser.ts', () => ({
+  ensureBrowserInstalled: vi.fn(async () => {}),
+}));
+vi.mock('../../../src/infrastructure/browser/browser-cleanup.ts', () => ({
+  cleanupOrphanedCamoufoxProcesses: vi.fn(async () => {}),
+}));
+
+// existsSync(workerPath) must be truthy so ensurePool() doesn't fail on the
+// missing-worker-bundle guard.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: vi.fn(() => true) };
+});
+
 // ---------------------------------------------------------------------------
 // Minimal FixedClusterPool stub — must use a regular function (not arrow) so
 // that vitest allows `new FixedClusterPool(...)` to work.
 // ---------------------------------------------------------------------------
 
+const poolRegistry = vi.hoisted(() => ({ instances: [] as any[] }));
+
 vi.mock('poolifier', () => {
-   
+
   function FixedClusterPool(this: any, _size: number, _path: string, _opts?: unknown) {
     this.execute = vi.fn().mockResolvedValue({});
     this.destroy = vi.fn().mockResolvedValue(undefined);
+    poolRegistry.instances.push(this);
     return this;
   }
 
@@ -71,6 +91,9 @@ vi.mock('poolifier', () => {
 // ---------------------------------------------------------------------------
 
 import { WorkerPoolManager } from '../../../src/infrastructure/browser/worker-pool-manager.ts';
+import { ensureBrowserInstalled } from '../../../src/infrastructure/browser/ensure-browser.ts';
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -81,6 +104,7 @@ describe('WorkerPoolManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    poolRegistry.instances.length = 0;
     manager = new WorkerPoolManager();
   });
 
@@ -184,6 +208,41 @@ describe('WorkerPoolManager', () => {
       ]);
       expect(p1).toBe(p2);
       expect(p2).toBe(p3);
+    });
+  });
+
+  describe('shutdown during in-flight init (resurrection + leak guard)', () => {
+    it('tears down a pool built by an init that was in flight when shutdown ran', async () => {
+      // Hold the init mid-flight at ensureBrowserInstalled (before the pool is
+      // constructed), exactly the window where shutdown() used to skip teardown
+      // (this.pool still null) and then reset isShuttingDown=false, letting the
+      // init finish and leak a fully-referenced pool.
+      let releaseInit!: () => void;
+      const initGate = new Promise<void>((resolve) => { releaseInit = resolve; });
+      vi.mocked(ensureBrowserInstalled).mockImplementationOnce(async () => { await initGate; });
+
+      const ensurePromise = manager.ensurePool();
+      await tick(); // let ensurePool enter the IIFE and block on ensureBrowserInstalled
+
+      // Shutdown while the init is parked. It bumps the generation and awaits the
+      // in-flight init rather than returning early.
+      const shutdownPromise = manager.shutdown();
+      await tick();
+
+      // Let the init proceed: it builds the pool, sees the generation changed,
+      // destroys it, and throws.
+      releaseInit();
+      await shutdownPromise;
+      await expect(ensurePromise).rejects.toThrow(/shutting down/);
+
+      // Exactly one pool was constructed, and it was destroyed — not leaked.
+      expect(poolRegistry.instances.length).toBe(1);
+      expect(poolRegistry.instances[0].destroy).toHaveBeenCalled();
+      expect(manager.getPool()).toBeNull();
+      expect(manager.isPoolShuttingDown()).toBe(false);
+
+      // The instance is still reusable afterwards.
+      await expect(manager.ensurePool()).resolves.not.toBeNull();
     });
   });
 

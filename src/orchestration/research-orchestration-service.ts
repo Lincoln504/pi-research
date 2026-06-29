@@ -194,11 +194,6 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       cleanupSharedLinks(targetId);
       resetLogger(targetId);
       clearSessionCircuitBreaker(targetId);
-      // Drop the per-run failure counter. This is a singleton service keyed by a
-      // unique researchId per run, so without this delete the map grows unbounded
-      // for the lifetime of the process.
-      this.failureCounts.delete(targetId);
-      if (researchId) this.failureCounts.delete(researchId);
     }
 
     logger.debug(`[ResearchOrchestrationService] Cleaned up research services for ${targetId}`);
@@ -473,18 +468,20 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     }
   }
 
-  // Tracks consecutive health check failures per researchId
-  private failureCounts: Map<string, number> = new Map();
 
   /**
-   * Run health check and log status
+   * Run the infrastructure health check and log its status. Purely ADVISORY:
+   * research never aborts on an unhealthy result. This is deliberate — the health
+   * check has historically produced false negatives (e.g. a single-endpoint DDG
+   * probe, or native deps unavailable on Intel macOS) and an abort-on-unhealthy
+   * would needlessly kill runs that would otherwise succeed on cached/partial
+   * data. The return type is `void` so a future edit can't quietly start
+   * "honoring" a boolean and reintroduce that false-negative abort.
    * @param round - Current round number
-   * @param researchId - Research ID (optional)
    * @param ctx - Optional extension context for container isolation
-   * @returns Promise<boolean> - True if healthy or degraded, false if unhealthy
    */
-  async checkHealth(round: number, researchId?: string, ctx?: any): Promise<boolean> {
-    if (round <= 1) return true;
+  async checkHealth(round: number, _researchId?: string, ctx?: any): Promise<void> {
+    if (round <= 1) return;
 
     try {
       const container = tryGetServiceContainerFromCtx(ctx);
@@ -496,41 +493,17 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       }
 
       const health = await registry.runAll();
-      
-      const isHealthy = health.status === 'healthy';
-      const isDegraded = health.status === 'degraded';
 
-      if (isHealthy || isDegraded) {
-        if (researchId) {
-          this.failureCounts.set(researchId, 0);
-        }
-        if (isHealthy) {
-          logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
-        } else {
-          const degraded = health.components.filter(c => !c.healthy).map(c => c.component);
-          logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Degraded (${degraded.join(', ')})`);
-        }
-        return true;
+      if (health.status === 'healthy') {
+        logger.debug(`[ResearchOrchestrationService] Health status at Round ${round}: [OK] All systems operational`);
       } else {
-        // Unhealthy: track failures
-        if (researchId) {
-          const failures = (this.failureCounts.get(researchId) || 0) + 1;
-          this.failureCounts.set(researchId, failures);
-          
-          if (failures >= 3) {
-            const failed = health.components.filter(c => !c.healthy).map(c => c.component);
-            logger.error(`[ResearchOrchestrationService] Health status at Round ${round}: [ERROR] Unhealthy after ${failures} attempts (${failed.join(', ')})`);
-            return false; // Hard failure
-          } else {
-            logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] Unhealthy (${failures}/3). Continuing.`);
-            return true; // Treat as transient failure
-          }
-        }
-        return false;
+        // Degraded or unhealthy — log for visibility but never stop the run.
+        const failed = health.components.filter(c => !c.healthy).map(c => c.component);
+        const label = health.status === 'degraded' ? 'Degraded' : 'Unhealthy';
+        logger.warn(`[ResearchOrchestrationService] Health status at Round ${round}: [WARN] ${label} (${failed.join(', ')}). Continuing.`);
       }
     } catch (err) {
       logger.warn('[ResearchOrchestrationService] Failed to check health status:', err);
-      return true; // Don't stop research on health check error
     }
   }
 }

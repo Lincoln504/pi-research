@@ -128,7 +128,7 @@ export const ConfigSchema = Type.Object({
   /**
    * Explicit directory for exported reports. When set, reports are written here
    * verbatim (created if needed), bypassing the cwd-relative "smart" resolution.
-   * Lets the skill/openclaw pin a stable location instead of writing into
+   * Lets the skill pin a stable location instead of writing into
    * whatever repo the host agent happens to be in. Empty = smart cwd resolution.
    */
   RESEARCH_REPORT_EXPORT_DIR: Type.Optional(Type.String()),
@@ -335,18 +335,17 @@ export function getGlobalEnvFilePath(): string {
  * the centralized project registry.
  *
  * - 'pi'        → src/index.ts (the pi extension: /research + /research-config)
- * - 'openclaw'  → src/openclaw-entry.ts (openclaw plugin)
- * - 'cli'       → src/cli.ts (the standalone `pi-research` CLI / agent skill)
+ * - 'cli'       → src/cli.ts (the standalone `pi-research` CLI / agent skill —
+ *                 the surface every skills-aware host, including OpenClaw, runs)
  *
  * Each front-end reads ONLY its own overlay, so the standalone CLI / agent skill
- * (cli.env) can be configured independently of the openclaw plugin (openclaw.env)
- * and the pi extension (pi.env).
+ * (cli.env) can be configured independently of the pi extension (pi.env).
  *
  * NOTE: the programmatic SDK (src/sdk.ts) is deliberately NOT an interface here —
  * it is a library configured from code via ResearchSDKOptions, not from a global
  * overlay file. See `ignoreGlobalConfig` in the SDK options for hermetic usage.
  */
-export type ConfigInterface = 'openclaw' | 'pi' | 'cli';
+export type ConfigInterface = 'pi' | 'cli';
 
 /**
  * Returns the per-interface overlay file path (~/.pi/research/{iface}.env).
@@ -757,7 +756,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
  *
  * The optional `iface` parameter selects a per-interface overlay file
  * (~/.pi/research/{iface}.env) that layers over the base config.env.
- * This lets the pi, openclaw, and cli front-ends carry independent
+ * This lets the pi and cli front-ends carry independent
  * model/config settings while all falling back to the shared base when
  * not set. (The SDK is code-configured and has no overlay file.)
  *

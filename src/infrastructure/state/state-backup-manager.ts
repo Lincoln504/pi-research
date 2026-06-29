@@ -11,6 +11,8 @@ import { logger } from '../../logger.ts';
 import type { IService } from '../../core/service-registry.ts';
 import { ServiceLifecycle } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
+import { StateValidator } from './state-validator.ts';
+import { CURRENT_STATE_VERSION } from '../types/state-types.ts';
 
 /**
  * Manages backup and recovery for state files
@@ -23,6 +25,9 @@ export class StateBackupManager implements IService {
   private readonly stateFilePath: string;
   private readonly backupDirPath: string;
   private readonly maxBackups: number;
+  // Stateless schema validation/migration; constructed inline (no DI plumbing
+  // needed since validateState/migrateAndValidate don't depend on initialize()).
+  private readonly validator = new StateValidator();
 
   constructor(stateFilePath: string, backupDirPath: string, maxBackups: number = 5) {
     this.stateFilePath = stateFilePath;
@@ -120,9 +125,12 @@ export class StateBackupManager implements IService {
   async recoverFromCorruption(): Promise<void> {
     try {
       // Collect candidate backups, newest first. The newest backup can itself be a
-      // partial write (e.g. a crash during createBackup), so we do NOT blindly
-      // restore it — we validate each (JSON-parse, which catches the truncated/partial
-      // corruption mode) and restore the first one that is well-formed.
+      // partial write (e.g. a crash during createBackup) OR well-formed JSON that
+      // nonetheless fails the state schema, so we do NOT blindly restore it. We
+      // parse, migrate, and schema-validate each, and restore the first that
+      // passes. JSON-parse alone is insufficient: a parseable-but-invalid backup
+      // would be restored, fail validation on the next read, and trigger recovery
+      // again — a loop that never converges and never persists a usable state.
       let backups: Array<{ name: string; mtime: Date }> = [];
       try {
         const entries = await fs.readdir(this.backupDirPath);
@@ -140,16 +148,21 @@ export class StateBackupManager implements IService {
 
       for (const backup of backups) {
         const backupPath = path.join(this.backupDirPath, backup.name);
-        let content: string;
+        let restoreContent: string;
         try {
-          content = await fs.readFile(backupPath, 'utf-8');
-          JSON.parse(content); // reject partial/corrupt backups before restoring
-        } catch {
-          logger.warn(`[StateManager] Skipping unreadable/corrupt backup: ${backup.name}`);
+          const content = await fs.readFile(backupPath, 'utf-8');
+          // Parse + migrate-forward + schema-validate. Persist the validated
+          // (and possibly migrated) object so the restored file is a current,
+          // well-formed state — never a raw older/odd backup. A future-version
+          // or schema-invalid backup throws here and is skipped.
+          const validated = this.validator.migrateAndValidate(JSON.parse(content));
+          restoreContent = JSON.stringify(validated, null, 2);
+        } catch (err) {
+          logger.warn(`[StateManager] Skipping invalid backup ${backup.name}: ${err instanceof Error ? err.message : String(err)}`);
           continue;
         }
         // Atomic restore so a crash mid-recovery can't leave a half-written state file.
-        await this.atomicWriteStateFile(content);
+        await this.atomicWriteStateFile(restoreContent);
         logger.log(`[StateManager] Recovered state from backup: ${backup.name}`);
         return;
       }
@@ -165,6 +178,27 @@ export class StateBackupManager implements IService {
   }
 
   /**
+   * Preserve a copy of a state file written by a NEWER build before this (older)
+   * process continues on an in-memory default. The original is left untouched —
+   * the newer build still owns and reads it. The quarantine copy is named so it
+   * matches neither the backup-recovery nor cleanup glob (`research-state-*.json`):
+   * it must never be restored into an older reader or pruned as an old backup.
+   */
+  async quarantineFutureState(fileVersion: number): Promise<void> {
+    try {
+      await fs.access(this.stateFilePath);
+    } catch {
+      return; // nothing on disk to preserve
+    }
+    await fs.mkdir(this.backupDirPath, { recursive: true, mode: 0o700 });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const name = `research-state-future-v${fileVersion}-${timestamp}.quarantine`;
+    const dest = path.join(this.backupDirPath, name);
+    await fs.copyFile(this.stateFilePath, dest);
+    logger.warn(`[StateManager] Quarantined newer-build state (v${fileVersion}) copy at ${dest}`);
+  }
+
+  /**
    * Atomically write the given content to the state file (temp file + rename, with
    * a Windows copy+delete fallback since rename fails on NTFS when the target exists).
    */
@@ -176,7 +210,17 @@ export class StateBackupManager implements IService {
     // 0o600: the state file holds browserServer.authSecret. The primary writer
     // (state-manager) forces owner-only; this recovery/default path must match so a
     // corruption-recovery write never lands world-readable.
-    await fs.writeFile(tempPath, content, { encoding: 'utf-8', mode: 0o600 });
+    // Open + write + fsync + close before rename, mirroring the primary writer's
+    // durability: a crash immediately after recovery must not resurrect the very
+    // corruption we just recovered from (an un-synced rename can expose a
+    // zero-length file after a power loss).
+    const fh = await fs.open(tempPath, 'w', 0o600);
+    try {
+      await fh.writeFile(content, { encoding: 'utf-8' });
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     try {
       await fs.rename(tempPath, this.stateFilePath);
     } catch (renameErr) {
@@ -204,7 +248,7 @@ export class StateBackupManager implements IService {
    */
   private getDefaultState() {
     return {
-      version: 1,
+      version: CURRENT_STATE_VERSION,
       containerId: '',
       containerName: '',
       port: 0,

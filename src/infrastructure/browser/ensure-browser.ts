@@ -2,11 +2,11 @@
  * Runtime browser (camoufox) provisioning.
  *
  * Normally the camoufox browser is fetched by the `postinstall` script
- * (scripts/setup.cjs) when pi-research is installed. But some hosts install
- * plugins with `--ignore-scripts` and therefore never run our postinstall — most
- * notably the OpenClaw plugin host, which runs every plugin's npm install with
- * `npm_config_ignore_scripts=true`. On those hosts the browser binary is absent
- * and the first scrape would fail with "Camoufox is not installed".
+ * (scripts/setup.cjs) when pi-research is installed. But some install flows skip
+ * lifecycle scripts (e.g. `npm install --ignore-scripts`, or a bare `git clone`
+ * whose `npm install` has not yet run) and therefore never run our postinstall.
+ * On those the browser binary is absent and the first scrape would fail with
+ * "Camoufox is not installed".
  *
  * `ensureBrowserInstalled()` closes that gap: it is called once before the worker
  * pool spawns and lazily fetches the browser if (and only if) it is missing.

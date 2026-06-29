@@ -297,6 +297,10 @@ export async function getScheduler(config?: Config, container: ServiceContainer 
             if (schedulerService.getSchedulerInitializationPromise() === p) {
                 schedulerService.setSchedulerInstance(scheduler);
                 schedulerService.setSchedulerVersion(schedulerVersion);
+                // Only now that we are the registered leader is it safe to arm the
+                // leadership self-check — otherwise it could race its own
+                // registration and self-shut-down mid-init under lock contention.
+                scheduler.startLeadershipMonitor();
             } else {
                 logger.warn('[Scheduler] Won election but was superseded by restart. Shutting down pool...');
                 await scheduler.shutdown().catch((err) => logger.debug('Swallowed shutdown error:', err));

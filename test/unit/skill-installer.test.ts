@@ -51,11 +51,18 @@ function skillPathFor(id: string): string {
 }
 
 describe('SKILL_AGENT_TARGETS (in-app installer scope)', () => {
-  it('targets exactly Claude and Codex — never Cursor (project-only, no global dir), pi, or ~/.agents', () => {
-    expect([...SKILL_AGENT_TARGETS]).toEqual(['claude', 'codex']);
+  it('targets Claude, Codex, and OpenClaw — never Cursor (project-only, no global dir), pi, or ~/.agents', () => {
+    expect([...SKILL_AGENT_TARGETS]).toEqual(['claude', 'codex', 'openclaw']);
     expect(SKILL_AGENT_TARGETS).not.toContain('cursor');
     expect(SKILL_AGENT_TARGETS).not.toContain('pi');
     expect(SKILL_AGENT_TARGETS).not.toContain('agents');
+  });
+  it('the OpenClaw target maps to its managed skills root (~/.openclaw/skills)', () => {
+    const ocl = HARNESSES.find(h => h.id === 'openclaw');
+    expect(ocl).toBeDefined();
+    expect(ocl!.skillsDir).toBe(path.join('.openclaw', 'skills'));
+    expect(ocl!.baseDir).toBe('.openclaw');
+    expect(ocl!.confidence).toBe('confirmed');
   });
   it('every target is a real harness id', () => {
     for (const id of SKILL_AGENT_TARGETS) {

@@ -23,9 +23,9 @@ const isLinux = process.platform === 'linux';
 const isDarwin = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
-const major = parseInt(process.version.replace('v', '').split('.')[0], 10);
-if (major < 22) {
-  console.warn(`WARNING: Node.js ${process.version} is below the minimum (22). Upgrade to 22.13.0+.`);
+const [nodeMajor, nodeMinor] = process.version.replace('v', '').split('.').map((n) => parseInt(n, 10));
+if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 19)) {
+  console.warn(`WARNING: Node.js ${process.version} is below the minimum (>=22.19.0). Upgrade to 22.19.0+.`);
 }
 
 /**

@@ -31,7 +31,7 @@ over `config.env` for the CLI only. Precedence:
 | `PI_RESEARCH_YOUTUBE_TRANSCRIPT_MAX_VIDEOS` | `3` | Videos per `youtube_transcript` call (1–5). |
 | `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | Append `youtube` to ~one-in-N queries (1 = every). |
 | `PI_RESEARCH_KNOWLEDGE_STORE_MODE` | `global` | Knowledge DB: `none`, `project`, `global`. |
-| `PI_RESEARCH_EMBEDDING_DEVICE` | `webgpu` | Embedding backend: `webgpu` or `cpu`. |
+| `PI_RESEARCH_EMBEDDING_DEVICE` | `auto` | Embedding backend: `auto`, `webgpu`, or `cpu` (`auto` probes the GPU and falls back to CPU; raw `webgpu` is forced and can hard-crash on a software GPU). |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` | `false` | Write report to `.md` and print its path. |
 | `STACKEXCHANGE_API_KEY` | — | Raises Stack Exchange rate limits (optional). |
 | `GITHUB_TOKEN` | — | Raises GitHub Advisory limit (optional). |
@@ -56,4 +56,4 @@ model/key; message lists the fix) · `70` runtime error (network/provider/intern
 - **Rate limit (70):** provider returned 429 — wait and retry.
 - **GPU/embedding errors:** set `PI_RESEARCH_EMBEDDING_DEVICE=cpu` (headless/no-GPU).
 
-Full variable list + precedence model: `docs/SDK.md` in the pi-research repo.
+Full variable list + precedence model: `docs/CONFIGURATION.md` in the pi-research repo.

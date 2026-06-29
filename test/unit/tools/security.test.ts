@@ -116,7 +116,9 @@ describe('tools/security', () => {
       await tool.execute('test-id', { terms: ['test'] }, undefined, undefined, undefined as any);
 
       expect(searchSecurityDatabases).toHaveBeenCalledWith(
-        expect.objectContaining({ databases: ['nvd', 'cisa_kev', 'github', 'osv'] })
+        expect.objectContaining({ databases: ['nvd', 'cisa_kev', 'github', 'osv'] }),
+        // The tool now forwards its AbortSignal as a second argument (undefined here).
+        undefined,
       );
     });
   });

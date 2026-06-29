@@ -74,16 +74,20 @@ export class EmbeddingClient implements IEmbedder {
     return new Promise((resolve, reject) => {
       const timeoutMs = 120_000;
       let resolved = false;
+      let req: http.ClientRequest | undefined;
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
+          // Destroy the request so a stalled body read is torn down, not left
+          // holding the socket until the server eventually closes it.
+          req?.destroy();
           reject(new Error(`[EmbeddingClient] GET ${path} timed out after ${timeoutMs}ms`));
         }
       }, timeoutMs);
       // FIX (#34): Don't keep the event loop alive for timeout timers
       if (timer.unref) timer.unref();
 
-      const req = http.request(
+      req = http.request(
         {
           hostname: '127.0.0.1',
           port: this.port,
@@ -91,12 +95,14 @@ export class EmbeddingClient implements IEmbedder {
           method: 'GET',
         },
         (res) => {
-          clearTimeout(timer);
+          // Keep the timeout armed through the body read — clearing it on headers
+          // would let a stalled body hang for the full process lifetime.
           let body = '';
           res.on('data', (chunk: Buffer) => { body += chunk; });
           res.on('end', () => {
             if (resolved) return;
             resolved = true;
+            clearTimeout(timer);
             try {
               const parsed = JSON.parse(body) as T;
               if (res.statusCode !== 200) {
@@ -132,9 +138,11 @@ export class EmbeddingClient implements IEmbedder {
     return new Promise((resolve, reject) => {
       const timeoutMs = 120_000;
       let resolved = false;
+      let req: http.ClientRequest | undefined;
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
+          req?.destroy();
           reject(new Error(`[EmbeddingClient] POST ${path} timed out after ${timeoutMs}ms`));
         }
       }, timeoutMs);
@@ -143,7 +151,7 @@ export class EmbeddingClient implements IEmbedder {
 
       const body = JSON.stringify(data);
 
-      const req = http.request(
+      req = http.request(
         {
           hostname: '127.0.0.1',
           port: this.port,
@@ -155,12 +163,13 @@ export class EmbeddingClient implements IEmbedder {
           },
         },
         (res) => {
-          clearTimeout(timer);
+          // Keep the timeout armed through the body read (see getRequest).
           let responseBody = '';
           res.on('data', (chunk: Buffer) => { responseBody += chunk; });
           res.on('end', () => {
             if (resolved) return;
             resolved = true;
+            clearTimeout(timer);
             try {
               const parsed = JSON.parse(responseBody) as T;
               if (res.statusCode !== 200) {

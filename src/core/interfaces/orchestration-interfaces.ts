@@ -81,5 +81,6 @@ export interface IResearchOrchestration extends IService {
   runResearchers(options: RunResearchersOptions, researcherLinks?: Map<string, string[]>, storeLinks?: Map<string, StoreUrlEntry[]>, ctx?: any): Promise<void>;
   runSearchBurst(queries: string[], config: Config, signal?: AbortSignal, onProgress?: (links: number) => void, ctx?: any): Promise<QueryResultWithError[]>;
   storeLinkDescriptions(sessionId: string, round: number, researchId: string, config: Config, ctx?: any): Promise<void>;
-  checkHealth(round: number, researchId?: string, ctx?: any): Promise<boolean>;
+  // Advisory only — logs infrastructure health; research never aborts on the result.
+  checkHealth(round: number, researchId?: string, ctx?: any): Promise<void>;
 }

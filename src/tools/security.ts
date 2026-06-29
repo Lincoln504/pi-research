@@ -64,7 +64,7 @@ export function createSecuritySearchTool(options: {
     async execute(
       _toolCallId,
       params,
-      _signal,
+      signal,
       _onUpdate,
       _extensionCtx,
     ): Promise<AgentToolResult<unknown>> {
@@ -116,7 +116,7 @@ export function createSecuritySearchTool(options: {
           ecosystem: p.ecosystem,
           githubRepo: p.githubRepo,
         };
-        results = await searchSecurityDatabases(searchParams);
+        results = await searchSecurityDatabases(searchParams, signal);
       } catch (error) {
         const duration = Date.now() - startTime;
         metrics.observe('tool_security_search_duration_ms', duration, { status: 'error' });

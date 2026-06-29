@@ -84,7 +84,7 @@ export function registerHealthChecks(registry: IHealthRegistryService, container
   registry.register('KnowledgeStore', async (options) => {
     // Resolve cwd from the live service (it captured ctx.cwd at init) so the
     // health check reads the SAME config the store actually uses. Reading
-    // process.cwd() here silently ignored SDK/openclaw cwd overrides.
+    // process.cwd() here silently ignored SDK/CLI cwd overrides.
     let service: IKnowledgeStoreService | null = null;
     let initError: unknown = null;
     try {

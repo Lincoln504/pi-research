@@ -96,6 +96,12 @@ const KNOWN_TOKEN_PATTERN =
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 // HTTP Basic credentials: "Basic <base64>".
 const BASIC_AUTH_PATTERN = /\bBasic\s+[A-Za-z0-9+/]{16,}={0,2}/gi;
+// HTTP Bearer credentials: "Bearer <token>". The token is often opaque — many
+// providers (e.g. GLM/zhipuai) use dotted keys that are NOT JWTs and carry no
+// known prefix, so KNOWN_TOKEN_PATTERN/JWT_PATTERN miss them and the KV pass
+// only masks the word "Bearer" (its value class stops at the space). Match the
+// scheme and redact the whole RFC 6750 b64token that follows, whatever its shape.
+const BEARER_AUTH_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
 // Provider keys not covered by KNOWN_TOKEN_PATTERN: Google API/OAuth, Stripe.
 const PROVIDER_TOKEN_PATTERN =
   /\b(AIza[0-9A-Za-z_-]{35}|ya29\.[0-9A-Za-z_-]{20,}|[sp]k_(?:live|test)_[0-9A-Za-z]{16,})\b/g;
@@ -128,6 +134,9 @@ export function redactSecrets(message: string): string {
   // only the word "Basic" and leave the credential blob exposed.
   out = out.replace(JWT_PATTERN, '[REDACTED]');
   out = out.replace(BASIC_AUTH_PATTERN, 'Basic [REDACTED]');
+  // Before the KV pass, for the same reason as Basic above: the KV value class
+  // stops at the space after "Bearer", leaving an opaque token exposed.
+  out = out.replace(BEARER_AUTH_PATTERN, 'Bearer [REDACTED]');
   out = out.replace(SENSITIVE_KV_PATTERN, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
   out = out.replace(KNOWN_TOKEN_PATTERN, '[REDACTED]');
   out = out.replace(PROVIDER_TOKEN_PATTERN, '[REDACTED]');

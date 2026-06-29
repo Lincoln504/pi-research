@@ -14,11 +14,11 @@ const __filename = fileURLToPath(import.meta.url);
 const CORE_LLM_DIR = dirname(__filename);
 
 // When running from the source tree: src/core/llm/ → ../../prompts = src/prompts/
-// When running from the openclaw bundle (dist/openclaw-entry.js): dist/ → ./prompts = dist/prompts/
-// (dist/prompts/ is copied at build time by build:openclaw)
+// When running from the bundled CLI (dist/cli.mjs): dist/ → ./prompts = dist/prompts/
+// (dist/prompts/ is copied next to the bundle at build time by build:cli)
 const PROMPT_CANDIDATES = [
   join(CORE_LLM_DIR, '../../prompts'),  // source tree
-  join(CORE_LLM_DIR, 'prompts'),        // openclaw bundle (dist/prompts/)
+  join(CORE_LLM_DIR, 'prompts'),        // bundled CLI (dist/prompts/)
 ];
 
 /**

@@ -72,6 +72,7 @@ export async function searchGitHubAdvisories(
     readonly severity?: string;      // LOW, MODERATE, HIGH, CRITICAL
     readonly maxResults?: number;
     readonly repo?: string;         // "owner/repo" format
+    readonly signal?: AbortSignal;
   },
 ): Promise<GitHubResult> {
   const startTime = Date.now();
@@ -103,7 +104,7 @@ export async function searchGitHubAdvisories(
       const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
         const resp = await fetch(url, {
           headers: githubHeaders(),
-          signal: createTimeoutSignal(10000),
+          signal: createTimeoutSignal(10000, options?.signal),
         });
 
         if (!resp.ok) {
@@ -136,6 +137,7 @@ export async function searchGitHubAdvisories(
         maxRetries: 2,
         initialDelay: 1000,
         maxDelay: 5000,
+        signal: options?.signal,
       }));
 
       let data: unknown;
@@ -186,7 +188,7 @@ export async function searchGitHubAdvisories(
         const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
           const resp = await fetch(apiUrl, {
             headers: githubHeaders(),
-            signal: createTimeoutSignal(10000),
+            signal: createTimeoutSignal(10000, options?.signal),
           });
 
           if (!resp.ok) {
@@ -217,6 +219,7 @@ export async function searchGitHubAdvisories(
           maxRetries: 2,
           initialDelay: 1000,
           maxDelay: 5000,
+          signal: options?.signal,
         }));
 
         // A 404 on a direct GHSA/CVE lookup means "no such advisory", not failure.

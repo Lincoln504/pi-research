@@ -363,9 +363,15 @@ export class QuickResearchOrchestrator {
           observer?.onComplete?.(result);
           return result;
         } catch (error) {
+          // Terminal-callback contract (shared with DeepResearchOrchestrator):
+          // fire EXACTLY ONE of onComplete / onError. Quick mode produces its
+          // result atomically at the end and keeps no per-round reports, so a
+          // mid-run failure or cancel has nothing partial to return — it is an
+          // onError + throw, mirroring Deep's "no collected reports" branch.
           const sessionDuration = Date.now() - sessionStart;
-          metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: 'error' });
-          metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: 'error' });
+          const aborted = signal?.aborted === true;
+          metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
+          metrics.increment('research_sessions_total', 1, { mode: 'quick', complexity: '0', status: aborted ? 'cancelled' : 'error' });
           observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
           throw error;
         }

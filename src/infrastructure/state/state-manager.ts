@@ -29,9 +29,11 @@ import type {
   StateMetrics,
   SingletonState,
 } from '../types/state-types.ts';
+import { CURRENT_STATE_VERSION } from '../types/state-types.ts';
 import { FileLockService } from '../file-lock-service.ts';
 import type { GPUResourceService } from '../gpu-resource-service.ts';
 import { StateBackupManager } from './state-backup-manager.ts';
+import { StateVersionTooNewError } from './state-migration.ts';
 import type { StateBrowserManager } from './state-browser-manager.ts';
 import type { StateSessionManager } from './state-session-manager.ts';
 import type { StateMetricsCollector } from './state-metrics.ts';
@@ -72,6 +74,11 @@ export class StateManager {
   private readonly backupManager: StateBackupManager;
   private readonly metricsCollector: StateMetricsCollector;
   private readonly validator: StateValidator;
+
+  // Set when a read finds the state file was written by a newer build than this
+  // process supports. While set, writes are suppressed so we never overwrite the
+  // newer file (which holds that build's sessions, browser lease, authSecret).
+  private stateTooNew = false;
 
   constructor(options: StateManagerOptions) {
     const {
@@ -134,7 +141,7 @@ export class StateManager {
    */
   private getDefaultState(): SingletonState {
     return {
-      version: 1,
+      version: CURRENT_STATE_VERSION,
       containerId: crypto.randomBytes(16).toString('hex'),
       containerName: 'pi-research-shared-state',
       port: 0,
@@ -152,7 +159,7 @@ export class StateManager {
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;
-      return this.validator.validateState(state);
+      return this.validator.migrateAndValidate(state);
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const errnoError = error as NodeJS.ErrnoException;
@@ -161,13 +168,33 @@ export class StateManager {
         }
       }
 
+      // A file written by a NEWER build is not corruption. Recovering/overwriting
+      // it would destroy that build's live sessions, browser lease, and
+      // authSecret. Instead: quarantine a copy for forensics, mark this process
+      // read-only so no write clobbers the newer file, and run on an in-memory
+      // default. Normal service resumes once this build is upgraded.
+      if (error instanceof StateVersionTooNewError) {
+        logger.error(
+          `[StateManager] ${error.message} Running in read-only mode on an in-memory default; writes are suppressed to protect the newer file.`,
+        );
+        this.stateTooNew = true;
+        await this.backupManager
+          .quarantineFutureState(error.fileVersion)
+          .catch((qErr: unknown) =>
+            logger.warn(
+              `[StateManager] Failed to quarantine newer state file: ${qErr instanceof Error ? qErr.message : String(qErr)}`,
+            ),
+          );
+        return this.getDefaultState();
+      }
+
       // Corruption is not only truncated/garbage JSON — a well-formed file can
-      // still fail schema validation (missing field, out-of-range port) or carry
-      // an unknown future `version` that the Type.Literal(1) schema rejects. All of
-      // these throw from JSON.parse (SyntaxError) or validateState ("Invalid
-      // state: ..."). Treat every such case as recoverable so a single bad file
-      // can never brick every reader; genuine I/O errors (EACCES/EPERM/EISDIR) are
-      // NOT corruption and still surface via the throw below.
+      // still fail schema validation (missing field, out-of-range port). These
+      // throw from JSON.parse (SyntaxError) or validateState ("Invalid state:
+      // ..."). Treat every such case as recoverable so a single bad file can
+      // never brick every reader; genuine I/O errors (EACCES/EPERM/EISDIR) are
+      // NOT corruption and still surface via the throw below. A future `version`
+      // is handled separately above (quarantine, not overwrite).
       const isCorruption =
         error instanceof SyntaxError ||
         (error instanceof Error &&
@@ -179,7 +206,7 @@ export class StateManager {
         try {
           await this.recoverFromCorruptionDirect();
           const recovered = await fs.readFile(this.stateFilePath, 'utf-8');
-          return this.validator.validateState(JSON.parse(recovered) as unknown);
+          return this.validator.migrateAndValidate(JSON.parse(recovered) as unknown);
         } catch (recoveryError) {
           logger.error(
             `[StateManager] Recovery failed (${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}); using in-memory default state.`,
@@ -229,6 +256,15 @@ export class StateManager {
    * Internal write without lock acquisition (caller must hold lock)
    */
   private async _writeState(state: SingletonState): Promise<void> {
+    // A prior read found a newer-build state file on disk. Suppress the write so
+    // we do not clobber that build's live state with our older-schema view. The
+    // in-memory updates are lost, which is the intended degradation: data loss
+    // of the newer file is the far worse outcome. (All mutations flow through
+    // updateState, which reads — and so sets this flag — before writing.)
+    if (this.stateTooNew) {
+      logger.warn('[StateManager] Skipping state write: on-disk state was written by a newer build (read-only mode).');
+      return;
+    }
     this.validator.validateState(state);
     state.lastUpdated = Date.now();
 

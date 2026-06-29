@@ -274,6 +274,21 @@ describe('SecuritySearcher', () => {
       expect(calls[0]!.options?.includeExploited).toBe(true);
     });
 
+    it('threads the caller AbortSignal through to the client options', async () => {
+      const mockNVD = new MockNVDClient();
+      mockNVD.setMockResult('test', { count: 0, vulnerabilities: [] });
+      const searcher = createFastSearcher({ nvdClient: mockNVD });
+      const controller = new AbortController();
+
+      await searcher.search({ terms: ['test'], databases: ['nvd'] }, controller.signal);
+
+      const calls = mockNVD.getSearchCalls();
+      expect(calls).toHaveLength(1);
+      // The same signal instance must reach the client so it can cancel its
+      // own rate-limit/backoff/pagination promptly.
+      expect(calls[0]!.options?.signal).toBe(controller.signal);
+    });
+
     it('should handle NVD errors', async () => {
       const mockNVD = new MockNVDClient();
       mockNVD.setMockResult('test', {

@@ -208,8 +208,6 @@ export interface ResolvedConfigPaths {
   cliIfaceEnv: string;
   /** Per-interface overlay for the pi extension (~/.pi/research/pi.env). */
   piIfaceEnv: string;
-  /** Per-interface overlay for the OpenClaw plugin (~/.pi/research/openclaw.env). */
-  oclIfaceEnv: string;
   /** pi auth storage (~/.pi/agent/auth.json). */
   piAuth: string;
   /** pi model definitions (~/.pi/agent/models.json). */
@@ -226,7 +224,6 @@ function resolvedConfigPaths(): ResolvedConfigPaths {
     configDir,
     cliIfaceEnv: getInterfaceEnvFilePath('cli'),
     piIfaceEnv: getInterfaceEnvFilePath('pi'),
-    oclIfaceEnv: getInterfaceEnvFilePath('openclaw'),
     piAuth: path.join(agentDir, 'auth.json'),
     piModels: path.join(agentDir, 'models.json'),
     piState: process.env['PI_RESEARCH_STATE_DIR'] ?? path.join(getGlobalConfigDir(), 'state'),
@@ -427,7 +424,7 @@ async function cmdResearch(args: ResearchArgs): Promise<number> {
 
     // Optionally persist the report to a file (opt-in via
     // PI_RESEARCH_REPORT_EXPORT_ENABLED). The SDK is a pure library and does not
-    // write files; the CLI front-end does, mirroring the pi/openclaw tool path.
+    // write files; the CLI front-end does, mirroring the pi tool path.
     // The saved path is surfaced in BOTH the report text and the JSON output so
     // the calling agent can tell the user where the file is.
     let reportPath: string | null = null;
@@ -650,9 +647,8 @@ CONFIGURE
     pi auth:      ${p.piAuth}
     pi models:    ${p.piModels}
 
-  Other front-ends have their own optional overlay files:
+  The pi extension has its own optional overlay file:
     pi extension: ${p.piIfaceEnv}
-    OpenClaw:     ${p.oclIfaceEnv}
 
   Knowledge store (global by default; set to 'project' to scope per-directory,
   or 'none' to disable):

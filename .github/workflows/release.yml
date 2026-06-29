@@ -39,7 +39,6 @@ jobs:
         run: |
           npm ci --legacy-peer-deps
           npm run build:worker
-          npm run build:openclaw
           npm run build:cli
           npm run build:skill
           npm pack
@@ -87,10 +86,8 @@ jobs:
       - name: Verify version sync across artifacts
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          OCV="$(node -p "require('./openclaw.plugin.json').version")"
-          test "$OCV" = "$VERSION" || { echo "ERROR: openclaw.plugin.json v$OCV != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
-          grep -q "version: \"$VERSION\"" skills/pi-research/SKILL.md || { echo "ERROR: skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
-          echo "OK: package.json, openclaw.plugin.json, SKILL.md all at v$VERSION"
+          grep -q "\"version\": \"$VERSION\"" skills/pi-research/SKILL.md || { echo "ERROR: skills/pi-research/SKILL.md version != package.json v$VERSION (run 'npm version' to sync)"; exit 1; }
+          echo "OK: package.json and SKILL.md both at v$VERSION"
 
       - env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'

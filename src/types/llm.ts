@@ -68,17 +68,6 @@ export type MessageBlock = TextContentBlock | ThinkingContentBlock | ToolCallBlo
  */
 export type MessageContent = string | MessageBlock[];
 
-/**
- * Filter for text content blocks from a message content array
- */
-export function isTextContentBlock(block: unknown): block is TextContentBlock {
-  return (
-    block !== null &&
-    typeof block === 'object' &&
-    (block as Record<string, unknown>)['type'] === 'text' &&
-    typeof (block as Record<string, unknown>)['text'] === 'string'
-  );
-}
 
 /**
  * Parse token usage from an unknown object

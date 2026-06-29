@@ -1,26 +1,16 @@
 ---
 name: pi-research
-description: >-
-  Multi-agent web research for any coding agent. Use for anything requiring
-  current information from the internet — news, trends, product/service/company
-  facts, statistics, people, places, events, APIs, library behavior, or "what is
-  X / how does X work" questions. Also use to search a local knowledge database
-  of previously researched findings before doing live research. Powered by the
-  pi-research engine (search, stealth scraping, security databases, Stack
-  Exchange). Not for reading local files, running project commands, or analyzing
-  this repository's own source.
+description: "Multi-agent web research for any coding agent. Use for anything requiring current information from the internet — news, trends, product/service/company facts, statistics, people, places, events, APIs, library behavior, or 'what is X / how does X work' questions. Also use to search a local knowledge database of previously researched findings before doing live research. Powered by the pi-research engine (search, stealth scraping, security databases, Stack Exchange). Not for reading local files, running project commands, or analyzing this repository's own source."
 license: MIT
-metadata:
-  author: Lincolndeen
-  version: "1.0.0"
-  package: "@lincoln504/pi-research"
-  engine: "pi-research-sdk"
+metadata: { "author": "Lincolndeen", "version": "1.0.0", "package": "@lincoln504/pi-research", "engine": "pi-research-sdk", "openclaw": { "requires": { "bins": ["node"] } } }
 allowed-tools: Bash(node:*)
 ---
 
 # pi-research skill
 
-Run via your **Bash** tool. Replace `<SKILL_DIR>` with this file's parent dir.
+Run via your shell tool — the **Bash** tool in Claude Code, the **`exec`** tool in
+OpenClaw. `<SKILL_DIR>` is this skill's own directory: substitute the absolute path
+your harness reports for this skill (in OpenClaw, `{baseDir}` resolves to it).
 
 ```
 node "<SKILL_DIR>/scripts/run.mjs" research  "<query>" --depth 1
@@ -30,7 +20,7 @@ node "<SKILL_DIR>/scripts/run.mjs" status    [--json]
 
 - **stdout** = Markdown report — read and cite it.
 - **stderr** = progress + errors — relay errors, suppress routine progress.
-- **Always set a generous Bash timeout** so a stalled run can't block forever, but
+- **Always set a generous command timeout** so a stalled run can't block forever, but
   leave plenty of headroom — a real run should finish well inside it:
   `knowledge` 600000ms · `research --depth 1` 900000ms · `--depth 2` 1200000ms · `--depth 3` 1800000ms.
 - **Background**: append `&` and keep the PID to work while a run completes; otherwise it runs foreground (blocks). Timeouts apply either way.

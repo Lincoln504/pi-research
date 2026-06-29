@@ -94,7 +94,10 @@ export class StackExchangeClient {
           },
         });
 
-        clearTimeout(timeoutId);
+        // NB: the timeout is cleared in `finally`, not here. Clearing it now —
+        // when only the headers have arrived — would leave the body read
+        // (response.json() below) with no timeout, so a stalled body could hang
+        // for the whole process lifetime.
 
         // The SE API returns a structured JSON wrapper (with error_id) even for
         // logical errors, so we still parse on non-2xx. But a maintenance page /
@@ -145,7 +148,6 @@ export class StackExchangeClient {
         
         return data;
       } catch (error) {
-        clearTimeout(timeoutId);
         const duration = Date.now() - startTime;
         metrics.observe('stackexchange_request_duration_ms', duration, { endpoint: options.endpoint, status: 'error' });
         metrics.increment('stackexchange_requests_total', 1, { endpoint: options.endpoint, status: 'error' });
@@ -157,6 +159,9 @@ export class StackExchangeClient {
 
         throw error;
       } finally {
+        // Single clear point: covers both the success and error paths and keeps
+        // the timeout armed across the body read above.
+        clearTimeout(timeoutId);
         if (signal) {
           signal.removeEventListener('abort', abortHandler);
         }

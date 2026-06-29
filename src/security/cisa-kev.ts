@@ -115,7 +115,7 @@ function extractCisaKevItems(data: unknown): readonly CisaKevItem[] {
 /**
  * Fetch with retry and circuit breaker for resilience
  */
-async function fetchWithRetryImpl(url: string, options: RequestInit): Promise<Response> {
+async function fetchWithRetryImpl(url: string, options: RequestInit, signal?: AbortSignal): Promise<Response> {
   const endpoint = 'cisa_kev_feed';
   return cisaCircuitBreaker.execute(async () => {
     return retryWithBackoff(
@@ -135,6 +135,7 @@ async function fetchWithRetryImpl(url: string, options: RequestInit): Promise<Re
         initialDelay: 1000,
         maxDelay: 10000,
         label: 'CISA KEV API',
+        signal,
         isTransientError: (error) => {
           const status = (error as Error & { status?: number })?.status;
           if (typeof status === 'number') {
@@ -160,6 +161,7 @@ export async function searchCisaKev(
     readonly vendor?: string;
     readonly product?: string;
     readonly maxResults?: number;
+    readonly signal?: AbortSignal;
   },
 ): Promise<CisaKevResult> {
   const startTime = Date.now();
@@ -173,8 +175,8 @@ export async function searchCisaKev(
         'User-Agent': 'pi-research/2.0',
         'Accept': 'application/json',
       },
-      signal: createTimeoutSignal(30000), // 30s timeout
-    });
+      signal: createTimeoutSignal(30000, options?.signal), // 30s timeout, composed with caller cancel
+    }, options?.signal);
 
     let data: unknown;
     try {

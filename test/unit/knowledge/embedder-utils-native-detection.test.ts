@@ -27,6 +27,23 @@ describe('isNativeStackUnavailableError', () => {
     expect(isNativeStackUnavailableError(err)).toBe(true);
   });
 
+  it('matches a failed native dlopen by error code, regardless of message wording', () => {
+    // ERR_DLOPEN_FAILED is emitted when a .node addon fails to load. The message
+    // wording varies across Node versions, but the code is stable.
+    const err = Object.assign(new Error('some future reworded native load failure'), { code: 'ERR_DLOPEN_FAILED' });
+    expect(isNativeStackUnavailableError(err)).toBe(true);
+  });
+
+  it('matches a module-not-found by code when it names a native package', () => {
+    const err = Object.assign(new Error('Cannot locate package onnxruntime-node'), { code: 'ERR_MODULE_NOT_FOUND' });
+    expect(isNativeStackUnavailableError(err)).toBe(true);
+  });
+
+  it('does NOT match a module-not-found for an unrelated package', () => {
+    const err = Object.assign(new Error("Cannot find module 'left-pad'"), { code: 'ERR_MODULE_NOT_FOUND' });
+    expect(isNativeStackUnavailableError(err)).toBe(false);
+  });
+
   it('does NOT match unrelated runtime errors (real faults must stay unhealthy)', () => {
     expect(isNativeStackUnavailableError(new Error('connect ECONNREFUSED 127.0.0.1:7070'))).toBe(false);
     expect(isNativeStackUnavailableError(new Error('Model load timed out after 30000ms'))).toBe(false);

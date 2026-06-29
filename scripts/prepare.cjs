@@ -9,9 +9,8 @@
  *
  * Artifacts built:
  *   - dist/thread-worker.mjs       (browser worker, via build:worker)
- *   - dist/openclaw-entry.js       (openclaw plugin, via build:openclaw)
- *   - dist/cli.mjs                 (pi-research CLI binary)
- *   - skills/pi-research/scripts/run.mjs  (skill launcher)
+ *   - dist/cli.mjs (+ dist/prompts, dist/webgpu-probe.mjs)  (pi-research CLI binary, via build:cli)
+ *   - skills/pi-research/scripts/run.mjs  (skill launcher, via build:skill)
  */
 
 'use strict';

@@ -32,6 +32,34 @@ export interface RetryOptions {
   readonly maxDelay: number;
   readonly label?: string;
   readonly isTransientError?: (error: unknown) => boolean;
+  // When provided, aborting it short-circuits the inter-attempt backoff wait and
+  // stops further retries, so a caller cancel isn't stuck behind a long sleep.
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Sleep for `ms`, resolving early (rejecting with an AbortError) if `signal`
+ * aborts. The timer is unref'd so it never keeps the event loop alive.
+ */
+export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    (timeoutId as TimeoutHandle).unref?.();
+    const onAbort = signal
+      ? () => {
+          clearTimeout(timeoutId as unknown as ReturnType<typeof setTimeout>);
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+        }
+      : undefined;
+    if (signal && onAbort) signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 // ============================================================================
@@ -191,7 +219,7 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: Partial<RetryOptions> = {},
 ): Promise<T> {
-  const opts: Required<RetryOptions> = {
+  const opts: Required<Omit<RetryOptions, 'signal'>> & { signal?: AbortSignal } = {
     maxRetries: 3,
     initialDelay: 1000,
     maxDelay: 10000,
@@ -236,11 +264,15 @@ export async function retryWithBackoff<T>(
       metrics.observe('retry_backoff_delay_ms', delay, { attempt: String(attempt), label: opts.label });
       logger.warn(`[Retry] ${opts.label} failed (attempt ${attempt + 1}/${opts.maxRetries + 1}), retrying in ${Math.round(delay)}ms: ${lastError.message}`);
 
-      // Wait before retrying
-      await new Promise<void>(resolve => {
-        const timeoutId = setTimeout(resolve, delay);
-        (timeoutId as TimeoutHandle).unref?.();
-      });
+      // Wait before retrying — abortable so a caller cancel doesn't sit through
+      // the full backoff. If the wait is aborted, surface the original transient
+      // error (not the synthetic AbortError) so callers see the real cause.
+      try {
+        await abortableDelay(delay, opts.signal);
+      } catch {
+        metrics.increment('retry_aborted_total', 1, { label: opts.label });
+        throw lastError;
+      }
 
       attempt++;
     }

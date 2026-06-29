@@ -166,8 +166,8 @@ export async function exportResearchReport(
 ): Promise<string | null> {
   const sanitizedQuery = sanitizeQuery(query);
   const baseFilename = `pi-research-${sanitizedQuery}`;
-  // An explicit directory (PI_RESEARCH_REPORT_EXPORT_DIR / openclaw reportExportPath)
-  // is used verbatim — created if needed, no cwd-relative "smart" probing — so a
+  // An explicit directory (PI_RESEARCH_REPORT_EXPORT_DIR) is used verbatim —
+  // created if needed, no cwd-relative "smart" probing — so a
   // host can pin a stable location instead of writing into the agent's arbitrary cwd.
   let targetDir: string;
   if (explicitDir && explicitDir.trim()) {

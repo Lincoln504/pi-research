@@ -61,7 +61,7 @@ await shutdownResearchSDK();
 `@lincoln504/pi-research/sdk` export these symbols.
 
 The SDK does not write report files. Report export is a front-end concern — the pi
-extension, OpenClaw plugin, and CLI do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
+extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 
 ## Init options
 

@@ -6,6 +6,7 @@
 
 import type { SingletonState } from '../types/state-types.ts';
 import { SingletonStateSchema } from '../types/state-types.ts';
+import { migrateRawState } from './state-migration.ts';
 import { Value } from 'typebox/value';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
@@ -62,6 +63,18 @@ export class StateValidator implements IService {
     }
 
     return coerced;
+  }
+
+  /**
+   * Migrate a freshly-parsed state object up to the current schema version, then
+   * validate it. Use this for state read from disk (where the version may be
+   * older, or newer than this process understands). Throws
+   * StateVersionTooNewError for future versions so the caller can quarantine
+   * rather than overwrite; throws "Invalid state: ..." for everything the schema
+   * rejects, matching the corruption-recovery contract in _readState.
+   */
+  migrateAndValidate(raw: unknown): SingletonState {
+    return this.validateState(migrateRawState(raw));
   }
 
   async initialize(): Promise<void> {

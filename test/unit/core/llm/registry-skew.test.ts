@@ -1,7 +1,7 @@
 /**
  * Host/SDK ModelRegistry version-skew resilience.
  *
- * The registry passed to the research resolvers can come from the pi/openclaw
+ * The registry passed to the research resolvers can come from the pi
  * host (ctx.modelRegistry), which may be built against a different
  * pi-coding-agent than this package. A live run crashed 6 researchers with
  * "modelRegistry.getAvailable is not a function". These tests pin the

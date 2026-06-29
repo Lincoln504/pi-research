@@ -8,6 +8,15 @@
 import { Type, type Static } from 'typebox';
 
 /**
+ * Current on-disk state schema version. Bump this (and add a migration step in
+ * state-migration.ts) whenever the persisted shape changes incompatibly. The
+ * schema's `version` literal is pinned to this value so a reader only accepts a
+ * state it actually understands; older/newer files are routed through migration
+ * or future-version quarantine rather than being silently overwritten.
+ */
+export const CURRENT_STATE_VERSION = 1 as const;
+
+/**
  * State metrics interface
  */
 export interface StateMetrics {
@@ -33,7 +42,7 @@ export const SessionInfoSchema = Type.Object({
  * Main state structure interface
  */
 export const SingletonStateSchema = Type.Object({
-  version: Type.Literal(1),
+  version: Type.Literal(CURRENT_STATE_VERSION),
   containerId: Type.String(),
   containerName: Type.String(),
   port: Type.Number(),
@@ -52,6 +61,12 @@ export const SingletonStateSchema = Type.Object({
     startTime: Type.Optional(Type.Number()),
     startedAt: Type.Number(),
     sessionId: Type.Optional(Type.String()),
+    // Re-entrant hold count for the owning process. The lock is shared by N
+    // concurrent in-process embedding calls (activeEmbeddings is designed > 1);
+    // each re-entrant acquire increments and each release decrements, so the
+    // cross-process owner record is only cleared when the last in-process hold
+    // is released. Absent on state written before refcounting — treated as 1.
+    holds: Type.Optional(Type.Number()),
   })),
   embeddingServer: Type.Optional(Type.Object({
     port: Type.Number(),

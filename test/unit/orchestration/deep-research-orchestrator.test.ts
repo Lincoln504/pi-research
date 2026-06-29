@@ -227,6 +227,37 @@ describe('DeepResearchOrchestrator', () => {
     await expect(orchestrator.run()).rejects.toThrow('Planning failed');
   });
 
+  it('fires onError (not onComplete) and throws when a failure leaves no reports', async () => {
+    mockPlanningService.generatePlan.mockRejectedValueOnce(new Error('Planning failed'));
+    mockSynthesisService.hasReports.mockReturnValue(false);
+    const onError = vi.fn();
+    const onComplete = vi.fn();
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onError, onComplete } });
+    await expect(orchestrator.run()).rejects.toThrow('Planning failed');
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('fires onComplete (not onError) and returns a partial when a failure leaves collected reports', async () => {
+    // A mid-run failure, but reports were collected — the orchestrator returns a
+    // fallback synthesis. This is a completion, so EXACTLY onComplete fires and
+    // onError must NOT (the previous behaviour fired both).
+    mockPlanningService.generatePlan.mockRejectedValueOnce(new Error('boom'));
+    mockSynthesisService.hasReports.mockReturnValue(true);
+    mockSynthesisService.buildFallbackSynthesis.mockReturnValue('# Partial report');
+    const onError = vi.fn();
+    const onComplete = vi.fn();
+
+    const orchestrator = new DeepResearchOrchestrator({ ...options, observer: { onError, onComplete } });
+    const result = await orchestrator.run();
+
+    expect(result).toContain('# Partial report');
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('should enforce maximum rounds and force synthesis', async () => {
     // Mock updatePlanForRound to always return delegate
     mockPlanningService.updatePlanForRound.mockResolvedValue({

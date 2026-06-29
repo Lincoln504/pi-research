@@ -117,8 +117,8 @@ jobs:
           #
           # devDependencies are deliberately excluded from the gate: the host
           # framework (@earendil-works/pi-coding-agent, provided by pi at runtime)
-          # and the optional `openclaw` SDK integration each ship their own
-          # npm-shrinkwrap.json, which freezes their nested transitive tree. By npm
+          # ships its own npm-shrinkwrap.json, which freezes its nested transitive
+          # tree. By npm
           # design a shrinkwrap is authoritative, so downstream `overrides` cannot
           # remediate their pinned-vulnerable deps (e.g. tar@7.5.15, protobufjs@8.4.0).
           # Those advisories are upstream-only and never ship in this package, so
@@ -153,7 +153,7 @@ jobs:
                 console.log('| Severity | Count |'); console.log('|---|---|');
                 sev.forEach(k => { if (fv[k] > 0) console.log('| \`' + k + '\` | ' + fv[k] + ' |'); });
                 console.log('');
-                console.log('_Dev-only advisories are frozen in upstream shrinkwraps (pi-coding-agent / openclaw) and not shipped; they do not block the gate._');
+                console.log('_Dev-only advisories are frozen in the upstream shrinkwrap (pi-coding-agent) and not shipped; they do not block the gate._');
               }
             " 2>/dev/null || echo "_Audit summary unavailable — see job log._"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -441,7 +441,6 @@ jobs:
       - name: Build distribution artifacts
         run: |
           npm run build:worker
-          npm run build:openclaw
           npm run build:cli
           npm run build:skill
       - name: Verify tarball manifest (required files present, no junk)

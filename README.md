@@ -8,7 +8,8 @@ the live web through a stealth browser, and an evaluator decides whether the ans
 complete or another round is needed. The result is a single cited Markdown report.
 
 One engine backs several front-ends — the pi extension, a standalone CLI / agent
-skill, the OpenClaw plugin, and a programmatic SDK.
+skill (the same skill any skills-aware host runs, including OpenClaw), and a
+programmatic SDK.
 
 ## Requirements
 
@@ -27,17 +28,24 @@ Install the front-end you want.
 pi install npm:@lincoln504/pi-research
 ```
 
-## OpenClaw plugin
-
-```bash
-openclaw plugins install npm:@lincoln504/pi-research
-```
-
 ## Standalone CLI / agent skill
 
 ```bash
 npm install -g @lincoln504/pi-research
 ```
+
+## OpenClaw
+
+OpenClaw uses pi-research as an agent **skill** (a `SKILL.md` folder), not a plugin.
+Install the engine, then register the bundled skill into OpenClaw's managed skill
+root:
+
+```bash
+npm install -g @lincoln504/pi-research
+openclaw skills install "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" --global
+```
+
+See [Agent skill](docs/AGENT-SKILL.md) for details.
 
 ## Development build (bleeding edge)
 
@@ -69,8 +77,7 @@ pi -p "research the latest developments in WebAssembly"
 | Doc | What's inside |
 |-----|---------------|
 | [Pi extension](docs/PI-EXTENSION.md) | Commands, the live TUI, and the extension lifecycle. |
-| [Agent skill](docs/AGENT-SKILL.md) | The portable skill that gives any coding agent research, and how it installs. |
-| [OpenClaw plugin](docs/OPENCLAW.md) | Install and use pi-research inside OpenClaw. |
+| [Agent skill](docs/AGENT-SKILL.md) | The portable skill that gives any coding agent (Claude Code, Codex, OpenClaw, …) research, and how it installs. |
 | [SDK](docs/SDK.md) | The programmatic library. |
 | [Configuration](docs/CONFIGURATION.md) | The TUI settings, every environment variable, and how config layers resolve. |
 | [Knowledge store](docs/KNOWLEDGE-STORE.md) | The local vector cache of past findings. |
@@ -78,27 +85,27 @@ pi -p "research the latest developments in WebAssembly"
 
 ## Built with
 
-## Browser & scraping
+### Browser & scraping
 
 - [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
 - [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
 - [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
 - `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
 
-## Knowledge store & embeddings
+### Knowledge store & embeddings
 
 - [Transformers.js](https://github.com/huggingface/transformers.js) — local embedding inference (model execution via ONNX Runtime)
 - Google [Dawn](https://dawn.googlesource.com/dawn) — the WebGPU backend, accessed through the `webgpu` Node binding
 - [LanceDB](https://lancedb.com) — on-disk vector database
 - [Apache Arrow](https://arrow.apache.org) — the columnar schema the vector table is built on
 
-## YouTube transcripts
+### YouTube transcripts
 
 - [youtubei.js](https://github.com/LuanRT/YouTube.js) — YouTube internal-API client
 - [BgUtils](https://github.com/LuanRT/BgUtils) — BotGuard PoToken generation
 - [jsdom](https://github.com/jsdom/jsdom) — DOM environment for minting the PoToken
 
-## Host & runtime
+### Host & runtime
 
 - [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
 - [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation

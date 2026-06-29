@@ -156,64 +156,46 @@ describe('ResearchOrchestrationService', () => {
         });
     });
 
-    it('round 1: returns true without calling healthRegistry.runAll()', async () => {
-      const result = await service.checkHealth(1);
+    // checkHealth is ADVISORY: it returns void and never aborts the run. These
+    // tests assert it logs status and tolerates every outcome without throwing.
 
-      expect(result).toBe(true);
+    it('round 1: skips the health check entirely (no runAll)', async () => {
+      await expect(service.checkHealth(1)).resolves.toBeUndefined();
       expect(mockRunAll).not.toHaveBeenCalled();
     });
 
-    it('round 2 with healthy status: returns true', async () => {
+    it('round 2 with healthy status: runs the check and resolves', async () => {
       mockRunAll.mockResolvedValue({ status: 'healthy', components: [] });
 
-      const result = await service.checkHealth(2, 'res-123');
-
-      expect(result).toBe(true);
+      await expect(service.checkHealth(2, 'res-123')).resolves.toBeUndefined();
       expect(mockRunAll).toHaveBeenCalledOnce();
     });
 
-    it('round 2 with degraded status: returns true (research continues)', async () => {
+    it('round 2 with degraded status: resolves (research continues)', async () => {
       mockRunAll.mockResolvedValue({
         status: 'degraded',
         components: [{ component: 'search', healthy: false }],
       });
 
-      const result = await service.checkHealth(2, 'res-123');
-
-      expect(result).toBe(true);
+      await expect(service.checkHealth(2, 'res-123')).resolves.toBeUndefined();
     });
 
-    it('round 2 with unhealthy status: returns true (transient failureWindow)', async () => {
-      mockRunAll.mockResolvedValue({
-        status: 'unhealthy',
-        components: [{ component: 'db', healthy: false }, { component: 'search', healthy: false }],
-      });
-
-      const result = await service.checkHealth(2, 'res-123');
-
-      expect(result).toBe(true);
-    });
-
-    it('multiple rounds with unhealthy status: tolerates up to 2 consecutive failures, stops on 3rd', async () => {
+    it('never aborts on repeated unhealthy results — no hard-fail after N strikes', async () => {
       mockRunAll.mockResolvedValue({
         status: 'unhealthy',
         components: [{ component: 'db', healthy: false }],
       });
 
-      // Round 2 (1st fail)
-      expect(await service.checkHealth(2, 'res-1')).toBe(true);
-      // Round 3 (2nd fail)
-      expect(await service.checkHealth(3, 'res-1')).toBe(true);
-      // Round 4 (3rd fail — tolerance exhausted: 3/3)
-      expect(await service.checkHealth(4, 'res-1')).toBe(false);
+      // Any number of consecutive unhealthy rounds must all resolve (advisory).
+      for (const round of [2, 3, 4, 5]) {
+        await expect(service.checkHealth(round, 'res-1')).resolves.toBeUndefined();
+      }
     });
 
-    it('healthRegistry.runAll() throws: returns true (non-fatal)', async () => {
+    it('healthRegistry.runAll() throws: swallowed (non-fatal)', async () => {
       mockRunAll.mockRejectedValue(new Error('registry exploded'));
 
-      const result = await service.checkHealth(3);
-
-      expect(result).toBe(true);
+      await expect(service.checkHealth(3)).resolves.toBeUndefined();
     });
   });
 

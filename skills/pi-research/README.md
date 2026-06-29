@@ -47,8 +47,8 @@ node "<skill_dir>/scripts/run.mjs" status  # verify detection
 ## Install the skill
 
 Recommended. From the pi extension, run `/research-config` and choose
-Install Skill in Coding Agents. It detects Claude and Codex and symlinks this
-skill into each one that is installed. Uninstall Skill from Coding Agents
+Install Skill in Coding Agents. It detects Claude, Codex, and OpenClaw and
+symlinks this skill into each one that is installed. Uninstall Skill from Coding Agents
 removes those symlinks (cleanup also runs automatically on `npm uninstall`).
 
 Cursor is not auto-installed — it has no global skills directory and only reads

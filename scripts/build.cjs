@@ -11,8 +11,7 @@
  *
  * Targets (dispatch by argv, or build all when no/`all` arg):
  *   worker   -> src/infrastructure/browser/thread-worker.mjs  (browser worker)
- *   openclaw -> dist/openclaw-entry.js (+ dist/prompts, dist/thread-worker.mjs)
- *   cli      -> dist/cli.mjs                 (pi-research CLI binary, shebang)
+ *   cli      -> dist/cli.mjs (+ dist/prompts, dist/thread-worker.mjs, dist/webgpu-probe.mjs)
  *   skill    -> skills/pi-research/scripts/run.mjs  (skill launcher, shebang)
  *
  * Note: `packages: 'external'` already externalizes every bare/`node:` import,
@@ -41,7 +40,7 @@ const p = (...segs) => path.join(ROOT, ...segs);
 // The out-of-process WebGPU viability probe is plain .mjs (not bundled). It must
 // sit next to the bundled entry points so the embedder can resolve it relative to
 // import.meta.url, and so it resolves @huggingface/transformers from the installed
-// package's node_modules. Both dist/cli.mjs and dist/openclaw-entry.js depend on it.
+// package's node_modules. The bundled dist/cli.mjs depends on it.
 function copyWebGpuProbe() {
   fs.mkdirSync(p('dist'), { recursive: true });
   fs.copyFileSync(
@@ -50,9 +49,8 @@ function copyWebGpuProbe() {
   );
 }
 
-// Build the browser worker bundle. Factored out so cli and openclaw can each
-// guarantee it exists when built in isolation (`build:cli` / `build:openclaw`),
-// not only via the full `build all`.
+// Build the browser worker bundle. Factored out so the cli target can guarantee
+// it exists when built in isolation (`build:cli`), not only via `build all`.
 function buildWorker() {
   return esbuild.build({
     ...COMMON,
@@ -65,8 +63,7 @@ async function ensureWorkerBuilt() {
   const src = p('src', 'infrastructure', 'browser', 'thread-worker.ts');
   const out = p('src', 'infrastructure', 'browser', 'thread-worker.mjs');
   // Rebuild if the bundle is missing OR older than its source, so an isolated
-  // `build:cli` / `build:openclaw` after editing thread-worker.ts never ships a
-  // stale worker.
+  // `build:cli` after editing thread-worker.ts never ships a stale worker.
   const stale =
     !fs.existsSync(out) || fs.statSync(out).mtimeMs < fs.statSync(src).mtimeMs;
   if (stale) {
@@ -75,8 +72,8 @@ async function ensureWorkerBuilt() {
 }
 
 // Copy the built worker bundle into dist/. dist/thread-worker.mjs is resolved by
-// worker-pool-manager.ts at runtime, so every entry point that spins up the
-// browser pool — cli AND openclaw — needs it next to its bundle.
+// worker-pool-manager.ts at runtime, so the bundled cli — which spins up the
+// browser pool — needs it next to its bundle.
 function copyThreadWorker() {
   fs.mkdirSync(p('dist'), { recursive: true });
   fs.copyFileSync(
@@ -85,27 +82,18 @@ function copyThreadWorker() {
   );
 }
 
-function copyOpenclawResources() {
+// Copy the prompt templates into dist/prompts/. The bundled dist/cli.mjs resolves
+// prompts relative to its own location (loadPrompt → join(dirname(cli.mjs),
+// 'prompts')), so the templates must sit next to the bundle.
+function copyPrompts() {
   fs.mkdirSync(p('dist', 'prompts'), { recursive: true });
   for (const f of fs.readdirSync(p('src', 'prompts'))) {
     fs.copyFileSync(p('src', 'prompts', f), p('dist', 'prompts', f));
   }
-  copyThreadWorker();
-  console.error('Openclaw resources copied to dist/');
 }
 
 const TARGETS = {
   worker: () => buildWorker(),
-  openclaw: async () => {
-    await ensureWorkerBuilt();
-    await esbuild.build({
-      ...COMMON,
-      entryPoints: [p('src', 'openclaw-entry.ts')],
-      outfile: p('dist', 'openclaw-entry.js'),
-    });
-    copyOpenclawResources();
-    copyWebGpuProbe();
-  },
   cli: async () => {
     await ensureWorkerBuilt();
     await esbuild.build({
@@ -116,6 +104,7 @@ const TARGETS = {
     });
     copyThreadWorker();
     copyWebGpuProbe();
+    copyPrompts();
   },
   skill: () =>
     esbuild.build({
@@ -126,9 +115,9 @@ const TARGETS = {
     }),
 };
 
-// The openclaw resource-copy step depends on the worker output existing, so the
-// full build runs worker before openclaw; cli and skill are independent.
-const ALL_ORDER = ['worker', 'openclaw', 'cli', 'skill'];
+// The cli target's copyThreadWorker step depends on the worker output existing,
+// so the full build runs worker before cli; skill is independent.
+const ALL_ORDER = ['worker', 'cli', 'skill'];
 
 async function main() {
   const arg = process.argv[2];

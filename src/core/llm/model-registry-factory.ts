@@ -2,8 +2,8 @@
  * Shared Model Registry Factory
  *
  * Single source of truth for creating a ModelRegistry with the correct auth.
- * Used by both the SDK entry point (src/sdk.ts) and the OpenClaw entry point
- * (src/openclaw-entry.ts).
+ * Used by the SDK entry point (src/sdk.ts), which also backs the bundled
+ * `pi-research` CLI and the cross-harness agent skill.
  *
  * Previously this logic was duplicated (#29) — any bug fix now updates both paths.
  */
@@ -16,8 +16,8 @@ import { logger } from '../../logger.ts';
 
 /**
  * A structural subset of ModelRegistry that the research resolvers actually use.
- * The registry object can arrive from three places — our own factory, the pi
- * extension host (ctx.modelRegistry), and the OpenClaw host — and a version skew
+ * The registry object can arrive from two places — our own factory and the pi
+ * extension host (ctx.modelRegistry) — and a version skew
  * between the pi-coding-agent we build against and the one the host injects has
  * historically produced "modelRegistry.getAvailable is not a function" crashes
  * mid-research. Treating the registry structurally (and feature-detecting each
@@ -144,7 +144,7 @@ export function buildModelRegistry(apiKey?: string, provider?: string): ModelReg
  * Construct a minimal Model object directly from provider + modelId + apiKey.
  *
  * Used when the user provides credentials but has no pi config directory
- * (e.g., SDK users, OpenClaw plugin users without pi installed).
+ * (e.g., SDK / CLI / agent-skill users without pi installed).
  * Bypasses the full ModelRegistry which would fail without models.json.
  */
 export function constructMinimalModel(provider: string, modelId: string, _apiKey: string): Model<any> {
@@ -185,7 +185,7 @@ export function resolveModel(registry: ModelRegistry, modelSpec?: string, provid
         : safeGetAll(registry).find(m => m.provider === prov && m.id === modelId);
       if (found) return found;
       
-      // Fallback for SDK/OpenClaw users without pi config: construct model from credentials
+      // Fallback for SDK / CLI / skill users without pi config: construct model from credentials
       if (apiKey && provider) {
         return constructMinimalModel(prov, modelId, apiKey);
       }

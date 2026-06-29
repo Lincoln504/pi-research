@@ -31,6 +31,7 @@ export class BrowserTaskScheduler implements IScheduler {
     private server: BrowserServer | null = null;
     private priorityQueue: PriorityTaskQueue | null = null;
     private leadershipTimer: any = null;
+    private leadershipMonitorStarted: boolean = false;
     private idleTimer: any = null;
     private consecutiveLeadershipMisses: number = 0;
     private readonly LEADERSHIP_CHECK_INTERVAL_MS: number = 5000;
@@ -43,8 +44,27 @@ export class BrowserTaskScheduler implements IScheduler {
         private readonly stateManager: IStateManager,
         private readonly container: ServiceContainer = getServiceContainer()
     ) {
-        this.startLeadershipCheck();
+        // NB: the leadership monitor is NOT started here. The leadership check
+        // compares the persisted browserServer.schedulerId against ours, but this
+        // scheduler does not register itself as leader until AFTER construction
+        // (startServer + the lock-contended election updateState in the factory).
+        // Arming the timer in the constructor meant that, under lock contention,
+        // the first checks could fire before registration completed, accumulate
+        // misses, and self-shut-down a scheduler that was still legitimately
+        // becoming the leader. The factory calls startLeadershipMonitor() once the
+        // election is won. The idle timer has no such dependency and starts now.
         this.resetIdleTimer();
+    }
+
+    /**
+     * Start the periodic leadership check. Called by the scheduler factory AFTER
+     * this process has won the election and registered itself as leader, so the
+     * check never races its own registration. Idempotent.
+     */
+    public startLeadershipMonitor(): void {
+        if (this.leadershipMonitorStarted || this.isShuttingDown) return;
+        this.leadershipMonitorStarted = true;
+        this.startLeadershipCheck();
     }
 
     private async getWorkerPoolManager(): Promise<WorkerPoolManager> {

@@ -18,7 +18,6 @@ export default defineConfig({
       'test/integration/knowledge-migrations.test.ts',
       'test/integration/knowledge-models.test.ts',
       'test/integration/knowledge-stack.test.ts',
-      'test/integration/openclaw.test.ts',
       'test/integration/research-knowledge-search.test.ts',
       'test/integration/setup.test.ts',
       'test/integration/shutdown.test.ts',

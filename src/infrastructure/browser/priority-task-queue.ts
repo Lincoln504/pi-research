@@ -136,15 +136,39 @@ export class PriorityTaskQueue {
             task.reject(new Error(`Task ${task.type} aborted before starting`));
             return;
         }
-        
+
         this.activeCount++;
         logger.debug(`[PriorityQueue] Starting task: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
+
+        // Race the task against caller abort. Without this, an abort while the
+        // task is RUNNING is a no-op (the queue-level abort listener only removes
+        // queued tasks), so a long task pins its concurrency slot until its own
+        // timeout fires — starving every other queued task. We cannot kill the
+        // underlying worker job from here (that needs IPC-level cancellation, a
+        // separate concern), so the orphaned fn() keeps running until it settles
+        // on its own; we swallow its late settlement and free the slot now so the
+        // queue can dispatch the next task immediately.
+        let onAbort: (() => void) | undefined;
+        const fnPromise = task.fn();
+        // Prevent an unhandled rejection if abort wins the race and fn() rejects later.
+        fnPromise.catch(() => { /* handled via the race below or abandoned on abort */ });
+
         try {
-            const result = await task.fn();
+            let result: any;
+            if (task.signal) {
+                const abortPromise = new Promise<never>((_, rej) => {
+                    onAbort = () => rej(new Error(`Task ${task.type} aborted while running`));
+                    task.signal!.addEventListener('abort', onAbort, { once: true });
+                });
+                result = await Promise.race([fnPromise, abortPromise]);
+            } else {
+                result = await fnPromise;
+            }
             task.resolve(result);
         } catch (err) {
             task.reject(err);
         } finally {
+            if (task.signal && onAbort) task.signal.removeEventListener('abort', onAbort);
             this.activeCount--;
             logger.debug(`[PriorityQueue] Task finished: ${task.type}. Active: ${this.activeCount}/${this.maxTotalConcurrency}`);
             // Check for more tasks on next tick

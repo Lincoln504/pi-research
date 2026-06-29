@@ -186,13 +186,6 @@ function getLogWriter(filePath: string): LogWriter {
   return writer;
 }
 
-/** Synchronously flush all buffered log output (e.g. before reading a log file in tests). */
-export function flushAllLogsSync(): void {
-  for (const w of logWriters.values()) {
-    try { w.drainSync(); } catch { /* best-effort */ }
-  }
-}
-
 /**
  * Symbol used to identify real Logger instances
  */

@@ -84,6 +84,49 @@ describe('retry-utils', () => {
       expect(fn).toHaveBeenCalledTimes(3);
     });
 
+    it('stops retrying and surfaces the original error when the signal aborts during backoff', async () => {
+      vi.useRealTimers(); // deterministic real-time abort instead of fake-timer microtask juggling
+      const controller = new AbortController();
+      const fn = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      const promise = retryWithBackoff(fn, { initialDelay: 10000, maxRetries: 5, signal: controller.signal });
+      promise.catch(() => {});
+
+      // Let the first attempt fail and the loop park in the long (10s) backoff.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // Abort mid-backoff: the wait short-circuits and the ORIGINAL transient
+      // error is surfaced (not a synthetic AbortError), without further attempts.
+      controller.abort();
+      await expect(promise).rejects.toThrow('ECONNREFUSED');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('abortableDelay', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('resolves after the delay when not aborted', async () => {
+      const { abortableDelay } = await import('../../../src/web-research/retry-utils.ts');
+      await expect(abortableDelay(10)).resolves.toBeUndefined();
+    });
+
+    it('rejects immediately if the signal is already aborted', async () => {
+      const { abortableDelay } = await import('../../../src/web-research/retry-utils.ts');
+      const controller = new AbortController();
+      controller.abort();
+      await expect(abortableDelay(10000, controller.signal)).rejects.toThrow(/abort/i);
+    });
+
+    it('rejects when the signal aborts mid-wait', async () => {
+      const { abortableDelay } = await import('../../../src/web-research/retry-utils.ts');
+      const controller = new AbortController();
+      const p = abortableDelay(10000, controller.signal);
+      controller.abort();
+      await expect(p).rejects.toThrow(/abort/i);
+    });
   });
 
   describe('createTimeoutSignal', () => {

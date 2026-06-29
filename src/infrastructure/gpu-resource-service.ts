@@ -81,14 +81,23 @@ export class GPUResourceService implements IGPUResourceService {
 
         // 1. Check if no one owns it
         if (!currentOwner) {
-          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId, holds: 1 };
           acquired = true;
           return state;
         }
 
-        // 2. Check for re-entrancy (same PID and same process start time)
+        // 2. Check for re-entrancy (same PID and same process start time).
+        // The lock is shared by N concurrent in-process embedding calls, so a
+        // re-entrant acquire must increment the hold count rather than re-take
+        // a single-owner record — otherwise the first release frees the lock
+        // while sibling calls are still on the GPU.
         if (currentOwner.pid === pid && currentOwner.startTime === (startTime ?? undefined)) {
-          state.gpuOwner = { ...currentOwner, startedAt: Date.now(), sessionId: sessionId || currentOwner.sessionId };
+          state.gpuOwner = {
+            ...currentOwner,
+            startedAt: Date.now(),
+            sessionId: sessionId || currentOwner.sessionId,
+            holds: (currentOwner.holds ?? 1) + 1,
+          };
           acquired = true;
           return state;
         }
@@ -97,7 +106,7 @@ export class GPUResourceService implements IGPUResourceService {
         const isAlive = await this.processLifecycle!.isProcessAlive(currentOwner.pid, currentOwner.startTime);
         if (!isAlive) {
           logger.warn(`[GPUResourceService] Reclaiming GPU lock from dead process ${currentOwner.pid}`);
-          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId, holds: 1 };
           acquired = true;
           return state;
         }
@@ -106,7 +115,7 @@ export class GPUResourceService implements IGPUResourceService {
         const age = Date.now() - currentOwner.startedAt;
         if (age > this.gpuLockStaleThresholdMs) {
           logger.warn(`[GPUResourceService] Reclaiming stale GPU lock from process ${currentOwner.pid} (age: ${age}ms)`);
-          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId };
+          state.gpuOwner = { pid, startTime: startTime ?? undefined, startedAt: Date.now(), sessionId, holds: 1 };
           acquired = true;
           return state;
         }
@@ -152,11 +161,22 @@ export class GPUResourceService implements IGPUResourceService {
     if (typeof pid === 'function') {
       const updateState = pid as any;
       const actualPid = ctx as any as number;
-      const targetPid = actualPid || this.processLifecycle!.getCurrentPid();
+      const currentPid = this.processLifecycle!.getCurrentPid();
+      const targetPid = actualPid || currentPid;
 
       await updateState(async (state: any) => {
         if (state.gpuOwner && state.gpuOwner.pid === targetPid) {
-          delete state.gpuOwner;
+          // Releasing our own lock decrements the re-entrant hold count and only
+          // clears the owner record when the last in-process hold is released.
+          // An explicit foreign pid is a forced takedown (e.g. a dead owner) and
+          // releases fully regardless of hold count.
+          const isOwnLock = targetPid === currentPid && !actualPid;
+          const remaining = (state.gpuOwner.holds ?? 1) - 1;
+          if (!isOwnLock || remaining <= 0) {
+            delete state.gpuOwner;
+          } else {
+            state.gpuOwner = { ...state.gpuOwner, holds: remaining };
+          }
         }
         return state;
       });

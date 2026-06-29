@@ -1,7 +1,8 @@
 # Configuration
 
-Every front-end (the pi extension, the OpenClaw plugin, the standalone CLI / agent
-skill, and the SDK) shares one configuration model. This document covers the
+Every front-end (the pi extension, the standalone CLI / agent skill — the surface
+OpenClaw and other skills-aware hosts run — and the SDK) shares one configuration
+model. This document covers the
 settings exposed in the `/research-config` TUI first, then the complete
 environment-variable reference, and finally how the configuration layers resolve.
 
@@ -77,7 +78,7 @@ user-scoped.
 | `PI_RESEARCH_WORKER_CONCURRENCY` | `2` | 1–10 | Tasks per worker process. |
 | `PI_RESEARCH_MODEL` | _(session model)_ | — | Model override for researcher sub-agents (deep and quick) and knowledge synthesis. The coordinator and evaluator keep using the session model. Accepts `provider/id` or a bare model id. |
 | `PI_RESEARCH_REPORT_EXPORT_ENABLED` (TUI) | `false` | — | Front-ends write a Markdown report to disk and surface its path. |
-| `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the skill / OpenClaw, which run from the host agent's arbitrary directory. |
+| `PI_RESEARCH_REPORT_EXPORT_DIR` | _(smart cwd)_ | — | Pin exported reports to a fixed directory, bypassing the cwd-relative resolution. Useful for the agent skill, which runs from the host agent's arbitrary directory. |
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape result, used for planning. |
 
@@ -130,7 +131,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
 | Variable | Description |
 |----------|-------------|
-| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI / OpenClaw mode (not needed when using pi's own auth). Provider is required alongside the key. |
+| `PI_RESEARCH_API_KEY` / `PI_RESEARCH_PROVIDER` | Explicit LLM credentials for SDK / CLI mode (not needed when using pi's own auth). Provider is required alongside the key. |
 | `STACKEXCHANGE_API_KEY` | Raises the Stack Exchange tool's limit from 300/day to 10,000/day. Obtain at <https://stackapps.com/apps/oauth>. |
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. |
@@ -168,7 +169,7 @@ Configuration resolves from the following layers, lowest to highest precedence
 ```
 built-in defaults
   < ~/.pi/research/config.env                       (base, shared; edited by /research-config)
-  < ~/.pi/research/{pi,openclaw,cli}.env             (optional per-front-end overlay)
+  < ~/.pi/research/{pi,cli}.env                      (optional per-front-end overlay)
   < legacy .pi-research.env in the cwd               (deprecated; auto-migrated to the registry)
   < project registry                                 (~/.pi/research/state/project-settings.json, per directory)
   < process.env                                      (real shell env always wins)
@@ -179,19 +180,19 @@ Base file. `config.env` holds your shared, user-scoped settings. The
 overlays or the merged view — so overlay values are never baked back into the base.
 
 Per-front-end overlays. Each front-end reads only its own optional overlay,
-layered over the shared base, so they can be configured independently. Exactly three
+layered over the shared base, so they can be configured independently. Exactly two
 exist:
 
 - `~/.pi/research/pi.env` — the pi extension
-- `~/.pi/research/openclaw.env` — the OpenClaw plugin
-- `~/.pi/research/cli.env` — the standalone CLI / agent skill
+- `~/.pi/research/cli.env` — the standalone CLI / agent skill (the surface OpenClaw
+  and other skills-aware hosts run)
 
 The overlay files do not exist by default; create the one you need by hand. There is
 intentionally no `sdk.env`: the SDK is a library configured from code (see
 [SDK.md](SDK.md)), not from a global file.
 
 Example — give the standalone CLI / agent skill its own model and depth without
-touching the pi extension or OpenClaw:
+touching the pi extension:
 
 ```sh
 # ~/.pi/research/config.env   (shared baseline)
@@ -220,7 +221,7 @@ All pi-research state lives under its own namespace, `~/.pi/research/`:
 | Path | Contents |
 |------|----------|
 | `~/.pi/research/config.env` | Shared base configuration (user-scoped settings). |
-| `~/.pi/research/{pi,openclaw,cli}.env` | Optional per-front-end overlays. |
+| `~/.pi/research/{pi,cli}.env` | Optional per-front-end overlays. |
 | `~/.pi/research/state/project-settings.json` | Project registry (per-directory settings). |
 | `~/.pi/research/state/` | Active sessions, browser status, locks. |
 | `~/.pi/research/knowledge_db/` | The knowledge store (LanceDB), unless `PI_RESEARCH_KNOWLEDGE_DIR` is set. |

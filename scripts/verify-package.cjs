@@ -8,7 +8,7 @@
  *   node scripts/verify-package.cjs manifest
  *     Inspects the tarball npm WOULD publish (`npm pack --dry-run --json`) and
  *     asserts every required file is present and no junk leaked in. Run AFTER
- *     `npm run build:worker && npm run build:openclaw` so the bundled artifacts
+ *     `npm run build:worker && npm run build:cli` so the bundled artifacts
  *     exist. Uses --ignore-scripts so the prepare lifecycle's stdout does not
  *     corrupt the JSON (and because the build already ran).
  *
@@ -35,15 +35,12 @@ const REQUIRED = [
   'package.json',
   'README.md',
   'LICENSE',
-  'openclaw.plugin.json',
   // Entry points (also cross-checked against package.json "exports")
   'src/index.ts',
   'src/sdk.ts',
-  'src/openclaw-entry.ts',
-  // Bundled runtime artifacts — the git-install + openclaw paths run off these,
-  // and the worker .mjs is what FixedClusterPool spawns.
+  // Bundled runtime artifacts — the CLI/skill engine runs off these, and the
+  // worker .mjs is what FixedClusterPool spawns.
   'src/infrastructure/browser/thread-worker.mjs',
-  'dist/openclaw-entry.js',
   'dist/thread-worker.mjs',
   // CLI binary (the `pi-research` bin in package.json)
   'dist/cli.mjs',
@@ -58,7 +55,7 @@ const REQUIRED = [
 ];
 
 // Prompt templates must ship in BOTH locations (src tree for the pi extension,
-// dist for the bundled openclaw plugin).
+// dist for the bundled CLI/skill engine, which resolves prompts next to its bundle).
 const PROMPT_DIRS = [
   { dir: 'src/prompts', min: 5 },
   { dir: 'dist/prompts', min: 5 },
@@ -91,25 +88,21 @@ function exportsTargets() {
   return out;
 }
 
-// The package version is duplicated in three hand-maintained places. The `npm
+// The package version is duplicated in two hand-maintained places. The `npm
 // version` lifecycle syncs them, but a manual edit can drift them silently —
-// shipping a plugin manifest / skill that disagrees with package.json. Assert
-// equality so a drift fails the publish gate instead of reaching users.
+// shipping a skill that disagrees with package.json. Assert equality so a drift
+// fails the publish gate instead of reaching users.
 function verifyVersionSync() {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'openclaw.plugin.json'), 'utf8'));
   const skillMd = fs.readFileSync(path.join(ROOT, 'skills/pi-research/SKILL.md'), 'utf8');
-  const skillMatch = skillMd.match(/^\s*version:\s*["']?([^"'\s]+)["']?\s*$/m);
+  const skillMatch = skillMd.match(/"version":\s*"([^"]+)"/);
   const skillVersion = skillMatch ? skillMatch[1] : null;
 
-  if (manifest.version !== pkg.version) {
-    fail(`openclaw.plugin.json version (${manifest.version}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
-  }
   if (skillVersion !== pkg.version) {
     fail(`skills/pi-research/SKILL.md version (${skillVersion}) != package.json version (${pkg.version}). Run \`npm version\` or sync manually.`);
   }
   if (!process.exitCode) {
-    console.log(`OK: version ${pkg.version} consistent across package.json, openclaw.plugin.json, SKILL.md.`);
+    console.log(`OK: version ${pkg.version} consistent across package.json and SKILL.md.`);
   }
 }
 

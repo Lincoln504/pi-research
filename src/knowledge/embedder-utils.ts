@@ -42,6 +42,20 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMess
 export function isNativeStackUnavailableError(err: unknown): boolean {
   if (!err) return false;
   const msg = (err instanceof Error ? `${err.message} ${err.stack ?? ''}` : String(err)).toLowerCase();
+
+  // Prefer the error CODE where present: it is stable across upstream message
+  // rewording, unlike the substring checks below. A failed dlopen of a native
+  // .node addon is unambiguously a missing/broken native binding. A
+  // module-not-found is only treated as a native-stack gap when it names one of
+  // our native packages — an unrelated missing module must NOT be misclassified
+  // as "this platform has no native stack".
+  const code = (err && typeof err === 'object' && 'code' in err) ? String((err as { code?: unknown }).code) : '';
+  if (code === 'ERR_DLOPEN_FAILED') return true;
+  if ((code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') &&
+      (msg.includes('onnxruntime') || msg.includes('lancedb'))) {
+    return true;
+  }
+
   return (
     msg.includes('cannot find native binding') ||
     msg.includes('onnxruntime_binding.node') ||

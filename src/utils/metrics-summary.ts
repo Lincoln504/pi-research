@@ -107,36 +107,6 @@ export function getLabeledCounter(
   return 0;
 }
 
-/**
- * Sum all label-variants of a counter matching a specific label filter.
- *
- * Example: sumLabeledCounter(counters, 'search_queries_total', { status: 'success' })
- */
-export function sumLabeledCounter(
-  counters: Record<string, number>,
-  baseName: string,
-  labelFilter: Partial<Record<string, string>>
-): number {
-  let total = 0;
-  for (const [key, value] of Object.entries(counters)) {
-    if (!key.startsWith(baseName + '{') && key !== baseName) continue;
-    if (Object.keys(labelFilter).length === 0) {
-      total += value;
-      continue;
-    }
-    // Check if all filter labels match
-    let allMatch = true;
-    for (const [filterKey, filterVal] of Object.entries(labelFilter)) {
-      if (!key.includes(`${filterKey}="${filterVal}"`)) {
-        allMatch = false;
-        break;
-      }
-    }
-    if (allMatch) total += value;
-  }
-  return total;
-}
-
 // formatDuration and formatTimeAgo are imported from text-utils.ts
 
 /**

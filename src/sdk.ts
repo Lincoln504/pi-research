@@ -208,7 +208,7 @@ async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
 
   // Seed configuration. The SDK is a library: it reads the base global config
   // file for convenience, but NEVER a per-interface overlay (those belong to the
-  // pi/openclaw/cli front-ends). `ignoreGlobalConfig` drops the file entirely so
+  // pi/cli front-ends). `ignoreGlobalConfig` drops the file entirely so
   // the SDK runs purely from defaults + process.env + options.config — fully
   // self-contained and reproducible from code.
   const baseConfig = options.ignoreGlobalConfig
@@ -770,8 +770,8 @@ function createMockContext(sessionId: string): ExtensionContext {
       notify: (msg: string) => logger.log(`[PI-UI-NOTIFY] ${msg}`),
       showStatus: () => () => {},
       progress: () => () => {},
-      // No-op widget host — kept field-compatible with the openclaw mock ctx so any
-      // future (hasUI-gated) ctx.ui.setWidget call behaves identically on both
+      // No-op widget host — kept field-compatible with the host-injected ctx so any
+      // future (hasUI-gated) ctx.ui.setWidget call behaves identically on
       // headless hosts instead of throwing on the SDK path.
       setWidget: () => {},
       custom: async () => ({ type: 'cancel' }),

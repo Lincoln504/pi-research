@@ -299,7 +299,7 @@ async function runBackgroundExtraction(
 
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects.
   // llmTimeout is resolved by the caller from the iface-aware Config so a
-  // per-interface overlay (sdk.env / openclaw.env / pi.env) is honored here.
+  // per-interface overlay (pi.env / cli.env) is honored here.
   const response = await withTimeout(
     completeSimple(model, {
       systemPrompt,
@@ -517,8 +517,8 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
       const container = tryGetServiceContainerFromCtx(ctx);
       // Prefer a config the caller already resolved and placed on the context
       // (the SDK/CLI seed ctx.config with their hermetic/overlay-resolved Config),
-      // falling back to reading the per-interface overlay (pi.env / openclaw.env /
-      // cli.env) from disk. This keeps RESEARCH_MODEL + LLM_TIMEOUT_MS for synthesis
+      // falling back to reading the per-interface overlay (pi.env / cli.env)
+      // from disk. This keeps RESEARCH_MODEL + LLM_TIMEOUT_MS for synthesis
       // consistent with the run path and honors ignoreGlobalConfig.
       const config = (ctx as { config?: Config }).config ?? getConfig(ctx.cwd, iface);
 

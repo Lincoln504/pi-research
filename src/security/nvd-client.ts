@@ -63,18 +63,28 @@ class NVDRateLimiter {
     return process.env['NVD_API_KEY'] ? 600 : 6000;
   }
 
-  async acquire(): Promise<void> {
+  async acquire(signal?: AbortSignal): Promise<void> {
     const now = Date.now();
     const waitTime = Math.max(0, this.minInterval - (now - this.lastRequest));
-    
+
     this.lastRequest = now + waitTime;
 
     if (waitTime > 0) {
-      await new Promise<void>(resolve => {
-        const timeoutId = setTimeout(resolve, waitTime);
+      // Abortable: the spacing is up to 6s (no API key), so a caller cancel must
+      // not be stuck behind it. On abort, throw so the caller stops paginating.
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, waitTime);
         safeUnref(timeoutId);
+        const onAbort = () => {
+          clearTimeout(timeoutId as unknown as ReturnType<typeof setTimeout>);
+          reject(Object.assign(new Error('NVD search aborted'), { name: 'AbortError' }));
+        };
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
       });
-      
+
       metrics.increment('nvd_ratelimiter_wait_total', 1);
       metrics.observe('nvd_ratelimiter_wait_duration_ms', waitTime);
     }
@@ -242,7 +252,7 @@ function buildURL(term: string, options: SearchOptions | undefined, maxResults: 
   return `${NVD_BASE_URL}?${params.toString()}`;
 }
 
-function createFetchOptions(): RequestInit {
+function createFetchOptions(signal?: AbortSignal): RequestInit {
   // An NVD API key raises the public rate limit from ~5 to ~50 requests per
   // 30s rolling window (and is sent as the `apiKey` header, not a bearer token).
   const apiKey = process.env['NVD_API_KEY'];
@@ -252,7 +262,8 @@ function createFetchOptions(): RequestInit {
       'Accept': 'application/json',
       ...(apiKey ? { apiKey } : {}),
     },
-    signal: createTimeoutSignal(30000),
+    // Compose the caller signal with the per-request timeout so either aborts.
+    signal: createTimeoutSignal(30000, signal),
   };
 }
 
@@ -278,20 +289,21 @@ function handleResponseStatus(response: Response): void {
   }
 }
 
-function fetchWithRetry(url: string): Promise<Response> {
+function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
   const retryOptions: RetryOptions = {
     maxRetries: 3,
     initialDelay: 2000,
     maxDelay: 10000,
+    signal,
   };
 
   const endpoint = new URL(url).pathname;
-  
+
   return nvdCircuitBreaker.execute(async () => {
     return retryWithBackoff(async () => {
       let response: Response;
       try {
-        response = await fetch(url, createFetchOptions());
+        response = await fetch(url, createFetchOptions(signal));
         metrics.increment('nvd_requests_total', 1, { endpoint, status: 'success' });
         metrics.increment('nvd_ratelimiter_used_total', 1, { endpoint });
       } catch (error) {
@@ -314,15 +326,17 @@ async function searchSingleTerm(
   const allVulnerabilities: Vulnerability[] = [];
   const maxPages = options?.maxPages ?? 5;
   const pageSize = Math.min(20, maxResults);
+  const signal = options?.signal;
   let startIndex = 0;
   let totalPagesFetched = 0;
-  
+
   while (totalPagesFetched < maxPages && allVulnerabilities.length < maxResults) {
+    if (signal?.aborted) break; // stop paginating promptly on cancel
     const url = buildURL(term, options, pageSize, startIndex);
 
-    await nvdRateLimiter.acquire();
+    await nvdRateLimiter.acquire(signal);
 
-    const response = await fetchWithRetry(url);
+    const response = await fetchWithRetry(url, signal);
     let data: unknown;
     try {
       data = await response.json();

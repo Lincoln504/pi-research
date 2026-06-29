@@ -4,8 +4,8 @@
  * Defines the research tool that orchestrates web/internet research.
  * Depth 1-3: AI-orchestrated multi-session research (coordinator → researchers → evaluator).
  *
- * Note: Depth 0 (quick mode) is only available via the SDK/OpenClaw programmatic API.
- * The pi extension tool has minimum: 1.
+ * Note: Depth 0 (quick mode) is only available via the SDK / CLI (`--depth 0`,
+ * which the agent skill can pass). The pi extension tool has minimum: 1.
  */
 
 import type {
@@ -302,7 +302,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
               observerState
             );
           } else {
-            // Headless mode (CLI / SDK / OpenClaw)
+            // Headless mode (CLI / SDK)
             observer = new HeadlessObserver({ enableLogging: true });
             
             const sessionResearchId = startResearchSession(piSessionId, researchId);

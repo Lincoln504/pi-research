@@ -23,7 +23,7 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, } from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, } from './scraper-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
@@ -115,7 +115,13 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
 
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
-  
+
+  // Connect-time SSRF pin: the socket connects only to a validated public IP,
+  // closing the DNS-rebinding TOCTOU gap between validateUrlForSSRF (request
+  // time) and fetch's own re-resolution (connect time). Null when undici is
+  // unavailable — request-time validation above still applies.
+  const dispatcher = await getSsrfSafeDispatcher();
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_LAYER_TIMEOUT);
   safeUnref(timeoutId);
@@ -141,7 +147,9 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
           'User-Agent': getRandomUserAgent(),
           'Accept': 'text/html,application/xhtml+xml,application/pdf,*/*;q=0.8',
         },
-      });
+        // RequestInit's standard type omits undici's `dispatcher`; cast to attach it.
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit);
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
@@ -247,6 +255,14 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
   }
 }
 
+// SSRF note: the URL is validated at request time by validateUrlForSSRF in
+// scrapeSingle before this fallback runs. Unlike the fetch layer, the stealth
+// browser (Camoufox/Firefox) performs its own DNS resolution and connection
+// inside the browser process, which this code cannot pin to the validated IP —
+// so a DNS-rebinding target could still be reached via this path. This is an
+// accepted residual: pinning would require browser-level request interception
+// or a validating local proxy. The request-time check blocks the common cases
+// (literals, hostnames that resolve to private ranges at validation time).
 async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {

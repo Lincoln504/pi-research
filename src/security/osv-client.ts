@@ -35,6 +35,7 @@ const DEFAULT_MAX_RESULTS = 20;
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const endpoint = new URL(url).pathname;
   return osvCircuitBreaker.execute(async () => {
@@ -58,6 +59,7 @@ async function fetchWithRetry(
         initialDelay: DEFAULT_INITIAL_DELAY_MS,
         maxDelay: DEFAULT_MAX_DELAY_MS,
         label: `OSV API: ${url}`,
+        signal,
         isTransientError: (error) => {
           const status = (error as Error & { status?: number })?.status;
           if (typeof status === 'number') {
@@ -84,6 +86,7 @@ export async function searchOSV(
     severity?: string;
     maxResults?: number;
     includeAffected?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<OSVResult> {
   const startTime = Date.now();
@@ -109,8 +112,8 @@ export async function searchOSV(
         const url: string = `${OSV_BASE_URL}/vulns/${encodeURIComponent(normalizedId)}`;
         response = await fetchWithRetry(url, {
           headers: { 'User-Agent': 'pi-research/2.0', 'Accept': 'application/json' },
-          signal: createTimeoutSignal(OSV_TIMEOUT_MS),
-        });
+          signal: createTimeoutSignal(OSV_TIMEOUT_MS, options?.signal),
+        }, options?.signal);
       } else {
         if (options?.ecosystem === undefined || options.ecosystem === '') {
           return { vulns: [], skipped: true };
@@ -124,8 +127,8 @@ export async function searchOSV(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
-          signal: createTimeoutSignal(OSV_TIMEOUT_MS),
-        });
+          signal: createTimeoutSignal(OSV_TIMEOUT_MS, options?.signal),
+        }, options?.signal);
       }
 
       let data: unknown;

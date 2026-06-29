@@ -95,7 +95,7 @@ export class SecuritySearcher {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  async search(params: SecuritySearchParams): Promise<SecuritySearchResult> {
+  async search(params: SecuritySearchParams, signal?: AbortSignal): Promise<SecuritySearchResult> {
     const startTime = Date.now();
     const results: { nvd?: NVDResult; cisa_kev?: CisaKevResult; github?: GitHubResult; osv?: OSVResult } = {};
     const errors: string[] = [];
@@ -110,6 +110,7 @@ export class SecuritySearcher {
               severity: getSeverityParam(params),
               maxResults: params.maxResults,
               includeExploited: params.includeExploited,
+              signal,
           });
           results.nvd = nvdResult;
           totalVulnerabilities += nvdResult.count;
@@ -122,7 +123,7 @@ export class SecuritySearcher {
     if (params.databases.includes('cisa_kev')) {
       searchPromises.push((async () => {
         try {
-          const cisaResult = await this.searchCisaKev(params.terms, { maxResults: params.maxResults });
+          const cisaResult = await this.searchCisaKev(params.terms, { maxResults: params.maxResults, signal });
           results.cisa_kev = cisaResult;
           totalVulnerabilities += cisaResult.count;
         } catch (err: unknown) {
@@ -139,6 +140,7 @@ export class SecuritySearcher {
             severity: params.severity,
             maxResults: params.maxResults,
             repo: params.githubRepo,
+            signal,
           });
           results.github = githubResult;
           totalVulnerabilities += githubResult.count;
@@ -155,6 +157,7 @@ export class SecuritySearcher {
             ecosystem: params.ecosystem,
             severity: params.severity,
             maxResults: params.maxResults,
+            signal,
           });
           results.osv = osvResult;
           totalVulnerabilities += osvResult.count;
@@ -173,9 +176,15 @@ export class SecuritySearcher {
     }
 
     if (delay > 0) {
+      // Abortable: a caller cancel must not sit through the post-sweep delay.
       await new Promise<void>((resolve) => {
-        const timeoutId = setTimeout(resolve, delay);
+        const timeoutId = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, delay);
         safeUnref(timeoutId);
+        const onAbort = () => { clearTimeout(timeoutId); resolve(); };
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
       });
     }
 
@@ -263,8 +272,8 @@ export function getSecuritySearcher(): SecuritySearcher {
 export function setSecuritySearcher(searcher: SecuritySearcher | null): void { globalSearcher = searcher; }
 export function resetSecuritySearcher(): void { globalSearcher = null; }
 
-export async function searchSecurityDatabases(params: SecuritySearchParams): Promise<SecuritySearchResult> {
-  return getSecuritySearcher().search(params);
+export async function searchSecurityDatabases(params: SecuritySearchParams, signal?: AbortSignal): Promise<SecuritySearchResult> {
+  return getSecuritySearcher().search(params, signal);
 }
 
 export function getDatabaseInfo(): DatabaseInfo {

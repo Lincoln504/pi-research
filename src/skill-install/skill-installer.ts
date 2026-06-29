@@ -47,6 +47,7 @@ export interface HarnessDef {
  */
 export const HARNESSES: readonly HarnessDef[] = [
   { id: 'claude', label: 'Claude', baseDir: '.claude', skillsDir: path.join('.claude', 'skills'), confidence: 'confirmed' },
+  { id: 'openclaw', label: 'OpenClaw', baseDir: '.openclaw', skillsDir: path.join('.openclaw', 'skills'), confidence: 'confirmed', note: 'OpenClaw reads ~/.openclaw/skills as a managed skill root and accepts symlinked skill folders (docs.openclaw.ai/tools/skills).' },
   { id: 'pi', label: 'pi', baseDir: '.pi', skillsDir: path.join('.pi', 'skills'), confidence: 'confirmed' },
   { id: 'cursor', label: 'Cursor', baseDir: '.cursor', skillsDir: path.join('.cursor', 'skills'), confidence: 'partial', note: 'Cursor project-level skills are documented; the global ~/.cursor/skills path is community-reported.' },
   { id: 'codex', label: 'OpenAI Codex CLI', baseDir: '.codex', skillsDir: path.join('.codex', 'skills'), confidence: 'unverified', note: 'Codex skills support is emerging; path not confirmed by official docs.' },
@@ -58,15 +59,19 @@ const PACKAGE_NAME = '@lincoln504/pi-research';
 
 /**
  * The coding agents the in-app installer (the /research-config TUI) targets:
- * Claude and Codex. Both load personal skills from a home-directory
- * `~/.<agent>/skills/` path, so a single global symlink works.
+ * Claude, Codex, and OpenClaw. Each loads skills from a home-directory
+ * `~/.<agent>/skills/` path — OpenClaw reads `~/.openclaw/skills` as a managed
+ * skill root that accepts symlinked skill folders — so a single global symlink
+ * works. Every target is gated on the agent's config dir already existing (see
+ * skillInstallCandidates), so a tool that isn't set up is never offered and we
+ * never create its home dir.
  *
  * Cursor is deliberately excluded: it has no personal/global skills directory —
  * Cursor only loads skills from a project-level `.cursor/skills/`, so a global
  * `~/.cursor/skills` symlink would never be read. `pi` (the host itself) and the
  * speculative `~/.agents` convention are likewise excluded from the one-click flow.
  */
-export const SKILL_AGENT_TARGETS = ['claude', 'codex'] as const;
+export const SKILL_AGENT_TARGETS = ['claude', 'codex', 'openclaw'] as const;
 
 export interface ManifestEntry {
   tool: string;

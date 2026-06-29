@@ -143,7 +143,6 @@ src/
 ├── logger.ts             structured logger (JSONL, TUI-safe)
 ├── tool.ts               tool definitions (research, health)
 ├── sdk.ts                programmatic SDK (non-extension use)
-├── openclaw-entry.ts     OpenClaw plugin entry point
 ├── research-config.ts    /research-config TUI
 ├── core/
 │   ├── llm/              agentic repair, prompts, model resolution, inject-date

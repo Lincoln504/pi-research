@@ -1,14 +1,14 @@
 # Agent Skill
 
 pi-research ships as a portable [Agent Skill](https://agentskills.io/specification)
-so any skills-compatible coding agent (Claude, OpenAI Codex CLI, and others using
-the same `SKILL.md` directory model) can run multi-agent web research through the
-same engine the `pi` extension uses.
+so any skills-compatible coding agent (Claude, OpenAI Codex CLI, OpenClaw, and
+others using the same `SKILL.md` directory model) can run multi-agent web research
+through the same engine the `pi` extension uses.
 
 ## How it works
 
 ```
-agent ──Bash──▶ skills/pi-research/scripts/run.mjs ──spawns──▶ pi-research engine (dist/cli.mjs)
+agent ─Bash/exec─▶ skills/pi-research/scripts/run.mjs ─spawns─▶ pi-research engine (dist/cli.mjs)
                 (zero-dep launcher; locates the                (SDK: init → run → shutdown)
                  engine, fails fast if missing)                        │
                                                                        ▼
@@ -31,12 +31,31 @@ One-click (recommended). From the `pi` extension, run `/research-config` →
 Install Skill in Coding Agents. The installer:
 
 1. Detects which target agents are present under `$HOME` — currently Claude
-   (`~/.claude/skills`) and OpenAI Codex CLI (`~/.codex/skills`).
+   (`~/.claude/skills`), OpenAI Codex CLI (`~/.codex/skills`), and OpenClaw
+   (`~/.openclaw/skills`, OpenClaw's managed skill root, which accepts symlinked
+   skill folders).
 2. Symlinks `skills/pi-research/` into each present agent, never overwriting an
    unrelated skill already in that slot.
 3. Records what it created in a manifest, so Uninstall Skill in Coding Agents
    removes only its own links. Stale links are also garbage-collected on startup and
    on `npm uninstall`.
+
+### OpenClaw without `pi`
+
+If you run OpenClaw but not the `pi` extension, register the skill with OpenClaw's
+own CLI after installing the engine — OpenClaw copies the `SKILL.md` folder into its
+managed skill root and reads it on the next session:
+
+```bash
+npm install -g @lincoln504/pi-research
+openclaw skills install "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" --global
+```
+
+OpenClaw drives the skill through its `exec` tool, gated on `node` being on `PATH`
+(`metadata.openclaw.requires.bins`). A bare `openclaw skills install git:…` is *not*
+used here: OpenClaw expects `SKILL.md` at a repo root, whereas this package nests it
+under `skills/pi-research/` — install the engine from npm and point OpenClaw at that
+folder, as above.
 
 Cursor is intentionally excluded from the one-click flow — it has no global skills
 directory and reads only project-level `.cursor/skills/`. Link it per project:
@@ -51,6 +70,7 @@ Manual. Symlink the directory into any agent's skills folder yourself:
 |-------|----------|---------|
 | Claude | `~/.claude/skills/pi-research/` | `<project>/.claude/skills/pi-research/` |
 | OpenAI Codex CLI | `~/.codex/skills/pi-research/` | `<project>/.codex/skills/pi-research/` |
+| OpenClaw | `~/.openclaw/skills/pi-research/` | `<workspace>/skills/pi-research/` |
 | Cursor | — (no global dir) | `<project>/.cursor/skills/pi-research/` |
 
 ## Prerequisites

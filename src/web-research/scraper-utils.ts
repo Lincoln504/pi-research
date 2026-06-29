@@ -3,11 +3,13 @@
  */
 
 import * as dns from 'node:dns/promises';
+import * as dnsCb from 'node:dns';
 import * as net from 'node:net';
 import crypto from 'node:crypto';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { errorTracker } from '../utils/error-tracker.ts';
 import { metrics } from '../utils/metrics.ts';
+import { logger } from '../logger.ts';
 import {
   USER_AGENTS,
   FILTERED_TAGS,
@@ -133,6 +135,83 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
       throw new Error('Hostname resolves to a private/reserved IPv6 address');
     }
   }
+}
+
+/**
+ * SSRF-safe DNS lookup for the connect layer.
+ *
+ * validateUrlForSSRF runs at request time, but Node's fetch independently
+ * re-resolves the hostname when it opens the socket. A DNS-rebinding attacker
+ * with a TTL-0 record can answer with a public IP during validation and a
+ * private one (e.g. the cloud metadata endpoint 169.254.169.254) at connect —
+ * a classic time-of-check/time-of-use gap. This lookup closes it: it is wired
+ * into the undici connector (see getSsrfSafeDispatcher) so the address the
+ * socket actually connects to is the address that gets validated. Any resolved
+ * private/reserved address is filtered out, and a host that resolves ONLY to
+ * private addresses is refused at connect time.
+ */
+export function ssrfSafeLookup(
+  hostname: string,
+  options: dnsCb.LookupAllOptions | dnsCb.LookupOneOptions | number | undefined,
+  callback: (err: NodeJS.ErrnoException | null, address?: any, family?: number) => void,
+  // Resolver is injectable for tests; undici calls with the standard 3 args.
+  resolveImpl: (hostname: string, opts: dnsCb.LookupAllOptions, cb: (err: NodeJS.ErrnoException | null, addresses: dnsCb.LookupAddress[]) => void) => void = dnsCb.lookup as any,
+): void {
+  const family = typeof options === 'number' ? options : (options?.family ?? 0);
+  const wantsAll = typeof options === 'object' && options?.all === true;
+  // Mirror validateUrlForSSRF's loopback test affordance: when explicitly
+  // enabled, integration tests resolve to 127.0.0.1/::1 and must be allowed to
+  // connect. Scoped to loopback only — other private ranges stay blocked.
+  const allowLoopback = process.env['PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE'] === 'true';
+  const isLoopback = (a: { address: string; family: number }): boolean =>
+    a.family === 6
+      ? (a.address.toLowerCase() === '::1' || isMappedLoopback(a.address))
+      : /^127\./.test(a.address);
+  resolveImpl(hostname, { all: true, verbatim: true, family }, (err, addresses) => {
+    if (err) return callback(err);
+    const list = Array.isArray(addresses) ? addresses : [];
+    const safe = list.filter((a) => {
+      if (!a) return false;
+      if (allowLoopback && isLoopback(a)) return true;
+      return a.family === 6 ? !isPrivateIpv6(a.address) : !isPrivateIp(a.address);
+    });
+    if (safe.length === 0) {
+      metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'connect_time_private' });
+      return callback(
+        Object.assign(new Error(`SSRF blocked: ${hostname} resolved only to private/reserved addresses at connect time`), { code: 'ESSRFBLOCKED' }),
+      );
+    }
+    if (wantsAll) return callback(null, safe);
+    return callback(null, safe[0]!.address, safe[0]!.family);
+  });
+}
+
+// undici Agent used as the per-request dispatcher for scrape fetches. Cached
+// after first construction. `undefined` = not yet attempted, `null` = undici
+// unavailable (fall back to plain fetch with request-time validation only).
+let cachedSsrfDispatcher: unknown | null | undefined = undefined;
+
+/**
+ * Build (once) an undici Agent whose connector resolves via ssrfSafeLookup, so
+ * every scrape fetch — including each manually-followed redirect hop — connects
+ * only to a validated public address. Returns null if undici can't be loaded;
+ * callers then fall back to plain fetch (request-time validation still applies).
+ */
+export async function getSsrfSafeDispatcher(): Promise<unknown | null> {
+  if (cachedSsrfDispatcher !== undefined) return cachedSsrfDispatcher as unknown | null;
+  try {
+    const { Agent } = await import('undici');
+    cachedSsrfDispatcher = new Agent({ connect: { lookup: ssrfSafeLookup } });
+  } catch (e) {
+    logger.warn(`[Scrapers] undici unavailable; connect-time SSRF pinning disabled (request-time validation still active): ${e instanceof Error ? e.message : String(e)}`);
+    cachedSsrfDispatcher = null;
+  }
+  return cachedSsrfDispatcher as unknown | null;
+}
+
+/** Test-only: reset the cached dispatcher so a test can re-exercise construction. */
+export function __resetSsrfDispatcherForTests(): void {
+  cachedSsrfDispatcher = undefined;
 }
 
 /**

@@ -184,11 +184,8 @@ export class DeepResearchOrchestrator {
         logger.log(`[DeepOrchestrator] ${roundLabel} ${this.elapsed()}`);
         observer?.onRoundStart?.(this.currentRound);
 
-        // Check infrastructure health (only if round > 1 or complexity > 1)
-        const healthy = await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
-        if (!healthy && this.currentRound > 1) {
-            logger.warn(`[DeepOrchestrator] Infrastructure unhealthy at Round ${this.currentRound}, attempting to continue with existing data...`);
-        }
+        // Check infrastructure health (advisory: logs status, never aborts the run).
+        await orchestrationService.checkHealth(this.currentRound, researchId, ctx);
 
         // 1. Update/Generate Plan
         let plan: ResearchPlan;
@@ -486,17 +483,23 @@ export class DeepResearchOrchestrator {
 
     } catch (error) {
       const sessionDuration = Date.now() - this.sessionStart;
-      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: 'error' });
-      logger.error(`[DeepOrchestrator] Research failed: ${error instanceof Error ? error.message : String(error)}`);
-      observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
+      const aborted = signal?.aborted === true;
+      metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: aborted ? 'cancelled' : 'error' });
+      logger.error(`[DeepOrchestrator] Research ${aborted ? 'cancelled' : 'failed'}: ${error instanceof Error ? error.message : String(error)}`);
 
-      // Attempt fallback synthesis from collected reports before re-throwing
+      // Terminal-callback contract (shared with QuickResearchOrchestrator): fire
+      // EXACTLY ONE of onComplete / onError. A returned report — full above, or a
+      // partial fallback synthesised from whatever was collected (the natural
+      // outcome of a mid-run cancel) — is a completion (onComplete). Only a run
+      // with nothing to return is a failure (onError + throw). Previously this
+      // fired onError AND THEN onComplete on the fallback path, signalling both
+      // "errored" and "completed" for one run.
       try {
         const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
         if (synthesisService.hasReports(researchId)) {
           let fallback = synthesisService.buildFallbackSynthesis(researchId, this.currentRound);
           fallback = synthesisService.ensureCitedLinks(researchId, fallback);
-          logger.log(`[DeepOrchestrator] Returning fallback synthesis (${fallback.length} chars) from ${synthesisService.getReportCount(researchId)} collected reports`);
+          logger.log(`[DeepOrchestrator] Returning ${aborted ? 'partial (cancelled)' : 'fallback'} synthesis (${fallback.length} chars) from ${synthesisService.getReportCount(researchId)} collected reports`);
           const finalSteeringMessages = getActiveSteeringMessages(this.options.sessionId);
           const result = synthesisService.appendSteeringGuidance(fallback, finalSteeringMessages);
           observer?.onComplete?.(result);
@@ -506,6 +509,9 @@ export class DeepResearchOrchestrator {
         logger.warn(`[DeepOrchestrator] Fallback synthesis also failed:`, fallbackErr);
       }
 
+      // Nothing to return — this run genuinely failed (or was cancelled with no
+      // collected work). Fire onError and propagate, matching QuickOrchestrator.
+      observer?.onError?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
     } finally {
       // Guard cleanup: getOrchestrationService()/cleanup can throw when the

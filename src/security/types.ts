@@ -109,6 +109,9 @@ export interface NVDSearchOptions {
   cweId?: string;
   startDate?: string;
   endDate?: string;
+  // Caller cancellation: composed with each request's own timeout and used to
+  // short-circuit rate-limit/backoff waits and stop pagination promptly.
+  signal?: AbortSignal;
 }
 
 export interface ICisaKevClient {
@@ -119,6 +122,7 @@ export interface CisaKevSearchOptions {
   vendor?: string;
   product?: string;
   maxResults?: number;
+  signal?: AbortSignal;
 }
 
 export interface IGitHubAdvisoriesClient {
@@ -131,6 +135,7 @@ export interface GitHubSearchOptions {
   severity?: string;
   maxResults?: number;
   repo?: string;
+  signal?: AbortSignal;
 }
 
 export interface IOSVClient {
@@ -143,4 +148,5 @@ export interface OSVSearchOptions {
   severity?: string;
   maxResults?: number;
   includeAffected?: boolean;
+  signal?: AbortSignal;
 }

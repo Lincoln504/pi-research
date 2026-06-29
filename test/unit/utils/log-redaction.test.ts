@@ -42,6 +42,22 @@ describe('redactSecrets', () => {
     expect(out).toContain('[REDACTED]');
   });
 
+  it('masks an opaque Bearer token that is not a JWT or known format', () => {
+    // GLM/zhipuai-style dotted key: not a JWT, no known prefix — the value the
+    // KV/known-token passes miss. The scheme-aware Bearer pattern must catch it.
+    const opaque = 'a1b2c3d4e5f6g7h8.i9j0k1l2m3n4o5p6';
+    const out = redactSecrets(`Authorization: Bearer ${opaque}`);
+    expect(out).not.toContain(opaque);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('masks a bare Bearer token (no Authorization key prefix)', () => {
+    const opaque = 'zhipu-XXXXXXXXXXXXXXXX.YYYYYYYYYYYY';
+    const out = redactSecrets(`sending header Bearer ${opaque} to provider`);
+    expect(out).not.toContain(opaque);
+    expect(out).toContain('Bearer [REDACTED]');
+  });
+
   it('masks Stripe and Google provider keys', () => {
     expect(redactSecrets('sk_live_abcdefghijklmnop1234')).toContain('[REDACTED]');
     // Google API keys are "AIza" + exactly 35 chars.
