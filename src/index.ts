@@ -390,32 +390,50 @@ export default async function (pi: ExtensionAPI) {
 
         const output = extractResultText(result);
 
-        pi.sendMessage({
-          customType: 'research-result',
-          content: output,
-          display: true,
-          details: { 
-            totalTokens: (result.details as ResearchResultDetails)?.totalTokens ?? 0,
-            researchId: (result.details as any)?.researchId
-          },
-        });
+        try {
+          pi.sendMessage({
+            customType: 'research-result',
+            content: output,
+            display: true,
+            details: {
+              totalTokens: (result.details as ResearchResultDetails)?.totalTokens ?? 0,
+              researchId: (result.details as any)?.researchId
+            },
+          });
 
-        if (ctx.hasUI) {
-          ctx.ui.notify('Research finished.', 'info');
+          if (ctx.hasUI) {
+            ctx.ui.notify('Research finished.', 'info');
+          }
+        } catch (deliverErr) {
+          // ctx went stale (the session was closed mid-run) — there's no live session to
+          // deliver the result to. Not a failure of the research itself.
+          logger.debug('[pi-research] could not deliver research result (session closed):', deliverErr);
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
+        // A quit / session replacement mid-run aborts ctx.signal and invalidates ctx; the run
+        // was cancelled, not broken, and any sendMessage/ui call below would itself throw
+        // "ctx is stale after session replacement or reload". There is no live session to
+        // report to, so exit quietly instead of logging a failure and re-throwing.
+        if (ctx.signal?.aborted || /ctx is stale after session replacement/i.test(message)) {
+          logger.debug('[pi-research] /research command ended early (session closed mid-run); skipping result delivery');
+          return;
+        }
         logger.error('[pi-research] /research command failed:', error);
 
-        pi.sendMessage({
-          customType: 'research-result',
-          content: `**Research failed**\n\n${message}`,
-          display: true,
-          details: { error: message },
-        });
+        try {
+          pi.sendMessage({
+            customType: 'research-result',
+            content: `**Research failed**\n\n${message}`,
+            display: true,
+            details: { error: message },
+          });
 
-        if (ctx.hasUI) {
-          ctx.ui.notify(`Research failed: ${message}`, 'error');
+          if (ctx.hasUI) {
+            ctx.ui.notify(`Research failed: ${message}`, 'error');
+          }
+        } catch (deliverErr) {
+          logger.debug('[pi-research] could not deliver failure notice (session closed):', deliverErr);
         }
       }
     },

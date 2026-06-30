@@ -149,7 +149,7 @@ describe('text-utils', () => {
         ],
       } as any;
       expect(() => ensureAssistantResponse(session, 'Test'))
-        .toThrow('Test: Researcher produced no text output');
+        .toThrow('Test: produced no text output');
     });
 
     it('should throw if last assistant message has only non-text blocks', () => {
@@ -162,7 +162,7 @@ describe('text-utils', () => {
         ],
       } as any;
       expect(() => ensureAssistantResponse(session, 'Test'))
-        .toThrow('Test: Researcher produced no text output');
+        .toThrow('Test: produced no text output');
     });
   });
 

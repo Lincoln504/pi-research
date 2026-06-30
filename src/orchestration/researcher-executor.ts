@@ -125,7 +125,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     //     wraps an opaque SDK result, so it is intentionally NOT a grounding signal.)
     //   - historicalUrls: knowledge-store summaries supplied to this researcher.
     // Per-attempt: each retry builds a fresh session, so both counts reset at the top of the body.
-    const scrapeEnabled = !mergedExclude.includes('scrape');
+    //
+    // The gate is a PRODUCTION guard against ungrounded real research. It does not apply when
+    // scraping is mocked: PI_RESEARCH_MOCK_SCRAPE (a TEST-ONLY mode, not a product feature)
+    // serves a tiny stub that never passes content validation, so there are zero real scrapes
+    // by design — applying the gate there would fail every researcher even with a capable model
+    // (which is exactly what made mocked demo/test runs look like "the model can't research").
+    const scrapeEnabled = !mergedExclude.includes('scrape') && process.env['PI_RESEARCH_MOCK_SCRAPE'] !== 'true';
     let successfulScrapeCount = 0;
     let nonScrapeGroundingHits = 0;
 

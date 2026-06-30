@@ -113,8 +113,9 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
     // zero text content blocks in the final assistant message. This typically means
     // all tool calls failed, or the session ended without a visible response.
     throw new Error(
-      `${label}: Researcher produced no text output. ` +
-      `This usually means the browser-based search engine was unavailable during the run — check system resources and retry.`
+      `${label}: produced no text output — the model returned no final text block after its tool calls. ` +
+      `This is usually a model-capability issue (a very small or thinking-only model that doesn't emit a final ` +
+      `answer after using tools), or every tool call in the turn failed. Try a more capable model or retry.`
     );
   }
   return text;

@@ -90,7 +90,13 @@ export function createCleanupFunction(
     
     const activePanels = getPiActivePanels(piSessionId);
     if (activePanels.length === 0) {
-      if (ctx.hasUI) {
+      // ctx.hasUI is a getter that throws "ctx is stale after session replacement or reload"
+      // when the session was torn down mid-run (e.g. the user quit while research was in
+      // flight). In that case there is no widget left to remove and no live UI to touch, so
+      // treat it as no-UI rather than letting the throw surface as a scary "Cleanup failed".
+      let hasUI = false;
+      try { hasUI = ctx.hasUI; } catch { /* ctx stale (session closed mid-run) → treat as no UI */ }
+      if (hasUI) {
         ctx.ui.setWidget(masterWidgetId, undefined);
         const tuiUI = ctx.ui as { setWorkingVisible?: (visible: boolean) => void };
         if (typeof tuiUI?.setWorkingVisible === 'function') {
