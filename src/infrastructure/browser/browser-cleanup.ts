@@ -40,13 +40,17 @@ export async function cleanupOrphanedCamoufoxProcesses(): Promise<void> {
 
 /**
  * Marker that identifies a browser process as one WE launched (Camoufox via
- * Playwright), never the user's own system Firefox. Camoufox always runs from a
- * `…/camoufox/camoufox-bin` executable and under a `…/pi-research/profiles/…`
- * Playwright profile; the system browser (`/usr/lib/firefox/firefox-bin`) matches
- * neither. Matching on the full command line (not the bare comm "firefox") is what
- * makes the orphan sweep safe to run on a desktop with a personal browser open.
+ * Playwright), never the user's own system Firefox. We match on the launched
+ * EXECUTABLE — `camoufox-bin` (Linux), `camoufox.exe` (Windows) or
+ * `…/MacOS/camoufox` (macOS), per camoufox-js's LAUNCH_FILE — plus our
+ * `…/pi-research/profiles/…` profile path (the fallback when PI_RESEARCH_TMP_DIR
+ * relocates profiles). Anchoring on the executable name (rather than a bare
+ * `camoufox` substring) keeps an incidental `tail camoufox.log`, `grep camoufox`,
+ * or an editor buffer from ever matching — the system Firefox matches none of
+ * these. (A user's OWN orphaned standalone Camoufox is the one indistinguishable
+ * case; it is gated further by the strict orphan conditions below.)
  */
-export const PI_BROWSER_MARKER = /camoufox|[/\\]pi-research[/\\]profiles[/\\]/i;
+export const PI_BROWSER_MARKER = /camoufox-bin\b|camoufox\.exe\b|[/\\]MacOS[/\\]camoufox\b|[/\\]pi-research[/\\]profiles[/\\]/i;
 
 /**
  * Cleanup orphaned processes on Unix-like systems (macOS, Linux)

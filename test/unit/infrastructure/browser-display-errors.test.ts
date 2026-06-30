@@ -292,7 +292,7 @@ describe('formatHealthError() TUI message mapping', () => {
     }
   });
 
-  it('maps timeout errors to connection-check hint', () => {
+  it('maps timeout errors to an honest readiness hint (not a false bot-block claim)', () => {
     const inputs = [
       'Browser launch timed out after 90000ms',
       'Connection Timeout',
@@ -300,7 +300,10 @@ describe('formatHealthError() TUI message mapping', () => {
     ];
     for (const raw of inputs) {
       const msg = formatHealthError(raw);
-      expect(msg).toContain('connection');
+      // Must name a real cause (startup/contention/cancel) and must NOT assert the search
+      // engine is blocking us — the readiness probes do not perform a web search.
+      expect(msg.toLowerCase()).toMatch(/readiness check timed out|resource contention|browser startup/);
+      expect(msg.toLowerCase()).not.toContain('search engine blocking');
     }
   });
 

@@ -61,7 +61,13 @@ export function formatHealthError(raw: string): string {
   } else if (raw.includes('not found') || raw.includes('not installed') || raw.includes('binaries')) {
     return 'Browser engine not installed. Run `npx camoufox-js fetch` to install it.';
   } else if (raw.includes('Timeout') || raw.includes('timeout') || raw.includes('timed out')) {
-    return 'The browser could not load a page in time (timed out). This is usually the search engine blocking automated traffic or a slow connection — not necessarily your internet. Retry; if it persists, check your connection.';
+    // The readiness probes check browser/state/knowledge availability — they do NOT perform a
+    // web search, so a timeout here is NOT the search engine blocking us. It is almost always
+    // slow browser startup, resource contention (several research runs sharing the pool/GPU at
+    // once, which makes these probes time out together), or a teardown race when a run is
+    // cancelled mid-flight. Keep this message honest so a contention timeout is not misread as
+    // bot-blocking.
+    return 'A readiness check timed out before the browser/services were ready. This is usually slow browser startup, resource contention (e.g. multiple research runs at once sharing the pool), or a cancelled run. It is not a sign the search engine is refusing automated traffic — these readiness probes do not run a search. Retry; if it persists, reduce concurrency and check system resources.';
   } else if (raw.includes('net::ERR') || raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')) {
     return 'The browser hit a network error reaching the web. Check your internet connection.';
   } else {

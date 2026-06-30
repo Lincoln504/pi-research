@@ -9,9 +9,13 @@ import { PI_BROWSER_MARKER } from '../../../src/infrastructure/browser/browser-c
  */
 describe('PI_BROWSER_MARKER', () => {
   const OURS = [
+    // Linux (camoufox-bin)
     '/home/u/.cache/camoufox/camoufox-bin -no-remote -headless -profile /home/u/.cache/pi-research/profiles/playwright_firefoxdev_profile-i8tZLw -juggler-pipe -silent',
     '/home/u/.cache/camoufox/camoufox-bin -contentproc -parentBuildID 20250315105650 -prefsHandle 0',
-    'C:\\Users\\u\\.cache\\pi-research\\profiles\\playwright_firefoxdev_profile-xyz\\firefox.exe',
+    // Windows (camoufox.exe) + a relocated profile under our namespace
+    'C:\\Users\\u\\.cache\\pi-research\\profiles\\playwright_firefoxdev_profile-xyz\\camoufox.exe',
+    // macOS (…/MacOS/camoufox, per camoufox-js LAUNCH_FILE.mac)
+    '/Users/u/.cache/camoufox/Camoufox.app/Contents/MacOS/camoufox -no-remote -profile /Users/u/.cache/pi-research/profiles/playwright_firefoxdev_profile-q',
   ];
   const THEIRS = [
     'firefox',
@@ -19,6 +23,11 @@ describe('PI_BROWSER_MARKER', () => {
     '/usr/lib/firefox/firefox -P default-release',
     '/snap/firefox/1234/usr/lib/firefox/firefox',
     '/Applications/Firefox.app/Contents/MacOS/firefox',
+    // Incidental mentions of the word "camoufox" that the OLD bare-substring marker would
+    // have wrongly matched (and killed if orphaned) — a log tail, a grep, an editor buffer.
+    'tail -f /home/u/.cache/camoufox.log',
+    'grep -r camoufox /home/u/notes',
+    'vim camoufox-config.txt',
   ];
 
   it('matches every pi-research Camoufox command line', () => {
