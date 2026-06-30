@@ -44,6 +44,9 @@ export class WorkerPoolManager implements IService {
     private generation: number = 0;
     // FIX (#12): Flag to indicate a pool reset is in progress
     private _resetInProgress: boolean = false;
+    // Handle for the schedulePoolReset() destroy timer, so shutdown() can cancel a pending
+    // reset instead of letting it fire after teardown and clobber a freshly-rebuilt pool.
+    private _resetTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor(
         private readonly onPoolError?: (error: Error, consecutiveErrors: number) => void
@@ -287,31 +290,42 @@ export class WorkerPoolManager implements IService {
         this._resetInProgress = true;
         this.currentWorkerCount = null;
         this.consecutiveErrors = 0;
+        // Pin the generation this reset belongs to. shutdown() bumps generation, so if a
+        // shutdown (and a subsequent re-init) happens while this timer is pending, the
+        // generation no longer matches and the timer must NOT touch the new pool's state.
+        const myGen = this.generation;
         metrics.increment('browser_pool_auto_recoveries_total', 1);
         logger.info('[WorkerPoolManager] Pool scheduled for auto-recovery; next ensurePool() will wait for old pool destruction.');
         // Destroy the old pool asynchronously after the event handler returns.
         const t = setTimeout(async () => {
             try {
-                // If shutdown() ran while this timer was pending it already destroyed
-                // the pool, so skip the second destroy to avoid a spurious error.
-                if (this.isShuttingDown) return;
+                // If shutdown() ran while this timer was pending it already destroyed the
+                // pool (and bumped the generation), so skip — destroying again is spurious
+                // and nulling shared state would clobber a pool rebuilt after the shutdown.
+                if (this.isShuttingDown || this.generation !== myGen) return;
                 if (deadPool) await deadPool.destroy();
                 logger.info('[WorkerPoolManager] Auto-recovery: old pool destroyed.');
             } catch (err) {
                 logger.warn('[WorkerPoolManager] Auto-recovery: error destroying old pool:', err);
             } finally {
-                // Now nullify the dead pool and clear the flag
-                if (this.pool === deadPool) this.pool = null;
-                // Clear the cached init promise too — it still resolves to the now
-                // DESTROYED pool. Without this, the next ensurePool() skips the
-                // (null) fast-path and returns the stale promise, handing callers a
-                // dead pool ("Cannot execute a task on destroying pool"). shutdown()
-                // already clears it; auto-recovery must as well.
-                this.poolInitializationPromise = null;
-                this._resetInProgress = false;
+                this._resetTimer = null;
+                // Only clear shared state if we still own this generation (re-check: the
+                // await above could have straddled a shutdown).
+                if (!this.isShuttingDown && this.generation === myGen) {
+                    // Now nullify the dead pool and clear the flag
+                    if (this.pool === deadPool) this.pool = null;
+                    // Clear the cached init promise too — it still resolves to the now
+                    // DESTROYED pool. Without this, the next ensurePool() skips the
+                    // (null) fast-path and returns the stale promise, handing callers a
+                    // dead pool ("Cannot execute a task on destroying pool"). shutdown()
+                    // already clears it; auto-recovery must as well.
+                    this.poolInitializationPromise = null;
+                    this._resetInProgress = false;
+                }
             }
         }, 1000);
         if (t.unref) t.unref();
+        this._resetTimer = t;
     }
 
     /**
@@ -330,6 +344,10 @@ export class WorkerPoolManager implements IService {
         // Invalidate any in-flight ensurePool() so the pool it builds is torn down
         // by its own generation check rather than surviving past this shutdown.
         this.generation++;
+        // Cancel a pending auto-recovery destroy timer: with the generation now bumped it
+        // would no-op anyway, but cancelling frees the handle immediately and avoids a
+        // late destroy() racing this teardown.
+        if (this._resetTimer) { clearTimeout(this._resetTimer); this._resetTimer = null; }
 
         // Await an in-flight initialization before tearing down. Without this, a
         // pool whose construction had not yet assigned this.pool when we entered
