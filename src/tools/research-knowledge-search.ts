@@ -294,17 +294,16 @@ const KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS = 1000;
  */
 export function isTransientSynthesisError(message: string): boolean {
   const m = message.toLowerCase();
+  // Numeric codes are matched on a word boundary so a token count embedded in a NON-transient
+  // error (e.g. "maximum context length ... you requested 67500 tokens" → "500", or "13100
+  // tokens" → "1310") does not trigger a pointless 3× retry before the call correctly fails.
+  if (/\b(429|500|502|503|504|1310)\b/.test(m)) return true;
   return (
     m.includes('rate limit') ||
-    m.includes('429') ||
-    m.includes('1310') ||
     m.includes('timed out') ||
     m.includes('timeout') ||
     m.includes('returned no text content') ||
     m.includes('overloaded') ||
-    m.includes('503') ||
-    m.includes('502') ||
-    m.includes('500') ||
     m.includes('econnreset') ||
     m.includes('fetch failed')
   );
@@ -416,6 +415,10 @@ export async function runBackgroundExtraction(
       context: 'Knowledge search extraction — synthesizing answer from reference documents',
       serviceName: 'ResearchKnowledgeSearch',
       signal,
+      // Match the budget of the call being repaired so a large synthesis is not re-truncated
+      // at repairJsonWithLlm's smaller default (16384). Mirrors the planning-service repairs.
+      maxTokens,
+      thinkingLevel,
     },
   );
 

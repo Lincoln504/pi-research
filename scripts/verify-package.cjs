@@ -44,6 +44,8 @@ const REQUIRED = [
   'dist/thread-worker.mjs',
   // CLI binary (the `pi-research` bin in package.json)
   'dist/cli.mjs',
+  // Out-of-process WebGPU viability probe (cli.mjs spawns it; shipped via files[])
+  'dist/webgpu-probe.mjs',
   // Agent skill — the launcher + definition that coding agents load
   'skills/pi-research/SKILL.md',
   'skills/pi-research/scripts/run.mjs',

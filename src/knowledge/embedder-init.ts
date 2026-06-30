@@ -157,20 +157,25 @@ export async function isModelCached(model: string): Promise<boolean> {
 
 /**
  * Whether a model-load failure indicates a corrupt/truncated on-disk cache (as opposed to a
- * network, timeout, or GPU error). These are unrecoverable by retrying the same files — the
- * only fix is to purge the cache and re-download.
+ * network, timeout, OOM, opset-mismatch, or GPU error). These are unrecoverable by retrying the
+ * same files — the only fix is to purge the cache and re-download.
+ *
+ * Match ONLY corruption-specific signals. ONNX Runtime wraps essentially every session-creation
+ * failure in two GENERIC strings — `Load model from <uri> failed: <ex>` and `Failed to load
+ * model with error: <ex>` — and also emits broad `out of bounds` / `out_of_range` for non-cache
+ * conditions (CPU OOM during weight load, unregistered-op/opset drift, shape inference, WebGPU
+ * buffer-offset checks). Matching those would purge + re-download a perfectly good multi-hundred-MB
+ * cache on a transient error, and PERMANENTLY destroy it if the host is offline. The genuine
+ * truncated-weights error ("Deserialize tensor … file_length … out of bounds") is still caught
+ * here via 'deserialize'/'file_length', so narrowing loses no real corruption coverage.
  */
 export function isCorruptModelError(err: unknown): boolean {
   const msg = (err instanceof Error ? (err.message + ' ' + (err.stack ?? '')) : String(err)).toLowerCase();
   return (
     msg.includes('deserialize') ||
     msg.includes('file_length') ||
-    msg.includes('out of bounds') ||
-    msg.includes('out_of_range') ||
     msg.includes('protobuf parsing failed') ||
-    msg.includes('invalid protobuf') ||
-    msg.includes('load model from') ||
-    msg.includes('failed to load model')
+    msg.includes('invalid protobuf')
   );
 }
 
@@ -186,7 +191,16 @@ export async function purgeModelCache(model: string): Promise<void> {
     if (!cacheDir) return;
     const { rm } = await import('node:fs/promises');
     const path = await import('node:path');
-    const modelDir = path.default.join(cacheDir, model);
+    // Containment guard: the consequence here is a recursive delete, so never let an empty,
+    // absolute, or traversal model id collapse `modelDir` to the cache root (which would wipe
+    // every model) or escape it. `model` is infrastructure config (EMBEDDING_MODEL), not
+    // attacker-derived, but validate in depth regardless.
+    const resolvedCache = path.default.resolve(cacheDir);
+    const modelDir = path.default.resolve(resolvedCache, model);
+    if (!model || path.default.isAbsolute(model) || modelDir === resolvedCache || !modelDir.startsWith(resolvedCache + path.default.sep)) {
+      logger.warn(`[embedder] Refusing to purge unsafe model-cache path for model id ${JSON.stringify(model)}`);
+      return;
+    }
     await rm(modelDir, { recursive: true, force: true });
     logger.warn(`[embedder] Purged corrupt model cache at ${modelDir}`);
   } catch (err) {

@@ -624,7 +624,7 @@ COMMANDS
   research  "<query>"            Run multi-agent web research (default depth: 1).
     --depth <0-3>                0 = quick, 1 = normal (default), 2 = deep, 3 = ultra.
     --model <provider/id>        Override the model for this run.
-    --exclude-tools <a,b>        Disable internal tools (e.g. security,stackexchange).
+    --exclude-tools <a,b>        Disable internal tools (e.g. security_search,stackexchange).
     --initial-links <url ...>    Seed URLs to investigate first (-- ends options).
     --config <path>              Read additional config from this file.
     --json                       Emit a JSON object instead of a markdown report.

@@ -69,8 +69,11 @@ export function isNativeStackUnavailableError(err: unknown): boolean {
  * Get the model cache directory
  */
 export function getModelCacheDir(): string {
+  // Per the XDG spec, XDG_CACHE_HOME is honored only when set to an ABSOLUTE path; an empty or
+  // relative value must be ignored (an empty `??`-fallback would otherwise yield a cache dir
+  // relative to cwd, scattering/--rm-ing models under whatever directory the process started in).
   const xdgCache = process.env['XDG_CACHE_HOME'];
-  const base = xdgCache ?? path.join(os.homedir(), '.cache');
+  const base = xdgCache && path.isAbsolute(xdgCache) ? xdgCache : path.join(os.homedir(), '.cache');
   return path.join(base, 'pi-research', 'models');
 }
 

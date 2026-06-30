@@ -22,6 +22,7 @@ import {
   truncateToWidth,
 } from '@earendil-works/pi-tui';
 import { setInteractiveTuiActive, initGlobalTuiController } from './tui/tui-controller.ts';
+import { normalizeSessionId } from './orchestration/session-state.ts';
 import { getConfig, saveConfig, resetConfig, getDbDir } from './config.ts';
 import { healthRegistry } from './healthcheck/index.ts';
 import { getService, clearService, tryGetServiceContainerFromCtx } from './core/service-registry.ts';
@@ -85,8 +86,11 @@ export async function handleResearchConfigCommand(
  * Show interactive TUI menu for research configuration
  */
 async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Promise<void> {
-  // Ensure the global TUI controller is initialized
-  const piSessionId = (ctx as any).sessionId || (ctx as any).sessionManager?.getSessionId();
+  // Ensure the global TUI controller is initialized. Normalize the session id (→ 'default'
+  // when unresolved) like every other call site: initGlobalTuiController unconditionally sets
+  // state.piSessionId, and an undefined value there makes setInteractiveTuiActive skip
+  // hideMasterWidget/refreshAllSessions — leaving the live panel stacked under the menu.
+  const piSessionId = normalizeSessionId((ctx as any).sessionId || (ctx as any).sessionManager?.getSessionId());
   initGlobalTuiController(ctx.ui, piSessionId);
 
   const cwd = ctx.cwd || process.cwd();

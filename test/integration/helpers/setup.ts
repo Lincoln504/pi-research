@@ -149,20 +149,6 @@ export function skipsLiveNetwork(): boolean {
 }
 
 /**
- * Skip test if lifecycle is not initialized
- */
-export function skipIfNotInitialized(context: TestContext, testFn: () => void | Promise<void>) {
-  return async function() {
-    if (context.skipTests()) {
-      const { logger } = await importLogger();
-      logger.log('[test] Skipping test - browser environment not available');
-      return;
-    }
-    await testFn();
-  };
-}
-
-/**
  * Creates a synthetic embedder for testing that doesn't require model downloads.
  */
 export function makeSyntheticEmbedder(dim = 384): Embedder {

@@ -615,7 +615,7 @@ describe('cache-aware initialization', () => {
     expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(2);
   });
 
-  it('does NOT purge the cache on a non-corruption load error', async () => {
+  it('does NOT purge the cache on a transient/non-corruption load error', async () => {
     const { pipeline } = await import('@huggingface/transformers');
     vi.mocked(pipeline).mockRejectedValueOnce(new Error('network unreachable'));
 
@@ -623,6 +623,28 @@ describe('cache-aware initialization', () => {
     await expect(embedder.initialize()).rejects.toThrow('network unreachable');
 
     expect(mockRm).not.toHaveBeenCalled();
+  });
+
+  it('does NOT purge the cache on ONNX Runtime\'s GENERIC load-failure wrappers (OOM / opset mismatch)', async () => {
+    // ort wraps essentially every session-creation failure in "Load model from <uri> failed: <ex>"
+    // and "Failed to load model with error: <ex>" — including a transient CPU OOM (bad_alloc) and
+    // an opset/op-registration mismatch on a perfectly good cache. Matching these would purge and
+    // (offline) permanently destroy a valid model, so isCorruptModelError must NOT classify them.
+    const generic = [
+      'Load model from /home/u/.cache/pi-research/models/m/onnx/model.onnx failed: bad_alloc',
+      'Failed to load model with error: Fatal error: com.microsoft:GroupQueryAttention(1) is not a registered function/op',
+      'Node (/Reshape) Op (Reshape) output shape index out of bounds',
+    ];
+    for (const message of generic) {
+      vi.clearAllMocks();
+      mockAccess.mockResolvedValue(undefined);
+      const { pipeline } = await import('@huggingface/transformers');
+      vi.mocked(pipeline).mockRejectedValueOnce(new Error(message));
+
+      const embedder = new Embedder({ model: 'test-model' });
+      await expect(embedder.initialize()).rejects.toThrow(message);
+      expect(mockRm).not.toHaveBeenCalled();
+    }
   });
 });
 

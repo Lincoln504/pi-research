@@ -156,6 +156,14 @@ export class StateManager {
    * Internal read without lock acquisition (caller must hold lock)
    */
   private async _readState(): Promise<SingletonState> {
+    // Once this process has seen a newer-build state file, it runs read-only on an in-memory
+    // default for the rest of its life (writes are suppressed in _writeState). Short-circuit
+    // here so every subsequent read does NOT re-open the file, re-throw StateVersionTooNewError,
+    // and re-quarantine a fresh copy on each call — which, on a hot path (heartbeats, GPU lock,
+    // metrics), produced an unbounded storm of `*.quarantine` copies under the state lock.
+    if (this.stateTooNew) {
+      return this.getDefaultState();
+    }
     try {
       const content = await fs.readFile(this.stateFilePath, 'utf-8');
       const state = JSON.parse(content) as unknown;

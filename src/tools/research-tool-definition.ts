@@ -95,7 +95,7 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
       description: 'Optional model ID override for coordination.',
     })),
     excludeTools: Type.Optional(Type.Array(Type.String(), {
-      description: 'List of internal tools to disable (e.g., search, scrape, security).',
+      description: 'List of internal tools to disable (e.g., search, scrape, security_search).',
     })),
     initialLinks: Type.Optional(Type.Array(Type.String(), {
       description: 'Optional seed URLs to investigate before (or instead of) web search.',
