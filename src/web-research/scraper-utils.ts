@@ -45,13 +45,17 @@ export function extractDomain(url: string): string {
 }
 
 /**
- * Validate URL to prevent SSRF attacks
+ * Synchronous SSRF screen: protocol, localhost, internal-network patterns, and
+ * IP-literal private/reserved ranges. Performs NO DNS resolution, so it is cheap
+ * enough to run on every browser subresource request without adding latency.
  *
- * FIX (#8): In addition to hostname pattern checks, resolves the hostname
- * via DNS and rejects any address that resolves to a private/reserved IP.
- * This defends against DNS rebinding and decimal/octal IP representations.
+ * Returns `true` when the target was definitively ACCEPTED via the test-only
+ * loopback affordance (the caller must do no further checks — a DNS pass would
+ * reject localhost→127.0.0.1). Returns `false` when the URL passed the sync
+ * screen but a DNS-resolution pass is still warranted (validateUrlForSSRF adds
+ * it). Throws on a blocked target.
  */
-export async function validateUrlForSSRF(url: string): Promise<void> {
+export function validateUrlForSSRFSync(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -61,7 +65,7 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
   }
 
   // Strip the IPv6 literal brackets that `new URL` preserves ("[::1]" → "::1").
-  // Without this every pattern/literal/DNS check below silently misses bracketed
+  // Without this every pattern/literal check below silently misses bracketed
   // IPv6 literals — e.g. http://[::1]/ and http://[::ffff:127.0.0.1]/ (which Node
   // normalizes to the hex form [::ffff:7f00:1]) would bypass the guard entirely.
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -83,7 +87,7 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
       hostname === 'localhost' || hostname.endsWith('.localhost') ||
       /^127\./.test(hostname) || hostname === '::1' ||
       (net.isIPv6(hostname) && isPrivateIpv6(hostname) && isMappedLoopback(hostname));
-    if (isLoopback) return;
+    if (isLoopback) return true;
   }
 
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
@@ -111,6 +115,24 @@ export async function validateUrlForSSRF(url: string): Promise<void> {
     metrics.increment('scrape_ssrf_blocks_total', 1, { block_type: 'ip_literal_v6' });
     throw new Error('Access to private/reserved IPv6 address is not allowed');
   }
+
+  return false;
+}
+
+/**
+ * Validate URL to prevent SSRF attacks
+ *
+ * FIX (#8): In addition to hostname pattern checks, resolves the hostname
+ * via DNS and rejects any address that resolves to a private/reserved IP.
+ * This defends against DNS rebinding and decimal/octal IP representations.
+ */
+export async function validateUrlForSSRF(url: string): Promise<void> {
+  // Synchronous protocol/localhost/internal-pattern/IP-literal screen first.
+  // A `true` return means the test-only loopback affordance accepted the target,
+  // so the DNS pass (which would reject localhost→127.0.0.1) must be skipped.
+  if (validateUrlForSSRFSync(url)) return;
+
+  const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   // Resolve hostname via DNS (both IPv4 and IPv6) and check all resulting addresses.
   // This catches DNS rebinding, decimal IP representations (2130706433),

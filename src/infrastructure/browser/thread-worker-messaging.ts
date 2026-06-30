@@ -249,18 +249,39 @@ export async function executeScrapeTask(
   try {
     logToDebugFile('DEBUG', `[Worker-${workerId}] Starting scrape for: ${url}`);
 
-    // Intercept navigation redirects and validate each hop against SSRF rules.
-    // Without this, Playwright follows 3xx natively and could reach internal IPs.
+    // Intercept EVERY request and validate it against SSRF rules: navigations
+    // (server 3xx AND client-side meta-refresh / window.location / form submit)
+    // get the full DNS-aware check; subresources get a cheap synchronous
+    // literal/pattern screen. Without this, Playwright follows redirects and
+    // client-side navigations natively and could reach internal IPs / cloud
+    // metadata, returning the rendered body to the researcher.
     // Must use page.route (a BLOCKING intercept), NOT page.on('request') — the
     // latter does not pause navigation, so the abort raced the redirect and the
     // metadata endpoint could be reached before it fired. route.fallback() defers
     // to the next handler (the CI mock context.route) or the network, so this
-    // preserves mocking while actually gating the redirect.
-    const { validateUrlForSSRF: validateForWorker } = await import('../../web-research/scraper-utils.ts');
+    // preserves mocking while actually gating each request.
+    const { validateUrlForSSRF: validateForWorker, validateUrlForSSRFSync: validateForWorkerSync } =
+      await import('../../web-research/scraper-utils.ts');
     await page.route('**', async (route: any, req: any) => {
-      if (req.isNavigationRequest() && req.redirectedFrom() != null) {
+      const reqUrl: string = req.url();
+      // Only http(s) requests can reach a private host over the network; in-page
+      // data:/blob:/about: schemes are not an SSRF vector and must pass through
+      // untouched (else pages using data: images/fonts would break).
+      if (/^https?:/i.test(reqUrl)) {
         try {
-          await validateForWorker(req.url());
+          if (req.isNavigationRequest()) {
+            // ANY navigation — a server 3xx redirect OR a client-side hop (meta
+            // refresh, window.location, form submit). Full DNS-aware check;
+            // navigations are infrequent so the resolution cost is negligible.
+            // Closes full-content SSRF exfil where a page redirects itself to
+            // 169.254.169.254 / an internal host and the rendered body is returned.
+            await validateForWorker(reqUrl);
+          } else {
+            // Subresource (img/script/style/xhr/fetch). Cheap synchronous
+            // literal/pattern screen only (no DNS) to block blind SSRF probing of
+            // private/loopback/metadata addresses without adding per-asset latency.
+            validateForWorkerSync(reqUrl);
+          }
         } catch (_ssrfErr: unknown) {
           await route.abort('blockedbyclient').catch(() => {});
           return;

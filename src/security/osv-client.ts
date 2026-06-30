@@ -156,7 +156,13 @@ export async function searchOSV(
       for (const item of items) {
         const vuln: Vulnerability = mapOsvItemToVulnerability(item);
         if (options?.severity !== undefined && options.severity !== '') {
-          if (vuln.severity !== options.severity.toUpperCase()) continue;
+          // OSV/GHSA severity vocabulary is LOW/MODERATE/HIGH/CRITICAL. Accept the
+          // common "MEDIUM" synonym for MODERATE (GitHub maps it the same way at
+          // github-advisories.ts) — otherwise a severity:"medium" filter silently
+          // drops every OSV result.
+          const want = options.severity.toUpperCase();
+          const normalized = want === 'MEDIUM' ? 'MODERATE' : want;
+          if (vuln.severity !== normalized) continue;
         }
         vulns.push(vuln);
       }
