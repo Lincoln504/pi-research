@@ -142,6 +142,17 @@ export const ConfigSchema = Type.Object({
   CONSOLE_LOG: Type.Boolean({ default: false }),
   /** Enable debug/verbose logging (writes INFO+DEBUG to log file). (default: false) */
   DEBUG: Type.Boolean({ default: false }),
+  /**
+   * Comma-separated list of research tools to DISABLE for every researcher in a run
+   * (e.g. "scrape", or "youtube_transcript,stackexchange"). Valid tool names:
+   * search, scrape, security_search, stackexchange, youtube_transcript, grep.
+   * Disable-only: the list is merged into the per-run excludeTools stream, so disabled
+   * tools are both removed from each researcher's toolset AND named in the
+   * coordinator/evaluator "DISABLED TOOLS" prompt section. Env-only
+   * (PI_RESEARCH_DISABLED_TOOLS); intentionally NOT exposed in the config TUI.
+   * Empty/absent = all tools enabled.
+   */
+  DISABLED_TOOLS: Type.Optional(Type.String()),
 });
 
 export type Config = Static<typeof ConfigSchema>;
@@ -535,6 +546,7 @@ export function saveConfig(config: Config, scope: 'local' | 'user' = 'local', cw
     PI_RESEARCH_REPORT_EXPORT_ENABLED: String(config.RESEARCH_REPORT_EXPORT_ENABLED),
     ...(config.RESEARCH_REPORT_EXPORT_DIR ? { PI_RESEARCH_REPORT_EXPORT_DIR: config.RESEARCH_REPORT_EXPORT_DIR } : {}),
     PI_RESEARCH_DEBUG: String(config.DEBUG),
+    ...(config.DISABLED_TOOLS ? { PI_RESEARCH_DISABLED_TOOLS: config.DISABLED_TOOLS } : {}),
   };
 
   // Scope-filter: only write the keys that belong to the target scope.
@@ -729,6 +741,7 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     RESEARCH_REPORT_EXPORT_ENABLED: parseEnvBool(e, 'PI_RESEARCH_REPORT_EXPORT_ENABLED', DEFAULTS.RESEARCH_REPORT_EXPORT_ENABLED),
     RESEARCH_REPORT_EXPORT_DIR: parseEnvString(e, 'PI_RESEARCH_REPORT_EXPORT_DIR', DEFAULTS.RESEARCH_REPORT_EXPORT_DIR),
     DEBUG: parseEnvBool(e, 'PI_RESEARCH_DEBUG', DEFAULTS.DEBUG),
+    DISABLED_TOOLS: parseEnvString(e, 'PI_RESEARCH_DISABLED_TOOLS', DEFAULTS.DISABLED_TOOLS),
   };
 
   const config = { ...DEFAULTS };

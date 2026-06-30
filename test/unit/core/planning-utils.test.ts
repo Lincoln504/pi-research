@@ -296,6 +296,16 @@ describe('parseJsonPlan', () => {
     expect(() => parseJsonPlan(text)).toThrow(/researchers/i);
   });
 
+  it('accepts a synthesize plan that omits researchers (evaluator synthesis contract)', () => {
+    // The evaluator's synthesize response is { action, content } with no researchers.
+    // It must validate directly, NOT be misrouted into the agentic-repair path.
+    const text = JSON.stringify({ action: 'synthesize', content: 'Final report body [1]. CITED LINKS' });
+    const plan = parseJsonPlan(text);
+    expect(plan.action).toBe('synthesize');
+    expect(plan.content).toContain('Final report body');
+    expect(plan.researchers).toBeUndefined();
+  });
+
   it('throws when a researcher has no queries array', () => {
     const text = JSON.stringify({
       action: 'delegate',

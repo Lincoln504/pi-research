@@ -36,7 +36,11 @@ export const ResearchPlanSchema = Type.Object({
     Type.Literal('delegate'),
     Type.Literal('wait')
   ])),
-  researchers: Type.Array(ResearcherConfigSchema),
+  // Optional at the schema level because a 'synthesize' response legitimately omits
+  // researchers (its contract is { action, content }). The delegate-requires-researchers
+  // invariant is enforced explicitly in parseJsonPlan() so that a valid synthesis is not
+  // misrouted into the agentic-repair path. See research-plan-types history / planning-utils.
+  researchers: Type.Optional(Type.Array(ResearcherConfigSchema)),
   allQueries: Type.Optional(Type.Array(Type.String())),
   content: Type.Optional(Type.String()),
   title: Type.Optional(Type.String()),

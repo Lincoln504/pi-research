@@ -63,14 +63,24 @@ const { mockPrompt, mockAbort, mockSubscribe, mockRegister, mockUnregister, mock
 }));
 
 vi.mock('../../../src/orchestration/researcher.ts', () => ({
-  createResearcherSession: vi.fn(() => Promise.resolve({
-    session: {
-      prompt: mockPrompt,
-      abort: mockAbort,
-      subscribe: mockSubscribe,
-    },
-    resolvedModel: { id: 'test-model' } as any,
-  })),
+  createResearcherSession: vi.fn((opts?: any) => {
+    // Simulate one successful scrape so a researcher with the scrape tool enabled counts as
+    // grounded — mirrors production, where the scrape tool drives onUrlScrapeResult. Without
+    // this, the executor's grounding gate (scrape enabled + 0 successful scrapes) would fail
+    // every success-path test. Skipped when scrape is excluded, so gate-specific tests can
+    // exercise the ungrounded path by passing excludeTools: ['scrape'] or no scrape success.
+    if (!opts?.excludeTools?.includes('scrape')) {
+      opts?.onUrlScrapeResult?.('https://example.com/scraped', true);
+    }
+    return Promise.resolve({
+      session: {
+        prompt: mockPrompt,
+        abort: mockAbort,
+        subscribe: mockSubscribe,
+      },
+      resolvedModel: { id: 'test-model' } as any,
+    });
+  }),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -244,6 +254,47 @@ describe('runResearcher', () => {
       // Session must be aborted and unregistered even on failure
       expect(mockAbort).toHaveBeenCalled();
       expect(mockUnregister).toHaveBeenCalled();
+    });
+  });
+
+  // ── Grounding gate ──────────────────────────────────────────────────────────
+
+  describe('grounding gate (scrape enabled, zero successful scrapes)', () => {
+    /** A session override that never reports a successful scrape. */
+    async function stubUngroundedSession() {
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      // mockImplementationOnce (not mockImplementation): reverts to the default scrape-firing
+      // mock after this single call, so the override cannot leak into later tests.
+      vi.mocked(createResearcherSession).mockImplementationOnce(() => Promise.resolve({
+        session: { prompt: mockPrompt, abort: mockAbort, subscribe: mockSubscribe } as any,
+        resolvedModel: { id: 'test-model' } as any,
+      }));
+    }
+
+    it('throws and stores nothing when scrape is enabled but no scrape succeeds and there is no knowledge-store grounding', async () => {
+      await stubUngroundedSession();
+      await expect(runResearcher(makeOptions({
+        initialLinks: ['https://example.com/a'],
+        historicalUrls: [],
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+      }))).rejects.toThrow(/ungrounded/i);
+      expect(mockStoreReport).not.toHaveBeenCalled();
+    });
+
+    it('stands down and completes normally when scrape is DISABLED for the researcher', async () => {
+      // Scrape excluded → the mock fires no scrape AND scrapeEnabled is false, so the gate
+      // must not fire even with zero scrapes.
+      await runResearcher(makeOptions({ excludeTools: ['scrape'] }));
+      expect(mockStoreReport).toHaveBeenCalledOnce();
+    });
+
+    it('completes when grounded by knowledge-store URLs despite zero scrapes', async () => {
+      await stubUngroundedSession();
+      await runResearcher(makeOptions({
+        initialLinks: [],
+        historicalUrls: [{ url: 'https://kb.example.com', description: 'prior summary' }],
+      }));
+      expect(mockStoreReport).toHaveBeenCalledOnce();
     });
   });
 

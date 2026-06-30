@@ -165,6 +165,15 @@ export function parseJsonPlan(text: string): ResearchPlan {
 
     const plan = coerced as ResearchPlan;
 
+    // Invariant: only a 'synthesize' response may omit researchers. Every other action
+    // (delegate, or an unset action that defaults to delegation downstream) must carry a
+    // researchers array to act on. The schema relaxes `researchers` to optional so a valid
+    // synthesis ({ action, content }) is accepted instead of being thrown into the costly
+    // agentic-repair path; this guard preserves the delegate-must-have-researchers rule.
+    if (plan.action !== 'synthesize' && plan.researchers === undefined) {
+      throw new Error('Plan validation failed: /researchers: a non-synthesize plan must include a researchers array');
+    }
+
     // 3. Post-processing
     if (plan.researchers) {
       plan.researchers.forEach((r) => {

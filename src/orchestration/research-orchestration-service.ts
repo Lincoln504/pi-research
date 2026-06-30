@@ -86,9 +86,21 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
    */
   async runResearch(options: ResearchOptions, signal?: AbortSignal): Promise<string> {
     const { ctx, query, depth = 0, observer, onUpdate, sessionId, researchId, config, excludeTools } = options;
-    
+
     const researchConfig = config || getConfig(ctx.cwd);
-    
+
+    // Fold the config-level per-tool disable list (PI_RESEARCH_DISABLED_TOOLS) into the
+    // per-run excludeTools stream. This is the single chokepoint that constructs both the
+    // Quick and Deep orchestrators, so the merged list reaches BOTH each researcher's tool
+    // allowlist AND the coordinator/evaluator "DISABLED TOOLS" prompt section for free.
+    // Disable-only and additive: any per-call excludeTools (e.g. CLI --exclude-tools) is preserved.
+    const configDisabledTools = researchConfig.DISABLED_TOOLS
+      ? researchConfig.DISABLED_TOOLS.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    const mergedExcludeTools = configDisabledTools.length > 0
+      ? [...new Set([...(excludeTools ?? []), ...configDisabledTools])]
+      : excludeTools;
+
     // Resolve model using centralized priority logic
     const selectedModel = await this.resolveResearchModel(options);
     logger.info(`[ResearchOrchestrationService] Using model: ${selectedModel.provider}/${selectedModel.id}`);
@@ -107,7 +119,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           observer,
           onUpdate,
           config: researchConfig,
-          excludeTools,
+          excludeTools: mergedExcludeTools,
           initialLinks: options.initialLinks,
         });
         result = await orchestrator.run(signal);
@@ -122,7 +134,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           observer,
           onUpdate,
           config: researchConfig,
-          excludeTools,
+          excludeTools: mergedExcludeTools,
           orchestrationService: this,
           initialLinks: options.initialLinks,
         });

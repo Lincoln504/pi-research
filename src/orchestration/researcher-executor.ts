@@ -113,6 +113,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
 
+    // Grounding gate: when the scrape tool is enabled for this researcher, a report with zero
+    // successful scrapes (and no knowledge-store summaries to fall back on) is ungrounded.
+    // successfulScrapeCount counts every success the scrape tool reports — fresh browser
+    // fetches AND cache hits — via the onUrlScrapeResult callback below. Per-attempt: each
+    // retry builds a fresh session, so the count resets here at the top of the loop body.
+    const scrapeEnabled = !mergedExclude.includes('scrape');
+    let successfulScrapeCount = 0;
+
     const { session, resolvedModel } = await createResearcherSession({
       cwd: ctx.cwd,
       ctxModel: model,
@@ -139,6 +147,7 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         observer?.onResearcherProgress?.(id, `${links} results`);
       },
       onUrlScrapeResult: (_url, success) => {
+        if (success) successfulScrapeCount++;
         observer?.onToolResult?.(id, success);
       },
     });
@@ -255,6 +264,20 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       metrics.observe('researcher_execution_latency_ms', researcherDuration, { mode: 'deep', complexity: String(complexity), round: String(round) });
       logger.debug(`[ResearcherExecutor] Researcher ${id} Final Response:\n${responseText}`);
 
+      // Grounding gate (see scrapeEnabled / successfulScrapeCount above). A deep researcher
+      // cannot search (workerExclude = ['search']); scrape is its only path to real sources.
+      // If scrape was available but produced zero successful fetches AND no knowledge-store
+      // summaries were supplied (historicalUrls), the report is not grounded in any source —
+      // do NOT land it. Retry first (a transiently blocked scrape may recover); on the final
+      // attempt this falls through to `throw lastError`, which runResearchers catches and
+      // records as a researcher failure (same contract as retry-exhaustion).
+      if (scrapeEnabled && successfulScrapeCount === 0 && historicalUrls.length === 0) {
+        lastError = new Error(`Researcher ${id} produced an ungrounded report: scrape tool enabled but zero successful scrapes`);
+        metrics.increment('researcher_ungrounded_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
+        logger.warn(`[ResearcherExecutor] Researcher ${id} attempt ${attempt}/${maxAttempts} ungrounded (scrape enabled, 0 successful scrapes, no knowledge-store grounding); ${attempt < maxAttempts ? 'retrying' : 'failing'}`);
+        continue;
+      }
+
       const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
       synthesisService.storeReport(researchId, `${round}.${id}`, responseText);
 
@@ -270,7 +293,11 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       // Attempt to salvage partial content on timeout or error
       try {
         const partialResponse = ensureAssistantResponse(session, id);
-        if (partialResponse && partialResponse.trim().length > 50) {
+        // Apply the same grounding gate to salvaged partials: a timed-out/errored researcher
+        // with zero successful scrapes and no knowledge-store grounding has nothing real to
+        // land, so skip the salvage store and fall through to the retry/abort handling below.
+        const ungrounded = scrapeEnabled && successfulScrapeCount === 0 && historicalUrls.length === 0;
+        if (partialResponse && partialResponse.trim().length > 50 && !ungrounded) {
           const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*WARNING: This report was truncated due to a timeout/error. Content may be incomplete.*');
           logger.log(`[ResearcherExecutor] Researcher ${id} salvaged partial content (${partialResponse.length} chars) after error: ${errMsg}`);
