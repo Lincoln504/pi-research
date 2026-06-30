@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchOSV, getOSVById } from '../../../src/security/osv-client.ts';
+import { searchOSV } from '../../../src/security/osv-client.ts';
 
 describe('OSV Client', () => {
   beforeEach(() => {
@@ -174,30 +174,4 @@ describe('OSV Client', () => {
     });
   });
 
-  describe('getOSVById', () => {
-    it('should fetch a single OSV by ID', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: 'OSV-123' }),
-      } as Response);
-
-      const result = await getOSVById('OSV-123');
-      expect(result?.id).toBe('OSV-123');
-    });
-
-    it('should handle errors in getOSVById', async () => {
-      vi.mocked(fetch).mockRejectedValue(new Error('Fetch failed'));
-      const result = await getOSVById('OSV-FAIL');
-      expect(result).toBeNull();
-    });
-
-    it('should handle unexpected format in getOSVById', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ unexpected: 'data' }), // missing id
-      } as Response);
-      const result = await getOSVById('OSV-123');
-      expect(result).toBeNull();
-    });
-  });
 });

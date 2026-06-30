@@ -1,10 +1,18 @@
 # Knowledge Store
 
-The knowledge store is a local vector database of past research findings. Before a
-run goes to the live web, the orchestrator searches it; a repeat or overlapping
-question can be answered from stored results, and previously useful URLs are handed
-to the new researchers as a starting point. It is an optional cache — research works
-without it — but it makes repeat work faster and cheaper.
+The knowledge store is a local vector database of past research findings. It is used
+in two distinct ways, and it is an optional cache — research works without it:
+
+- **Knowledge-first answering (advisory).** The `research_knowledge_search` tool
+  answers a repeat or overlapping question directly from stored results. The agent is
+  asked to try it *before* the live `research` tool, but this is guidance the model
+  follows — it is not enforced, and `research_knowledge_search` is a separate tool, not
+  a gate in front of `research`.
+- **Seeding a live run (automatic).** A live `research` run never answers from the
+  store; instead the orchestrator hands each researcher the previously useful URLs for
+  its goal as starting points to re-scrape live.
+
+Together these make repeat work faster and cheaper.
 
 - [What it stores](#what-it-stores)
 - [Scopes: none, project, global](#scopes-none-project-global)

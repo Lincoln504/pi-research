@@ -296,6 +296,53 @@ describe('runResearcher', () => {
       }));
       expect(mockStoreReport).toHaveBeenCalledOnce();
     });
+
+    /**
+     * Override the session so it (a) reports zero scrapes and (b) emits a single
+     * tool_execution_end event carrying the given details on subscribe — the channel by which
+     * the non-URL grounding tools (security_search, stackexchange) report grounding hits.
+     */
+    async function stubSessionEmittingToolEnd(event: Record<string, unknown>) {
+      const { createResearcherSession } = await import('../../../src/orchestration/researcher.ts');
+      const subscribeEmitting = vi.fn((handler: (e: any) => void) => {
+        handler(event);
+        return vi.fn();
+      });
+      vi.mocked(createResearcherSession).mockImplementationOnce(() => Promise.resolve({
+        session: { prompt: mockPrompt, abort: mockAbort, subscribe: subscribeEmitting } as any,
+        resolvedModel: { id: 'test-model' } as any,
+      }));
+    }
+
+    it('completes when grounded by security_search hits despite zero scrapes', async () => {
+      await stubSessionEmittingToolEnd({
+        type: 'tool_execution_end', toolName: 'security_search', isError: false,
+        result: { details: { groundingHits: 4 } },
+      });
+      await runResearcher(makeOptions({ initialLinks: ['https://example.com/a'], historicalUrls: [] }));
+      expect(mockStoreReport).toHaveBeenCalledOnce();
+    });
+
+    it('completes when grounded by stackexchange hits despite zero scrapes', async () => {
+      await stubSessionEmittingToolEnd({
+        type: 'tool_execution_end', toolName: 'stackexchange', isError: false,
+        result: { details: { groundingHits: 2 } },
+      });
+      await runResearcher(makeOptions({ initialLinks: ['https://example.com/a'], historicalUrls: [] }));
+      expect(mockStoreReport).toHaveBeenCalledOnce();
+    });
+
+    it('stays ungrounded when a grounding tool returns zero hits (e.g. no vulnerabilities found)', async () => {
+      await stubSessionEmittingToolEnd({
+        type: 'tool_execution_end', toolName: 'security_search', isError: false,
+        result: { details: { groundingHits: 0 } },
+      });
+      await expect(runResearcher(makeOptions({
+        initialLinks: ['https://example.com/a'], historicalUrls: [],
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+      }))).rejects.toThrow(/ungrounded/i);
+      expect(mockStoreReport).not.toHaveBeenCalled();
+    });
   });
 
   // ── Successful execution ────────────────────────────────────────────────────

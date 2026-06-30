@@ -23,10 +23,10 @@ import type {
   OSVResult,
 } from './types.ts';
 import { REQUEST_DELAY_MS_NVD, REQUEST_DELAY_MS_OTHER } from '../constants.ts';
-import { searchNVD, getCVEById } from './nvd-client.ts';
+import { searchNVD } from './nvd-client.ts';
 import { searchCisaKev } from './cisa-kev.ts';
-import { searchGitHubAdvisories, getAdvisoryById } from './github-advisories.ts';
-import { searchOSV, getOSVById } from './osv-client.ts';
+import { searchGitHubAdvisories } from './github-advisories.ts';
+import { searchOSV } from './osv-client.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 
 // ============================================================================
@@ -220,9 +220,6 @@ class DefaultNVDClient implements INVDClient {
   async search(terms: readonly string[], options?: NVDSearchOptions): Promise<NVDResult> {
     return searchNVD(terms as string[], options);
   }
-  async getById(cveId: string, signal?: AbortSignal): Promise<import('./types.ts').Vulnerability | null> {
-    return getCVEById(cveId, signal);
-  }
 }
 
 class DefaultCisaKevClient implements ICisaKevClient {
@@ -235,17 +232,11 @@ class DefaultGitHubClient implements IGitHubAdvisoriesClient {
   async search(terms: readonly string[], options?: GitHubSearchOptions): Promise<GitHubResult> {
     return searchGitHubAdvisories(terms as string[], options);
   }
-  async getById(id: string, signal?: AbortSignal): Promise<import('./types.ts').Advisory | null> {
-    return getAdvisoryById(id, signal);
-  }
 }
 
 class DefaultOSVClient implements IOSVClient {
   async search(terms: readonly string[], options?: OSVSearchOptions): Promise<OSVResult> {
     return searchOSV(terms as string[], options);
-  }
-  async getById(osvId: string, signal?: AbortSignal): Promise<import('./types.ts').Vulnerability | null> {
-    return getOSVById(osvId, signal);
   }
 }
 

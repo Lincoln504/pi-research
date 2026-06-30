@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { searchNVD, getCVEById } from '../../../src/security/nvd-client.ts';
+import { searchNVD } from '../../../src/security/nvd-client.ts';
 
 describe('NVD Client', () => {
   beforeEach(() => {
@@ -145,25 +145,6 @@ describe('NVD Client', () => {
     await vi.runAllTimersAsync();
     const result = await searchPromise;
     expect(result.vulnerabilities).toEqual([]);
-  });
-
-  it('should get a single CVE by ID', async () => {
-    vi.mocked(fetch).mockImplementation(async () => ({
-      ok: true,
-      json: async () => ({ vulnerabilities: [{ cve: { id: 'CVE-1' } }] }),
-    } as Response));
-    const getPromise = getCVEById('CVE-1');
-    await vi.runAllTimersAsync();
-    const result = await getPromise;
-    expect(result?.id).toBe('CVE-1');
-  });
-
-  it('should handle getCVEById with error', async () => {
-    vi.mocked(fetch).mockImplementation(async () => { throw new Error('Fail'); });
-    const getPromise = getCVEById('CVE-1');
-    await vi.runAllTimersAsync();
-    const result = await getPromise;
-    expect(result).toBeNull();
   });
 
   it('should build correct URL with options', async () => {

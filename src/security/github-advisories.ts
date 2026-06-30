@@ -13,7 +13,6 @@
 
 import type { Advisory, GitHubResult } from './types.ts';
 import type { GitHubAdvisoryRaw } from './github-advisory-types.ts';
-import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -328,86 +327,3 @@ export async function searchGitHubAdvisories(
   };
 }
 
-/**
- * Get specific advisory by GHSA ID or CVE ID
- *
- * @param id - The GHSA ID or CVE ID to fetch
- * @returns Promise resolving to Advisory or null if not found
- */
-export async function getAdvisoryById(id: string, signal?: AbortSignal): Promise<Advisory | null> {
-  const startTime = Date.now();
-  try {
-    if (id === '') {
-      return null;
-    }
-
-    const url = `${GITHUB_API_BASE}/advisories/${encodeURIComponent(id)}`;
-
-    const response = await githubCircuitBreaker.execute(() => retryWithBackoff(async () => {
-      const resp = await fetch(url, {
-        headers: githubHeaders(),
-        signal: createTimeoutSignal(10000, signal),
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 404) {
-          throw new Error('Advisory not found (HTTP 404)');
-        }
-        if (resp.status === 403) {
-          metrics.increment('github_ratelimit_hits_total', 1, { endpoint: 'advisory_by_id' });
-          throw new Error('GitHub API rate limit exceeded (HTTP 403). Retrying with backoff...');
-        }
-        if (resp.status >= 500) {
-          throw new Error(`GitHub server error (HTTP ${resp.status}). Retrying with backoff...`);
-        }
-        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-      }
-
-      const rateLimitRemaining = resp.headers.get('X-RateLimit-Remaining');
-      const rateLimitLimit = resp.headers.get('X-RateLimit-Limit');
-      if (rateLimitRemaining !== null) {
-        metrics.setGauge('github_ratelimit_remaining', parseInt(rateLimitRemaining, 10), { endpoint: 'advisory_by_id' });
-      }
-      if (rateLimitLimit !== null) {
-        metrics.setGauge('github_ratelimit_limit', parseInt(rateLimitLimit, 10), { endpoint: 'advisory_by_id' });
-      }
-      
-      metrics.increment('github_requests_total', 1, { endpoint: 'advisory_by_id', status: 'success' });
-      return resp;
-    }, {
-      maxRetries: 2,
-      initialDelay: 1000,
-      maxDelay: 5000,
-      signal,
-    }));
-
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      metrics.increment('github_advisory_fetch_errors_total', 1);
-      logger.warn(`[GitHub Advisories] Malformed JSON for advisory ${id}`);
-      return null;
-    }
-
-    if (isGitHubAdvisoryRaw(data)) {
-      const duration = Date.now() - startTime;
-      metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'true' });
-      return mapGitHubAdvisory(data);
-    }
-
-    const duration = Date.now() - startTime;
-    metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'false' });
-    return null;
-  } catch (err: unknown) {
-    const duration = Date.now() - startTime;
-    metrics.observe('github_advisory_fetch_duration_ms', duration, { found: 'false', error: 'true' });
-    metrics.increment('github_advisory_fetch_errors_total', 1);
-    if (err instanceof Error && err.message.includes('HTTP 404')) {
-      logger.warn(`[GitHub Advisories] Advisory ${id} not found`);
-      return null;
-    }
-    logger.error(`[GitHub Advisories] Error fetching advisory ${id}:`, err);
-    return null;
-  }
-}

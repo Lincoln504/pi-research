@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
-const { mockPipelineFn, mockEnv, mockAccess } = vi.hoisted(() => {
+const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm } = vi.hoisted(() => {
   const mockPipelineFn = vi.fn(async (text: string | string[], _options: any) => {
     const dimensions = 384;
     if (Array.isArray(text)) {
@@ -26,10 +26,16 @@ const { mockPipelineFn, mockEnv, mockAccess } = vi.hoisted(() => {
     useFSCache: true,
   };
 
-  // Mock fs/promises.access — default resolves (model is cached)
+  // Mock fs/promises for isModelCached() — default state is a COMPLETE cache:
+  // access(model.onnx) resolves, readdir lists no partial-download artifacts and no external
+  // weights file, so isModelCached returns true. stat/rm are present for the completeness and
+  // corrupt-cache-purge paths.
   const mockAccess = vi.fn().mockResolvedValue(undefined);
+  const mockReaddir = vi.fn().mockResolvedValue(['model.onnx', 'config.json']);
+  const mockStat = vi.fn().mockResolvedValue({ size: 1024 });
+  const mockRm = vi.fn().mockResolvedValue(undefined);
 
-  return { mockPipelineFn, mockEnv, mockAccess };
+  return { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm };
 });
 
 vi.mock('@huggingface/transformers', () => ({
@@ -39,6 +45,9 @@ vi.mock('@huggingface/transformers', () => ({
 
 vi.mock('node:fs/promises', () => ({
   access: (...args: unknown[]) => mockAccess(...args),
+  readdir: (...args: unknown[]) => mockReaddir(...args),
+  stat: (...args: unknown[]) => mockStat(...args),
+  rm: (...args: unknown[]) => mockRm(...args),
 }));
 
 // Keep unit tests hermetic: the real resolveEmbeddingDevice('auto', ...) spawns
@@ -505,8 +514,11 @@ describe('cache-aware initialization', () => {
     // Reset env to defaults before each test
     mockEnv.allowRemoteModels = true;
     mockEnv.cacheDir = '/fake/cache';
-    // Default: model is cached
+    // Default: model is fully cached (graph file present, no partial artifacts, no empty weights).
     mockAccess.mockResolvedValue(undefined);
+    mockReaddir.mockResolvedValue(['model.onnx', 'config.json']);
+    mockStat.mockResolvedValue({ size: 1024 });
+    mockRm.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -566,6 +578,51 @@ describe('cache-aware initialization', () => {
     await embedder.initialize();
 
     expect(allowRemoteAtCallTime).toBe(true);
+  });
+
+  it('treats a cache with a partial-download artifact as NOT cached', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    let allowRemoteAtCallTime: boolean | undefined;
+
+    // model.onnx exists (access resolves) but an interrupted weights download left a partial
+    // artifact in the dir — isModelCached must report not-cached so the model is re-fetched.
+    mockReaddir.mockResolvedValueOnce(['model.onnx', 'model.onnx_data.incomplete']);
+
+    (vi.mocked(pipeline) as any).mockImplementationOnce(async () => {
+      allowRemoteAtCallTime = mockEnv.allowRemoteModels;
+      return mockPipelineFn;
+    });
+
+    const embedder = new Embedder({ model: 'test-model' });
+    await embedder.initialize();
+
+    expect(allowRemoteAtCallTime).toBe(true);
+  });
+
+  it('purges a corrupt cache and re-downloads once when the load deserialize-fails', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+
+    // First load (from the "complete" cache) fails with a corruption error; the embedder must
+    // purge the cache (rm) and re-download exactly once, which then succeeds.
+    (vi.mocked(pipeline) as any)
+      .mockRejectedValueOnce(new Error('Deserialize tensor onnx::MatMul failed. file_length 36229843 out of bounds'))
+      .mockImplementationOnce(async () => mockPipelineFn);
+
+    const embedder = new Embedder({ model: 'test-model' });
+    await embedder.initialize();
+
+    expect(mockRm).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(pipeline)).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT purge the cache on a non-corruption load error', async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    vi.mocked(pipeline).mockRejectedValueOnce(new Error('network unreachable'));
+
+    const embedder = new Embedder({ model: 'test-model' });
+    await expect(embedder.initialize()).rejects.toThrow('network unreachable');
+
+    expect(mockRm).not.toHaveBeenCalled();
   });
 });
 

@@ -32,6 +32,7 @@ import { extractUsage } from '../types/llm.ts';
 import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
 import { getService, tryGetServiceContainerFromCtx } from '../core/service-registry.ts';
 import { withTimeout } from '../core/llm/llm-timeout.ts';
+import { abortableDelay } from '../web-research/retry-utils.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
 import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
@@ -275,7 +276,42 @@ function validateResponse(raw: unknown): ResearchKnowledgeSynthesisResponse | nu
  *
  * If both phases fail, returns a safe default (answer_status: "no").
  */
-async function runBackgroundExtraction(
+/**
+ * Total attempts (1 initial + retries) for the background synthesis LLM call.
+ * The synthesis call was previously single-shot: a transient provider failure (a 429
+ * rate-limit, a timeout, a thinking-only/empty response, a 5xx) was caught by the tool's
+ * outer handler and reported as a knowledge-store MISS, silently escalating the host agent
+ * to a slow, costly live web run instead of serving the store. Matching the researcher
+ * provider-retry default of 2 retries.
+ */
+const KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS = 3;
+const KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS = 1000;
+
+/**
+ * Whether an LLM-call failure is transient and worth retrying. Mirrors the rate-limit/timeout
+ * signals surfaced by validateAndExtractText (llm-utils.ts) and the withTimeout wrapper.
+ * Exported for unit testing.
+ */
+export function isTransientSynthesisError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('rate limit') ||
+    m.includes('429') ||
+    m.includes('1310') ||
+    m.includes('timed out') ||
+    m.includes('timeout') ||
+    m.includes('returned no text content') ||
+    m.includes('overloaded') ||
+    m.includes('503') ||
+    m.includes('502') ||
+    m.includes('500') ||
+    m.includes('econnreset') ||
+    m.includes('fetch failed')
+  );
+}
+
+/** Exported for unit testing of the transient-retry loop. */
+export async function runBackgroundExtraction(
   model: Model<any>,
   auth: { apiKey: string; headers?: Record<string, string> },
   conversationHistory: string,
@@ -300,32 +336,55 @@ async function runBackgroundExtraction(
   // Phase 4a: Stateless LLM call — no AgentSession, no side-effects.
   // llmTimeout is resolved by the caller from the iface-aware Config so a
   // per-interface overlay (pi.env / cli.env) is honored here.
-  const response = await withTimeout(
-    completeSimple(model, {
-      systemPrompt,
-      messages: [
-        { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
-      ],
-    }, buildSafeOptions(model, {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      signal
-    }, maxTokens, thinkingLevel)),
-    llmTimeout,
-    'knowledge-search-extraction',
-  );
+  // Bounded transient-retry: a 429/timeout/empty response on this single synthesis call must
+  // not be swallowed into a knowledge-store MISS (which forces a needless live web run). A
+  // genuine cancellation (signal) or a non-transient error (e.g. malformed-but-present text,
+  // which flows on to the repair path) is NOT retried.
+  let responseText: string;
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    try {
+      const response = await withTimeout(
+        completeSimple(model, {
+          systemPrompt,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+          ],
+        }, buildSafeOptions(model, {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          signal
+        }, maxTokens, thinkingLevel)),
+        llmTimeout,
+        'knowledge-search-extraction',
+      );
 
-  // Track token and cost metrics for the background synthesis call
-  const rawUsage = (response as any).usage;
-  if (rawUsage) {
-    const { tokens, cost } = extractUsage(model, rawUsage);
-    if (tokens > 0 || cost > 0) {
-      metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_search' });
-      metrics.increment('llm_cost_total', cost, { component: 'knowledge_search' });
+      // Track token and cost metrics for the background synthesis call
+      const rawUsage = (response as any).usage;
+      if (rawUsage) {
+        const { tokens, cost } = extractUsage(model, rawUsage);
+        if (tokens > 0 || cost > 0) {
+          metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_search' });
+          metrics.increment('llm_cost_total', cost, { component: 'knowledge_search' });
+        }
+      }
+
+      responseText = validateAndExtractText(response, 'Knowledge Extraction');
+      break;
+    } catch (err) {
+      // A real cancellation propagates immediately — no retry, no fallback.
+      if (signal?.aborted) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt >= KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS || !isTransientSynthesisError(msg)) {
+        throw err;
+      }
+      const delay = KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS * attempt;
+      metrics.increment('research_knowledge_search_synthesis_retries_total', 1);
+      logger.warn(`[research-knowledge-search] Synthesis attempt ${attempt}/${KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS} failed transiently (${msg}); retrying in ${delay}ms`);
+      await abortableDelay(delay, signal);
     }
   }
-
-  const responseText = validateAndExtractText(response, 'Knowledge Extraction');
 
   // Phase 4b: Direct JSON extraction + TypeBox validation
   const extracted = extractJson<ResearchKnowledgeSynthesisResponse>(responseText, 'object');

@@ -89,6 +89,9 @@ describe('tools/security', () => {
       expect((result.content[0] as any).text).toContain('Security Vulnerability Search Results');
       expect((result.content[0] as any).text).toContain('Total Vulnerabilities Found:**');
       expect((result.content[0] as any).text).toContain('CVE-2024-1234');
+      // Grounding contract: groundingHits mirrors the real vulnerability count (consumed by the
+      // researcher-executor grounding gate).
+      expect((result.details as any).groundingHits).toBe(3);
     });
 
     it('should return formatted error when searchSecurityDatabases throws', async () => {

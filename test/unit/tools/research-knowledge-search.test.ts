@@ -20,6 +20,7 @@ import {
 import {
   assembleReferenceDocuments,
   buildSteeringResult,
+  isTransientSynthesisError,
   MAX_DOCUMENTS,
   MAX_REFERENCE_CHARS,
   RESEARCH_KNOWLEDGE_MISS_STRING,
@@ -28,6 +29,37 @@ import {
 import { resolveResearchModel } from '../../../src/core/llm/research-model-resolver.ts';
 import type { IKnowledgeStore } from '../../../src/core/interfaces/knowledge-interfaces.ts';
 import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
+
+// ---------------------------------------------------------------------------
+// Transient-error classification for the synthesis retry (Bug 2 fix)
+// ---------------------------------------------------------------------------
+describe('isTransientSynthesisError — retry classification', () => {
+  it.each([
+    'Knowledge Extraction failed: API Rate Limit Exhausted.',
+    'HTTP 429: Too Many Requests',
+    'provider error 1310: limit exhausted',
+    'knowledge-search-extraction timed out after 60000ms',
+    'Knowledge Extraction returned no text content from LLM',
+    'Service Unavailable (HTTP 503)',
+    'Bad gateway 502',
+    'Internal server error 500',
+    'read ECONNRESET',
+    'fetch failed',
+    'Model is overloaded, please retry',
+  ])('treats %j as transient (retryable)', (msg) => {
+    expect(isTransientSynthesisError(msg)).toBe(true);
+  });
+
+  it.each([
+    'invalid API key',
+    'authentication failed (401)',
+    'model not found',
+    'malformed JSON in response',
+    'HTTP 400: bad request',
+  ])('treats %j as non-transient (no retry)', (msg) => {
+    expect(isTransientSynthesisError(msg)).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test 1: Schema Validation (Phase 1)

@@ -113,13 +113,21 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     const workerExclude = ['search'];
     const mergedExclude = [...new Set([...workerExclude, ...(options.excludeTools || [])])];
 
-    // Grounding gate: when the scrape tool is enabled for this researcher, a report with zero
-    // successful scrapes (and no knowledge-store summaries to fall back on) is ungrounded.
-    // successfulScrapeCount counts every success the scrape tool reports — fresh browser
-    // fetches AND cache hits — via the onUrlScrapeResult callback below. Per-attempt: each
-    // retry builds a fresh session, so the count resets here at the top of the loop body.
+    // Grounding gate: when the scrape tool is enabled for this researcher, a report grounded in
+    // NO real source (and no knowledge-store summaries to fall back on) is ungrounded.
+    // A researcher is grounded when it retrieved real content from any content-retrieval tool:
+    //   - successfulScrapeCount: successes the scrape tool reports (fresh fetches AND cache hits)
+    //     via the onUrlScrapeResult callback below. youtube_transcript routes its per-video
+    //     successes through the SAME callback, so transcript fetches count here too.
+    //   - nonScrapeGroundingHits: real items returned by the non-URL grounding tools
+    //     (security_search, stackexchange), reported uniformly as details.groundingHits on the
+    //     tool_execution_end event. (grep is local code search, not a web-research source, and
+    //     wraps an opaque SDK result, so it is intentionally NOT a grounding signal.)
+    //   - historicalUrls: knowledge-store summaries supplied to this researcher.
+    // Per-attempt: each retry builds a fresh session, so both counts reset at the top of the body.
     const scrapeEnabled = !mergedExclude.includes('scrape');
     let successfulScrapeCount = 0;
+    let nonScrapeGroundingHits = 0;
 
     const { session, resolvedModel } = await createResearcherSession({
       cwd: ctx.cwd,
@@ -218,6 +226,16 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         if (event.toolName !== 'scrape') {
           observer?.onToolResult?.(id, !event.isError);
         }
+        // Grounding accumulation for the non-URL grounding tools. They don't go through
+        // onUrlScrapeResult, so they report how many real items they retrieved via a uniform
+        // details.groundingHits field (e.g. security_search = vulnerabilities found,
+        // stackexchange = questions/answers returned). Soft-failures (rate-limit, API error,
+        // empty result) omit it or report 0, so they correctly do NOT count as grounding.
+        const details = (event.result as { details?: { groundingHits?: unknown } } | undefined)?.details;
+        const hits = details?.groundingHits;
+        if (typeof hits === 'number' && hits > 0) {
+          nonScrapeGroundingHits += hits;
+        }
       }
     });
 
@@ -271,10 +289,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       // do NOT land it. Retry first (a transiently blocked scrape may recover); on the final
       // attempt this falls through to `throw lastError`, which runResearchers catches and
       // records as a researcher failure (same contract as retry-exhaustion).
-      if (scrapeEnabled && successfulScrapeCount === 0 && historicalUrls.length === 0) {
-        lastError = new Error(`Researcher ${id} produced an ungrounded report: scrape tool enabled but zero successful scrapes`);
+      if (scrapeEnabled && successfulScrapeCount === 0 && nonScrapeGroundingHits === 0 && historicalUrls.length === 0) {
+        lastError = new Error(`Researcher ${id} produced an ungrounded report: scrape tool enabled but zero successful scrapes and no other grounding`);
         metrics.increment('researcher_ungrounded_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
-        logger.warn(`[ResearcherExecutor] Researcher ${id} attempt ${attempt}/${maxAttempts} ungrounded (scrape enabled, 0 successful scrapes, no knowledge-store grounding); ${attempt < maxAttempts ? 'retrying' : 'failing'}`);
+        logger.warn(`[ResearcherExecutor] Researcher ${id} attempt ${attempt}/${maxAttempts} ungrounded (scrape enabled, 0 successful scrapes, 0 security/stackexchange grounding hits, no knowledge-store grounding); ${attempt < maxAttempts ? 'retrying' : 'failing'}`);
         continue;
       }
 
@@ -294,9 +312,10 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       try {
         const partialResponse = ensureAssistantResponse(session, id);
         // Apply the same grounding gate to salvaged partials: a timed-out/errored researcher
-        // with zero successful scrapes and no knowledge-store grounding has nothing real to
-        // land, so skip the salvage store and fall through to the retry/abort handling below.
-        const ungrounded = scrapeEnabled && successfulScrapeCount === 0 && historicalUrls.length === 0;
+        // with zero successful scrapes, zero non-scrape grounding hits, and no knowledge-store
+        // grounding has nothing real to land, so skip the salvage store and fall through to the
+        // retry/abort handling below.
+        const ungrounded = scrapeEnabled && successfulScrapeCount === 0 && nonScrapeGroundingHits === 0 && historicalUrls.length === 0;
         if (partialResponse && partialResponse.trim().length > 50 && !ungrounded) {
           const synthesisService = await getService<IResearchSynthesisService>(ServiceNames.RESEARCH_SYNTHESIS_SERVICE, ctx, container);
           synthesisService.storeReport(researchId, `${round}.${id}`, partialResponse + '\n\n---\n*WARNING: This report was truncated due to a timeout/error. Content may be incomplete.*');

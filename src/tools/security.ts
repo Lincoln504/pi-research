@@ -303,6 +303,10 @@ export function createSecuritySearchTool(options: {
           totalDatabases: results.totalDatabases,
           totalVulnerabilities: results.totalVulnerabilities,
           duration: elapsed,
+          // Grounding signal for the researcher-executor grounding gate: the count of real
+          // vulnerabilities this search returned. Zero (nothing found) is correctly NOT
+          // grounding. See researcher-executor.ts tool_execution_end accumulation.
+          groundingHits: results.totalVulnerabilities,
         },
       };
     },

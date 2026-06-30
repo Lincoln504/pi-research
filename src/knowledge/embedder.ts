@@ -37,6 +37,8 @@ import {
   warmupPipeline,
   handleWebGPULoadError,
   handleWebGPUWarmupError,
+  isCorruptModelError,
+  purgeModelCache,
 } from './embedder-init.ts';
 
 export { resetWebGpuFallbackFlag, hasWebGpuFallback, getModelCacheDir };
@@ -220,6 +222,23 @@ export class Embedder {
           this.pipeline = result.pipeline ?? null;
           this.device = 'cpu';
           this.gpuLockHeld = false;
+        } else if (cached && isCorruptModelError(loadErr)) {
+          // The on-disk cache is truncated/corrupt (e.g. an interrupted weights download that
+          // slipped past isModelCached). Retrying the same files fails identically and, on one
+          // path, surfaced as an uncaughtException that took down the host. Purge the cache and
+          // re-download exactly once; allowRemoteModels must be re-enabled for the fetch.
+          const errMsg = loadErr instanceof Error ? loadErr.message : String(loadErr);
+          logger.warn(`[embedder] Corrupt model cache detected on load (${errMsg}); purging and re-downloading once`);
+          await purgeModelCache(this.model);
+          env.allowRemoteModels = true;
+          const { pipeline: reloadedPipeline } = await loadPipelineWithTimeout(
+            this.model,
+            this.device,
+            this.initializationTimeoutMs,
+            this.useCache
+          );
+          this.pipeline = reloadedPipeline;
+          logger.info(`[embedder] Re-download after cache purge succeeded (device: ${this.device})`);
         } else {
           throw loadErr;
         }

@@ -38,15 +38,10 @@ import type {
 
 class MockNVDClient implements INVDClient {
   private readonly mockResults: Map<string, NVDResult> = new Map();
-  private readonly mockById: Map<string, Vulnerability | null> = new Map();
   private searchCalls: Array<{ terms: readonly string[]; options?: NVDSearchOptions }> = [];
 
   setMockResult(key: string, result: NVDResult): void {
     this.mockResults.set(key, result);
-  }
-
-  setMockById(id: string, result: Vulnerability | null): void {
-    this.mockById.set(id, result);
   }
 
   getSearchCalls() {
@@ -55,7 +50,6 @@ class MockNVDClient implements INVDClient {
 
   clear(): void {
     this.mockResults.clear();
-    this.mockById.clear();
     this.searchCalls = [];
   }
 
@@ -64,10 +58,6 @@ class MockNVDClient implements INVDClient {
     const key = terms.join(',') + JSON.stringify(options ?? {});
     // Try with full options first, then fall back to just terms
     return this.mockResults.get(key) ?? this.mockResults.get(terms.join(',')) ?? { count: 0, vulnerabilities: [] };
-  }
-
-  async getById(cveId: string): Promise<Vulnerability | null> {
-    return this.mockById.get(cveId) ?? null;
   }
 }
 
@@ -97,15 +87,10 @@ class MockCisaKevClient implements ICisaKevClient {
 
 class MockGitHubClient implements IGitHubAdvisoriesClient {
   private readonly mockResults: Map<string, GitHubResult> = new Map();
-  private readonly mockById: Map<string, Advisory | null> = new Map();
   private searchCalls: Array<{ terms: readonly string[]; options?: GitHubSearchOptions }> = [];
 
   setMockResult(key: string, result: GitHubResult): void {
     this.mockResults.set(key, result);
-  }
-
-  setMockById(id: string, result: Advisory | null): void {
-    this.mockById.set(id, result);
   }
 
   getSearchCalls() {
@@ -114,7 +99,6 @@ class MockGitHubClient implements IGitHubAdvisoriesClient {
 
   clear(): void {
     this.mockResults.clear();
-    this.mockById.clear();
     this.searchCalls = [];
   }
 
@@ -123,23 +107,14 @@ class MockGitHubClient implements IGitHubAdvisoriesClient {
     const key = terms.join(',') + JSON.stringify(options ?? {});
     return this.mockResults.get(key) ?? this.mockResults.get(terms.join(',')) ?? { count: 0, advisories: [] };
   }
-
-  async getById(id: string): Promise<Advisory | null> {
-    return this.mockById.get(id) ?? null;
-  }
 }
 
 class MockOSVClient implements IOSVClient {
   private readonly mockResults: Map<string, OSVResult> = new Map();
-  private readonly mockById: Map<string, Vulnerability | null> = new Map();
   private searchCalls: Array<{ terms: readonly string[]; options?: OSVSearchOptions }> = [];
 
   setMockResult(key: string, result: OSVResult): void {
     this.mockResults.set(key, result);
-  }
-
-  setMockById(id: string, result: Vulnerability | null): void {
-    this.mockById.set(id, result);
   }
 
   getSearchCalls() {
@@ -148,7 +123,6 @@ class MockOSVClient implements IOSVClient {
 
   clear(): void {
     this.mockResults.clear();
-    this.mockById.clear();
     this.searchCalls = [];
   }
 
@@ -156,10 +130,6 @@ class MockOSVClient implements IOSVClient {
     this.searchCalls.push({ terms, options });
     const key = terms.join(',') + JSON.stringify(options ?? {});
     return this.mockResults.get(key) ?? this.mockResults.get(terms.join(',')) ?? { count: 0, vulnerabilities: [] };
-  }
-
-  async getById(osvId: string): Promise<Vulnerability | null> {
-    return this.mockById.get(osvId) ?? null;
   }
 }
 

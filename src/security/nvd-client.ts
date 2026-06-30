@@ -20,7 +20,6 @@ import type {
   SearchOptions,
   RetryOptions,
 } from './nvd-types.ts';
-import { logger } from '../logger.ts';
 import { createTimeoutSignal, retryWithBackoff, isTransientError } from '../web-research/retry-utils.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
@@ -451,24 +450,3 @@ export async function searchNVD(
   };
 }
 
-/**
- * Get specific CVE by ID
- *
- * @param cveId - The CVE ID to fetch (e.g., "CVE-2023-1234")
- * @returns Promise<Vulnerability | null> containing the vulnerability or null if not found
- */
-export async function getCVEById(cveId: string, signal?: AbortSignal): Promise<Vulnerability | null> {
-  const startTime = Date.now();
-  try {
-    const results = await searchNVD([cveId], { maxResults: 1, signal });
-    const duration = Date.now() - startTime;
-    metrics.observe('nvd_cve_fetch_duration_ms', duration, { found: results.vulnerabilities.length > 0 ? 'true' : 'false' });
-    return results.vulnerabilities[0] ?? null;
-  } catch (err) {
-    const duration = Date.now() - startTime;
-    metrics.observe('nvd_cve_fetch_duration_ms', duration, { found: 'false', error: 'true' });
-    metrics.increment('nvd_cve_fetch_errors_total', 1);
-    logger.error(`[NVD] Error fetching CVE ${cveId}:`, err);
-    return null;
-  }
-}

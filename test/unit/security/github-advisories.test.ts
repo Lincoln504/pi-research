@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchGitHubAdvisories, getAdvisoryById } from '../../../src/security/github-advisories.ts';
+import { searchGitHubAdvisories } from '../../../src/security/github-advisories.ts';
 
 describe('GitHub Advisories Client', () => {
   beforeEach(() => {
@@ -158,11 +158,4 @@ describe('GitHub Advisories Client', () => {
     });
   });
 
-  describe('getAdvisoryById', () => {
-    it('should handle 404 in getAdvisoryById', async () => {
-      vi.mocked(fetch).mockImplementation(async () => ({ ok: false, status: 404 } as Response));
-      const result = await getAdvisoryById('MISSING');
-      expect(result).toBeNull();
-    });
-  });
 });

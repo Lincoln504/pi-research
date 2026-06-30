@@ -129,11 +129,17 @@ export async function stackexchangeCommand(options: {
     const quota = client.getQuotaInfo();
     output += `\n---\n**Source: Stack Exchange**\n**API Quota:** ${quota.remaining}/${quota.max} remaining\n`;
 
+    // Grounding signal for the researcher-executor grounding gate: how many real items this
+    // command returned. search yields a Question[] (0 = nothing found = NOT grounding); get/
+    // user/site yield a single populated object. See researcher-executor.ts grounding accumulation.
+    const groundingHits = Array.isArray(result) ? result.length : (result ? 1 : 0);
+
     return {
       content: [{ type: 'text', text: output }],
       details: {
         quota,
         command,
+        groundingHits,
       },
     };
   } catch (error) {

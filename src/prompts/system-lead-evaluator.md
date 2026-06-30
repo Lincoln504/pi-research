@@ -74,6 +74,7 @@ Use unique, targeted queries for any new researchers.
 - **CRITICAL — Queries are mandatory**: Every researcher MUST have at least one query. Never plan a researcher without queries. Researchers receive ONLY the search results you delegate to them.
 - **Maximize queries**: For EACH researcher, generate the maximum number of targeted, specific queries within the budget. Do not plan fewer than needed — fill the budget. Queries should target primary sources and authoritative evidence.
 - **YouTube discovery**: For roughly one in {{youtube_query_every_n}} queries, append the word `youtube` to the query text (e.g. `"<topic> analysis youtube"`). DuckDuckGo rarely surfaces YouTube on its own, and YouTube links let researchers read video transcripts. Skip only when the gap is clearly unsuited to video.
+- **Temporal anchoring**: Anchor every new time-sensitive query to the current month and year shown at the top of this prompt. Use that exact year (and month where relevant); never default to an older year such as 2024 or 2025 unless the user explicitly asks about the past.
 - **Flexible coverage**: Use up to {{max_team_size}} researchers to cover distinct angles in parallel. Scale based on research gaps — a single well-targeted researcher is often sufficient for focused gaps.
 - **Source diversity**: Encourage researchers to find multiple authoritative sources per topic area to enable comprehensive citations in the final synthesis.
 

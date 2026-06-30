@@ -118,19 +118,79 @@ export function isWebGpuDeviceError(err: unknown): boolean {
 }
 
 /**
- * Check if model is cached on disk
+ * Check if a model is FULLY cached on disk.
+ *
+ * Verifying only that `model.onnx` exists is not enough: large models keep their weights in a
+ * sibling external-data file (`model.onnx_data`). An interrupted download can leave the small
+ * graph file (`model.onnx`) complete while the weights file is missing, zero-length, or a
+ * leftover partial-download artifact — which passes a presence-only check and then crashes the
+ * ONNX loader at deserialize time ("Deserialize tensor … file_length … out of bounds").
+ * Returning false here routes the caller back through a fresh download instead.
  */
 export async function isModelCached(model: string): Promise<boolean> {
   try {
     const env = getHFEnv();
     const cacheDir = env.cacheDir;
     if (!cacheDir) return false;
-    const { access } = await import('node:fs/promises');
+    const { access, readdir, stat } = await import('node:fs/promises');
     const path = await import('node:path');
-    await access(path.default.join(cacheDir, model, 'onnx', 'model.onnx'));
+    const onnxDir = path.default.join(cacheDir, model, 'onnx');
+    // Graph file must exist.
+    await access(path.default.join(onnxDir, 'model.onnx'));
+    // Reject an incomplete cache: a leftover partial-download artifact anywhere in the onnx
+    // dir, or a present-but-empty external weights file. Best-effort — directory read failures
+    // fall through to "cached" rather than forcing a needless re-download.
+    const entries = await readdir(onnxDir).catch(() => [] as string[]);
+    const hasPartialArtifact = entries.some(
+      (f) => /\.(incomplete|downloading|part|tmp)$/i.test(f) || f.includes('.tmp.')
+    );
+    if (hasPartialArtifact) return false;
+    if (entries.includes('model.onnx_data')) {
+      const dataStat = await stat(path.default.join(onnxDir, 'model.onnx_data')).catch(() => null);
+      if (!dataStat || dataStat.size === 0) return false;
+    }
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Whether a model-load failure indicates a corrupt/truncated on-disk cache (as opposed to a
+ * network, timeout, or GPU error). These are unrecoverable by retrying the same files — the
+ * only fix is to purge the cache and re-download.
+ */
+export function isCorruptModelError(err: unknown): boolean {
+  const msg = (err instanceof Error ? (err.message + ' ' + (err.stack ?? '')) : String(err)).toLowerCase();
+  return (
+    msg.includes('deserialize') ||
+    msg.includes('file_length') ||
+    msg.includes('out of bounds') ||
+    msg.includes('out_of_range') ||
+    msg.includes('protobuf parsing failed') ||
+    msg.includes('invalid protobuf') ||
+    msg.includes('load model from') ||
+    msg.includes('failed to load model')
+  );
+}
+
+/**
+ * Delete a model's on-disk cache directory so the next load re-downloads it from scratch.
+ * Best-effort: a deletion failure is logged and swallowed (the subsequent re-download attempt
+ * will surface any real, persistent problem).
+ */
+export async function purgeModelCache(model: string): Promise<void> {
+  try {
+    const env = getHFEnv();
+    const cacheDir = env.cacheDir;
+    if (!cacheDir) return;
+    const { rm } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const modelDir = path.default.join(cacheDir, model);
+    await rm(modelDir, { recursive: true, force: true });
+    logger.warn(`[embedder] Purged corrupt model cache at ${modelDir}`);
+  } catch (err) {
+    logger.warn('[embedder] Failed to purge model cache:', err);
   }
 }
 

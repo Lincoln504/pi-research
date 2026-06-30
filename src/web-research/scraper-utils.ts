@@ -209,11 +209,6 @@ export async function getSsrfSafeDispatcher(): Promise<unknown | null> {
   return cachedSsrfDispatcher as unknown | null;
 }
 
-/** Test-only: reset the cached dispatcher so a test can re-exercise construction. */
-export function __resetSsrfDispatcherForTests(): void {
-  cachedSsrfDispatcher = undefined;
-}
-
 /**
  * Check if an IPv4 address is private/reserved/loopback.
  */
