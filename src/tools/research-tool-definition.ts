@@ -348,6 +348,12 @@ export function createResearchTool(iface?: ConfigInterface): ToolDefinition {
                 researchId,
                 excludeTools,
                 initialLinks,
+                // Pass the interface-resolved config (getConfig(cwd, iface) at the top
+                // of this handler) so the RUN honors the same `pi.env` overlay already
+                // applied to model/depth/export. Without this the orchestrator falls
+                // back to getConfig(cwd) with no interface, silently ignoring a
+                // pi.env DISABLED_TOOLS / TIMEOUT_MS / concurrency override for the run.
+                config,
               }, internalAbort.signal);
 
               // Stop wave animation
