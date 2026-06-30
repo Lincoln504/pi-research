@@ -186,13 +186,40 @@ function isPlausibleCitationUrl(url: string): boolean {
 }
 
 /**
+ * Offset of the LAST line-leading "CITED LINKS" section header in a report, or -1
+ * when none is present.
+ *
+ * ONLY an all-caps "CITED LINKS" at the start of a line (optionally after markdown
+ * heading `#` / blockquote `>` / bold `**` markers and whitespace) counts as the
+ * section marker — NOT an incidental lowercase "...the cited links below..." in
+ * prose. An unanchored, case-insensitive /CITED LINKS/i match would fire on such a
+ * mention and, with a trailing `[\s\S]*$`, silently truncate (or mis-parse) the
+ * whole report body from that point. Matching a header line and taking the LAST
+ * occurrence (the real trailing section) avoids that while staying idempotent
+ * against the `CITED LINKS\n...` block that formatCitedLinks() emits.
+ */
+export function lastCitedLinksHeaderIndex(text: string): number {
+  // Case-insensitive but LINE-LEADING: a mid-prose "...the cited links below..." has
+  // non-whitespace before it on the line, so it cannot match — only a header at the
+  // start of a line (after optional markdown markers) does.
+  const re = /(^|\n)([ \t]*(?:#{1,6}[ \t]*|>[ \t]*|\*\*)?)CITED LINKS\b/gi;
+  let last = -1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    // Offset of the 'C' in CITED LINKS = match start + leading newline + markers.
+    last = m.index + m[1]!.length + m[2]!.length;
+  }
+  return last;
+}
+
+/**
  * Parses the CITED LINKS section from a researcher report, extracting URLs, sources, and their descriptions.
  * Handles both single-line 'URL - description' and multi-line 'Source:'/'Description:' formats.
  */
 export function parseCitations(report: string): Citation[] {
-  const sectionMatch = /CITED LINKS[\s\S]*$/i.exec(report);
-  if (!sectionMatch) return [];
-  const section = sectionMatch[0];
+  const headerIdx = lastCitedLinksHeaderIndex(report);
+  if (headerIdx < 0) return [];
+  const section = report.slice(headerIdx);
 
   const citations: Citation[] = [];
   // Match [N] or N. or **[N]** or **N.** with optional whitespace

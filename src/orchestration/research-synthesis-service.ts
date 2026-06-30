@@ -11,6 +11,7 @@
 
 import { parseCitations } from '../utils/text-utils.ts';
 import { normalizeCitations, formatCitedLinks, type GlobalCitation } from '../utils/citation-utils.ts';
+import { lastCitedLinksHeaderIndex } from '../utils/text-utils.ts';
 import { getScrapedLinks } from '../utils/shared-links.ts';
 import { logger } from '../logger.ts';
 import { ServiceLifecycle, type IService } from '../core/service-registry.ts';
@@ -196,10 +197,15 @@ export class ResearchSynthesisService implements IService {
 
     if (globalCitations.length > 0) {
       const verifiedLinksSection = formatCitedLinks(globalCitations);
-      // If the synthesis already has a CITED LINKS section, replace it with the verified version
-      if (/CITED LINKS/i.test(synthesis)) {
+      // Replace an existing CITED LINKS section with the verified version — but only
+      // a line-leading, all-caps "CITED LINKS" header marks the section. An
+      // unanchored /CITED LINKS[\s\S]*$/i would also fire on an incidental
+      // "...the cited links below..." in prose and truncate the entire report body
+      // from that point (silent content loss). Anchor to the LAST header line.
+      const citedHeaderIdx = lastCitedLinksHeaderIndex(synthesis);
+      if (citedHeaderIdx >= 0) {
         logger.debug('[ResearchSynthesisService] Replacing existing CITED LINKS with verified version');
-        return synthesis.replace(/CITED LINKS[\s\S]*$/i, verifiedLinksSection);
+        return `${synthesis.slice(0, citedHeaderIdx).trimEnd()}\n\n${verifiedLinksSection}`;
       }
       logger.warn('[ResearchSynthesisService] Synthesis missing CITED LINKS - appending verified version');
       return `${synthesis.trim()}\n\n${verifiedLinksSection}`;

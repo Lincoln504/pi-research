@@ -1,4 +1,4 @@
-import { parseCitations, type Citation } from './text-utils.ts';
+import { parseCitations, lastCitedLinksHeaderIndex, type Citation } from './text-utils.ts';
 import { normalizeUrl } from './shared-links.ts';
 
 export interface GlobalCitation extends Citation {
@@ -55,9 +55,12 @@ export function normalizeCitations(reports: Map<string, string>): {
       }
     });
 
-    // Remove the CITED LINKS section
-    const parts = report.split(/CITED LINKS\b/i);
-    let content = parts[0] || '';
+    // Remove the trailing CITED LINKS section before renumbering — but only a real
+    // line-leading, all-caps header, never an incidental "cited links" mention in
+    // prose (an unanchored split there would drop real findings before the
+    // evaluator ever sees them).
+    const headerIdx = lastCitedLinksHeaderIndex(report);
+    let content = headerIdx >= 0 ? report.slice(0, headerIdx) : report;
 
     // Replace [N] with [GlobalID]
     // Also handle [N][M] combinations
