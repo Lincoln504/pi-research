@@ -46,9 +46,26 @@ function makeSyntheticEmbedder(dim = 64): Embedder {
 
 function isModelCachedLocally(modelId: string): boolean {
   const cacheDir = getModelCacheDir();
-  const onnxDir = path.join(cacheDir, ...modelId.split('/'), 'onnx');
+  const modelRoot = path.join(cacheDir, ...modelId.split('/'));
+  const onnxDir = path.join(modelRoot, 'onnx');
   try {
-    return fs.readdirSync(onnxDir).some((f: string) => f.endsWith('.onnx'));
+    // transformers.js needs the root metadata too (config.json / tokenizer); an interrupted
+    // download can leave the .onnx weights without it, which fails the load under
+    // allowRemoteModels=false. Require it so a partial cache skips rather than runs-and-fails.
+    if (!fs.existsSync(path.join(modelRoot, 'config.json'))) return false;
+    const entries = fs.readdirSync(onnxDir);
+    if (!entries.includes('model.onnx')) return false;
+    // Match the embedder's isModelCached completeness check so a PARTIAL cache (interrupted
+    // download) reports not-cached and the test SKIPS cleanly, instead of "running" on a
+    // graph-only file and then timing out at 120s when the load can't find the weights.
+    if (entries.some((f: string) => f.includes('.tmp.') || /\.(incomplete|part|downloading)$/i.test(f))) return false;
+    if (entries.includes('model.onnx_data')) {
+      // External-weights model: the weights file must be present and non-empty.
+      return fs.statSync(path.join(onnxDir, 'model.onnx_data')).size > 0;
+    }
+    // No external-data file → weights live inside model.onnx, so it must be substantial; a tiny
+    // graph-only model.onnx means the sibling weights file was never finished downloading.
+    return fs.statSync(path.join(onnxDir, 'model.onnx')).size > 5_000_000;
   } catch {
     return false;
   }
