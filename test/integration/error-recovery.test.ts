@@ -10,7 +10,7 @@ import {
   runBrowserTask,
 } from '../../src/infrastructure/browser/index.ts';
 import { KnowledgeStore } from '../../src/knowledge/store.ts';
-import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder } from './helpers/setup.ts';
+import { setupLifecycle, teardownLifecycle, type TestContext, makeSyntheticEmbedder, skipsLiveNetwork } from './helpers/setup.ts';
 import { CircuitBreaker } from '../../src/utils/circuit-breaker.ts';
 import { logger } from '../../src/logger.ts';
 import * as path from 'node:path';
@@ -224,7 +224,12 @@ describe('Error Recovery and Resilience', () => {
 
   describe('Circuit Breaker Integration', () => {
     it('should integrate circuit breaker with browser operations', async (ctx) => {
-      if (testContext.skipTests()) return ctx.skip();
+      // Gate on skipsLiveNetwork() like every other live-browser serial test: this
+      // performs real sequential DuckDuckGo searches, which on CI datacenter IPs hang
+      // on a never-settling challenge page and blow the test budget (the ubuntu-only
+      // serial flake). The circuit-breaker wrapper under test needs no real network;
+      // it runs fully locally on a residential IP. ctx.skip() keeps it visible.
+      if (testContext.skipTests() || skipsLiveNetwork()) return ctx.skip();
 
       const circuitBreaker = new CircuitBreaker({
         failureThreshold: 3,

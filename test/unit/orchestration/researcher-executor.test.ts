@@ -288,6 +288,28 @@ describe('runResearcher', () => {
       expect(mockStoreReport).toHaveBeenCalledOnce();
     });
 
+    it('suppresses the gate in mock-scrape mode (PI_RESEARCH_MOCK_SCRAPE=true) so a mock run completes', async () => {
+      // FULL_MOCK_MODE mocks the scrape worker to return a short stub that never counts as
+      // real grounding. The gate guards REAL ungrounded research, so it must stand down when
+      // scrape is mocked — otherwise it fails EVERY researcher in mock mode (the documented
+      // "4-word scrape stub" bug). Identical ungrounded setup to the throwing test above,
+      // only with the mock flag set: it must now complete instead of throwing.
+      const prev = process.env['PI_RESEARCH_MOCK_SCRAPE'];
+      process.env['PI_RESEARCH_MOCK_SCRAPE'] = 'true';
+      try {
+        await stubUngroundedSession();
+        await runResearcher(makeOptions({
+          initialLinks: ['https://example.com/a'],
+          historicalUrls: [],
+          researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 0 } as any,
+        }));
+        expect(mockStoreReport).toHaveBeenCalledOnce();
+      } finally {
+        if (prev === undefined) delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
+        else process.env['PI_RESEARCH_MOCK_SCRAPE'] = prev;
+      }
+    });
+
     it('completes when grounded by knowledge-store URLs despite zero scrapes', async () => {
       await stubUngroundedSession();
       await runResearcher(makeOptions({

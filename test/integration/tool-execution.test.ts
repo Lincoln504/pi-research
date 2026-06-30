@@ -138,12 +138,11 @@ describe('Tool Execution After Service Registry Refactor', () => {
   });
 
   describe('Health Tool Execution', () => {
-    it('should execute health tool successfully', async () => {
+    it('should execute health tool successfully', async (ctx) => {
       const { isBrowserAvailable } = await import('../../src/infrastructure/browser/config.ts');
-      if (!isBrowserAvailable()) {
-        console.log('[test] Skipping health tool test - browser not available or FULL_MOCK_MODE active');
-        return;
-      }
+      // Visible skip, not a silent `return` that reports as PASSED while asserting
+      // nothing (the false-green this file otherwise had).
+      if (!isBrowserAvailable()) return ctx.skip();
 
       const tool = createHealthTool();
       const mockCtx = {
@@ -172,12 +171,10 @@ describe('Tool Execution After Service Registry Refactor', () => {
       expect(result.details).toBeDefined();
     });
 
-    it('should execute health tool with verbose flag', async () => {
+    it('should execute health tool with verbose flag', async (ctx) => {
       const { isBrowserAvailable } = await import('../../src/infrastructure/browser/config.ts');
-      if (!isBrowserAvailable()) {
-        console.log('[test] Skipping health tool verbose test - browser not available or FULL_MOCK_MODE active');
-        return;
-      }
+      // Visible skip, not a silent `return` (see above).
+      if (!isBrowserAvailable()) return ctx.skip();
 
       const tool = createHealthTool();
       const mockCtx = {
