@@ -244,7 +244,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'ACTION_SKILL_INSTALL',
         label: 'Install in External Agents',
-        description: 'Symlink the pi-research skill into your other coding agents (Claude, Codex) so they can run web research too. Only agents already set up on this machine are touched.',
+        description: 'Symlink the pi-research skill into your other coding agents (Claude, Codex, OpenClaw) so they can run web research too. Only agents already set up on this machine are touched.',
         currentValue: 'run',
         values: ['run'],
       },
@@ -253,7 +253,7 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
       {
         id: 'ACTION_SKILL_UNINSTALL',
         label: 'Remove from External Agents',
-        description: 'Remove the pi-research skill from your other coding agents (Claude, Codex). Only the symlinks this extension created are removed; unrelated skills are left untouched.',
+        description: 'Remove the pi-research skill from your other coding agents (Claude, Codex, OpenClaw). Only the symlinks this extension created are removed; unrelated skills are left untouched.',
         currentValue: 'run',
         values: ['run'],
       },

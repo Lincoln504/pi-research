@@ -822,6 +822,17 @@ async function main(argv: string[]): Promise<number> {
   const noBridge = new Set(['help', 'version']);
   if (!noBridge.has(parsed.command ?? '')) {
     bridgeConfigEnv(parsed.configPath);
+    // Self-heal cross-harness skill installs on every engine-touching CLI run. The
+    // CLI — not the interactive pi extension — is the surface that skill invocations
+    // from Claude Code / Codex / OpenClaw actually drive, so without this an update
+    // that relocates the package leaves a sibling skill symlink dangling until the
+    // user happens to open an interactive pi session. Best-effort and idempotent;
+    // it early-returns when no skills are installed and a filesystem hiccup here must
+    // never block the command. Mirrors the reconcile in the extension's activation.
+    try {
+      const { reconcileSkillInstalls } = await import('./skill-install/skill-installer.ts');
+      reconcileSkillInstalls();
+    } catch { /* best-effort self-heal; never block the CLI */ }
   }
 
   switch (parsed.command) {
