@@ -38,11 +38,15 @@ function getCurrentDateString(): string {
 export function injectCurrentDate(prompt: string, _agentType: 'coordinator' | 'researcher' | 'evaluator'): string {
   const monthYear = getCurrentMonthYearString();
   const fullDate = getCurrentDateString();
+  // Derive the stale-year examples from the current year so the guidance stays correct in any
+  // year (a hardcoded "2024 or 2025" reads wrong from 2027 on).
+  const currentYear = new Date().getFullYear();
+  const staleYears = `${currentYear - 2} or ${currentYear - 1}`;
   const dateContext =
     `**CURRENT MONTH AND YEAR: ${monthYear}** (today is ${fullDate})\n\n` +
     `You are operating in ${monthYear}. All queries, analysis, and "latest"/"current"/"recent" ` +
     `framing MUST be anchored to ${monthYear}. When a query is time-sensitive, use the current ` +
-    `month and year (${monthYear}) explicitly — do NOT default to an earlier year such as 2024 or ` +
-    `2025 unless the user is explicitly asking about the past.\n\n`;
+    `month and year (${monthYear}) explicitly — do NOT default to an earlier year such as ${staleYears} ` +
+    `unless the user is explicitly asking about the past.\n\n`;
   return dateContext + prompt;
 }
