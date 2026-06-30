@@ -390,7 +390,9 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
           render: (width: number) => {
             if (width < 4) return [];
             const border = theme.fg('muted', '─'.repeat(width));
-            const listLines = settingsList.render(width);
+            // Drop the blank separator lines the SettingsList widget inserts (before the
+            // description and before the hint) so the menu renders as one gap-free block.
+            const listLines = settingsList.render(width).filter(line => visibleWidth(line) > 0);
 
             // Header with title and search hint
             const titleText = 'Research Configuration';
@@ -402,9 +404,12 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
             // Kept on a single line so the outer truncate clips it cleanly when
             // the terminal is narrow.
             const dirName = path.basename(cwd);
-            const pathInfoLine = ` ${theme.fg('warning', '[project]')}${theme.fg('dim', ` directory: ${dirName}`)}`;
+            // Two-space indent so the footer's "[project]" lines up with the list rows
+            // and the "[project]" in the description (both use a 2-space left margin).
+            const pathInfoLine = `  ${theme.fg('warning', '[project]')}${theme.fg('dim', ` directory: ${dirName}`)}`;
 
-            const lines = [border, header, border, ...listLines, '', pathInfoLine];
+            // No blank line before the footer: keep it flush under the hint line.
+            const lines = [border, header, border, ...listLines, pathInfoLine];
             return lines.map(line => {
               if (visibleWidth(line) > width) {
                 return truncateToWidth(line, width);
