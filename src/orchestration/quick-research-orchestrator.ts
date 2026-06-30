@@ -158,9 +158,11 @@ export class QuickResearchOrchestrator {
         evidenceLines.push(quickEvidenceSection);
 
         const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-            .replace('{{goal}}', query + steeringSection)
-            .replace('{{store_section}}', storeSection)
-            .replace('{{evidence_section}}', evidenceLines.join('\n\n'))
+            // Function replacers: insert `$`-bearing dynamic content (scraped evidence,
+            // store descriptions, the user query) literally, not as a substitution pattern.
+            .replace('{{goal}}', () => query + steeringSection)
+            .replace('{{store_section}}', () => storeSection)
+            .replace('{{evidence_section}}', () => evidenceLines.join('\n\n'))
             .replace('{{coordination_section}}', '')
             .replace('{{extra_tool_guidelines}}', '- `search`: Perform broad web searches (Round 1 only).');
 

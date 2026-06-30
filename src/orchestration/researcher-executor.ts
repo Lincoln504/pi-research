@@ -105,10 +105,13 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
     }
 
     const prompt = injectCurrentDate(researcherPromptTemplate, 'researcher')
-      .replace('{{goal}}', researcherConfig.goal)
-      .replace('{{store_section}}', storeSection)
-      .replace('{{evidence_section}}', evidenceSection)
-      .replace('{{coordination_section}}', previousQueriesSection)
+      // Function replacers so a `$`-bearing dynamic value (scraped evidence, store
+      // descriptions, or an LLM-authored goal containing $&, $$, $1, …) is inserted
+      // literally instead of being interpreted as a String.replace substitution pattern.
+      .replace('{{goal}}', () => researcherConfig.goal)
+      .replace('{{store_section}}', () => storeSection)
+      .replace('{{evidence_section}}', () => evidenceSection)
+      .replace('{{coordination_section}}', () => previousQueriesSection)
       .replace('{{extra_tool_guidelines}}', '')
       .trim() + steeringSection;
 
