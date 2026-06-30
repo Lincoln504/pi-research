@@ -50,6 +50,15 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...real, execFileSync: vi.fn().mockImplementation(real.execFileSync) };
 });
 
+// Same pass-through pattern for the browser config module, so test (D) can exercise the
+// binary-ABSENT branch of checkBrowserCapability() WITHOUT uninstalling the real binary
+// (which every other test in this file needs present). resolveHeadlessMode() and the rest stay
+// real; only test (D) overrides isBrowserAvailable() once.
+vi.mock('../../src/infrastructure/browser/config.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/infrastructure/browser/config.ts')>();
+  return { ...real, isBrowserAvailable: vi.fn().mockImplementation(real.isBrowserAvailable) };
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -434,17 +443,11 @@ describe('Linux display-mode integration tests', () => {
       expect(result.healthy).toBe(true);
     });
 
-    it('(D) returns unhealthy with browser-missing message when binary is absent (non-Linux path)', async (ctx) => {
-      // This test exercises the `else` branch (isBrowserAvailable() returns false).
-      // We simulate it by forcing FULL_MOCK_MODE=false AND having no binary.
-      // Since we can't uninstall the binary, we test on a known-absent configuration
-      // by checking the return value when the binary check logic would fail.
-      //
-      // This is explicitly not a Linux-only test; it validates the error message
-      // that appears on any OS when the browser binary is absent.
-      //
-      // Skip if browser IS available (we can't test the "absent" path with it present).
-      if (isBrowserAvailable()) return ctx.skip();
+    it('(D) returns unhealthy with browser-missing message when binary is absent', async () => {
+      // Exercises the `else` branch of checkBrowserCapability() (isBrowserAvailable() === false).
+      // Rather than skip when the real binary is present, force the absent path for this one
+      // call via the module mock, so the error-message contract is actually validated here.
+      vi.mocked(isBrowserAvailable).mockReturnValueOnce(false);
 
       delete process.env['PI_RESEARCH_MOCK_SEARCH'];
       delete process.env['PI_RESEARCH_MOCK_SCRAPE'];
