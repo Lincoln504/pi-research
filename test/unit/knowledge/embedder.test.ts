@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Embedder, resetWebGpuFallbackFlag } from '../../../src/knowledge/embedder.ts';
 
 // vi.hoisted ensures these are available when vi.mock factories run (which are hoisted to the top)
-const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm } = vi.hoisted(() => {
+const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile } = vi.hoisted(() => {
   const mockPipelineFn = vi.fn(async (text: string | string[], _options: any) => {
     const dimensions = 384;
     if (Array.isArray(text)) {
@@ -27,15 +27,17 @@ const { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm } = v
   };
 
   // Mock fs/promises for isModelCached() — default state is a COMPLETE cache:
-  // access(model.onnx) resolves, readdir lists no partial-download artifacts and no external
-  // weights file, so isModelCached returns true. stat/rm are present for the completeness and
-  // corrupt-cache-purge paths.
+  // access(model.onnx) resolves, root config.json reads as valid JSON, a tokenizer file
+  // stats non-empty, readdir lists no partial-download artifacts and no external weights
+  // file, so isModelCached returns true. stat/rm/readFile back the completeness, root-
+  // metadata, sweep, and corrupt-cache-purge paths.
   const mockAccess = vi.fn().mockResolvedValue(undefined);
   const mockReaddir = vi.fn().mockResolvedValue(['model.onnx', 'config.json']);
   const mockStat = vi.fn().mockResolvedValue({ size: 1024 });
   const mockRm = vi.fn().mockResolvedValue(undefined);
+  const mockReadFile = vi.fn().mockResolvedValue('{}');
 
-  return { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm };
+  return { mockPipelineFn, mockEnv, mockAccess, mockReaddir, mockStat, mockRm, mockReadFile };
 });
 
 vi.mock('@huggingface/transformers', () => ({
@@ -48,6 +50,7 @@ vi.mock('node:fs/promises', () => ({
   readdir: (...args: unknown[]) => mockReaddir(...args),
   stat: (...args: unknown[]) => mockStat(...args),
   rm: (...args: unknown[]) => mockRm(...args),
+  readFile: (...args: unknown[]) => mockReadFile(...args),
 }));
 
 // Keep unit tests hermetic: the real resolveEmbeddingDevice('auto', ...) spawns

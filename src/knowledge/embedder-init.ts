@@ -120,34 +120,83 @@ export function isWebGpuDeviceError(err: unknown): boolean {
 /**
  * Check if a model is FULLY cached on disk.
  *
- * Verifying only that `model.onnx` exists is not enough: large models keep their weights in a
- * sibling external-data file (`model.onnx_data`). An interrupted download can leave the small
- * graph file (`model.onnx`) complete while the weights file is missing, zero-length, or a
- * leftover partial-download artifact — which passes a presence-only check and then crashes the
- * ONNX loader at deserialize time ("Deserialize tensor … file_length … out of bounds").
- * Returning false here routes the caller back through a fresh download instead.
+ * Verifying only that `model.onnx` exists is not enough on two axes:
+ *
+ *  1. WEIGHTS: large models keep their weights in a sibling external-data file
+ *     (`model.onnx_data`). An interrupted download can leave the small graph file
+ *     (`model.onnx`) complete while the weights file is missing, zero-length, or a
+ *     leftover partial-download artifact — which passes a presence-only check and then
+ *     crashes the ONNX loader ("Deserialize tensor … file_length … out of bounds").
+ *  2. ROOT METADATA: transformers.js also needs `config.json` and a tokenizer at the
+ *     MODEL ROOT (not in `onnx/`). A truncated/garbage `config.json` (external disk
+ *     error, partial delete) otherwise passes a weights-only check and then fails to
+ *     parse with an error isCorruptModelError does NOT match — a permanent, un-self-
+ *     healing init failure on every startup. Requiring them here re-fetches instead.
+ *
+ * Returning false routes the caller back through a fresh download, which heals the gap.
+ * A leftover `.tmp` artifact alongside COMPLETE weights is just trash from a prior
+ * interrupted attempt that later succeeded — it is swept (best-effort) and does not
+ * defeat the cached fast-path (which would otherwise re-download every startup).
  */
 export async function isModelCached(model: string): Promise<boolean> {
   try {
     const env = getHFEnv();
     const cacheDir = env.cacheDir;
     if (!cacheDir) return false;
-    const { access, readdir, stat } = await import('node:fs/promises');
+    const { access, readdir, readFile, stat, rm } = await import('node:fs/promises');
     const path = await import('node:path');
-    const onnxDir = path.default.join(cacheDir, model, 'onnx');
+    const modelDir = path.default.join(cacheDir, model);
+    const onnxDir = path.default.join(modelDir, 'onnx');
+
     // Graph file must exist.
     await access(path.default.join(onnxDir, 'model.onnx'));
-    // Reject an incomplete cache: a leftover partial-download artifact anywhere in the onnx
-    // dir, or a present-but-empty external weights file. Best-effort — directory read failures
-    // fall through to "cached" rather than forcing a needless re-download.
+
+    // Root config.json must exist AND parse — catches a missing/empty/truncated/garbage
+    // config (the un-self-healing corruption case). It is tiny, so the parse is cheap.
+    try {
+      const cfgRaw = await readFile(path.default.join(modelDir, 'config.json'), 'utf-8');
+      JSON.parse(cfgRaw);
+    } catch {
+      return false;
+    }
+
+    // A tokenizer must be present and non-empty. Accept any recognized form so this never
+    // false-negatives across the supported models (fast tokenizer.json) or a custom model
+    // (sentencepiece tokenizer.model / WordPiece vocab.txt).
+    const tokenizerFiles = ['tokenizer.json', 'tokenizer.model', 'vocab.txt'];
+    let hasTokenizer = false;
+    for (const f of tokenizerFiles) {
+      const st = await stat(path.default.join(modelDir, f)).catch(() => null);
+      if (st && st.size > 0) { hasTokenizer = true; break; }
+    }
+    if (!hasTokenizer) return false;
+
     const entries = await readdir(onnxDir).catch(() => [] as string[]);
-    const hasPartialArtifact = entries.some(
-      (f) => /\.(incomplete|downloading|part|tmp)$/i.test(f) || f.includes('.tmp.')
-    );
-    if (hasPartialArtifact) return false;
-    if (entries.includes('model.onnx_data')) {
+
+    // If an external weights file is listed, it must be non-empty — an interrupted
+    // download can leave a zero-length model.onnx_data that crashes the ONNX loader.
+    const hasExternalWeights = entries.includes('model.onnx_data');
+    if (hasExternalWeights) {
       const dataStat = await stat(path.default.join(onnxDir, 'model.onnx_data')).catch(() => null);
       if (!dataStat || dataStat.size === 0) return false;
+    }
+
+    const partialArtifacts = entries.filter(
+      (f) => /\.(incomplete|downloading|part|tmp)$/i.test(f) || f.includes('.tmp.')
+    );
+    if (partialArtifacts.length > 0) {
+      // A leftover partial-download artifact. Treat it as trash to sweep ONLY when the
+      // real weights are confirmed present and complete (model.onnx_data non-empty,
+      // checked above) — a prior interrupted attempt that later succeeded. With no
+      // confirmed external-weights file the partial IS an in-flight/interrupted weights
+      // download, so the cache is genuinely incomplete → re-download.
+      if (hasExternalWeights) {
+        for (const f of partialArtifacts) {
+          await rm(path.default.join(onnxDir, f), { force: true }).catch(() => {});
+        }
+      } else {
+        return false;
+      }
     }
     return true;
   } catch {
