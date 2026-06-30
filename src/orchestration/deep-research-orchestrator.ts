@@ -485,7 +485,13 @@ export class DeepResearchOrchestrator {
       const sessionDuration = Date.now() - this.sessionStart;
       const aborted = signal?.aborted === true;
       metrics.observe('research_session_duration_ms', sessionDuration, { mode: 'deep', complexity: String(complexity), status: aborted ? 'cancelled' : 'error' });
-      logger.error(`[DeepOrchestrator] Research ${aborted ? 'cancelled' : 'failed'}: ${error instanceof Error ? error.message : String(error)}`);
+      // A user cancellation is a clean stop, not an error — log it at debug so a
+      // quit-mid-run doesn't surface a red error line that reads like a failure.
+      if (aborted) {
+        logger.debug(`[DeepOrchestrator] Research cancelled: ${error instanceof Error ? error.message : String(error)}`);
+      } else {
+        logger.error(`[DeepOrchestrator] Research failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
       // Terminal-callback contract (shared with QuickResearchOrchestrator): fire
       // EXACTLY ONE of onComplete / onError. A returned report — full above, or a

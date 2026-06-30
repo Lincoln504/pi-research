@@ -131,9 +131,11 @@ export function withTimeout<T>(
   logger.debug(`[withTimeout] Starting ${timeoutMs}ms timeout guard (external signal: ${signal?.aborted ?? 'no signal'})`);
 
   return new Promise<T>((resolve, reject) => {
-    // Early abort check: if signal is already aborted, reject immediately
+    // Early abort check: if signal is already aborted, reject immediately. Already
+    // aborted before we start means an external (user) cancellation, not a timeout —
+    // a clean stop, so log at debug, not error.
     if (combinedSignal.aborted) {
-      logger.error(`[withTimeout] ${label} ALREADY ABORTED at start`);
+      logger.debug(`[withTimeout] ${label} already aborted at start (external cancellation)`);
       return reject(new Error(`${label} cancelled or timed out`));
     }
 
@@ -141,7 +143,14 @@ export function withTimeout<T>(
     const abortHandler = () => {
       if (!settled) {
         settled = true;
-        logger.error(`[withTimeout] ${label} ABORTED (timeout or external signal)`);
+        // Distinguish a user/external cancellation (clean — debug) from a genuine
+        // timeout (worth a warning). The reject text keeps both words so downstream
+        // transient-classification on "timed out" is unaffected.
+        if (signal?.aborted) {
+          logger.debug(`[withTimeout] ${label} cancelled (external signal)`);
+        } else {
+          logger.warn(`[withTimeout] ${label} timed out after ${timeoutMs}ms`);
+        }
         reject(new Error(`${label} cancelled or timed out`));
       }
     };

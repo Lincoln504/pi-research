@@ -6,7 +6,6 @@
 
 import type { ResearchMessage } from '../types/index.ts';
 import type { SystemResearchState } from './deep-research-types.ts';
-import type { ExtendedExtensionContext } from '../types/extension-context.ts';
 import { createResearcherSession } from './researcher.ts';
 import { registerScrapedLinks } from '../utils/shared-links.ts';
 import { ensureAssistantResponse } from '../utils/text-utils.ts';
@@ -65,7 +64,12 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
   const researcherPromptTemplate = loadPrompt('researcher');
   if (initialLinks.length === 0 && historicalUrls.length === 0) {
     logger.warn(`[ResearcherExecutor] Researcher ${id} has no initial search results or historical links; skipping.`);
-    recordResearcherFailure((ctx as ExtendedExtensionContext).sessionId, researchId, id);
+    // Use the resolved sessionId (= piSessionId), NOT the raw ctx.sessionId: when
+    // ctx.sessionId is unset but sessionManager supplies a real id (common in SDK
+    // use), recording under ctx.sessionId would file this no-links skip under a
+    // different id than shouldStopResearch() checks, so the fast-stop guard would
+    // under-count exactly the broad-search-failure case it exists to catch.
+    recordResearcherFailure(sessionId, researchId, id);
     metrics.increment('researcher_skipped_total', 1, { mode: 'deep', complexity: String(complexity), reason: 'no_initial_links' });
     observer?.onResearcherFailure?.(id, 'No initial search results or historical links available');
     return;

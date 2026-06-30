@@ -34,7 +34,7 @@ import type {
   IResearchSynthesisService,
 } from '../core/service-interfaces.ts';
 import type { Config } from '../config.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, DEFAULTS } from '../config.ts';
 import { getCachedScrapedContent, normalizeUrl, cleanupSharedLinks } from '../utils/shared-links.ts';
 import { runResearcher } from './researcher-executor.ts';
 import { recordResearcherFailure, shouldStopResearch, getResearchStopMessage } from './session-state.ts';
@@ -274,7 +274,7 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
     const researchers = plan.researchers || [];
     const active = new Set<Promise<void>>();
     // Honour MAX_CONCURRENT_RESEARCHERS — prevents resource spikes when a plan has many researchers.
-    const maxConcurrent: number = (orchestratorOptions.config as Config)?.MAX_CONCURRENT_RESEARCHERS ?? 3;
+    const maxConcurrent: number = (orchestratorOptions.config as Config)?.MAX_CONCURRENT_RESEARCHERS ?? DEFAULTS.MAX_CONCURRENT_RESEARCHERS;
 
     for (const configItem of researchers) {
       if (signal?.aborted) break;
@@ -328,13 +328,19 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
-
-          // Record failure for stopping logic
-          recordResearcherFailure(sessionId, researchId, id);
-
-          // Notify observer
-          observer?.onResearcherFailure?.(id, errMsg);
+          // A user cancellation (quit mid-run) surfaces here as an 'Aborted' throw.
+          // That is a clean stop, not a researcher failure: don't log it at ERROR,
+          // don't count it toward the fast-stop threshold, and don't paint the TUI
+          // researcher slice red. Mirrors the guard in researcher-executor.ts.
+          if (signal?.aborted || errMsg === 'Aborted') {
+            logger.debug(`[ResearchOrchestrationService] Researcher ${id} cancelled (aborted).`);
+          } else {
+            logger.error(`[ResearchOrchestrationService] Researcher ${id} failed: ${errMsg}`);
+            // Record failure for stopping logic
+            recordResearcherFailure(sessionId, researchId, id);
+            // Notify observer
+            observer?.onResearcherFailure?.(id, errMsg);
+          }
         }
       })();
 

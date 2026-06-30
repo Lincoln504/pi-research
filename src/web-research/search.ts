@@ -56,9 +56,9 @@ export async function search(
         successfulQueries++;
         metrics.observe('search_results_per_query', qResults.length);
       } else {
-        result.error = { 
-          type: 'empty_results', 
-          message: 'Browser-based search returned no results. This may indicate an IP block or lack of relevant data.' 
+        result.error = {
+          type: 'empty_results',
+          message: 'Browser-based search returned no relevant results for this query (the query may be too narrow, or the site returned nothing usable).'
         };
         failedQueries++;
       }

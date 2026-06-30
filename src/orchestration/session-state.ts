@@ -602,19 +602,26 @@ export function getResearchStopMessage(piSessionId: string | undefined, research
   const failed = getFailedResearchers(sid, researchId);
   const count = failed.length;
 
+  // Order the causes by likelihood. The pre-run health check verifies search and
+  // scrape BEFORE researchers run, so when it passed (the normal case) the browser
+  // and network are fine and the failure is at the model / AI-session layer — most
+  // often a small or "thinking-only" model that returns no final answer after its
+  // tool calls, or repeated ungrounded reports. Leading with "infrastructure /
+  // search engine blocking" here mis-sends the user to debug their network; the
+  // readiness probes do not even run a search, so a failure is not evidence of bot
+  // blocking.
   return [
-    `Research stopped: ${count} researcher(s) failed: ${failed.join(', ')}.`,
+    `Research stopped: ${count} researcher(s) did not return a usable report: ${failed.join(', ')}.`,
     '',
-    'This indicates infrastructure failure — multiple researchers could not complete research.',
-    'Possible causes: network unavailable, search engine blocking automated requests.',
+    'Most likely cause — the research model could not produce grounded results:',
+    '• Try a more capable research model. Very small or "thinking-only" models often',
+    '  emit no final text after their tool calls, which fails every researcher.',
+    '• Verify the model is available and the API key / context settings are valid.',
     '',
-    '▎ If the health check passed (search and scrape verified), this failure is at the AI session layer —',
-    '   check model availability, API key, and context settings.',
-    '',
-    'Troubleshooting:',
-    '• Verify network connection is active',
-    '• Check browser logs for automation detection signals',
-    '• Check PI_RESEARCH_TIMEOUT_MS if set (default: 5 minutes)',
+    'Less likely — a network or browser problem (only if the health check did NOT pass):',
+    '• Verify the network connection is active.',
+    '• Check PI_RESEARCH_TIMEOUT_MS if set (default: 5 minutes).',
+    '  A readiness-probe timeout is not a sign the search engine is blocking automated traffic.',
     '',
     'Partial results may be available below.',
   ].join('\n');

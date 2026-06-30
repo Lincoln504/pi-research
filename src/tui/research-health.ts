@@ -4,7 +4,7 @@
  * Helper functions for health checking during research
  */
 
-import { runHealthCheck, healthRegistry } from '../healthcheck/index.ts';
+import { runHealthCheck, healthRegistry, isBusyPoolHealthFailure } from '../healthcheck/index.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import {
@@ -41,9 +41,19 @@ export async function ensureFunctionalHealth(
   try {
     const health = await runHealthCheck();
     if (!health.success) {
-      const raw = health.error || '';
-      const msg = formatHealthError(raw);
-      throw new Error(msg);
+      // Distinguish a DEAD/uninitialized pool (must abort) from one that is merely
+      // BUSY: under concurrent load the BrowserRuntime readiness probe queues behind
+      // in-flight scrapes and times out even though the pool is operational. Mirror
+      // the quick orchestrator and proceed-with-warning rather than aborting — the
+      // per-task timeouts bound the work. Without this the TUI aborts the exact
+      // contention case formatHealthError now (correctly) describes as non-fatal.
+      if (isBusyPoolHealthFailure(health)) {
+        logger.warn('[ResearchHealth] Browser pool busy — readiness probe queued out under load, but the pool is operational. Proceeding; per-task timeouts bound the work.');
+      } else {
+        const raw = health.error || '';
+        const msg = formatHealthError(raw);
+        throw new Error(msg);
+      }
     }
   } finally {
     removeSlice(panelState, sliceLabel);

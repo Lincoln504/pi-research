@@ -70,7 +70,11 @@ describe('utils/session-state', () => {
     recordResearcherFailure(piSessionId, sessionId, '2:1');
     
     const message = getResearchStopMessage(piSessionId, sessionId);
-    expect(message).toContain('Research stopped: 2 researcher(s) failed: 1:1, 2:1');
+    expect(message).toContain('Research stopped: 2 researcher(s) did not return a usable report: 1:1, 2:1');
+    // Must lead with the model-layer cause, not a misleading "infrastructure / search
+    // engine blocking" headline (the repeated misdiagnosis this reword fixes).
+    expect(message).toContain('research model could not produce grounded results');
+    expect(message).not.toContain('infrastructure failure');
   });
 
   it('should cleanup session on end', () => {
