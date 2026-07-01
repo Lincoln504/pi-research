@@ -104,30 +104,39 @@ describe('scrapers', () => {
   });
 
   describe('scrapeSingle — URL validation', () => {
-    it('rejects URL containing [ bracket without calling fetch', async () => {
+    it('rejects a JSON array accidentally stringified as the url (starts with [) without calling fetch', async () => {
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
 
-      const result = await scrapeSingle('https://example.com/[invalid]');
+      const result = await scrapeSingle('["https://a.com","https://b.com"]');
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Invalid URL format');
       expect(result.markdown).toBe('');
       expect(fetchSpy).not.toHaveBeenCalled();
     });
+
+    it('does NOT reject a valid URL that merely contains brackets in its query string', async () => {
+      // Regression: the old includes('[') guard dropped legit URLs like ?ids[]=1 before any fetch.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      const result = await scrapeSingle('https://example.com/api?ids[]=1');
+
+      // It is not rejected at the bracket guard — it proceeds (SSRF/fetch handle it from here).
+      expect(result.error ?? '').not.toContain('Invalid URL format');
+    });
   });
 
   describe('scrapeSingle — fetch layer', () => {
     it('returns success with source=fetch when fetch succeeds', async () => {
+      const okHtml = '<h1>Title</h1><p>This is a long enough content to pass the 50 word check. ' +
+        ('Word word word word word word word word word word ').repeat(5) + '.</p>';
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
         headers: { get: () => 'text/html; charset=utf-8' },
-        text: async () => '<h1>Title</h1><p>This is a long enough content to pass the 50 word check. ' + 
-                          'Word word word word word word word word word word ' +
-                          'word word word word word word word word word word ' +
-                          'word word word word word word word word word word ' +
-                          'word word word word word word word word word word ' +
-                          'word word word word word word word word word word.</p>',
+        text: async () => okHtml,
+        arrayBuffer: async () => new TextEncoder().encode(okHtml).buffer,
       }));
 
       const result = await scrapeSingle('https://some-site.org/page');
@@ -155,6 +164,7 @@ describe('scrapers', () => {
         ok: true,
         headers: { get: () => 'text/html' },
         text: async () => '<html><head><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/js/CHL_CORE/v1"></script></head></html>',
+        arrayBuffer: async () => new TextEncoder().encode('<html><head><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/js/CHL_CORE/v1"></script></head></html>').buffer,
       }));
       
       const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
@@ -171,6 +181,7 @@ describe('scrapers', () => {
         ok: true,
         headers: { get: () => 'text/html' },
         text: async () => '<p>Too short.</p>',
+        arrayBuffer: async () => new TextEncoder().encode('<p>Too short.</p>').buffer,
       }));
 
       const { runBrowserTask } = await import('../../../src/infrastructure/browser/index.ts');
@@ -224,6 +235,7 @@ describe('scrapers', () => {
         ok: true,
         headers: { get: () => 'text/html' },
         text: async () => 'Word '.repeat(60),
+        arrayBuffer: async () => new TextEncoder().encode('Word '.repeat(60)).buffer,
       }));
 
       await runWithRunRegistry(runRegistry, async () => {

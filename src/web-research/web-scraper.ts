@@ -113,6 +113,33 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
   }
 }
 
+/**
+ * Decode an HTML response body using its declared charset. response.text() blindly UTF-8-decodes,
+ * corrupting non-UTF-8 pages (Shift_JIS/GBK/EUC-KR/ISO-8859-1). Prefer the Content-Type charset,
+ * else sniff a <meta charset>/<meta http-equiv content=...charset=...> in the head, else UTF-8.
+ * An absent/unknown charset falls back to UTF-8 (previous behavior), so UTF-8 pages are unaffected.
+ */
+function decodeHtmlBody(bytes: Uint8Array, contentTypeHeader: string): string {
+  let charset = '';
+  const fromHeader = /charset=["']?([^"';,\s]+)/i.exec(contentTypeHeader);
+  if (fromHeader?.[1]) charset = fromHeader[1].toLowerCase();
+  if (!charset) {
+    // <meta> charset tags are ASCII, so a UTF-8 read of the first 2KB finds them regardless of the
+    // body's real encoding.
+    const head = new TextDecoder('utf-8').decode(bytes.subarray(0, 2048));
+    const fromMeta =
+      /<meta[^>]+charset=["']?([\w:-]+)/i.exec(head) ||
+      /<meta[^>]+content=["'][^"']*charset=([\w:-]+)/i.exec(head);
+    if (fromMeta?.[1]) charset = fromMeta[1].toLowerCase();
+  }
+  if (!charset || charset === 'utf8') charset = 'utf-8';
+  try {
+    return new TextDecoder(charset).decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes); // unknown/unsupported label → prior UTF-8 behavior
+  }
+}
+
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
 
@@ -197,11 +224,14 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       return { source: 'fetch', layer: 'fetch', markdown };
     }
 
-    const html = await response.text();
-    
-    if (html.length > MAX_HTML_SIZE) {
-      const sizeMB = Math.round(html.length / 1024 / 1024);
-      logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), truncating`);
+    // Read the raw bytes and decode with the DECLARED charset. response.text() blindly UTF-8-decodes,
+    // which mangles Shift_JIS/GBK/EUC-KR/ISO-8859-1 pages into mojibake that then gets cached + cited.
+    // Size-check on the byte length before decoding.
+    const bodyBytes = new Uint8Array(await response.arrayBuffer());
+
+    if (bodyBytes.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(bodyBytes.length / 1024 / 1024);
+      logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), skipping`);
       metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
       errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
         component: 'scrapers',
@@ -213,6 +243,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       });
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
+
+    const html = decodeHtmlBody(bodyBytes, contentType);
     
     let markdown: string;
     try {
@@ -305,7 +337,12 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
 }
 
 export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult> {
-  if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
+  // Guard against an array accidentally stringified and passed as a single url (JSON arrays start
+  // with '['). Do NOT reject brackets ANYWHERE: valid URLs legitimately contain them in query
+  // strings (e.g. ?ids[]=1) and IPv6 literals (http://[::1]/) — the old includes('[') check dropped
+  // those real sources before any fetch. A malformed non-URL string is still caught by the SSRF
+  // validation below (new URL()).
+  if (typeof url !== 'string' || url.trim().startsWith('[')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
   }

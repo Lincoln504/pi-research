@@ -385,11 +385,17 @@ export function validateContent(html: string, markdown: string, url: string): vo
   }
 
   const words = markdown.trim().split(/\s+/).filter(w => w.length > 0);
+  // Space-less scripts (Chinese/Japanese/Thai) have no inter-word whitespace, so a real article
+  // yields very few whitespace tokens. Gate the stub check on BOTH a low word count AND a low
+  // non-whitespace character count — otherwise a genuine CJK page was thrown away as a "stub",
+  // silently biasing research away from the non-Latin web. A true stub (nav-only / a few words)
+  // is short by both measures; a real CJK article clears the character threshold.
+  const charCount = markdown.replace(/\s+/g, '').length;
   let stubCheckHostname = '';
   try { stubCheckHostname = new URL(url).hostname; } catch { /* ignore */ }
-  if (words.length < 50 && stubCheckHostname !== 'example.com') {
+  if (words.length < 50 && charCount < 200 && stubCheckHostname !== 'example.com') {
     metrics.increment('scrape_errors_total', 1, { error_type: 'stub_content' });
-    const error = new Error(`Fetch returned stub: only ${words.length} words found.`);
+    const error = new Error(`Fetch returned stub: only ${words.length} words / ${charCount} chars found.`);
     errorTracker.trackError(error, {
       component: 'scrapers',
       operation: 'validate',

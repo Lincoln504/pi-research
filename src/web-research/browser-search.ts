@@ -8,6 +8,7 @@ import { runWorkerSearch } from '../infrastructure/browser/task-execution-servic
 import { getMaxWorkers } from '../infrastructure/browser/config.ts';
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
+import { normalizeUrl } from '../utils/url-utils.ts';
 import type { SearchResult } from './types.ts';
 import type { Config } from '../config.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -105,8 +106,13 @@ export async function performSearch(
                     // its snippet in the combined output, wasting context tokens; this
                     // also makes seenUrls.size a true cross-query unique count for the
                     // progress callback and the unique-URLs metric.
-                    if (r.url && !seenUrls.has(r.url)) {
-                        seenUrls.add(r.url);
+                    // Dedup on the NORMALIZED url (consistent with shared-links / knowledge store),
+                    // so http/https, trailing-slash, and tracking-param variants of the same page
+                    // collapse to one — otherwise snippets repeat across queries (wasting context)
+                    // and seenUrls.size over-counts uniques for the progress callback / metric.
+                    const key = r.url ? normalizeUrl(r.url) : '';
+                    if (key && !seenUrls.has(key)) {
+                        seenUrls.add(key);
                         uniqueResults.push(r);
                     }
                 }
