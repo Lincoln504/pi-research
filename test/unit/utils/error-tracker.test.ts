@@ -8,6 +8,24 @@ describe('ErrorTracker', () => {
     tracker = new ErrorTracker();
   });
 
+  it('caps tracked patterns to bound memory, evicting the least-frequent first', () => {
+    // Letters-only token so extractSignature (which normalizes digits to <NUM>) keeps them distinct.
+    const letters = (n: number): string => {
+      let s = '';
+      do { s += String.fromCharCode(97 + (n % 26)); n = Math.floor(n / 26); } while (n > 0);
+      return s;
+    };
+    // A high-frequency pattern that must survive eviction.
+    for (let i = 0; i < 20; i++) tracker.trackError('persistent frequent alpha failure');
+    // Flood with 700 distinct low-frequency signatures — well past the 500 cap.
+    for (let i = 0; i < 700; i++) tracker.trackError(`unique signature token ${letters(i)}`);
+
+    const report = tracker.getReport();
+    expect(report.uniquePatterns).toBeLessThanOrEqual(500);
+    // Least-frequent-first eviction keeps the frequent pattern.
+    expect(report.patterns.some(p => p.count === 20)).toBe(true);
+  });
+
   it('should accurately count errors by type', () => {
     tracker.trackError('Fetch blocked: Cloudflare challenge');
     tracker.trackError('Fetch blocked: Cloudflare challenge');

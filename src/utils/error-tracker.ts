@@ -63,6 +63,10 @@ export function runWithTracker<T>(tracker: ErrorTracker, fn: () => T): T {
 export class ErrorTracker {
   private patterns = new Map<string, ErrorPattern>();
   private readonly MAX_CONTEXTS_PER_PATTERN = 10;
+  // Bound total memory. The global singleton is never clear()'d, so out-of-run errors (logger,
+  // scrapers, healthcheck) would otherwise grow these maps without limit over a long-lived host.
+  private readonly MAX_PATTERNS = 500;
+  private readonly MAX_DOMAINS_PER_PATTERN = 100;
 
   /**
    * Normalize an error message to extract a stable signature.
@@ -108,6 +112,11 @@ export class ErrorTracker {
 
     let pattern = this.patterns.get(signature);
     if (!pattern) {
+      // Evict the least-frequent pattern before adding a new one at the cap, so the map stays
+      // bounded while retaining the highest-signal (most frequent) patterns.
+      if (this.patterns.size >= this.MAX_PATTERNS) {
+        this.evictLeastFrequentPattern();
+      }
       pattern = {
         signature,
         message,
@@ -123,10 +132,15 @@ export class ErrorTracker {
     pattern.count++;
     pattern.lastSeen = now;
 
-    // Track domain count if available
+    // Track domain count if available. Cap distinct domains per pattern: existing domains keep
+    // incrementing, but once at the cap new distinct domains are dropped to bound memory.
     if (context.domain) {
-      const currentCount = pattern.domainCounts.get(context.domain) ?? 0;
-      pattern.domainCounts.set(context.domain, currentCount + 1);
+      const existing = pattern.domainCounts.get(context.domain);
+      if (existing !== undefined) {
+        pattern.domainCounts.set(context.domain, existing + 1);
+      } else if (pattern.domainCounts.size < this.MAX_DOMAINS_PER_PATTERN) {
+        pattern.domainCounts.set(context.domain, 1);
+      }
     }
 
     // Add context to rolling buffer (keep only last 10)
@@ -206,6 +220,24 @@ export class ErrorTracker {
     }
 
     return typeCounts;
+  }
+
+  /**
+   * Evict the least-frequent pattern to keep the map bounded (see MAX_PATTERNS). O(n) but only
+   * runs when a new signature is added while already at the cap.
+   */
+  private evictLeastFrequentPattern(): void {
+    let victimKey: string | undefined;
+    let victimCount = Infinity;
+    for (const [key, p] of this.patterns) {
+      if (p.count < victimCount) {
+        victimCount = p.count;
+        victimKey = key;
+      }
+    }
+    if (victimKey !== undefined) {
+      this.patterns.delete(victimKey);
+    }
   }
 
   /**

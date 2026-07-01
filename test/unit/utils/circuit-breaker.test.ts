@@ -77,7 +77,28 @@ describe('CircuitBreaker', () => {
 
     await expect(cb.execute(failTransient)).rejects.toThrow('transient');
     await expect(cb.execute(failTransient)).rejects.toThrow('transient');
-    
+
     expect(cb.getState()).toBe('OPEN');
+  });
+
+  it('admits only halfOpenMaxCalls concurrent probes in HALF_OPEN, fast-failing the rest', async () => {
+    // Regression: once the first caller flipped OPEN→HALF_OPEN, concurrent callers saw state !==
+    // 'OPEN' and all executed against the still-down dependency. Now extra concurrent probes fast-fail.
+    const cb = new CircuitBreaker({ failureThreshold: 1, resetTimeoutMs: 1000, halfOpenMaxCalls: 1 });
+    await expect(cb.execute(vi.fn().mockRejectedValue(new Error('fail')))).rejects.toThrow('fail');
+    expect(cb.getState()).toBe('OPEN');
+    vi.advanceTimersByTime(1500);
+
+    // A probe that stays pending so a second caller races it while it's in flight.
+    let release!: () => void;
+    const pending = new Promise<string>((res) => { release = () => res('ok'); });
+    const first = cb.execute(() => pending); // admitted as the single probe (flips to HALF_OPEN)
+
+    await expect(cb.execute(vi.fn().mockResolvedValue('x'))).rejects.toThrow('HALF_OPEN (trial in progress)');
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    release();
+    await expect(first).resolves.toBe('ok');
+    expect(cb.getState()).toBe('CLOSED'); // the single probe succeeded → circuit closes
   });
 });

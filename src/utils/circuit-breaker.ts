@@ -25,6 +25,9 @@ export class CircuitBreaker {
   private failureCount = 0;
   private successCount = 0;
   private nextAttemptTime = 0;
+  // Number of trial calls currently executing in HALF_OPEN. Caps concurrent probes so a burst of
+  // parallel callers doesn't all hit a still-recovering dependency the instant the breaker half-opens.
+  private halfOpenInFlight = 0;
   private options: Required<CircuitBreakerOptions>;
 
   constructor(options: CircuitBreakerOptions = {}) {
@@ -50,6 +53,20 @@ export class CircuitBreaker {
       }
     }
 
+    // HALF_OPEN admission control: allow only halfOpenMaxCalls trial calls to execute at once and
+    // fast-fail the rest. Without this, once the first caller flips OPEN→HALF_OPEN every other
+    // concurrent caller sees state !== 'OPEN', skips the gate, and hits the still-down dependency
+    // simultaneously — defeating the single-trial probe and immediately re-opening the breaker.
+    let admittedAsProbe = false;
+    if (this.state === 'HALF_OPEN') {
+      if (this.halfOpenInFlight >= this.options.halfOpenMaxCalls) {
+        metrics.increment('circuit_breaker_rejected_total', 1, { breaker: this.options.name, reason: 'half_open_probe_limit' });
+        throw new Error(`CircuitBreaker '${this.options.name}' is HALF_OPEN (trial in progress). Fast-failing to limit probes.`);
+      }
+      this.halfOpenInFlight++;
+      admittedAsProbe = true;
+    }
+
     try {
       const result = await action();
       const duration = Date.now() - startTime;
@@ -63,6 +80,8 @@ export class CircuitBreaker {
         this.onFailure(error);
       }
       throw error;
+    } finally {
+      if (admittedAsProbe) this.halfOpenInFlight = Math.max(0, this.halfOpenInFlight - 1);
     }
   }
 
@@ -104,6 +123,7 @@ export class CircuitBreaker {
       this.nextAttemptTime = Date.now() + this.options.resetTimeoutMs;
     } else if (newState === 'HALF_OPEN') {
       this.successCount = 0;
+      this.halfOpenInFlight = 0;
     } else if (newState === 'CLOSED') {
       this.failureCount = 0;
       this.successCount = 0;
@@ -119,6 +139,7 @@ export class CircuitBreaker {
     this.state = 'CLOSED';
     this.failureCount = 0;
     this.successCount = 0;
+    this.halfOpenInFlight = 0;
     this.nextAttemptTime = 0;
     metrics.setGauge('circuit_breaker_state', 0, { breaker: this.options.name });
   }
