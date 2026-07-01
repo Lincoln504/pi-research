@@ -58,11 +58,15 @@ export class KnowledgeStore implements IKnowledgeStore {
   private manifestPath: string;
   private isClosing = false;
   private activeWrites = new Set<Promise<any>>();
-  // Row count at the last successful FTS rebuild in THIS process. rebuildFtsIndex()
-  // skips when the count is unchanged: a research run that added no new rows would
-  // otherwise create a fresh FTS index (and a new table version) on every cleanup,
-  // the dominant driver of the unbounded _indices/_versions bloat seen on disk.
-  private lastFtsRowCount: number | null = null;
+  // LanceDB table version at the last successful FTS rebuild. rebuildFtsIndex() skips
+  // when the version is unchanged: a research run that committed no new transactions
+  // would otherwise create a fresh FTS index (and a new table version) on every cleanup,
+  // the dominant driver of the unbounded _indices/_versions bloat seen on disk. Row
+  // count is NOT a sufficient signal — a re-ingest of changed content deletes N rows and
+  // adds N (writer-queue hash-change path), leaving the count identical while the indexed
+  // row SET changed; the table version advances on every such transaction, so it is the
+  // correct proxy and is cross-process-correct (getFreshTable re-opens at the latest version).
+  private lastFtsVersion: number | null = null;
   private rrfReranker: lancedb.rerankers.RRFReranker | null = null;
   private circuitBreaker = new CircuitBreaker({
     failureThreshold: 3,
@@ -759,13 +763,15 @@ export class KnowledgeStore implements IKnowledgeStore {
         logger.debug('[store] Skipping FTS index rebuild (table is empty)');
         return false;
       }
-      // Skip when the row count is unchanged since our last rebuild in this
-      // process: the existing FTS index already covers exactly these rows, so a
-      // rebuild would only churn out a new index version for no search benefit.
-      // (Row count is a sufficient proxy here — documents are append/delete, never
-      // edited in place, so a same-count table is the same set of indexed rows.)
-      if (this.lastFtsRowCount === count) {
-        logger.debug(`[store] Skipping FTS index rebuild (row count unchanged at ${count})`);
+      // Skip when the table version is unchanged since our last rebuild: the existing
+      // FTS index already covers exactly these rows, so a rebuild would only churn out a
+      // new index version for no search benefit. The version advances on EVERY committed
+      // transaction (add/delete/optimize), so unlike row count it detects an equal-count
+      // re-ingest (delete N + add N) that changes the indexed row set — the case that would
+      // otherwise silently leave new content out of the keyword/BM25 index.
+      const version = await table.version();
+      if (this.lastFtsVersion === version) {
+        logger.debug(`[store] Skipping FTS index rebuild (table version unchanged at ${version})`);
         return false;
       }
       logger.info('[store] Rebuilding FTS indexes...');
@@ -779,7 +785,9 @@ export class KnowledgeStore implements IKnowledgeStore {
         config: lancedb.Index.fts(),
         replace: true,
       });
-      this.lastFtsRowCount = count;
+      // Record the version AFTER indexing (createIndex commits its own transactions) so the
+      // next call compares against this post-rebuild baseline and only rebuilds on real writes.
+      this.lastFtsVersion = await (await this.getFreshTable()).version();
       logger.info('[store] FTS indexes rebuilt (text + content).');
       return true;
     } catch (err) {

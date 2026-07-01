@@ -863,7 +863,14 @@ async function main(argv: string[]): Promise<number> {
 // resolved on-disk path of this module's URL against process.argv[1].
 const _isMain = (() => {
   try {
-    return path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1] ?? '');
+    if (!process.argv[1]) return false;
+    // realpath BOTH sides: when installed via an npm `bin` symlink (the primary global-install
+    // path), argv[1] is the symlink while import.meta.url is realpath-resolved by Node. A plain
+    // path.resolve does not follow symlinks, so the two never matched and main() was silently
+    // skipped — the CLI exited 0 with empty output. Resolving symlinks on both sides fixes it.
+    const modulePath = fs.realpathSync(path.resolve(fileURLToPath(import.meta.url)));
+    const invokedPath = fs.realpathSync(path.resolve(process.argv[1]));
+    return modulePath === invokedPath;
   } catch {
     return false;
   }

@@ -305,12 +305,25 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
     }
     
     if (lockFd !== null) {
-      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+      // Atomic write: a bare writeFileSync could be truncated by a crash/ENOSPC mid-write,
+      // leaving invalid JSON that loadProjectSettingsRegistry silently resets to {} — wiping
+      // every workspace's saved settings. Write a temp then rename (atomic on the same FS).
+      const tmpPath = `${registryPath}.tmp.${process.pid}.${Date.now()}`;
+      try {
+        fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
+        fs.renameSync(tmpPath, registryPath);
+      } catch (writeErr) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        throw writeErr;
+      }
     } else {
       throw new Error(`Failed to acquire lock for project settings registry after ${maxRetries} retries. Aborting to prevent data corruption.`);
     }
   } catch (err) {
+    // Rethrow so the caller (saveConfig → /research-config) surfaces the failure instead of
+    // reporting a save that silently did not persist. Mirrors the user-scope config.env writer.
     logger.error('[config] Failed to save project settings registry:', err);
+    throw err;
   } finally {
     if (lockFd !== null) {
       try { fs.closeSync(lockFd); } catch { /* ignore */ }

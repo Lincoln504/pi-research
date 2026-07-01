@@ -33,6 +33,8 @@ export class ResearchSessionService implements IService {
   // Map of sessionId -> Map<id, SessionEntry>
   private sessions = new Map<string, Map<string, SessionEntry>>();
 
+  // Create-on-write: use ONLY from registerSession. Read/delete paths must use peekSessionMap
+  // so they never resurrect an empty map (which would leak one entry per completed researchId).
   private getSessionMap(sessionId: string): Map<string, SessionEntry> {
     let sessionMap = this.sessions.get(sessionId);
     if (!sessionMap) {
@@ -40,6 +42,11 @@ export class ResearchSessionService implements IService {
       this.sessions.set(sessionId, sessionMap);
     }
     return sessionMap;
+  }
+
+  // Read-only accessor: never inserts. Returns undefined when no sessions exist for the id.
+  private peekSessionMap(sessionId: string): Map<string, SessionEntry> | undefined {
+    return this.sessions.get(sessionId);
   }
 
   /**
@@ -53,28 +60,33 @@ export class ResearchSessionService implements IService {
    * Get an active session by ID
    */
   getSession(sessionId: string, id: string): SessionEntry | undefined {
-    return this.getSessionMap(sessionId).get(id);
+    return this.peekSessionMap(sessionId)?.get(id);
   }
 
   /**
    * Check if a session is active
    */
   hasSession(sessionId: string, id: string): boolean {
-    return this.getSessionMap(sessionId).has(id);
+    return this.peekSessionMap(sessionId)?.has(id) ?? false;
   }
 
   /**
-   * Unregister a session (no abort)
+   * Unregister a session (no abort). Prunes the per-run map once empty so a long-lived host
+   * does not accumulate empty maps keyed by completed research runs.
    */
   unregisterSession(sessionId: string, id: string): void {
-    this.getSessionMap(sessionId).delete(id);
+    const sessionMap = this.peekSessionMap(sessionId);
+    if (!sessionMap) return;
+    sessionMap.delete(id);
+    if (sessionMap.size === 0) this.sessions.delete(sessionId);
   }
 
   /**
    * Abort and unregister a specific session
    */
   async abortSession(sessionId: string, id: string): Promise<void> {
-    const sessionMap = this.getSessionMap(sessionId);
+    const sessionMap = this.peekSessionMap(sessionId);
+    if (!sessionMap) return;
     const entry = sessionMap.get(id);
     if (!entry) return;
 
@@ -118,14 +130,15 @@ export class ResearchSessionService implements IService {
    * Get count of active sessions
    */
   getActiveSessionCount(sessionId: string): number {
-    return this.getSessionMap(sessionId).size;
+    return this.peekSessionMap(sessionId)?.size ?? 0;
   }
 
   /**
    * Get all active session IDs
    */
   getActiveSessionIds(sessionId: string): string[] {
-    return Array.from(this.getSessionMap(sessionId).keys());
+    const sessionMap = this.peekSessionMap(sessionId);
+    return sessionMap ? Array.from(sessionMap.keys()) : [];
   }
 
   /**

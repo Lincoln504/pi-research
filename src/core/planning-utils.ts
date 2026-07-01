@@ -234,6 +234,22 @@ export function capResearcherQueries(plan: ResearchPlan, complexity: 1 | 2 | 3, 
       return normalized;
     });
 
+  // 1b. Enforce unique researcher IDs within the round. Reports are keyed `${round}.${id}`
+  // and search links by String(id); two researchers sharing an id (the LLM emitting `1.1`
+  // twice, or `1` and "1") collide last-writer-wins — both run but one's findings are silently
+  // dropped. Renumber collisions so every launched researcher's report is retained.
+  const seenIds = new Set<string>();
+  for (const r of plan.researchers) {
+    const rid = String(r.id);
+    if (!seenIds.has(rid)) { seenIds.add(rid); continue; }
+    let n = 2;
+    let candidate = `${rid}-${n}`;
+    while (seenIds.has(candidate)) { n++; candidate = `${rid}-${n}`; }
+    logger.warn(`[${serviceName}] Duplicate researcher id '${rid}' → renumbered '${candidate}'`);
+    r.id = candidate;
+    seenIds.add(candidate);
+  }
+
   // 2. Enforce global round budget
   let totalQueries = plan.researchers.reduce((sum, r) => sum + r.queries.length, 0);
   if (totalQueries > ROUND_HARD_CAP) {
