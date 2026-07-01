@@ -210,7 +210,7 @@ function peerMissing(pkgDir: string): never {
     'The standalone engine imports this package at startup, so it cannot run',
     'without it. Reinstall so peer dependencies are included:',
     '',
-    '    npm install -g @lincoln504/pi-research     # global (npm 7+ installs peers)',
+    '    npm install -g @lincoln504/pi-research     # global — reinstalls the full dependency tree',
     `    # or, in the package dir:  cd "${pkgDir}" && npm install ${PEER}`,
     '',
     `(engine located at: ${pkgDir})`,

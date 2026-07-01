@@ -10,11 +10,16 @@ through the same engine the `pi` extension uses.
 ### How it works
 
 ```
-agent ─Bash/exec─▶ skills/pi-research/scripts/run.mjs ─spawns─▶ pi-research engine (dist/cli.mjs)
-                (zero-dep launcher; locates the                (SDK: init → run → shutdown)
-                 engine, fails fast if missing)                        │
-                                                                       ▼
-                                                          cited Markdown report → stdout
+agent
+  │  shells out (Bash / exec)
+  ▼
+run.mjs  —  zero-dep launcher (skills/pi-research/scripts/)
+  │  locates the installed engine, or fails fast with guidance
+  ▼
+pi-research engine  —  the SDK (dist/cli.mjs)
+  │  init → run → shutdown
+  ▼
+cited Markdown report  →  stdout  →  back to the agent
 ```
 
 The agent matches the `description` in `SKILL.md` and shells out to the launcher.
