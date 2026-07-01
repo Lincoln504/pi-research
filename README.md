@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Multi-agent deep web research with a built-in personal knowledge store — usable from Pi, an agent skill, or the SDK.</strong>
+  <strong>Deep web research with knowledge store — usable from Pi, agent skill, or SDK.</strong>
 </p>
 
 <p align="center">
@@ -13,9 +13,9 @@
   ·
   <a href="docs/SDK.md">SDK</a>
   ·
-  <a href="docs/CONFIGURATION.md">Configuration</a>
-  ·
   <a href="docs/KNOWLEDGE-STORE.md">Knowledge store</a>
+  ·
+  <a href="docs/CONFIGURATION.md">Configuration</a>
   ·
   <a href="docs/ARCHITECTURE.md">Architecture</a>
 </p>
