@@ -325,9 +325,14 @@ export async function runBackgroundExtraction(
     throw new Error('research-knowledge-search prompt template not found');
   }
 
+  // Use FUNCTION replacers: referenceDocuments is rebuilt knowledge-store text (scraped web pages)
+  // and conversationHistory is arbitrary user text, both of which routinely contain `$`. A plain
+  // string replacement interprets `$&`, `` $` ``, `$'`, `$$` as substitution patterns and corrupts
+  // the extractor prompt (duplicating/eating template text) → wrong yes/maybe/no classification.
+  // A function replacer inserts the value literally. (Same class as commit 78c16f98.)
   const systemPrompt = promptTemplate
-    .replace('{{conversation_history}}', conversationHistory)
-    .replace('{{reference_documents}}', referenceDocuments);
+    .replace('{{conversation_history}}', () => conversationHistory)
+    .replace('{{reference_documents}}', () => referenceDocuments);
 
   const userMessage =
     'Analyze the reference documents above and extract the answer using the required JSON format.';
