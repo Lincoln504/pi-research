@@ -105,6 +105,3 @@ VERIFICATION_REPORT.md
 
 # Generated skill launcher (built by scripts/build.cjs skill on prepare)
 skills/pi-research/scripts/run.mjs
-
-# High-quality demo gif renders are kept in the pi-research-demo repo, not here
-docs/media/*-hq.gif
