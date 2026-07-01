@@ -764,11 +764,14 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     }
   }
 
-  // Keep PI_RESEARCH_DEBUG env var in sync with config.DEBUG
-  // so that isVerboseFromEnv() (which reads the env var) picks up
-  // TUI-configured debug settings without a circular import.
-  if (processEnv['PI_RESEARCH_DEBUG'] === undefined) {
-    processEnv['PI_RESEARCH_DEBUG'] = String(config.DEBUG);
+  // Bridge a config/TUI-set DEBUG into the PI_RESEARCH_DEBUG env var so isVerboseFromEnv()
+  // (which reads the env var — it cannot import config without a circular dependency) picks it
+  // up. Only ever opt INTO verbose ('true'), never write 'false': createConfig runs with the
+  // shared process.env, and getConfig merges process.env LAST, so pinning 'false' here from the
+  // first-resolved interface would override a later interface whose own config sets DEBUG=true
+  // (silently disabling its debug logging). Enabling-only is a safe, monotonic bridge.
+  if (config.DEBUG && processEnv['PI_RESEARCH_DEBUG'] === undefined) {
+    processEnv['PI_RESEARCH_DEBUG'] = 'true';
   }
 
   return config;
@@ -847,6 +850,8 @@ function parseEnvNumber(env: Record<string, string | undefined>, key: string, de
 function parseEnvBool(env: Record<string, string | undefined>, key: string, def: boolean): boolean {
   const v = env[key];
   if (v === undefined || v === '') return def;
+  // Strict by design: only the literal 'true' (any case) is truthy; every other value is false.
+  // This is intentional and asserted in config.test.ts ('1'/'yes' → false) — do not loosen it.
   return v.toLowerCase() === 'true';
 }
 

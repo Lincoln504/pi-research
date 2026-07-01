@@ -161,6 +161,11 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+        // Reject tasks once this scheduler has begun teardown. shutdown() nulls priorityQueue and
+        // clears the scheduler reference (a future run gets a fresh scheduler), so getPriorityQueue()
+        // here would otherwise build a FRESH, non-shutdown queue on this dead instance and dispatch
+        // onto a pool being destroyed. The message matches isPoolShutdownError → benign DEBUG for callers.
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
@@ -236,6 +241,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
@@ -294,6 +300,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();

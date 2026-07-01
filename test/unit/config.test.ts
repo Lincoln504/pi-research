@@ -182,6 +182,16 @@ describe('config (refactored)', () => {
         expect(processEnv['PI_RESEARCH_DEBUG']).toBe('true');
       });
 
+      it('does NOT pin processEnv.PI_RESEARCH_DEBUG when DEBUG is false (prevents cross-interface bleed)', () => {
+        // Regression: createConfig runs with the shared process.env and getConfig merges it LAST,
+        // so pinning 'false' from the first-resolved interface would override a later interface
+        // whose own config enables DEBUG (silently disabling its debug logging). Only opt in.
+        const processEnv: Record<string, string | undefined> = {};
+        const config = createConfig({ PI_RESEARCH_DEBUG: 'false' }, processEnv);
+        expect(config.DEBUG).toBe(false);
+        expect(processEnv['PI_RESEARCH_DEBUG']).toBeUndefined();
+      });
+
       it('does not overwrite an already-set processEnv.PI_RESEARCH_DEBUG', () => {
         const processEnv: Record<string, string | undefined> = { PI_RESEARCH_DEBUG: 'TRUE' };
         const config = createConfig({}, processEnv);
