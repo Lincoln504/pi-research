@@ -140,7 +140,11 @@ export class BrowserTaskScheduler implements IScheduler {
         if (this.idleTimer) clearTimeout(this.idleTimer);
         this.idleTimer = setTimeout(() => {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
-            this.shutdown();
+            // shutdown() is async and awaits getService()/server.stop(); a rejection here (e.g.
+            // getService throwing during a concurrent container disposal) would otherwise surface
+            // as an unhandledRejection from this fire-and-forget timer. Swallow it — an idle
+            // teardown that fails is non-fatal; the next run gets a fresh scheduler regardless.
+            this.shutdown().catch(err => logger.warn('[Scheduler] Idle-timeout shutdown failed (non-fatal):', err));
         }, this.IDLE_TIMEOUT_MS);
         if (this.idleTimer.unref) this.idleTimer.unref();
     }
