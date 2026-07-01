@@ -595,18 +595,30 @@ export async function triageRelevantUrls(
       }
       const delay = KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS * attempt;
       metrics.increment('research_knowledge_search_triage_retries_total', 1);
+      logger.warn(`[research-knowledge-search] Triage attempt ${attempt}/${KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS} failed transiently (${msg}); retrying in ${delay}ms`);
       await abortableDelay(delay, signal);
     }
   }
 
+  // Coerce-then-validate exactly like validateResponse(): a single Value.Convert
+  // wrapped in try/catch (Convert can throw on some malformed inputs), then check
+  // the coerced value. A throw or a failed check falls through to the fail-open
+  // path below — a triage fault must never hide real knowledge.
   const extracted = extractJson<KnowledgeRelevanceTriage>(responseText, 'object');
-  if (!extracted.success || !extracted.value ||
-      !Value.Check(KnowledgeRelevanceTriageSchema, Value.Convert(KnowledgeRelevanceTriageSchema, extracted.value))) {
+  let coerced: KnowledgeRelevanceTriage | null = null;
+  if (extracted.success && extracted.value) {
+    try {
+      const converted = Value.Convert(KnowledgeRelevanceTriageSchema, extracted.value);
+      if (Value.Check(KnowledgeRelevanceTriageSchema, converted)) {
+        coerced = converted as KnowledgeRelevanceTriage;
+      }
+    } catch { /* fall through to malformed handling */ }
+  }
+  if (!coerced) {
     logger.warn('[research-knowledge-search] Triage output malformed; failing open to full synthesis');
     return null;
   }
 
-  const coerced = Value.Convert(KnowledgeRelevanceTriageSchema, extracted.value) as KnowledgeRelevanceTriage;
   const seen = new Set<string>();
   const relevantUrls: string[] = [];
   for (const idx of coerced.relevant_indices) {
