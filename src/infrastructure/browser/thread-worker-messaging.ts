@@ -290,6 +290,22 @@ export async function executeScrapeTask(
       await route.fallback().catch(() => {});
     });
 
+    // Track the ACTUAL connected IP of each main-frame document response. The post-goto check below
+    // only re-validates the initial navigation; a page that passes it can then client-navigate
+    // (window.location / meta-refresh / form submit) to a TTL-0 host that rebinds to a private /
+    // metadata IP. Re-validating the FINAL main-frame document's serverAddr before its body is
+    // returned closes that second-hop DNS-rebind window.
+    let finalMainFrameAddr: Promise<{ ipAddress?: string } | null> = Promise.resolve(null);
+    page.on('response', (resp: any) => {
+      try {
+        if (resp.request().resourceType() === 'document' && resp.frame() === page.mainFrame()) {
+          finalMainFrameAddr = resp.serverAddr().catch(() => null);
+        }
+      } catch {
+        /* frame detached / teardown — ignore */
+      }
+    });
+
     // High-fidelity wait: try domcontentloaded first for speed
     const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
 
@@ -369,6 +385,14 @@ export async function executeScrapeTask(
       ? 0
       : Math.floor(Math.random() * 1000) + 500;
     if (jitter > 0) await new Promise(r => setTimeout(r, jitter));
+
+    // Re-validate the final rendered main-frame document's connected IP (catches a client-side
+    // navigation to a DNS-rebinding host that occurred after the initial goto passed).
+    const finalAddr = await finalMainFrameAddr;
+    if (finalAddr?.ipAddress) {
+      const fip: string = finalAddr.ipAddress;
+      validateForWorkerSync(fip.includes(':') ? `http://[${fip}]/` : `http://${fip}/`);
+    }
 
     await page.close();
     return { contentType, html, jitter };

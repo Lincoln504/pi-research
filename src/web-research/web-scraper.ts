@@ -288,13 +288,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 }
 
 // SSRF note: the URL is validated at request time by validateUrlForSSRF in
-// scrapeSingle before this fallback runs. Unlike the fetch layer, the stealth
-// browser (Camoufox/Firefox) performs its own DNS resolution and connection
-// inside the browser process, which this code cannot pin to the validated IP —
-// so a DNS-rebinding target could still be reached via this path. This is an
-// accepted residual: pinning would require browser-level request interception
-// or a validating local proxy. The request-time check blocks the common cases
-// (literals, hostnames that resolve to private ranges at validation time).
+// scrapeSingle, and again inside the worker where every navigation gets a
+// DNS-aware page.route check and each main-frame document's ACTUAL connected IP
+// (response.serverAddr()) is re-validated against the SSRF policy before its body
+// is returned — this closes the DNS-rebinding hole for both the initial load and
+// client-side hops. The residual is the TCP connection itself (not prevented) and
+// cached/service-worker responses that report no serverAddr; the rendered body is
+// still withheld whenever a private/metadata IP is observed.
 async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
@@ -309,6 +309,17 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     }
 
     let html = result.html || '';
+
+    // The browser path has no Content-Length to pre-screen (unlike the fetch layer), so cap the
+    // rendered HTML here before the O(n) markdown conversion runs on it. Guards against a
+    // pathological/hostile page ballooning worker + main-process memory.
+    if (html.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(html.length / 1024 / 1024);
+      logger.warn(`[Scrapers] Browser HTML too large (rendered: ${sizeMB}MB, max 25MB), skipping`);
+      metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html', layer: 'playwright' });
+      throw new Error(`Browser HTML too large (${sizeMB}MB, max 25MB)`);
+    }
+
     let markdown: string;
     try {
       markdown = await convertToMarkdown(html);
