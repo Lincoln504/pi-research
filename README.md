@@ -9,7 +9,7 @@ complete or another round is needed. The result is a single cited Markdown repor
 
 One engine backs several front-ends — the pi extension, a standalone CLI / agent
 skill (the same skill any skills-aware host runs, including OpenClaw), and a
-programmatic SDK, each with its own guide in the docs table below.
+programmatic SDK, each with its own guide in the docs linked below.
 
 Ask in natural language — the tool understands the depth needed:
 
@@ -56,16 +56,19 @@ pi install .
 
 npm is the stable channel; the git install is the development channel (see Stability, below). The first install pulls the stealth browser engine, which takes a few minutes.
 
-### Documentation
-
-| Doc | What's inside |
-|-----|---------------|
-| [Pi extension](docs/PI-EXTENSION.md) | Commands, the live TUI, and the extension lifecycle. |
-| [Agent skill](docs/AGENT-SKILL.md) | The portable skill that gives any coding agent (Claude Code, Codex, OpenClaw, …) research, and how it installs. |
-| [SDK](docs/SDK.md) | The programmatic library. |
-| [Configuration](docs/CONFIGURATION.md) | The TUI settings, every environment variable, and how config layers resolve. |
-| [Knowledge store](docs/KNOWLEDGE-STORE.md) | The local vector cache of past findings. |
-| [Architecture](docs/ARCHITECTURE.md) | How the engine is built: layers, services, and the research pipeline. |
+<p align="center">
+  <a href="docs/PI-EXTENSION.md">Pi extension</a>
+  ·
+  <a href="docs/AGENT-SKILL.md">Agent skill</a>
+  ·
+  <a href="docs/SDK.md">SDK</a>
+  ·
+  <a href="docs/CONFIGURATION.md">Configuration</a>
+  ·
+  <a href="docs/KNOWLEDGE-STORE.md">Knowledge store</a>
+  ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
 
 ### Built with
 
