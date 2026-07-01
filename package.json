@@ -105,9 +105,9 @@
     ]
   },
   "dependencies": {
-    "@earendil-works/pi-ai": ">=0.80.0",
-    "@earendil-works/pi-coding-agent": ">=0.80.0",
-    "@earendil-works/pi-tui": ">=0.80.0",
+    "@earendil-works/pi-ai": ">=0.80.2",
+    "@earendil-works/pi-coding-agent": ">=0.80.2",
+    "@earendil-works/pi-tui": ">=0.80.2",
     "@huggingface/transformers": "4.2.0",
     "@kreuzberg/html-to-markdown-node": "^3.5.5",
     "@lancedb/lancedb": "0.29.0",

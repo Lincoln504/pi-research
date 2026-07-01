@@ -8,7 +8,7 @@ pi-research is a pi CLI extension that provides multi-agent web research. It run
 pi CLI
 └── pi-research extension (src/index.ts)
     ├── Tools         research, health, research_knowledge_search (when store enabled)
-    ├── Commands      /research, /research-config
+    ├── Commands      /research, /research-config, /knowledge-store
     ├── Event hooks   before_agent_start, after_provider_response
     └── Layers
         ├── Orchestration   quick/deep research coordination

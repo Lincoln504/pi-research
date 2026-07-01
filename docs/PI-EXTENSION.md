@@ -14,12 +14,13 @@ pi -p "research the latest developments in WebAssembly"
 pi -p "do a thorough deep-dive on the AI inference hardware landscape"
 ```
 
-Two slash commands are also registered:
+Three slash commands are also registered:
 
 | Command | Description |
 |---------|-------------|
-| `/research <query>` | Runs at the configured default depth (`PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`, 1 by default). It does not parse an inline depth — the model chooses depth when it calls the tool itself. |
+| `/research <query>` | Runs at the configured default depth (`PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`, 1 by default). It does not parse an inline depth — the model chooses depth when it calls the tool itself. When a knowledge store is enabled, the tool checks it first and returns a complete cached answer without a live run; this happens in code, so it does not depend on the agent following the prompt. |
 | `/research-config` | Opens the interactive TUI settings dashboard. |
+| `/knowledge-store <query>` | Searches the local knowledge store for a query and returns a synthesised answer from previously researched findings. Unavailable when Knowledge Mode is `none`. The store auto-manages its own compaction, so there is no maintenance subcommand. |
 
 ## Tools
 
