@@ -128,8 +128,15 @@ export async function fetchVideoTranscripts(
   //    can never stall the researcher.
   let tokens: Map<string, string>;
   try {
+    // Pass a timeout-combined signal INTO the mint, not just to withTimeout's wrapper. doMint
+    // threads opts.signal into its BotGuard challenge/integrity fetches, so this makes the timeout
+    // actually abort an in-flight mint and release the process-wide mintChain mutex. Previously the
+    // raw researcher signal was passed, so on timeout withTimeout rejected the wrapper while doMint
+    // kept running and held the mutex forever — one stalled Google socket then hung every later
+    // YouTube mint in the run (each surfacing as a 20s "token unavailable").
+    const mintSignal = createTimeoutSignal(timeoutMs, signal);
     tokens = await withTimeout(
-      mintPoTokens([visitorData, ...videoIds], { requestKey: opts.requestKey, fetchImpl, signal }),
+      mintPoTokens([visitorData, ...videoIds], { requestKey: opts.requestKey, fetchImpl, signal: mintSignal }),
       timeoutMs,
       'youtube:mint',
       signal,
