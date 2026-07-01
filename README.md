@@ -26,19 +26,19 @@ Ask in natural language — the tool understands the depth needed:
 
 Install the front-end you want.
 
-**pi extension**
+pi extension
 
 ```bash
 pi install npm:@lincoln504/pi-research
 ```
 
-**Standalone CLI / agent skill**
+Standalone CLI / agent skill
 
 ```bash
 npm install -g @lincoln504/pi-research
 ```
 
-**OpenClaw**
+OpenClaw
 
 OpenClaw uses pi-research as an agent skill (a `SKILL.md` folder), not a plugin.
 Install the engine, then register the bundled skill into OpenClaw's managed skill
@@ -51,7 +51,7 @@ openclaw skills install "$(npm root -g)/@lincoln504/pi-research/skills/pi-resear
 
 See [Agent skill](docs/AGENT-SKILL.md) for details.
 
-**Development build (bleeding edge)**
+Development build (bleeding edge)
 
 ```bash
 pi install git:https://github.com/Lincoln504/pi-research.git
@@ -80,27 +80,27 @@ npm is the stable channel; the git install is the development channel (see Stabi
 
 ### Built with
 
-**Browser & scraping**
+Browser & scraping
 
 - [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
 - [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
 - [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
 - `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
 
-**Knowledge store & embeddings**
+Knowledge store & embeddings
 
 - [Transformers.js](https://github.com/huggingface/transformers.js) — local embedding inference (model execution via ONNX Runtime)
 - Google [Dawn](https://dawn.googlesource.com/dawn) — the WebGPU backend, accessed through the `webgpu` Node binding
 - [LanceDB](https://lancedb.com) — on-disk vector database
 - [Apache Arrow](https://arrow.apache.org) — the columnar schema the vector table is built on
 
-**YouTube transcripts**
+YouTube transcripts
 
 - [youtubei.js](https://github.com/LuanRT/YouTube.js) — YouTube internal-API client
 - [BgUtils](https://github.com/LuanRT/BgUtils) — BotGuard PoToken generation
 - [jsdom](https://github.com/jsdom/jsdom) — DOM environment for minting the PoToken
 
-**Host & runtime**
+Host & runtime
 
 - [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
 - [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation

@@ -11,14 +11,14 @@ inlined).
 
 ### Notable dependency licensing
 
-**camoufox-js / Camoufox browser**
+camoufox-js / Camoufox browser
 
 `camoufox-js` is used in-process only to configure and launch the Camoufox
 (Firefox-fork) browser **binary as a separate operating-system process**, which
 this package then drives over the Playwright/CDP protocol. The Camoufox binary is
 downloaded and run separately and is subject to its own license.
 
-**ua-parser-js**
+ua-parser-js
 
 `ua-parser-js` 2.x is licensed under AGPL-3.0-or-later. To keep this MIT-licensed
 package free of AGPL-licensed code in its dependency tree, `package.json`
@@ -27,7 +27,7 @@ package free of AGPL-licensed code in its dependency tree, `package.json`
 (`camoufox-js`) uses, and the pin is behavior-neutral for this package's usage
 (no custom `navigator.userAgent`/`fingerprint` is passed to Camoufox).
 
-**youtubei.js / bgutils-js / jsdom (YouTube transcripts)**
+youtubei.js / bgutils-js / jsdom (YouTube transcripts)
 
 The `youtube_transcript` tool depends on `youtubei.js` (MIT), `bgutils-js` (MIT),
 and `jsdom` (MIT). All three are standard MIT and are resolved at install time,

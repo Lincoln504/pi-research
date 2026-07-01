@@ -60,7 +60,7 @@ The TUI-exposed variables are marked `(TUI)`. The `[project]` mark indicates a
 project-scoped key (saved per directory in the registry); all others are
 user-scoped.
 
-**Research**
+Research
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -80,7 +80,7 @@ user-scoped.
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape result, used for planning. |
 
-**YouTube transcripts**
+YouTube transcripts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -90,7 +90,7 @@ user-scoped.
 | `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | 1–100 | Append `youtube` to roughly one-in-N search queries (1 = every query). |
 | `PI_RESEARCH_YOUTUBE_POTOKEN_REQUEST_KEY` | _(built-in)_ | — | Advanced: override the BotGuard PoToken web request key (only if YouTube rotates the public key and transcripts start failing). |
 
-**Timeouts**
+Timeouts
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -100,7 +100,7 @@ user-scoped.
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait / overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Pre-flight health-check timeout. |
 
-**LLM output & reasoning**
+LLM output & reasoning
 
 These are advanced, env-only knobs (not in the TUI).
 
@@ -110,7 +110,7 @@ These are advanced, env-only knobs (not in the TUI).
 | `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision. Clamped to the model's real ceiling. |
 | `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report. Clamped to the model's real ceiling. |
 
-**Knowledge store**
+Knowledge store
 
 See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
@@ -125,7 +125,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model initialization timeout (first-time download can be slow). |
 | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ | — | Set `1` to discard the cached WebGPU-viability verdict and probe again on next use. |
 
-**API keys (all optional)**
+API keys (all optional)
 
 | Variable | Description |
 |----------|-------------|
@@ -134,7 +134,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. |
 
-**Diagnostics & platform**
+Diagnostics & platform
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -150,7 +150,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
 
-**Testing only — never enable in production**
+Testing only — never enable in production
 
 | Variable | Description |
 |----------|-------------|
