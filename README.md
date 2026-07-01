@@ -38,6 +38,8 @@ Standalone CLI / agent skill
 npm install -g @lincoln504/pi-research
 ```
 
+See [Agent skill](docs/AGENT-SKILL.md) for details.
+
 Development build (bleeding edge)
 
 ```bash
