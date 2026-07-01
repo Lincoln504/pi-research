@@ -41,7 +41,7 @@ a project-scoped setting you can change per directory:
 |------|----------|
 | `global` (default) | One store shared across every directory. A finding cached in one project is retrievable from any other. |
 | `project` | Findings are scoped to the working directory they were created in; only that directory retrieves them. |
-| `none` | The store is disabled. No data is read or written, and the `research_knowledge_search` tool is not registered. |
+| `none` | The store is disabled — no data is read or written. The `research_knowledge_search` tool stays registered (so re-enabling the mode later needs no pi restart) but is not advertised to the agent: its prompt guidance is stripped, and any direct call returns a "knowledge store is disabled" result. The `/knowledge-store` command is unavailable. |
 
 All scopes share one physical LanceDB directory; project vs. global rows are
 distinguished by columns (a normalized workspace path and a global flag) and filtered

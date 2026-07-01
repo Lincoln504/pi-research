@@ -32,7 +32,14 @@ The extension registers three tools:
 |------|-----------|
 | `research` | always |
 | `health` | always |
-| `research_knowledge_search` | only when `PI_RESEARCH_KNOWLEDGE_STORE_MODE !== 'none'` |
+| `research_knowledge_search` | always (see note) |
+
+`research_knowledge_search` is registered unconditionally so a Knowledge Mode
+change takes effect without restarting pi (pi has no unregister API). When
+`PI_RESEARCH_KNOWLEDGE_STORE_MODE` is `none` the tool is not advertised to the
+agent — its prompt guidance is stripped, and any call returns a "store disabled"
+result; the `/knowledge-store` command is likewise unavailable. Advertisement and
+the store's read/write paths are gated on the live mode, not on this registration.
 
 Tool exclusion — the `research` tool honors an `excludeTools` list taken from
 the pi session context when the host forwards one.
