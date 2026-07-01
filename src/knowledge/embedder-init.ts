@@ -4,12 +4,13 @@
  * Handles initialization and warmup logic for the embedder
  */
 
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 import { logger } from '../logger.ts';
 import type { IStateManager } from '../core/service-interfaces.ts';
 import { DisposablePipeline } from '../core/interfaces/knowledge-interfaces.ts';
 import { withTimeout, markWebGpuFallback } from './embedder-utils.ts';
 import { getHFEnv } from './onnx-env.ts';
+import { getTransformers } from './transformers-loader.ts';
 
 /**
  * Load pipeline with timeout
@@ -27,6 +28,7 @@ export async function loadPipelineWithTimeout(
   // Creating the Promise outside means the background thread could write its
   // Dawn limit-clamping warnings before captureStdio redirects FD 2.
   const loadedPipeline = await logger.runCapturingStderr(async () => {
+    const { pipeline } = await getTransformers();
     const pipelinePromise = pipeline('feature-extraction', model, {
       device: device as 'webgpu' | 'cpu' | 'auto' | 'gpu' | 'wasm' | 'webnn' | 'webnn-npu' | 'webnn-gpu' | 'webnn-cpu',
       ...(useCache === false ? { use_cache: false } : {}),
@@ -140,7 +142,7 @@ export function isWebGpuDeviceError(err: unknown): boolean {
  */
 export async function isModelCached(model: string): Promise<boolean> {
   try {
-    const env = getHFEnv();
+    const env = await getHFEnv();
     const cacheDir = env.cacheDir;
     if (!cacheDir) return false;
     const { access, readdir, readFile, stat, rm } = await import('node:fs/promises');
@@ -235,7 +237,7 @@ export function isCorruptModelError(err: unknown): boolean {
  */
 export async function purgeModelCache(model: string): Promise<void> {
   try {
-    const env = getHFEnv();
+    const env = await getHFEnv();
     const cacheDir = env.cacheDir;
     if (!cacheDir) return;
     const { rm } = await import('node:fs/promises');
@@ -268,6 +270,7 @@ export async function loadModelOnCPU(
   logger.info(`[embedder] Loading model on CPU after WebGPU error...`);
   
   const loadedPipeline = await logger.runCapturingStderr(async () => {
+    const { pipeline } = await getTransformers();
     const pipelinePromise = pipeline('feature-extraction', model, {
       device: 'cpu',
       ...(useCache === false ? { use_cache: false } : {}),

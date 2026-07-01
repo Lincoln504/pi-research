@@ -4,7 +4,11 @@
  * Core database operations for the KnowledgeStore.
  */
 
-import * as lancedb from '@lancedb/lancedb';
+// Type-only import: this module references lancedb solely in type positions
+// (lancedb.Table / lancedb.rerankers.*). A type import is erased at build time,
+// so esbuild never hoists a native-loading `import` into the CLI bundle. See
+// ./lancedb-loader.ts for why that matters.
+import type * as lancedb from '@lancedb/lancedb';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
 import { StoreDocument } from '../core/interfaces/knowledge-interfaces.ts';

@@ -13,7 +13,10 @@ import {
   Int64,
   Bool
 } from 'apache-arrow';
-import * as lancedb from '@lancedb/lancedb';
+// Type-only import for lancedb types; runtime values (Index) come from the
+// lazy loader so the native binding is not hoisted into the CLI bundle.
+import type * as lancedb from '@lancedb/lancedb';
+import { getLancedb } from './lancedb-loader.ts';
 
 export const CURRENT_SCHEMA_VERSION = '4';
 
@@ -47,6 +50,7 @@ export async function createStoreTable(
   modelName: string
 ): Promise<lancedb.Table> {
   const schema = createStoreSchema(dim, modelName);
+  const { Index } = await getLancedb();
 
   // Create empty table with schema and metadata
   const table = await db.createTable({
@@ -60,16 +64,16 @@ export async function createStoreTable(
   //   'content' — full article markdown (keyword/BM25 grep through full article contents)
   // This enables true hybrid search: semantic similarity on descriptions +
   // keyword matching across full article text, fused via RRF reranking.
-  await table.createIndex('text', { config: lancedb.Index.fts() });
-  await table.createIndex('content', { config: lancedb.Index.fts() });
+  await table.createIndex('text', { config: Index.fts() });
+  await table.createIndex('content', { config: Index.fts() });
 
   // Create scalar indices for performance (B-Tree)
   // These improve deleteByUrl, countRows, and evictOldRecords performance significantly as the store grows.
-  await table.createIndex('url', { config: lancedb.Index.btree() });
-  await table.createIndex('timestamp', { config: lancedb.Index.btree() });
-  await table.createIndex('workspace', { config: lancedb.Index.btree() });
-  await table.createIndex('is_global', { config: lancedb.Index.btree() });
-  await table.createIndex('ingestion_type', { config: lancedb.Index.btree() });
+  await table.createIndex('url', { config: Index.btree() });
+  await table.createIndex('timestamp', { config: Index.btree() });
+  await table.createIndex('workspace', { config: Index.btree() });
+  await table.createIndex('is_global', { config: Index.btree() });
+  await table.createIndex('ingestion_type', { config: Index.btree() });
 
   return table;
 }

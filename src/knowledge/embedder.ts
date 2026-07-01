@@ -6,7 +6,7 @@
  * to release GPU memory when not in use.
  */
 
-import { type FeatureExtractionPipeline } from '@huggingface/transformers';
+import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 
 import { logger } from '../logger.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
@@ -132,9 +132,6 @@ export class Embedder {
       throw new Error('Cannot initialize while disposing');
     }
 
-    // Lazy initialization of ONNX environment
-    initializeONNXEnv();
-    
     if (this.initializingPromise) {
       return this.initializingPromise;
     }
@@ -160,6 +157,13 @@ export class Embedder {
 
   private async _initializeInternal(): Promise<void> {
     try {
+      // Lazy initialization of the ONNX/transformers environment. Kept here (not
+      // in initialize()) so initialize()'s synchronous state setup — state =
+      // 'initializing' and the initializingPromise — runs before the first await,
+      // preserving the dispose-during-init ordering. This is also the first point
+      // the native ML stack is touched (via the lazy transformers loader).
+      await initializeONNXEnv();
+
       // Resolve 'auto' to a concrete backend BEFORE any native ONNX/Dawn code runs.
       // For 'auto' this runs an out-of-process probe (cached per host) so that a
       // native SIGSEGV on a software/paravirtual GPU can never reach this process.
@@ -194,7 +198,7 @@ export class Embedder {
         `[embedder] Loading model: ${this.model} (${cached ? 'from local cache' : 'downloading from HuggingFace'})...`
       );
 
-      const env = getHFEnv();
+      const env = await getHFEnv();
       const prevAllowRemote = env.allowRemoteModels;
       if (cached) {
         env.allowRemoteModels = false;

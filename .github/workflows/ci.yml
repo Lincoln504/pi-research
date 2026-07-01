@@ -105,7 +105,10 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run lint
@@ -170,7 +173,10 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - run: npm run type-check
@@ -206,9 +212,18 @@ jobs:
           path: node_modules
           # runner.os is part of the key: node_modules holds platform-specific
           # native binaries, so each OS gets its own cache entry.
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
+      # Repair npm's optional-dependency bug (npm/cli#4828): a fresh `npm ci` or a
+      # restored node_modules cache can be missing the platform-specific
+      # @lancedb/lancedb native binding that the knowledge-store unit tests need.
+      # Verifies the binding loads and installs it directly by name if it doesn't.
+      - name: Ensure native bindings
+        run: node scripts/ensure-native-deps.cjs
       # Always (re)build the browser worker bundle. It is gitignored and produced
       # by the `prepare` lifecycle, which only runs as part of `npm ci`. On a
       # node_modules cache HIT `npm ci` is skipped, so without this step the
@@ -260,7 +275,10 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
         # camoufox-js's postinstall fetch queries the GitHub releases API; the
@@ -268,6 +286,11 @@ jobs:
         # macOS/Windows runner IPs.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Repair npm's optional-dependency bug (npm/cli#4828) before the integration
+      # suite, which exercises the real knowledge store (needs the @lancedb/lancedb
+      # native binding). See scripts/ensure-native-deps.cjs.
+      - name: Ensure native bindings
+        run: node scripts/ensure-native-deps.cjs
       - name: Install ripgrep (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y ripgrep
@@ -397,7 +420,10 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       # Validate architectural rules (fast, fails on violations)
@@ -433,7 +459,10 @@ jobs:
         id: cache-modules
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # v2: bust caches poisoned by npm's optional-dep bug (npm/cli#4828),
+          # which dropped the platform @lancedb/lancedb native binding from a
+          # saved node_modules tree. See scripts/ensure-native-deps.cjs.
+          key: node-modules-v2-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - if: steps.cache-modules.outputs.cache-hit != 'true'
         run: npm ci --legacy-peer-deps
       - name: Validate package.json
