@@ -45,9 +45,23 @@ export interface Description {
   readonly value?: string;
 }
 
+// CVSS v4.0 mirrors v3 (score + qualitative severity live in cvssData). NVD is actively adding it.
+export interface CVSSMetricV40 {
+  readonly cvssData: CVSSData;
+}
+
+// CVSS v2 differs: cvssData carries the numeric baseScore/vectorString but NO qualitative rating —
+// NVD exposes the v2 baseSeverity (LOW/MEDIUM/HIGH) at the METRIC level instead.
+export interface CVSSMetricV2 {
+  readonly cvssData: CVSSData;
+  readonly baseSeverity?: string;
+}
+
 export interface Metrics {
+  readonly cvssMetricV40?: CVSSMetricV40[];
   readonly cvssMetricV31?: CVSSMetricV31[];
   readonly cvssMetricV30?: CVSSMetricV30[];
+  readonly cvssMetricV2?: CVSSMetricV2[];
 }
 
 export interface CVE {
