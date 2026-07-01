@@ -12,6 +12,8 @@ in two distinct ways, and it is an optional cache — research works without it:
   store; instead the orchestrator hands each researcher the previously useful URLs for
   its goal as starting points to re-scrape live.
 
+![Knowledge-store hit — a cached answer returned without a live run](media/03-knowledge-store.gif)
+
 Together these make repeat work faster and cheaper.
 
 - [What it stores](#what-it-stores)

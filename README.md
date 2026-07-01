@@ -11,6 +11,21 @@ One engine backs several front-ends — the pi extension, a standalone CLI / age
 skill (the same skill any skills-aware host runs, including OpenClaw), and a
 programmatic SDK.
 
+## Demo
+
+Two research runs at once — one evaluating its findings, one still gathering:
+
+![Concurrent research panels](docs/media/hero.png)
+
+| | |
+|---|---|
+| **Slash command** — `/research <topic>` runs a live investigation | **Natural prompt** — the model picks the depth and runs multiple rounds |
+| ![Slash-command research](docs/media/01-slash-research.gif) | ![Prompt-driven multi-round research](docs/media/02-prompt-research.gif) |
+| **Knowledge store** — instant cached answers, no live run | **Config TUI** — every setting, live, no restart |
+| ![Knowledge-store hit](docs/media/03-knowledge-store.gif) | ![Configuration TUI](docs/media/04-config.gif) |
+| **Agent skill** — install research into any coding agent | **Health check** — one-command diagnostics |
+| ![Agent-skill install](docs/media/05-agent-skill.gif) | ![Health diagnostics](docs/media/06-health-check.gif) |
+
 ## Requirements
 
 - Node.js >= 22.19.0

@@ -6,6 +6,8 @@ model. This document covers the
 settings exposed in the `/research-config` TUI first, then the complete
 environment-variable reference, and finally how the configuration layers resolve.
 
+![The /research-config settings TUI](media/04-config.gif)
+
 - [Settings in the TUI](#settings-in-the-tui)
 - [Environment variables](#environment-variables)
 - [How configuration is layered](#how-configuration-is-layered)

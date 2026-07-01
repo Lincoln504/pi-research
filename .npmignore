@@ -65,6 +65,11 @@ build/
 out/
 *.tsbuildinfo
 
+# Demo media — kept in the repo for the README/docs (rendered from GitHub-raw on
+# npmjs.com), but deliberately NOT shipped in the tarball (multi-MB gifs). The
+# files[] allowlist already omits docs/media; this is the defence-in-depth mirror.
+docs/media/
+
 # OS cruft
 Thumbs.db
 Desktop.ini
