@@ -20,8 +20,16 @@ describe('scoreCvss3 — CVSS v3.1 base-score calculator', () => {
     });
   }
 
-  it('accepts CVSS:3.0 vectors (same base formula)', () => {
+  it('accepts CVSS:3.0 vectors (same base formula for unchanged scope)', () => {
     expect(scoreCvss3('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')?.score).toBe(9.8);
+  });
+
+  it('uses the version-specific changed-scope impact equation (v3.1 revised it)', () => {
+    // Same vector, different version: v3.1's changed-scope impact formula yields a higher score
+    // that crosses the MEDIUM/HIGH band. Using v3.0's formula for a v3.1 vector under-reports it.
+    const vector = 'AV:P/AC:H/PR:H/UI:N/S:C/C:H/I:H/A:H';
+    expect(scoreCvss3(`CVSS:3.1/${vector}`)).toEqual({ score: 7.0, severity: 'HIGH' });
+    expect(scoreCvss3(`CVSS:3.0/${vector}`)).toEqual({ score: 6.9, severity: 'MEDIUM' });
   });
 
   it('returns null for non-v3, unparseable, or incomplete vectors', () => {

@@ -2,12 +2,16 @@
  * Minimal CVSS v3.0/v3.1 base-score calculator.
  *
  * Used to derive a qualitative severity + numeric base score from a CVSS vector STRING (OSV
- * `severity[]` entries carry a vector, not a number). Implements the official CVSS v3.1 base-score
- * equations (identical to v3.0 for base metrics). Returns null for a vector it cannot parse, a
+ * `severity[]` entries carry a vector, not a number). Implements the official base-score equations
+ * for both versions. The two are identical EXCEPT the changed-scope impact sub-score, which v3.1
+ * revised (`(iss·0.9731 − 0.02)^13` vs v3.0's `(iss − 0.02)^15`); using the wrong one on a
+ * changed-scope vector can cross a severity band (e.g. 6.9/MEDIUM vs 7.0/HIGH), so the formula is
+ * selected from the version in the vector prefix. Returns null for a vector it cannot parse, a
  * non-v3 vector, or an incomplete base vector — callers then fall back to UNKNOWN rather than guess.
  *
  * Only the BASE metric group is computed (temporal/environmental are ignored), which is what a
- * severity label reflects. Verified against the CVSS v3.1 specification examples (9.8, 7.8, 6.1, 5.9).
+ * severity label reflects. Verified against the CVSS v3.1 specification examples (9.8, 7.8, 6.1, 5.9)
+ * and the v3.1 changed-scope case (7.0/HIGH).
  */
 
 const AV: Readonly<Record<string, number>> = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };
@@ -39,7 +43,9 @@ export function severityFromScore(score: number): string {
  * parseable, complete v3 base vector.
  */
 export function scoreCvss3(vector: string): { score: number; severity: string } | null {
-  if (typeof vector !== 'string' || !/^CVSS:3\.[01]\//i.test(vector)) return null;
+  const versionMatch = typeof vector === 'string' ? /^CVSS:3\.([01])\//i.exec(vector) : null;
+  if (!versionMatch) return null;
+  const isV31 = versionMatch[1] === '1';
 
   const metrics: Record<string, string> = {};
   for (const part of vector.split('/').slice(1)) {
@@ -61,9 +67,12 @@ export function scoreCvss3(vector: string): { score: number; severity: string } 
   }
 
   const iss = 1 - (1 - c!) * (1 - i!) * (1 - a!);
+  // Changed-scope impact differs between versions; base and unchanged-scope impact are identical.
   const impact = scope === 'U'
     ? 6.42 * iss
-    : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
+    : isV31
+      ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss * 0.9731 - 0.02, 13)
+      : 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15);
   const exploitability = 8.22 * av! * ac! * pr! * ui!;
 
   let score: number;
