@@ -80,6 +80,9 @@ export class StateManager {
   // newer file (which holds that build's sessions, browser lease, authSecret).
   private stateTooNew = false;
 
+  // One-time guard for the orphaned-temp sweep below.
+  private orphanTmpSwept = false;
+
   constructor(options: StateManagerOptions) {
     const {
       stateDir: providedStateDir,
@@ -133,6 +136,50 @@ export class StateManager {
         logger.error(`[StateManager] Failed to create directory ${dir}:`, err);
         throw err;
       }
+    }
+
+    await this.sweepOrphanedTempFiles();
+  }
+
+  /**
+   * Reclaim orphaned `research-state-*.tmp` files left in the state dir.
+   *
+   * Both the primary writer (_writeState) and the recovery writer
+   * (StateBackupManager.atomicWriteStateFile) write via temp+fsync+rename. The
+   * in-process `finally` cleans the temp on a failed write, but a process killed
+   * mid-write (SIGKILL, crash, OOM) between open and rename leaks the temp, and
+   * nothing else ever removes it — only backups/ is pruned. Sweep them here, once,
+   * on the first directory ensure.
+   *
+   * Only temps older than a safety window are removed: a live write holds the
+   * state lock and a temp exists for milliseconds, so anything older than the
+   * window cannot belong to a concurrent in-flight write (in this or another
+   * process). This makes the sweep safe without taking the state lock.
+   */
+  private async sweepOrphanedTempFiles(): Promise<void> {
+    if (this.orphanTmpSwept) return;
+    this.orphanTmpSwept = true;
+
+    const STALE_TMP_MS = 5 * 60 * 1000; // 5 minutes — far longer than any real write
+    const stateDir = path.dirname(this.stateFilePath);
+    const cutoff = Date.now() - STALE_TMP_MS;
+    try {
+      const entries = await fs.readdir(stateDir);
+      for (const entry of entries) {
+        if (!entry.startsWith('research-state-') || !entry.endsWith('.tmp')) continue;
+        const filePath = path.join(stateDir, entry);
+        try {
+          const stats = await fs.stat(filePath);
+          if (!stats.isFile() || stats.mtimeMs >= cutoff) continue;
+          await fs.unlink(filePath);
+          logger.debug(`[StateManager] Removed orphaned state temp file: ${entry}`);
+        } catch {
+          // Raced with another sweeper or the file vanished — ignore.
+        }
+      }
+    } catch (err) {
+      // Never let cleanup hygiene fail directory setup.
+      logger.debug('[StateManager] Orphaned temp sweep failed (non-fatal):', err);
     }
   }
 

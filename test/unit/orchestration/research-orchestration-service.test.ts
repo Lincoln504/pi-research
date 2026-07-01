@@ -11,6 +11,12 @@ vi.mock('../../../src/logger.ts', () => ({
     error: vi.fn(),
     debug: vi.fn(),
   },
+  resetLogger: vi.fn(),
+}));
+
+// Session-teardown helper invoked at the tail of cleanupResearchServices.
+vi.mock('../../../src/infrastructure/browser/browser-error-utils.ts', () => ({
+  clearSessionCircuitBreaker: vi.fn(),
 }));
 
 // Mock constants
@@ -28,8 +34,10 @@ vi.mock('../../../src/healthcheck/index.ts', () => ({
   healthRegistry: { runAll: vi.fn(), isCritical: vi.fn(() => true) },
 }));
 
-// Mock other imports that are not under test
-vi.mock('../../../src/utils/text-utils.ts', () => ({
+// Mock other imports that are not under test. Partial mock (keep real exports
+// such as normalizeWorkspacePath, which getConfig() needs during cleanup).
+vi.mock('../../../src/utils/text-utils.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/utils/text-utils.ts')>()),
   parseCitations: vi.fn(() => []),
 }));
 
@@ -291,6 +299,44 @@ describe('ResearchOrchestrationService', () => {
       await service.storeLinkDescriptions('s1', 1, 'r1', config as any);
 
       expect(localMockWriter.enqueue).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // cleanupResearchServices — FTS rebuild + optimize gating
+  // =========================================================================
+
+  describe('cleanupResearchServices knowledge maintenance', () => {
+    function mockStore(rebuilt: boolean) {
+      const store = {
+        rebuildFtsIndex: vi.fn().mockResolvedValue(rebuilt),
+        optimize: vi.fn().mockResolvedValue(true),
+      };
+      const ksService = { isReady: () => true, getStore: vi.fn().mockResolvedValue(store) };
+      vi.mocked(getService).mockImplementation(async (name: any) => {
+        if (name === ServiceNames.KNOWLEDGE_STORE) return ksService as any;
+        return null;
+      });
+      return store;
+    }
+
+    // Use the repo cwd, which resolves to the default KNOWLEDGE_STORE_MODE ('global')
+    // so the cleanup path resolves the store instead of skipping it. The
+    // container.tryGet stub lets the later synthesis/planning cleanup steps no-op.
+    const ctx = { cwd: process.cwd(), container: { tryGet: () => undefined } };
+
+    it('runs optimize() after a rebuild that actually ran (data changed)', async () => {
+      const store = mockStore(true);
+      await service.cleanupResearchServices('s1', 'r1', ctx);
+      expect(store.rebuildFtsIndex).toHaveBeenCalledTimes(1);
+      expect(store.optimize).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips optimize() when the FTS rebuild was a no-op (count unchanged)', async () => {
+      const store = mockStore(false);
+      await service.cleanupResearchServices('s1', 'r1', ctx);
+      expect(store.rebuildFtsIndex).toHaveBeenCalledTimes(1);
+      expect(store.optimize).not.toHaveBeenCalled();
     });
   });
 });

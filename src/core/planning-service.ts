@@ -16,7 +16,7 @@ import type {
   GeneratePlanOptions
 } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
-import { completeSimple } from '@earendil-works/pi-ai/compat';
+import { completeSimple } from './llm/pi-ai-completion.ts';
 import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
 import { extractUsage } from '../types/llm.ts';

@@ -345,7 +345,7 @@ export function getGlobalEnvFilePath(): string {
  * Keys in the overlay win over the base file but lose to process.env and
  * the centralized project registry.
  *
- * - 'pi'        → src/index.ts (the pi extension: /research + /research-config)
+ * - 'pi'        → src/index.ts (the pi extension: /research, /research-config, /knowledge-store)
  * - 'cli'       → src/cli.ts (the standalone `pi-research` CLI / agent skill —
  *                 the surface every skills-aware host, including OpenClaw, runs)
  *

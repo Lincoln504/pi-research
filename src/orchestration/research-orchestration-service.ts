@@ -177,7 +177,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           const store = await ksService.getStore();
           if (store) {
             logger.info('[ResearchOrchestrationService] Rebuilding FTS index after research run');
-            await store.rebuildFtsIndex();
+            const rebuilt = await store.rebuildFtsIndex();
+            // Only compact/prune when the FTS index was actually rebuilt — i.e. the
+            // run changed the data. A no-op run skips both, so steady-state loops no
+            // longer accumulate orphaned index/version files (the disk-bloat fix).
+            if (rebuilt) {
+              await store.optimize();
+            }
           }
         }
       }

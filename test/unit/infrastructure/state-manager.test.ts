@@ -116,6 +116,28 @@ describe('StateManager Integration-style Tests', () => {
     expect(lockStats.isDirectory()).toBe(true);
   });
 
+  it('sweeps orphaned state .tmp files (stale) but spares fresh ones on first ensure', async () => {
+    // A SIGKILL between temp-write and rename leaks a research-state-*.tmp. Nothing
+    // else reaps it, so the sweep on first directory-ensure must.
+    const staleTmp = path.join(testDir, 'research-state-deadbeef.tmp');
+    const freshTmp = path.join(testDir, 'research-state-livewrite.tmp');
+    const unrelated = path.join(testDir, 'keepme.txt');
+    await fs.writeFile(staleTmp, 'orphaned');
+    await fs.writeFile(freshTmp, 'in-flight');
+    await fs.writeFile(unrelated, 'not a state temp');
+
+    // Age the stale temp well past the 5-minute safety window.
+    const old = new Date(Date.now() - 30 * 60 * 1000);
+    await fs.utimes(staleTmp, old, old);
+
+    // First read triggers ensureDirectories() → sweepOrphanedTempFiles().
+    await manager.readState();
+
+    await expect(fs.access(staleTmp)).rejects.toThrow(); // removed
+    await expect(fs.access(freshTmp)).resolves.toBeUndefined(); // spared (could be a live write)
+    await expect(fs.access(unrelated)).resolves.toBeUndefined(); // never touched
+  });
+
   it('should write and read state correctly', async () => {
     const initialState = await manager.readState();
     expect(initialState.sessions).toEqual({});
