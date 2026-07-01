@@ -36,12 +36,23 @@ Ask in natural language — the tool understands the depth needed:
 
 ![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 
-### Requirements
+### Use cases
+
+- Deep web research from inside the pi extension.
+- Research from Claude Code, Codex, or another coding agent, with a cheaper lightweight or local model driving the research so it doesn't spend your main agent's budget.
+- Populating a dataset or building an index of knowledge sources from the web.
+- Holding research in the knowledge store with a configurable scope — project-specific or globally user-scoped, set per directory from the `/research-config` TUI.
+- Using the pi-research agent skill as OpenClaw's web access.
+- Building agent systems that identify and examine web sources.
+
+### Requirements / limitations
 
 - Node.js >= 22.19.0
 - An LLM with a 100k+ context window (bring your own key)
 - Internet access
 - A residential IP address — search, scraping, and YouTube transcripts all rely on a residential connection. A datacenter/VPS/cloud IP gets bot-blocked by the providers these features depend on.
+- The pi runtime the engine builds on — `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui`. The pi extension uses the host's copies; the standalone CLI / agent skill install them as dependencies (`@earendil-works/pi-coding-agent` is the peer the launcher checks is resolvable, and it will tell you to reinstall if a partial install leaves it out).
+- Cloudflare and similar anti-automation systems block scraping on some sites, so runs will identify sources they cannot reach. pi-research compensates with volume: the search tool rapidly pulls a large set of results off free DuckDuckGo, giving the model a wide selection of reachable content to choose from.
 
 ### Install
 
@@ -61,21 +72,7 @@ npm install -g @lincoln504/pi-research
 
 See [Agent skill](docs/AGENT-SKILL.md) for details.
 
-Development build (bleeding edge)
-
-```bash
-pi install git:https://github.com/Lincoln504/pi-research.git
-```
-
-Or from a local clone:
-
-```bash
-git clone https://github.com/Lincoln504/pi-research.git
-cd pi-research
-pi install .
-```
-
-npm is the stable channel; the git install is the development channel (see Stability, below). The first install pulls the stealth browser engine, which takes a few minutes.
+The first install pulls the stealth browser engine, which takes a few minutes.
 
 ### Stability (v1.0.0)
 
