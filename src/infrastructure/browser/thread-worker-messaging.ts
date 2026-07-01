@@ -292,6 +292,20 @@ export async function executeScrapeTask(
 
     // High-fidelity wait: try domcontentloaded first for speed
     const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    // DNS-rebinding defense-in-depth. The page.route guard's validateForWorker resolves the
+    // hostname independently of the browser's own connect-time resolution, so a TTL-0 rebind can
+    // pass validation yet have the browser connect to a private/metadata IP (169.254.169.254 /
+    // RFC1918). The browser reports the IP it ACTUALLY connected to via serverAddr — re-check it
+    // against the same SSRF policy and refuse to return the body if it is internal. This does not
+    // prevent the TCP connection itself, but it stops the rendered response (e.g. cloud IAM
+    // credentials) from being exfiltrated to the researcher/report, which is the real harm here.
+    const serverAddr = await response?.serverAddr().catch(() => null);
+    if (serverAddr?.ipAddress) {
+      const ip: string = serverAddr.ipAddress;
+      validateForWorkerSync(ip.includes(':') ? `http://[${ip}]/` : `http://${ip}/`);
+    }
+
     const contentType = (await response?.headerValue('content-type')) || '';
 
     if (contentType.includes('application/pdf')) {
