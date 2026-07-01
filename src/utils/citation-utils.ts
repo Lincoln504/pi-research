@@ -51,7 +51,12 @@ export function normalizeCitations(reports: Map<string, string>): {
     localCitations.forEach((cit, index) => {
       const globalId = urlToGlobalId.get(normalizeUrl(cit.url));
       if (globalId !== undefined) {
-        localToGlobal.set(index + 1, globalId);
+        // Key by the number the report actually WROTE for this entry (e.g. `[3]`), not its list
+        // position. A report that numbers CITED LINKS non-sequentially (or has an entry dropped as
+        // an implausible URL) would otherwise remap inline [N] to the wrong global id or leave it
+        // dangling. Fall back to position when a written number is unavailable.
+        const localKey = cit.number ?? (index + 1);
+        localToGlobal.set(localKey, globalId);
       }
     });
 

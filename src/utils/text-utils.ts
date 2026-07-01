@@ -177,6 +177,9 @@ export interface Citation {
   url: string;
   description: string;
   source?: string;
+  /** The number the report actually wrote for this entry (e.g. 3 for `[3]`). Used to remap
+   *  inline `[N]` by the written label, not list position, so non-sequential numbering maps right. */
+  number?: number;
 }
 
 /**
@@ -233,8 +236,16 @@ export function parseCitations(report: string): Citation[] {
   const citations: Citation[] = [];
   // Match [N] or N. or **[N]** or **N.** with optional whitespace
   const blocks = section.split(/(?:\*\*|)\s*(?:\[\d+\]|\d+\.)\s*(?:\*\*|)/).slice(1);
-  
-  for (const block of blocks) {
+  // Capture the written number for each delimiter in parallel, using a SEPARATE global+capturing
+  // regex (adding a capture group to the split pattern above would inject the captures into the
+  // split output and break block indexing). blocks[i] is the content after delimiter i, so
+  // writtenNumbers[i] is blocks[i]'s label — used to remap inline [N] by label, not position.
+  const writtenNumbers = [...section.matchAll(/(?:\*\*|)\s*(?:\[(\d+)\]|(\d+)\.)\s*(?:\*\*|)/g)]
+    .map(m => parseInt(m[1] ?? m[2] ?? '', 10));
+
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi]!;
+    const writtenNumber = Number.isFinite(writtenNumbers[bi]) ? writtenNumbers[bi] : undefined;
     const lines = block.trim().split('\n');
     if (lines.length === 0) continue;
     
@@ -280,7 +291,7 @@ export function parseCitations(report: string): Citation[] {
     }
     
     if (url && isPlausibleCitationUrl(url)) {
-      citations.push({ url, description: desc, source });
+      citations.push({ url, description: desc, source, number: writtenNumber });
     }
   }
   return citations;
