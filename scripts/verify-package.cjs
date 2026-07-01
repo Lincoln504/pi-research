@@ -54,6 +54,11 @@ const REQUIRED = [
   // Install/uninstall lifecycle scripts
   'scripts/setup.cjs',
   'scripts/cleanup.cjs',
+  // Build scripts the git-install path depends on: `prepare` runs on install and
+  // invokes build.cjs to produce dist/ + the skill launcher from source. Dropping
+  // either from files[] would silently break `pi install git:` / directory installs.
+  'scripts/build.cjs',
+  'scripts/prepare.cjs',
 ];
 
 // Prompt templates must ship in BOTH locations (src tree for the pi extension,
