@@ -2,7 +2,7 @@ import * as http from 'node:http';
 import * as crypto from 'node:crypto';
 import { logger } from '../../logger.ts';
 import type { SearchResult } from '../../web-research/types.ts';
-import { isCloudflareBlockError } from './browser-error-utils.ts';
+import { isCloudflareBlockError, isPoolShutdownError } from './browser-error-utils.ts';
 
 export interface BrowserServerOptions {
     onSearch: (query: string) => Promise<SearchResult[]>;
@@ -98,6 +98,10 @@ export class BrowserServer {
                         // Everything else is a genuine request-handling error.
                         if (isCloudflareBlockError(error)) {
                             logger.warn('[BrowserServer] Request blocked by bot protection:', error instanceof Error ? error.message : String(error));
+                        } else if (isPoolShutdownError(error)) {
+                            // Pool destroyed mid-request during quit/SIGTERM teardown — expected,
+                            // not a server fault. DEBUG so a normal shutdown doesn't emit ERRORs.
+                            logger.debug('[BrowserServer] Request abandoned during shutdown:', error instanceof Error ? error.message : String(error));
                         } else {
                             logger.error('[BrowserServer] Error handling request:', error);
                         }

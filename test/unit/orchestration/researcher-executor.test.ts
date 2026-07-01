@@ -459,6 +459,32 @@ describe('runResearcher', () => {
       expect(mockAbort).toHaveBeenCalledTimes(2);
       expect(mockUnregister).toHaveBeenCalledTimes(2);
     });
+
+    it('does NOT retry when the service container is disposing (quit/SIGTERM mid-run)', async () => {
+      // Regression: a quit mid-run disposes services; the researcher's next getService throws
+      // "…during container disposal". Retrying is futile and relaunches search bursts into a
+      // WorkerPool that dispose() is destroying ("Cannot execute a task on destroying pool").
+      mockPrompt.mockRejectedValue(new Error('transient failure'));
+      const disposingCtx = { ...BASE_CTX, container: { isReady: true, isDisposing: true } };
+
+      await expect(runResearcher(makeOptions({
+        ctx: disposingCtx as any,
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+      }))).rejects.toThrow('transient failure');
+
+      // Exactly one attempt — the disposal guard breaks the loop instead of retrying.
+      expect(mockPrompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT retry when the failure is a container-disposal error', async () => {
+      mockPrompt.mockRejectedValue(new Error("Cannot get service 'x' during container disposal"));
+
+      await expect(runResearcher(makeOptions({
+        researchConfig: { ...SYSTEM_CONFIG, RESEARCHER_MAX_RETRIES: 2 } as any,
+      }))).rejects.toThrow('during container disposal');
+
+      expect(mockPrompt).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── Abort signal ────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer, getBrowserServerAuthSecret } from './browser-server.ts';
+import { isPoolShutdownError } from './browser-error-utils.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
@@ -196,6 +197,14 @@ export class BrowserTaskScheduler implements IScheduler {
             ]);
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
+            // A pool-shutdown/destroy error means the run is being torn down (quit/SIGTERM
+            // mid-search-burst): the task never ran because dispose() destroyed the pool.
+            // That is expected teardown, not a fault — log at DEBUG and don't count it toward
+            // the error metric/tracker, so a normal quit-mid-run doesn't inflate ERROR counts.
+            if (isPoolShutdownError(error)) {
+                logger.debug(`[BrowserTaskScheduler] Search abandoned during shutdown: "${query}"`);
+                throw error;
+            }
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
             metrics.increment('browser_search_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {

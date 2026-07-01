@@ -340,8 +340,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         logger.debug(`[ResearcherExecutor] Researcher ${id} salvage attempt failed:`, salvageErr);
       }
       
-      if (signal?.aborted || errMsg === 'Aborted') {
-        logger.debug(`[ResearcherExecutor] Researcher ${id} was aborted, skipping retries.`);
+      // Skip retries when the run is being torn down: an aborted signal, an explicit
+      // "Aborted" error, or the service container entering disposal (SIGTERM/quit
+      // mid-run, which throws "…during container disposal" from getService). Retrying
+      // during disposal is futile — services are being destroyed — and it relaunches
+      // search bursts into a WorkerPool that dispose() is simultaneously destroying,
+      // producing a storm of "Cannot execute a task on destroying pool" errors.
+      if (signal?.aborted || errMsg === 'Aborted' || errMsg.includes('during container disposal') || container?.isDisposing) {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} aborted or container disposing, skipping retries.`);
         break; // Break out of the attempt loop
       }
 

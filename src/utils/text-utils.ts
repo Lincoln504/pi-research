@@ -89,7 +89,9 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
     throw new Error(`${label}: No assistant response found`);
   }
 
-  // Check for explicit error stop reason or error message
+  // Check for explicit error stop reason or error message. An aborted session with an
+  // errorMessage is an interruption, not a provider error — fall through so any partial
+  // text it produced is salvaged below (and, if empty, reported as an abort not a model fault).
   if (last.stopReason === 'error' || (last.errorMessage && last.stopReason !== 'aborted')) {
     const msg = last.errorMessage || 'Unknown error';
     if (msg.includes('429')) {
@@ -110,6 +112,13 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
 
   const text = extractText(last);
   if (!text.trim()) {
+    // An aborted session with no salvageable text was interrupted mid-turn (quit/SIGTERM
+    // during research, or a timeout abort) before the model emitted its final answer. That
+    // is NOT a model-capability failure — surface an explicit "Aborted" so callers skip
+    // retries (see researcher-executor) instead of blaming the model with the message below.
+    if (last.stopReason === 'aborted') {
+      throw new Error(`${label}: Aborted`);
+    }
     // zero text content blocks in the final assistant message. This typically means
     // all tool calls failed, or the session ended without a visible response.
     throw new Error(
