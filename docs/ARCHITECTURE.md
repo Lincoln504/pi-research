@@ -1,61 +1,110 @@
 ## Architecture
 
-pi-research is a pi CLI extension that provides multi-agent web research. It runs inside the pi process, registers tools and commands, and manages its own browser worker pool, service registry, and local knowledge store.
+pi-research is a pi CLI extension for multi-agent web research. It runs inside the pi
+process, registers its tools and commands, and manages its own browser worker pool,
+service registry, and local knowledge store. The same engine is also exposed as a
+standalone CLI, a portable agent skill, and a programmatic SDK (`src/sdk.ts`).
 
 ```
 pi CLI
 └── pi-research extension (src/index.ts)
-    ├── Tools         research, health, research_knowledge_search (when store enabled)
-    ├── Commands      /research, /research-config, /knowledge-store
-    ├── Event hooks   before_agent_start, after_provider_response
+    ├── Tools      research, health, research_knowledge_search (when the store is enabled)
+    ├── Commands   /research, /research-config, /knowledge-store
+    ├── Events     input (mid-run steering), session_shutdown (cleanup)
     └── Layers
         ├── Orchestration   quick/deep research coordination
-        ├── Tools           search, scrape, youtube_transcript, security, stackexchange, grep
+        ├── Tools           search, scrape, youtube_transcript, security_search, stackexchange, grep, read
         ├── Infrastructure  browser pool, knowledge store, state manager
         └── Core            service registry, scheduler, health checks
 ```
 
+### A run, end to end
+
+1. A query enters through `runResearch` — the single internal entry point — with a depth.
+2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below).
+3. On the deep path the coordinator plans the research tracks and runs one initial
+   search burst, then hands each researcher a set of result URLs to start from.
+4. Researchers scrape and read those pages through the stealth browser and return cited
+   reports. They reason only from what they scraped this session — no prior knowledge.
+5. The evaluator reviews the round and either runs another round or synthesizes the
+   final report.
+6. The result is returned as a single cited Markdown report. Separately and
+   asynchronously, the cited URLs and their summaries are queued into the knowledge
+   store for future runs.
+
 ### Orchestration
 
-Two orchestrators handle research sessions:
+`runResearch` (`IResearchOrchestration`, implemented in
+`src/orchestration/research-orchestration-service.ts`) is the single internal entry
+point. It dispatches on depth.
 
-QuickResearchOrchestrator (`src/orchestration/quick-research-orchestrator.ts`)
-- Single researcher agent, depth 0
-- No planning phase — agent runs directly with all tools
+Depth 0 — quick (`QuickResearchOrchestrator`): a single researcher runs directly with
+all tools; there is no coordinator, no planning phase, and no rounds. Depth 0 is
+reachable only through the SDK (`runQuickResearch`) or the CLI (`--depth 0`, which the
+agent skill can pass). The pi extension's `research` tool has a minimum depth of 1, so
+an in-session agent can never request quick mode.
 
-DeepResearchOrchestrator (`src/orchestration/deep-research-orchestrator.ts`)
-- Coordinator → N parallel researchers → evaluator → synthesis
-- Depths 1–3 map to 2/3/5 researchers and 2/3/3 rounds
-- Coordinator plans research tracks; evaluator decides whether to go deeper
+Depth 1–3 — deep (`DeepResearchOrchestrator`): the run proceeds in **rounds**. A round
+is one coordinate → research → evaluate cycle — the round's agenda is planned (by the
+coordinator in round 1, by the evaluator thereafter), a batch of **researchers** runs it
+in parallel, and the evaluator then decides whether to run another round or synthesize.
+Two limits apply independently: how many researchers run *within* a round, and how many
+rounds the run may take.
 
-`runResearch` in `IResearchOrchestration` is the single internal entry point, implemented in `src/orchestration/research-orchestration-service.ts`.
+| Depth | Label  | Researchers per round (max) | Rounds (max) |
+|-------|--------|-----------------------------|--------------|
+| 1     | normal | 2                           | 2            |
+| 2     | deep   | 3                           | 3            |
+| 3     | ultra  | 5                           | 3            |
 
-LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and knowledge-extraction calls go through `completeSimple` + `buildSafeOptions` (`src/core/llm/llm-utils.ts`); researcher sub-agents go through `createAgentSession`. Two conventions apply:
+These are ceilings, not targets: the coordinator and evaluator use as many researchers
+and rounds as the topic needs. A depth-2 run, for example, may spawn up to 3 researchers
+in each of up to 3 rounds. Queued steering messages (Alt+Enter) can unlock a few extra
+rounds past the cap (`MAX_EXTRA_ROUNDS_WITH_STEERING`).
 
-- Thinking is off by default. These calls emit structured JSON or cited reports, so a chain-of-thought block consumes output-token budget (and can truncate the answer) for little gain. One knob controls it: `PI_RESEARCH_LLM_THINKING_LEVEL` (default `off`), passed through pi's reasoning option and clamped per provider.
-- Output budgets are sized per role and clamped to the model's ceiling: `PLANNING_MAX_TOKENS` for the plan/decision, `SYNTHESIS_MAX_TOKENS` for the final report. The report is the evaluator's `synthesize` response, so that call carries the report budget. A mid-round evaluation that cannot be parsed continues the existing agenda rather than finalizing early, so a parse failure does not truncate a run.
+The coordinator also runs the initial search burst and distributes its result URLs to
+round 1's researchers (`distributeSearchResults`), so in deep mode the researchers
+themselves do not call `search`.
 
-### Research Tools
+LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and
+knowledge-extraction calls go through `completeSimple` + `buildSafeOptions`
+(`src/core/llm/llm-utils.ts`); researcher sub-agents go through `createAgentSession`.
+Two conventions apply:
 
-Each researcher agent has access to a fixed tool set with shared budget (12 calls across gathering tools per phase):
+- Thinking is off by default. These calls emit structured JSON or cited reports, so a
+  chain-of-thought block only spends output-token budget (and can truncate the answer).
+  `PI_RESEARCH_LLM_THINKING_LEVEL` (default `off`) controls it, clamped per provider.
+- Output budgets are sized per role and clamped to the model's ceiling:
+  `PLANNING_MAX_TOKENS` for the plan/decision, `SYNTHESIS_MAX_TOKENS` for the final
+  report. A mid-round evaluation that cannot be parsed continues the existing agenda
+  rather than finalizing early, so a parse failure never truncates a run.
 
-| Tool | Quick | Deep | Source |
-|------|-------|------|--------|
-| `search` | ✓ | — | DuckDuckGo Lite via stealth browser |
-| `scrape` | ✓ | ✓ | URL batch scraping via stealth browser (up to 6 URLs each) |
-| `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos, one call/researcher) |
+### Research tools
+
+Each researcher has a fixed tool set and a shared budget of 12 gathering calls per phase
+(`MAX_GATHERING_CALLS`).
+
+| Tool | Quick | Deep | Backend |
+|------|-------|------|---------|
+| `search` | ✓ | — | DuckDuckGo Lite via the stealth browser |
+| `scrape` | ✓ | ✓ | Batch page fetch → Markdown via the stealth browser (up to 6 URLs per call) |
+| `youtube_transcript` | ✓ | ✓ | YouTube captions via youtubei.js + BotGuard PoToken (≤3 videos, one call per researcher) |
 | `security_search` | ✓ | ✓ | NVD, CISA KEV, GitHub Advisories, OSV |
 | `stackexchange` | ✓ | ✓ | Stack Exchange network |
-| `grep` | — | ✓ | Local ripgrep |
+| `grep` | — | ✓ | Local ripgrep (from pi-coding-agent) |
 | `read` | ✓ | ✓ | Local file reads (from pi-coding-agent) |
 
-In deep research, `search` is excluded from researchers — the orchestrator runs the search burst and distributes result URLs directly. In quick research, `grep` is excluded — the single researcher session is not expected to do local codebase traversal.
+In deep research `search` is excluded — the coordinator runs the search burst and hands
+out URLs directly. In quick research `grep` is excluded — the single session is not
+expected to traverse a local codebase. Researchers cannot write files, run shell
+commands, or reach the network outside these tools.
 
-Researchers cannot write files, run shell commands, or access the network outside these tools.
+### Browser infrastructure
 
-### Browser Infrastructure
-
-All browser operations (search, scrape, health checks) go through a poolifier `FixedClusterPool` of worker processes. Workers are Node.js child processes each running a camoufox (stealth Firefox) instance.
+All browser work (search, scrape, health checks) goes through a poolifier
+`FixedClusterPool` of worker processes — each a Node.js child process running its own
+camoufox (stealth Firefox) instance. Isolating the browser in workers means a crash in
+one worker cannot take down the orchestrator or other sessions.
 
 ```
 BrowserTaskScheduler
@@ -66,136 +115,143 @@ BrowserTaskScheduler
 ```
 
 Key files:
-- `src/infrastructure/browser/browser-task-scheduler.ts` — dispatches tasks to pool
-- `src/infrastructure/browser/thread-worker.ts` — worker entry point (bundled separately)
+- `src/infrastructure/browser/browser-task-scheduler.ts` — dispatches tasks to the pool
+- `src/infrastructure/browser/thread-worker.ts` — worker entry point (bundled separately by esbuild)
 - `src/infrastructure/browser/thread-worker-messaging.ts` — IPC protocol
 - `src/infrastructure/browser/config.ts` — pool configuration, binary path detection
 
-Workers run in `FULL_MOCK_MODE` (both `PI_RESEARCH_MOCK_SEARCH` and `PI_RESEARCH_MOCK_SCRAPE` set) during CI to avoid FixedClusterPool deadlocks in Vitest's fork context.
+During CI, workers run in `FULL_MOCK_MODE` (`PI_RESEARCH_MOCK_SEARCH` +
+`PI_RESEARCH_MOCK_SCRAPE`) to avoid FixedClusterPool deadlocks in Vitest's fork context.
 
-### Knowledge Store
+### Knowledge store and data handling
 
-Scraped content is embedded and stored in LanceDB for cross-session deduplication and RAG retrieval.
+The knowledge store is a local LanceDB vector table of past findings. It is optional
+(research works without it) and is driven entirely by the orchestrator — researchers
+never call it directly:
 
-Pipeline integration — the knowledge store is accessed at the orchestrator level, not by researcher agents directly:
-- Before each researcher starts, the orchestrator queries the store per-researcher goal and injects matching historical URLs (with summaries) into the researcher's system prompt.
-- After research completes, parsed citation URLs and descriptions are enqueued into the writer queue for the next session.
+- Before each researcher starts, the orchestrator searches the store for that
+  researcher's goal and injects any matching historical URLs (with summaries) into its
+  prompt as starting points.
+- After a run, the cited URLs and their descriptions are enqueued into the async writer
+  queue and stored in the background — writes never block a run.
 
-This keeps the knowledge store integration deterministic and pipeline-controlled rather than relying on researchers to call it explicitly.
+On ingest, each source's summary and full scraped Markdown are split into chunks and
+embedded into vectors. A SHA-256 content hash of the page dedupes re-ingested URLs:
+an unchanged page is skipped, a changed page replaces its old rows. Each row carries the
+vector, the normalized URL, the text and full content, a timestamp, and scope flags
+(project vs. global) that are filtered at query time.
 
 ```
 WriterQueue (async, non-blocking)
 └── KnowledgeStore
     ├── Embedder  (onnx-community/granite-embedding-small-english-r2-ONNX via @huggingface/transformers)
-    │   └── inference backend: auto (out-of-process WebGPU probe → webgpu or cpu) / webgpu / cpu
+    │   └── backend: auto (out-of-process WebGPU probe → webgpu or cpu) / webgpu / cpu
     └── LanceDB   (knowledge_db/ directory, Arrow-backed vector table)
 ```
 
-Key files:
-- `src/knowledge/store.ts` — LanceDB operations
-- `src/knowledge/embedder.ts` — model loading and batched inference
-- `src/knowledge/writer-queue.ts` — async write queue
-- `src/knowledge/webgpu-viability.ts` — out-of-process WebGPU probe + cached verdict
-- `src/knowledge/migration.ts` — model change migration (drop, backup, or re-embed)
+Key files: `src/knowledge/store.ts` (LanceDB operations), `embedder.ts` (model load +
+batched inference), `writer-queue.ts` (async writes + content-hash dedup), `chunker.ts`
+(chunking), `webgpu-viability.ts` (out-of-process GPU probe + cached verdict),
+`migration.ts` (model-change migration: drop / backup / re-embed).
 
-The store depends on native ONNX-runtime and LanceDB bindings. Platforms without a
-prebuilt binary — notably Intel macOS (`darwin-x64`) — have no store: the health
-check reports it as disabled (healthy) and research runs without the cache. See
+The store needs native ONNX-runtime and LanceDB bindings. On platforms with no prebuilt
+binary — notably Intel macOS (`darwin-x64`) — it is absent: the health check reports it
+disabled-but-healthy and research runs without the cache. See
 [KNOWLEDGE-STORE.md](KNOWLEDGE-STORE.md) for the full subsystem and platform matrix.
 
-### Service Registry
+### Services and lifecycle
 
-Services are registered with async factory functions and initialized lazily or eagerly. Dependencies are resolved at initialization time via `getService()`.
+Services are registered with async factory functions and resolved through a registry
+(`getService()`), initialized lazily or eagerly with dependencies wired at init time.
 
 ```typescript
-// registration
 registerService(ServiceNames.FOO, async () => {
   const dep = await getService<IBar>(ServiceNames.BAR);
   return new FooService(dep);
 }, { lazyInitialization: true });
 
-// usage anywhere in the codebase
 const foo = await getService<IFoo>(ServiceNames.FOO);
 ```
 
-Services that hold resources implement `dispose()` for clean shutdown. The registry handles disposal in reverse dependency order.
+Services that hold resources implement `dispose()`; the registry disposes them in
+reverse dependency order. Resolving through the registry (rather than direct imports)
+enforces lifecycle discipline (init → use → dispose) and lets tests swap in mocks.
 
-Core services (`src/core/`): `PlanningService`, `SchedulerService`
-Infrastructure services (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`.
-Orchestration services (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`.
+- Core (`src/core/`): `PlanningService`, `SchedulerService`
+- Infrastructure (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`
+- Orchestration (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`
 
-### State Management
-
-Cross-session and cross-process state (active sessions, browser status, metrics) is managed by `StateManagerService` (in `src/infrastructure/state/`) using file-based locking (`FileLockService`) to serialize concurrent writes.
+Cross-session, cross-process state (active sessions, browser status, metrics) lives in
+`StateManagerService` (`src/infrastructure/state/`), which serializes concurrent writes
+with file-based locking (`FileLockService`).
 
 ### TUI
 
-The research TUI uses `@earendil-works/pi-tui` to render live progress panels. Terminal state (keyboard protocol, mouse tracking, bracketed paste) and stdio capture are managed by utilities in `src/tui/utils/` to ensure a clean exit.
+The live progress panel uses `@earendil-works/pi-tui`. Terminal state (keyboard
+protocol, mouse tracking, bracketed paste) and stdio capture are handled by
+`src/tui/utils/` to guarantee a clean exit.
 
-### Project Structure
+### Project structure
 
 ```
 src/
-├── index.ts              extension entry point
-├── config.ts             env var parsing, validation, singleton
-├── logger.ts             structured logger (JSONL, TUI-safe)
-├── tool.ts               tool definitions (research, health)
+├── index.ts              extension entry point (tools, commands, events, lifecycle)
+├── cli.ts                standalone CLI entry point
 ├── sdk.ts                programmatic SDK (non-extension use)
+├── config.ts             env-var parsing, validation, singleton
+├── constants.ts          team sizes, round caps, tool budgets, batch limits
+├── logger.ts             structured logger (JSONL, TUI-safe)
+├── tool.ts               research + health tool definitions
 ├── research-config.ts    /research-config TUI
 ├── core/
-│   ├── llm/              agentic repair, prompts, model resolution, inject-date
+│   ├── llm/              prompts, model resolution, agentic JSON repair, inject-date
 │   ├── interfaces/       abstraction contracts (observer, planning, orchestration)
-│   ├── service-registry.ts
-│   ├── service-interfaces.ts
-│   ├── service-initialization.ts
-│   ├── planning-service.ts
-│   └── scheduler-service.ts
+│   ├── planning-service.ts, scheduler-service.ts
+│   ├── service-registry.ts, service-interfaces.ts, service-initialization.ts
+│   └── planning-utils.ts
 ├── infrastructure/
 │   ├── browser/          worker pool, task scheduler, IPC, camoufox config
 │   ├── state/            state manager, session tracking, metrics collector
 │   ├── embedding/        local embedding server management
-│   ├── types/            infrastructure-level types
-│   ├── knowledge-store-service.ts
-│   ├── metrics-service.ts
-│   ├── process-lifecycle-service.ts
-│   ├── file-lock-service.ts
-│   └── service-initialization.ts
+│   ├── knowledge-store-service.ts, metrics-service.ts, file-lock-service.ts
+│   └── process-lifecycle-service.ts
 ├── orchestration/
-│   ├── session/          in-memory research session tracking, PI session metadata
-│   ├── deep-research-orchestrator.ts
-│   ├── quick-research-orchestrator.ts
-│   ├── research-orchestration-service.ts
-│   ├── researcher-executor.ts
-│   ├── researcher.ts
-│   └── service-initialization.ts
+│   ├── session/          in-memory research-session tracking, PI session metadata
+│   ├── deep-research-orchestrator.ts, quick-research-orchestrator.ts
+│   ├── research-orchestration-service.ts, researcher-executor.ts, researcher.ts
 ├── prompts/              Markdown prompt templates for all agents
 ├── tools/                search, scrape, youtube_transcript, security, stackexchange, grep, read, knowledge-search
-├── skill-install/        research-skill installer for coding-agent harnesses
+├── knowledge/            embedder, store, writer queue, chunker, migration, webgpu probe
 ├── web-research/         DuckDuckGo search, scraper, retry logic
-├── knowledge/            embedder, store, writer queue, chunker, migration
-├── tui/
-│   ├── utils/            terminal state, stdio capture
-│   └── ...               panels, layout, controller, wave animation
-├── healthcheck/          health check registry and checks
-├── cleanup/              research result cleanup
-├── observers/            research-observer implementation
 ├── security/             NVD, CISA KEV, OSV, GitHub Advisory clients
 ├── stackexchange/        Stack Exchange API client
-├── types/                shared index types and TUI types
-└── utils/                circuit breaker, text-utils, shared-links, metrics, error tracking
+├── youtube/              YouTube transcript client (InnerTube + BotGuard PoToken)
+├── skill-install/        research-skill installer for coding-agent harnesses
+├── tui/                  panels, layout, controller, wave animation, terminal utils
+├── healthcheck/          health-check registry and checks
+├── cleanup/              research-result cleanup
+├── observers/            research-observer implementation
+├── types/                shared index and TUI types
+└── utils/                circuit breaker, text utils, shared-links, metrics, error tracking
 ```
 
-### Key Design Decisions
+### Key design decisions
 
-No shell commands in researchers — researcher agents are sandboxed to the tool set above. They cannot write files, spawn processes, or make arbitrary network calls.
+Sandboxed researchers — researcher agents are limited to the tool set above. They cannot
+write files, spawn processes, or make arbitrary network calls.
 
-Worker pool over direct browser — browser processes are isolated in workers so a crash in one worker does not affect the orchestrator or other sessions.
+Worker pool over direct browser — browser processes are isolated in workers so a crash
+in one cannot affect the orchestrator or other sessions.
 
-Service registry over direct imports — services are registered and resolved through the registry to support testing (mock replacement) and to enforce lifecycle discipline (init → use → dispose).
+Registry over direct imports — services are registered and resolved through the registry
+to support testing (mock replacement) and enforce init → use → dispose lifecycle.
 
-Pure ESM — the entire codebase uses ES Modules (`"type": "module"`). Worker bundles are built with esbuild (`npm run build:worker`) before integration tests or publishing.
+Pure ESM — the codebase is ES Modules (`"type": "module"`). Worker bundles are built with
+esbuild (`npm run build:worker`) before integration tests or publishing.
 
-Dependency graph — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).
+Enforced boundaries — `docs/deps.svg` is regenerated on every push (madge), and
+architectural rules are enforced by dependency-cruiser
+(`config/tooling/dependency-cruiser.cjs`).
 
 ### Development
 
