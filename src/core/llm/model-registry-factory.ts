@@ -260,7 +260,10 @@ export function readModelsJsonProviderOrder(): string[] {
   try {
     const raw = JSON.parse(fs.readFileSync(modelsJsonPath, 'utf-8'));
     return Object.keys(raw?.providers ?? {});
-  } catch {
+  } catch (err) {
+    // Malformed models.json only affects provider-preference ordering (benign), but log
+    // a warn to match every other registry fault in this file rather than swallowing it.
+    logger.warn(`[ModelRegistry] Could not read provider order from models.json: ${err}`);
     return [];
   }
 }

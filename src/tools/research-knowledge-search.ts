@@ -174,6 +174,7 @@ export async function collectCandidateUrls(
   const provenanceByUrl = new Map<string, string>();
   const descriptionByUrl = new Map<string, string>();
 
+  let failedQueries = 0;
   for (const query of queries) {
     try {
       const results = await store.findRelevantUrls(query, { limit: 20 });
@@ -185,8 +186,21 @@ export async function collectCandidateUrls(
         }
       }
     } catch (err) {
+      failedQueries++;
       logger.debug(`[research-knowledge-search] Vector search failed for query "${query}": ${err}`);
     }
+  }
+
+  // Distinguish a backend outage from a genuine empty: if EVERY query threw (the store
+  // reported content but the vector index/embedder is faulting), an empty candidate list
+  // is a false miss. We still fail open (the caller reports a miss → host does live
+  // research), but warn so the outage is not silent — the symmetric detection the
+  // web-search path already has for "all queries failed".
+  if (queries.length > 0 && failedQueries === queries.length) {
+    logger.warn(
+      `[research-knowledge-search] All ${queries.length} vector search(es) failed — ` +
+      `treating as a miss, but this may be a knowledge-store outage rather than a genuine empty.`,
+    );
   }
 
   // Sort by first-appearance order (lower = more relevant), cap the candidate pool.
@@ -496,8 +510,10 @@ export async function runBackgroundExtraction(
     if (validated) return validated;
   }
 
-  // Phase 4d: Safe fallback — treat as not found rather than crashing
-  logger.error('[research-knowledge-search] Agentic repair failed, returning NOT_FOUND');
+  // Phase 4d: Safe fallback — treat as not found rather than crashing. This is a
+  // fail-open (the host just falls back to live research), so warn — matching the
+  // other fail-open paths in this file — rather than error.
+  logger.warn('[research-knowledge-search] Agentic repair failed, returning NOT_FOUND');
   return { answer_status: 'no', synthesis: '', citations: [] };
 }
 

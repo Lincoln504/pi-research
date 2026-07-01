@@ -463,7 +463,10 @@ export default async function (pi: ExtensionAPI) {
       // With KNOWLEDGE_STORE_MODE='none' the store is disabled and a search can only miss.
       // Point the user at the toggle instead. Read LIVE config so a /research-config change
       // applies without a Pi restart (getConfig is re-read after research-config's resetConfig).
-      if (getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE === 'none') {
+      // Key the gate off the SAME cwd the tool below resolves its config from (ctx.cwd, not
+      // the activation pi.cwd) so the "disabled?" check and the tool never disagree on the
+      // mode when the session cwd differs from the activation directory.
+      if (getConfig(ctx.cwd ?? (pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE === 'none') {
         const msg = 'The knowledge store is disabled (Knowledge Mode = none). Enable it via /research-config.';
         if (ctx.hasUI) ctx.ui.notify(msg, 'warning');
         else pi.sendMessage({ customType: 'knowledge-store', content: msg, display: true });

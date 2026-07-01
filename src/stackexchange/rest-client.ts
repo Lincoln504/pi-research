@@ -37,9 +37,12 @@ export class StackExchangeClient {
       name: 'StackExchange API',
       isTransientError: (err) => {
         if (err instanceof Error) {
-            // Count network errors and 5xx errors, but not 4xx client errors (except 429)
+            // Count network errors and 5xx errors, but not 4xx client errors (except 429).
+            // Match status codes on a word boundary so an incidental "50"/"429" inside a
+            // larger number (e.g. a token count) does not spuriously look transient — same
+            // class as the word-boundary fix in isTransientSynthesisError.
             const msg = err.message.toLowerCase();
-            return msg.includes('timeout') || msg.includes('network') || msg.includes('econn') || msg.includes('50') || msg.includes('429');
+            return msg.includes('timeout') || msg.includes('network') || msg.includes('econn') || /\b5\d\d\b/.test(msg) || /\b429\b/.test(msg);
         }
         return true;
       }

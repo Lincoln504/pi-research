@@ -190,8 +190,10 @@ export function isTransientError(error: unknown): boolean {
 
   const message = error.message.toLowerCase();
 
-  // Network errors
-  if (message.includes('econnrefused') || message.includes('enotfound') || message.includes('timeout') || message.includes('etimedout')) {
+  // Network errors (incl. mid-stream ECONNRESET and undici's generic "fetch failed",
+  // matching the LLM-synthesis classifier in research-knowledge-search.ts so the same
+  // transient signals are retried everywhere they can occur).
+  if (message.includes('econnrefused') || message.includes('enotfound') || message.includes('timeout') || message.includes('etimedout') || message.includes('econnreset') || message.includes('fetch failed')) {
     return true;
   }
 

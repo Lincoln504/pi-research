@@ -31,6 +31,7 @@ import {
   isTransientSynthesisError,
   MAX_DOCUMENTS,
   MAX_CANDIDATES,
+  TRIAGE_DESCRIPTION_MAX_CHARS,
   MAX_REFERENCE_CHARS,
   RESEARCH_KNOWLEDGE_MISS_STRING,
   RESEARCH_KNOWLEDGE_MAYBE_STRING,
@@ -386,6 +387,18 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     const urls = await triageRelevantUrls(model, auth, 'history', [], 30000, 'off');
     expect(urls).toEqual([]);
     expect(mockCompleteSimple).not.toHaveBeenCalled();
+  });
+
+  it('truncates an over-long candidate description to TRIAGE_DESCRIPTION_MAX_CHARS in the prompt', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
+    const longDesc = 'x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 500);
+    const candidate: KnowledgeCandidate = { url: 'https://long.com', description: longDesc, provenance: 'p' };
+    await triageRelevantUrls(model, auth, 'history', [candidate], 30000, 'off');
+    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
+    // The full description must not appear; the truncated slice must.
+    expect(systemPrompt).not.toContain(longDesc);
+    expect(systemPrompt).toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS));
+    expect(systemPrompt).not.toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 1));
   });
 
   it('fails open (null) on malformed model output so real knowledge is never hidden', async () => {
