@@ -162,6 +162,11 @@ export function createSecuritySearchTool(options: {
       markdown += `**Terms:** ${terms.join(', ')}\n`;
       markdown += `**Duration:** ${(elapsed / 1000).toFixed(2)}s\n\n`;
       markdown += `**Total Vulnerabilities Found:** ${results.totalVulnerabilities}\n\n`;
+      if (results.errors && results.errors.length > 0) {
+        // A database that threw is omitted from the results below; call it out so its absence
+        // isn't read as "found nothing" for that source.
+        markdown += `**Note — some databases could not be queried:** ${results.errors.join('; ')}\n\n`;
+      }
 
       if (results.results.nvd !== undefined) {
         markdown += '## NIST NVD\n\n';

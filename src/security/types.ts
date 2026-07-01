@@ -91,6 +91,9 @@ export interface SecuritySearchResult {
   totalDatabases: number;
   totalVulnerabilities: number;
   duration: number;
+  /** Databases that THREW (rejected) rather than returning an `error` field — those are omitted
+   *  from `results` entirely, so surface them here so a dropped source isn't mistaken for "found nothing". */
+  errors?: string[];
 }
 
 // ============================================================================
