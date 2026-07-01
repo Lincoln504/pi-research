@@ -476,10 +476,20 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
       legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
       Object.assign(merged, legacyEnv);
       
-      // Auto-migrate legacy settings to central registry if they differ
-      if (!registry[normalizedCwd] || JSON.stringify(registry[normalizedCwd]) !== JSON.stringify(legacyEnv)) {
+      // Auto-migrate legacy settings to the central registry — but only LOCAL_SCOPE_KEYS. The
+      // registry is project-scoped storage by design (saveConfig writes only these keys to it);
+      // persisting user-scoped legacy keys would freeze them per-workspace and silently override
+      // the user's global config.env forever. Non-local legacy keys still apply to THIS resolution
+      // via the Object.assign(merged, legacyEnv) above — they just aren't persisted.
+      const legacyLocal = Object.fromEntries(
+        Object.entries(legacyEnv).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
+      );
+      const existingLocal = Object.fromEntries(
+        Object.entries(registry[normalizedCwd] ?? {}).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
+      );
+      if (Object.keys(legacyLocal).length > 0 && JSON.stringify(existingLocal) !== JSON.stringify(legacyLocal)) {
         logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
-        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyEnv };
+        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyLocal };
         saveProjectSettingsRegistry(registry);
       }
     } catch (err) {
@@ -487,25 +497,23 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
     }
   }
 
-  // 4. Load Centralized project settings (REGISTRY WINS for project-scoped keys)
+  // 4. Apply centralized project settings. The registry is project-scoped storage: ONLY
+  //    LOCAL_SCOPE_KEYS are applied (and may override), never user-scoped keys — those belong to
+  //    config.env. Any non-local key present here is stale pollution (e.g. a pre-fix legacy
+  //    migration) and is ignored rather than allowed to override the user's global settings.
   if (registry[normalizedCwd]) {
-    // Conflict detection: registry vs legacy .pi-research.env
     for (const [key, val] of Object.entries(registry[normalizedCwd])) {
-      if (LOCAL_SCOPE_KEYS.has(key) && legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
-        // Don't interpolate the values — a config key could carry a secret and
-        // redactSecrets won't catch short/non-standard tokens. The key + winner
-        // is all the divergence warning needs.
-        logger.warn(`[config] Config divergence for ${key} in ${cwd}: registry value differs from legacy .pi-research.env. Registry wins.`);
+      if (LOCAL_SCOPE_KEYS.has(key)) {
+        // Don't interpolate values in warnings — a config key could carry a secret and
+        // redactSecrets won't catch short/non-standard tokens. Key + winner is enough.
+        if (legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
+          logger.warn(`[config] Config divergence for ${key} in ${cwd}: registry value differs from legacy .pi-research.env. Registry wins.`);
+        }
+        merged[key] = val;
+      } else if (merged[key] !== undefined && merged[key] !== val) {
+        logger.warn(`[config] Ignoring stale user-scoped ${key} in the project registry (config.env wins). Re-save your user settings to drop it.`);
       }
     }
-    // Conflict detection: registry vs config.env (user settings)
-    // Only warn about keys that are user-scoped but have leaked into the registry
-    for (const [key, val] of Object.entries(registry[normalizedCwd])) {
-      if (!LOCAL_SCOPE_KEYS.has(key) && merged[key] !== undefined && merged[key] !== val) {
-        logger.warn(`[config] Registry override for user-scoped ${key}: registry value overrides config.env (stale snapshot in the project registry). Registry wins — consider re-saving your user settings.`);
-      }
-    }
-    Object.assign(merged, registry[normalizedCwd]);
   } else if (Object.keys(merged).length === 0 && !fs.existsSync(legacyPath) && !fs.existsSync(globalPath)) {
     // 5. Warning for missing config
     logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);

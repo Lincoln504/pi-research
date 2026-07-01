@@ -64,6 +64,31 @@ describe('Configuration Scoping', () => {
     expect(config.DEFAULT_RESEARCH_DEPTH).toBe(3);
   });
 
+  it('ignores a stale user-scoped key in the project registry (config.env wins)', () => {
+    // Regression (CONFIG#3): a pre-fix legacy migration could leak a user-scoped key (e.g.
+    // PI_RESEARCH_MODEL) into the per-workspace registry, which then overrode the user's global
+    // config.env forever. The registry must only apply LOCAL_SCOPE_KEYS.
+    delete process.env['PI_RESEARCH_MODEL'];
+    const globalEnvPath = path.join(os.homedir(), CONFIG_DIR_NAME, 'research', 'config.env');
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => p === projectSettingsPath || p === globalEnvPath);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+      if (p === projectSettingsPath) {
+        return JSON.stringify({
+          [normalizeWorkspacePath(mockCwd)]: {
+            PI_RESEARCH_MODEL: 'registry/model',              // user-scoped pollution — must be ignored
+            PI_RESEARCH_DEFAULT_RESEARCH_DEPTH: '3',          // genuinely project-scoped — must apply
+          },
+        });
+      }
+      if (p === globalEnvPath) return 'PI_RESEARCH_MODEL=env/model\n';
+      return '';
+    });
+
+    const config = getConfig(mockCwd);
+    expect(config.RESEARCH_MODEL).toBe('env/model'); // config.env wins, registry pollution ignored
+    expect(config.DEFAULT_RESEARCH_DEPTH).toBe(3);   // real project-scoped key still applies
+  });
+
   it('should fall back to user defaults when project settings are missing', () => {
     // Mock no project settings
     vi.mocked(fs.existsSync).mockReturnValue(false);
