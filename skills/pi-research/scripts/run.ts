@@ -24,12 +24,12 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const PKG = '@lincoln504/pi-research';
-// Load-bearing peer dependency of the engine: the standalone CLI statically
+// Load-bearing runtime dependency of the engine: the standalone CLI statically
 // imports it (model registry + auth + agent dir). On an install that omitted
-// peers it would die at module-load with a raw ERR_MODULE_NOT_FOUND; we preflight
+// it, it would die at module-load with a raw ERR_MODULE_NOT_FOUND; we preflight
 // it here so the user gets the same clean, actionable exit-78 message as a missing
 // engine instead of a stack trace.
-const PEER = '@earendil-works/pi-coding-agent';
+const REQUIRED_DEP = '@earendil-works/pi-coding-agent';
 const EXIT = { OK: 0, USAGE: 64, CONFIG: 78, SOFTWARE: 70 } as const;
 
 // ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
   if (explicitPath) {
     const fromDir = engineFromPackageDir(explicitPath);
     if (fromDir) {
-      if (!peerResolvableFrom(explicitPath)) peerMissing(explicitPath);
+      if (!depResolvableFrom(explicitPath)) depMissing(explicitPath);
       return fromDir;
     }
   }
@@ -133,9 +133,9 @@ function resolveEngine(skillDir: string): ResolvedEngine | null {
   if (pkgDir) {
     const fromPkg = engineFromPackageDir(pkgDir);
     if (fromPkg) {
-      // We resolved the engine via its package dir, so we can verify its peer
-      // resolves from the same anchor (where the bundled CLI will look for it).
-      if (!peerResolvableFrom(pkgDir)) peerMissing(pkgDir);
+      // We resolved the engine via its package dir, so we can verify its
+      // dependency resolves from the same anchor (where the bundled CLI looks).
+      if (!depResolvableFrom(pkgDir)) depMissing(pkgDir);
       return fromPkg;
     }
   }
@@ -180,38 +180,38 @@ function engineFromPackageDir(pkgDir: string): ResolvedEngine | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Is the engine's load-bearing peer dep physically present, reachable from
- * `anchorDir`? We check for node_modules/<PEER>/package.json walking up parent
- * dirs (Node's package-lookup algorithm) rather than require.resolve(), because
- * the peer is an ESM package with conditional `exports` and no CJS/package.json
+ * Is the engine's load-bearing runtime dependency physically present, reachable
+ * from `anchorDir`? We check for node_modules/<REQUIRED_DEP>/package.json walking
+ * up parent dirs (Node's package-lookup algorithm) rather than require.resolve(),
+ * because it is an ESM package with conditional `exports` and no CJS/package.json
  * export — require.resolve() from this CJS launcher throws "No exports main
  * defined" even when it is installed and the engine imports it fine. Checking the
  * directory mirrors how Node finds the package, immune to export conditions.
  */
-function peerResolvableFrom(anchorDir: string): boolean {
-  const peerSegs = PEER.split('/');
+function depResolvableFrom(anchorDir: string): boolean {
+  const depSegs = REQUIRED_DEP.split('/');
   // Normalize: a relative anchor would otherwise stop the walk at '.' and miss
-  // hoisted node_modules in real parent dirs, wrongly reporting the peer missing.
+  // hoisted node_modules in real parent dirs, wrongly reporting the dependency missing.
   let dir = resolve(anchorDir);
   for (;;) {
-    if (existsSync(join(dir, 'node_modules', ...peerSegs, 'package.json'))) return true;
+    if (existsSync(join(dir, 'node_modules', ...depSegs, 'package.json'))) return true;
     const parent = dirname(dir);
     if (parent === dir) return false;
     dir = parent;
   }
 }
 
-function peerMissing(pkgDir: string): never {
+function depMissing(pkgDir: string): never {
   const lines = [
     '',
-    `Error: pi-research engine found, but its required peer dependency`,
-    `'${PEER}' is not installed alongside it.`,
+    `Error: pi-research engine found, but its required runtime dependency`,
+    `'${REQUIRED_DEP}' is not installed alongside it.`,
     '',
     'The standalone engine imports this package at startup, so it cannot run',
-    'without it. Reinstall so peer dependencies are included:',
+    'without it. Reinstall so all dependencies are included:',
     '',
     '    npm install -g @lincoln504/pi-research     # global — reinstalls the full dependency tree',
-    `    # or, in the package dir:  cd "${pkgDir}" && npm install ${PEER}`,
+    `    # or, in the package dir:  cd "${pkgDir}" && npm install ${REQUIRED_DEP}`,
     '',
     `(engine located at: ${pkgDir})`,
     '',

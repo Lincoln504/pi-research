@@ -1,9 +1,10 @@
 /**
  * Host pi configuration access — resolved LAZILY.
  *
- * `@earendil-works/pi-coding-agent` is a *peer* dependency: it is provided by
- * the host pi process and is NOT present in this extension's own `node_modules`
- * when pi installs the extension (the install omits dev/peer packages). A
+ * `@earendil-works/pi-coding-agent` is provided by the host pi process and is
+ * NOT reliably present in this extension's own module-resolution scope when pi
+ * runs the extension (though declared as a regular dependency, it resolves
+ * against the host, not the extension's own `node_modules`). A
  * top-level `import { CONFIG_DIR_NAME } from '@earendil-works/pi-coding-agent'`
  * is hoisted and executed on module load, so any *standalone* bundle that
  * transitively imports such a module — most importantly the poolifier-spawned

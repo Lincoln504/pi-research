@@ -2,8 +2,8 @@
 
 pi-research ships as a portable [Agent Skill](https://agentskills.io/specification)
 so any skills-compatible coding agent (Claude, OpenAI Codex CLI, OpenClaw, and
-others using the same `SKILL.md` directory model) can run multi-agent web research
-through the same engine the `pi` extension uses.
+others using the same `SKILL.md` directory model) can run web research through the
+pi-research software.
 
 ![Installing the research skill into external agents](media/05-agent-skill.gif)
 
