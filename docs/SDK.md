@@ -93,9 +93,9 @@ is model-dependent (auto-detected); stored fields are `text`, `content`,
 `vector`, `url`, `metadata`, `timestamp`, `workspace`, `is_global`, and
 `ingestion_type`.
 
-### Built with the SDK
+### Example Use
 
-[Wall of Shame](https://github.com/Lincoln504/wall-of-shame) runs on this SDK: its
-agent pipeline calls `initResearchSDK` and the research entry points
-(`runQuickResearch` / `runDeepResearch`) per investigation, and reuses the
-`scrapeUrl`, `verifyUrl`, and `repairJson` exports directly.
+The [Wall of Shame](https://wallofshame.io) project ([repo](https://github.com/Lincoln504/wall-of-shame))
+uses this SDK in its agent pipeline: it calls `initResearchSDK` and the research
+entry points (`runQuickResearch` / `runDeepResearch`) per investigation, and uses
+the `scrapeUrl`, `verifyUrl`, and `repairJson` exports directly.
