@@ -51,7 +51,7 @@ Ask in natural language — the tool understands the depth needed:
 - Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
 - Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
 - Search a little or a lot — three depth levels (four in SDK mode, which adds the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
-- Holds up against other tools — several in the pi community have built competitive web-research extensions, and pi-research has not been tested head-to-head against them. It does outperform the Claude Code web-research subagent, though: usually faster to respond and far more comprehensive in results, and cheap to run via a smaller model.
+- Holds up against other tools — many in the pi community have built competitive web-research extensions. Though pi-research has not been tested head-to-head against these, it does outperform the Claude Code web-research subagent: usually faster to respond and far more comprehensive in results, and cheap to run via a smaller model.
 
 ### Requirements / limitations
 
