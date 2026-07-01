@@ -1,15 +1,39 @@
-![pi-research banner](docs/banner.jpg)
+<p align="center">
+  <img src="docs/banner.jpg" alt="pi-research" width="100%" />
+</p>
 
-<a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a> <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
+<p align="center">
+  <strong>Multi-agent deep web research with a built-in personal knowledge store — usable from Pi, an agent skill, or the SDK.</strong>
+</p>
 
-Multi-agent web research for [pi](https://github.com/badlogic/pi-mono). A coordinator
-breaks a question into parallel research tracks, each researcher searches and scrapes
-the live web through a stealth browser, and an evaluator decides whether the answer is
-complete or another round is needed. The result is a single cited Markdown report.
+<p align="center">
+  <a href="docs/PI-EXTENSION.md">Pi extension</a>
+  ·
+  <a href="docs/AGENT-SKILL.md">Agent skill</a>
+  ·
+  <a href="docs/SDK.md">SDK</a>
+  ·
+  <a href="docs/CONFIGURATION.md">Configuration</a>
+  ·
+  <a href="docs/KNOWLEDGE-STORE.md">Knowledge store</a>
+  ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
 
-One engine backs several front-ends — the pi extension, a standalone CLI / agent
-skill (the same skill any skills-aware host runs, including OpenClaw), and a
-programmatic SDK, each with its own guide in the docs linked below.
+<p align="center">
+  <a href="https://github.com/Lincoln504/pi-research/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Lincoln504/pi-research/ci.yml?style=flat-square&branch=main" /></a>
+  <a href="https://www.npmjs.com/package/@lincoln504/pi-research"><img alt="npm version" src="https://img.shields.io/npm/v/@lincoln504/pi-research.svg?style=flat-square" /></a>
+</p>
+
+---
+
+A coordinator breaks a question into parallel research tracks, each researcher searches
+and scrapes the live web through a stealth browser, and an evaluator decides whether the
+answer is complete or another round is needed. The result is a single cited Markdown report.
+
+One engine backs several front-ends — the [pi](https://github.com/badlogic/pi-mono)
+extension, a standalone CLI / agent skill (the same skill any skills-aware host runs,
+including OpenClaw), and a programmatic SDK.
 
 Ask in natural language — the tool understands the depth needed:
 
@@ -55,20 +79,6 @@ pi install .
 ```
 
 npm is the stable channel; the git install is the development channel (see Stability, below). The first install pulls the stealth browser engine, which takes a few minutes.
-
-<p align="center">
-  <a href="docs/PI-EXTENSION.md">Pi extension</a>
-  ·
-  <a href="docs/AGENT-SKILL.md">Agent skill</a>
-  ·
-  <a href="docs/SDK.md">SDK</a>
-  ·
-  <a href="docs/CONFIGURATION.md">Configuration</a>
-  ·
-  <a href="docs/KNOWLEDGE-STORE.md">Knowledge store</a>
-  ·
-  <a href="docs/ARCHITECTURE.md">Architecture</a>
-</p>
 
 ### Built with
 
