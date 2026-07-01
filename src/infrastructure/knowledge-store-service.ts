@@ -45,6 +45,11 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
   // onnxruntime/lancedb binding) is permanent on this platform, so it stays memoized.
   private _disabledReason: 'mode' | 'native' | null = null;
 
+  // The KNOWLEDGE_STORE_MODE the live store was last built with. Lets initialize() detect a runtime
+  // mode change (project↔global re-scope, or enabled→none) and re-initialize so a /research-config
+  // change applies without a Pi restart — not just the DISABLED→enabled revival.
+  private _initializedMode: string | undefined = undefined;
+
   // Initialization promise to prevent concurrent initialization
   private _initializationPromise: Promise<void> | null = null;
 
@@ -59,20 +64,34 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
     // already-resolved this._cwd keeps the scope stable across lazy calls.
     const newCwd = ctx?.cwd || this._cwd;
 
-    // If already initialized and CWD hasn't changed, return early — UNLESS the service went
-    // DISABLED only because Knowledge Mode was 'none' and the live config has since re-enabled
-    // it (via /research-config). In that case fall through and re-initialize so the change
-    // applies without a Pi restart. A native-unavailable DISABLED ('native') stays memoized —
-    // retrying is futile on that platform.
+    // If already settled for this cwd, return early — UNLESS the live Knowledge Mode has changed
+    // since we initialized (via /research-config), in which case re-initialize so the change
+    // applies without a Pi restart:
+    //  - DISABLED('mode') and mode is now != 'none'   : was off, now enabled → revive.
+    //  - INITIALIZED and mode != the built mode        : project↔global re-scope, or enabled→'none'.
+    // A native-unavailable DISABLED ('native') stays memoized — retrying is futile on that platform.
     if ((this.lifecycle === ServiceLifecycle.INITIALIZED || this.lifecycle === ServiceLifecycle.DISABLED) && this._cwd === newCwd) {
-      const modeReEnabled =
-        this.lifecycle === ServiceLifecycle.DISABLED &&
-        this._disabledReason === 'mode' &&
-        (ctx?.config || getConfig(this._cwd)).KNOWLEDGE_STORE_MODE !== 'none';
-      if (!modeReEnabled) {
+      const liveMode: string = (ctx?.config || getConfig(this._cwd)).KNOWLEDGE_STORE_MODE;
+      // Reviving a DISABLED store creates handles (no live state to tear down), so it is safe even
+      // from a lazy call and uses the live config. Re-scoping/disabling a LIVE (INITIALIZED) store,
+      // however, disposes handles — restrict that to an EXPLICIT ctx.config (mirrors the ctx.cwd
+      // invariant): a lazy getStore() reads the base getConfig, which can differ from the
+      // iface-resolved config the store was built with, and must never dispose out from under a run.
+      const reviveFromMode =
+        this.lifecycle === ServiceLifecycle.DISABLED && this._disabledReason === 'mode' && liveMode !== 'none';
+      const modeChanged =
+        this.lifecycle === ServiceLifecycle.INITIALIZED &&
+        ctx?.config !== undefined &&
+        this._initializedMode !== undefined &&
+        this._initializedMode !== ctx.config.KNOWLEDGE_STORE_MODE;
+      if (!reviveFromMode && !modeChanged) {
         return;
       }
-      logger.log('[KnowledgeStoreService] Knowledge Mode re-enabled in config; re-initializing store (no restart needed).');
+      logger.log(`[KnowledgeStoreService] Knowledge Mode changed (${this._initializedMode ?? this._disabledReason} → ${liveMode}); re-initializing store (no restart needed).`);
+      // An INITIALIZED store holds live handles (embedder/LanceDB/writer) — dispose before rebuilding.
+      if (this.lifecycle === ServiceLifecycle.INITIALIZED) {
+        await this.dispose();
+      }
     }
 
     // If CWD changed, we must dispose the old store and re-initialize.
@@ -102,6 +121,8 @@ export class KnowledgeStoreService implements IKnowledgeStoreService {
         // Prefer a caller-resolved config (the SDK/CLI/tool seed ctx.config with the
         // interface-resolved overlay); else load this directory's config.
         const config = ctx?.config || getConfig(this._cwd);
+        // Record the mode this build reflects so a later runtime mode change is detected above.
+        this._initializedMode = config.KNOWLEDGE_STORE_MODE;
         const embedderFactory = () => getEmbedder(config);
         const reconnectFactory = async () => {
           clearEmbeddingInstance();

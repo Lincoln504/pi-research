@@ -92,6 +92,39 @@ describe('KnowledgeStoreService', () => {
     expect(knowledge.createKnowledgeStoreComponents).toHaveBeenCalledTimes(1);
   });
 
+  it('re-initializes the live store when Knowledge Mode changes project→global at runtime', async () => {
+    const mk = () => ({
+      embedder: { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockImplementation(async () => mk());
+
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'project' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    const builds = vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length;
+
+    // User switches project→global via /research-config (same cwd, new mode) → dispose + rebuild.
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length).toBe(builds + 1);
+  });
+
+  it('disables the live store when Knowledge Mode changes enabled→none at runtime', async () => {
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+
+    // Switch to none → dispose + rebuild → components null → DISABLED (no restart needed).
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'none' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+  });
+
   it('lazy getStore()/getEmbedder() after an explicit-cwd init do NOT re-scope to process.cwd()', async () => {
     // Regression: getStore() calls initialize() with no ctx. It previously resolved
     // the missing cwd to process.cwd(), so when process.cwd() !== the session cwd it
