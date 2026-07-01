@@ -63,7 +63,10 @@ function extractResultText(result: AgentToolResult<unknown>): string {
  * Pi Research Extension
  */
 export default async function (pi: ExtensionAPI) {
-  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.0)
+  // Runtime version check — must match the @earendil-works/* dependency minimum (>=0.80.2).
+  // 0.80.2 is the floor because the AuthStorage credential discriminator pi-research
+  // passes (`type: 'api_key'`, model-registry-factory.ts) only became correct in 0.80.2
+  // (it was `api-key` before); the pi-ai `/compat` entrypoint also exists from 0.80.0.
   const versionParts = PI_VERSION.split('.').map(Number);
   const major = versionParts[0] ?? 0;
   const minor = versionParts[1] ?? 0;
@@ -74,7 +77,7 @@ export default async function (pi: ExtensionAPI) {
       `Please ensure pi-coding-agent is installed correctly.`,
     );
   }
-  const minMajor = 0, minMinor = 80, minPatch = 0;
+  const minMajor = 0, minMinor = 80, minPatch = 2;
   const tooOld = major < minMajor
     || (major === minMajor && minor < minMinor)
     || (major === minMajor && minor === minMinor && patch < minPatch);
@@ -293,14 +296,15 @@ export default async function (pi: ExtensionAPI) {
   const healthTool: ToolDefinition = createHealthTool();
   pi.registerTool(healthTool);
 
-  // Create and register the Research Knowledge Search tool
-  const researchKnowledgeSearchTool: ToolDefinition | null =
-    getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none'
-      ? createResearchKnowledgeSearchTool('pi')
-      : null;
-  if (researchKnowledgeSearchTool) {
-    pi.registerTool(researchKnowledgeSearchTool);
-  }
+  // Create and register the Research Knowledge Search tool. It is native-free at
+  // construction (the vector/ML stack loads lazily on first execute) and self-guards when
+  // Knowledge Mode is 'none' (its execute returns a "store disabled" miss). Registering it
+  // unconditionally lets a Knowledge Mode change via /research-config take effect without a
+  // Pi restart — availability to the agent and the /knowledge-store command below both key
+  // off live config, not this startup binding. The pi API has no unregisterTool, so a
+  // startup-gated registration could never be added back after enabling mid-session anyway.
+  const researchKnowledgeSearchTool: ToolDefinition = createResearchKnowledgeSearchTool('pi');
+  pi.registerTool(researchKnowledgeSearchTool);
 
   // Alt+P — Pop queued steering messages out of the research queue and steer pi with them.
   pi.registerShortcut(Key.alt('p'), {
@@ -447,6 +451,70 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
+  // /knowledge-store <query> — search the local knowledge store for previously
+  // researched findings (synthesised answer). Query-only: the store auto-manages its
+  // own compaction/pruning after runs, so there is no manual maintenance subcommand.
+  pi.registerCommand('knowledge-store', {
+    description: 'Search the local research knowledge store for a query',
+    handler: async (args, ctx: ExtensionContext) => {
+      const text = args.trim();
+      if (!text) return;
+
+      // With KNOWLEDGE_STORE_MODE='none' the store is disabled and a search can only miss.
+      // Point the user at the toggle instead. Read LIVE config so a /research-config change
+      // applies without a Pi restart (getConfig is re-read after research-config's resetConfig).
+      if (getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE === 'none') {
+        const msg = 'The knowledge store is disabled (Knowledge Mode = none). Enable it via /research-config.';
+        if (ctx.hasUI) ctx.ui.notify(msg, 'warning');
+        else pi.sendMessage({ customType: 'knowledge-store', content: msg, display: true });
+        return;
+      }
+
+      try {
+        const result = await researchKnowledgeSearchTool.execute(
+          randomUUID(),
+          { queries: [text] },
+          ctx.signal,
+          undefined,
+          ctx,
+        );
+
+        const output = extractResultText(result);
+        try {
+          pi.sendMessage({
+            customType: 'knowledge-store',
+            content: output,
+            display: true,
+            details: { researchId: (result.details as any)?.researchId },
+          });
+          if (ctx.hasUI) ctx.ui.notify('Knowledge search finished.', 'info');
+        } catch (deliverErr) {
+          logger.debug('[pi-research] could not deliver knowledge-store result (session closed):', deliverErr);
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        // A quit/session replacement mid-run aborts ctx.signal and invalidates ctx —
+        // the search was cancelled, not broken. Exit quietly (mirrors /research).
+        if (ctx.signal?.aborted || /ctx is stale after session replacement/i.test(message)) {
+          logger.debug('[pi-research] /knowledge-store command ended early (session closed mid-run)');
+          return;
+        }
+        logger.error('[pi-research] /knowledge-store command failed:', error);
+        try {
+          pi.sendMessage({
+            customType: 'knowledge-store',
+            content: `**Knowledge store search failed**\n\n${message}`,
+            display: true,
+            details: { error: message },
+          });
+          if (ctx.hasUI) ctx.ui.notify(`Knowledge store search failed: ${message}`, 'error');
+        } catch (deliverErr) {
+          logger.debug('[pi-research] could not deliver knowledge-store failure notice (session closed):', deliverErr);
+        }
+      }
+    },
+  });
+
   // JIT Prompt Injection (Simplified & Non-Intrusive)
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
     if (event.streamingBehavior === 'steer') {
@@ -478,9 +546,12 @@ export default async function (pi: ExtensionAPI) {
     }
 
     const isResearchToolAvailable = !event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchTool.name);
-    const isKnowledgeSearchAvailable = researchKnowledgeSearchTool
-      ? (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name))
-      : false;
+    // Gate the KNOWLEDGE SEARCH prompt block on LIVE Knowledge Mode (not the startup tool
+    // binding, which is now always registered) so enabling/disabling via /research-config
+    // applies without a Pi restart. The tool must also be selected for this turn.
+    const knowledgeModeEnabled = getConfig((pi as any).cwd, 'pi').KNOWLEDGE_STORE_MODE !== 'none';
+    const isKnowledgeSearchAvailable = knowledgeModeEnabled &&
+      (!event.systemPromptOptions || event.systemPromptOptions.selectedTools?.includes(researchKnowledgeSearchTool.name));
 
     if (isResearchToolAvailable || isKnowledgeSearchAvailable) {
       let researchPrompt = loadPrompt('research-tool-usage')
@@ -489,7 +560,10 @@ export default async function (pi: ExtensionAPI) {
         .replace('{{max_team_size_l3}}', MAX_TEAM_SIZE_LEVEL_3.toString());
       
       if (!isKnowledgeSearchAvailable) {
-        researchPrompt = researchPrompt.replace(/\n\*\*KNOWLEDGE SEARCH\*\*[\s\S]*?---\n/m, '\n---\n');
+        // Strip the whole KNOWLEDGE SEARCH block when no store is enabled. Match from
+        // the `**KNOWLEDGE SEARCH` header (the title may carry a suffix, e.g.
+        // "— MANDATORY FIRST STEP") through its terminating `---` rule.
+        researchPrompt = researchPrompt.replace(/\n\*\*KNOWLEDGE SEARCH[\s\S]*?\n---\n/m, '\n---\n');
       }
       
       return {

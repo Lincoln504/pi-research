@@ -103,6 +103,24 @@ describe('basic registration and retrieval', () => {
       ServiceLifecycle.INITIALIZED,
     ]);
   });
+
+  it('preserves a DISABLED verdict the service sets for itself in initialize() (no clobber to INITIALIZED)', async () => {
+    // Regression: the knowledge store sets lifecycle=DISABLED inside its own initialize() when
+    // Knowledge Mode is 'none'. The registry cold-path must NOT overwrite that with INITIALIZED —
+    // doing so left the store "initialized" with null components (mis-reported as "initializing")
+    // and defeated the mode-reenable revival, so it stayed dead until a Pi restart.
+    const svc: IService = {
+      name: 'svc-self-disables',
+      lifecycle: ServiceLifecycle.UNINITIALIZED,
+      async initialize() { this.lifecycle = ServiceLifecycle.DISABLED; },
+      async dispose() {},
+    };
+    registerService('svc-self-disables', () => svc);
+
+    await getService('svc-self-disables');
+
+    expect(svc.lifecycle).toBe(ServiceLifecycle.DISABLED);
+  });
 });
 
 // ---------------------------------------------------------------------------

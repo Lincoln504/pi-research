@@ -497,8 +497,17 @@ export class ServiceContainer {
         await instance.initialize(ctx);
       }
 
-      // Update lifecycle to initialized
-      instance.lifecycle = ServiceLifecycle.INITIALIZED;
+      // Update lifecycle to initialized — but PRESERVE a DISABLED verdict the service's own
+      // initialize() set for itself (e.g. the knowledge store when Knowledge Mode is 'none', or
+      // a missing native binding). Unconditionally forcing INITIALIZED here left the store
+      // "initialized" with null components: it mis-reported as "initializing" instead of
+      // "disabled", and — because the mode-reenable revival keys off lifecycle === DISABLED — it
+      // defeated live re-enabling via /research-config, so the store stayed dead until a restart.
+      // Cast defeats control-flow narrowing: TS still thinks lifecycle is INITIALIZING (set
+      // above), unaware that the awaited initialize() may have mutated it to DISABLED via `this`.
+      if ((instance.lifecycle as ServiceLifecycle) !== ServiceLifecycle.DISABLED) {
+        instance.lifecycle = ServiceLifecycle.INITIALIZED;
+      }
       registration.initializationPromise = null;
 
       if (registration.options.enableLogging) {
