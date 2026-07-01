@@ -49,7 +49,8 @@ export function isNativeStackUnavailableError(err: unknown): boolean {
   // module-not-found is only treated as a native-stack gap when it names one of
   // our native packages — an unrelated missing module must NOT be misclassified
   // as "this platform has no native stack".
-  const code = (err && typeof err === 'object' && 'code' in err) ? String((err as { code?: unknown }).code) : '';
+  // `err` is already known truthy (guarded above), so no `err &&` here.
+  const code = (typeof err === 'object' && 'code' in err) ? String((err as { code?: unknown }).code) : '';
   if (code === 'ERR_DLOPEN_FAILED') return true;
   if ((code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') &&
       (msg.includes('onnxruntime') || msg.includes('lancedb'))) {

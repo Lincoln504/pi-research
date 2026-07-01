@@ -48,7 +48,7 @@ const BENIGN_IPC_CODES = new Set(['EPIPE', 'ERR_IPC_CHANNEL_CLOSED', 'ECONNRESET
 export function isBenignClusterIpcError(err: any): boolean {
   if (!err) return false;
   if (typeof err.code === 'string' && BENIGN_IPC_CODES.has(err.code)) return true;
-  const msg = String((err && err.message) || err);
+  const msg = String(err.message || err);
   return /\b(EPIPE|ECONNRESET)\b/.test(msg) || /channel closed/i.test(msg);
 }
 
