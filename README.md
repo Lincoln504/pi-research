@@ -38,19 +38,6 @@ Standalone CLI / agent skill
 npm install -g @lincoln504/pi-research
 ```
 
-OpenClaw
-
-OpenClaw uses pi-research as an agent skill (a `SKILL.md` folder), not a plugin.
-Install the engine, then register the bundled skill into OpenClaw's managed skill
-root:
-
-```bash
-npm install -g @lincoln504/pi-research
-openclaw skills install "$(npm root -g)/@lincoln504/pi-research/skills/pi-research" --global
-```
-
-See [Agent skill](docs/AGENT-SKILL.md) for details.
-
 Development build (bleeding edge)
 
 ```bash
