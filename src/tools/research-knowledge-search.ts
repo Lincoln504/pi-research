@@ -6,13 +6,18 @@
  * sub-agent tool — the research orchestration already injects historical
  * URLs into researcher prompts via the store_section mechanism.
  *
- * Architecture (5 phases):
+ * Architecture:
  *
  *   Phase 1: Strict Contracts — rigid JSON schema for background LLM output
- *   Phase 2: Safe Data Rehydration — vector search → URL dedup → rebuildDocument
+ *   Phase 2: Candidate Retrieval — vector search → URL dedup → ranked candidates
+ *            (descriptions only, no full-document rebuild yet)
  *   Phase 3: Conversational Continuity — pi SDK's buildSessionContext pipeline
- *   Phase 4: Stateless Background Execution — completeSimple + agentic repair
- *   Phase 5: Orchestration Steering — tri-state result (yes/maybe/no)
+ *   Phase 4.5: Relevance Triage — cheap, model-agnostic LLM judgement over the
+ *            short descriptions; an empty result is an instant miss (no rebuild,
+ *            no synthesis), and a triage fault fails open to all candidates
+ *   Phase 5: Safe Data Rehydration — rebuildDocument for the relevant URLs, then
+ *            stateless background synthesis (completeSimple + agentic repair)
+ *   Phase 6: Orchestration Steering — tri-state result (yes/maybe/no)
  *
  * Registration: pi.registerTool() in src/index.ts (alongside research & health).
  * NOT in createResearchTools() — sub-researchers already get knowledge store
@@ -35,10 +40,11 @@ import { withTimeout } from '../core/llm/llm-timeout.ts';
 import { abortableDelay } from '../web-research/retry-utils.ts';
 import { ServiceNames } from '../core/service-interfaces.ts';
 import type { IKnowledgeStoreService } from '../core/service-interfaces.ts';
-import type { ResearchKnowledgeSynthesisResponse } from './research-knowledge-types.ts';
+import type { ResearchKnowledgeSynthesisResponse, KnowledgeRelevanceTriage } from './research-knowledge-types.ts';
 import {
   ResearchKnowledgeSynthesisResponseSchema,
   ResearchKnowledgeSynthesisResponseSchemaAsTSchema,
+  KnowledgeRelevanceTriageSchema,
 } from './research-knowledge-types.ts';
 import { logger } from '../logger.ts';
 import { metrics } from '../utils/metrics.ts';
@@ -75,6 +81,20 @@ export const MAX_REFERENCE_CHARS = 120_000;
 /** Maximum number of unique URLs to rebuild documents for.
  *  Exported for unit tests (bundle-neutral: internal symbol, tree-shaken). */
 export const MAX_DOCUMENTS = 10;
+
+/** Maximum number of candidate URLs (with descriptions) fed to the cheap relevance
+ *  triage. Larger than MAX_DOCUMENTS because descriptions are tiny — the triage can
+ *  survey a wider net before the full-document rebuild narrows to MAX_DOCUMENTS.
+ *  Exported for unit tests. */
+export const MAX_CANDIDATES = 24;
+
+/** Per-candidate description length (chars) shown to the triage LLM. Descriptions
+ *  are already short; this bounds a pathologically long one. Exported for tests. */
+export const TRIAGE_DESCRIPTION_MAX_CHARS = 600;
+
+/** Output-token budget for the triage call. Its output is just a small index array,
+ *  so this is intentionally tiny (keeps a miss fast and cheap). */
+const TRIAGE_MAX_TOKENS = 2048;
 
 /** Widget ID for the knowledge search TUI panel */
 const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
@@ -126,32 +146,42 @@ function hideKnowledgeSearchWidget(ctx: ExtensionContext): void {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2: Safe Data Rehydration
+// Phase 2: Candidate retrieval → cheap relevance triage → document rehydration
 // ---------------------------------------------------------------------------
 
+/** A single retrieved candidate: a URL plus its short synthesis-description.
+ *  The description is what the cheap triage LLM reads (NOT the full document). */
+export interface KnowledgeCandidate {
+  url: string;
+  description: string;
+  provenance: string;
+}
+
 /**
- * Deduplicate URLs from multiple vector search results and rebuild pristine
- * documents. Uses the store's native rebuildDocument() method which queries
- * for synthesis-description metadata blocks — guaranteeing unfragmented
- * original markdown, not stitched-together vector chunks.
+ * Run the vector search for every query and deduplicate the resulting URLs into
+ * a ranked candidate list, WITHOUT rebuilding any full documents. Each candidate
+ * carries its short synthesis-description — enough for the cheap relevance triage
+ * to judge, at a fraction of the token cost of the full rebuilt markdown.
  *
- * The deduplication logic uses a Map to track first-appearance order, so
- * the earliest (most relevant) query result for each URL is retained.
+ * Deduplication uses a Map keyed on first-appearance order, so the earliest (most
+ * relevant) query result for each URL — and its provenance/description — is kept.
  */
-export async function assembleReferenceDocuments(
+export async function collectCandidateUrls(
   queries: string[],
   store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
-): Promise<{ text: string; urls: string[] }> {
-  const allUrls = new Map<string, number>();
+): Promise<{ candidates: KnowledgeCandidate[]; provenanceByUrl: Map<string, string> }> {
+  const order = new Map<string, number>();
   const provenanceByUrl = new Map<string, string>();
+  const descriptionByUrl = new Map<string, string>();
 
   for (const query of queries) {
     try {
       const results = await store.findRelevantUrls(query, { limit: 20 });
       for (const entry of results) {
-        if (!allUrls.has(entry.url)) {
-          allUrls.set(entry.url, allUrls.size);
+        if (!order.has(entry.url)) {
+          order.set(entry.url, order.size);
           provenanceByUrl.set(entry.url, entry.provenance || 'unknown');
+          descriptionByUrl.set(entry.url, entry.description || '');
         }
       }
     } catch (err) {
@@ -159,15 +189,33 @@ export async function assembleReferenceDocuments(
     }
   }
 
-  if (allUrls.size === 0) {
-    return { text: '', urls: [] };
-  }
+  // Sort by first-appearance order (lower = more relevant), cap the candidate pool.
+  const candidates = [...order.keys()]
+    .sort((a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity))
+    .slice(0, MAX_CANDIDATES)
+    .map((url) => ({
+      url,
+      description: descriptionByUrl.get(url) || '',
+      provenance: provenanceByUrl.get(url) || 'unknown',
+    }));
 
-  // Sort by first-appearance order (lower = more relevant)
-  const sortedUrls = [...allUrls.keys()]
-    .sort((a, b) => (allUrls.get(a) ?? Infinity) - (allUrls.get(b) ?? Infinity))
-    .slice(0, MAX_DOCUMENTS);
+  return { candidates, provenanceByUrl };
+}
 
+/**
+ * Rebuild pristine full documents for the given URLs via the store's native
+ * rebuildDocument() (synthesis-description metadata blocks → unfragmented original
+ * markdown, not stitched vector chunks), enforcing the total character budget.
+ * `urls` is expected to already be ranked (most relevant first); it is capped at
+ * MAX_DOCUMENTS. The returned `urls` is the capped input list (including any whose
+ * rebuild yielded nothing) so callers can report how many documents were considered.
+ */
+export async function rebuildDocuments(
+  urls: string[],
+  provenanceByUrl: Map<string, string>,
+  store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
+): Promise<{ text: string; urls: string[] }> {
+  const sortedUrls = urls.slice(0, MAX_DOCUMENTS);
   const documentParts: string[] = [];
   let totalChars = 0;
 
@@ -202,6 +250,22 @@ export async function assembleReferenceDocuments(
   }
 
   return { text: documentParts.join('\n'), urls: sortedUrls };
+}
+
+/**
+ * Convenience composition: collect candidates for the queries and rebuild ALL of
+ * them (no triage). This is the permissive fall-back used when the relevance-triage
+ * LLM is unavailable or fails — behaviourally identical to the pre-triage tool.
+ */
+export async function assembleReferenceDocuments(
+  queries: string[],
+  store: import('../core/interfaces/knowledge-interfaces.ts').IKnowledgeStore,
+): Promise<{ text: string; urls: string[] }> {
+  const { candidates, provenanceByUrl } = await collectCandidateUrls(queries, store);
+  if (candidates.length === 0) {
+    return { text: '', urls: [] };
+  }
+  return rebuildDocuments(candidates.map((c) => c.url), provenanceByUrl, store);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +502,124 @@ export async function runBackgroundExtraction(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3.5: Cheap, model-agnostic relevance triage (descriptions only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask the LLM which candidates are actually relevant, reading ONLY their short
+ * descriptions. This is the model-agnostic replacement for an embedding-similarity
+ * gate: the vector index always returns SOME nearest neighbour, so we let the LLM —
+ * which judged the original "Belize" miss correctly — decide relevance on cheap text
+ * before paying to rebuild full documents and run the large synthesis call.
+ *
+ * Returns:
+ *  - `string[]` (possibly empty) — triage ran: the relevant candidate URLs. An empty
+ *    array authorises an instant miss with NO rebuild and NO synthesis LLM call.
+ *  - `null` — triage could NOT run (no prompt, non-transient error, or malformed
+ *    output). The caller then FAILS OPEN (uses all candidates), so a triage fault
+ *    never wrongly hides real knowledge — worst case is the old, slower behaviour.
+ *
+ * A genuine cancellation (signal) propagates as a throw.
+ * Exported for unit testing.
+ */
+export async function triageRelevantUrls(
+  model: Model<any>,
+  auth: { apiKey: string; headers?: Record<string, string> },
+  conversationHistory: string,
+  candidates: KnowledgeCandidate[],
+  llmTimeout: number,
+  thinkingLevel: Config['LLM_THINKING_LEVEL'],
+  signal?: AbortSignal,
+): Promise<string[] | null> {
+  if (candidates.length === 0) return [];
+
+  const promptTemplate = loadPrompt('research-knowledge-relevance-triage');
+  if (!promptTemplate) {
+    logger.warn('[research-knowledge-search] Triage prompt missing; failing open to full synthesis');
+    return null;
+  }
+
+  const candidateBlock = candidates
+    .map((c, i) => {
+      const desc = (c.description || '(no description available)').slice(0, TRIAGE_DESCRIPTION_MAX_CHARS);
+      return `[${i}] ${c.url}\n${desc}`;
+    })
+    .join('\n\n');
+
+  // FUNCTION replacers so literal `$`/`$&` in descriptions or history are not treated
+  // as regex substitution patterns (same class as the synthesis prompt).
+  const systemPrompt = promptTemplate
+    .replace('{{conversation_history}}', () => conversationHistory)
+    .replace('{{candidates}}', () => candidateBlock);
+
+  const userMessage = 'Return the JSON object listing the indices of the relevant candidates.';
+
+  let responseText: string;
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    try {
+      const response = await withTimeout(
+        completeSimple(model, {
+          systemPrompt,
+          messages: [
+            { role: 'user', content: [{ type: 'text', text: userMessage }], timestamp: Date.now() },
+          ],
+        }, buildSafeOptions(model, {
+          apiKey: auth.apiKey,
+          headers: auth.headers,
+          signal,
+        }, TRIAGE_MAX_TOKENS, thinkingLevel)),
+        llmTimeout,
+        'knowledge-relevance-triage',
+      );
+
+      const rawUsage = (response as any).usage;
+      if (rawUsage) {
+        const { tokens, cost } = extractUsage(model, rawUsage);
+        if (tokens > 0 || cost > 0) {
+          metrics.increment('llm_tokens_total', tokens, { component: 'knowledge_triage' });
+          metrics.increment('llm_cost_total', cost, { component: 'knowledge_triage' });
+        }
+      }
+
+      responseText = validateAndExtractText(response, 'Knowledge Triage');
+      break;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt >= KNOWLEDGE_SYNTHESIS_MAX_ATTEMPTS || !isTransientSynthesisError(msg)) {
+        // Fail open: a triage fault must not hide real knowledge.
+        logger.warn(`[research-knowledge-search] Triage failed (${msg}); failing open to full synthesis`);
+        return null;
+      }
+      const delay = KNOWLEDGE_SYNTHESIS_RETRY_BASE_MS * attempt;
+      metrics.increment('research_knowledge_search_triage_retries_total', 1);
+      await abortableDelay(delay, signal);
+    }
+  }
+
+  const extracted = extractJson<KnowledgeRelevanceTriage>(responseText, 'object');
+  if (!extracted.success || !extracted.value ||
+      !Value.Check(KnowledgeRelevanceTriageSchema, Value.Convert(KnowledgeRelevanceTriageSchema, extracted.value))) {
+    logger.warn('[research-knowledge-search] Triage output malformed; failing open to full synthesis');
+    return null;
+  }
+
+  const coerced = Value.Convert(KnowledgeRelevanceTriageSchema, extracted.value) as KnowledgeRelevanceTriage;
+  const seen = new Set<string>();
+  const relevantUrls: string[] = [];
+  for (const idx of coerced.relevant_indices) {
+    const candidate = Number.isInteger(idx) && idx >= 0 && idx < candidates.length ? candidates[idx] : undefined;
+    if (candidate && !seen.has(candidate.url)) {
+      seen.add(candidate.url);
+      relevantUrls.push(candidate.url);
+    }
+  }
+  return relevantUrls;
+}
+
+// ---------------------------------------------------------------------------
 // Phase 5: Orchestration Steering
 // ---------------------------------------------------------------------------
 
@@ -626,11 +808,10 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         }
 
         // ----------------------------------------------------------
-        // Phase 2: Vector search → URL dedup → rebuildDocument
+        // Phase 2: Vector retrieval → ranked candidates (descriptions only, cheap)
         // ----------------------------------------------------------
-        const { text: referenceText, urls } = await assembleReferenceDocuments(p.queries, store);
-
-        if (!referenceText || referenceText.length === 0) {
+        const { candidates, provenanceByUrl } = await collectCandidateUrls(p.queries, store);
+        if (candidates.length === 0) {
           return missResult('no_results');
         }
 
@@ -640,7 +821,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         const conversationHistory = await serializeConversationHistory(ctx);
 
         // ----------------------------------------------------------
-        // Phase 4: Model routing → stateless LLM → agentic repair
+        // Phase 4: Model routing (needed for both triage and synthesis)
         // ----------------------------------------------------------
         const { model, error: modelError } = resolveSynthesisModel(ctx, config);
         if (modelError || !model) {
@@ -652,10 +833,44 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           logger.warn(`[research-knowledge-search] Model auth failed: ${authResult.error}`);
           return missResult('auth_failed');
         }
+        const auth = { apiKey: authResult.apiKey || '', headers: authResult.headers };
+
+        // ----------------------------------------------------------
+        // Phase 4.5: Cheap relevance triage over descriptions. This is the
+        // model-agnostic replacement for an embedding-similarity gate: the vector
+        // index always returns *some* nearest neighbour, so we let the LLM judge the
+        // short descriptions before paying to rebuild full documents + synthesize.
+        // ----------------------------------------------------------
+        const triaged = await triageRelevantUrls(
+          model, auth, conversationHistory, candidates,
+          config.LLM_TIMEOUT_MS, config.LLM_THINKING_LEVEL, signal,
+        );
+        // null = triage unavailable/failed → fail open to all candidates (never hide
+        // real knowledge). A non-null result is authoritative, including an empty one.
+        const chosenUrls = triaged === null ? candidates.map((c) => c.url) : triaged;
+        logger.debug(
+          `[research-knowledge-search] Triage: ${candidates.length} candidates → ` +
+          `${triaged === null ? 'FAIL-OPEN (all)' : `${chosenUrls.length} relevant`}`,
+        );
+        if (chosenUrls.length === 0) {
+          // Triage judged nothing relevant → instant miss, NO document rebuild and NO
+          // synthesis call. This is the fast path that fixes the slow-empty behaviour.
+          const durationMs = Date.now() - startTime;
+          metrics.observe('research_knowledge_search_duration_ms', durationMs, { status: 'triaged_out' });
+          return missResult('no_results');
+        }
+
+        // ----------------------------------------------------------
+        // Phase 5: Rebuild ONLY the relevant documents → full synthesis
+        // ----------------------------------------------------------
+        const { text: referenceText, urls } = await rebuildDocuments(chosenUrls, provenanceByUrl, store);
+        if (!referenceText || referenceText.length === 0) {
+          return missResult('no_results');
+        }
 
         const result = await runBackgroundExtraction(
           model,
-          { apiKey: authResult.apiKey || '', headers: authResult.headers },
+          auth,
           conversationHistory,
           referenceText,
           config.LLM_TIMEOUT_MS,
@@ -671,7 +886,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         metrics.observe('research_knowledge_search_duration_ms', durationMs);
 
         // ----------------------------------------------------------
-        // Phase 5: Orchestration Steering
+        // Phase 6: Orchestration Steering
         // ----------------------------------------------------------
         return buildSteeringResult(result, urls);
       } catch (error) {

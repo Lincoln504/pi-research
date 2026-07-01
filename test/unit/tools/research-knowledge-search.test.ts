@@ -12,19 +12,29 @@
  * mocked; no file I/O, no network, no real LLM calls.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Value } from 'typebox/value';
+
+// The relevance-triage LLM call goes through completeSimple; mock it so the triage
+// tests drive the REAL triageRelevantUrls logic with scripted model output.
+const { mockCompleteSimple } = vi.hoisted(() => ({ mockCompleteSimple: vi.fn() }));
+vi.mock('../../../src/core/llm/pi-ai-completion.ts', () => ({ completeSimple: mockCompleteSimple }));
+
 import {
   ResearchKnowledgeSynthesisResponseSchema,
 } from '../../../src/tools/research-knowledge-types.ts';
 import {
   assembleReferenceDocuments,
+  collectCandidateUrls,
+  triageRelevantUrls,
   buildSteeringResult,
   isTransientSynthesisError,
   MAX_DOCUMENTS,
+  MAX_CANDIDATES,
   MAX_REFERENCE_CHARS,
   RESEARCH_KNOWLEDGE_MISS_STRING,
   RESEARCH_KNOWLEDGE_MAYBE_STRING,
+  type KnowledgeCandidate,
 } from '../../../src/tools/research-knowledge-search.ts';
 import { resolveResearchModel } from '../../../src/core/llm/research-model-resolver.ts';
 import type { IKnowledgeStore } from '../../../src/core/interfaces/knowledge-interfaces.ts';
@@ -303,6 +313,93 @@ describe('assembleReferenceDocuments — token budget and document caps', () => 
     const { text } = await assembleReferenceDocuments(['q'], store);
     expect(text.length).toBeLessThanOrEqual(MAX_REFERENCE_CHARS + 200);
     expect(text).toContain('[TRUNCATED]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 3b: Candidate collection (real collectCandidateUrls)
+// ---------------------------------------------------------------------------
+describe('collectCandidateUrls — ranked candidates with descriptions', () => {
+  function storeWithDescriptions(byQuery: Record<string, Array<{ url: string; description?: string; provenance?: string }>>): IKnowledgeStore {
+    return {
+      findRelevantUrls: vi.fn(async (q: string) =>
+        (byQuery[q] ?? []).map((e) => ({ url: e.url, description: e.description ?? '', provenance: e.provenance }))),
+    } as unknown as IKnowledgeStore;
+  }
+
+  it('captures each URL description and dedups by first appearance', async () => {
+    const store = storeWithDescriptions({
+      q1: [{ url: 'https://a.com', description: 'About A' }],
+      q2: [{ url: 'https://a.com', description: 'A again' }, { url: 'https://b.com', description: 'About B' }],
+    });
+    const { candidates } = await collectCandidateUrls(['q1', 'q2'], store);
+    expect(candidates.map((c) => c.url)).toEqual(['https://a.com', 'https://b.com']);
+    // First appearance wins for the description
+    expect(candidates[0].description).toBe('About A');
+    expect(candidates[1].description).toBe('About B');
+  });
+
+  it('caps the candidate pool at MAX_CANDIDATES', async () => {
+    const many = Array.from({ length: MAX_CANDIDATES + 8 }, (_, i) => ({ url: `https://d-${i}.com`, description: `d${i}` }));
+    const store = storeWithDescriptions({ q: many });
+    const { candidates } = await collectCandidateUrls(['q'], store);
+    expect(candidates).toHaveLength(MAX_CANDIDATES);
+  });
+
+  it('returns an empty list when nothing is found', async () => {
+    const { candidates } = await collectCandidateUrls(['q'], storeWithDescriptions({}));
+    expect(candidates).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 3c: Relevance triage (real triageRelevantUrls, mocked LLM)
+// ---------------------------------------------------------------------------
+describe('triageRelevantUrls — cheap description-based relevance judgement', () => {
+  const model = { maxTokens: 4096 } as any;
+  const auth = { apiKey: 'test-key' };
+  const cands = (n: number): KnowledgeCandidate[] =>
+    Array.from({ length: n }, (_, i) => ({ url: `https://u-${i}.com`, description: `desc ${i}`, provenance: 'p' }));
+  const llmReturning = (json: string) => ({ content: [{ type: 'text', text: json }], stopReason: 'stop' });
+
+  beforeEach(() => mockCompleteSimple.mockReset());
+
+  it('maps returned indices to the corresponding candidate URLs', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[0,2]}'));
+    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    expect(urls).toEqual(['https://u-0.com', 'https://u-2.com']);
+  });
+
+  it('drops out-of-range and duplicate indices', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[1,1,99,-1,0]}'));
+    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    expect(urls).toEqual(['https://u-1.com', 'https://u-0.com']);
+  });
+
+  it('returns [] (authoritative "nothing relevant") when the model selects none', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
+    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    expect(urls).toEqual([]);
+  });
+
+  it('short-circuits without an LLM call for empty candidates', async () => {
+    const urls = await triageRelevantUrls(model, auth, 'history', [], 30000, 'off');
+    expect(urls).toEqual([]);
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+  });
+
+  it('fails open (null) on malformed model output so real knowledge is never hidden', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('not json at all'));
+    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    expect(urls).toBeNull();
+  });
+
+  it('fails open (null) on a non-transient LLM error', async () => {
+    // Provider surfaces the error via the response (stopReason/errorMessage), which
+    // validateAndExtractText turns into a thrown non-transient error inside the try.
+    mockCompleteSimple.mockResolvedValue({ stopReason: 'error', errorMessage: 'model does not exist', content: [] });
+    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    expect(urls).toBeNull();
   });
 });
 

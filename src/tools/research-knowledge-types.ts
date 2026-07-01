@@ -53,3 +53,25 @@ export type ResearchKnowledgeSynthesisResponse = Static<typeof ResearchKnowledge
  */
 export const ResearchKnowledgeSynthesisResponseSchemaAsTSchema =
   ResearchKnowledgeSynthesisResponseSchema as unknown as TSchema;
+
+/**
+ * Cheap relevance-triage response.
+ *
+ * The triage LLM reads only the SHORT per-candidate descriptions (a few hundred
+ * chars each) — not the full rebuilt documents — and returns the 0-based indices
+ * of the candidates that are genuinely relevant to the user's question. An empty
+ * array means "nothing in the store is relevant" → the tool reports an instant
+ * miss WITHOUT rebuilding documents or running the full synthesis LLM.
+ *
+ * This replaces the earlier idea of an embedding-similarity threshold, which was
+ * shown to be neither model- nor store-size-robust (a large anisotropic vector
+ * space gives every query a spuriously-close nearest neighbour). Letting the LLM
+ * judge the descriptions is model-agnostic and adapts to any embedding model.
+ */
+export const KnowledgeRelevanceTriageSchema = Type.Object({
+  relevant_indices: Type.Array(Type.Integer(), {
+    description: '0-based indices of the candidate sources that are relevant to the question. Empty if none.',
+  }),
+});
+
+export type KnowledgeRelevanceTriage = Static<typeof KnowledgeRelevanceTriageSchema>;
