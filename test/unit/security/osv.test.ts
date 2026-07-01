@@ -25,6 +25,23 @@ describe('OSV Client', () => {
       expect(result.vulnerabilities[0]!.id).toBe('CVE-2023-0001');
     });
 
+    it('derives severity + CVSS score from a v3 vector when no database_specific.severity (non-GHSA)', async () => {
+      // A CVE-sourced OSV record: severity lives only in a CVSS vector, not database_specific.
+      const mockVuln = {
+        id: 'CVE-2023-9999',
+        summary: 'Test CVE with CVSS vector only',
+        modified: '2023-01-01T00:00:00Z',
+        severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockVuln } as Response);
+
+      const result = await searchOSV(['CVE-2023-9999']);
+
+      expect(result.vulnerabilities[0]!.severity).toBe('CRITICAL'); // was UNKNOWN before the calculator
+      expect(result.vulnerabilities[0]!.cvssScore).toBe(9.8);
+      expect(result.vulnerabilities[0]!.cvssVector).toContain('CVSS:3.1');
+    });
+
     it('should normalize GHSA IDs', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,

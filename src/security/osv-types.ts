@@ -3,6 +3,7 @@
  */
 
 import type { Vulnerability } from './types.ts';
+import { scoreCvss3 } from './cvss.ts';
 
 /**
  * OSV API vulnerability response (from GET /vulns/{id})
@@ -143,7 +144,26 @@ export function mapOsvItemToVulnerability(item: OsvVulnerability): Vulnerability
       typeof item.database_specific.severity === 'string') {
     severityStr = item.database_specific.severity;
   }
-  const severity: string = mapOsvSeverity(severityStr);
+  let severity: string = mapOsvSeverity(severityStr);
+
+  // When OSV has no database_specific.severity (non-GHSA records: CVE/PyPA/Go/RustSec), the only
+  // severity signal is a CVSS vector in item.severity[]. Compute the v3 base score/severity from it
+  // rather than reporting UNKNOWN with no score.
+  let cvssScore: number | undefined;
+  let cvssVector: string | undefined;
+  if (severity === 'UNKNOWN' && Array.isArray(item.severity)) {
+    for (const sev of item.severity) {
+      if (sev && typeof sev.score === 'string' && /^CVSS_V3/i.test(sev.type ?? '')) {
+        const scored = scoreCvss3(sev.score);
+        if (scored) {
+          severity = scored.severity === 'NONE' ? 'UNKNOWN' : scored.severity;
+          cvssScore = scored.score;
+          cvssVector = sev.score;
+          break;
+        }
+      }
+    }
+  }
 
   const aliases: string[] = item.aliases ?? [];
   const references: string[] = [...aliases];
@@ -228,8 +248,8 @@ export function mapOsvItemToVulnerability(item: OsvVulnerability): Vulnerability
     description: summary !== '' ? summary : details,
     published,
     modified,
-    cvssScore: undefined,
-    cvssVector: undefined,
+    cvssScore,
+    cvssVector,
     cwes,
     references,
     affectedProducts,
