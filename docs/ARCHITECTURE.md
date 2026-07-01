@@ -253,6 +253,33 @@ Enforced boundaries — `docs/deps.svg` is regenerated on every push (madge), an
 architectural rules are enforced by dependency-cruiser
 (`config/tooling/dependency-cruiser.cjs`).
 
+### Built with
+
+Browser & scraping
+
+- [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
+- [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
+- [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
+- `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
+
+Knowledge store & embeddings
+
+- [Transformers.js](https://github.com/huggingface/transformers.js) — local embedding inference (model execution via ONNX Runtime)
+- Google [Dawn](https://dawn.googlesource.com/dawn) — the WebGPU backend, accessed through the `webgpu` Node binding
+- [LanceDB](https://lancedb.com) — on-disk vector database
+- [Apache Arrow](https://arrow.apache.org) — the columnar schema the vector table is built on
+
+YouTube transcripts
+
+- [youtubei.js](https://github.com/LuanRT/YouTube.js) — YouTube internal-API client
+- [BgUtils](https://github.com/LuanRT/BgUtils) — BotGuard PoToken generation
+- [jsdom](https://github.com/jsdom/jsdom) — DOM environment for minting the PoToken
+
+Host & runtime
+
+- [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
+- [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation
+
 ### Development
 
 ```bash
