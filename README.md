@@ -38,12 +38,20 @@ Ask in natural language — the tool understands the depth needed:
 
 ### Use cases
 
-- Deep web research from inside the pi extension.
+- Plug-and-play (no API key needed) research tool for your [pi](https://github.com/earendil-works/pi).
 - Research from Claude Code, Codex, or another coding agent, with a cheaper lightweight or local model driving the research so it doesn't spend your main agent's budget.
 - Populating a dataset or building an index of knowledge sources from the web.
 - Holding research in the knowledge store with a configurable scope — project-specific or globally user-scoped, set per directory from the `/research-config` TUI.
 - Using the pi-research agent skill as OpenClaw's web access.
 - Building agent systems that identify and examine web sources.
+
+### Advantages
+
+- Unlimited search and scrape, for free — you only pay for LLM tokens.
+- Context-efficient — it returns a synthesized, cited report to the chat instead of dumping raw web content into the conversation.
+- Safe by design — web access runs inside a specialized, limited research agent with no filesystem or shell access.
+- Search a little or a lot — three depth levels (four in SDK mode, which adds the quick depth-0 path). Levels 1 and 2 are recommended for everyday workflow use; level 3 is for larger-scale investigations.
+- Holds up against other tools — several in the pi community have built competitive web-research extensions, and pi-research has not been tested head-to-head against them. It does outperform the Claude Code web-research subagent, though: usually faster to respond and far more comprehensive in results, and cheap to run via a smaller model.
 
 ### Requirements / limitations
 
