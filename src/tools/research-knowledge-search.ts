@@ -26,7 +26,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Type, type Static } from 'typebox';
 import { Value } from 'typebox/value';
-import { completeSimple } from '@earendil-works/pi-ai/compat';
+import { completeSimple } from '../core/llm/pi-ai-completion.ts';
 import type { Model } from '@earendil-works/pi-ai';
 import { extractUsage } from '../types/llm.ts';
 import { buildSafeOptions, validateAndExtractText } from '../core/llm/llm-utils.ts';
@@ -325,9 +325,14 @@ export async function runBackgroundExtraction(
     throw new Error('research-knowledge-search prompt template not found');
   }
 
+  // Use FUNCTION replacers: referenceDocuments is rebuilt knowledge-store text (scraped web pages)
+  // and conversationHistory is arbitrary user text, both of which routinely contain `$`. A plain
+  // string replacement interprets `$&`, `` $` ``, `$'`, `$$` as substitution patterns and corrupts
+  // the extractor prompt (duplicating/eating template text) → wrong yes/maybe/no classification.
+  // A function replacer inserts the value literally. (Same class as commit 78c16f98.)
   const systemPrompt = promptTemplate
-    .replace('{{conversation_history}}', conversationHistory)
-    .replace('{{reference_documents}}', referenceDocuments);
+    .replace('{{conversation_history}}', () => conversationHistory)
+    .replace('{{reference_documents}}', () => referenceDocuments);
 
   const userMessage =
     'Analyze the reference documents above and extract the answer using the required JSON format.';
@@ -556,14 +561,16 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
     label: 'Research Knowledge Search',
     description:
       'Search the research knowledge database for previously investigated information. ' +
-      'Use this before performing live web research.',
+      'Check this first for a web-research question, before the live `research` tool — ' +
+      'it is a local, instant lookup. Go to live research only if it returns a partial or no answer.',
     promptSnippet: 'Search research knowledge database',
     promptGuidelines: [
-      'Query `research_knowledge_search` first for research tasks.',
-      'If status is "no", proceed with `research` for live investigation.',
-      'If status is "maybe", use the synthesis and fill gaps with live research.',
-      'If status is "yes", the answer is complete; no live research needed.',
-      'Do not call both knowledge search and research for the same query simultaneously.',
+      'Check `research_knowledge_search` first for research tasks, before `research`.',
+      'A bare "research X" request still starts here: check what is known, then go live only if needed.',
+      'If status is "yes" (complete), answer from it; no live research needed.',
+      'If status is "maybe" (partial), use the synthesis and call `research` to fill gaps.',
+      'If status is "no" (empty), call `research` for live investigation.',
+      'Do not call knowledge search and research for the same query in the same turn — wait for the result.',
     ],
     parameters: ResearchKnowledgeSearchParams,
     executionMode: 'parallel',
@@ -598,14 +605,19 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           return missResult('store_unavailable');
         }
 
-        if (!storeService.isReady()) {
-          const lifecycle = (storeService as any).lifecycle;
-          return missResult(lifecycle === 'disabled' ? 'store_disabled' : 'store_not_ready');
-        }
-
+        // Do NOT short-circuit on isReady() here. Immediately after Knowledge Mode is enabled
+        // via /research-config (no Pi restart), the store is still coming up — the getService
+        // above triggers the revival, but the native embed stack + init lock take a few seconds,
+        // during which isReady() is briefly false and would return a spurious "initializing"
+        // miss (the user then thinks a restart is required). getStore() awaits initialization to
+        // completion, so gate readiness on its result instead: it returns the store once up,
+        // or null when the store is genuinely disabled/failed.
         const store = await storeService.getStore();
         if (!store) {
-          return missResult('store_disabled');
+          // null = disabled (mode still 'none') or a genuine init failure — distinguish for the
+          // user-facing message so a real failure doesn't read as "disabled in settings".
+          const lifecycle = (storeService as any).lifecycle;
+          return missResult(lifecycle === 'disabled' ? 'store_disabled' : 'store_not_ready');
         }
 
         const count = await store.count();

@@ -24,6 +24,7 @@ vi.mock('../../../src/core/service-registry.ts', () => ({
     UNINITIALIZED: 'UNINITIALIZED',
     INITIALIZING: 'INITIALIZING',
     INITIALIZED: 'INITIALIZED',
+    DISABLED: 'DISABLED',
     DISPOSING: 'DISPOSING',
     DISPOSED: 'DISPOSED',
   },
@@ -61,6 +62,114 @@ describe('KnowledgeStoreService', () => {
     expect(await service.getEmbedder()).toBe(mockEmbedder);
     expect(await service.getStore()).toBe(mockStore);
     expect(await service.getWriterQueue()).toBe(mockQueue);
+  });
+
+  it('revives a mode-disabled store when Knowledge Mode is re-enabled in config (no restart)', async () => {
+    // First init: createKnowledgeStoreComponents returns null → store disabled (mode=none).
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize();
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+
+    // User enables Knowledge Mode via /research-config. The next init (same cwd) must re-check
+    // live config and re-initialize instead of early-returning the memoized DISABLED verdict.
+    const mockEmbedder = { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' };
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: mockEmbedder as any, store: { close: vi.fn() } as any, writerQueue: { dispose: vi.fn() } as any,
+    });
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    expect(knowledge.createKnowledgeStoreComponents).toHaveBeenCalledTimes(2);
+  });
+
+  it('stays disabled (no needless rebuild) when Knowledge Mode is still none', async () => {
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize();
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+
+    // Live config still 'none' → early-return, no second build.
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'none' } } as any);
+    expect(knowledge.createKnowledgeStoreComponents).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-initializes the live store when Knowledge Mode changes project→global at runtime', async () => {
+    const mk = () => ({
+      embedder: { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockImplementation(async () => mk());
+
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'project' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    const builds = vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length;
+
+    // User switches project→global via /research-config (same cwd, new mode) → dispose + rebuild.
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length).toBe(builds + 1);
+  });
+
+  it('disables the live store when Knowledge Mode changes enabled→none at runtime', async () => {
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce({
+      embedder: { getOriginalDevice: () => 'cpu', isInitialized: () => true, getDevice: () => 'cpu' } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'global' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.INITIALIZED);
+
+    // Switch to none → dispose + rebuild → components null → DISABLED (no restart needed).
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockResolvedValueOnce(null as any);
+    await service.initialize({ config: { KNOWLEDGE_STORE_MODE: 'none' } } as any);
+    expect(service.lifecycle).toBe(ServiceLifecycle.DISABLED);
+  });
+
+  it('lazy getStore()/getEmbedder() after an explicit-cwd init do NOT re-scope to process.cwd()', async () => {
+    // Regression: getStore() calls initialize() with no ctx. It previously resolved
+    // the missing cwd to process.cwd(), so when process.cwd() !== the session cwd it
+    // disposed the correctly-scoped store and rebuilt it against process.cwd().
+    const makeComponents = () => ({
+      embedder: { getOriginalDevice: () => 'webgpu', isInitialized: () => true, getDevice: () => 'webgpu', dispose: vi.fn() } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockImplementation(async () => makeComponents());
+
+    // The session cwd is deliberately NOT process.cwd() (that is the whole point).
+    const sessionCwd = '/tmp/pi-research-scope-projA';
+    expect(sessionCwd).not.toBe(process.cwd());
+
+    await service.initialize({ cwd: sessionCwd });
+    expect(service.getCwd()).toBe(sessionCwd);
+    const buildsAfterInit = vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length;
+    // The store was built for the session cwd (5th positional arg).
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.lastCall?.[4]).toBe(sessionCwd);
+
+    // Lazy accessors must neither re-scope nor rebuild the store.
+    await service.getStore();
+    await service.getEmbedder();
+    await service.getWriterQueue();
+
+    expect(service.getCwd()).toBe(sessionCwd);
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length).toBe(buildsAfterInit);
+  });
+
+  it('an explicit ctx.cwd change DOES re-scope the store to the new directory', async () => {
+    const makeComponents = () => ({
+      embedder: { getOriginalDevice: () => 'webgpu', isInitialized: () => true, getDevice: () => 'webgpu', dispose: vi.fn() } as any,
+      store: { close: vi.fn() } as any,
+      writerQueue: { dispose: vi.fn() } as any,
+    });
+    vi.mocked(knowledge.createKnowledgeStoreComponents).mockImplementation(async () => makeComponents());
+
+    await service.initialize({ cwd: '/tmp/pi-research-scope-projA' });
+    await service.initialize({ cwd: '/tmp/pi-research-scope-projB' });
+
+    expect(service.getCwd()).toBe('/tmp/pi-research-scope-projB');
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.lastCall?.[4]).toBe('/tmp/pi-research-scope-projB');
+    // Two distinct directories → two builds (the first store was disposed).
+    expect(vi.mocked(knowledge.createKnowledgeStoreComponents).mock.calls.length).toBe(2);
   });
 
   it('should handle LanceDB corruption and auto-recover', async () => {

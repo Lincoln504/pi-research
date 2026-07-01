@@ -354,12 +354,36 @@ describe('KnowledgeStore', () => {
     expect(await store.count()).toBe(2);
   });
 
-  it('rebuildFtsIndex resolves without error after documents are added', async () => {
+  it('rebuildFtsIndex builds after documents are added, then skips when row count is unchanged', async () => {
+    await store.open();
+    // Empty table → nothing to index.
+    await expect(store.rebuildFtsIndex()).resolves.toBe(false);
+
+    await store.addDocuments([
+      { url: 'https://example.com', text: 'test document', metadata: {}, timestamp: Date.now() },
+    ]);
+    // First rebuild with rows present → built.
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+    // Row count unchanged → skipped (the disk-bloat guard).
+    await expect(store.rebuildFtsIndex()).resolves.toBe(false);
+
+    // Adding a row changes the count → rebuild runs again.
+    await store.addDocuments([
+      { url: 'https://example.com/2', text: 'second document', metadata: {}, timestamp: Date.now() },
+    ]);
+    await expect(store.rebuildFtsIndex()).resolves.toBe(true);
+  });
+
+  it('optimize() compacts and prunes without error, and is a no-op while closing', async () => {
     await store.open();
     await store.addDocuments([
       { url: 'https://example.com', text: 'test document', metadata: {}, timestamp: Date.now() },
     ]);
-    await expect(store.rebuildFtsIndex()).resolves.toBeUndefined();
+    await store.rebuildFtsIndex();
+    await expect(store.optimize()).resolves.toBe(true);
+
+    await store.close();
+    await expect(store.optimize()).resolves.toBe(false);
   });
 
   it('evictOldRecords removes documents older than the TTL on open()', async () => {

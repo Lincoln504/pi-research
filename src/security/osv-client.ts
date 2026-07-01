@@ -154,14 +154,22 @@ export async function searchOSV(
 
       const vulns: Vulnerability[] = [];
       for (const item of items) {
+        // Withdrawn/retracted advisories are no longer valid vulnerabilities — skip them so they
+        // are not reported as active findings nor counted toward the researcher grounding gate.
+        if (item.withdrawn) continue;
         const vuln: Vulnerability = mapOsvItemToVulnerability(item);
         if (options?.severity !== undefined && options.severity !== '') {
           // OSV/GHSA severity vocabulary is LOW/MODERATE/HIGH/CRITICAL. Accept the
           // common "MEDIUM" synonym for MODERATE (GitHub maps it the same way at
           // github-advisories.ts) — otherwise a severity:"medium" filter silently
           // drops every OSV result.
+          // mapOsvItemToVulnerability canonicalizes severity to LOW/MEDIUM/HIGH/CRITICAL (both the
+          // OSV "MODERATE" and "MEDIUM" spellings map to 'MEDIUM'). Normalize the caller's filter
+          // into the SAME vocabulary — MODERATE→MEDIUM — before comparing. The previous direction
+          // (MEDIUM→MODERATE) compared against a value vuln.severity never holds, silently dropping
+          // every medium-severity OSV result (the most common filter value).
           const want = options.severity.toUpperCase();
-          const normalized = want === 'MEDIUM' ? 'MODERATE' : want;
+          const normalized = want === 'MODERATE' ? 'MEDIUM' : want;
           if (vuln.severity !== normalized) continue;
         }
         vulns.push(vuln);

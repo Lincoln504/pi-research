@@ -82,6 +82,42 @@ describe('NVD Client', () => {
     expect(result.vulnerabilities[0]!.cvssScore).toBe(6.5);
   });
 
+  it('parses CVSS v4.0 metrics when no v3 metric is present (was reported UNKNOWN/no-score)', async () => {
+    const mockResponse = {
+      totalResults: 1,
+      vulnerabilities: [{
+        cve: {
+          id: 'CVE-V40',
+          metrics: { cvssMetricV40: [{ cvssData: { baseScore: 9.3, baseSeverity: 'CRITICAL' } }] },
+        },
+      }],
+    };
+    vi.mocked(fetch).mockImplementation(async () => ({ ok: true, json: async () => mockResponse } as Response));
+    const searchPromise = searchNVD(['term']);
+    await vi.runAllTimersAsync();
+    const result = await searchPromise;
+    expect(result.vulnerabilities[0]!.cvssScore).toBe(9.3);
+    expect(result.vulnerabilities[0]!.severity).toBe('CRITICAL');
+  });
+
+  it('parses CVSS v2 metrics (metric-level baseSeverity) when only v2 is present', async () => {
+    const mockResponse = {
+      totalResults: 1,
+      vulnerabilities: [{
+        cve: {
+          id: 'CVE-V2',
+          metrics: { cvssMetricV2: [{ cvssData: { baseScore: 7.5 }, baseSeverity: 'HIGH' }] },
+        },
+      }],
+    };
+    vi.mocked(fetch).mockImplementation(async () => ({ ok: true, json: async () => mockResponse } as Response));
+    const searchPromise = searchNVD(['term']);
+    await vi.runAllTimersAsync();
+    const result = await searchPromise;
+    expect(result.vulnerabilities[0]!.cvssScore).toBe(7.5);
+    expect(result.vulnerabilities[0]!.severity).toBe('HIGH');
+  });
+
   it('should extract complex data (CWEs, references, CPEs)', async () => {
     const mockResponse = {
       totalResults: 1,

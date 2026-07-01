@@ -317,6 +317,10 @@ describe('SecuritySearcher', () => {
       // Should complete without throwing
       expect(result).toBeDefined();
       expect(result.totalDatabases).toBe(0);
+      // A database that threw must be surfaced in `errors` (not silently omitted / mistaken for
+      // "found nothing"), so the tool can tell the researcher the source could not be queried.
+      expect(result.errors).toBeDefined();
+      expect(result.errors!.some(e => e.includes('NVD') && e.includes('Network error'))).toBe(true);
     });
   });
 

@@ -305,6 +305,15 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
       if (scrapeEnabled && successfulScrapeCount === 0 && nonScrapeGroundingHits === 0 && historicalUrls.length === 0) {
         lastError = new Error(`Researcher ${id} produced an ungrounded report: scrape tool enabled but zero successful scrapes and no other grounding`);
         metrics.increment('researcher_ungrounded_total', 1, { mode: 'deep', complexity: String(complexity), round: String(round) });
+        // Do NOT retry an ungrounded report when the run is being torn down (quit/SIGTERM sets
+        // container.isDisposing without necessarily aborting the signal). A retry rebuilds the
+        // session and relaunches a search/scrape burst into a WorkerPool that dispose() is
+        // destroying — the same "Cannot execute a task on destroying pool" storm the catch-block
+        // guard prevents. This branch exits via `continue`, so it needs the guard too.
+        if (signal?.aborted || container?.isDisposing) {
+          logger.debug(`[ResearcherExecutor] Researcher ${id} ungrounded but run aborting/disposing; skipping retries.`);
+          break;
+        }
         logger.warn(`[ResearcherExecutor] Researcher ${id} attempt ${attempt}/${maxAttempts} ungrounded (scrape enabled, 0 successful scrapes, 0 security/stackexchange grounding hits, no knowledge-store grounding); ${attempt < maxAttempts ? 'retrying' : 'failing'}`);
         continue;
       }
@@ -340,8 +349,14 @@ export async function runResearcher(options: RunResearcherOptions): Promise<void
         logger.debug(`[ResearcherExecutor] Researcher ${id} salvage attempt failed:`, salvageErr);
       }
       
-      if (signal?.aborted || errMsg === 'Aborted') {
-        logger.debug(`[ResearcherExecutor] Researcher ${id} was aborted, skipping retries.`);
+      // Skip retries when the run is being torn down: an aborted signal, an explicit
+      // "Aborted" error, or the service container entering disposal (SIGTERM/quit
+      // mid-run, which throws "…during container disposal" from getService). Retrying
+      // during disposal is futile — services are being destroyed — and it relaunches
+      // search bursts into a WorkerPool that dispose() is simultaneously destroying,
+      // producing a storm of "Cannot execute a task on destroying pool" errors.
+      if (signal?.aborted || errMsg === 'Aborted' || errMsg.includes('during container disposal') || container?.isDisposing) {
+        logger.debug(`[ResearcherExecutor] Researcher ${id} aborted or container disposing, skipping retries.`);
         break; // Break out of the attempt loop
       }
 

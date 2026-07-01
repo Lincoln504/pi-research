@@ -16,7 +16,7 @@ import type {
   GeneratePlanOptions
 } from './service-interfaces.ts';
 import { logger } from '../logger.ts';
-import { completeSimple } from '@earendil-works/pi-ai/compat';
+import { completeSimple } from './llm/pi-ai-completion.ts';
 import { injectCurrentDate } from './llm/inject-date.ts';
 import { loadPrompt } from './llm/prompts.ts';
 import { extractUsage } from '../types/llm.ts';
@@ -297,6 +297,15 @@ export class PlanningService implements IPlanningService {
 
       // Final safety cap
       plan = this.capResearcherQueries(plan, complexity, this.name);
+      // The coordinator (round 1) MUST yield runnable researchers. If the model emitted empty or
+      // absent query arrays, capResearcherQueries drops them all and force-synthesizes — but at
+      // round 1 there are zero reports, so that is a silent no-op run ("no summary generated",
+      // no error). buildFallbackCoordinatorPlan only fires on a null plan, so a parseable-but-
+      // empty plan slips through. Fall back to the single-researcher plan so the run investigates.
+      if (!plan.researchers || plan.researchers.length === 0) {
+          logger.warn('[PlanningService] Coordinator produced no runnable researchers (empty queries); using single-researcher fallback');
+          plan = this.capResearcherQueries(this.buildFallbackCoordinatorPlan(responseText, query), complexity, this.name);
+      }
       if (plan.action !== 'synthesize') {
           plan.action = 'delegate';
       }

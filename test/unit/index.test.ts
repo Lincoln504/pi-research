@@ -25,6 +25,18 @@ vi.mock('../../src/tool.ts', () => ({
   createHealthTool: mocks.createHealthTool,
 }));
 
+// The knowledge-search tool backs `/knowledge-store <query>`. Mock its factory so
+// the command path is hermetic (no native vector stack) and assertable. The execute
+// spy is created via vi.hoisted so the hoisted vi.mock factory can reference it.
+const { mockKnowledgeExecute } = vi.hoisted(() => ({ mockKnowledgeExecute: vi.fn() }));
+vi.mock('../../src/tools/research-knowledge-search.ts', () => ({
+  createResearchKnowledgeSearchTool: vi.fn(() => ({
+    name: 'research_knowledge_search',
+    execute: mockKnowledgeExecute,
+    description: 'Search the research knowledge database',
+  })),
+}));
+
 vi.mock('../../src/logger.ts', () => ({
   logger: {
     log: vi.fn(),
@@ -247,6 +259,63 @@ describe('extension entrypoint', () => {
         expect.objectContaining({
           customType: 'research-result',
           details: { error: 'Rate limited' },
+        }),
+      );
+    });
+  });
+
+  describe('/knowledge-store slash command', () => {
+    it('ignores an empty/whitespace query — no search, no message', async () => {
+      const { pi, commands } = createPiMock();
+      await activate(pi as any);
+
+      await commands.get('knowledge-store')!.handler('   ', makeCtx());
+
+      expect(mockKnowledgeExecute).not.toHaveBeenCalled();
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('searches the knowledge store for a query and delivers the result', async () => {
+      const { pi, commands } = createPiMock();
+      await activate(pi as any);
+
+      mockKnowledgeExecute.mockResolvedValueOnce({
+        content: [{ type: 'text', text: '## From knowledge store\n\nPreviously researched.' }],
+        details: { researchId: 'k1' },
+      });
+
+      const ctx = makeCtx();
+      await commands.get('knowledge-store')!.handler('what is typescript', ctx);
+
+      expect(mockKnowledgeExecute).toHaveBeenCalledWith(
+        'mock-uuid-123',
+        { queries: ['what is typescript'] },
+        undefined,
+        undefined,
+        expect.any(Object),
+      );
+      expect(pi.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customType: 'knowledge-store',
+          content: '## From knowledge store\n\nPreviously researched.',
+          display: true,
+        }),
+      );
+    });
+
+    it('reports a search failure to chat', async () => {
+      const { pi, commands } = createPiMock();
+      await activate(pi as any);
+
+      mockKnowledgeExecute.mockRejectedValueOnce(new Error('store exploded'));
+
+      const ctx = makeCtx();
+      await commands.get('knowledge-store')!.handler('boom', ctx);
+
+      expect(pi.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customType: 'knowledge-store',
+          details: { error: 'store exploded' },
         }),
       );
     });

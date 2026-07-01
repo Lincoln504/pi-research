@@ -17,6 +17,7 @@ import { ensureBrowserCacheDir, getBrowserEnv, getBrowserProfileDir, getMaxWorke
 import { ensureBrowserInstalled } from './ensure-browser.ts';
 import { cleanupStaleProfiles } from './cleanup-utils.ts';
 import { cleanupOrphanedCamoufoxProcesses } from './browser-cleanup.ts';
+import { setupMasterIpcErrorHandler } from './thread-worker-lifecycle.ts';
 import { ServiceLifecycle, type IService } from '../../core/service-registry.ts';
 import { ServiceNames } from '../../core/interfaces/service-names.ts';
 
@@ -109,6 +110,12 @@ export class WorkerPoolManager implements IService {
                 }
 
                 this.currentWorkerCount = maxWorkers;
+
+                // Install the master-side IPC guard BEFORE any worker is forked, so a
+                // `write EPIPE` on a closing worker channel (poolifier dispatch racing a
+                // 429-driven respawn) is swallowed instead of crashing the pi host via an
+                // unhandled cluster.Worker 'error'. Idempotent — only installs once.
+                setupMasterIpcErrorHandler();
 
                 logger.log(`[WorkerPoolManager] Initializing Unified FixedClusterPool (Size: ${maxWorkers}) on PID ${process.pid}`);
 

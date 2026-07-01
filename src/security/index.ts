@@ -188,7 +188,15 @@ export class SecuritySearcher {
       });
     }
 
-    return { results, totalDatabases: Object.keys(results).length, totalVulnerabilities, duration: Date.now() - startTime };
+    return {
+      results,
+      totalDatabases: Object.keys(results).length,
+      totalVulnerabilities,
+      duration: Date.now() - startTime,
+      // Surface databases that threw (vs returned an error field) so a dropped source is visible
+      // rather than silently omitted and mistaken for a clean "no results" from that database.
+      ...(errors.length > 0 ? { errors } : {}),
+    };
   }
 
   private async searchNVD(terms: readonly string[], options: NVDSearchOptions): Promise<import('./types.ts').NVDResult> {

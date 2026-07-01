@@ -63,6 +63,21 @@ describe('citation-utils', () => {
       expect(normalizedReports.get('res2')).toContain(`Info [${commonId}].`);
     });
 
+    it('remaps inline [N] by the written label, not list position (non-sequential numbering)', () => {
+      // res1 numbers its CITED LINKS non-sequentially: [1] then [3] (no [2]). The inline [3] must
+      // map to its written entry (https://third.com), not dangle. With the old position-based
+      // mapping only keys 1 and 2 existed, so [3] was left unmapped.
+      const reports = new Map([
+        ['res1', 'A [1] and C [3].\n\nCITED LINKS\n[1] https://first.com — First\n[3] https://third.com — Third'],
+      ]);
+      const { normalizedReports, globalCitations } = normalizeCitations(reports);
+      const firstId = globalCitations.find(c => c.url === 'https://first.com')?.id;
+      const thirdId = globalCitations.find(c => c.url === 'https://third.com')?.id;
+      expect(firstId).toBeDefined();
+      expect(thirdId).toBeDefined();
+      expect(normalizedReports.get('res1')).toContain(`A [${firstId}] and C [${thirdId}].`);
+    });
+
     it('should handle missing CITED LINKS section gracefully', () => {
       const reports = new Map([
         ['res1', 'No citations here.']

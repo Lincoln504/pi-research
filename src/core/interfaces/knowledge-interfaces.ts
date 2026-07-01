@@ -105,7 +105,10 @@ export interface IKnowledgeStore extends IService {
   open(): Promise<void>;
   close(): Promise<void>;
   clear(filter?: string): Promise<void>;
-  rebuildFtsIndex(): Promise<void>;
+  /** Rebuild FTS indexes; returns true if a rebuild ran, false if skipped (empty/unchanged). */
+  rebuildFtsIndex(): Promise<boolean>;
+  /** Compact data fragments and prune stale versions/indices to reclaim disk. Returns true if it ran. */
+  optimize(options?: { cleanupOlderThan?: Date; deleteUnverified?: boolean }): Promise<boolean>;
   count(): Promise<number>;
   search(query: string, options?: { limit?: number }): Promise<StoreDocument[]>;
   findRelevantUrls(query: string, options?: { limit?: number }): Promise<StoreUrlEntry[]>;

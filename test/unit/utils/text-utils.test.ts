@@ -122,6 +122,19 @@ describe('text-utils', () => {
       expect(ensureAssistantResponse(session, 'Test')).toBe('aborted findings');
     });
 
+    it('should report an aborted session with no text as "Aborted", not a model-capability failure', () => {
+      // A researcher interrupted mid-turn by quit/SIGTERM has an aborted final message with
+      // no text block yet. This must NOT be misdiagnosed as "produced no text output —
+      // model-capability issue" (the retry loop keys off the "Aborted" message to stop retrying).
+      const session = {
+        messages: [
+          { role: 'assistant', content: [], stopReason: 'aborted' },
+        ],
+      } as any;
+      expect(() => ensureAssistantResponse(session, 'Test')).toThrow('Test: Aborted');
+      expect(() => ensureAssistantResponse(session, 'Test')).not.toThrow(/produced no text output/);
+    });
+
     it('should return partial text when stopReason is length and text is present', () => {
       const session = {
         messages: [

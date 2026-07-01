@@ -113,6 +113,33 @@ async function extractPdfToMarkdown(bytes: Uint8Array): Promise<string> {
   }
 }
 
+/**
+ * Decode an HTML response body using its declared charset. response.text() blindly UTF-8-decodes,
+ * corrupting non-UTF-8 pages (Shift_JIS/GBK/EUC-KR/ISO-8859-1). Prefer the Content-Type charset,
+ * else sniff a <meta charset>/<meta http-equiv content=...charset=...> in the head, else UTF-8.
+ * An absent/unknown charset falls back to UTF-8 (previous behavior), so UTF-8 pages are unaffected.
+ */
+function decodeHtmlBody(bytes: Uint8Array, contentTypeHeader: string): string {
+  let charset = '';
+  const fromHeader = /charset=["']?([^"';,\s]+)/i.exec(contentTypeHeader);
+  if (fromHeader?.[1]) charset = fromHeader[1].toLowerCase();
+  if (!charset) {
+    // <meta> charset tags are ASCII, so a UTF-8 read of the first 2KB finds them regardless of the
+    // body's real encoding.
+    const head = new TextDecoder('utf-8').decode(bytes.subarray(0, 2048));
+    const fromMeta =
+      /<meta[^>]+charset=["']?([\w:-]+)/i.exec(head) ||
+      /<meta[^>]+content=["'][^"']*charset=([\w:-]+)/i.exec(head);
+    if (fromMeta?.[1]) charset = fromMeta[1].toLowerCase();
+  }
+  if (!charset || charset === 'utf8') charset = 'utf-8';
+  try {
+    return new TextDecoder(charset).decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes); // unknown/unsupported label → prior UTF-8 behavior
+  }
+}
+
 async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<ScrapeLayerResult> {
   await validateUrlForSSRF(url);
 
@@ -197,11 +224,14 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       return { source: 'fetch', layer: 'fetch', markdown };
     }
 
-    const html = await response.text();
-    
-    if (html.length > MAX_HTML_SIZE) {
-      const sizeMB = Math.round(html.length / 1024 / 1024);
-      logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), truncating`);
+    // Read the raw bytes and decode with the DECLARED charset. response.text() blindly UTF-8-decodes,
+    // which mangles Shift_JIS/GBK/EUC-KR/ISO-8859-1 pages into mojibake that then gets cached + cited.
+    // Size-check on the byte length before decoding.
+    const bodyBytes = new Uint8Array(await response.arrayBuffer());
+
+    if (bodyBytes.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(bodyBytes.length / 1024 / 1024);
+      logger.warn(`[Scrapers] HTML response too large (actual: ${sizeMB}MB, max 25MB), skipping`);
       metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html' });
       errorTracker.trackError(new Error(`HTML response too large (${sizeMB}MB, max 25MB)`), {
         component: 'scrapers',
@@ -213,6 +243,8 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
       });
       throw new Error(`HTML response too large (${sizeMB}MB, max 25MB)`);
     }
+
+    const html = decodeHtmlBody(bodyBytes, contentType);
     
     let markdown: string;
     try {
@@ -256,13 +288,13 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Scrap
 }
 
 // SSRF note: the URL is validated at request time by validateUrlForSSRF in
-// scrapeSingle before this fallback runs. Unlike the fetch layer, the stealth
-// browser (Camoufox/Firefox) performs its own DNS resolution and connection
-// inside the browser process, which this code cannot pin to the validated IP —
-// so a DNS-rebinding target could still be reached via this path. This is an
-// accepted residual: pinning would require browser-level request interception
-// or a validating local proxy. The request-time check blocks the common cases
-// (literals, hostnames that resolve to private ranges at validation time).
+// scrapeSingle, and again inside the worker where every navigation gets a
+// DNS-aware page.route check and each main-frame document's ACTUAL connected IP
+// (response.serverAddr()) is re-validated against the SSRF policy before its body
+// is returned — this closes the DNS-rebinding hole for both the initial load and
+// client-side hops. The residual is the TCP connection itself (not prevented) and
+// cached/service-worker responses that report no serverAddr; the rendered body is
+// still withheld whenever a private/metadata IP is observed.
 async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: AbortSignal, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeLayerResult> {
   const browserStart = Date.now();
   try {
@@ -277,6 +309,17 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
     }
 
     let html = result.html || '';
+
+    // The browser path has no Content-Length to pre-screen (unlike the fetch layer), so cap the
+    // rendered HTML here before the O(n) markdown conversion runs on it. Guards against a
+    // pathological/hostile page ballooning worker + main-process memory.
+    if (html.length > MAX_HTML_SIZE) {
+      const sizeMB = Math.round(html.length / 1024 / 1024);
+      logger.warn(`[Scrapers] Browser HTML too large (rendered: ${sizeMB}MB, max 25MB), skipping`);
+      metrics.increment('scrape_errors_total', 1, { error_type: 'size_exceeded', content_type: 'html', layer: 'playwright' });
+      throw new Error(`Browser HTML too large (${sizeMB}MB, max 25MB)`);
+    }
+
     let markdown: string;
     try {
       markdown = await convertToMarkdown(html);
@@ -305,7 +348,12 @@ async function scrapeWithStealthBrowser(_url: string, config?: Config, signal?: 
 }
 
 export async function scrapeSingle(url: string, signal?: AbortSignal, config?: Config, sessionId?: string, container: ServiceContainer = getServiceContainer()): Promise<ScrapeResult> {
-  if (typeof url !== 'string' || url.includes('[') || url.includes(']')) {
+  // Guard against an array accidentally stringified and passed as a single url (JSON arrays start
+  // with '['). Do NOT reject brackets ANYWHERE: valid URLs legitimately contain them in query
+  // strings (e.g. ?ids[]=1) and IPv6 literals (http://[::1]/) — the old includes('[') check dropped
+  // those real sources before any fetch. A malformed non-URL string is still caught by the SSRF
+  // validation below (new URL()).
+  if (typeof url !== 'string' || url.trim().startsWith('[')) {
     metrics.increment('scrape_errors_total', 1, { error_type: 'invalid_url_format' });
     return { url, success: false, error: 'Invalid URL format (array passed as string?)', markdown: '' };
   }

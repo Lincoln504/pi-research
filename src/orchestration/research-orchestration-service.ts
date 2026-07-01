@@ -177,7 +177,13 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
           const store = await ksService.getStore();
           if (store) {
             logger.info('[ResearchOrchestrationService] Rebuilding FTS index after research run');
-            await store.rebuildFtsIndex();
+            const rebuilt = await store.rebuildFtsIndex();
+            // Only compact/prune when the FTS index was actually rebuilt — i.e. the
+            // run changed the data. A no-op run skips both, so steady-state loops no
+            // longer accumulate orphaned index/version files (the disk-bloat fix).
+            if (rebuilt) {
+              await store.optimize();
+            }
           }
         }
       }
@@ -293,16 +299,22 @@ export class ResearchOrchestrationService implements IResearchOrchestration {
       // Wait for one slot to free up when we're at capacity, or abort immediately if signalled.
       if (active.size >= maxConcurrent) {
         if (signal?.aborted) break;
-        await Promise.race([
-          ...active,
-          ...(signal ? [new Promise<void>((_, reject) => {
-            const onAbort = () => reject(new Error('Aborted'));
-            if (signal.aborted) onAbort();
-            else signal.addEventListener('abort', onAbort, { once: true });
-          })] : [])
-        ]).catch(err => {
-          if (err.message !== 'Aborted') throw err;
-        });
+        // Hoist onAbort so the listener is removed once the race settles normally (a researcher
+        // finished). The previous {once:true} listener was only cleaned up if abort actually
+        // fired, so every capacity-wait that resolved by completion leaked a listener on `signal`
+        // — accumulating across a long run toward MaxListenersExceededWarning.
+        let onAbort: (() => void) | undefined;
+        const abortPromise = signal ? new Promise<void>((_, reject) => {
+          onAbort = () => reject(new Error('Aborted'));
+          if (signal.aborted) onAbort();
+          else signal.addEventListener('abort', onAbort, { once: true });
+        }) : null;
+        try {
+          await Promise.race([...active, ...(abortPromise ? [abortPromise] : [])])
+            .catch(err => { if (err.message !== 'Aborted') throw err; });
+        } finally {
+          if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        }
         if (signal?.aborted) break;
       }
 

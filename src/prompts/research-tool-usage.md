@@ -14,15 +14,18 @@ argument-hint: <query> [depth:1|2|3] [model:<id>]
 
 The `research` tool (from pi-research extension) is your tool for web/internet research.
 
-**KNOWLEDGE SEARCH**
-- The `research_knowledge_search` tool searches the research knowledge database for previously researched information.
-- **Unified Results**: It searches both your **Project Knowledge Store** and your **User Knowledge Store** simultaneously.
-- It is **instant and free** — always try it FIRST before using the live `research` tool.
-- **Three result types:**
-  - **Complete answer** — returns a clean, cited report. No live research needed.
-  - **Partial answer** — returns what it found AND tells you to also do live research to fill gaps.
-  - **No answer** — explicitly tells you to use live web research.
-- Note: This tool is only available if at least one knowledge store is enabled in settings.
+**KNOWLEDGE SEARCH (a knowledge store is enabled)**
+
+Check the knowledge store first. For a web-research question, call `research_knowledge_search` before the live `research` tool — it is a local lookup (instant, no network) and covers both the Project and User knowledge stores, so the live tool is only needed when the store doesn't already answer the question.
+
+- Workflow:
+  1. Call `research_knowledge_search` with the question.
+  2. Act on the returned status:
+     - complete — answer from it; no live research needed.
+     - partial — use what it found, then call `research` to fill the gaps.
+     - none — call the live `research` tool.
+- A bare "research X" request still starts here: check what is already known, then go live only if the store comes back partial or empty.
+- Don't call `research_knowledge_search` and `research` in the same turn for the same question — wait for the knowledge result before deciding.
 
 ---
 

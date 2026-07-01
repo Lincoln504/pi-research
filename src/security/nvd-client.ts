@@ -105,21 +105,42 @@ function extractCVSSScore(metrics: Metrics | undefined): {
   let cvssVector: string | undefined;
   let severity: string = 'UNKNOWN';
 
+  // Prefer v3.1 → v3.0 (unchanged behavior for the common case), then fall back to v4.0 and finally
+  // v2 so CVEs carrying only a newer (v4) or older (v2) metric no longer report UNKNOWN/no-score.
   if (metrics?.cvssMetricV31 && metrics.cvssMetricV31.length > 0) {
-    const firstMetric = metrics.cvssMetricV31[0];
-    const cvssData = firstMetric?.cvssData;
+    const cvssData = metrics.cvssMetricV31[0]?.cvssData;
     cvssScore = cvssData?.baseScore;
     cvssVector = cvssData?.vectorString;
     severity = cvssData?.baseSeverity ?? 'UNKNOWN';
   } else if (metrics?.cvssMetricV30 && metrics.cvssMetricV30.length > 0) {
-    const firstMetric = metrics.cvssMetricV30[0];
-    const cvssData = firstMetric?.cvssData;
+    const cvssData = metrics.cvssMetricV30[0]?.cvssData;
     cvssScore = cvssData?.baseScore;
     cvssVector = cvssData?.vectorString;
     severity = cvssData?.baseSeverity ?? 'UNKNOWN';
+  } else if (metrics?.cvssMetricV40 && metrics.cvssMetricV40.length > 0) {
+    const cvssData = metrics.cvssMetricV40[0]?.cvssData;
+    cvssScore = cvssData?.baseScore;
+    cvssVector = cvssData?.vectorString;
+    severity = cvssData?.baseSeverity ?? 'UNKNOWN';
+  } else if (metrics?.cvssMetricV2 && metrics.cvssMetricV2.length > 0) {
+    const m = metrics.cvssMetricV2[0];
+    cvssScore = m?.cvssData?.baseScore;
+    cvssVector = m?.cvssData?.vectorString;
+    // v2 has no qualitative rating inside cvssData; use the NVD metric-level baseSeverity, and if
+    // that is absent derive it from the score using CVSS v2 bands (v2 has no CRITICAL, caps at HIGH).
+    severity = m?.baseSeverity ?? deriveV2Severity(cvssScore);
   }
 
   return { score: cvssScore, vector: cvssVector, severity };
+}
+
+/** Map a CVSS v2 base score (0-10) to its qualitative band. v2 has no CRITICAL rating. */
+function deriveV2Severity(score: number | undefined): string {
+  if (score === undefined) return 'UNKNOWN';
+  if (score >= 7.0) return 'HIGH';
+  if (score >= 4.0) return 'MEDIUM';
+  if (score >= 0) return 'LOW';
+  return 'UNKNOWN';
 }
 
 function extractCWEs(cve: CVE): string[] {

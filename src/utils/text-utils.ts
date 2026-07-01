@@ -89,7 +89,9 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
     throw new Error(`${label}: No assistant response found`);
   }
 
-  // Check for explicit error stop reason or error message
+  // Check for explicit error stop reason or error message. An aborted session with an
+  // errorMessage is an interruption, not a provider error — fall through so any partial
+  // text it produced is salvaged below (and, if empty, reported as an abort not a model fault).
   if (last.stopReason === 'error' || (last.errorMessage && last.stopReason !== 'aborted')) {
     const msg = last.errorMessage || 'Unknown error';
     if (msg.includes('429')) {
@@ -110,6 +112,13 @@ export function ensureAssistantResponse(session: AgentSession, label: string): s
 
   const text = extractText(last);
   if (!text.trim()) {
+    // An aborted session with no salvageable text was interrupted mid-turn (quit/SIGTERM
+    // during research, or a timeout abort) before the model emitted its final answer. That
+    // is NOT a model-capability failure — surface an explicit "Aborted" so callers skip
+    // retries (see researcher-executor) instead of blaming the model with the message below.
+    if (last.stopReason === 'aborted') {
+      throw new Error(`${label}: Aborted`);
+    }
     // zero text content blocks in the final assistant message. This typically means
     // all tool calls failed, or the session ended without a visible response.
     throw new Error(
@@ -168,6 +177,9 @@ export interface Citation {
   url: string;
   description: string;
   source?: string;
+  /** The number the report actually wrote for this entry (e.g. 3 for `[3]`). Used to remap
+   *  inline `[N]` by the written label, not list position, so non-sequential numbering maps right. */
+  number?: number;
 }
 
 /**
@@ -224,8 +236,16 @@ export function parseCitations(report: string): Citation[] {
   const citations: Citation[] = [];
   // Match [N] or N. or **[N]** or **N.** with optional whitespace
   const blocks = section.split(/(?:\*\*|)\s*(?:\[\d+\]|\d+\.)\s*(?:\*\*|)/).slice(1);
-  
-  for (const block of blocks) {
+  // Capture the written number for each delimiter in parallel, using a SEPARATE global+capturing
+  // regex (adding a capture group to the split pattern above would inject the captures into the
+  // split output and break block indexing). blocks[i] is the content after delimiter i, so
+  // writtenNumbers[i] is blocks[i]'s label — used to remap inline [N] by label, not position.
+  const writtenNumbers = [...section.matchAll(/(?:\*\*|)\s*(?:\[(\d+)\]|(\d+)\.)\s*(?:\*\*|)/g)]
+    .map(m => parseInt(m[1] ?? m[2] ?? '', 10));
+
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi]!;
+    const writtenNumber = Number.isFinite(writtenNumbers[bi]) ? writtenNumbers[bi] : undefined;
     const lines = block.trim().split('\n');
     if (lines.length === 0) continue;
     
@@ -271,7 +291,7 @@ export function parseCitations(report: string): Citation[] {
     }
     
     if (url && isPlausibleCitationUrl(url)) {
-      citations.push({ url, description: desc, source });
+      citations.push({ url, description: desc, source, number: writtenNumber });
     }
   }
   return citations;

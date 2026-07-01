@@ -34,6 +34,109 @@ export function setupIpcErrorHandler(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Master-side counterpart to setupIpcErrorHandler()
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC error codes that are benign when a worker's channel is mid-teardown: the
+ * write failed because the pipe is already gone. poolifier independently counts
+ * worker errors and respawns, so swallowing these does not hide a real fault.
+ */
+const BENIGN_IPC_CODES = new Set(['EPIPE', 'ERR_IPC_CHANNEL_CLOSED', 'ECONNRESET']);
+
+export function isBenignClusterIpcError(err: any): boolean {
+  if (!err) return false;
+  if (typeof err.code === 'string' && BENIGN_IPC_CODES.has(err.code)) return true;
+  const msg = String((err && err.message) || err);
+  return /\b(EPIPE|ECONNRESET)\b/.test(msg) || /channel closed/i.test(msg);
+}
+
+let masterIpcGuardInstalled = false;
+
+/**
+ * Master-side guard against the unhandled `write EPIPE` that crashed the whole pi
+ * host (observed twice on 2026-06-30 during a populate loop, each preceded by
+ * knowledge-extraction 429s → worker churn).
+ *
+ * Mechanism: poolifier's FixedClusterPool dispatches tasks with cluster
+ * `worker.send()`. When a worker's IPC channel closes (a 429-driven respawn, a
+ * crash, or terminate()), an in-flight/subsequent send completes with `write
+ * EPIPE`. Node's cluster module re-emits that as an 'error' on the cluster.Worker.
+ * poolifier attaches its own 'error' listener — but during terminate() it calls
+ * `worker.removeAllListeners()`, after which the cluster module's internal re-emit
+ * (`worker.process.on('error', ...)`, which poolifier never strips) fires
+ * `worker.emit('error', EPIPE)` on a Worker with NO listeners → EventEmitter
+ * throws → uncaughtException → the pi host exits.
+ *
+ * The worker-side guard (setupIpcErrorHandler) returns early in the master, so the
+ * master had no equivalent. This installs a PERSISTENT benign-IPC-error swallower
+ * on every forked worker that survives poolifier's removeAllListeners(), so the
+ * cluster.Worker is never without an 'error' listener at the moment cluster
+ * re-emits. Idempotent; safe to call before each pool (re)creation.
+ */
+export function setupMasterIpcErrorHandler(): void {
+  if (masterIpcGuardInstalled) return;
+  // Workers use setupIpcErrorHandler(); this guard is for the primary process
+  // that owns the cluster pool and originates the failing worker.send() calls.
+  if (cluster.isWorker) return;
+  masterIpcGuardInstalled = true;
+
+  // cluster emits 'fork' for every worker poolifier creates, including the
+  // respawns it triggers via startMinimumNumberOfWorkers() after an unexpected
+  // exit — so this catches the churn-driven workers, not just the initial set.
+  cluster.on('fork', (worker) => guardClusterWorker(worker));
+
+  // Cover any workers already forked before this handler was installed.
+  for (const id of Object.keys(cluster.workers ?? {})) {
+    const w = (cluster.workers as any)?.[id];
+    if (w) guardClusterWorker(w);
+  }
+}
+
+/** Reset for tests — re-arms the one-time install guard. */
+export function __resetMasterIpcGuardForTests(): void {
+  masterIpcGuardInstalled = false;
+}
+
+function guardClusterWorker(worker: any): void {
+  if (!worker || worker.__piIpcGuarded) return;
+  worker.__piIpcGuarded = true;
+
+  const guard = (err: any) => {
+    if (isBenignClusterIpcError(err)) {
+      logToDebugFile('DEBUG', `[Master] Swallowed benign worker IPC error: ${err?.code || err?.message}`);
+      return;
+    }
+    // Non-benign worker errors are independently handled by poolifier's own
+    // errorHandler (which counts them and triggers pool recovery). Re-throwing
+    // here would itself become an uncaughtException, so just record it.
+    logToDebugFile('WARN', `[Master] Worker error (non-IPC): ${err?.stack || err?.message || err}`);
+  };
+
+  worker.on('error', guard);
+  if (worker.process && typeof worker.process.on === 'function') {
+    // The channel-write EPIPE is emitted on the underlying ChildProcess; cluster
+    // re-emits it to the Worker, but listen here too so a direct process 'error'
+    // (no re-emit) is also handled.
+    worker.process.on('error', guard);
+  }
+
+  // poolifier calls worker.removeAllListeners() during terminate(), stripping our
+  // guard right before the channel's final write can EPIPE. Re-arm after any
+  // removal so the cluster.Worker is never without an 'error' listener.
+  if (typeof worker.removeAllListeners === 'function') {
+    const originalRemoveAll = worker.removeAllListeners.bind(worker);
+    worker.removeAllListeners = (event?: string | symbol) => {
+      const ret = originalRemoveAll(event);
+      if (event === undefined || event === 'error') {
+        worker.on('error', guard);
+      }
+      return ret;
+    };
+  }
+}
+
 /**
  * Handle Uncaught Exceptions in Worker
  */

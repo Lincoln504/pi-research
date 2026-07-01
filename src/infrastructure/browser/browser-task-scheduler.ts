@@ -17,6 +17,7 @@ import { ServiceNames } from '../../core/service-interfaces.ts';
 import type { ISchedulerInternals } from '../../core/interfaces/scheduler-interfaces.ts';
 import type { IStateManager } from '../../core/interfaces/state-manager-interfaces.ts';
 import { BrowserServer, getBrowserServerAuthSecret } from './browser-server.ts';
+import { isPoolShutdownError } from './browser-error-utils.ts';
 import type { WorkerPoolManager } from './worker-pool-manager.ts';
 import type { IScheduler } from '../../core/interfaces/scheduler-interfaces.ts';
 import { cleanupOrphanedCamoufoxProcesses, getBrowserPidsForWorkers, killBrowserProcesses } from './browser-cleanup.ts';
@@ -139,7 +140,11 @@ export class BrowserTaskScheduler implements IScheduler {
         if (this.idleTimer) clearTimeout(this.idleTimer);
         this.idleTimer = setTimeout(() => {
             logger.log('[Scheduler] Browser pool idle timeout reached, shutting down...');
-            this.shutdown();
+            // shutdown() is async and awaits getService()/server.stop(); a rejection here (e.g.
+            // getService throwing during a concurrent container disposal) would otherwise surface
+            // as an unhandledRejection from this fire-and-forget timer. Swallow it — an idle
+            // teardown that fails is non-fatal; the next run gets a fresh scheduler regardless.
+            this.shutdown().catch(err => logger.warn('[Scheduler] Idle-timeout shutdown failed (non-fatal):', err));
         }, this.IDLE_TIMEOUT_MS);
         if (this.idleTimer.unref) this.idleTimer.unref();
     }
@@ -160,6 +165,11 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runSearch(query: string, config?: Config, signal?: AbortSignal): Promise<SearchResult[]> {
+        // Reject tasks once this scheduler has begun teardown. shutdown() nulls priorityQueue and
+        // clears the scheduler reference (a future run gets a fresh scheduler), so getPriorityQueue()
+        // here would otherwise build a FRESH, non-shutdown queue on this dead instance and dispatch
+        // onto a pool being destroyed. The message matches isPoolShutdownError → benign DEBUG for callers.
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
@@ -196,6 +206,14 @@ export class BrowserTaskScheduler implements IScheduler {
             ]);
             logger.debug(`[BrowserTaskScheduler] Search completed: "${query}" in ${Date.now() - startTime}ms`);
         } catch (error) {
+            // A pool-shutdown/destroy error means the run is being torn down (quit/SIGTERM
+            // mid-search-burst): the task never ran because dispose() destroyed the pool.
+            // That is expected teardown, not a fault — log at DEBUG and don't count it toward
+            // the error metric/tracker, so a normal quit-mid-run doesn't inflate ERROR counts.
+            if (isPoolShutdownError(error)) {
+                logger.debug(`[BrowserTaskScheduler] Search abandoned during shutdown: "${query}"`);
+                throw error;
+            }
             logger.error(`[BrowserTaskScheduler] Search failed: "${query}"`, error);
             metrics.increment('browser_search_errors_total', 1);
             errorTracker.trackError(error instanceof Error ? error : String(error), {
@@ -227,6 +245,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runScrape(url: string, config?: Config, signal?: AbortSignal): Promise<ScrapeResult> {
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();
@@ -285,6 +304,7 @@ export class BrowserTaskScheduler implements IScheduler {
     }
 
     async runHealthCheck(config?: Config, signal?: AbortSignal): Promise<{ success: boolean }> {
+        if (this.isShuttingDown) throw new Error('Worker pool is shutting down');
         this.resetIdleTimer();
         const pool = await (await this.getWorkerPoolManager()).ensurePool(config);
         const startTime = Date.now();

@@ -305,12 +305,25 @@ function saveProjectSettingsRegistry(registry: Record<string, Record<string, str
     }
     
     if (lockFd !== null) {
-      fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+      // Atomic write: a bare writeFileSync could be truncated by a crash/ENOSPC mid-write,
+      // leaving invalid JSON that loadProjectSettingsRegistry silently resets to {} — wiping
+      // every workspace's saved settings. Write a temp then rename (atomic on the same FS).
+      const tmpPath = `${registryPath}.tmp.${process.pid}.${Date.now()}`;
+      try {
+        fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
+        fs.renameSync(tmpPath, registryPath);
+      } catch (writeErr) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+        throw writeErr;
+      }
     } else {
       throw new Error(`Failed to acquire lock for project settings registry after ${maxRetries} retries. Aborting to prevent data corruption.`);
     }
   } catch (err) {
+    // Rethrow so the caller (saveConfig → /research-config) surfaces the failure instead of
+    // reporting a save that silently did not persist. Mirrors the user-scope config.env writer.
     logger.error('[config] Failed to save project settings registry:', err);
+    throw err;
   } finally {
     if (lockFd !== null) {
       try { fs.closeSync(lockFd); } catch { /* ignore */ }
@@ -345,7 +358,7 @@ export function getGlobalEnvFilePath(): string {
  * Keys in the overlay win over the base file but lose to process.env and
  * the centralized project registry.
  *
- * - 'pi'        → src/index.ts (the pi extension: /research + /research-config)
+ * - 'pi'        → src/index.ts (the pi extension: /research, /research-config, /knowledge-store)
  * - 'cli'       → src/cli.ts (the standalone `pi-research` CLI / agent skill —
  *                 the surface every skills-aware host, including OpenClaw, runs)
  *
@@ -463,10 +476,20 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
       legacyEnv = parseDotEnv(fs.readFileSync(legacyPath, 'utf-8'));
       Object.assign(merged, legacyEnv);
       
-      // Auto-migrate legacy settings to central registry if they differ
-      if (!registry[normalizedCwd] || JSON.stringify(registry[normalizedCwd]) !== JSON.stringify(legacyEnv)) {
+      // Auto-migrate legacy settings to the central registry — but only LOCAL_SCOPE_KEYS. The
+      // registry is project-scoped storage by design (saveConfig writes only these keys to it);
+      // persisting user-scoped legacy keys would freeze them per-workspace and silently override
+      // the user's global config.env forever. Non-local legacy keys still apply to THIS resolution
+      // via the Object.assign(merged, legacyEnv) above — they just aren't persisted.
+      const legacyLocal = Object.fromEntries(
+        Object.entries(legacyEnv).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
+      );
+      const existingLocal = Object.fromEntries(
+        Object.entries(registry[normalizedCwd] ?? {}).filter(([k]) => LOCAL_SCOPE_KEYS.has(k))
+      );
+      if (Object.keys(legacyLocal).length > 0 && JSON.stringify(existingLocal) !== JSON.stringify(legacyLocal)) {
         logger.info(`[config] Migrating legacy .pi-research.env settings from ${cwd} to central registry...`);
-        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyEnv };
+        registry[normalizedCwd] = { ...registry[normalizedCwd], ...legacyLocal };
         saveProjectSettingsRegistry(registry);
       }
     } catch (err) {
@@ -474,25 +497,23 @@ function loadEnvFiles(cwd: string, iface?: ConfigInterface): Record<string, stri
     }
   }
 
-  // 4. Load Centralized project settings (REGISTRY WINS for project-scoped keys)
+  // 4. Apply centralized project settings. The registry is project-scoped storage: ONLY
+  //    LOCAL_SCOPE_KEYS are applied (and may override), never user-scoped keys — those belong to
+  //    config.env. Any non-local key present here is stale pollution (e.g. a pre-fix legacy
+  //    migration) and is ignored rather than allowed to override the user's global settings.
   if (registry[normalizedCwd]) {
-    // Conflict detection: registry vs legacy .pi-research.env
     for (const [key, val] of Object.entries(registry[normalizedCwd])) {
-      if (LOCAL_SCOPE_KEYS.has(key) && legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
-        // Don't interpolate the values — a config key could carry a secret and
-        // redactSecrets won't catch short/non-standard tokens. The key + winner
-        // is all the divergence warning needs.
-        logger.warn(`[config] Config divergence for ${key} in ${cwd}: registry value differs from legacy .pi-research.env. Registry wins.`);
+      if (LOCAL_SCOPE_KEYS.has(key)) {
+        // Don't interpolate values in warnings — a config key could carry a secret and
+        // redactSecrets won't catch short/non-standard tokens. Key + winner is enough.
+        if (legacyEnv[key] !== undefined && legacyEnv[key] !== val) {
+          logger.warn(`[config] Config divergence for ${key} in ${cwd}: registry value differs from legacy .pi-research.env. Registry wins.`);
+        }
+        merged[key] = val;
+      } else if (merged[key] !== undefined && merged[key] !== val) {
+        logger.warn(`[config] Ignoring stale user-scoped ${key} in the project registry (config.env wins). Re-save your user settings to drop it.`);
       }
     }
-    // Conflict detection: registry vs config.env (user settings)
-    // Only warn about keys that are user-scoped but have leaked into the registry
-    for (const [key, val] of Object.entries(registry[normalizedCwd])) {
-      if (!LOCAL_SCOPE_KEYS.has(key) && merged[key] !== undefined && merged[key] !== val) {
-        logger.warn(`[config] Registry override for user-scoped ${key}: registry value overrides config.env (stale snapshot in the project registry). Registry wins — consider re-saving your user settings.`);
-      }
-    }
-    Object.assign(merged, registry[normalizedCwd]);
   } else if (Object.keys(merged).length === 0 && !fs.existsSync(legacyPath) && !fs.existsSync(globalPath)) {
     // 5. Warning for missing config
     logger.warn(`[config] No configuration found for workspace: ${cwd}. Using code defaults. Run /research-config to configure.`);
@@ -751,11 +772,14 @@ export function createConfig(env: Record<string, string | undefined>, processEnv
     }
   }
 
-  // Keep PI_RESEARCH_DEBUG env var in sync with config.DEBUG
-  // so that isVerboseFromEnv() (which reads the env var) picks up
-  // TUI-configured debug settings without a circular import.
-  if (processEnv['PI_RESEARCH_DEBUG'] === undefined) {
-    processEnv['PI_RESEARCH_DEBUG'] = String(config.DEBUG);
+  // Bridge a config/TUI-set DEBUG into the PI_RESEARCH_DEBUG env var so isVerboseFromEnv()
+  // (which reads the env var — it cannot import config without a circular dependency) picks it
+  // up. Only ever opt INTO verbose ('true'), never write 'false': createConfig runs with the
+  // shared process.env, and getConfig merges process.env LAST, so pinning 'false' here from the
+  // first-resolved interface would override a later interface whose own config sets DEBUG=true
+  // (silently disabling its debug logging). Enabling-only is a safe, monotonic bridge.
+  if (config.DEBUG && processEnv['PI_RESEARCH_DEBUG'] === undefined) {
+    processEnv['PI_RESEARCH_DEBUG'] = 'true';
   }
 
   return config;
@@ -834,6 +858,8 @@ function parseEnvNumber(env: Record<string, string | undefined>, key: string, de
 function parseEnvBool(env: Record<string, string | undefined>, key: string, def: boolean): boolean {
   const v = env[key];
   if (v === undefined || v === '') return def;
+  // Strict by design: only the literal 'true' (any case) is truthy; every other value is false.
+  // This is intentional and asserted in config.test.ts ('1'/'yes' → false) — do not loosen it.
   return v.toLowerCase() === 'true';
 }
 

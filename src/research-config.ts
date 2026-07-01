@@ -366,6 +366,18 @@ async function showInteractiveMenu(ctx: ExtensionContext, pi: ExtensionAPI): Pro
               }
             }
 
+            // If Knowledge Mode was just turned on, warm the store in the background so the first
+            // search after enabling doesn't block on a cold init (native embed stack + init lock,
+            // a few seconds). Fire-and-forget: getStore() drives initialize() to completion. The
+            // search tool also awaits readiness, so this is a latency optimisation, not a
+            // correctness dependency — the store works without it, just slower on the first query.
+            if (id === 'KNOWLEDGE_STORE_MODE' && newValue !== 'none') {
+              const kmContainer = tryGetServiceContainerFromCtx(ctx);
+              void getService<IKnowledgeStoreService>(ServiceNames.KNOWLEDGE_STORE, ctx, kmContainer)
+                .then((s) => s.getStore())
+                .catch((e) => logger.debug('[research-config] knowledge-store warm-up failed:', e));
+            }
+
             // 2. Handle Actions
             if (id === 'ACTION_HEALTH') {
               wrappedDone({ type: 'action', action: 'health' });

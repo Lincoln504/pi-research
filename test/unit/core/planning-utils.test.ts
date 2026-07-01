@@ -372,6 +372,20 @@ describe('capResearcherQueries', () => {
     };
   }
 
+  it('renumbers duplicate researcher ids so neither report is silently overwritten', () => {
+    // Two researchers sharing id "1.1" would collide on the `${round}.${id}` report key
+    // (last-writer-wins) — one researcher runs but its findings are dropped. Dedup renames.
+    const a = makeResearcher('1.1', 2);
+    const b = { ...makeResearcher('1.1', 2), queries: ['q-b-0', 'q-b-1'] };
+    const plan = { action: 'delegate' as const, researchers: [a, b], allQueries: [] };
+    const result = capResearcherQueries(plan, 2, svc);
+    const ids = result.researchers!.map(r => String(r.id));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2); // ids are unique after dedup
+    expect(ids[0]).toBe('1.1');
+    expect(ids[1]).toBe('1.1-2');
+  });
+
   it('does not trim a researcher whose queries are under budget (level 1)', () => {
     const r = makeResearcher('1', MAX_QUERIES_PER_RESEARCHER_LEVEL_1 - 1);
     const plan = { action: 'delegate' as const, researchers: [r], allQueries: [] };
