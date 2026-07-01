@@ -1,13 +1,8 @@
-# SDK
+## SDK
 
 The programmatic SDK for scripts, CI, and custom tooling. For configuration — the
 layering model, the TUI settings, and every environment variable — see
 [CONFIGURATION.md](CONFIGURATION.md).
-
-- [Programmatic SDK](#programmatic-sdk)
-- [Health & knowledge-store APIs](#health--knowledge-store-apis)
-
-## Programmatic SDK
 
 `src/sdk.ts` is a library for scripts, CI, and custom tooling. It is configured
 from code, not from a global overlay file — there is no `sdk.env`. It reads the
@@ -63,7 +58,7 @@ await shutdownResearchSDK();
 The SDK does not write report files. Report export is a front-end concern — the pi
 extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`.
 
-## Init options
+### Init options
 
 | Option | Description |
 |--------|-------------|
@@ -79,7 +74,7 @@ environment-variable reference, see [CONFIGURATION.md](CONFIGURATION.md). Note t
 the SDK is configured from code and has no overlay file — pass `ignoreGlobalConfig: true`
 for a hermetic run.
 
-## Health & knowledge-store APIs
+### Health & knowledge-store APIs
 
 The `health` tool (and the SDK's `getResearchHealth()`) runs every registered
 health check — browser capability, browser runtime, knowledge store, and state

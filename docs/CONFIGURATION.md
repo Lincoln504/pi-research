@@ -1,4 +1,4 @@
-# Configuration
+## Configuration
 
 Every front-end (the pi extension, the standalone CLI / agent skill — the surface
 OpenClaw and other skills-aware hosts run — and the SDK) shares one configuration
@@ -8,12 +8,7 @@ environment-variable reference, and finally how the configuration layers resolve
 
 ![The /research-config settings TUI](media/04-config.gif)
 
-- [Settings in the TUI](#settings-in-the-tui)
-- [Environment variables](#environment-variables)
-- [How configuration is layered](#how-configuration-is-layered)
-- [Where files live](#where-files-live)
-
-## Settings in the TUI
+### Settings in the TUI
 
 Run `/research-config` in the pi extension to open an interactive menu. Selecting a
 setting and pressing `Enter` / `Space` cycles its value; the change is saved
@@ -42,7 +37,7 @@ auto-detect path: pi-research probes whether WebGPU actually runs on this machin
 and falls back to CPU if it does not. CPU forces CPU-only
 inference. Raw forced-GPU (no probe) is reachable only through the
 `PI_RESEARCH_EMBEDDING_DEVICE=webgpu` environment variable, for benchmarking — see
-the [knowledge store doc](KNOWLEDGE-STORE.md#device-selection).
+the [knowledge store doc](KNOWLEDGE-STORE.md).
 
 The Embedding Model, Embedding Device, and Cache Retention rows appear
 only when Knowledge Mode is not `none`.
@@ -53,7 +48,7 @@ Clear Debug Logs, and Install / Remove in External Agents (the coding-agent
 skill installer). Browser worker count is deliberately not in the menu — it is
 CPU/RAM-sensitive and set only via `PI_RESEARCH_WORKER_THREADS`.
 
-## Environment variables
+### Environment variables
 
 Every setting is also an environment variable. The repo's
 [`.env.example`](../.env.example) is the canonical, exhaustive list with inline
@@ -65,7 +60,7 @@ The TUI-exposed variables are marked `(TUI)`. The `[project]` mark indicates a
 project-scoped key (saved per directory in the registry); all others are
 user-scoped.
 
-### Research
+**Research**
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -85,7 +80,7 @@ user-scoped.
 | `PI_RESEARCH_MAX_SCRAPE_TOKEN_FRACTION_FOR_SCRAPING` | `0.15` | 0.05–1.0 | Max fraction of the context window used for initial scrape context. |
 | `PI_RESEARCH_AVG_TOKENS_PER_SCRAPE` | `2500` | 500–10000 | Estimated tokens per scrape result, used for planning. |
 
-### YouTube transcripts
+**YouTube transcripts**
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -95,7 +90,7 @@ user-scoped.
 | `PI_RESEARCH_YOUTUBE_QUERY_EVERY_N` | `5` | 1–100 | Append `youtube` to roughly one-in-N search queries (1 = every query). |
 | `PI_RESEARCH_YOUTUBE_POTOKEN_REQUEST_KEY` | _(built-in)_ | — | Advanced: override the BotGuard PoToken web request key (only if YouTube rotates the public key and transcripts start failing). |
 
-### Timeouts
+**Timeouts**
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
@@ -105,7 +100,7 @@ user-scoped.
 | `PI_RESEARCH_BROWSER_TASK_TIMEOUT_MS` | `10000` | 2000–120000 | Queue-wait / overhead margin added to each browser op's own timeout (a search task ceiling is `SEARCH_TIMEOUT_MS` + this; a scrape is `SCRAPE_TIMEOUT_MS` + this). |
 | `PI_RESEARCH_HEALTH_CHECK_TIMEOUT_MS` | `10000` | 2000–120000 | Pre-flight health-check timeout. |
 
-### LLM output & reasoning
+**LLM output & reasoning**
 
 These are advanced, env-only knobs (not in the TUI).
 
@@ -115,7 +110,7 @@ These are advanced, env-only knobs (not in the TUI).
 | `PI_RESEARCH_PLANNING_MAX_TOKENS` | `16384` | 1024–131072 | Max output tokens for the plan + mid-round evaluator decision. Clamped to the model's real ceiling. |
 | `PI_RESEARCH_SYNTHESIS_MAX_TOKENS` | `32768` | 1024–131072 | Max output tokens for the final synthesized report. Clamped to the model's real ceiling. |
 
-### Knowledge store
+**Knowledge store**
 
 See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 
@@ -130,7 +125,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` | `300000` | 10000–600000 | Embedding-model initialization timeout (first-time download can be slow). |
 | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ | — | Set `1` to discard the cached WebGPU-viability verdict and probe again on next use. |
 
-### API keys (all optional)
+**API keys (all optional)**
 
 | Variable | Description |
 |----------|-------------|
@@ -139,7 +134,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `GITHUB_TOKEN` | Raises the security tool's GitHub Advisory limit from 60/hr to 5000/hr (any default-scope token). |
 | `NVD_API_KEY` | Raises the security tool's NVD limit ~10× and tightens request spacing. Request at <https://nvd.nist.gov/developers/request-an-api-key>. |
 
-### Diagnostics & platform
+**Diagnostics & platform**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -155,7 +150,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_SKILL_DIR` | _(auto)_ | Override the bundled research-skill source directory used by the skill installer. |
 | `PI_RESEARCH_CONFIG_DIR_NAME` | `.pi` | Override the host config-directory name under your home dir (advanced; e.g. set to share another harness's config root). |
 
-### Testing only — never enable in production
+**Testing only — never enable in production**
 
 | Variable | Description |
 |----------|-------------|
@@ -164,7 +159,7 @@ See the [knowledge store doc](KNOWLEDGE-STORE.md) for what each value does.
 | `PI_RESEARCH_FORCE_READY` | Bypass readiness checks and run even when critical services failed to initialize. |
 | `PI_RESEARCH_ALLOW_LOOPBACK_SCRAPE` | Permit scraping loopback/private/internal addresses, bypassing SSRF protection. |
 
-## How configuration is layered
+### How configuration is layered
 
 Configuration resolves from the following layers, lowest to highest precedence
 (later wins):
@@ -217,7 +212,7 @@ just export the variable for that process.
 > `/research-config` TUI (which writes it), export variables in your shell, or use a
 > loader such as direnv. `.env.example` is a reference, not an active config file.
 
-## Where files live
+### Where files live
 
 All pi-research state lives under its own namespace, `~/.pi/research/`:
 

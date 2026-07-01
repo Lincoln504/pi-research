@@ -1,6 +1,4 @@
-# Architecture
-
-## Overview
+## Architecture
 
 pi-research is a pi CLI extension that provides multi-agent web research. It runs inside the pi process, registers tools and commands, and manages its own browser worker pool, service registry, and local knowledge store.
 
@@ -17,7 +15,7 @@ pi CLI
         └── Core            service registry, scheduler, health checks
 ```
 
-## Orchestration
+### Orchestration
 
 Two orchestrators handle research sessions:
 
@@ -37,7 +35,7 @@ LLM-call conventions. Coordinator, evaluator, synthesis, JSON-repair, and knowle
 - Thinking is off by default. These calls emit structured JSON or cited reports, so a chain-of-thought block consumes output-token budget (and can truncate the answer) for little gain. One knob controls it: `PI_RESEARCH_LLM_THINKING_LEVEL` (default `off`), passed through pi's reasoning option and clamped per provider.
 - Output budgets are sized per role and clamped to the model's ceiling: `PLANNING_MAX_TOKENS` for the plan/decision, `SYNTHESIS_MAX_TOKENS` for the final report. The report is the evaluator's `synthesize` response, so that call carries the report budget. A mid-round evaluation that cannot be parsed continues the existing agenda rather than finalizing early, so a parse failure does not truncate a run.
 
-## Research Tools
+### Research Tools
 
 Each researcher agent has access to a fixed tool set with shared budget (12 calls across gathering tools per phase):
 
@@ -55,7 +53,7 @@ In deep research, `search` is excluded from researchers — the orchestrator run
 
 Researchers cannot write files, run shell commands, or access the network outside these tools.
 
-## Browser Infrastructure
+### Browser Infrastructure
 
 All browser operations (search, scrape, health checks) go through a poolifier `FixedClusterPool` of worker processes. Workers are Node.js child processes each running a camoufox (stealth Firefox) instance.
 
@@ -75,7 +73,7 @@ Key files:
 
 Workers run in `FULL_MOCK_MODE` (both `PI_RESEARCH_MOCK_SEARCH` and `PI_RESEARCH_MOCK_SCRAPE` set) during CI to avoid FixedClusterPool deadlocks in Vitest's fork context.
 
-## Knowledge Store
+### Knowledge Store
 
 Scraped content is embedded and stored in LanceDB for cross-session deduplication and RAG retrieval.
 
@@ -105,7 +103,7 @@ prebuilt binary — notably Intel macOS (`darwin-x64`) — have no store: the he
 check reports it as disabled (healthy) and research runs without the cache. See
 [KNOWLEDGE-STORE.md](KNOWLEDGE-STORE.md) for the full subsystem and platform matrix.
 
-## Service Registry
+### Service Registry
 
 Services are registered with async factory functions and initialized lazily or eagerly. Dependencies are resolved at initialization time via `getService()`.
 
@@ -126,15 +124,15 @@ Core services (`src/core/`): `PlanningService`, `SchedulerService`
 Infrastructure services (`src/infrastructure/`): `StateManagerService`, `KnowledgeStoreService`, `WriterQueue`, `MetricsService`, `HealthCheckService`, `WorkerPoolManager`, `FileLockService`, `GPUResourceService`.
 Orchestration services (`src/orchestration/`): `ResearchOrchestrationService`, `ResearchSessionService`, `ResearchSynthesisService`.
 
-## State Management
+### State Management
 
 Cross-session and cross-process state (active sessions, browser status, metrics) is managed by `StateManagerService` (in `src/infrastructure/state/`) using file-based locking (`FileLockService`) to serialize concurrent writes.
 
-## TUI
+### TUI
 
 The research TUI uses `@earendil-works/pi-tui` to render live progress panels. Terminal state (keyboard protocol, mouse tracking, bracketed paste) and stdio capture are managed by utilities in `src/tui/utils/` to ensure a clean exit.
 
-## Project Structure
+### Project Structure
 
 ```
 src/
@@ -187,7 +185,7 @@ src/
 └── utils/                circuit breaker, text-utils, shared-links, metrics, error tracking
 ```
 
-## Key Design Decisions
+### Key Design Decisions
 
 No shell commands in researchers — researcher agents are sandboxed to the tool set above. They cannot write files, spawn processes, or make arbitrary network calls.
 
@@ -199,7 +197,7 @@ Pure ESM — the entire codebase uses ES Modules (`"type": "module"`). Worker bu
 
 Dependency graph — `docs/deps.svg` is regenerated automatically on every push via CI (madge). Architectural rules are enforced by dependency-cruiser (`config/tooling/dependency-cruiser.cjs`).
 
-## Development
+### Development
 
 ```bash
 npm run test:unit         # unit tests, no browser required

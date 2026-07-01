@@ -9,41 +9,39 @@ complete or another round is needed. The result is a single cited Markdown repor
 
 One engine backs several front-ends — the pi extension, a standalone CLI / agent
 skill (the same skill any skills-aware host runs, including OpenClaw), and a
-programmatic SDK.
+programmatic SDK, each with its own guide in the docs table below.
 
-## Demo
-
-Ask in natural language — the model picks the depth, runs multiple research
+Ask in natural language — the tool understands the depth needed, runs multiple research
 rounds in parallel, and returns a single cited report:
 
 ![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 
-## Requirements
+### Requirements
 
 - Node.js >= 22.19.0
 - An LLM with a 100k+ context window (bring your own key)
 - Internet access
 - A residential IP address — search, scraping, and YouTube transcripts all rely on a residential connection. A datacenter/VPS/cloud IP gets bot-blocked by the providers these features depend on.
 
-## Install
+### Install
 
 Install the front-end you want.
 
-## pi extension
+**pi extension**
 
 ```bash
 pi install npm:@lincoln504/pi-research
 ```
 
-## Standalone CLI / agent skill
+**Standalone CLI / agent skill**
 
 ```bash
 npm install -g @lincoln504/pi-research
 ```
 
-## OpenClaw
+**OpenClaw**
 
-OpenClaw uses pi-research as an agent **skill** (a `SKILL.md` folder), not a plugin.
+OpenClaw uses pi-research as an agent skill (a `SKILL.md` folder), not a plugin.
 Install the engine, then register the bundled skill into OpenClaw's managed skill
 root:
 
@@ -54,7 +52,7 @@ openclaw skills install "$(npm root -g)/@lincoln504/pi-research/skills/pi-resear
 
 See [Agent skill](docs/AGENT-SKILL.md) for details.
 
-## Development build (bleeding edge)
+**Development build (bleeding edge)**
 
 ```bash
 pi install git:https://github.com/Lincoln504/pi-research.git
@@ -68,27 +66,9 @@ cd pi-research
 pi install .
 ```
 
-npm is the stable channel; the git install is the development channel — see [Stability](#stability-v100). The first install pulls the stealth browser engine, which takes a few minutes.
+npm is the stable channel; the git install is the development channel (see Stability, below). The first install pulls the stealth browser engine, which takes a few minutes.
 
-## Usage
-
-In pi, just ask — the model invokes the research tool from natural language and
-chooses the depth itself:
-
-```bash
-pi -p "research the latest developments in WebAssembly"
-```
-
-To check what's detected and whether you're ready to run — model, key, and
-browser engine — use the standalone CLI's one-command diagnostics:
-
-```bash
-pi-research status
-```
-
-![One-command health and readiness diagnostics](docs/media/06-health-check.gif)
-
-## Documentation
+### Documentation
 
 | Doc | What's inside |
 |-----|---------------|
@@ -99,34 +79,34 @@ pi-research status
 | [Knowledge store](docs/KNOWLEDGE-STORE.md) | The local vector cache of past findings. |
 | [Architecture](docs/ARCHITECTURE.md) | How the engine is built: layers, services, and the research pipeline. |
 
-## Built with
+### Built with
 
-### Browser & scraping
+**Browser & scraping**
 
 - [Camoufox](https://camoufox.com) — stealth Firefox (driven via [Playwright](https://playwright.dev)) for undetected search and scraping
 - [poolifier](https://github.com/poolifier/poolifier) — the worker-process pool behind the browser workers
 - [html-to-markdown](https://github.com/Goldziher/html-to-markdown) & [node-html-markdown](https://github.com/crosstype/node-html-markdown) — convert scraped HTML to Markdown
 - `pdf-oxide-wasm` — PDF text extraction (Rust/WASM)
 
-### Knowledge store & embeddings
+**Knowledge store & embeddings**
 
 - [Transformers.js](https://github.com/huggingface/transformers.js) — local embedding inference (model execution via ONNX Runtime)
 - Google [Dawn](https://dawn.googlesource.com/dawn) — the WebGPU backend, accessed through the `webgpu` Node binding
 - [LanceDB](https://lancedb.com) — on-disk vector database
 - [Apache Arrow](https://arrow.apache.org) — the columnar schema the vector table is built on
 
-### YouTube transcripts
+**YouTube transcripts**
 
 - [youtubei.js](https://github.com/LuanRT/YouTube.js) — YouTube internal-API client
 - [BgUtils](https://github.com/LuanRT/BgUtils) — BotGuard PoToken generation
 - [jsdom](https://github.com/jsdom/jsdom) — DOM environment for minting the PoToken
 
-### Host & runtime
+**Host & runtime**
 
 - [pi](https://github.com/badlogic/pi-mono) — the host runtime, agent SDK, and TUI toolkit
 - [TypeBox](https://github.com/sinclairzx81/typebox) — runtime config schema and validation
 
-## Stability (v1.0.0)
+### Stability (v1.0.0)
 
 v0.1.13 (April 20, 2026) was the last release before an extended break. Upstream
 pi/SDK API changes and a re-architecture around the stealth-browser stack left the
@@ -137,6 +117,6 @@ From v1.0.0 on:
 - npm (`npm:@lincoln504/pi-research`) is the stable channel, kept current with breaking pi changes.
 - A git install is the development channel: latest commits, first to break.
 
-## License
+### License
 
 MIT

@@ -1,4 +1,4 @@
-# research — an Agent Skill for pi-research
+## research — an Agent Skill for pi-research
 
 A portable [Agent Skill](https://agentskills.io/specification) that gives any
 coding agent multi-agent web research by driving the
@@ -6,7 +6,7 @@ coding agent multi-agent web research by driving the
 engine the `pi` extension uses, packaged as a skill so Claude, Cursor,
 Codex, Gemini CLI, and other Agent-Skills-compatible tools can use it.
 
-## What it exposes
+### What it exposes
 
 Two capabilities, invoked as shell subcommands:
 
@@ -17,7 +17,7 @@ Two capabilities, invoked as shell subcommands:
 
 Plus `status` to inspect detection/config without running research.
 
-## How it works
+### How it works
 
 ```
 agent  ──Bash──▶  scripts/run.mjs  ──spawns──▶  pi-research engine (dist/cli.mjs)
@@ -33,7 +33,7 @@ The engine wraps the [pi-research SDK](https://www.npmjs.com/package/@lincoln504
 and fails fast with actionable messages + config locations when the package or a
 model/key is missing.
 
-## Prerequisites
+### Prerequisites
 
 - Node.js >= 22.19
 - `pi-research` installed somewhere the launcher can find it, and a model +
@@ -44,7 +44,7 @@ npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status  # verify detection
 ```
 
-## Install the skill
+### Install the skill
 
 Recommended. From the pi extension, run `/research-config` and choose
 Install Skill in Coding Agents. It detects Claude, Codex, and OpenClaw and
@@ -67,7 +67,7 @@ Manual. Or symlink this `pi-research/` directory into your agent's skills folder
 Then ask your agent to pi-research something — its skill system matches the
 `description` in `SKILL.md` and activates this skill automatically.
 
-## Usage from an agent
+### Usage from an agent
 
 ```bash
 node "<skill_dir>/scripts/run.mjs" research "solid-state battery progress 2026" --depth 2
@@ -75,12 +75,12 @@ node "<skill_dir>/scripts/run.mjs" knowledge "openai gpt-5 release date"
 node "<skill_dir>/scripts/run.mjs" status
 ```
 
-## Files
+### Files
 
 - `SKILL.md` — the skill definition + system prompt (what agents read).
 - `scripts/run.mjs` — the launcher (compiled from `run.ts`).
 - `references/configuration.md` — model/key setup and the full variable reference.
 
-## License
+### License
 
 MIT.

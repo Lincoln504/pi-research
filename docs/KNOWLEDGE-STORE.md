@@ -1,4 +1,4 @@
-# Knowledge Store
+## Knowledge Store
 
 The knowledge store is a local vector database of past research findings. It is used
 in two distinct ways, and it is an optional cache — research works without it:
@@ -16,18 +16,7 @@ in two distinct ways, and it is an optional cache — research works without it:
 
 Together these make repeat work faster and cheaper.
 
-- [What it stores](#what-it-stores)
-- [Scopes: none, project, global](#scopes-none-project-global)
-- [How a run uses the store](#how-a-run-uses-the-store)
-- [Embeddings and the model](#embeddings-and-the-model)
-- [Device selection](#device-selection)
-- [Platform support (no Intel Mac)](#platform-support-no-intel-mac)
-- [Retention and eviction](#retention-and-eviction)
-- [Changing the model: migration](#changing-the-model-migration)
-- [Managing the store](#managing-the-store)
-- [Settings](#settings)
-
-## What it stores
+### What it stores
 
 The store is a [LanceDB](https://lancedb.com) table on disk. After each research
 round, the cited URLs from the researchers' reports are enqueued and written in the
@@ -43,7 +32,7 @@ finding can be rehydrated later without re-scraping.
 Writes never block a research run — they go through an asynchronous writer queue that
 is drained at the end of the round and on shutdown.
 
-## Scopes: none, project, global
+### Scopes: none, project, global
 
 The store's reach is set by Knowledge Mode (`PI_RESEARCH_KNOWLEDGE_STORE_MODE`),
 a project-scoped setting you can change per directory:
@@ -63,7 +52,7 @@ The embedding model is lazy — it only downloads and initializes the first time
 the store is actually written or searched, so the `global` default adds no startup
 cost until a run caches its first page.
 
-## How a run uses the store
+### How a run uses the store
 
 The store is driven by the orchestrator, not called ad hoc by researcher agents,
 which keeps its use deterministic:
@@ -79,7 +68,7 @@ lets the model query the store directly: it rehydrates the most relevant stored
 documents, asks a background LLM whether they answer the question, and returns a
 synthesized answer with citations — or reports that live research is needed.
 
-## Embeddings and the model
+### Embeddings and the model
 
 Embeddings are computed locally with
 [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) over
@@ -104,12 +93,12 @@ Supported models (`PI_RESEARCH_EMBEDDING_MODEL`):
 | `Xenova/all-mpnet-base-v2` | English |
 
 Changing the model invalidates existing vectors (they have a different dimension and
-meaning), so the store is migrated — see [migration](#changing-the-model-migration).
+meaning), so the store is migrated (see Changing the model, below).
 The model is downloaded from Hugging Face on first use and cached; the first download
 can take a few minutes (raise `PI_RESEARCH_EMBEDDING_MODEL_INIT_TIMEOUT_MS` on a slow
 connection).
 
-## Device selection
+### Device selection
 
 Embeddings run on either the GPU (WebGPU, via the runtime's bundled Dawn backend) or
 the CPU. The backend is chosen by `PI_RESEARCH_EMBEDDING_DEVICE`:
@@ -135,7 +124,7 @@ platform, architecture, Node major version, and model. Set
 `PI_RESEARCH_WEBGPU_REPROBE=1` to discard it and probe again (for example after a
 driver upgrade).
 
-## Platform support (no Intel Mac)
+### Platform support (no Intel Mac)
 
 The store depends on two native components — the ONNX runtime for embeddings and
 LanceDB for vector storage — that ship prebuilt binaries only for certain
@@ -161,14 +150,14 @@ knowledge store cannot run there. The degradation is automatic:
 
 No configuration is needed on an Intel Mac.
 
-## Retention and eviction
+### Retention and eviction
 
 Cached findings are kept for `PI_RESEARCH_CACHE_TTL_DAYS` (default 30; range 1–365).
 Eviction is checked when the store opens and removes only rows older than the cutoff
 within the current scope. Lower the value for fresher data and less disk; raise it to
 keep history longer.
 
-## Changing the model: migration
+### Changing the model: migration
 
 When the configured embedding model differs from the one the stored vectors were
 built with, the store is migrated according to `PI_RESEARCH_MIGRATION_STRATEGY`:
@@ -183,7 +172,7 @@ If the chosen strategy fails, pi-research falls back to `backup`, then to `drop`
 rather than leaving the store in a broken state. Changing the model from the
 `/research-config` menu always clears the current store and starts fresh.
 
-## Managing the store
+### Managing the store
 
 From `/research-config`:
 
@@ -209,7 +198,7 @@ The store grows copy-on-write (each run appends a version), so it is compacted
 automatically after any run that changed the stored data — stale versions and
 indices are pruned to keep it bounded. There is no manual maintenance command.
 
-## Settings
+### Settings
 
 | Setting | Variable | Default |
 |---------|----------|---------|
@@ -223,5 +212,5 @@ indices are pruned to keep it bounded. There is no manual maintenance command.
 | Re-probe WebGPU | `PI_RESEARCH_WEBGPU_REPROBE` | _(unset)_ |
 
 See [CONFIGURATION.md](CONFIGURATION.md) for the full configuration model, and
-[ARCHITECTURE.md](ARCHITECTURE.md#knowledge-store) for how the store fits into the
+[ARCHITECTURE.md](ARCHITECTURE.md) for how the store fits into the
 engine.

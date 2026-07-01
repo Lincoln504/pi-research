@@ -1,10 +1,10 @@
-# Configuration
+## Configuration
 
 The skill drives the **pi-research** engine, which needs a model + API key.
 Run `node "<SKILL_DIR>/scripts/run.mjs" status` to print what's detected and where
 to configure (no research runs).
 
-## Credentials — resolution order
+### Credentials — resolution order
 
 1. **Env vars** (most portable):
    ```sh
@@ -19,7 +19,7 @@ Real env vars always win. Optional CLI-only overlay `~/.pi/research/cli.env` lay
 over `config.env` for the CLI only. Precedence:
 `defaults < config.env < cli.env < project registry < real env`.
 
-## Common settings (optional; env or `config.env`)
+### Common settings (optional; env or `config.env`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -41,12 +41,12 @@ over `config.env` for the CLI only. Precedence:
 `PI_RESEARCH_REPORT_EXPORT_ENABLED=true`, the report ends with
 `Research report saved to: <path>` — surface that path.
 
-## Exit codes
+### Exit codes
 
 `0` success · `64` bad arguments · `78` not configured (engine missing or no
 model/key; message lists the fix) · `70` runtime error (network/provider/internal).
 
-## Troubleshooting
+### Troubleshooting
 
 - **"engine not found" (78 from launcher):** not installed —
   `npm i -g @lincoln504/pi-research`, or `pi install npm:@lincoln504/pi-research`,

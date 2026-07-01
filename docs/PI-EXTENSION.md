@@ -1,13 +1,13 @@
-# Pi Extension
+## Pi Extension
 
 pi-research integrates as a [pi](https://github.com/badlogic/pi-mono)
 extension (`src/index.ts`) — a multi-agent web research engine with a real-time
 TUI, registered directly in the pi process.
 
-## Usage
+### Usage
 
 The `research` tool is auto-registered, so the model invokes it
-from natural language and picks the depth (1–3) itself based on the query.
+from natural language, and the tool understands the depth needed (1–3) from the query.
 
 ```bash
 pi -p "research the latest developments in WebAssembly"
@@ -24,7 +24,7 @@ Three slash commands are also registered:
 
 ![Running a live investigation with the /research slash command](media/01-slash-research.gif)
 
-## Tools
+### Tools
 
 The extension registers three tools:
 
@@ -37,7 +37,7 @@ The extension registers three tools:
 Tool exclusion — the `research` tool honors an `excludeTools` list taken from
 the pi session context when the host forwards one.
 
-## TUI
+### TUI
 
 During a run pi-research renders a live progress panel:
 
@@ -53,7 +53,7 @@ During a run pi-research renders a live progress panel:
 | Arrow keys | Navigate the `/research-config` menu |
 | `Enter` / `Space` | Cycle a setting's value |
 
-## Configuration
+### Configuration
 
 Manage settings through `/research-config`, which edits two layers:
 
@@ -68,14 +68,14 @@ optional overlay at `~/.pi/research/pi.env` (it layers over `config.env` for the
 pi extension only). The full configuration model, precedence, and the complete
 environment-variable list live in [CONFIGURATION.md](CONFIGURATION.md).
 
-## Coding-agent skill installer
+### Coding-agent skill installer
 
 The `/research-config` menu can install the `pi-research` skill into your other
 coding agents (Claude, Codex, OpenClaw) so they can run web research through the
 CLI, and remove it again — with exact, manifest-tracked cleanup. See
 [AGENT-SKILL.md](AGENT-SKILL.md) for the full installation flow.
 
-## Lifecycle
+### Lifecycle
 
 - `activate` — registers commands, tools, the TUI controller, and initializes services.
 - `deactivate` — drains the writer queue, closes LanceDB, terminates the browser pool, disposes the embedding model.

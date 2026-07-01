@@ -1,4 +1,4 @@
-# Agent Skill
+## Agent Skill
 
 pi-research ships as a portable [Agent Skill](https://agentskills.io/specification)
 so any skills-compatible coding agent (Claude, OpenAI Codex CLI, OpenClaw, and
@@ -7,7 +7,7 @@ through the same engine the `pi` extension uses.
 
 ![Installing the research skill into external agents](media/05-agent-skill.gif)
 
-## How it works
+### How it works
 
 ```
 agent ─Bash/exec─▶ skills/pi-research/scripts/run.mjs ─spawns─▶ pi-research engine (dist/cli.mjs)
@@ -24,7 +24,7 @@ message — including config-file locations — if the package, a model, or an A
 is missing. It exposes three subcommands: `research "<query>"` (live research),
 `knowledge "<query>"` (search past findings), and `status` (inspect detection/config).
 
-## Installation flow
+### Installation flow
 
 The skill source lives at `skills/pi-research/` inside the package. Installing means
 linking that directory into each agent's skills folder.
@@ -42,7 +42,7 @@ Install Skill in Coding Agents. The installer:
    removes only its own links. Stale links are also garbage-collected on startup and
    on `npm uninstall`.
 
-### OpenClaw without `pi`
+**OpenClaw without `pi`**
 
 If you run OpenClaw but not the `pi` extension, register the skill with OpenClaw's
 own CLI after installing the engine — OpenClaw copies the `SKILL.md` folder into its
@@ -75,7 +75,7 @@ Manual. Symlink the directory into any agent's skills folder yourself:
 | OpenClaw | `~/.openclaw/skills/pi-research/` | `<workspace>/skills/pi-research/` |
 | Cursor | — (no global dir) | `<project>/.cursor/skills/pi-research/` |
 
-## Prerequisites
+### Prerequisites
 
 - Node.js >= 22.19.0
 - `pi-research` installed where the launcher can find it, plus a model + API key.
@@ -85,6 +85,8 @@ Manual. Symlink the directory into any agent's skills folder yourself:
 npm install -g @lincoln504/pi-research
 node "<skill_dir>/scripts/run.mjs" status   # verify the engine is detected
 ```
+
+![One-command health and readiness diagnostics](media/06-health-check.gif)
 
 Once installed, ask the agent to research something — its skill system activates
 pi-research automatically. The in-package readme (`skills/pi-research/README.md`) and
