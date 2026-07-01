@@ -184,21 +184,14 @@ export function getSDKContainer(): ServiceContainer | null {
 }
 
 /**
- * Internal initializer — ensures services are registered and ready.
- * Supports re-initialization if the working directory (cwd) changes.
+ * Internal initializer — registers services and makes the SDK ready. Only ever reached when the
+ * SDK is NOT already initialized (initResearchSDK guards and no-ops on repeat calls). To
+ * re-initialize with a new cwd/config/model, call shutdownResearchSDK() first — as the public
+ * initResearchSDK warning instructs. (A previous in-function re-init branch here was dead code:
+ * unreachable through the public API, and it contradicted that idempotent contract.)
  */
 async function _doInit(options: ResearchSDKOptions = {}): Promise<void> {
   const newCwd = options.cwd ? options.cwd : process.cwd();
-
-  if (isInitialized) {
-    if (newCwd === globalCwd && !options.config && !options.model) {
-      logger.debug('[SDK] SDK already initialized for this directory.');
-      return;
-    }
-    logger.info('[SDK] Re-initializing SDK for new context...');
-    await shutdownResearchSDK();
-  }
-
   globalCwd = newCwd;
 
   // Verbose logging setup
