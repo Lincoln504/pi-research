@@ -4,7 +4,11 @@
  * Vector database for storing and retrieving research documents using LanceDB.
  */
 
-import * as lancedb from '@lancedb/lancedb';
+// Type-only import for lancedb types; runtime values (connect, Index,
+// rerankers) are resolved lazily via getLancedb() so the native binding is not
+// hoisted into the CLI bundle and loaded at startup. See ./lancedb-loader.ts.
+import type * as lancedb from '@lancedb/lancedb';
+import { getLancedb } from './lancedb-loader.ts';
 import { CircuitBreaker } from '../utils/circuit-breaker.ts';
 import { logger } from '../logger.ts';
 import { 
@@ -166,7 +170,7 @@ export class KnowledgeStore implements IKnowledgeStore {
       if (!fs.existsSync(this.options.dbDir)) {
         fs.mkdirSync(this.options.dbDir, { recursive: true });
       }
-      this.db = await lancedb.connect(this.options.dbDir);
+      this.db = await (await getLancedb()).connect(this.options.dbDir);
 
       const tableNames = await this.db.tableNames();
       if (tableNames.includes(this.tableName)) {
@@ -560,7 +564,7 @@ export class KnowledgeStore implements IKnowledgeStore {
 
   private async getReranker(): Promise<lancedb.rerankers.RRFReranker> {
     if (!this.rrfReranker) {
-      this.rrfReranker = await lancedb.rerankers.RRFReranker.create();
+      this.rrfReranker = await (await getLancedb()).rerankers.RRFReranker.create();
     }
     return this.rrfReranker;
   }
@@ -775,14 +779,15 @@ export class KnowledgeStore implements IKnowledgeStore {
         return false;
       }
       logger.info('[store] Rebuilding FTS indexes...');
+      const { Index } = await getLancedb();
       // FTS on 'text' — synthesis descriptions (for semantic/hybrid search)
       await table.createIndex('text', {
-        config: lancedb.Index.fts(),
+        config: Index.fts(),
         replace: true,
       });
       // FTS on 'content' — full article markdown (for keyword/BM25 grep)
       await table.createIndex('content', {
-        config: lancedb.Index.fts(),
+        config: Index.fts(),
         replace: true,
       });
       // Record the version AFTER indexing (createIndex commits its own transactions) so the
