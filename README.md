@@ -13,18 +13,10 @@ programmatic SDK.
 
 ## Demo
 
-Two research runs at once — one evaluating its findings, one still gathering:
+Ask in natural language — the model picks the depth, runs multiple research
+rounds in parallel, and returns a single cited report:
 
-![Concurrent research panels](docs/media/hero.png)
-
-| | |
-|---|---|
-| **Slash command** — `/research <topic>` runs a live investigation | **Natural prompt** — the model picks the depth and runs multiple rounds |
-| ![Slash-command research](docs/media/01-slash-research.gif) | ![Prompt-driven multi-round research](docs/media/02-prompt-research.gif) |
-| **Knowledge store** — instant cached answers, no live run | **Config TUI** — every setting, live, no restart |
-| ![Knowledge-store hit](docs/media/03-knowledge-store.gif) | ![Configuration TUI](docs/media/04-config.gif) |
-| **Agent skill** — install research into any coding agent | **Health check** — one-command diagnostics |
-| ![Agent-skill install](docs/media/05-agent-skill.gif) | ![Health diagnostics](docs/media/06-health-check.gif) |
+![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 
 ## Requirements
 
@@ -86,6 +78,15 @@ chooses the depth itself:
 ```bash
 pi -p "research the latest developments in WebAssembly"
 ```
+
+To check what's detected and whether you're ready to run — model, key, and
+browser engine — use the standalone CLI's one-command diagnostics:
+
+```bash
+pi-research status
+```
+
+![One-command health and readiness diagnostics](docs/media/06-health-check.gif)
 
 ## Documentation
 

@@ -4,8 +4,6 @@ pi-research integrates as a [pi](https://github.com/badlogic/pi-mono)
 extension (`src/index.ts`) — a multi-agent web research engine with a real-time
 TUI, registered directly in the pi process.
 
-![Prompt-driven multi-round research in the pi TUI](media/02-prompt-research.gif)
-
 ## Usage
 
 The `research` tool is auto-registered, so the model invokes it
@@ -23,6 +21,8 @@ Three slash commands are also registered:
 | `/research <query>` | Invokes the `research` tool directly at the configured default depth (`PI_RESEARCH_DEFAULT_RESEARCH_DEPTH`, 1 by default) — a plain live run with no LLM turn. It does not parse an inline depth and does **not** consult the knowledge store; use `/knowledge-store <query>` for a store-only lookup. (The knowledge store is only checked when the *agent* chooses to call `research_knowledge_search` during a normal turn, which is prompt-guided, not a gate in front of `research`.) |
 | `/research-config` | Opens the interactive TUI settings dashboard. |
 | `/knowledge-store <query>` | Searches the local knowledge store for a query and returns a synthesised answer from previously researched findings. Unavailable when Knowledge Mode is `none`. The store auto-manages its own compaction, so there is no maintenance subcommand. |
+
+![Running a live investigation with the /research slash command](media/01-slash-research.gif)
 
 ## Tools
 
