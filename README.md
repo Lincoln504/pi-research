@@ -11,8 +11,7 @@ One engine backs several front-ends — the pi extension, a standalone CLI / age
 skill (the same skill any skills-aware host runs, including OpenClaw), and a
 programmatic SDK, each with its own guide in the docs table below.
 
-Ask in natural language — the tool understands the depth needed, runs multiple research
-rounds in parallel, and returns a single cited report:
+Ask in natural language — the tool understands the depth needed:
 
 ![Prompt-driven multi-round research in the pi TUI](docs/media/02-prompt-research.gif)
 

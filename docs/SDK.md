@@ -70,9 +70,7 @@ extension and the CLI / agent skill do it when `PI_RESEARCH_REPORT_EXPORT_ENABLE
 | `verbose` | Mirror logs to the console. |
 
 For configuration precedence, the per-front-end overlays, and the full
-environment-variable reference, see [CONFIGURATION.md](CONFIGURATION.md). Note that
-the SDK is configured from code and has no overlay file — pass `ignoreGlobalConfig: true`
-for a hermetic run.
+environment-variable reference, see [CONFIGURATION.md](CONFIGURATION.md).
 
 ### Health & knowledge-store APIs
 
