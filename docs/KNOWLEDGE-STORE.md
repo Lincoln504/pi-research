@@ -192,13 +192,16 @@ From `/research-config`:
 - Run Diagnostics — exercises the browser pool, GPU/embedding, and database
   connectivity, and reports the store's health state.
 
-The `research` tool checks the knowledge store first on its own: when a store is
-enabled, every research call runs a knowledge lookup before any live run and returns
-a complete cached answer ("yes") as-is, falling through to live research only on a
-partial or empty result. This is enforced in code, not left to the agent.
+As described at the top of this document, knowledge-first answering is advisory: the
+agent is *prompted* to try `research_knowledge_search` before a live `research` call
+and use a complete cached answer as-is, but nothing in code forces this — the two are
+separate tools, not a gate. The `/research <query>` command bypasses that guidance
+entirely; it invokes the `research` tool directly and always runs live (the store is
+only ever used to seed a run's starting URLs, never to answer it).
 
-The `/knowledge-store <query>` command searches previously researched findings and
-returns a synthesised answer, without live web research.
+The `/knowledge-store <query>` command is the explicit store-only path: it searches
+previously researched findings and returns a synthesised answer, without live web
+research.
 
 The store grows copy-on-write (each run appends a version), so it is compacted
 automatically after any run that changed the stored data — stale versions and
