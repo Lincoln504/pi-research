@@ -272,7 +272,11 @@ export class EmbeddingServer implements IEmbedder {
             `expected ${this.serverId}, found ${serverInfo?.serverId ?? 'none'}`,
           );
           if (this.consecutiveLeadershipMisses >= this.LEADERSHIP_MISS_THRESHOLD) {
-            logger.error('[EmbeddingServer] Leadership lost, shutting down...');
+            // Another process won leadership; step down. This is an orderly, expected
+            // handoff (not a fault), so it logs at WARN to match the surrounding
+            // leadership-check severity (DEBUG/WARN above) rather than polluting the
+            // ERROR log — which also re-tracks into the diagnostic error count.
+            logger.warn('[EmbeddingServer] Leadership lost, shutting down...');
             void this.shutdown();
             return;
           }

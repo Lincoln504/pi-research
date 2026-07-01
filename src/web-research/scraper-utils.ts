@@ -19,6 +19,32 @@ import {
   INTERNAL_NETWORK_PATTERNS,
   type NativeHtmlToMarkdownModule,
 } from './scraper-types.ts';
+import { isCloudflareBlockError, isTaskTimeoutError, isPoolShutdownError } from '../infrastructure/browser/browser-error-utils.ts';
+
+/**
+ * True when a scrape failure is an EXPECTED per-URL outcome rather than an engine
+ * fault. Scraping the open web routinely hits bot-protection interstitials, thin
+ * "stub" pages, HTTP 4xx/5xx, slow/unresponsive remotes, and (on quit) pool-drain
+ * races. None of these is a pi-research bug: the URL is already accounted for as
+ * "not scraped" (scrape_results_total{outcome=total_failure}) and surfaced to the
+ * user that way, and no operator action follows. Callers use this to log such
+ * failures at debug instead of error — keeping the ERROR log (and, via
+ * logger.error's error-tracker re-track, the diagnostic error count) focused on
+ * genuine faults. The messages matched here are produced by validateContent
+ * (`Fetch blocked:` / `Fetch returned stub:`) and scrapeWithFetch (`HTTP <code>`);
+ * the remaining cases delegate to the shared browser-layer predicates.
+ */
+export function isBenignScrapeFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.startsWith('Fetch blocked:') ||        // bot-protection interstitial (Cloudflare, DDoS-Guard, …)
+    msg.startsWith('Fetch returned stub:') ||  // nav-only / near-empty page
+    /^HTTP \d{3}\b/.test(msg) ||               // remote 4xx/5xx status
+    isCloudflareBlockError(error) ||
+    isTaskTimeoutError(error) ||
+    isPoolShutdownError(error)
+  );
+}
 
 /**
  * Get a random user agent

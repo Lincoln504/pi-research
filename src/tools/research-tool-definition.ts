@@ -51,15 +51,23 @@ function appendResearchSummary(
   const stats = extractRunStats(metricsSnapshot as any);
 
   if (!stats) {
-    // No meaningful metrics — still show errors if any
+    // The run produced no meaningful metrics (hard failure before any research ran).
+    // The error tracker is the only remaining signal, so surface its count here. This
+    // path involves no scrape fallback chains, so it is not subject to the per-URL
+    // over-counting that made the tracker unsuitable as the normal error count.
     if (errorReport.totalErrors > 0) {
       return result + `\n\n---\n\n*${errorReport.totalErrors} error${errorReport.totalErrors > 1 ? 's' : ''} encountered during research.*`;
     }
     return result;
   }
 
-  // Override error count from the actual error tracker (more accurate)
-  stats.errors = errorReport.totalErrors;
+  // NOTE: stats.errors is intentionally left as extractRunStats computed it (genuine
+  // engine faults only). It is NOT overridden with errorReport.totalErrors: the
+  // tracker records ~5-6 entries per failed URL along the fetch→browser fallback
+  // chain, so using it here reported blocked/unavailable sources (already shown as
+  // "not scraped") as a large, inflated error count. Keeping the metric-derived count
+  // also makes the report footnote consistent with the SDK (getLastRunStats) and the
+  // session-metrics TUI, which both read extractRunStats().errors.
 
   const summary = buildResearchSummary(stats);
   if (!summary) {

@@ -23,7 +23,7 @@ import {
 import {
   FETCH_LAYER_TIMEOUT,
 } from './types.ts';
-import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, } from './scraper-utils.ts';
+import { getRandomUserAgent, extractDomain, validateUrlForSSRF, validateContent, createNativeMarkdownConverter, createJsMarkdownConverter, getSsrfSafeDispatcher, isBenignScrapeFailure, } from './scraper-utils.ts';
 import { safeUnref } from '../utils/safe-unref.ts';
 import { getServiceContainer } from '../core/service-registry.ts';
 import type { ServiceContainer } from '../core/service-registry.ts';
@@ -390,14 +390,10 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
   } catch (e1) {
     const fetchDuration = Date.now() - start;
     logger.debug(`[Scrapers] fetch failed for ${url} in ${fetchDuration}ms: ${String(e1)}`);
-    errorTracker.trackError(e1, {
-      component: 'scrapers',
-      operation: 'fetch',
-      url,
-      domain: extractDomain(url),
-      layer: 'fetch',
-    });
-    
+    // Not re-tracked here: scrapeWithFetch's own catch already recorded this error
+    // with richer layer/errorType context immediately before rethrowing. Tracking
+    // it again at this frame would double-count the same failure.
+
     if (playwrightAvailable) {
       try {
         const browserStart = Date.now();
@@ -415,17 +411,20 @@ export async function scrapeSingle(url: string, signal?: AbortSignal, config?: C
         return { ...res, url, success: true };
       } catch (e2) {
         const totalDuration = Date.now() - start;
-        logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
+        // A blocked/stubbed/HTTP-errored/slow/pool-draining URL is an expected
+        // scraping outcome, already surfaced to the user as "not scraped" (the
+        // total_failure metric below). Log it at debug so it neither pollutes the
+        // ERROR log nor (via logger.error's re-track) inflates the diagnostic error
+        // count. A genuine/unexpected fault (e.g. a markdown-conversion crash) stays
+        // at ERROR with its stack. Either way, scrapeWithStealthBrowser's own catch
+        // already tracked the error with layer context, so it is not re-tracked here.
+        if (isBenignScrapeFailure(e2)) {
+          logger.debug(`[Scrapers] Browser fallback did not yield content for ${url} in ${totalDuration}ms: ${String(e2)}`);
+        } else {
+          logger.error(`[Scrapers] Browser fallback failed for ${url} in ${totalDuration}ms:`, e2);
+        }
         metrics.increment('scrape_errors_total', 1, { error_type: 'fallback_failed', layer: 'playwright' });
         metrics.increment('scrape_results_total', 1, { outcome: 'total_failure' });
-        errorTracker.trackError(e2, {
-          component: 'scrapers',
-          operation: 'scrape',
-          url,
-          domain: extractDomain(url),
-          layer: 'playwright+camoufox',
-          errorType: 'fallback_failed',
-        });
         return { url, success: false, error: String(e2), markdown: '' };
       }
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateContent } from '../../../src/web-research/scraper-utils.ts';
+import { validateContent, isBenignScrapeFailure } from '../../../src/web-research/scraper-utils.ts';
 
 describe('validateContent — stub detection', () => {
   it('does NOT reject a space-less CJK article that is character-rich (regression)', () => {
@@ -16,5 +16,36 @@ describe('validateContent — stub detection', () => {
 
   it('does not reject substantial Latin content', () => {
     expect(() => validateContent('', 'word '.repeat(60).trim(), 'https://x.com/a')).not.toThrow();
+  });
+});
+
+describe('isBenignScrapeFailure — expected per-URL scrape outcomes', () => {
+  it('treats bot-protection blocks as benign (all BOT_PATTERNS reasons, not just Cloudflare)', () => {
+    expect(isBenignScrapeFailure(new Error('Fetch blocked: Cloudflare interstitial'))).toBe(true);
+    expect(isBenignScrapeFailure(new Error('Fetch blocked: DDoS-Guard challenge'))).toBe(true);
+  });
+
+  it('treats stub pages and HTTP status rejections as benign', () => {
+    expect(isBenignScrapeFailure(new Error('Fetch returned stub: only 3 words / 12 chars found.'))).toBe(true);
+    expect(isBenignScrapeFailure(new Error('HTTP 403'))).toBe(true);
+    expect(isBenignScrapeFailure(new Error('HTTP 503'))).toBe(true);
+  });
+
+  it('treats remote timeouts and pool-drain/teardown races as benign', () => {
+    expect(isBenignScrapeFailure(new Error('Scrape task timed out after 30000ms'))).toBe(true);
+    expect(isBenignScrapeFailure(new Error('Cannot execute a task on destroying pool'))).toBe(true);
+  });
+
+  it('does NOT treat genuine engine faults as benign', () => {
+    expect(isBenignScrapeFailure(new Error('Browser markdown conversion failed: TypeError'))).toBe(false);
+    expect(isBenignScrapeFailure(new Error('Network failure'))).toBe(false);
+    // A non-2xx-looking string that is not an HTTP status line stays non-benign.
+    expect(isBenignScrapeFailure(new Error('HTTPClient exploded'))).toBe(false);
+  });
+
+  it('handles non-Error inputs without throwing', () => {
+    expect(isBenignScrapeFailure('Fetch blocked: Cloudflare challenge')).toBe(true);
+    expect(isBenignScrapeFailure(undefined)).toBe(false);
+    expect(isBenignScrapeFailure(null)).toBe(false);
   });
 });

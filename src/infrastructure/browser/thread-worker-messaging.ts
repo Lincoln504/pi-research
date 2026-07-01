@@ -362,7 +362,10 @@ export async function executeScrapeTask(
         html = await page.content();
         logToDebugFile('INFO', `[Worker-${workerId}] Cloudflare challenge resolved for: ${url}`);
       } catch (_waitError: unknown) {
-        logToDebugFile('ERROR', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
+        // A Cloudflare challenge that doesn't clear is an expected block, not a worker
+        // fault (the thrown 'Fetch blocked' is demoted to WARN at the server boundary
+        // via isCloudflareBlockError). Label the debug-file line WARN to match.
+        logToDebugFile('WARN', `[Worker-${workerId}] Cloudflare challenge failed for: ${url}`);
         const error = new Error('Fetch blocked: Cloudflare challenge');
         error.cause = _waitError;
         throw error;

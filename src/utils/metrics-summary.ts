@@ -41,9 +41,10 @@ export interface ResearchStats {
   browserFallbacks: number;
   /** Number of URLs successfully scraped/analyzed (fetch + browser). */
   urlsAnalyzed: number;
-  /** Number of URLs that failed to scrape. */
+  /** Number of URLs that failed to scrape (blocked, stub, HTTP error, timeout). */
   urlsFailed: number;
-  /** Total errors encountered during the run. */
+  /** Genuine engine faults (errored/timed-out researcher attempts). Excludes
+   *  expected remote scrape unavailability, which is reported via urlsFailed. */
   errors: number;
   /** Total LLM tokens consumed. */
   tokens: number;
@@ -157,9 +158,18 @@ export function extractRunStats(snapshot: IMetricsSnapshot): ResearchStats | nul
     knowledgeLookups: sumCounter(counters, 'research_knowledge_search_total'),
   };
 
-  // Errors
-  const errors = sumCounter(counters, 'scrape_errors_total') +
-    sumCounter(counters, 'researcher_errors_total') +
+  // Errors — genuine engine faults only (a researcher attempt that threw or timed
+  // out; llm_api_errors_total is summed for forward-compat but no path emits it yet).
+  // Deliberately EXCLUDES scrape_errors_total: a URL blocked by bot-protection,
+  // returning a stub, or answering 4xx/5xx is an EXPECTED outcome of scraping the
+  // open web — it is already surfaced to the user as "not scraped" (urlsFailed,
+  // from the once-per-URL total_failure outcome). Counting scrape_errors_total here
+  // both mislabels remote unavailability as an engine error AND over-counts, since
+  // it is incremented several times along one URL's fetch→browser fallback chain.
+  // A researcher whose sources were all blocked does NOT increment
+  // researcher_errors_total (it takes the ungrounded path), so blocked runs
+  // correctly show 0 errors here.
+  const errors = sumCounter(counters, 'researcher_errors_total') +
     sumCounter(counters, 'llm_api_errors_total');
 
   // Tokens — sum all label variants
@@ -284,7 +294,8 @@ export function buildResearchSummary(stats: ResearchStats): string {
     lines.push(resourceParts.join(' · '));
   }
 
-  // --- Footnote: errors encountered (urlsFailed already shown in tier breakdown above) ---
+  // --- Footnote: genuine engine errors only. Blocked/unavailable sources are NOT
+  //     errors — they appear as "N not scraped" in the tier breakdown above. ---
   if (stats.errors > 0) {
     lines.push(`*${stats.errors} error${stats.errors > 1 ? 's' : ''} encountered.*`);
   }
