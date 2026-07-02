@@ -247,6 +247,16 @@ write files, spawn processes, or make arbitrary network calls.
 Worker pool over direct browser — browser processes are isolated in workers so a crash
 in one cannot affect the orchestrator or other sessions.
 
+Pinned browser protocol pair — `playwright-core` is pinned to an exact version (not a
+caret range) because it and the camoufox Firefox binary are one matched protocol pair
+(Playwright's Juggler): a playwright-core newer than the camoufox build supports fails
+every browser launch (e.g. 1.61 added a `viewport.isMobile` field that the camoufox
+Firefox 135 build rejects). camoufox-js stays on the 0.10.x line, which fetches the
+stable, fully cross-platform camoufox build (Firefox 135 / beta.24); the 0.11.x line
+pulls a pre-release (alpha/beta) Firefox with no stable Windows binary. Do NOT caret-bump
+`playwright-core`, and do not move camoufox-js ahead of the browser's stable release —
+upgrade both together, deliberately, and re-verify a real headless run.
+
 Registry over direct imports — services are registered and resolved through the registry
 to support testing (mock replacement) and enforce init → use → dispose lifecycle.
 
