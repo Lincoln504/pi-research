@@ -367,24 +367,24 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
 
   it('maps returned indices to the corresponding candidate URLs', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[0,2]}'));
-    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],cands(3), 30000, 'off');
     expect(urls).toEqual(['https://u-0.com', 'https://u-2.com']);
   });
 
   it('drops out-of-range and duplicate indices', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[1,1,99,-1,0]}'));
-    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],cands(3), 30000, 'off');
     expect(urls).toEqual(['https://u-1.com', 'https://u-0.com']);
   });
 
   it('returns [] (authoritative "nothing relevant") when the model selects none', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
-    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],cands(3), 30000, 'off');
     expect(urls).toEqual([]);
   });
 
   it('short-circuits without an LLM call for empty candidates', async () => {
-    const urls = await triageRelevantUrls(model, auth, 'history', [], 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],[], 30000, 'off');
     expect(urls).toEqual([]);
     expect(mockCompleteSimple).not.toHaveBeenCalled();
   });
@@ -393,7 +393,7 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
     const longDesc = 'x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 500);
     const candidate: KnowledgeCandidate = { url: 'https://long.com', description: longDesc, provenance: 'p' };
-    await triageRelevantUrls(model, auth, 'history', [candidate], 30000, 'off');
+    await triageRelevantUrls(model, auth, 'history', ['test query'],[candidate], 30000, 'off');
     const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
     // The full description must not appear; the truncated slice must.
     expect(systemPrompt).not.toContain(longDesc);
@@ -401,9 +401,29 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     expect(systemPrompt).not.toContain('x'.repeat(TRIAGE_DESCRIPTION_MAX_CHARS + 1));
   });
 
+  it('surfaces the explicit search query in the triage prompt so triage is not blind to the question', async () => {
+    // Regression: the triage judged relevance ONLY against the conversation history, which
+    // is empty in the CLI/SDK/agent-skill paths ("No previous context available.") — leaving
+    // the model unable to know the question and returning non-deterministic false "no results".
+    // The query must always reach the prompt.
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[0]}'));
+    await triageRelevantUrls(model, auth, 'No previous context available.', ['who created the Rust language'], cands(2), 30000, 'off');
+    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
+    expect(systemPrompt).toContain("USER'S SEARCH QUERY");
+    expect(systemPrompt).toContain('who created the Rust language');
+  });
+
+  it('renders multiple queries and neutralizes regex-special `$` sequences in the query', async () => {
+    mockCompleteSimple.mockResolvedValue(llmReturning('{"relevant_indices":[]}'));
+    await triageRelevantUrls(model, auth, 'history', ['price of $100 item', 'cost $& fees'], cands(1), 30000, 'off');
+    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
+    expect(systemPrompt).toContain('- price of $100 item');
+    expect(systemPrompt).toContain('- cost $& fees'); // literal, not a regex replacement artifact
+  });
+
   it('fails open (null) on malformed model output so real knowledge is never hidden', async () => {
     mockCompleteSimple.mockResolvedValue(llmReturning('not json at all'));
-    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],cands(3), 30000, 'off');
     expect(urls).toBeNull();
   });
 
@@ -411,7 +431,7 @@ describe('triageRelevantUrls — cheap description-based relevance judgement', (
     // Provider surfaces the error via the response (stopReason/errorMessage), which
     // validateAndExtractText turns into a thrown non-transient error inside the try.
     mockCompleteSimple.mockResolvedValue({ stopReason: 'error', errorMessage: 'model does not exist', content: [] });
-    const urls = await triageRelevantUrls(model, auth, 'history', cands(3), 30000, 'off');
+    const urls = await triageRelevantUrls(model, auth, 'history', ['test query'],cands(3), 30000, 'off');
     expect(urls).toBeNull();
   });
 });

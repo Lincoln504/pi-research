@@ -96,6 +96,21 @@ export const TRIAGE_DESCRIPTION_MAX_CHARS = 600;
  *  so this is intentionally tiny (keeps a miss fast and cheap). */
 const TRIAGE_MAX_TOKENS = 2048;
 
+/**
+ * Render the explicit search queries for the triage/synthesis prompts. The queries
+ * are the PRIMARY relevance signal: retrieval is query-driven, but the relevance
+ * triage and the synthesis LLM previously saw only the conversation history — which
+ * is empty in the CLI / SDK / agent-skill paths (createMockContext has no session
+ * branch), leaving them blind to the actual question and prone to non-deterministic
+ * false "no results". Surfacing the queries makes the search reliable on every
+ * surface, and robust for weaker models than the host's.
+ */
+export function formatQueriesBlock(queries: string[]): string {
+  const cleaned = queries.map((q) => q.trim()).filter((q) => q.length > 0);
+  if (cleaned.length === 0) return '(no explicit query provided)';
+  return cleaned.map((q) => `- ${q}`).join('\n');
+}
+
 /** Widget ID for the knowledge search TUI panel */
 const KNOWLEDGE_WIDGET_ID = 'pi-research-knowledge-search';
 
@@ -392,6 +407,7 @@ export async function runBackgroundExtraction(
   model: Model<any>,
   auth: { apiKey: string; headers?: Record<string, string> },
   conversationHistory: string,
+  queries: string[],
   referenceDocuments: string,
   llmTimeout: number,
   maxTokens: number,
@@ -404,11 +420,12 @@ export async function runBackgroundExtraction(
   }
 
   // Use FUNCTION replacers: referenceDocuments is rebuilt knowledge-store text (scraped web pages)
-  // and conversationHistory is arbitrary user text, both of which routinely contain `$`. A plain
-  // string replacement interprets `$&`, `` $` ``, `$'`, `$$` as substitution patterns and corrupts
-  // the extractor prompt (duplicating/eating template text) → wrong yes/maybe/no classification.
-  // A function replacer inserts the value literally. (Same class as commit 78c16f98.)
+  // and conversationHistory/queries are arbitrary user text, all of which routinely contain `$`. A
+  // plain string replacement interprets `$&`, `` $` ``, `$'`, `$$` as substitution patterns and
+  // corrupts the extractor prompt (duplicating/eating template text) → wrong yes/maybe/no
+  // classification. A function replacer inserts the value literally. (Same class as commit 78c16f98.)
   const systemPrompt = promptTemplate
+    .replace('{{queries}}', () => formatQueriesBlock(queries))
     .replace('{{conversation_history}}', () => conversationHistory)
     .replace('{{reference_documents}}', () => referenceDocuments);
 
@@ -542,6 +559,7 @@ export async function triageRelevantUrls(
   model: Model<any>,
   auth: { apiKey: string; headers?: Record<string, string> },
   conversationHistory: string,
+  queries: string[],
   candidates: KnowledgeCandidate[],
   llmTimeout: number,
   thinkingLevel: Config['LLM_THINKING_LEVEL'],
@@ -562,9 +580,10 @@ export async function triageRelevantUrls(
     })
     .join('\n\n');
 
-  // FUNCTION replacers so literal `$`/`$&` in descriptions or history are not treated
-  // as regex substitution patterns (same class as the synthesis prompt).
+  // FUNCTION replacers so literal `$`/`$&` in queries, descriptions or history are not
+  // treated as regex substitution patterns (same class as the synthesis prompt).
   const systemPrompt = promptTemplate
+    .replace('{{queries}}', () => formatQueriesBlock(queries))
     .replace('{{conversation_history}}', () => conversationHistory)
     .replace('{{candidates}}', () => candidateBlock);
 
@@ -870,7 +889,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
         // short descriptions before paying to rebuild full documents + synthesize.
         // ----------------------------------------------------------
         const triaged = await triageRelevantUrls(
-          model, auth, conversationHistory, candidates,
+          model, auth, conversationHistory, p.queries, candidates,
           config.LLM_TIMEOUT_MS, config.LLM_THINKING_LEVEL, signal,
         );
         // null = triage unavailable/failed → fail open to all candidates (never hide
@@ -900,6 +919,7 @@ export function createResearchKnowledgeSearchTool(iface?: ConfigInterface): Tool
           model,
           auth,
           conversationHistory,
+          p.queries,
           referenceText,
           config.LLM_TIMEOUT_MS,
           // Synthesis budget, not planning: this call distills up to ~30k tokens of

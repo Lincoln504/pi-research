@@ -27,7 +27,7 @@ vi.mock('../../../src/web-research/retry-utils.ts', () => ({
 
 // Deterministic prompt template (avoids touching dist/prompts on disk).
 vi.mock('../../../src/core/llm/prompts.ts', () => ({
-  loadPrompt: () => 'history: {{conversation_history}}\ndocs: {{reference_documents}}',
+  loadPrompt: () => "USER'S SEARCH QUERY\n{{queries}}\nhistory: {{conversation_history}}\ndocs: {{reference_documents}}",
 }));
 
 vi.mock('../../../src/logger.ts', () => ({
@@ -58,7 +58,7 @@ function goodResponse() {
 }
 
 function run(signal?: AbortSignal) {
-  return runBackgroundExtraction(MODEL, AUTH, 'what is x?', 'doc body', 5000, 2048, 'off', signal);
+  return runBackgroundExtraction(MODEL, AUTH, 'what is x?', ['what is x?'], 'doc body', 5000, 2048, 'off', signal);
 }
 
 describe('runBackgroundExtraction — synthesis transient-retry loop', () => {
@@ -114,5 +114,16 @@ describe('runBackgroundExtraction — synthesis transient-retry loop', () => {
     expect(result.answer_status).toBe('yes');
     expect(mockCompleteSimple).toHaveBeenCalledTimes(1);
     expect(mockAbortableDelay).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the search query in the synthesis prompt so it answers the actual question', async () => {
+    // The synthesis LLM previously saw only the conversation history (empty in the
+    // CLI/SDK/agent-skill paths), so its yes/maybe/no classification was blind to the
+    // question. The query must always reach the extractor prompt.
+    mockCompleteSimple.mockResolvedValueOnce(goodResponse());
+    await runBackgroundExtraction(MODEL, AUTH, 'No previous context available.', ['who created the Rust language'], 'doc body', 5000, 2048, 'off');
+    const systemPrompt: string = mockCompleteSimple.mock.calls[0][1].systemPrompt;
+    expect(systemPrompt).toContain("USER'S SEARCH QUERY");
+    expect(systemPrompt).toContain('who created the Rust language');
   });
 });
