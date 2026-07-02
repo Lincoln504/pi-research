@@ -102,12 +102,24 @@ export class DeepResearchOrchestrator {
     const { model, query, complexity, researchId, ctx } = this.options;
     const observer = this.observer;
     const container = tryGetServiceContainerFromCtx(ctx);
+
+    // RESEARCH_MODEL contract (config.ts): the coordinator and evaluator always
+    // use the caller's model (ctx.model); RESEARCH_MODEL overrides only the
+    // researcher sub-agents. `model` is the resolved research model — it equals
+    // ctx.model on the SDK/CLI path, but on the pi-tool path it is the
+    // RESEARCH_MODEL override, so planning must key off ctx.model explicitly.
+    // Fall back to `model` when the host exposes no ctx.model.
+    const coordinatorModel = (ctx.model as Model<any> | undefined) ?? model;
     
     const orchestrationService = await this.getOrchestrationService();
     const planningService = await this.getPlanningService();
 
-    // Reset services for this specific research run ID to ensure fresh state
-    await orchestrationService.cleanupResearchServices(undefined, researchId);
+    // Reset services for this specific research run ID to ensure fresh state.
+    // Pass ctx so the reset targets the SAME (ctx-scoped) container the run resolves
+    // its services from — otherwise it clears state on, and runs the knowledge-store
+    // FTS/optimize pass against, the global container instead (see the finally below,
+    // which already passes ctx).
+    await orchestrationService.cleanupResearchServices(undefined, researchId, ctx);
     
     logger.log(`[DeepOrchestrator] Starting multi-round research (complexity ${complexity}) for: "${query}" (Run: ${researchId})`);
     metrics.increment('research_sessions_total', 1, { mode: 'deep', complexity: String(complexity) });
@@ -196,7 +208,7 @@ export class DeepResearchOrchestrator {
                 sessionId: researchId,
                 query,
                 complexity,
-                model,
+                model: coordinatorModel,
                 modelRegistry: ctx.modelRegistry,
                 cwd: ctx.cwd,
                 config: this.config,
@@ -214,7 +226,7 @@ export class DeepResearchOrchestrator {
                 query: query,
                 complexity,
                 round: this.currentRound,
-                model,
+                model: coordinatorModel,
                 modelRegistry: ctx.modelRegistry,
                 cwd: ctx.cwd,
                 config: this.config,
@@ -412,7 +424,7 @@ export class DeepResearchOrchestrator {
               query: query,
               complexity,
               round: maxRounds,
-              model,
+              model: coordinatorModel,
               modelRegistry: ctx.modelRegistry,
               cwd: ctx.cwd,
               config: this.config,

@@ -527,9 +527,11 @@ export class PlanningService implements IPlanningService {
       this.currentPlans.set(sessionId, finalPlan);
       return finalPlan;
     } catch (err) {
-      logger.error('[PlanningService] Failed to update plan:', err);
       // A genuine cancellation must propagate so the orchestrator can abort cleanly.
+      // Re-throw BEFORE logging so a quit-mid-run is a clean stop, not a red
+      // "Failed to update plan" line (matching generatePlan's abort hygiene).
       if (signal?.aborted) throw err;
+      logger.error('[PlanningService] Failed to update plan:', err);
       // Otherwise degrade gracefully: a transient evaluator failure (timeout, empty
       // or provider error) reaches here BEFORE the JSON-parse fallback above and used
       // to throw — aborting the whole run with no decision (looks like "the evaluator
