@@ -43,38 +43,47 @@ interface SliceFlashState {
  */
 const MAX_QUEUE_SIZE = 8;
 
-/** Per-session flash state: Map<sliceId, SliceFlashState> */
-const sessionFlashState = new Map<string, Map<string, SliceFlashState>>();
+/**
+ * Per-research-run flash state: Map<researchId, Map<sliceId, SliceFlashState>>.
+ *
+ * Keyed by researchId, NOT the pi sessionId: a single pi session can host several
+ * concurrent research runs, and they all reuse the same slice ids ('coord', 'eval',
+ * '1', '2', …). Keying by sessionId let one run's flashes render against — or, on
+ * teardown, cancel — another run's, sometimes leaving a column stuck colored.
+ * researchId is unique per run, so this isolates them.
+ */
+const flashStateByRun = new Map<string, Map<string, SliceFlashState>>();
 
-function getOrCreateSliceFlash(sessionId: string, sliceId: string): SliceFlashState {
-  let session = sessionFlashState.get(sessionId);
-  if (!session) {
-    session = new Map();
-    sessionFlashState.set(sessionId, session);
+function getOrCreateSliceFlash(researchId: string, sliceId: string): SliceFlashState {
+  let run = flashStateByRun.get(researchId);
+  if (!run) {
+    run = new Map();
+    flashStateByRun.set(researchId, run);
   }
-  let slice = session.get(sliceId);
+  let slice = run.get(sliceId);
   if (!slice) {
-    slice = { 
-      activeColor: null, 
-      activeTimeout: null, 
+    slice = {
+      activeColor: null,
+      activeTimeout: null,
       colorQueue: [],
       activeStatus: null,
       statusTimeout: null,
       statusQueue: []
     };
-    session.set(sliceId, slice);
+    run.set(sliceId, slice);
   }
   return slice;
 }
 
 /**
- * Clear all flash state for a session (call on session end).
+ * Clear all flash state for a research run (call on that run's teardown). Scoped to
+ * the run so disposing one run never cancels a concurrent sibling run's flashes.
  */
-export function clearAllFlashTimeouts(sessionId?: string): void {
-  if (sessionId) {
-    const session = sessionFlashState.get(sessionId);
-    if (session) {
-      for (const slice of session.values()) {
+export function clearAllFlashTimeouts(researchId?: string): void {
+  if (researchId) {
+    const run = flashStateByRun.get(researchId);
+    if (run) {
+      for (const slice of run.values()) {
         if (slice.activeTimeout) clearTimeout(slice.activeTimeout);
         if (slice.statusTimeout) clearTimeout(slice.statusTimeout);
         slice.activeTimeout = null;
@@ -84,16 +93,16 @@ export function clearAllFlashTimeouts(sessionId?: string): void {
         slice.activeStatus = null;
         slice.statusQueue.length = 0;
       }
-      sessionFlashState.delete(sessionId);
+      flashStateByRun.delete(researchId);
     }
   } else {
-    for (const session of sessionFlashState.values()) {
-      for (const slice of session.values()) {
+    for (const run of flashStateByRun.values()) {
+      for (const slice of run.values()) {
         if (slice.activeTimeout) clearTimeout(slice.activeTimeout);
         if (slice.statusTimeout) clearTimeout(slice.statusTimeout);
       }
     }
-    sessionFlashState.clear();
+    flashStateByRun.clear();
   }
 }
 
@@ -113,7 +122,7 @@ export function flashSlice(
   const slice = state.slices.get(sliceId);
   if (!slice || slice.completed || slice.queued) return;
 
-  const flash = getOrCreateSliceFlash(state.sessionId, sliceId);
+  const flash = getOrCreateSliceFlash(state.researchId, sliceId);
 
   if (flash.activeTimeout !== null) {
     if (flash.colorQueue.length < MAX_QUEUE_SIZE) {
@@ -175,7 +184,7 @@ export function flashStatus(
   const slice = state.slices.get(sliceId);
   if (!slice || slice.completed || slice.queued) return;
 
-  const flash = getOrCreateSliceFlash(state.sessionId, sliceId);
+  const flash = getOrCreateSliceFlash(state.researchId, sliceId);
 
   if (flash.statusTimeout !== null) {
     if (flash.statusQueue.length < MAX_QUEUE_SIZE) {
@@ -227,10 +236,10 @@ function startStatusPop(
  * Clean up flash state for a specific slice.
  * Clears timeout, queue, and removes from the session map.
  */
-function clearSliceFlash(sessionId: string, sliceId: string): void {
-  const session = sessionFlashState.get(sessionId);
-  if (!session) return;
-  const flash = session.get(sliceId);
+function clearSliceFlash(researchId: string, sliceId: string): void {
+  const run = flashStateByRun.get(researchId);
+  if (!run) return;
+  const flash = run.get(sliceId);
   if (!flash) return;
   if (flash.activeTimeout) clearTimeout(flash.activeTimeout);
   if (flash.statusTimeout) clearTimeout(flash.statusTimeout);
@@ -240,7 +249,7 @@ function clearSliceFlash(sessionId: string, sliceId: string): void {
   flash.statusTimeout = null;
   flash.activeStatus = null;
   flash.statusQueue.length = 0;
-  session.delete(sliceId);
+  run.delete(sliceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +263,7 @@ function clearSliceFlash(sessionId: string, sliceId: string): void {
 export function addSlice(state: ResearchPanelState, id: string, label: string, queued: boolean = false): void {
   // Clean up any leftover flash state from a previous slice with the same id
   // (e.g., 'eval' being re-added across evaluation rounds).
-  clearSliceFlash(state.sessionId, id);
+  clearSliceFlash(state.researchId, id);
   state.slices.set(id, { id, label, completed: false, queued, flash: null });
 }
 
@@ -263,7 +272,7 @@ export function addSlice(state: ResearchPanelState, id: string, label: string, q
  * Cleans up any flash state to prevent orphaned timers.
  */
 export function removeSlice(state: ResearchPanelState, id: string): void {
-  clearSliceFlash(state.sessionId, id);
+  clearSliceFlash(state.researchId, id);
   state.slices.delete(id);
 }
 
@@ -321,7 +330,7 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
     slice.completed = true;
     slice.queued = false;
     slice.flash = null;
-    clearSliceFlash(state.sessionId, id);
+    clearSliceFlash(state.researchId, id);
   }
 }
 
@@ -331,7 +340,7 @@ export function completeSlice(state: ResearchPanelState, id: string): void {
  */
 export function reactivateSlice(state: ResearchPanelState, id: string): void {
   // Clean up any flash state from the previous lifecycle (timers, queue).
-  clearSliceFlash(state.sessionId, id);
+  clearSliceFlash(state.researchId, id);
   const slice = state.slices.get(id);
   if (slice) {
     slice.completed = false;
@@ -347,7 +356,7 @@ export function clearCompletedResearchers(state: ResearchPanelState): void {
   const toRemove: string[] = [];
   for (const [id, slice] of state.slices.entries()) {
     if (slice.completed) {
-      clearSliceFlash(state.sessionId, id);
+      clearSliceFlash(state.researchId, id);
       toRemove.push(id);
     }
   }

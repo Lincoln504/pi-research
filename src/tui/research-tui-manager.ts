@@ -168,7 +168,9 @@ export function createResearchTuiManager(
    * Dispose of TUI resources
    */
   const dispose = () => {
-    clearAllFlashTimeouts(piSessionId);
+    // Scope the clear to THIS run — clearing by piSessionId would cancel the flash
+    // timers of any concurrent sibling run sharing the session.
+    clearAllFlashTimeouts(researchId);
 
     if (refreshTimeout) {
       clearTimeout(refreshTimeout);

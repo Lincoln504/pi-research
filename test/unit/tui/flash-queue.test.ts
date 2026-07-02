@@ -18,8 +18,8 @@ import {
 } from '../../../src/tui/research-panel-state.ts';
 import type { ResearchPanelState } from '../../../src/types/research-panel-types.ts';
 
-function makeState(sessionId = 'test-session'): ResearchPanelState {
-  return createInitialPanelState(sessionId, 'research-1', 'test query', 'test-model');
+function makeState(sessionId = 'test-session', researchId = 'research-1'): ResearchPanelState {
+  return createInitialPanelState(sessionId, researchId, 'test query', 'test-model');
 }
 
 describe('Flash queue system', () => {
@@ -229,12 +229,12 @@ describe('Flash queue system', () => {
   });
 
   // =========================================================================
-  // Session isolation
+  // Run isolation (flash state is keyed by researchId, not pi sessionId)
   // =========================================================================
 
-  it('isolates flash state between sessions and only clears the targeted one', () => {
-    const s1 = makeState('alpha');
-    const s2 = makeState('bravo');
+  it('isolates flash state between runs and only clears the targeted one', () => {
+    const s1 = makeState('session', 'run-A');
+    const s2 = makeState('session', 'run-B');
     const u1 = vi.fn();
     const u2 = vi.fn();
 
@@ -244,14 +244,59 @@ describe('Flash queue system', () => {
     flashSlice(s1, '1', 'green', u1);
     flashSlice(s2, '1', 'red', u2);
 
-    // Clear session alpha only
-    clearAllFlashTimeouts('alpha');
+    // Clear run-A only
+    clearAllFlashTimeouts('run-A');
 
-    // Session bravo still has its timer running
+    // run-B still has its timer running
     expect(s2.slices.get('1')!.flash).toBe('red');
 
     vi.advanceTimersByTime(700);
-    expect(s2.slices.get('1')!.flash).toBeNull(); // bravo's red expired normally
+    expect(s2.slices.get('1')!.flash).toBeNull(); // run-B's red expired normally
+  });
+
+  it('isolates concurrent runs that share one pi session and reuse the same slice ids', () => {
+    // Regression: two research runs in the SAME pi session both use slice ids like
+    // 'coord'/'eval'/'1'. When flash state was keyed by sessionId, run B's flash
+    // rendered against run A's column, and A's teardown cancelled B's timers —
+    // sometimes leaving a column stuck colored. Keying by researchId isolates them.
+    const runA = makeState('pi-session', 'run-A');
+    const runB = makeState('pi-session', 'run-B');
+    addSlice(runA, '1', '1');
+    addSlice(runB, '1', '1');
+
+    flashSlice(runA, '1', 'green', vi.fn()); // 400ms
+    flashSlice(runB, '1', 'red', vi.fn());   // 700ms
+
+    // Each run shows its OWN color despite identical slice id + shared session.
+    expect(runA.slices.get('1')!.flash).toBe('green');
+    expect(runB.slices.get('1')!.flash).toBe('red');
+
+    // Run A finishing (dispose clears by researchId) must NOT cancel run B's flash.
+    clearAllFlashTimeouts('run-A');
+    expect(runB.slices.get('1')!.flash).toBe('red');
+
+    // Run B's red still expires on its own 700ms schedule, unaffected by A's teardown.
+    vi.advanceTimersByTime(700);
+    expect(runB.slices.get('1')!.flash).toBeNull();
+  });
+
+  it('does not let one run\'s completeSlice cancel a concurrent run\'s live flash on the same id', () => {
+    // completeSlice(runA, 'eval') calls clearSliceFlash(runA.researchId, 'eval');
+    // if that were keyed by session it would wipe runB's 'eval' flash too.
+    const runA = makeState('pi-session', 'run-A');
+    const runB = makeState('pi-session', 'run-B');
+    addSlice(runA, 'eval', 'eval');
+    addSlice(runB, 'eval', 'eval');
+
+    flashSlice(runB, 'eval', 'green', vi.fn());
+    expect(runB.slices.get('eval')!.flash).toBe('green');
+
+    completeSlice(runA, 'eval'); // run A's eval completes
+
+    // run B's eval flash is untouched and expires on schedule.
+    expect(runB.slices.get('eval')!.flash).toBe('green');
+    vi.advanceTimersByTime(400);
+    expect(runB.slices.get('eval')!.flash).toBeNull();
   });
 
   // =========================================================================

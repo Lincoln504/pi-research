@@ -23,12 +23,14 @@ import {
  *   - The clear is deferred to onResearcherStart (atomic round transition).
  */
 describe('multi-round TUI box lifecycle', () => {
-  const sessions: string[] = [];
+  const researchIds: string[] = [];
 
   function makeObserver(): { panelState: ResearchPanelState; obs: ReturnType<typeof createResearchObserver>; state: ObserverState } {
-    const sessionId = `sess-${sessions.length}`;
-    sessions.push(sessionId);
-    const panelState = createInitialPanelState(sessionId, 'rid', 'q', 'model');
+    // Flash state is keyed by researchId, so give each observer a distinct one and
+    // clear by that key — otherwise the afterEach cleanup silently misses the timers.
+    const researchId = `rid-${researchIds.length}`;
+    researchIds.push(researchId);
+    const panelState = createInitialPanelState(`sess-${researchIds.length}`, researchId, 'q', 'model');
     const state = createObserverState();
     const obs = createResearchObserver(
       { panelState, debouncedRefresh: () => {}, researchComplexity: 2 },
@@ -38,8 +40,8 @@ describe('multi-round TUI box lifecycle', () => {
   }
 
   afterEach(() => {
-    for (const s of sessions) clearAllFlashTimeouts(s);
-    sessions.length = 0;
+    for (const r of researchIds) clearAllFlashTimeouts(r);
+    researchIds.length = 0;
   });
 
   function activeNonCompleted(panelState: ResearchPanelState): string[] {
