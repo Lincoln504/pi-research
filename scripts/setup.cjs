@@ -72,7 +72,7 @@ if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
     try {
       execSync('npx playwright install-deps', { stdio: 'inherit', env: { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0' } });
     } catch (e) {
-      console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y xvfb libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`WARNING: could not install system dependencies. Run: sudo apt-get install -y libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1\nReason: ${e instanceof Error ? e.message : String(e)}\n(These are the libraries headless camoufox needs. Xvfb is NOT required for the default headless mode — only add it if you opt into virtual-display mode with PI_RESEARCH_USE_XVFB=true.)`);
     }
   }
 
