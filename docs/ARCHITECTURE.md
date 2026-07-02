@@ -1,6 +1,6 @@
 ## Architecture
 
-pi-research is a pi CLI extension for multi-agent web research. It runs inside the pi
+pi-research is a pi TUI extension for multi-agent web research. It runs inside the pi
 process, registers its tools and commands, and manages its own browser worker pool,
 service registry, and local knowledge store. The same engine is also exposed as a
 standalone CLI, a portable agent skill, and a programmatic SDK (`src/sdk.ts`).
@@ -8,29 +8,27 @@ standalone CLI, a portable agent skill, and a programmatic SDK (`src/sdk.ts`).
 ```
 pi CLI
 └── pi-research extension (src/index.ts)
-    ├── Tools      research, health, research_knowledge_search (when the store is enabled)
-    ├── Commands   /research, /research-config, /knowledge-store
-    ├── Events     input (mid-run steering), session_shutdown (cleanup)
+    ├── Registered Tools   research, health, research_knowledge_search (when the store is enabled)
+    ├── Commands           /research, /research-config, /knowledge-store
+    ├── Events             input (mid-run steering), session_shutdown (cleanup)
     └── Layers
         ├── Orchestration   quick/deep research coordination
-        ├── Tools           search, scrape, youtube_transcript, security_search, stackexchange, grep, read
+        ├── Agent Tools     search, scrape, youtube_transcript, security_search, stackexchange, grep, read
         ├── Infrastructure  browser pool, knowledge store, state manager
         └── Core            service registry, scheduler, health checks
 ```
 
-### A run, end to end
-
 1. A query enters through `runResearch` — the single internal entry point — with a depth.
-2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below).
-3. On the deep path the coordinator plans the research tracks and runs one initial
+2. Depth 0 takes the quick path; depth 1–3 takes the deep path (below). TUI and Agent
+   Skill are restricted to levels 1-3. 
+4. On the deep path the coordinator plans the research tracks and runs one initial
    search burst, then hands each researcher a set of result URLs to start from.
-4. Researchers scrape and read those pages through the stealth browser and return cited
-   reports. They reason only from what they scraped this session — no prior knowledge.
-5. The evaluator reviews the round and either runs another round or synthesizes the
+5. Researchers scrape and read those pages through the scrape tooling and return cited
+   reports. They consider only from what they scraped this session.
+6. The evaluator reviews the round and either runs another round or synthesizes the
    final report.
-6. The result is returned as a single cited Markdown report. Separately and
-   asynchronously, the cited URLs and their summaries are queued into the knowledge
-   store for future runs.
+7. The result is returned as a single cited Markdown report. the cited URLs and their
+   summaries are queued into the knowledge store for future runs.
 
 ### Orchestration
 
