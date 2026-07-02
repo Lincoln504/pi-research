@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { normalizeUrl, registerScrapedLinks, deduplicateUrls, cleanupSharedLinks } from '../../../src/utils/shared-links.ts';
+import { validateUrl } from '../../../src/utils/url-utils.ts';
 
 describe('shared-links normalization', () => {
   describe('normalizeUrl — Property-based tests', () => {
@@ -75,6 +76,41 @@ describe('shared-links normalization', () => {
       for (const u of opaquePathUrls) {
         expect(() => normalizeUrl(u)).not.toThrow();
         expect(typeof normalizeUrl(u)).toBe('string');
+      }
+    });
+  });
+
+  describe('normalizeUrl — trailing-punctuation handling', () => {
+    it('preserves a balanced trailing paren (Wikipedia disambiguation URLs)', () => {
+      expect(normalizeUrl('https://en.wikipedia.org/wiki/Python_(programming_language)'))
+        .toBe('https://en.wikipedia.org/wiki/Python_(programming_language)');
+      expect(normalizeUrl('https://en.wikipedia.org/wiki/Mercury_(element)'))
+        .toBe('https://en.wikipedia.org/wiki/Mercury_(element)');
+    });
+
+    it('strips an unbalanced trailing paren and sentence punctuation an LLM appends', () => {
+      expect(normalizeUrl('https://example.com/foo)')).toBe('https://example.com/foo');
+      expect(normalizeUrl('https://example.com/foo.')).toBe('https://example.com/foo');
+      expect(normalizeUrl('https://example.com/foo),')).toBe('https://example.com/foo');
+      expect(normalizeUrl('https://example.com/foo**')).toBe('https://example.com/foo');
+    });
+
+    it('preserves RFC-3986 unreserved trailing chars (_ and ~)', () => {
+      expect(normalizeUrl('https://example.com/page_')).toBe('https://example.com/page_');
+      expect(normalizeUrl('https://example.com/~user')).toBe('https://example.com/~user');
+    });
+  });
+
+  describe('validateUrl — IPv6 ULA guard must not reject real domains', () => {
+    it('accepts ordinary domains that begin with fc/fd/fe', () => {
+      for (const u of ['https://fc2.com/x', 'https://fcc.gov/a', 'https://fda.gov/b', 'https://fdic.gov/c', 'https://fedex.com/d']) {
+        expect(validateUrl(u)).toBe(true);
+      }
+    });
+
+    it('still rejects IPv6 unique-local / link-local literals and private IPv4', () => {
+      for (const u of ['http://[fc00::1]/', 'http://[fd12:3456::1]/', 'http://[fe80::1]/', 'http://10.0.0.1/', 'http://127.0.0.1/']) {
+        expect(validateUrl(u)).toBe(false);
       }
     });
   });

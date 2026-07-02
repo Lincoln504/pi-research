@@ -8,6 +8,44 @@
 import { logger } from '../logger.ts';
 
 /**
+ * Strips trailing punctuation an LLM commonly appends to a URL in prose
+ * (sentence periods, list commas, markdown emphasis/code markers) WITHOUT
+ * corrupting the URL itself:
+ * - A trailing ')' is removed only when it is unbalanced (e.g. from "(see http://x)").
+ *   A balanced ')' is part of the URL — e.g. Wikipedia's
+ *   "…/Python_(programming_language)" — and is preserved.
+ * - '_' and '~' are RFC 3986 unreserved characters and are legitimate at the
+ *   end of a URL, so they are never stripped (in the main parse path a leading
+ *   markdown marker would have made new URL() throw and diverted to the
+ *   aggressive fallback, so a trailing one here is far more likely genuine).
+ * The loop is bounded to defend against pathological input (ReDoS-free).
+ */
+function stripTrailingLlmPunctuation(input: string): string {
+  let s = input;
+  for (let i = 0; i < 25 && s.length > 0; i++) {
+    const last = s[s.length - 1]!;
+    if (last === '*' || last === '`' || last === '.' || last === ',') {
+      s = s.slice(0, -1);
+      continue;
+    }
+    if (last === ')') {
+      let opens = 0;
+      let closes = 0;
+      for (const ch of s) {
+        if (ch === '(') opens++;
+        else if (ch === ')') closes++;
+      }
+      if (closes > opens) {
+        s = s.slice(0, -1);
+        continue;
+      }
+    }
+    break;
+  }
+  return s;
+}
+
+/**
  * Normalizes a URL for consistent deduplication and storage.
  * 
  * Features:
@@ -29,9 +67,8 @@ export function normalizeUrl(url: string): string {
     // Guard against pathological inputs (ReDoS defense for subsequent regex)
     if (url.length > 4096) return url.trim().split('#')[0]!.toLowerCase();
     // 1. Strip trailing markdown markers and punctuation often found in LLM output
-    const cleanUrl = url.trim()
-      .replace(/[*_~`]{1,20}$/, '')
-      .replace(/[,.)]{1,20}$/, '');
+    //    (balanced parens and unreserved trailing chars are preserved).
+    const cleanUrl = stripTrailingLlmPunctuation(url.trim());
     
     const parsed = new URL(cleanUrl);
     
@@ -142,9 +179,13 @@ export function validateUrl(url: string): boolean {
     if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.)/.test(hostname)) return false;
     
     // IPv6 private ranges
+    // Note: new URL().hostname wraps IPv6 literals in brackets, so IPv6 ranges
+    // must be matched on the bracketed form. Matching the bracketless prefix
+    // (e.g. "fc"/"fd") would instead reject ordinary domains like fc2.com,
+    // fcc.gov, fda.gov and fdic.gov — a false-negative, not SSRF protection
+    // (the connect-time IP pin in validateUrlForSSRF is the real gate).
     if (hostname.startsWith('fe80:') || hostname.startsWith('[fe80:')) return false;
-    if (hostname.startsWith('fc') || hostname.startsWith('[fc')) return false;
-    if (hostname.startsWith('fd') || hostname.startsWith('[fd')) return false;
+    if (hostname.startsWith('[fc') || hostname.startsWith('[fd')) return false;
     if (hostname.startsWith('::ffff:') || hostname.startsWith('[::ffff:')) return false;
     
     // Reject hostnames without a public TLD or with internal suffixes
